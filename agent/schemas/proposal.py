@@ -176,11 +176,13 @@ class AgentCard(BaseModel):
         max_length=300, description="What this agent cannot assess or may get wrong."
     )
     trust_guidance: str = Field(
-        max_length=400,
-        description="One or two sentences instructing the proposal LLM how to weight "
-        "this agent's findings relative to experiment results and other sources. "
-        "E.g. 'Treat as promising priors — only experiment runs confirm applicability.' "
-        "For physics agents: 'Physical constraints are HARD LIMITS.'",
+        max_length=800,
+        description="Instructs the proposal LLM how to weight this agent's findings "
+        "relative to experiment results and other sources. May carry a confidence "
+        "rubric legend so the proposer knows what a finding's confidence score means "
+        "(see ConfidenceRubric.render_for_consumer); 800 chars accommodates the full "
+        "band criteria. E.g. 'Treat as promising priors — only experiment runs confirm "
+        "applicability.' For physics agents: 'Physical constraints are HARD LIMITS.'",
     )
 
 

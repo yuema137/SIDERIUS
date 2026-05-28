@@ -15,6 +15,7 @@ import pytest
 import nodes.ml_literature_review as node_mod
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import (
+    ConfidenceRubric,
     DynamicSearchConfig,
     LiteratureReviewInput,
     LiteratureReviewOutput,
@@ -51,10 +52,12 @@ class FakeBridge:
         self.provider = provider
         self.model_id = model_id
         self.calls: list[str] = []
+        self.prompts: list[tuple[str, str, str]] = []  # (label, system, user) per call
         self.responses = responses or {}
 
     def generate(self, system, user, *, label="", components=None):
         self.calls.append(label)
+        self.prompts.append((label, system, user))
         r = self.responses.get(label)
         if isinstance(r, list):
             return r.pop(0) if r else {}
@@ -164,6 +167,21 @@ def _search_ok(kwargs):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestAgentCardTrustGuidance:
+    """The static AgentCard carries the confidence-rubric legend so the proposer
+    can interpret each finding's confidence number (invariant 3)."""
+
+    def test_trust_guidance_carries_rubric_bands(self):
+        tg = node_mod._AGENT_CARD.trust_guidance
+        assert "0.80" in tg and "0.40" in tg  # band bounds visible to the proposer
+        assert "deep-read" in tg  # band criteria carried over
+
+    def test_trust_guidance_within_field_cap(self):
+        # AgentCard.trust_guidance max_length is 800; the rendered rubric must fit
+        # (construction would otherwise raise at import time).
+        assert len(node_mod._AGENT_CARD.trust_guidance) <= 800
 
 
 class TestFullRun:
@@ -453,6 +471,254 @@ class TestSynthesis:
         # Only the well-cited item survives; the bad cite_id is dropped, not raised.
         assert len(out.findings) == 1
         assert out.findings[0].cite_id == "arxiv:2406.04378"
+
+
+class TestAbstractOnlyConfidenceClamp:
+    """A finding citing a verbosity-0 (abstract-only) paper is capped at the
+    rubric's abstract_only_ceiling; deep-read (v1+) citations are untouched.
+
+    The root paper (arxiv:2406.04378) resolves at v1 (deep-read); the search hit
+    (arxiv:2301.00001) stays at v0 (abstract-only). Citing both lets one test
+    exercise the clamp branch and the pass-through branch together.
+    """
+
+    def _run(self, tmp_path, monkeypatch, findings, *, rubric=None):
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "dilated conv 1d denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.synthesis": {"findings": findings},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok(), search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        inp = _input(tmp_path, dynamic=DynamicSearchConfig(enabled=True, max_rounds=3))
+        if rubric is not None:
+            inp = inp.model_copy(update={"confidence_rubric": rubric})
+        return agent.run(inp)
+
+    def test_v0_over_ceiling_clamped_v1_kept(self, tmp_path, monkeypatch):
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            [
+                {"content": "deep-read paper", "cite_id": "arxiv:2406.04378", "confidence": 0.85},
+                {
+                    "content": "abstract-only paper",
+                    "cite_id": "arxiv:2301.00001",
+                    "confidence": 0.85,
+                },
+            ],
+        )
+        by_cite = {f.cite_id: f.confidence for f in out.findings}
+        assert by_cite["arxiv:2406.04378"] == 0.85  # v1 deep-read: untouched
+        assert by_cite["arxiv:2301.00001"] == 0.79  # v0 abstract-only: clamped to ceiling
+
+    def test_v0_below_ceiling_unchanged(self, tmp_path, monkeypatch):
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            [{"content": "modest", "cite_id": "arxiv:2301.00001", "confidence": 0.6}],
+        )
+        assert out.findings[0].confidence == 0.6  # below ceiling → no clamp
+
+    def test_custom_ceiling_respected(self, tmp_path, monkeypatch):
+        out = self._run(
+            tmp_path,
+            monkeypatch,
+            [{"content": "abstract-only", "cite_id": "arxiv:2301.00001", "confidence": 0.85}],
+            rubric=ConfidenceRubric(abstract_only_ceiling=0.5),
+        )
+        assert out.findings[0].confidence == 0.5  # node reads the ceiling from the rubric
+
+
+class TestSearchBridgeRouting:
+    def test_search_decision_uses_search_bridge(self, tmp_path, monkeypatch):
+        # search_llm_* set -> the search-decision call routes to the search bridge
+        # (deepseek), while compression + synthesis stay on the main bridge.
+        main = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        search = FakeBridge(
+            responses={"lit_review.search_decision": {"action": "done", "reasoning": "enough"}}
+        )
+
+        def factory(**kw):
+            return search if kw.get("provider") == "deepseek" else main
+
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=factory, root_cache_dir=str(tmp_path / "cache")
+        )
+        inp = _input(tmp_path, dynamic=DynamicSearchConfig(enabled=True, max_rounds=2))
+        inp = inp.model_copy(
+            update={"search_llm_provider": "deepseek", "search_llm_model_id": "deepseek-v4-pro"}
+        )
+        agent.run(inp)
+
+        # search-decision -> search bridge only; compression + synthesis -> main only
+        assert "lit_review.search_decision" in search.calls
+        assert "lit_review.search_decision" not in main.calls
+        assert "lit_review.paper_extract" in main.calls
+        assert "lit_review.synthesis" in main.calls
+        assert search.calls.count("lit_review.search_decision") >= 1
+
+    def test_no_override_uses_single_bridge(self, tmp_path, monkeypatch):
+        # Without search_llm_*, the same bridge handles all calls (fallback).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.search_decision": {"action": "done", "reasoning": "x"},
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        agent.run(_input(tmp_path, dynamic=DynamicSearchConfig(enabled=True, max_rounds=2)))
+        # all three call labels landed on the one bridge
+        assert {
+            "lit_review.search_decision",
+            "lit_review.paper_extract",
+            "lit_review.synthesis",
+        } <= set(bridge.calls)
+
+
+class TestConfidenceRubricWiring:
+    def test_custom_rubric_reaches_synthesis_prompt(self, tmp_path, monkeypatch):
+        from agent.schemas.literature_review import ConfidenceBand, ConfidenceRubric
+
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        rubric = ConfidenceRubric(
+            bands=[ConfidenceBand(lower=0.9, upper=1.0, criteria="DISTINCTIVE-RUBRIC-MARKER")],
+            omit_below=0.9,
+        )
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        inp = _input(tmp_path).model_copy(update={"confidence_rubric": rubric})
+        agent.run(inp)
+
+        synth_prompts = [s for (lbl, s, u) in bridge.prompts if lbl == "lit_review.synthesis"]
+        assert synth_prompts, "synthesis call never happened"
+        assert "DISTINCTIVE-RUBRIC-MARKER" in synth_prompts[0]  # custom rubric injected by the node
+
+
+class TestZeroHitFeedback:
+    def test_prior_zero_hit_query_fed_into_next_round(self, tmp_path, monkeypatch):
+        # Round 0 search returns 0 hits; round 1's search-decision prompt must
+        # carry that query + "0 hits" + the "too specific" annotation (Fix C b).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "narrow query alpha", "reasoning": "r"},
+                    {"action": "search", "query": "broader beta", "reasoning": "r"},
+                    {"action": "done", "reasoning": "done"},
+                ],
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def _search(kw):
+            q = kw.get("query")
+            results = (
+                []
+                if q == "narrow query alpha"
+                else [
+                    {
+                        "paperId": "p1",
+                        "title": "T",
+                        "year": 2023,
+                        "abstract": "a",
+                        "openAccessPdf": None,
+                        "externalIds": {"ArXiv": "2301.00001"},
+                    }
+                ]
+            )
+            return {
+                "status": "ok",
+                "data": {
+                    "query": q,
+                    "results": results,
+                    "total": len(results),
+                    "offset": 0,
+                    "next": None,
+                },
+                "message": "ok",
+            }
+
+        skill = FakeSkill(search=_search)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        agent.run(
+            _input(
+                tmp_path, root_papers=[], dynamic=DynamicSearchConfig(enabled=True, max_rounds=3)
+            )
+        )
+
+        sd_user_prompts = [
+            u for (lbl, s, u) in bridge.prompts if lbl == "lit_review.search_decision"
+        ]
+        assert len(sd_user_prompts) >= 2
+        # Round 0 prompt has no feedback block yet.
+        assert "Queries already tried this run" not in sd_user_prompts[0]
+        # Round 1 prompt carries round 0's whiffed query + annotation.
+        assert "narrow query alpha" in sd_user_prompts[1]
+        assert "0 hits" in sd_user_prompts[1]
+        assert "too specific" in sd_user_prompts[1]
+
+
+class TestYearOverride:
+    def test_year_overridden_from_s2_metadata(self, tmp_path, monkeypatch):
+        # LLM extracts "2023" from degraded PDF; S2 metadata says 2020. The node
+        # must overwrite the extract year with the authoritative S2 value.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT, year="2023"),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def _resolve(kw):
+            r = _resolve_ok()
+            r["data"]["s2_metadata"]["year"] = 2020
+            return r
+
+        skill = FakeSkill(resolve=_resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+
+        root = out.retrieved_papers[0]
+        assert root.extract is not None
+        assert root.extract.year == "2020"  # S2 year wins over the LLM's "2023"
 
 
 class TestEscalationCap:

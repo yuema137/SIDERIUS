@@ -23,33 +23,46 @@ rationally ignore it).
 
 ## Output contract
 
-Return ONE JSON object:
+Return ONE JSON object. Every finding is an object with THREE SEPARATE keys —
+`content`, `cite_id`, and `confidence`. Do NOT collapse them into one string:
+the paper id goes in `cite_id` (its own key), the score goes in `confidence`
+(its own key), and only the prose + rationale go in `content`.
+
+Produce EXACTLY this shape (note the three separate keys per finding):
 
   {"findings": [
-     {"content": "<grounded, actionable signal — see format below>",
-      "cite_id": "<the exact paper_id of the source paper>",
-      "confidence": <number 0.0-1.0>},
-     ...
+     {"content": "Given the high-frequency-overfitting bottleneck, WaveNet's dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
+      "cite_id": "arxiv:2406.04378",
+      "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
 `content` format — every item MUST:
 - Name the specific current bottleneck (or key finding) it addresses.
 - State the concrete implication for what to try next. NOT "Paper X proposes
   dilated convolutions", but "Given the high-frequency-overfitting bottleneck,
-  Paper X's dilated-convolution receptive-field control suggests trying a wider
+  Paper X's dilated-convolution receptive-field control suggests a wider
   dilation schedule."
-- End with a one-line confidence rationale in parentheses — there is NO separate
-  rationale field, so put it in `content`. E.g. "(confidence 0.6: single paper,
-  full-spectrum result, not yet replicated on this detector's data)."
+- End with a one-line rationale in parentheses justifying the `confidence` score.
 - Carry over any training-regime qualifier from the paper (e.g. "under
-  frequency-split training"); never present a regime-specific result as a
-  general conclusion.
+  frequency-split training"); never present a regime-specific result as general.
+- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`.
+
+## Confidence
+
+{CONFIDENCE_RUBRIC}
 
 Hard rules:
-- `cite_id` MUST be the exact `paper_id` of one of the papers listed below.
-  Inventing an id is a failure; an item whose `cite_id` matches no listed paper
-  is dropped.
-- `confidence` (0.0-1.0) is required for every item.
+- `cite_id` is a SEPARATE key and MUST be the exact `paper_id` of one of the
+  papers listed below (copy it verbatim, e.g. "arxiv:2406.04378"). Omitting the
+  key, or inventing an id, drops the item.
+- `confidence` is a SEPARATE key, required on every item — assign it using the
+  Confidence rubric above (it also defines the omit threshold).
 - Omission beats a weak item — do not pad the list to cover every paper.
+- The downstream task is FULL-SPECTRUM (one model, all frequencies). Do NOT
+  recommend frequency-split / per-band techniques (e.g. a separate model per
+  band) as solutions — they do not transfer. If a paper's result was achieved
+  under frequency-split training, treat it as a CAUTIONARY note ("strong only
+  under frequency-split training, which does not transfer to our full-spectrum
+  setting"), never as something to try.
 - State only what the listed papers support. Do not invent results or papers.
 - Output ONLY the JSON object — no markdown fences, no extra text.

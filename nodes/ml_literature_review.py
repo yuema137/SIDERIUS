@@ -44,6 +44,7 @@ from agent.prompt_templates.literature_review import (
     render_synthesis_prompt,
 )
 from agent.schemas.literature_review import (
+    ConfidenceRubric,
     LiteratureReviewInput,
     LiteratureReviewOutput,
     PaperExtract,
@@ -70,9 +71,12 @@ _AGENT_CARD = AgentCard(
         "Cannot run experiments; cannot judge SQUID-specific applicability "
         "without empirical confirmation."
     ),
-    trust_guidance=(
-        "Treat findings as promising priors; only experiment runs confirm applicability."
-    ),
+    # The proposer reads raw confidence numbers off each finding; the rubric
+    # legend here tells it what those numbers mean (single source of truth =
+    # ConfidenceRubric — invariant 3). Uses the DEFAULT rubric. If a run ever
+    # overrides inp.confidence_rubric, this static card would describe the
+    # default instead — build the card per-run from inp.confidence_rubric then.
+    trust_guidance=ConfidenceRubric().render_for_consumer(),
 )
 
 
@@ -115,6 +119,20 @@ def _as_verbosity(value) -> Literal[0, 1, 2]:
     return 0
 
 
+def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict | None) -> None:
+    """Overwrite the LLM-extracted ``year`` with S2's authoritative value when available.
+
+    The compression LLM reads ``year`` from degraded PDF text and is sometimes
+    wrong (e.g. it picks a revision-stamp year). ``s2_metadata['year']`` is the
+    canonical source. No-op for ``local`` sources (no metadata) or a missing year.
+    """
+    if extract is None or not s2_metadata:
+        return
+    year = s2_metadata.get("year")
+    if year:
+        extract.year = str(year)
+
+
 class MLLiteratureReviewAgent:
     """Resolve root papers, run the dynamic search loop, synthesise findings.
 
@@ -128,8 +146,11 @@ class MLLiteratureReviewAgent:
 
     # Built in run() from the validated input's llm config (the provider/model
     # live on the input, not the constructor — matching the tuner's lazy bridge).
-    # Declared here so it is non-Optional for the helper methods that use it.
+    # Declared here so they are non-Optional for the helper methods that use them.
+    # ``search_bridge`` drives the cheap/templated search-decision step (may be a
+    # cheaper model than the main reasoning bridge); falls back to ``bridge``.
     bridge: LLMBridge
+    search_bridge: LLMBridge
 
     def __init__(self, bridge_factory=None, root_cache_dir: str = DEFAULT_ROOT_CACHE_DIR):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -142,6 +163,16 @@ class MLLiteratureReviewAgent:
         inp = LiteratureReviewInput.model_validate(inp)
         started_at = _utc_now()
         self.bridge = self._bridge_factory(provider=inp.llm_provider, model_id=inp.llm_model_id)
+        # Search-decision bridge: the cheap, templated query/escalate/done step may
+        # run on a cheaper model (e.g. deepseek-v4) while compression + synthesis
+        # stay on the main model. Falls back to the main bridge when unconfigured.
+        if inp.search_llm_provider or inp.search_llm_model_id:
+            self.search_bridge = self._bridge_factory(
+                provider=inp.search_llm_provider or inp.llm_provider,
+                model_id=inp.search_llm_model_id or inp.llm_model_id,
+            )
+        else:
+            self.search_bridge = self.bridge
         cache_dir = Path(self._root_cache_dir)
 
         retrieved: list[RetrievedPaper] = []
@@ -226,6 +257,7 @@ class MLLiteratureReviewAgent:
             # On compression failure keep full text only if it was requested
             # (verbosity 2); otherwise degrade to metadata-only.
             achieved = src.verbosity if extract is not None else (2 if stored_full_text else 0)
+            _override_year_from_metadata(extract, s2_meta)
 
         return RetrievedPaper(
             paper_id=paper_id,
@@ -250,6 +282,7 @@ class MLLiteratureReviewAgent:
         hist = inp.experiment_history
         rounds = 0  # search rounds executed (== search_rounds_used)
         escalations_this_round = 0  # reset on each search; capped per round
+        prior_search_results: list[tuple[str, int]] = []  # (query, hit_count) fed back per round
         # A misbehaving LLM that only ever escalates must still terminate:
         # searches consume the round budget, escalations do not. This hard
         # iteration ceiling is the backstop (searches + capped escalations).
@@ -266,12 +299,13 @@ class MLLiteratureReviewAgent:
                 explored_models=hist.model_types,
                 papers_seen=papers_seen,
                 escalation_allowed=cfg.escalation_allowed,
+                prior_search_results=prior_search_results,
             )
-            # TODO(reflector-split): this decision step is the natural future
-            # reflector-model candidate (cheap, templated) — route it through a
-            # cheaper model once the bridge's reflect split is generalised.
+            # The search-decision is the cheap, templated step — routed through
+            # self.search_bridge (a cheaper model when configured; else the main
+            # bridge). Compression + synthesis stay on self.bridge.
             try:
-                decision = self.bridge.generate(
+                decision = self.search_bridge.generate(
                     sys_prompt, user_prompt, label="lit_review.search_decision"
                 )
             except Exception as e:  # resilience boundary — a bad call ends the loop, not the run
@@ -295,7 +329,8 @@ class MLLiteratureReviewAgent:
                         "search action with empty query at round %d; ending loop", rounds
                     )
                     break
-                self._do_search(query, retrieved, index, cfg.results_per_query)
+                n_hits = self._do_search(query, retrieved, index, cfg.results_per_query)
+                prior_search_results.append((query, n_hits))
                 rounds += 1
                 escalations_this_round = 0  # fresh escalation budget for the new round
             elif action == "escalate" and cfg.escalation_allowed:
@@ -327,16 +362,20 @@ class MLLiteratureReviewAgent:
         retrieved: list[RetrievedPaper],
         index: dict[str, RetrievedPaper],
         limit: int,
-    ) -> None:
+    ) -> int:
+        """Run one S2 search; append new papers; return the number of hits S2
+        returned for ``query`` (fed back to the next round for self-correction)."""
         result = run_skill(None, mode="search", query=query, limit=limit, verbosity=0)
         if result.get("status") not in ("ok", "partial"):
             logger.warning("search failed for query %r: %s", query, result.get("message"))
-            return
-        for r in (result.get("data") or {}).get("results", []):
+            return 0
+        results = (result.get("data") or {}).get("results", [])
+        for r in results:
             rp = self._retrieved_from_search_result(r)
             if rp is not None and rp.paper_id not in index:
                 retrieved.append(rp)
                 index[rp.paper_id] = rp
+        return len(results)
 
     def _retrieved_from_search_result(self, r: dict) -> RetrievedPaper | None:
         source_type, identifier = _source_type_from_external_ids(r.get("externalIds") or {})
@@ -372,6 +411,7 @@ class MLLiteratureReviewAgent:
             return
         extract = self._compress(full_text)
         if extract is not None:
+            _override_year_from_metadata(extract, target.s2_metadata)
             target.extract = extract
             target.verbosity_achieved = target_verbosity
             target.full_text = full_text if target_verbosity == 2 else None
@@ -407,6 +447,7 @@ class MLLiteratureReviewAgent:
                 bottlenecks=hist.bottlenecks,
                 take_home_message=hist.take_home_message,
                 papers=papers,
+                confidence_rubric=inp.confidence_rubric,
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
         except Exception as e:  # resilience boundary
@@ -418,6 +459,8 @@ class MLLiteratureReviewAgent:
             return []
 
         valid_ids = {rp.paper_id for rp in retrieved}
+        verbosity_by_id = {rp.paper_id: rp.verbosity_achieved for rp in retrieved}
+        ceiling = inp.confidence_rubric.abstract_only_ceiling
         now = _utc_now()
         items: list[ExpertContextItem] = []
         for f in findings_raw:
@@ -432,6 +475,9 @@ class MLLiteratureReviewAgent:
                     cite_id,
                 )
                 continue
+            confidence = self._clamp_abstract_only_confidence(
+                f.get("confidence"), cite_id, verbosity_by_id, ceiling
+            )
             try:
                 items.append(
                     ExpertContextItem(
@@ -439,13 +485,38 @@ class MLLiteratureReviewAgent:
                         kind="literature",
                         content=str(f["content"]),
                         cite_id=cite_id,
-                        confidence=f.get("confidence"),
+                        confidence=confidence,
                         produced_at=now,
                     )
                 )
             except ValidationError as e:
                 logger.warning("dropping invalid finding %s: %s", f, e)
         return items
+
+    @staticmethod
+    def _clamp_abstract_only_confidence(
+        confidence, cite_id: str, verbosity_by_id: dict[str, int], ceiling: float
+    ):
+        """Cap a verbosity-0 (abstract-only) paper's finding confidence at ``ceiling``.
+
+        The rubric's top confidence band requires a deep-read (verbosity >= 1), so
+        a finding citing a paper that was never deep-read must not exceed the
+        ceiling (``ConfidenceRubric.abstract_only_ceiling``). The threshold is the
+        single source of truth in the schema — this node only enforces it. Non-
+        numeric / ``None`` confidences pass through untouched (``ExpertContextItem``
+        validates them); ``bool`` is excluded so a stray ``true`` is not treated as 1.0.
+        """
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+            return confidence
+        if verbosity_by_id.get(cite_id, 0) == 0 and confidence > ceiling:
+            logger.info(
+                "clamping finding confidence %.2f -> %.2f (cite %s is abstract-only, v0)",
+                confidence,
+                ceiling,
+                cite_id,
+            )
+            return ceiling
+        return confidence
 
     # ------------------------------------------------------------------
     # Prompt-input formatting helpers

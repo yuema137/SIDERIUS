@@ -26,6 +26,8 @@ docs/paper_resolver_pilot.md findings F1-F4):
 
 import os
 
+from agent.schemas.literature_review import ConfidenceRubric
+
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Maximum number of raw-text characters injected into the user prompt. Text
@@ -109,6 +111,7 @@ def render_search_decision_prompt(
     explored_models: list[str],
     papers_seen: list[dict],
     escalation_allowed: bool,
+    prior_search_results: list[tuple[str, int]] | None = None,
     task_description: str = SIDERIUS_TASK,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for one dynamic-search-loop decision.
@@ -127,12 +130,32 @@ def render_search_decision_prompt(
             snippet}`` for the papers retrieved so far (the escalation menu).
         escalation_allowed: when False, the prompt tells the LLM to choose
             ``search`` or ``done`` only.
+        prior_search_results: ``(query, hit_count)`` for each search already run
+            this run. Fed back so the LLM self-corrects — a 0-hit query is
+            flagged "too specific" and the LLM is nudged to broaden. Omitted on
+            the first round.
     """
     system_prompt = load_prompt("search_decision_system.md").replace(
         "{TASK_DESCRIPTION}", task_description
     )
 
     explored = ", ".join(m for m in (explored_models or []) if m) or "(none recorded)"
+
+    prior_block = ""
+    if prior_search_results:
+        lines = ["## Queries already tried this run"]
+        any_zero = False
+        for query, hits in prior_search_results:
+            lines.append(f'- "{query}" → {hits} hits')
+            if hits == 0:
+                lines.append("  (too specific — try broader terms for the same concept)")
+                any_zero = True
+        if any_zero:
+            lines.append(
+                "\nA query that returned 0 hits was too narrow or off-vocabulary — "
+                "broaden it or try different keywords; do NOT repeat a 0-hit query."
+            )
+        prior_block = "\n".join(lines) + "\n\n"
 
     if papers_seen:
         lines = []
@@ -159,6 +182,7 @@ def render_search_decision_prompt(
         f"Key findings so far:\n{_bullets(key_findings)}\n\n"
         f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
+        f"{prior_block}"
         "## Papers retrieved so far this run\n"
         f"{papers_block}\n"
         f"{escalation_note}\n"
@@ -173,17 +197,27 @@ def render_synthesis_prompt(
     bottlenecks: list[str],
     take_home_message: str,
     papers: list[dict],
+    confidence_rubric: ConfidenceRubric | None = None,
     task_description: str = SIDERIUS_TASK,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for the final findings synthesis.
 
-    The LLM emits ``{"findings": [{content, cite_id, confidence?}]}``. The node
+    The LLM emits ``{"findings": [{content, cite_id, confidence}]}``. The node
     wraps each into an ``ExpertContextItem``. ``papers`` is a list of
     ``{paper_id, title, year, summary}`` where ``summary`` is the compressed
     extract (preferred) or the abstract.
+
+    ``confidence_rubric`` (default = the standard ``ConfidenceRubric``) is the
+    single source of confidence semantics; its rendered form is injected into
+    the ``{CONFIDENCE_RUBRIC}`` placeholder. The ``.md`` template carries no
+    numeric thresholds — see "Scoring and rubric design invariants" in
+    docs/external_agents_architecture.md.
     """
-    system_prompt = load_prompt("synthesis_system.md").replace(
-        "{TASK_DESCRIPTION}", task_description
+    rubric = confidence_rubric or ConfidenceRubric()
+    system_prompt = (
+        load_prompt("synthesis_system.md")
+        .replace("{TASK_DESCRIPTION}", task_description)
+        .replace("{CONFIDENCE_RUBRIC}", rubric.render())
     )
 
     if papers:
