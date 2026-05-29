@@ -130,9 +130,15 @@ class TestModeDispatch:
 
 
 class TestResolveArxiv:
+    # NOTE: every test in this class short-circuits Tier-1 (`_try_arxiv_tier1`)
+    # to None so the legacy openAccessPdf / arxiv-fallback path stays the
+    # subject under test. Tier-1 (arxiv source tarball) cascade behavior has
+    # its own class below (TestArxivTier1Cascade).
+
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
     @patch.object(wrapper, "_extract_pdf_text", return_value=("EXTRACTED BODY", None))
     @patch.object(wrapper.requests, "get")
-    def test_arxiv_openaccess_pdf_path(self, mock_get, mock_extract):
+    def test_arxiv_openaccess_pdf_path(self, mock_get, mock_extract, mock_tier1):
         # First call: S2 metadata (has openAccessPdf).
         # Second call: PDF download.
         mock_get.side_effect = [
@@ -150,13 +156,15 @@ class TestResolveArxiv:
         assert "openAccessPdf" in out["message"]
         assert out["data"]["full_text"] == "EXTRACTED BODY"
         assert out["data"]["verbosity_achieved"] == 1
+        assert out["data"]["extraction_method"] == "pdfplumber_llm"
         # Confirm we hit the openAccessPdf URL, not the arxiv fallback.
         pdf_url = mock_get.call_args_list[1].args[0]
         assert pdf_url == "https://example.org/paper.pdf"
 
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
     @patch.object(wrapper, "_extract_pdf_text", return_value=("FALLBACK BODY", None))
     @patch.object(wrapper.requests, "get")
-    def test_arxiv_fallback_when_no_oap(self, mock_get, mock_extract):
+    def test_arxiv_fallback_when_no_oap(self, mock_get, mock_extract, mock_tier1):
         mock_get.side_effect = [
             _ok_response(_paper_without_oap_with_arxiv()),
             _ok_response({"_": "_"}),
@@ -173,9 +181,11 @@ class TestResolveArxiv:
         pdf_url = mock_get.call_args_list[1].args[0]
         assert pdf_url == "https://arxiv.org/pdf/2101.00001.pdf"
         assert out["data"]["full_text"] == "FALLBACK BODY"
+        assert out["data"]["extraction_method"] == "pdfplumber_llm"
 
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
     @patch.object(wrapper.requests, "get")
-    def test_arxiv_no_pdf_available(self, mock_get):
+    def test_arxiv_no_pdf_available(self, mock_get, mock_tier1):
         # S2 returns metadata but no openAccessPdf and no ArXiv external id.
         mock_get.return_value = _ok_response(_paper_metadata_only())
         out = wrapper.run_skill(
@@ -189,6 +199,7 @@ class TestResolveArxiv:
         assert out["data"]["verbosity_achieved"] == 0
         assert out["data"]["s2_metadata"] is not None
         assert out["data"]["full_text"] is None
+        assert out["data"]["extraction_method"] == "abstract_only"
         # Exactly one HTTP call — only the metadata lookup happened.
         assert mock_get.call_count == 1
 
@@ -248,6 +259,167 @@ class TestResolveOtherSchemes:
         assert out["data"]["verbosity_achieved"] == 2
         called_url = mock_get.call_args_list[0].args[0]
         assert "URL:" in called_url
+
+
+# ---------------------------------------------------------------------------
+# Tier-1 (arXiv source) cascade
+# ---------------------------------------------------------------------------
+
+
+class TestArxivTier1Cascade:
+    """Three-tier extraction cascade — Commit 2c-b.
+
+    The wrapper attempts Tier 1 (arxiv.org/src tarball → cleaned Markdown)
+    before falling through to Tier 3 (openAccessPdf / arxiv fallback PDF +
+    pdfplumber). Tier 2 (marker-pdf) is added in Commit 2c-c.
+
+    These tests pin the cascade behavior at the wrapper level; the parser
+    itself is covered by ``test_arxiv_source.py``.
+    """
+
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value="# Tier-1 Markdown\n\nBody.")
+    @patch.object(wrapper.requests, "get")
+    def test_tier1_success_short_circuits_pdf(self, mock_get, mock_tier1):
+        # S2 metadata returns openAccessPdf, but Tier-1 succeeds first → we
+        # never download the PDF, and extraction_method is "arxiv_source".
+        mock_get.return_value = _ok_response(_paper_with_oap())
+        out = wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=1,
+        )
+        assert out["status"] == "ok"
+        assert "Tier 1" in out["message"]
+        assert out["data"]["full_text"].startswith("# Tier-1 Markdown")
+        assert out["data"]["verbosity_achieved"] == 1
+        assert out["data"]["extraction_method"] == "arxiv_source"
+        # S2 metadata only — no PDF download.
+        assert mock_get.call_count == 1
+        mock_tier1.assert_called_once_with("2406.04378")
+
+    @patch.object(wrapper, "_extract_pdf_text", return_value=("PDF BODY", None))
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
+    @patch.object(wrapper.requests, "get")
+    def test_tier1_none_falls_through_to_tier3(self, mock_get, mock_tier1, mock_extract):
+        # Tier 1 cleanly returns None → Tier 3 (pdfplumber on openAccessPdf)
+        # runs, extraction_method ends up "pdfplumber_llm".
+        mock_get.side_effect = [
+            _ok_response(_paper_with_oap()),
+            _ok_response({"_": "_"}),
+        ]
+        out = wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=1,
+        )
+        assert out["status"] == "ok"
+        assert out["data"]["full_text"] == "PDF BODY"
+        assert out["data"]["extraction_method"] == "pdfplumber_llm"
+        mock_tier1.assert_called_once()
+
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
+    @patch.object(wrapper.requests, "get")
+    def test_tier1_not_attempted_for_doi(self, mock_get, mock_tier1):
+        # DOI source type has no arxiv id → Tier-1 must NOT be invoked.
+        mock_get.return_value = _ok_response(_paper_metadata_only())
+        wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="doi",
+            identifier="10.9999/zz",
+            verbosity=1,
+        )
+        mock_tier1.assert_not_called()
+
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
+    @patch.object(wrapper.requests, "get")
+    def test_tier1_not_attempted_for_openreview(self, mock_get, mock_tier1):
+        mock_get.return_value = _ok_response(_paper_metadata_only())
+        wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="openreview",
+            identifier="https://openreview.net/forum?id=abc",
+            verbosity=1,
+        )
+        mock_tier1.assert_not_called()
+
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value="# T1")
+    @patch.object(wrapper.requests, "get")
+    def test_tier1_skipped_for_verbosity_0(self, mock_get, mock_tier1):
+        # verbosity=0 → metadata-only; Tier-1 must NOT be triggered.
+        mock_get.return_value = _ok_response(_paper_with_oap())
+        out = wrapper.run_skill(
+            None,
+            mode="resolve",
+            source_type="arxiv",
+            identifier="2406.04378",
+            verbosity=0,
+        )
+        assert out["data"]["full_text"] is None
+        assert out["data"]["extraction_method"] == "abstract_only"
+        mock_tier1.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _try_arxiv_tier1 — direct unit coverage
+# ---------------------------------------------------------------------------
+
+
+class TestTryArxivTier1Direct:
+    """Direct coverage of ``_try_arxiv_tier1`` failure / success branches."""
+
+    @patch.object(wrapper, "parse_arxiv_source", return_value="# Parsed")
+    @patch.object(wrapper.requests, "get")
+    def test_success_returns_parser_output(self, mock_get, mock_parse):
+        resp = MagicMock(spec=requests.Response)
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "application/x-eprint-tar"}
+        resp.content = b"FAKE TARBALL"
+        mock_get.return_value = resp
+        out = wrapper._try_arxiv_tier1("2406.04378")
+        assert out == "# Parsed"
+        called_url = mock_get.call_args.args[0]
+        assert called_url == "https://arxiv.org/src/2406.04378"
+        mock_parse.assert_called_once_with(b"FAKE TARBALL")
+
+    @patch.object(wrapper.requests, "get")
+    def test_pdf_only_returns_none(self, mock_get):
+        # Content-Type pdf → arXiv only stored a PDF; skip cleanly.
+        resp = MagicMock(spec=requests.Response)
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "application/pdf"}
+        resp.content = b"%PDF-..."
+        mock_get.return_value = resp
+        assert wrapper._try_arxiv_tier1("1234.56789") is None
+
+    @patch.object(wrapper.requests, "get")
+    def test_non_200_returns_none(self, mock_get):
+        resp = MagicMock(spec=requests.Response)
+        resp.status_code = 404
+        resp.headers = {}
+        resp.content = b""
+        mock_get.return_value = resp
+        assert wrapper._try_arxiv_tier1("nope") is None
+
+    @patch.object(wrapper.requests, "get", side_effect=requests.ConnectionError("boom"))
+    def test_network_error_returns_none(self, mock_get):
+        assert wrapper._try_arxiv_tier1("2406.04378") is None
+
+    @patch.object(wrapper, "parse_arxiv_source", side_effect=RuntimeError("parser blew up"))
+    @patch.object(wrapper.requests, "get")
+    def test_parser_exception_returns_none(self, mock_get, mock_parse):
+        # Defensive: any unhandled parser exception cleanly cascades.
+        resp = MagicMock(spec=requests.Response)
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "application/x-eprint-tar"}
+        resp.content = b"FAKE TARBALL"
+        mock_get.return_value = resp
+        assert wrapper._try_arxiv_tier1("2406.04378") is None
 
 
 # ---------------------------------------------------------------------------
@@ -466,9 +638,10 @@ class TestCachingAndErrors:
         assert "HTTP 404" in out["message"]
         assert mock_get.call_count == 1
 
+    @patch.object(wrapper, "_try_arxiv_tier1", return_value=None)
     @patch.object(wrapper, "_extract_pdf_text", return_value=(None, "pdfplumber blew up"))
     @patch.object(wrapper.requests, "get")
-    def test_pdf_extraction_failure_returns_partial(self, mock_get, mock_extract):
+    def test_pdf_extraction_failure_returns_partial(self, mock_get, mock_extract, mock_tier1):
         mock_get.side_effect = [
             _ok_response(_paper_with_oap()),
             _ok_response({"_": "_"}),
@@ -484,6 +657,9 @@ class TestCachingAndErrors:
         assert "extraction failed" in out["message"]
         assert out["data"]["s2_metadata"] is not None
         assert out["data"]["full_text"] is None
+        # Tier-3 was attempted (pdfplumber) and failed → tier stays declared,
+        # downstream LLM will read the abstract-only ceiling from the metadata.
+        assert out["data"]["extraction_method"] == "abstract_only"
 
 
 # ---------------------------------------------------------------------------

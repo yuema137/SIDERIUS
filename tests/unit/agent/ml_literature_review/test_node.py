@@ -928,3 +928,182 @@ class TestEscalationCap:
         not_escalated = [p for p in out.retrieved_papers if p.verbosity_achieved == 0]
         assert len(not_escalated) == 1  # the third hit stayed metadata-only
         assert out.search_rounds_used == 1  # only the search counts as a round
+
+
+# ---------------------------------------------------------------------------
+# extraction_method propagation (Commit 2c-b)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionMethodPropagation:
+    """The skill emits ``extraction_method`` on the resolve response; the node
+    reads it from ``data`` and stamps it onto ``PaperExtract.extraction_method``
+    AFTER LLM validation (the LLM is not allowed to mint or overwrite this
+    trust signal). The instruction block injected into the prompt also varies
+    with the extraction method so the LLM knows what input quality to expect.
+    """
+
+    @pytest.mark.parametrize(
+        "method",
+        ["arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"],
+    )
+    def test_method_from_skill_lands_on_extract(self, tmp_path, monkeypatch, method):
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        # abstract_only carries no full_text — synthesize accordingly so the
+        # _compress path is still exercised (the node only compresses when
+        # full_text is present and verbosity≥1).
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Some prose body.",
+                    "extraction_method": method,
+                },
+                "message": f"resolved via {method}",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == method
+
+    def test_missing_method_in_data_defaults_to_pdfplumber_llm(self, tmp_path, monkeypatch):
+        # Pre-2c cached entries don't carry ``extraction_method``. The node
+        # must default to the conservative Tier-3 label so trust signals stay
+        # consistent (better than blindly claiming a higher tier).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            # NOTE: no "extraction_method" key in data.
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                },
+                "message": "legacy resolve response",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == "pdfplumber_llm"
+
+    def test_llm_cannot_override_extraction_method(self, tmp_path, monkeypatch):
+        # If the LLM hallucinates a higher tier (e.g. claims "arxiv_source")
+        # while the skill actually emitted "pdfplumber_llm", the node's
+        # post-validation stamp must win. This is the trust-signal invariant.
+        lying_extract = dict(_VALID_EXTRACT)
+        lying_extract["extraction_method"] = "arxiv_source"  # LLM lies
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": lying_extract,
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                    "extraction_method": "pdfplumber_llm",
+                },
+                "message": "tier-3 resolve",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == "pdfplumber_llm"  # skill wins
+
+    @pytest.mark.parametrize(
+        ("method", "fingerprint"),
+        [
+            ("arxiv_source", "clean LaTeX"),
+            ("marker_pdf", "marker"),
+            ("pdfplumber_llm", "pdfplumber"),
+            ("abstract_only", "abstract"),
+        ],
+    )
+    def test_prompt_carries_tier_specific_instructions(
+        self, tmp_path, monkeypatch, method, fingerprint
+    ):
+        # The render function selects the instruction block matching the
+        # extraction tier. We check that a tier-distinctive phrase reaches
+        # the system prompt the bridge sees.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                    "extraction_method": method,
+                },
+                "message": "resolved",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        agent.run(_input(tmp_path))
+        extract_prompts = [
+            (system, user)
+            for (label, system, user) in bridge.prompts
+            if label == "lit_review.paper_extract"
+        ]
+        assert extract_prompts, "no paper_extract prompt was issued"
+        system, _user = extract_prompts[0]
+        assert fingerprint.lower() in system.lower(), (
+            f"system prompt for method={method!r} should mention {fingerprint!r}; "
+            f"got: {system[:200]}..."
+        )

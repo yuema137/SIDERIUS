@@ -278,6 +278,9 @@ class MLLiteratureReviewAgent:
         status = result.get("status")
         s2_meta = data.get("s2_metadata")
         full_text = data.get("full_text")
+        # Skill response carries the extraction tier (Commit 2c-b). Pre-2c
+        # cached entries don't have it — default to the conservative tier.
+        extraction_method = data.get("extraction_method") or "pdfplumber_llm"
         error = None if status == "ok" else result.get("message")
 
         extract: PaperExtract | None = None
@@ -285,7 +288,7 @@ class MLLiteratureReviewAgent:
         achieved: Literal[0, 1, 2] = _as_verbosity(data.get("verbosity_achieved", 0))
 
         if src.verbosity >= 1 and full_text:
-            extract = self._compress(full_text)
+            extract = self._compress(full_text, extraction_method=extraction_method)
             # On compression failure keep full text only if it was requested
             # (verbosity 2); otherwise degrade to metadata-only.
             achieved = src.verbosity if extract is not None else (2 if stored_full_text else 0)
@@ -441,7 +444,8 @@ class MLLiteratureReviewAgent:
         full_text = data.get("full_text")
         if not full_text:
             return
-        extract = self._compress(full_text)
+        extraction_method = data.get("extraction_method") or "pdfplumber_llm"
+        extract = self._compress(full_text, extraction_method=extraction_method)
         if extract is not None:
             _override_year_from_metadata(extract, target.s2_metadata)
             target.extract = extract
@@ -455,12 +459,32 @@ class MLLiteratureReviewAgent:
     # ------------------------------------------------------------------
     # LLM compression (verbosity-1 extract)
     # ------------------------------------------------------------------
-    def _compress(self, full_text: str) -> PaperExtract | None:
-        """Compress full text into a PaperExtract; never raises (returns None)."""
+    def _compress(
+        self,
+        full_text: str,
+        extraction_method: Literal[
+            "arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"
+        ] = "pdfplumber_llm",
+    ) -> PaperExtract | None:
+        """Compress full text into a PaperExtract; never raises (returns None).
+
+        ``extraction_method`` selects the per-tier instruction block in
+        ``render_paper_extract_prompt`` AND is stamped onto the resulting
+        ``PaperExtract.extraction_method`` (the field is set node-side, not by
+        the LLM — see §5a invariant). Defaults to ``"pdfplumber_llm"`` for
+        pre-cascade safety; callers should pass the value from the skill
+        response (``data["extraction_method"]``).
+        """
         try:
-            sys_prompt, user_prompt = render_paper_extract_prompt(full_text)
+            sys_prompt, user_prompt = render_paper_extract_prompt(
+                full_text, extraction_method=extraction_method
+            )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.paper_extract")
-            return PaperExtract.model_validate(raw)
+            extract = PaperExtract.model_validate(raw)
+            # Skill is authoritative for the tier signal; override any value
+            # the LLM may have accidentally emitted.
+            extract.extraction_method = extraction_method
+            return extract
         except Exception as e:  # resilience boundary — a bad extract must not abort the run
             logger.warning("paper compression failed: %s", e)
             return None
