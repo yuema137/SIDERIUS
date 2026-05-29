@@ -747,3 +747,183 @@ Still open:
    `agent/schemas/`, injected via a placeholder, no numbers in the .md). Deferred
    because changing them requires re-validating Checkpoint B. See the
    "Scoring and rubric design invariants" section in `external_agents_architecture.md`.
+
+---
+
+## §10 End-to-end validation suite
+
+The permanent acceptance gate for the whole `ml_literature_review` system.
+
+### §10.1 — Purpose and scope
+
+This suite is the definitive answer to: *"does the system correctly extract
+technical content from papers and produce actionable findings for the
+proposer?"* It validates the **complete pipeline** end-to-end —
+`paper_resolver_skill` → `PaperExtract` (compression) → synthesis →
+`ExpertContextItem` findings → (Commit 2d) `reference_library` — on a fixed
+corpus of real arXiv papers, with human review of every intermediate artifact.
+
+It is a **permanent fixture, not a one-time checkpoint**. The corpus of seven
+papers (§10.2) is *locked*: every future change to a prompt
+(`paper_extract_system.md`, `search_decision_system.md`, `synthesis_system.md`),
+a schema (`ConfidenceRubric`, `SynthesisConfig`, `PaperExtract`), or an
+extraction tier (Commit 2c) must be re-validated against this same corpus, so
+results are comparable across commits. Locking the corpus is what makes the
+suite a regression gate rather than a moving target.
+
+It complements, rather than replaces, the commit-gated checkpoints
+(A/B/C/E/F — see §10.6). Those are *behavioral gates attached to a single
+commit*; this suite is the *human-review acceptance standard* that spans
+commits and can be triggered any time (§10.7). A checkpoint answers "did this
+commit's change work?"; the suite answers "does the whole system still meet the
+acceptance bar?"
+
+Note: the suite is only *fully* runnable after Commits 2c + 2d — see the
+runnability callout at the top of §10.4.
+
+### §10.2 — Fixed test corpus
+
+Seven locked papers, all real and arXiv-resolvable. `.tex` source availability
+verified 2026-05-29 via `arxiv.org/src/{id}`.
+
+| # | Track | arXiv ID | Title | Why selected | Has `.tex` source |
+|---|-------|----------|-------|-------------|----------------|
+| 1 | Main — architecture | `2312.00752` | Mamba: Linear-Time Sequence Modeling with Selective State Spaces | State-space / selective-SSM family; rich, specific `architecture_details` (selection mechanism, hardware-aware scan) | yes (Tier-1) |
+| 2 | Main — architecture | `2211.14730` | A Time Series is Worth 64 Words (PatchTST) | Transformer/attention family; patching + channel-independence — a distinct architecture from #1 | yes (Tier-1) |
+| 3 | Application — physics | `2511.20731` | Denoising gravitational wave with deep learning in the time-frequency domain | GW detector signal; tests `relevance_to_task` transfer to SQUID; prior extract data (Checkpoint B 5-paper check) | yes (Tier-1) |
+| 4 | Application — physics | `1811.02695` | Seismic Signal Denoising and Decomposition Using Deep Neural Networks (DeepDenoiser) | Different physical 1-D signal (geophysics); transfer-relevance test | yes (Tier-1) |
+| 5 | Denoising — architecture | `2501.04967` | Targeted Adversarial Denoising Autoencoders (TADA) for Neural Time Series Filtration | New 1-D neural-time-series denoising AE; prior data (canonical trace finding @0.50) | yes (Tier-1) |
+| 6 | Denoising — loss/training | `2510.25800` | FreIE: Low-Frequency Spectral Bias in Neural Networks for Time-Series Tasks | 1-D frequency-domain / metric-aligned loss; on-domain high-confidence path; prior data (canonical trace finding @0.45) | yes (Tier-1) |
+| 7 | Denoising — loss/training (cross-domain) | `2503.18162` | SNRAware: Improved Deep Learning MRI Denoising with SNR Unit Training and G-factor Map Augmentation | **PDF-only fallback-tier case.** SNR-aware training exemplar; richest prior data (root in canonical trace; cited @0.65 in the isolated moderate comparison). Tests the moderate-tolerance cross-domain-with-caveat path **and** the Tier-2/Tier-3 extraction fallback | **no — PDF-only** (Tier-2/3) |
+
+**These papers are locked.** Do not substitute without updating this section and
+re-running the full suite. Additions (e.g. an 8th paper for a new track) are
+welcome but do not replace the seven core papers. **Two intentional design
+choices:** #6 (FreIE) and #7 (SNRAware) both occupy the denoising loss/training
+track because they exercise *different* behavioral paths — #6 the on-domain
+high-confidence path (0.60–0.79+ band), #7 the cross-domain transfer-caveat path
+(moderate tolerance) **and** the PDF-only extraction fallback (no `arxiv_source`).
+If `arxiv.org/src` availability changes for any paper (e.g. a new version adds
+source), re-verify and update the `.tex` column.
+
+### §10.3 — Parameter reference table
+
+These parameters control pipeline behavior during a suite run. Every run must
+record which values were used.
+
+**Table 1 — Verbosity parameters**
+
+| Parameter | Location | Values | Default | Controls |
+|-----------|----------|--------|---------|---------|
+| `PaperSource.verbosity` | `LiteratureReviewInput.root_papers` | 0, 1, 2 | 1 | Root paper resolve depth: 0=metadata only, 1=full text + compression, 2=full text only (no compression) |
+| `DynamicSearchConfig.initial_verbosity` | `LiteratureReviewInput.dynamic_search` | 0, 1, 2 | 0 | Initial verbosity for dynamic search results |
+| `RetrievedPaper.verbosity_achieved` | `LiteratureReviewOutput.retrieved_papers` | 0, 1, 2 | — | Actual verbosity reached by resolver (output, not input) |
+| `findings_verbosity` | `LiteratureReviewInput` | 0, 1 | 1 | Finding content format: 0=single paragraph, 1=three-part Implication/Mechanism/Adaptation |
+| `extraction_method` | `PaperExtract` (Commit 2c+) | `arxiv_source`, `marker_pdf`, `pdfplumber_llm`, `abstract_only` | `abstract_only` | Extraction tier used, serves as trust signal for downstream consumers |
+
+**Table 2 — Threshold and scoring parameters**
+
+| Parameter | Location | Values | Default | Controls |
+|-----------|----------|--------|---------|---------|
+| `ConfidenceRubric.omit_below` | `LiteratureReviewInput.confidence_rubric` | float | 0.40 | Findings below this confidence are omitted from findings list |
+| `ConfidenceRubric.abstract_only_ceiling` | `LiteratureReviewInput.confidence_rubric` | float | 0.79 | Confidence upper bound for verbosity=0 papers (node-side clamp) |
+| `ConfidenceRubric` bands | `LiteratureReviewInput.confidence_rubric` | 0.80–1.00 / 0.60–0.79 / 0.40–0.59 / omit | standard | Evidence requirement per band: deep-read+on-domain / clear transfer / abstract-only / omit |
+| `SynthesisConfig.transfer_tolerance` | `LiteratureReviewInput.synthesis_config` | `strict`, `moderate`, `liberal` | `moderate` | Threshold for generating findings from cross-domain papers |
+| `DynamicSearchConfig.max_rounds` | `LiteratureReviewInput.dynamic_search` | int ≥ 1 | 3 | Maximum search loop rounds |
+| `DynamicSearchConfig.max_escalations_per_round` | `LiteratureReviewInput.dynamic_search` | int | 2 | Maximum escalations per round |
+| `DynamicSearchConfig.results_per_query` | `LiteratureReviewInput.dynamic_search` | int | 10 | S2 search results per query |
+
+### §10.4 — Test procedure
+
+> **Runnability — Commits 2c/2d dependency.** The suite is *fully* runnable only
+> after Commits 2c (three-tier extraction → `key_equations_md`, `pseudocode_md`,
+> `extraction_method`) and 2d (`reference_library`) land. Before then it is
+> **partially runnable**: **runnable now** (Commit 4 shipped) — Step 1a (v0
+> metadata), Step 1b for the seven core `PaperExtract` fields, and all of Phase 2
+> (cite_id / confidence band / three-part content / Fix B / clamp); **requires
+> Commit 2c** — Step 1b's `key_equations_md` / `pseudocode_md` /
+> `extraction_method` checks; **requires Commit 2d** — Phase 2's
+> `reference_library` sub-check.
+
+Run in two phases; capture and human-review every intermediate artifact.
+
+**Phase 1 — Paper resolver output (per paper, all 7).** Resolve each paper at two
+verbosity levels and capture the full output.
+
+*Step 1a — `verbosity=0` (metadata only):*
+- Capture: `s2_metadata` fields (title, year, authors, abstract, citation count); `verbosity_achieved` (must be 0).
+- Human review: is the abstract sufficient to understand the paper's core contribution? Would the abstract alone support a valid finding in synthesis?
+
+*Step 1b — `verbosity=1` (full text + compression):*
+- Capture: `verbosity_achieved` (should be 1; note if degraded to 0 and why); `extraction_method` (after Commit 2c — expect `arxiv_source` for #1–#6, `marker_pdf`/`pdfplumber_llm` for #7 SNRAware); full `PaperExtract` JSON (all fields).
+- Human review per field:
+  - `core_idea`: captures the central contribution in ≤80 words?
+  - `architecture_details`: names specific layer types, connectivity, key design choices — specific enough that a proposer could learn a concrete design decision? *"Uses deep learning" is a fail; "dilated causal convolutions with exponentially increasing dilation rates and gated activations" is a pass.*
+  - `key_results`: performance numbers carry regime qualifiers (dataset, metric, training regime — especially frequency-split vs full-spectrum)?
+  - `relevance_to_task`: makes a specific argument about transfer to full-spectrum 1-D SQUID denoising, not generic?
+  - `key_equations_md` (Commit 2c+): LaTeX correct? Cross-check against the `.tex` source when `extraction_method=arxiv_source` (#1–#6). For #7 (no `.tex`), judge the marker/pdfplumber-reconstructed equations against the PDF.
+  - `pseudocode_md` (Commit 2c+): algorithm structure preserved?
+  - No hallucinations: every claim traceable to the source paper?
+
+**Phase 2 — Literature reviewer findings (all 7 as root papers).** Configure
+`LiteratureReviewInput` with all 7 at `verbosity=1`, `findings_verbosity=1`,
+`transfer_tolerance=moderate`, `max_rounds=3`; run the full node.
+
+Per `ExpertContextItem` in `findings`, review:
+- `cite_id`: matches a real retrieved paper?
+- `confidence`: in the correct rubric band given the paper's verbosity + domain? Was it clamped by `abstract_only_ceiling` (if the cited paper was verbosity=0)?
+- `content` three-part check:
+  - **Implication** — names a specific bottleneck? concrete next step? ≤40 words?
+  - **Mechanism** — specific layer types / loss terms / training regime? ≤80 words? carries regime qualifiers (e.g. frequency-split caveat)?
+  - **Adaptation** — concrete adaptation step for the SQUID full-spectrum setting? ≤50 words?
+  - `(rationale: …)` — present and honest?
+- No frequency-split recommendations (Fix B must hold).
+- Cross-domain papers (esp. #7 SNRAware): does the **Adaptation** explicitly state the transfer assumption?
+
+Additionally, `reference_library` (after Commit 2d):
+- Each verbosity=1 paper cited in findings appears in `reference_library`?
+- Each `PaperReference.extract` matches the `PaperExtract` from Phase 1?
+- `extraction_method` correctly propagated (incl. the non-`arxiv_source` value for #7)?
+
+### §10.5 — Acceptance criteria
+
+A run passes if **all** of the following hold.
+
+**Paper resolver (Phase 1):**
+- All 7 papers resolve at `verbosity_achieved=1` (no degradation to 0 unless the PDF/source is genuinely unavailable — document the reason).
+- `architecture_details` specific enough for a proposer to learn a concrete design decision, on all 7.
+- `key_results` carries regime qualifiers on every paper with training-regime-specific results.
+- `key_equations_md` non-empty and LaTeX correct for all papers **with a `.tex` source** (#1–#6, after Commit 2c). For **#7 (PDF-only)**: Tier-2/Tier-3 produces a usable extract and `extraction_method` is correctly set to `marker_pdf`/`pdfplumber_llm` (not `arxiv_source`); equation content is judged best-effort, not held to ground-truth-LaTeX correctness.
+- Zero hallucinations across all 7 extracts.
+
+**Literature reviewer (Phase 2):**
+- At least 4 of the 7 papers produce at least one finding (papers with no actionable bottleneck relevance may be correctly omitted — document which and why).
+- All findings in the correct confidence band per the rubric.
+- All findings in `findings_verbosity=1` mode have all three labeled sections present.
+- Fix B holds: zero frequency-split recommendations.
+- `reference_library` contains entries for all verbosity=1 papers that appear in findings (after Commit 2d).
+
+**Failure response:**
+- Phase 1 failure on `architecture_details` or `key_equations_md` → revise the compression prompt or extraction tier; re-run Checkpoints B / E / F.
+- Phase 2 failure on finding quality → revise the synthesis prompt; re-validate with the three-way `transfer_tolerance` comparison.
+- Systematic failure across multiple papers in the same track → the track may need a different paper; document the failure and escalate before substituting (the corpus is locked — substitution is a deliberate, documented act).
+
+### §10.6 — Relationship to existing checkpoints
+
+| Checkpoint | Scope | Relation to §10 suite |
+|------------|-------|---------------------|
+| Checkpoint A | Raw paper resolution, TIDMAD only | §10 Phase 1 extends this to 7 papers × 2 verbosities |
+| Checkpoint B | LLM compression quality, 2 papers | §10 Phase 1 extends this to all 7 fixed papers |
+| Checkpoint C | Dynamic search loop behavior | §10 Phase 2 uses the same synthesis evaluation criteria |
+| Checkpoint E | Tier-1 formula extraction quality (Commit 2c) | §10 Phase 1 Step 1b includes `key_equations_md` review (#1–#6) |
+| Checkpoint F | LLM compression for new fields (Commit 2c) | §10 Phase 1 Step 1b includes the equation/pseudocode field review |
+| Checkpoint D | End-to-end proposer behavior change (Commit 6) | §10 is a **prerequisite** for Checkpoint D — the suite must pass before wiring into the workflow |
+
+### §10.7 — When to run the suite
+
+- Before opening the PR for **Commit 2c** (Checkpoints E + F).
+- Before opening the PR for **Commit 2d** (`reference_library` population check).
+- Before **Checkpoint D** (Commit 6) — must pass as a prerequisite.
+- Any time a prompt file is modified (`synthesis_system.md`, `search_decision_system.md`, `paper_extract_system.md`).
+- Any time `ConfidenceRubric` default values change.
+- Any time `SynthesisConfig.transfer_tolerance` default changes.

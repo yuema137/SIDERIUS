@@ -57,6 +57,12 @@ commit). A commit is not "done" until both its automated test gate is green
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit
   · gate full `tests/unit/` + `tests/integration/` green
+- [ ] **§10 End-to-end validation suite** — permanent acceptance gate
+  (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
+  commit. Run log: `docs/validation_suite_runs.md`.
+  - [ ] **First FULL run** — after Commit 2d closes (Commit-2 family complete →
+        suite fully runnable per the §10.4 runnability callout)
+  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass)
 
 ---
 
@@ -78,6 +84,16 @@ artifacts (`docs/paper_resolver_pilot.md`, `docs/paper_extract_pilot.md`,
 `docs/dynamic_search_pilot.md`, `docs/e2e_behavior_pilot.md`) are
 version-controlled so future revisions of the system have a reference for
 what "working" looked like at each stage.
+
+**§10 End-to-end validation suite** (spec:
+`external_agents_for_proposer.md` §10) is a *separate kind of artifact* —
+distinct from the one-time checkpoints above, it is a *permanent* acceptance
+gate that re-runs across commits on a locked 7-paper corpus. The one-time
+checkpoints (A–F, D) gate a single commit's behavior; §10 gates the entire
+system's regression behavior over time. Its first FULL run is right after
+Commit 2d closes (Commit-2 family complete → suite fully runnable per §10.4),
+and it is a prerequisite for Checkpoint D / Commit 6. Each suite run records
+dated results in `docs/validation_suite_runs.md`.
 
 ---
 
@@ -554,6 +570,10 @@ new fields (Checkpoint F + the equation-aware prompt variant).
   cascade, all HTTP/marker mocked.
 - Integration (`@real_run`): Tier-1 on TIDMAD with a **real** arXiv source
   download; assert `key_equations_md` is non-empty and contains `$$`.
+- **§10 partial run** (before closing 2c): run §10 Phase 1 (Steps 1a/1b incl.
+  `key_equations_md` / `extraction_method`) on the 7-paper corpus — this *is*
+  Checkpoints E+F at corpus scale. Record results in
+  `docs/validation_suite_runs.md`.
 
 #### 🔍 Behavioral Checkpoint E — Tier-1 formula extraction quality
 
@@ -641,6 +661,11 @@ Commits 2–3, implemented after Commit 4b closes.
   nodes/ml_literature_review.py
 .venv/bin/python -m pyright agent/schemas/literature_review.py agent/schemas/proposal.py
 ```
+
+**§10 trigger** (before closing 2d): run §10 Phase 2 `reference_library`
+sub-check on the corpus; then — since 2c + 2d are both done — perform the
+**first FULL §10 run** (suite is now fully runnable per the §10.4 callout).
+Record both in `docs/validation_suite_runs.md`.
 
 **Resolved open questions** (from the design draft):
 - render placement: after expert_context, before vocab — confirmed
@@ -1243,6 +1268,9 @@ deepseek, `search_llm_*` unset).
 **Files**:
 - New: `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
 - New: `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
+- Edit: `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — add
+  `reference_library` parameter to `local_full_context` (no longer audit-only;
+  Q6 audit 2026-05-29).
 
 **Checklist**:
 - [ ] **Audit step (no code change)**: open
@@ -1255,27 +1283,39 @@ deepseek, `search_llm_*` unset).
       matching the conventions in `ml_result_interp_to_ml_model_propose.py`:
   - Module docstring listing implemented vs planned protocols.
   - `local_all_channels(output: LiteratureReviewOutput) -> dict[str, Any]`
-    — returns a dict with the four kwargs that `local_full_context` expects
+    — returns a dict with the **five** kwargs that `local_full_context` expects
     from external agents: `expert_context=output.findings`,
     `vocab_seed=output.new_vocab_candidates`, `agent_cards=[output.agent_card]`,
-    `mindset=output.suggested_mindset`. Returns a dict (not a typed object)
-    because it gets spread into `local_full_context(**update_dict, ...)`.
+    `mindset=output.suggested_mindset`,
+    `reference_library=output.reference_library`. Returns a dict (not a typed
+    object) because it gets spread into `local_full_context(**update_dict, ...)`.
   - `database_all_channels(...) -> dict[str, Any]` placeholder that raises
     `NotImplementedError`.
+- [ ] **Edit `local_full_context`** in
+      `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`: add a
+      `reference_library: list[PaperReference] | None = None` parameter that maps
+      into `ProposalInput.reference_library` when present (mirrors how it already
+      threads `mindset`/`agent_cards`). Without this, the `reference_library`
+      kwarg spread from `local_all_channels` never reaches `ProposalInput` — the
+      field is permanently empty in production (Q6 audit 2026-05-29).
 - [ ] Tests:
-  - [ ] `local_all_channels` maps all four channels correctly with a fully
+  - [ ] `local_all_channels` maps all five channels correctly with a fully
         populated `LiteratureReviewOutput`.
   - [ ] `local_all_channels` passes through `new_vocab_candidates=[]` and
         `suggested_mindset=None` without error (v1 wired-empty channels).
   - [ ] `local_all_channels` wraps a single `agent_card` into a list of one
         (the field on `ProposalInput` is `agent_cards: list[AgentCard]`).
+  - [ ] `local_all_channels` emits `reference_library` (5th kwarg) from a
+        populated output.
+  - [ ] `local_full_context` populates `ProposalInput.reference_library`
+        end-to-end from the spread dict (non-empty round-trip).
   - [ ] `database_all_channels` raises `NotImplementedError`.
 
 **Test gate**:
 ```
 .venv/bin/python -m pytest tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py -q
-.venv/bin/python -m ruff check agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py
-.venv/bin/python -m pyright agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py
+.venv/bin/python -m ruff check agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py
+.venv/bin/python -m pyright agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py
 ```
 
 **Commit message must include the audit finding**: state that
@@ -1299,7 +1339,8 @@ as the always-true trigger.
 
 **Files**:
 - Edit: `workflows/model_exploration.py`
-- New: `configs/lit_review_config.yaml`
+- Edit: `configs/lit_review_config.yaml` (stub created in 4b-final; Commit 6 fills
+  in the full runtime config with root_papers, dynamic_search, and synthesis blocks)
 - New: `reference_data/root_papers_cache/README.md`
 - New: `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
 - Edit (possibly): existing Tier-0 dual-mode workflow test to cover the new
@@ -1319,7 +1360,12 @@ as the always-true trigger.
   - `suggested_mindset`: last non-None wins (documented as a v1 rule; flagged
     for revisit when the second agent populates this — see §9 Q2 of the
     architecture doc).
-  - Returns the four-kwarg dict directly consumable by `local_full_context`.
+  - `reference_library`: concatenate across outputs. **Dependency on Commit 5**:
+    requires `local_all_channels` to emit `reference_library` AND
+    `local_full_context` to accept it (Q6 audit 2026-05-29); without those this
+    field is silently dropped.
+  - Returns the **five-kwarg** dict directly consumable by `local_full_context`
+    (fifth = `reference_library`).
 - [ ] Add `should_run_literature_review(interp_output: InterpretationOutput) -> bool`:
       always returns `True` for v1. Docstring includes the cost-tradeoff
       note from spec §6.
@@ -1387,6 +1433,11 @@ as the always-true trigger.
 .venv/bin/python -m ruff check workflows/model_exploration.py configs/lit_review_config.yaml tests/unit/workflows/test_model_exploration_lit_review_wiring.py
 .venv/bin/python -m pyright workflows/model_exploration.py
 ```
+
+**§10 prerequisite** (before Checkpoint D): full §10 suite must pass — §10.6
+makes it a prerequisite for Checkpoint D. Re-run the full suite if any prompt
+/ `ConfidenceRubric` / `transfer_tolerance` default has changed since the
+Commit-2d full run. Record in `docs/validation_suite_runs.md`.
 
 #### 🔍 Behavioral Checkpoint D — End-to-end proposer behavior change
 
