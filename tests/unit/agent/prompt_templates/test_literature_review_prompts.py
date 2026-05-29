@@ -75,13 +75,13 @@ class TestRenderStructure:
 
     def test_system_prompt_has_anti_noise_and_math_rules(self):
         # Default extraction_method='pdfplumber_llm' selects the degraded-PDF
-        # instruction block, which contains these rules verbatim. Other tiers
-        # (arxiv_source / marker_pdf) have different blocks — see
+        # instruction block, which contains these rules verbatim. The other
+        # tier (arxiv_source) has a different block — see
         # TestExtractionInstructions below.
         system, _ = render_paper_extract_prompt("text")
         # (cid:NN) glyph artifacts (F3) must be called out.
         assert "(cid:" in system
-        # Math-in-prose / approximate-LaTeX instruction (F3, Tier-3 path).
+        # Math-in-prose / approximate-LaTeX instruction (F3, Tier-2 path).
         assert "LaTeX" in system
         # Despacing tolerance (run-together words).
         assert "missing spaces" in system
@@ -104,7 +104,7 @@ class TestRenderStructure:
 
 
 class TestExtractionInstructions:
-    """`render_paper_extract_prompt(extraction_method=...)` injects one of four
+    """`render_paper_extract_prompt(extraction_method=...)` injects one of three
     per-tier instruction blocks at the `{EXTRACTION_INSTRUCTIONS}` placeholder.
     Each block's distinctive guidance must appear (and the wrong-tier guidance
     must NOT appear)."""
@@ -117,18 +117,12 @@ class TestExtractionInstructions:
         # arxiv source is clean — pdfplumber's (cid:NN) artifact rule must NOT leak.
         assert "(cid:" not in system
 
-    def test_marker_pdf_block_injected(self):
-        system, _ = render_paper_extract_prompt("md from marker", extraction_method="marker_pdf")
-        assert "Markdown extracted from the paper's PDF via the marker" in system
-        assert "DIRECTLY into `key_equations_md`" in system
-        assert "(cid:" not in system
-
     def test_pdfplumber_block_injected_and_is_default(self):
         # Explicit and default both select the degraded-PDF block.
         for kwargs in ({}, {"extraction_method": "pdfplumber_llm"}):
             system, _ = render_paper_extract_prompt("degraded text", **kwargs)
             assert "(cid:" in system  # F3 degraded-PDF artifact rule
-            assert "approximate LaTeX form" in system  # Tier-3 best-effort note
+            assert "approximate LaTeX form" in system  # Tier-2 best-effort note
             assert 'extraction_method="pdfplumber_llm"' in system  # downstream trust signal
 
     def test_abstract_only_block_injected(self):
@@ -150,9 +144,8 @@ class TestExtractionInstructions:
 
         raw = Path(mod.__file__).with_name("paper_extract_system.md").read_text()
         assert "{EXTRACTION_INSTRUCTIONS}" in raw
-        # tier-specific marker strings must NOT be in the raw .md
+        # tier-specific fingerprints must NOT be in the raw .md
         assert "arXiv source" not in raw
-        assert "marker converter" not in raw
         assert "(cid:" not in raw
 
 

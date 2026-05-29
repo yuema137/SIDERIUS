@@ -177,20 +177,6 @@ blocks preserved. Treat this as ground truth:
 - The author affiliations / footnotes / bibliography that may appear in the
   raw `.tex` are noise — ignore them."""
 
-_PAPER_EXTRACT_INSTRUCTIONS_MARKER = """## Extraction (PDF → Markdown via marker)
-
-The text below is **Markdown extracted from the paper's PDF via the marker
-converter**. Equations and pseudocode are largely preserved in LaTeX / Markdown
-but may have minor conversion artifacts:
-
-- Extract key equations DIRECTLY into `key_equations_md` (`$$...$$` display,
-  `$...$` inline). Clean up minor artifacts (stray spaces, malformed braces)
-  but preserve the equation's meaning. Do not paraphrase equations.
-- Extract algorithm / pseudocode blocks DIRECTLY into `pseudocode_md` (fenced
-  code blocks).
-- If a region looks too garbled to reliably reconstruct, prefer omission
-  (`""`) over hallucinated LaTeX."""
-
 _PAPER_EXTRACT_INSTRUCTIONS_PDFPLUMBER = """## Reading degraded PDF text
 
 The text below is extracted from a PDF via pdfplumber and is **imperfect**. You
@@ -230,7 +216,6 @@ not contain extractable equations or pseudocode."""
 
 _PAPER_EXTRACT_INSTRUCTIONS: dict[str, str] = {
     "arxiv_source": _PAPER_EXTRACT_INSTRUCTIONS_ARXIV,
-    "marker_pdf": _PAPER_EXTRACT_INSTRUCTIONS_MARKER,
     "pdfplumber_llm": _PAPER_EXTRACT_INSTRUCTIONS_PDFPLUMBER,
     "abstract_only": _PAPER_EXTRACT_INSTRUCTIONS_ABSTRACT,
 }
@@ -246,7 +231,7 @@ def load_prompt(filename: str) -> str:
 def render_paper_extract_prompt(
     raw_text: str,
     extraction_method: Literal[
-        "arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"
+        "arxiv_source", "pdfplumber_llm", "abstract_only"
     ] = "pdfplumber_llm",
     task_description: str = SIDERIUS_TASK,
 ) -> tuple[str, str]:
@@ -259,10 +244,9 @@ def render_paper_extract_prompt(
         extraction_method: Which extraction tier produced ``raw_text``. Selects
                            the per-tier instruction block injected at the
                            ``{EXTRACTION_INSTRUCTIONS}`` placeholder. Default
-                           ``"pdfplumber_llm"`` preserves the pre-Commit-2c
-                           behaviour (current node call site feeds pdfplumber
-                           output). Commit 2c-b/c wires the cascade and the
-                           node will then pass the actual tier explicitly.
+                           ``"pdfplumber_llm"`` matches the Tier-2 fallback;
+                           callers (the lit-review node) pass the actual tier
+                           explicitly based on the skill's ``extraction_method``.
         task_description:  Concrete downstream task the proposer works on, used
                            to ground ``relevance_to_task``. Defaults to
                            ``SIDERIUS_TASK``.

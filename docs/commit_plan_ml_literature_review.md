@@ -41,12 +41,12 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
-- [ ] **Commit 2c** — Three-tier full-text + formula extraction (arXiv source → marker → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
+- [ ] **Commit 2c** — Two-tier full-text + formula extraction (arXiv source → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` (tier cascade) + `@real_run` Tier-1 on TIDMAD · extraction-pilot artifact
   - [x] **2c-a** — `PaperExtract` +3 fields + extraction-tier-aware compression prompt · committed `4da895d`
   - [x] **2c-b** — Tier-1 arXiv source extraction wired end-to-end (parser + wrapper cascade + node propagation + 41 unit tests) · committed `1ebb034`
-  - [ ] **2c-c** — Tier-2 marker hook (optional dep, runtime detection, cascade tests)
-  - [ ] **2c-d** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F
+  - [ ] **2c-cleanup** — drop the `marker_pdf` tier entirely from schema/prompts/skill_config/docs (two-tier cascade locked: arXiv source → pdfplumber+LLM)
+  - [ ] **2c-c** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F *(was 2c-d before Tier-2 was cancelled)*
   - [ ] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output)
   - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
 - [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
@@ -524,23 +524,33 @@ equation handling. Same file also captures the search-mode sanity check
 
 ---
 
-## Commit 2c — Three-tier full-text + formula extraction
+## Commit 2c — Two-tier full-text + formula extraction
 
-**Goal**: Implement the three-tier extraction strategy
+**Goal**: Implement the two-tier extraction strategy
 (`docs/external_agents_for_proposer.md` §5a) in `paper_resolver_skill`; add
 `key_equations_md`, `pseudocode_md`, and `extraction_method` to `PaperExtract`;
 run a pilot validating extraction quality on real papers. Logically this sits
 between Commit 2 (shipped the skill + pdfplumber path) and Commit 3 (locked the
 `PaperExtract` field set) — it extends the skill and **amends** both Commit 3's
 field-set lock and pilot finding **F3** ("no `key_equations`; prose only"): F3's
-rationale (pdfplumber degrades math) holds only for the Tier-3 path; Tiers 1–2
-carry equations verbatim. NOTE: introduced after Commits 3 and 4 already shipped,
-so it also requires re-validating the Commit-3 compression prompt against the
-new fields (Checkpoint F + the equation-aware prompt variant).
+rationale (pdfplumber degrades math) holds only for the Tier-2 path; Tier 1
+carries equations verbatim. NOTE: introduced after Commits 3 and 4 already
+shipped, so it also requires re-validating the Commit-3 compression prompt
+against the new fields (Checkpoint F + the equation-aware prompt variant).
 
-**Sub-commit ladder**: split into four logical units committed sequentially —
-2c-a (schema + prompt), 2c-b (Tier-1 wire-up), 2c-c (Tier-2 marker hook),
-2c-d (pilot + render_review_report + Checkpoints E/F).
+**Why two tiers, not three.** An early plan slotted in a GPU-based PDF→Markdown
+tier (`marker-pdf`) between arXiv source and pdfplumber. We dropped it: the lab
+GPU (5090) does not have `marker-pdf` installed, and the marginal quality gain
+over `pdfplumber + LLM` is small for math-heavy papers (both paths ultimately
+depend on the compression LLM to reconstruct LaTeX). The framework stays
+extensible — a Tier-1.5 GPU converter can be slotted in later without touching
+the existing wire-up — but the locked design here is two-tier only.
+
+**Sub-commit ladder**: split into logical units committed sequentially — 2c-a
+(schema + prompt), 2c-b (Tier-1 wire-up), 2c-cleanup (drop `marker_pdf` from
+schema/prompts/docs after the Tier-2 cancellation decision), 2c-c (pilot +
+render_review_report + Checkpoints E/F; renumbered from the original 2c-d after
+the cancellation).
 
 **Checklist**:
 
@@ -557,27 +567,46 @@ new fields (Checkpoint F + the equation-aware prompt variant).
       + `.tex` parser for `equation`/`align`/`algorithm`/`figure` → clean Markdown.
       Implemented in `agent/skills/paper_resolver_skill/arxiv_source.py` via
       pylatexenc 2.x AST walk with verbatim slicing.
-- [x] Tier 3: existing `pdfplumber` text path retained as last resort
-      (no change to the path itself; cascade now arrives there only after
-      Tier-1 returns None).
-- [x] `extraction_method` wired end-to-end through the Tier-1 / Tier-3 paths:
-      set in the skill payload, returned in the response envelope, read by
-      the node and stamped on `PaperExtract` after LLM validation (so the
-      LLM cannot mint or override the trust signal).
-- [x] Unit tests for the **Tier-1 / Tier-3 cascade** (Tier-2 added in 2c-c):
-      21 parser tests + 10 wrapper cascade tests + 10 node propagation tests
-      (mocked HTTP throughout; no real network, no real LLM).
+- [x] Tier 2 (formerly Tier-3): existing `pdfplumber` text path retained as the
+      fallback. No change to the path itself; the cascade now arrives there only
+      after Tier-1 returns None.
+- [x] `extraction_method` wired end-to-end through both tiers: set in the skill
+      payload, returned in the response envelope, read by the node and stamped
+      on `PaperExtract` after LLM validation (so the LLM cannot mint or override
+      the trust signal).
+- [x] Unit tests for the **Tier-1 / Tier-2 cascade**: 21 parser tests + 10
+      wrapper cascade tests + 10 node propagation tests (mocked HTTP throughout;
+      no real network, no real LLM).
 
-#### 2c-c — Tier-2 marker hook
-- [ ] Tier 2 marker integration: add marker-pdf to pyproject.toml as an
-      optional dependency (not in the default install group). The skill
-      detects availability at runtime via importlib.util.find_spec("marker")
-      and skips to Tier 3 if not found. CI (no GPU) must pass without marker
-      installed — the unit tests mock the marker call, never import it directly.
-- [ ] Cascade-test extension: re-run the wrapper cascade suite with the
-      three-tier ordering (Tier 1 → Tier 2 → Tier 3 → abstract_only).
+#### 2c-cleanup — drop `marker_pdf` from schema/prompts/docs
+*(post-2c-b decision: cancel the planned Tier-2 marker hook entirely; the
+cascade is two-tier only — see "Why two tiers, not three" above)*
+- [ ] `agent/schemas/literature_review.py`: remove `"marker_pdf"` from the
+      `extraction_method` Literal; update the field docstring to describe a
+      two-tier scale (`arxiv_source` > `pdfplumber_llm` > `abstract_only`).
+- [ ] `agent/prompt_templates/literature_review/__init__.py`: remove
+      `_PAPER_EXTRACT_INSTRUCTIONS_MARKER` constant and its entry in the
+      `_PAPER_EXTRACT_INSTRUCTIONS` dict; tighten `render_paper_extract_prompt`'s
+      `extraction_method` parameter Literal to drop `"marker_pdf"`.
+- [ ] `agent/prompt_templates/literature_review/paper_extract_system.md`:
+      no edit needed if `marker_pdf` is not mentioned in the static template —
+      verify and confirm.
+- [ ] `agent/skills/paper_resolver_skill/skill_config.json`: update the
+      top-level description to list two tiers (drop `marker_pdf`) and update
+      the `verbosity` description correspondingly.
+- [ ] `agent/skills/paper_resolver_skill/wrapper.py`: drop any reference to
+      `marker_pdf` in payload dicts / log lines (none exist today — verify
+      and confirm).
+- [ ] `nodes/ml_literature_review.py`: tighten the `_compress` and call-site
+      Literals to drop `"marker_pdf"`.
+- [ ] Tests: remove the `marker_pdf` parametrize case from
+      `test_node.py::TestExtractionMethodPropagation::test_method_from_skill_lands_on_extract`
+      and from the `test_prompt_carries_tier_specific_instructions` parametrize.
+- [ ] Run the full gate (pytest + ruff + ruff format --check + pyright) on the
+      affected suites; confirm green.
 
-#### 2c-d — pilot + render_review_report + Checkpoints E/F
+#### 2c-c — pilot + render_review_report + Checkpoints E/F
+*(renumbered from the original 2c-d after Tier-2 was cancelled)*
 - [ ] **`render_review_report`** — pure, deterministic Markdown renderer for a
       lit-review run's artifacts (Phase 1 `RetrievedPaper` extracts and, when
       present, Phase 2 findings / reference_library). Reusable in production
@@ -589,7 +618,7 @@ new fields (Checkpoint F + the equation-aware prompt variant).
       findings).
 - [ ] Pilot on the **§10 corpus** (7 papers, §10.2): six Tier-1 papers
       (#1–#6 Mamba / PatchTST / GW / DeepDenoiser / TADA / FreIE) and SNRAware
-      (#7) via the Tier-2 / Tier-3 fallback. Capture per-paper
+      (#7) via the Tier-2 (`pdfplumber + LLM`) fallback. Capture per-paper
       `verbosity_achieved`, `extraction_method`, and full `PaperExtract`
       (incl. `key_equations_md` / `pseudocode_md`). The pilot script calls
       `render_review_report` and writes a single human-review Markdown file
@@ -599,18 +628,18 @@ new fields (Checkpoint F + the equation-aware prompt variant).
       signed off, run the compression prompt on the §10 corpus and verify:
       (a) `key_equations_md` is populated with correct LaTeX for the six
           Tier-1 papers (cross-check against raw `.tex`); for SNRAware
-          (PDF-only) Tier-2 / Tier-3 produces a usable best-effort extract;
+          (PDF-only) Tier-2 produces a usable best-effort extract;
       (b) `pseudocode_md` is populated with the algorithm structure preserved;
       (c) `extraction_method` is correctly passed through the response envelope
           to the node and reflected in the final `PaperExtract` (`arxiv_source`
-          for #1–#6; `marker_pdf` or `pdfplumber_llm` for #7).
+          for #1–#6; `pdfplumber_llm` for #7).
       The pilot's `render_review_report` output (above) contains the full
       `PaperExtract` for all seven papers — that's the artifact for the
       Checkpoint-F review. This is the **§10 Phase 1 partial run**.
 
 **Test gate**:
 - Unit: `tests/unit/agent/skills/test_paper_resolver_skill.py` — per-tier +
-  cascade, all HTTP/marker mocked.
+  cascade, all HTTP mocked.
 - Integration (`@real_run`): Tier-1 on TIDMAD with a **real** arXiv source
   download; assert `key_equations_md` is non-empty and contains `$$`.
 - **§10 partial run** (before closing 2c): run §10 Phase 1 (Steps 1a/1b incl.
@@ -633,25 +662,30 @@ proceeding.** Verify per paper:
 - (c) the Markdown is clean enough to feed directly to the LLM compression
   prompt.
 
-This checkpoint **gates whether Tier 1 alone suffices** on these six papers,
-or whether Tier 2 (`marker`) is needed for acceptable quality. Note: SNRAware
+This checkpoint **gates Tier-1 quality** on these six papers — equations,
+pseudocode, and figure captions must come through cleanly enough for the
+compression LLM to fill `key_equations_md` / `pseudocode_md` verbatim. If
+Tier-1 turns out to be insufficient on a paper, that paper degrades to the
+Tier-2 (`pdfplumber + LLM`) path instead — same fallback SNRAware uses below.
+(Inserting a future GPU-based converter as a Tier-1.5 is left open by the
+two-tier design, but is out of scope for Commit 2c.) Note: SNRAware
 (`arxiv:2503.18162`, §10 #7) is PDF-only (no `.tex` source) and exercises the
-Tier-2 / Tier-3 fallback path in Checkpoint F, not Tier-1 here. Do not proceed
-on the new fields until signed off.
+Tier-2 fallback path in Checkpoint F, not Tier-1 here. Do not proceed on the
+new fields until signed off.
 
 #### 🔍 Behavioral Checkpoint F — LLM compression quality for new fields
 
 After Checkpoint E is signed off, run the compression prompt on the **full §10
-corpus** (six Tier-1 papers from §10.2 #1–#6 + SNRAware (#7) via Tier-2 / Tier-3)
-and verify the equation-aware prompt variant correctly populates the new fields:
+corpus** (six Tier-1 papers from §10.2 #1–#6 + SNRAware (#7) via Tier-2
+(`pdfplumber + LLM`)) and verify the equation-aware prompt variant correctly
+populates the new fields:
 - (a) `key_equations_md` holds correct LaTeX for the six Tier-1 papers
-  (cross-check against raw `.tex`); for SNRAware (PDF-only), Tier-2 / Tier-3
-  produces a usable best-effort extract;
+  (cross-check against raw `.tex`); for SNRAware (PDF-only), Tier-2 produces
+  a usable best-effort extract;
 - (b) `pseudocode_md` holds the algorithm structure, preserved;
 - (c) `extraction_method` is correctly set per paper (`arxiv_source` for the
-  Tier-1 inputs; `marker_pdf` or `pdfplumber_llm` for SNRAware) and propagated
-  through the response envelope to the node and reflected in the final
-  `PaperExtract`.
+  Tier-1 inputs; `pdfplumber_llm` for SNRAware) and propagated through the
+  response envelope to the node and reflected in the final `PaperExtract`.
 Show the full `PaperExtract` JSON for all seven papers before closing
 Commit 2c. This is a targeted re-run of Checkpoint B for the new fields at
 corpus scale (= the §10 Phase 1 partial run).
@@ -1094,8 +1128,13 @@ ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
         only on-bottleneck v1 candidate (Raman, doi:10.3390/s21144623) was
         identified by the LLM's escalation reasoning but couldn't be deep-read
         because the resolver had no PDF for that DOI; this is precisely the
-        failure mode Commit 2c (three-tier extraction with Tier-2 marker) is
-        designed to fix.
+        failure mode Commit 2c (originally three-tier extraction with a
+        Tier-2 marker hook for DOI-only PDFs) was designed to fix.
+        **Supersession (post-2c-b):** the marker hook was cancelled (see
+        §523 "Why two tiers, not three"). The two-tier cascade fixes this
+        failure mode only when the paper has an arXiv ID; DOI-only papers
+        like the Raman example remain pdfplumber-extracted (Tier-2) or
+        abstract-only.
   - [x] **SynthesisConfig.transfer_tolerance** (impl 2026-05-28). Added
         `SynthesisConfig` (`transfer_tolerance: Literal["strict","moderate","liberal"]
         = "moderate"`; `min_confidence` deliberately NOT duplicated — omit

@@ -397,10 +397,11 @@ def _resolve_remote(source_type: str, identifier: str, verbosity: int) -> dict[s
                 "data": payload,
                 "message": "extracted via arXiv source (Tier 1)",
             }
-        # Tier 1 failed (PDF-only / network / parse) → fall through to Tier 3.
+        # Tier 1 failed (PDF-only / network / parse) → fall through to Tier 2.
 
-    # Tier 3 — openAccessPdf / arxiv-fallback PDF + pdfplumber. (Tier 2 marker
-    # is added in Commit 2c-c and slots in between Tier 1 and Tier 3.)
+    # Tier 2 — openAccessPdf / arxiv-fallback PDF + pdfplumber. (A GPU-based
+    # PDF→Markdown tier was considered for this slot — see §5a of
+    # docs/external_agents_for_proposer.md — and dropped before 2c-c.)
     pdf_url = None
     if metadata.get("openAccessPdf"):
         oap = metadata["openAccessPdf"]

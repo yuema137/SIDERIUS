@@ -463,7 +463,7 @@ class MLLiteratureReviewAgent:
         self,
         full_text: str,
         extraction_method: Literal[
-            "arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"
+            "arxiv_source", "pdfplumber_llm", "abstract_only"
         ] = "pdfplumber_llm",
     ) -> PaperExtract | None:
         """Compress full text into a PaperExtract; never raises (returns None).

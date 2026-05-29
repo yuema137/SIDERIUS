@@ -267,11 +267,13 @@ class TestResolveOtherSchemes:
 
 
 class TestArxivTier1Cascade:
-    """Three-tier extraction cascade — Commit 2c-b.
+    """Two-tier extraction cascade — Commit 2c-b.
 
     The wrapper attempts Tier 1 (arxiv.org/src tarball → cleaned Markdown)
-    before falling through to Tier 3 (openAccessPdf / arxiv fallback PDF +
-    pdfplumber). Tier 2 (marker-pdf) is added in Commit 2c-c.
+    before falling through to Tier 2 (openAccessPdf / arxiv fallback PDF +
+    pdfplumber). An earlier design slotted a GPU-based marker-pdf converter
+    between the two; it was cancelled before 2c-c — see §5a of
+    ``docs/external_agents_for_proposer.md``.
 
     These tests pin the cascade behavior at the wrapper level; the parser
     itself is covered by ``test_arxiv_source.py``.

@@ -945,7 +945,7 @@ class TestExtractionMethodPropagation:
 
     @pytest.mark.parametrize(
         "method",
-        ["arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"],
+        ["arxiv_source", "pdfplumber_llm", "abstract_only"],
     )
     def test_method_from_skill_lands_on_extract(self, tmp_path, monkeypatch, method):
         bridge = FakeBridge(
@@ -1058,7 +1058,6 @@ class TestExtractionMethodPropagation:
         ("method", "fingerprint"),
         [
             ("arxiv_source", "clean LaTeX"),
-            ("marker_pdf", "marker"),
             ("pdfplumber_llm", "pdfplumber"),
             ("abstract_only", "abstract"),
         ],

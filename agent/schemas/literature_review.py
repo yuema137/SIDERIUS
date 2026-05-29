@@ -126,9 +126,9 @@ class PaperExtract(BaseModel):
     mathematical methods were captured in prose inside ``key_results`` /
     ``architecture_details``. Commit 2c **amends** that lock and adds three
     fields — ``key_equations_md``, ``pseudocode_md``, ``extraction_method``
-    — once three-tier extraction (§5a of docs/external_agents_for_proposer.md)
+    — once two-tier extraction (§5a of docs/external_agents_for_proposer.md)
     made reliable formula content viable. F3's "no LaTeX" rationale now
-    applies only to the Tier-3 (pdfplumber) path; Tier-1 / Tier-2 inputs carry
+    applies only to the Tier-2 (pdfplumber) path; Tier-1 inputs carry
     equations and pseudocode verbatim.
 
     All string fields default to empty string (not ``None``) so the compression
@@ -147,7 +147,7 @@ class PaperExtract(BaseModel):
     length is paper-determined (no fixed word budget). ``extraction_method``
     is set by the resolver skill / node based on which extraction tier
     succeeded — it is NOT emitted by the LLM; the schema default
-    ``"abstract_only"`` applies until the cascade (Commit 2c-b/c) wires it.
+    ``"abstract_only"`` applies when no full-text path runs.
     """
 
     title: str = Field(default="", description="Paper title.")
@@ -162,7 +162,7 @@ class PaperExtract(BaseModel):
         description="Architectural description: model type, layer/block "
         "structure, key design choices, and how the approach compares to "
         "alternatives the paper discusses (≤150 words). Math goes in "
-        "``key_equations_md`` for Tier-1/2 sources; prose-only for Tier-3 "
+        "``key_equations_md`` for Tier-1 sources; prose-only for Tier-2 "
         "(per F3's conditional supersession in §5a).",
     )
     key_results: str = Field(
@@ -180,8 +180,8 @@ class PaperExtract(BaseModel):
     key_equations_md: str = Field(
         default="",
         description="Core equations as Markdown LaTeX — ``$$...$$`` for display "
-        "math, ``$...$`` for inline. Reliable for Tier-1/2 inputs (clean source); "
-        "approximate / best-effort for Tier-3 (``pdfplumber_llm``); empty for "
+        "math, ``$...$`` for inline. Reliable for Tier-1 inputs (clean source); "
+        "approximate / best-effort for Tier-2 (``pdfplumber_llm``); empty for "
         "``abstract_only``. Trust signal lives on ``extraction_method``.",
     )
     pseudocode_md: str = Field(
@@ -190,16 +190,15 @@ class PaperExtract(BaseModel):
         "`````python ... `````). Same tier "
         "reliability semantics as ``key_equations_md``.",
     )
-    extraction_method: Literal["arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"] = (
-        Field(
-            default="abstract_only",
-            description="First-class trust signal indicating which extraction tier "
-            "produced the source text. ``arxiv_source`` (Tier-1, ground-truth LaTeX) "
-            "> ``marker_pdf`` (Tier-2, ML PDF→Markdown) > ``pdfplumber_llm`` (Tier-3, "
-            "degraded text + LLM reconstruction) > ``abstract_only`` (no full text). "
-            "Set by the resolver skill / node — NOT emitted by the LLM. Default "
-            "``abstract_only`` applies until the cascade (Commit 2c-b/c) wires it.",
-        )
+    extraction_method: Literal["arxiv_source", "pdfplumber_llm", "abstract_only"] = Field(
+        default="abstract_only",
+        description="First-class trust signal indicating which extraction tier "
+        "produced the source text. ``arxiv_source`` (Tier-1, ground-truth LaTeX) "
+        "> ``pdfplumber_llm`` (Tier-2, degraded text + LLM reconstruction) > "
+        "``abstract_only`` (no full text). Set by the resolver skill / node — "
+        "NOT emitted by the LLM. The earlier three-tier design had a Tier-2 "
+        "``marker_pdf`` slot (GPU-based PDF→Markdown); it was cancelled before "
+        "2c-c — see ``docs/external_agents_for_proposer.md`` §5a.",
     )
 
 

@@ -195,14 +195,17 @@ class TestPaperExtract:
         assert e.extraction_method == "abstract_only"
 
     def test_extraction_method_accepts_each_valid_tier(self):
-        for tier in ("arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"):
+        for tier in ("arxiv_source", "pdfplumber_llm", "abstract_only"):
             assert PaperExtract(extraction_method=tier).extraction_method == tier
 
     def test_extraction_method_unknown_value_rejected(self):
-        # Literal validation — anything outside the four tiers is a validation
-        # error (no quiet coerce; the field is a trust signal).
-        with pytest.raises(ValidationError):
-            PaperExtract(extraction_method="docling")  # type: ignore[arg-type]
+        # Literal validation — anything outside the three tiers is a validation
+        # error (no quiet coerce; the field is a trust signal). The cancelled
+        # ``marker_pdf`` tier is also rejected — proof that the schema enforces
+        # the two-tier scale, not legacy values.
+        for bad in ("docling", "marker_pdf"):
+            with pytest.raises(ValidationError):
+                PaperExtract(extraction_method=bad)  # type: ignore[arg-type]
 
     def test_populated(self):
         e = PaperExtract(

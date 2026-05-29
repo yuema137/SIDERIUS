@@ -372,15 +372,15 @@ placeholder raising `NotImplementedError` alongside the `local_*` function.
 > Supersedes the Commit-2 pilot finding **F3** ("no `key_equations` field;
 > equations in prose") *conditionally*. F3's rationale — `pdfplumber` degrades
 > math (`∑`→`(cid:88)`, flattened sub/superscripts) — holds only for the
-> pdfplumber path. When a clean LaTeX/Markdown source is available (Tiers 1–2),
-> equations and pseudocode are carried verbatim; prose-only applies to Tier 3.
+> pdfplumber path. When a clean LaTeX/Markdown source is available (Tier 1),
+> equations and pseudocode are carried verbatim; prose-only applies to Tier 2.
 > The Commit-3 compression prompt's instruction to "describe math in prose" now
-> applies only to the Tier-3 path. For Tier-1 and Tier-2 inputs, the prompt
-> variant must be equation-aware: it should extract equations directly into
+> applies only to the Tier-2 path. For Tier-1 inputs, the prompt variant must
+> be equation-aware: it should extract equations directly into
 > `key_equations_md` rather than paraphrasing them. This prompt variant is
 > validated in Checkpoint F.
 
-`verbosity ≥ 1` extraction is a **three-tier cascade**, tried best-first. Each
+`verbosity ≥ 1` extraction is a **two-tier cascade**, tried best-first. Each
 tier records how the text was obtained in a first-class `extraction_method`
 field so every downstream consumer can calibrate trust.
 
@@ -392,32 +392,35 @@ LaTeX/Markdown. This is the author's own source — **zero hallucination risk, n
 GPU, no ML model** — and covers the large majority of ML papers.
 `extraction_method="arxiv_source"`.
 
-**Tier 2 — `marker` (fallback for non-arXiv).** For DOI/OpenReview papers with
-no arXiv source, convert the PDF with `marker-pdf` (open-source, ~4 GB VRAM,
-PDF→Markdown with LaTeX preserved; ~10.5/12 on equation extraction vs ~5/12 for
-docling). The lab A100 makes VRAM a non-constraint.
-`extraction_method="marker_pdf"`. Skipped gracefully (→ Tier 3) when `marker`
-is not installed or no GPU exists.
-
-**Tier 3 — `pdfplumber` + LLM reconstruction (last resort).** When neither
-Tier 1 nor Tier 2 is available or succeeds, use the existing `pdfplumber` text
-and let the node's compression call reconstruct equations in prose plus
-*approximate* LaTeX. `extraction_method="pdfplumber_llm"` — the signal that
-equation content here is lower-reliability.
+**Tier 2 — `pdfplumber` + LLM reconstruction (fallback).** When Tier 1 is
+unavailable (no arXiv source, e.g. PDF-only submissions like SNRAware) or
+fails, use the existing `pdfplumber` text and let the node's compression call
+reconstruct equations in prose plus *approximate* LaTeX.
+`extraction_method="pdfplumber_llm"` — the signal that equation content here
+is lower-reliability.
 
 When no PDF is obtainable at all: `extraction_method="abstract_only"`.
+
+> **Why no GPU-based PDF→Markdown tier (e.g. `marker-pdf`)?** A GPU-based
+> Markdown converter sits naturally between Tier 1 and Tier 2, but the lab
+> environment (5090) does not have `marker-pdf` installed and the marginal
+> quality gain over `pdfplumber + LLM` is small for the math-heavy papers
+> we care about (both ultimately depend on the compression LLM to
+> reconstruct LaTeX from imperfect input). We keep the cascade two-tier
+> until Checkpoint F shows the Tier-2 path is insufficient on the §10
+> corpus; if it is, a Tier-1.5 GPU-based converter can be slotted in
+> without touching the existing wire-up.
 
 **Cascade (skill, `verbosity ≥ 1`):**
 
     if arxiv_id:       try Tier 1 → "arxiv_source"    (on fail ↓)
-    if pdf available:  try Tier 2 → "marker_pdf"       (on fail / not installed ↓)
-                       Tier 3      → "pdfplumber_llm"
+    if pdf available:  Tier 2      → "pdfplumber_llm"
     if no pdf:         "abstract_only"
 
 The skill returns the extracted Markdown **and** `extraction_method` in its
 response envelope. The node reads `extraction_method` to pick the compression
-prompt variant: Tiers 1–2 (clean input) get equation-aware instructions that
-populate `key_equations_md` / `pseudocode_md` directly; Tier 3 gets "describe
+prompt variant: Tier 1 (clean input) gets equation-aware instructions that
+populate `key_equations_md` / `pseudocode_md` directly; Tier 2 gets "describe
 math in prose, attempt LaTeX only when structure is clear, treat
 `key_equations_md` as unreliable".
 
@@ -445,7 +448,7 @@ for segment in batch:
 set). `PaperExtract` gains:
 - `key_equations_md: Optional[str]` — display/inline LaTeX of core equations.
 - `pseudocode_md: Optional[str]` — fenced pseudocode/algorithm blocks.
-- `extraction_method: Literal["arxiv_source","marker_pdf","pdfplumber_llm","abstract_only"]`
+- `extraction_method: Literal["arxiv_source","pdfplumber_llm","abstract_only"]`
   — first-class trust signal, default `"abstract_only"`.
 
 **Why Tier-1-first, and why it matters for the `reference_library`.** The
@@ -502,12 +505,12 @@ matching `PaperReference` for the original equations/pseudocode/architecture. It
 is not required to read every entry — only the ones behind findings it builds on.
 
 **Equation trust hierarchy** (`extraction_method`, descending reliability):
-`arxiv_source` (ground-truth LaTeX) > `marker_pdf` (good) > `pdfplumber_llm`
-(approximate) > `abstract_only` (not present — no reference_library entry).
+`arxiv_source` (ground-truth LaTeX) > `pdfplumber_llm` (approximate) >
+`abstract_only` (not present — no reference_library entry).
 
 **Relationship to Commit 2c.** The `reference_library` *structure* lands in
 Commit 2d. Its equation *content* (`key_equations_md`, `pseudocode_md`) is
-reliably populated only once Commit 2c's three-tier extraction lands; before
+reliably populated only once Commit 2c's two-tier extraction lands; before
 that, those fields are typically `None` — the structure is in place, content
 improves when 2c lands.
 
@@ -794,7 +797,7 @@ verified 2026-05-29 via `arxiv.org/src/{id}`.
 | 4 | Application — physics | `1811.02695` | Seismic Signal Denoising and Decomposition Using Deep Neural Networks (DeepDenoiser) | Different physical 1-D signal (geophysics); transfer-relevance test | yes (Tier-1) |
 | 5 | Denoising — architecture | `2501.04967` | Targeted Adversarial Denoising Autoencoders (TADA) for Neural Time Series Filtration | New 1-D neural-time-series denoising AE; prior data (canonical trace finding @0.50) | yes (Tier-1) |
 | 6 | Denoising — loss/training | `2510.25800` | FreIE: Low-Frequency Spectral Bias in Neural Networks for Time-Series Tasks | 1-D frequency-domain / metric-aligned loss; on-domain high-confidence path; prior data (canonical trace finding @0.45) | yes (Tier-1) |
-| 7 | Denoising — loss/training (cross-domain) | `2503.18162` | SNRAware: Improved Deep Learning MRI Denoising with SNR Unit Training and G-factor Map Augmentation | **PDF-only fallback-tier case.** SNR-aware training exemplar; richest prior data (root in canonical trace; cited @0.65 in the isolated moderate comparison). Tests the moderate-tolerance cross-domain-with-caveat path **and** the Tier-2/Tier-3 extraction fallback | **no — PDF-only** (Tier-2/3) |
+| 7 | Denoising — loss/training (cross-domain) | `2503.18162` | SNRAware: Improved Deep Learning MRI Denoising with SNR Unit Training and G-factor Map Augmentation | **PDF-only fallback-tier case.** SNR-aware training exemplar; richest prior data (root in canonical trace; cited @0.65 in the isolated moderate comparison). Tests the moderate-tolerance cross-domain-with-caveat path **and** the Tier-2 (`pdfplumber + LLM`) extraction fallback | **no — PDF-only** (Tier-2) |
 
 **These papers are locked.** Do not substitute without updating this section and
 re-running the full suite. Additions (e.g. an 8th paper for a new track) are
@@ -819,7 +822,7 @@ record which values were used.
 | `DynamicSearchConfig.initial_verbosity` | `LiteratureReviewInput.dynamic_search` | 0, 1, 2 | 0 | Initial verbosity for dynamic search results |
 | `RetrievedPaper.verbosity_achieved` | `LiteratureReviewOutput.retrieved_papers` | 0, 1, 2 | — | Actual verbosity reached by resolver (output, not input) |
 | `findings_verbosity` | `LiteratureReviewInput` | 0, 1 | 1 | Finding content format: 0=single paragraph, 1=three-part Implication/Mechanism/Adaptation |
-| `extraction_method` | `PaperExtract` (Commit 2c+) | `arxiv_source`, `marker_pdf`, `pdfplumber_llm`, `abstract_only` | `abstract_only` | Extraction tier used, serves as trust signal for downstream consumers |
+| `extraction_method` | `PaperExtract` (Commit 2c+) | `arxiv_source`, `pdfplumber_llm`, `abstract_only` | `abstract_only` | Extraction tier used, serves as trust signal for downstream consumers |
 
 **Table 2 — Threshold and scoring parameters**
 
@@ -836,7 +839,7 @@ record which values were used.
 ### §10.4 — Test procedure
 
 > **Runnability — Commits 2c/2d dependency.** The suite is *fully* runnable only
-> after Commits 2c (three-tier extraction → `key_equations_md`, `pseudocode_md`,
+> after Commits 2c (two-tier extraction → `key_equations_md`, `pseudocode_md`,
 > `extraction_method`) and 2d (`reference_library`) land. Before then it is
 > **partially runnable**: **runnable now** (Commit 4 shipped) — Step 1a (v0
 > metadata), Step 1b for the seven core `PaperExtract` fields, and all of Phase 2
@@ -855,13 +858,13 @@ verbosity levels and capture the full output.
 - Human review: is the abstract sufficient to understand the paper's core contribution? Would the abstract alone support a valid finding in synthesis?
 
 *Step 1b — `verbosity=1` (full text + compression):*
-- Capture: `verbosity_achieved` (should be 1; note if degraded to 0 and why); `extraction_method` (after Commit 2c — expect `arxiv_source` for #1–#6, `marker_pdf`/`pdfplumber_llm` for #7 SNRAware); full `PaperExtract` JSON (all fields).
+- Capture: `verbosity_achieved` (should be 1; note if degraded to 0 and why); `extraction_method` (after Commit 2c — expect `arxiv_source` for #1–#6, `pdfplumber_llm` for #7 SNRAware); full `PaperExtract` JSON (all fields).
 - Human review per field:
   - `core_idea`: captures the central contribution in ≤80 words?
   - `architecture_details`: names specific layer types, connectivity, key design choices — specific enough that a proposer could learn a concrete design decision? *"Uses deep learning" is a fail; "dilated causal convolutions with exponentially increasing dilation rates and gated activations" is a pass.*
   - `key_results`: performance numbers carry regime qualifiers (dataset, metric, training regime — especially frequency-split vs full-spectrum)?
   - `relevance_to_task`: makes a specific argument about transfer to full-spectrum 1-D SQUID denoising, not generic?
-  - `key_equations_md` (Commit 2c+): LaTeX correct? Cross-check against the `.tex` source when `extraction_method=arxiv_source` (#1–#6). For #7 (no `.tex`), judge the marker/pdfplumber-reconstructed equations against the PDF.
+  - `key_equations_md` (Commit 2c+): LaTeX correct? Cross-check against the `.tex` source when `extraction_method=arxiv_source` (#1–#6). For #7 (no `.tex`), judge the pdfplumber-reconstructed equations against the PDF.
   - `pseudocode_md` (Commit 2c+): algorithm structure preserved?
   - No hallucinations: every claim traceable to the source paper?
 
@@ -893,7 +896,7 @@ A run passes if **all** of the following hold.
 - All 7 papers resolve at `verbosity_achieved=1` (no degradation to 0 unless the PDF/source is genuinely unavailable — document the reason).
 - `architecture_details` specific enough for a proposer to learn a concrete design decision, on all 7.
 - `key_results` carries regime qualifiers on every paper with training-regime-specific results.
-- `key_equations_md` non-empty and LaTeX correct for all papers **with a `.tex` source** (#1–#6, after Commit 2c). For **#7 (PDF-only)**: Tier-2/Tier-3 produces a usable extract and `extraction_method` is correctly set to `marker_pdf`/`pdfplumber_llm` (not `arxiv_source`); equation content is judged best-effort, not held to ground-truth-LaTeX correctness.
+- `key_equations_md` non-empty and LaTeX correct for all papers **with a `.tex` source** (#1–#6, after Commit 2c). For **#7 (PDF-only)**: Tier-2 (`pdfplumber + LLM`) produces a usable extract and `extraction_method` is correctly set to `pdfplumber_llm` (not `arxiv_source`); equation content is judged best-effort, not held to ground-truth-LaTeX correctness.
 - Zero hallucinations across all 7 extracts.
 
 **Literature reviewer (Phase 2):**
