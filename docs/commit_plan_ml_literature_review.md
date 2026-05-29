@@ -57,6 +57,12 @@ commit). A commit is not "done" until both its automated test gate is green
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit
   · gate full `tests/unit/` + `tests/integration/` green
+- [ ] **§10 End-to-end validation suite** — permanent acceptance gate
+  (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
+  commit. Run log: `docs/validation_suite_runs.md`.
+  - [ ] **First FULL run** — after Commit 2d closes (Commit-2 family complete →
+        suite fully runnable per the §10.4 runnability callout)
+  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass)
 
 ---
 
@@ -78,6 +84,16 @@ artifacts (`docs/paper_resolver_pilot.md`, `docs/paper_extract_pilot.md`,
 `docs/dynamic_search_pilot.md`, `docs/e2e_behavior_pilot.md`) are
 version-controlled so future revisions of the system have a reference for
 what "working" looked like at each stage.
+
+**§10 End-to-end validation suite** (spec:
+`external_agents_for_proposer.md` §10) is a *separate kind of artifact* —
+distinct from the one-time checkpoints above, it is a *permanent* acceptance
+gate that re-runs across commits on a locked 7-paper corpus. The one-time
+checkpoints (A–F, D) gate a single commit's behavior; §10 gates the entire
+system's regression behavior over time. Its first FULL run is right after
+Commit 2d closes (Commit-2 family complete → suite fully runnable per §10.4),
+and it is a prerequisite for Checkpoint D / Commit 6. Each suite run records
+dated results in `docs/validation_suite_runs.md`.
 
 ---
 
@@ -554,6 +570,10 @@ new fields (Checkpoint F + the equation-aware prompt variant).
   cascade, all HTTP/marker mocked.
 - Integration (`@real_run`): Tier-1 on TIDMAD with a **real** arXiv source
   download; assert `key_equations_md` is non-empty and contains `$$`.
+- **§10 partial run** (before closing 2c): run §10 Phase 1 (Steps 1a/1b incl.
+  `key_equations_md` / `extraction_method`) on the 7-paper corpus — this *is*
+  Checkpoints E+F at corpus scale. Record results in
+  `docs/validation_suite_runs.md`.
 
 #### 🔍 Behavioral Checkpoint E — Tier-1 formula extraction quality
 
@@ -641,6 +661,11 @@ Commits 2–3, implemented after Commit 4b closes.
   nodes/ml_literature_review.py
 .venv/bin/python -m pyright agent/schemas/literature_review.py agent/schemas/proposal.py
 ```
+
+**§10 trigger** (before closing 2d): run §10 Phase 2 `reference_library`
+sub-check on the corpus; then — since 2c + 2d are both done — perform the
+**first FULL §10 run** (suite is now fully runnable per the §10.4 callout).
+Record both in `docs/validation_suite_runs.md`.
 
 **Resolved open questions** (from the design draft):
 - render placement: after expert_context, before vocab — confirmed
@@ -1408,6 +1433,11 @@ as the always-true trigger.
 .venv/bin/python -m ruff check workflows/model_exploration.py configs/lit_review_config.yaml tests/unit/workflows/test_model_exploration_lit_review_wiring.py
 .venv/bin/python -m pyright workflows/model_exploration.py
 ```
+
+**§10 prerequisite** (before Checkpoint D): full §10 suite must pass — §10.6
+makes it a prerequisite for Checkpoint D. Re-run the full suite if any prompt
+/ `ConfidenceRubric` / `transfer_tolerance` default has changed since the
+Commit-2d full run. Record in `docs/validation_suite_runs.md`.
 
 #### 🔍 Behavioral Checkpoint D — End-to-end proposer behavior change
 
