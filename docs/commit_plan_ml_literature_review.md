@@ -47,8 +47,8 @@ commit). A commit is not "done" until both its automated test gate is green
   - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
 - [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` + `tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py` + `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`; protocol mapping deferred to Commit 5
-- [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
-  · **4a** `820c548`; **4b-code** `c7860d7`; **4b-docs** `2ec1ae5`; **4b-final** (findings_verbosity + transfer_tolerance + node source-type routing + integration test → DeepSeek + Checkpoint C) — code complete 2026-05-28, commit pending
+- [x] **Commit 4** — `nodes/ml_literature_review.py` core loop
+  · **4a** `820c548`; **4b-code** `c7860d7`; **4b-docs** `2ec1ae5`; **4b-final** `91461a2` (findings_verbosity + transfer_tolerance + node source-type routing + integration test → DeepSeek + Checkpoint C)
   - [x] **Checkpoint C** — Dynamic search loop behavior · signed off 2026-05-28 (artifact `docs/dynamic_search_pilot.md`)
 - [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **wires `reference_library` into `local_all_channels`** — deferred from 2d)
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
@@ -953,7 +953,7 @@ ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
       pull-channel paragraph in `external_agents_architecture.md`; Commit 2c + 2d
       sections + status-board reorder in this doc; `nodes/ml_literature_review_README.md`
       stub (first instance of the node-README convention).
-- [ ] **4b-final** (code complete 2026-05-28; commit pending):
+- [x] **4b-final** (`91461a2`, 2026-05-28):
   - [x] **findings_verbosity + three-part content format** (impl 2026-05-27).
         Added `findings_verbosity: Literal[0, 1] = 1` to `LiteratureReviewInput`;
         replaced example + content-format section in `synthesis_system.md` with a
