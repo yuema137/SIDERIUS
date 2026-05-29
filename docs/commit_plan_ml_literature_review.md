@@ -1243,6 +1243,9 @@ deepseek, `search_llm_*` unset).
 **Files**:
 - New: `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
 - New: `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
+- Edit: `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — add
+  `reference_library` parameter to `local_full_context` (no longer audit-only;
+  Q6 audit 2026-05-29).
 
 **Checklist**:
 - [ ] **Audit step (no code change)**: open
@@ -1255,27 +1258,39 @@ deepseek, `search_llm_*` unset).
       matching the conventions in `ml_result_interp_to_ml_model_propose.py`:
   - Module docstring listing implemented vs planned protocols.
   - `local_all_channels(output: LiteratureReviewOutput) -> dict[str, Any]`
-    — returns a dict with the four kwargs that `local_full_context` expects
+    — returns a dict with the **five** kwargs that `local_full_context` expects
     from external agents: `expert_context=output.findings`,
     `vocab_seed=output.new_vocab_candidates`, `agent_cards=[output.agent_card]`,
-    `mindset=output.suggested_mindset`. Returns a dict (not a typed object)
-    because it gets spread into `local_full_context(**update_dict, ...)`.
+    `mindset=output.suggested_mindset`,
+    `reference_library=output.reference_library`. Returns a dict (not a typed
+    object) because it gets spread into `local_full_context(**update_dict, ...)`.
   - `database_all_channels(...) -> dict[str, Any]` placeholder that raises
     `NotImplementedError`.
+- [ ] **Edit `local_full_context`** in
+      `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`: add a
+      `reference_library: list[PaperReference] | None = None` parameter that maps
+      into `ProposalInput.reference_library` when present (mirrors how it already
+      threads `mindset`/`agent_cards`). Without this, the `reference_library`
+      kwarg spread from `local_all_channels` never reaches `ProposalInput` — the
+      field is permanently empty in production (Q6 audit 2026-05-29).
 - [ ] Tests:
-  - [ ] `local_all_channels` maps all four channels correctly with a fully
+  - [ ] `local_all_channels` maps all five channels correctly with a fully
         populated `LiteratureReviewOutput`.
   - [ ] `local_all_channels` passes through `new_vocab_candidates=[]` and
         `suggested_mindset=None` without error (v1 wired-empty channels).
   - [ ] `local_all_channels` wraps a single `agent_card` into a list of one
         (the field on `ProposalInput` is `agent_cards: list[AgentCard]`).
+  - [ ] `local_all_channels` emits `reference_library` (5th kwarg) from a
+        populated output.
+  - [ ] `local_full_context` populates `ProposalInput.reference_library`
+        end-to-end from the spread dict (non-empty round-trip).
   - [ ] `database_all_channels` raises `NotImplementedError`.
 
 **Test gate**:
 ```
 .venv/bin/python -m pytest tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py -q
-.venv/bin/python -m ruff check agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py
-.venv/bin/python -m pyright agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py
+.venv/bin/python -m ruff check agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py
+.venv/bin/python -m pyright agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py
 ```
 
 **Commit message must include the audit finding**: state that
@@ -1299,7 +1314,8 @@ as the always-true trigger.
 
 **Files**:
 - Edit: `workflows/model_exploration.py`
-- New: `configs/lit_review_config.yaml`
+- Edit: `configs/lit_review_config.yaml` (stub created in 4b-final; Commit 6 fills
+  in the full runtime config with root_papers, dynamic_search, and synthesis blocks)
 - New: `reference_data/root_papers_cache/README.md`
 - New: `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
 - Edit (possibly): existing Tier-0 dual-mode workflow test to cover the new
@@ -1319,7 +1335,12 @@ as the always-true trigger.
   - `suggested_mindset`: last non-None wins (documented as a v1 rule; flagged
     for revisit when the second agent populates this — see §9 Q2 of the
     architecture doc).
-  - Returns the four-kwarg dict directly consumable by `local_full_context`.
+  - `reference_library`: concatenate across outputs. **Dependency on Commit 5**:
+    requires `local_all_channels` to emit `reference_library` AND
+    `local_full_context` to accept it (Q6 audit 2026-05-29); without those this
+    field is silently dropped.
+  - Returns the **five-kwarg** dict directly consumable by `local_full_context`
+    (fifth = `reference_library`).
 - [ ] Add `should_run_literature_review(interp_output: InterpretationOutput) -> bool`:
       always returns `True` for v1. Docstring includes the cost-tradeoff
       note from spec §6.
