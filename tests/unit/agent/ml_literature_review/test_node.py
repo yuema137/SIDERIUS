@@ -538,6 +538,120 @@ class TestAbstractOnlyConfidenceClamp:
         assert out.findings[0].confidence == 0.5  # node reads the ceiling from the rubric
 
 
+class TestSourceTypeRouting:
+    """The node routes all four source types through
+    _resolve_root_paper -> cache -> compress identically. arxiv is exercised by
+    the full-run / cache tests + the canonical trace; this covers doi / local /
+    openreview at the node level: paper_id construction, skill dispatch, v1
+    compression, and a filesystem-safe cache round-trip."""
+
+    @pytest.mark.parametrize(
+        ("source_type", "identifier"),
+        [
+            ("doi", "10.1109/TGRS.2020.3036065"),
+            ("openreview", "https://openreview.net/forum?id=AbC123"),
+            ("local", "reference_data/papers/foo_paper.pdf"),
+        ],
+    )
+    def test_root_paper_routes_caches_and_compresses(
+        self, tmp_path, monkeypatch, source_type, identifier
+    ):
+        paper_id = f"{source_type}:{identifier}"
+
+        def resolve(kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": source_type,
+                    "identifier": identifier,
+                    # local sources carry no S2 metadata; remote ones do
+                    "s2_metadata": (
+                        None if source_type == "local" else {"title": "P", "year": 2023}
+                    ),
+                    "verbosity_achieved": 1,
+                    "full_text": "A denoising method described in prose.",
+                },
+                "message": "resolved",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        cache_dir = tmp_path / "cache"
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(cache_dir)
+        )
+        out = agent.run(
+            _input(
+                tmp_path,
+                root_papers=[
+                    PaperSource(source_type=source_type, identifier=identifier, verbosity=1)
+                ],
+            )
+        )
+
+        # 1. skill dispatched with the right source_type + identifier
+        rc = skill.resolve_calls
+        assert rc and rc[0]["source_type"] == source_type
+        assert rc[0]["identifier"] == identifier
+        # 2. paper_id built as "{source_type}:{identifier}", compressed to v1
+        rp = next(p for p in out.retrieved_papers if p.paper_id == paper_id)
+        assert rp.verbosity_achieved == 1
+        assert rp.extract is not None
+        # 3. cache written at the sanitized (filesystem-safe) path + round-trips
+        cache_file = cache_dir / f"{_sanitize_paper_id(paper_id)}.json"
+        assert cache_file.exists()
+        assert RetrievedPaper.model_validate_json(cache_file.read_text()).paper_id == paper_id
+
+    def test_sanitize_paper_id_is_filesystem_safe(self):
+        # The cache filename must contain no path-unsafe chars (: / ? =) for any
+        # source type; dots and hyphens are preserved.
+        assert (
+            _sanitize_paper_id("doi:10.1109/TGRS.2020.3036065") == "doi_10.1109_TGRS.2020.3036065"
+        )
+        assert _sanitize_paper_id("local:reference_data/papers/foo.pdf") == (
+            "local_reference_data_papers_foo.pdf"
+        )
+        orv = _sanitize_paper_id("openreview:https://openreview.net/forum?id=AbC")
+        for bad in (":", "/", "?", "="):
+            assert bad not in orv
+        assert orv.startswith("openreview_https")
+
+
+class TestHeadingNormalization:
+    """`_normalize_finding_content_headings` rewrites known LLM heading slips
+    (e.g. DeepSeek's `**Adaption:**` typo) to canonical form, leaving canonical
+    headings untouched. The synthesis prompt at findings_verbosity=1 instructs
+    the LLM to use canonical headings verbatim; this normalizer is the
+    backstop for occasional model variance."""
+
+    def test_adaption_variant_normalized_canonical_unchanged(self):
+        from nodes.ml_literature_review import _normalize_finding_content_headings
+
+        variant = (
+            "**Implication:** widen receptive field.\n"
+            "**Mechanism:** dilated convolutions.\n"
+            "**Adaption:** stack three dilated blocks.\n"  # the slip
+            "(rationale: on-domain.)"
+        )
+        normalized = _normalize_finding_content_headings(variant)
+        assert "**Adaption:**" not in normalized
+        assert "**Adaptation:** stack three dilated blocks." in normalized
+
+        canonical = (
+            "**Implication:** widen receptive field.\n"
+            "**Mechanism:** dilated convolutions.\n"
+            "**Adaptation:** stack three dilated blocks.\n"
+            "(rationale: on-domain.)"
+        )
+        assert _normalize_finding_content_headings(canonical) == canonical
+
+
 class TestSearchBridgeRouting:
     def test_search_decision_uses_search_bridge(self, tmp_path, monkeypatch):
         # search_llm_* set -> the search-decision call routes to the search bridge

@@ -323,6 +323,28 @@ class ConfidenceRubric(BaseModel):
         return "\n".join(lines)
 
 
+class SynthesisConfig(BaseModel):
+    """Controls the omission threshold / transfer tolerance for synthesis.
+
+    ``min_confidence`` is intentionally NOT a field here — the omit threshold is
+    ``ConfidenceRubric.omit_below`` (single source of truth; see "Scoring and
+    rubric design invariants" in docs/external_agents_architecture.md). This
+    config governs only how readily synthesis emits a finding for a *cross-
+    domain* paper whose mechanism is transferable with caveats.
+    """
+
+    transfer_tolerance: Literal["strict", "moderate", "liberal"] = Field(
+        default="moderate",
+        description="How readily synthesis emits a finding for a cross-domain "
+        "paper. 'strict' omits cross-domain papers with fundamental domain "
+        "differences; 'moderate' (default) emits when a concrete mechanism "
+        "transfer exists, provided the Adaptation states the transfer "
+        "assumptions; 'liberal' emits for any potentially relevant technique and "
+        "lets the proposer judge. Selects the {OMISSION_RULE} block injected "
+        "into the synthesis prompt.",
+    )
+
+
 class LiteratureReviewInput(BaseModel):
     """Input to the ml_literature_review node.
 
@@ -375,6 +397,22 @@ class LiteratureReviewInput(BaseModel):
         "confidence semantics (see 'Scoring and rubric design invariants' in "
         "docs/external_agents_architecture.md). Override to retune without "
         "touching any prompt file.",
+    )
+    findings_verbosity: Literal[0, 1] = Field(
+        default=1,
+        description="Detail level for each finding's `content` string. 1 = "
+        "structured three-part Markdown (`**Implication:**` / `**Mechanism:**` / "
+        "`**Adaptation:**` + closing `(rationale: ...)`), the canonical "
+        "proposer-facing format paired with reference_library (§5b). 0 = "
+        "single-paragraph backward-compat. Only the synthesis prompt's content "
+        "format changes; the ExpertContextItem schema is unchanged either way.",
+    )
+    synthesis_config: SynthesisConfig = Field(
+        default_factory=SynthesisConfig,
+        description="Omission / transfer-tolerance knobs for the synthesis step. "
+        "Default tolerance is 'moderate' — cross-domain papers with a transferable "
+        "mechanism yield a finding carrying an explicit Adaptation transfer caveat, "
+        "rather than being omitted. See SynthesisConfig.",
     )
 
 

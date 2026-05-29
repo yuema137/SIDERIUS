@@ -15,11 +15,9 @@ are listed first in the user message. Your job is NOT to summarise papers. Your
 job is to connect a specific paper to a specific current bottleneck.
 
 For each candidate finding ask: "does this paper change what the proposer should
-try, GIVEN one of the current bottlenecks?" If yes, write it. If a paper has
-nothing to say about the current bottlenecks, DROP IT — produce no item for it.
-Omission beats a weak item: an empty `findings` list is a perfectly good answer,
-whereas a list of generic paper summaries is a bad one (the proposer will
-rationally ignore it).
+try, GIVEN one of the current bottlenecks?"
+
+{OMISSION_RULE}
 
 ## Output contract
 
@@ -28,24 +26,7 @@ Return ONE JSON object. Every finding is an object with THREE SEPARATE keys —
 the paper id goes in `cite_id` (its own key), the score goes in `confidence`
 (its own key), and only the prose + rationale go in `content`.
 
-Produce EXACTLY this shape (note the three separate keys per finding):
-
-  {"findings": [
-     {"content": "Given the high-frequency-overfitting bottleneck, WaveNet's dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
-      "cite_id": "arxiv:2406.04378",
-      "confidence": <a number assigned per the Confidence rubric below>}
-  ]}
-
-`content` format — every item MUST:
-- Name the specific current bottleneck (or key finding) it addresses.
-- State the concrete implication for what to try next. NOT "Paper X proposes
-  dilated convolutions", but "Given the high-frequency-overfitting bottleneck,
-  Paper X's dilated-convolution receptive-field control suggests a wider
-  dilation schedule."
-- End with a one-line rationale in parentheses justifying the `confidence` score.
-- Carry over any training-regime qualifier from the paper (e.g. "under
-  frequency-split training"); never present a regime-specific result as general.
-- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`.
+{CONTENT_FORMAT_BLOCK}
 
 ## Confidence
 
@@ -57,7 +38,8 @@ Hard rules:
   key, or inventing an id, drops the item.
 - `confidence` is a SEPARATE key, required on every item — assign it using the
   Confidence rubric above (it also defines the omit threshold).
-- Omission beats a weak item — do not pad the list to cover every paper.
+- Follow the omission / transfer rule in "How to think" above — do not pad the
+  list with papers that have no plausible mechanism transfer.
 - The downstream task is FULL-SPECTRUM (one model, all frequencies). Do NOT
   recommend frequency-split / per-band techniques (e.g. a separate model per
   band) as solutions — they do not transfer. If a paper's result was achieved

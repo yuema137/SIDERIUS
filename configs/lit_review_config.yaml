@@ -1,0 +1,11 @@
+# configs/lit_review_config.yaml
+#
+# STUB (created 2026-05-28 alongside SynthesisConfig). Config-file LOADING is a
+# Commit 7 deliverable — nothing reads this file yet; today the node is driven
+# by the programmatically-constructed LiteratureReviewInput and its schema
+# defaults. Commit 7 will flesh out root_papers, dynamic_search, llm routing,
+# etc. and wire the loader. The synthesis block below documents the new
+# transfer_tolerance knob (default mirrors SynthesisConfig.transfer_tolerance).
+
+synthesis:
+  transfer_tolerance: moderate  # strict / moderate / liberal

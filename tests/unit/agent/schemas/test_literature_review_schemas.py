@@ -22,6 +22,7 @@ from agent.schemas.literature_review import (
     PaperExtract,
     PaperSource,
     RetrievedPaper,
+    SynthesisConfig,
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem, VocabEntry
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -272,6 +273,19 @@ class TestExternalAgentOutput:
 # ---------------------------------------------------------------------------
 
 
+class TestSynthesisConfig:
+    def test_default_transfer_tolerance_is_moderate(self):
+        assert SynthesisConfig().transfer_tolerance == "moderate"
+
+    def test_explicit_tolerances_accepted(self):
+        for t in ("strict", "moderate", "liberal"):
+            assert SynthesisConfig(transfer_tolerance=t).transfer_tolerance == t
+
+    def test_unknown_transfer_tolerance_rejected(self):
+        with pytest.raises(ValidationError):
+            SynthesisConfig(transfer_tolerance="aggressive")  # type: ignore[arg-type]
+
+
 class TestLiteratureReviewInput:
     def test_happy_path(self):
         i = LiteratureReviewInput(
@@ -305,6 +319,52 @@ class TestLiteratureReviewInput:
         )
         assert i.search_llm_provider == "deepseek"
         assert i.search_llm_model_id == "deepseek-v4-pro"
+
+    def test_findings_verbosity_default_is_one(self):
+        # Default = 1: structured three-part Markdown is the canonical
+        # proposer-facing format paired with reference_library (§5b).
+        i = LiteratureReviewInput(
+            experiment_history=_make_interp_output(),
+            storage=_make_storage(),
+            run_name="lit_v1",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+        assert i.findings_verbosity == 1
+
+    def test_findings_verbosity_zero_accepted(self):
+        i = LiteratureReviewInput(
+            experiment_history=_make_interp_output(),
+            storage=_make_storage(),
+            run_name="lit_v1",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+            findings_verbosity=0,
+        )
+        assert i.findings_verbosity == 0
+
+    def test_findings_verbosity_out_of_range_rejected(self):
+        # Literal[0, 1] — anything else is a validation error (no quiet coerce).
+        with pytest.raises(ValidationError):
+            LiteratureReviewInput(
+                experiment_history=_make_interp_output(),
+                storage=_make_storage(),
+                run_name="lit_v1",
+                llm_provider="openai",
+                llm_model_id="gpt-4o-mini",
+                findings_verbosity=2,  # type: ignore[arg-type]
+            )
+
+    def test_synthesis_config_defaults_to_moderate(self):
+        i = LiteratureReviewInput(
+            experiment_history=_make_interp_output(),
+            storage=_make_storage(),
+            run_name="lit_v1",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+        assert isinstance(i.synthesis_config, SynthesisConfig)
+        assert i.synthesis_config.transfer_tolerance == "moderate"
 
     def test_missing_required_fields(self):
         with pytest.raises(ValidationError):

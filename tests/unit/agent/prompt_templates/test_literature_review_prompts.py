@@ -24,7 +24,12 @@ from agent.prompt_templates.literature_review import (
     render_search_decision_prompt,
     render_synthesis_prompt,
 )
-from agent.schemas.literature_review import ConfidenceBand, ConfidenceRubric, PaperExtract
+from agent.schemas.literature_review import (
+    ConfidenceBand,
+    ConfidenceRubric,
+    PaperExtract,
+    SynthesisConfig,
+)
 
 # The seven locked PaperExtract keys. Kept inline (not derived from the schema)
 # so the test fails loudly if either the schema or the prompt drifts away from
@@ -196,8 +201,8 @@ class TestSynthesisPrompt:
         system, _ = self._render()
         # (a) bottleneck-grounding instruction
         assert "bottleneck" in system
-        # (d) omission-over-weak-item rule
-        assert "Omission beats a weak item" in system
+        # (d) omission / transfer rule present (default _render = moderate tolerance)
+        assert "no plausible mechanism transfer exists" in system
         # (e) cite_id-matching instruction
         assert "cite_id" in system and "paper_id" in system
         # task-description injection
@@ -270,6 +275,106 @@ class TestSynthesisPrompt:
         assert "{CONFIDENCE_RUBRIC}" in raw
         for n in ("0.40", "0.59", "0.60", "0.79", "0.80", "1.00", "0.5", "0.65", "0.7"):
             assert n not in raw, f"confidence number {n!r} leaked into the .md template"
+
+    def test_md_template_has_content_format_placeholder(self):
+        # findings_verbosity content blocks live in the render module, not the
+        # .md template; the .md carries only the placeholder so future verbosity
+        # levels need no template rewrite.
+        from pathlib import Path
+
+        import agent.prompt_templates.literature_review as mod
+
+        raw = Path(mod.__file__).with_name("synthesis_system.md").read_text()
+        assert "{CONTENT_FORMAT_BLOCK}" in raw
+        # The content-format example/rules must NOT be in the raw .md
+        # (they belong in _SYNTHESIS_CONTENT_FORMAT_V1 / _V0 in __init__.py).
+        assert "**Implication:**" not in raw
+        assert "every item MUST" not in raw
+
+    def test_findings_verbosity_default_is_v1(self):
+        # Default findings_verbosity=1 → V1 three-part block injected; the
+        # placeholder is filled and the structured headings appear in the
+        # rendered system prompt.
+        system, _ = self._render()  # no findings_verbosity arg → default
+        assert "{CONTENT_FORMAT_BLOCK}" not in system
+        assert "**Implication:**" in system
+        assert "**Mechanism:**" in system
+        assert "**Adaptation:**" in system
+        # word budgets (the load-bearing constraint at v=1)
+        assert "≤ 40 words" in system  # Implication
+        assert "≤ 80 words" in system  # Mechanism (raised from 60 per user)
+        assert "≤ 50 words" in system  # Adaptation
+
+    def test_findings_verbosity_0_uses_v0_format(self):
+        # Explicit findings_verbosity=0 → backward-compat single-paragraph block;
+        # V1 structural headings must NOT appear, and V0's existing rules must.
+        system, _ = render_synthesis_prompt(
+            key_findings=["x"],
+            bottlenecks=["y"],
+            take_home_message="z",
+            papers=[{"paper_id": "arxiv:1", "title": "P", "year": 2023, "summary": "s"}],
+            findings_verbosity=0,
+        )
+        assert "{CONTENT_FORMAT_BLOCK}" not in system
+        assert "**Implication:**" not in system
+        assert "**Mechanism:**" not in system
+        assert "**Adaptation:**" not in system
+        # V0 rules present (the existing single-paragraph format)
+        assert "every item MUST" in system
+        assert "End with a one-line rationale" in system
+
+    def test_omission_rule_strict_block(self):
+        system, _ = render_synthesis_prompt(
+            key_findings=["x"],
+            bottlenecks=["y"],
+            take_home_message="z",
+            papers=[{"paper_id": "arxiv:1", "title": "P", "year": 2023, "summary": "s"}],
+            synthesis_config=SynthesisConfig(transfer_tolerance="strict"),
+        )
+        assert "{OMISSION_RULE}" not in system  # placeholder filled
+        assert "Cross-domain papers with fundamental domain differences" in system
+        # moderate/liberal phrasings must NOT leak in
+        assert "more valuable than no finding at all" not in system
+
+    def test_omission_rule_moderate_block(self):
+        system, _ = render_synthesis_prompt(
+            key_findings=["x"],
+            bottlenecks=["y"],
+            take_home_message="z",
+            papers=[{"paper_id": "arxiv:1", "title": "P", "year": 2023, "summary": "s"}],
+            synthesis_config=SynthesisConfig(transfer_tolerance="moderate"),
+        )
+        assert "{OMISSION_RULE}" not in system
+        assert "A finding with a clear caveat is more valuable than no finding" in system
+        assert "no plausible mechanism transfer exists whatsoever" in system
+
+    def test_omission_rule_liberal_block(self):
+        system, _ = render_synthesis_prompt(
+            key_findings=["x"],
+            bottlenecks=["y"],
+            take_home_message="z",
+            papers=[{"paper_id": "arxiv:1", "title": "P", "year": 2023, "summary": "s"}],
+            synthesis_config=SynthesisConfig(transfer_tolerance="liberal"),
+        )
+        assert "{OMISSION_RULE}" not in system
+        assert "potentially relevant technique" in system
+        assert "Let the proposer decide relevance" in system
+
+    def test_omission_rule_default_is_moderate(self):
+        # No synthesis_config arg → SynthesisConfig() → moderate block.
+        system, _ = self._render()
+        assert "A finding with a clear caveat is more valuable than no finding" in system
+
+    def test_md_template_has_omission_placeholder(self):
+        from pathlib import Path
+
+        import agent.prompt_templates.literature_review as mod
+
+        raw = Path(mod.__file__).with_name("synthesis_system.md").read_text()
+        assert "{OMISSION_RULE}" in raw
+        # the tolerance-specific phrasings live in __init__.py, not the .md
+        assert "more valuable than no finding" not in raw
+        assert "Cross-domain papers with fundamental domain differences" not in raw
 
 
 class TestSearchDecisionPrompt:

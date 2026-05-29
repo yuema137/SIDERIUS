@@ -119,6 +119,38 @@ def _as_verbosity(value) -> Literal[0, 1, 2]:
     return 0
 
 
+# Heading aliases for finding `content` at findings_verbosity=1. The synthesis
+# prompt instructs the LLM to use `**Implication:**` / `**Mechanism:**` /
+# `**Adaptation:**` verbatim, but LLMs occasionally slip (DeepSeek wrote
+# `**Adaption:**` on 1 of 6 findings in the 2026-05-27 validation). The map
+# below rewrites known variants to the canonical heading. Identity mappings for
+# the canonical forms keep the pattern explicit — when a new variant is
+# observed in a real run, add an entry pointing it at the canonical form.
+_FINDING_HEADING_ALIASES: dict[str, str] = {
+    # canonical -> itself (documents the canonical set; no-op at runtime)
+    "**Implication:**": "**Implication:**",
+    "**Mechanism:**": "**Mechanism:**",
+    "**Adaptation:**": "**Adaptation:**",
+    # known variants -> canonical
+    "**Adaption:**": "**Adaptation:**",  # DeepSeek typo (2026-05-27 validation)
+}
+
+
+def _normalize_finding_content_headings(content: str) -> str:
+    """Rewrite known heading variants in a finding's ``content`` to canonical form.
+
+    Applied in ``_synthesize`` right before each ``ExpertContextItem`` is built,
+    so downstream consumers (the proposer's content parser) see canonical
+    headings only. Add new entries to ``_FINDING_HEADING_ALIASES`` as new
+    variants surface in real runs — identity rows for the canonical forms make
+    the pattern obvious.
+    """
+    for variant, canonical in _FINDING_HEADING_ALIASES.items():
+        if variant != canonical:
+            content = content.replace(variant, canonical)
+    return content
+
+
 def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict | None) -> None:
     """Overwrite the LLM-extracted ``year`` with S2's authoritative value when available.
 
@@ -448,6 +480,8 @@ class MLLiteratureReviewAgent:
                 take_home_message=hist.take_home_message,
                 papers=papers,
                 confidence_rubric=inp.confidence_rubric,
+                findings_verbosity=inp.findings_verbosity,
+                synthesis_config=inp.synthesis_config,
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
         except Exception as e:  # resilience boundary
@@ -483,7 +517,7 @@ class MLLiteratureReviewAgent:
                     ExpertContextItem(
                         source="ml_literature_review",
                         kind="literature",
-                        content=str(f["content"]),
+                        content=_normalize_finding_content_headings(str(f["content"])),
                         cite_id=cite_id,
                         confidence=confidence,
                         produced_at=now,
