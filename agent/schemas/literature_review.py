@@ -93,6 +93,24 @@ class DynamicSearchConfig(BaseModel):
         "specific paper mid-loop. When False, all search results stay at "
         "initial_verbosity.",
     )
+    results_per_query: int = Field(
+        default=10,
+        ge=1,
+        description="Number of S2 hits requested per search query. Default 10: "
+        "S2 relevance drops sharply past position ~10, and ~10 abstracts "
+        "(~2k tokens) is a manageable decision surface for the loop LLM. Larger "
+        "values mostly add low-relevance noise and prompt cost.",
+    )
+    max_escalations_per_round: int = Field(
+        default=2,
+        ge=0,
+        description="Cap on verbosity escalations (deep-reads) the LLM may "
+        "request within a single search round. Each escalation costs one PDF "
+        "fetch + one LLM compression call, so an uncapped loop (e.g. 5 rounds "
+        "with many escalations each) can balloon to 25+ extra calls. Escalation "
+        "requests beyond this cap in the same round are logged and dropped. "
+        "0 disables escalation entirely (independent of escalation_allowed).",
+    )
 
 
 class PaperExtract(BaseModel):
@@ -189,6 +207,144 @@ class RetrievedPaper(BaseModel):
     )
 
 
+class ConfidenceBand(BaseModel):
+    """One band of a ConfidenceRubric: a numeric range + the evidence criteria
+    that map to it."""
+
+    lower: float = Field(ge=0.0, le=1.0, description="Inclusive lower bound of the band.")
+    upper: float = Field(ge=0.0, le=1.0, description="Inclusive upper bound of the band.")
+    criteria: str = Field(
+        description="Evidence conditions a finding must meet to receive a confidence in this band.",
+    )
+
+    @model_validator(mode="after")
+    def _check_order(self) -> ConfidenceBand:
+        if self.lower > self.upper:
+            raise ValueError(f"band lower ({self.lower}) must be <= upper ({self.upper})")
+        return self
+
+
+def _default_confidence_bands() -> list[ConfidenceBand]:
+    return [
+        ConfidenceBand(
+            lower=0.80,
+            upper=1.00,
+            criteria="deep-read (verbosity >= 1 extract) AND on-domain (1D / "
+            "broadband signal denoising) AND directly addresses a current bottleneck",
+        ),
+        ConfidenceBand(
+            lower=0.60,
+            upper=0.79,
+            criteria="deep-read with a clear mechanism transfer, OR an on-domain "
+            "abstract with a strong specific signal",
+        ),
+        ConfidenceBand(
+            lower=0.40,
+            upper=0.59,
+            criteria="abstract-only evidence, OR cross-domain with a plausible "
+            "(unvalidated) transfer rationale",
+        ),
+    ]
+
+
+class ConfidenceRubric(BaseModel):
+    """Unified definition of what a finding's ``confidence`` (0.0-1.0) means.
+
+    Single source of truth for confidence semantics — see the "Scoring and
+    rubric design invariants" section of docs/external_agents_architecture.md.
+    Defined once here; injected into the synthesis prompt via the
+    ``{CONFIDENCE_RUBRIC}`` placeholder (never duplicated as numbers in prompt
+    text); configurable per run via ``LiteratureReviewInput.confidence_rubric``.
+    """
+
+    bands: list[ConfidenceBand] = Field(
+        default_factory=_default_confidence_bands,
+        description="Confidence bands from strongest to weakest evidence. A "
+        "finding's confidence must fall in the band whose criteria its evidence "
+        "meets.",
+    )
+    omit_below: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description="A finding whose confidence would fall below this threshold "
+        "is omitted entirely (no finding generated). The omit threshold lives "
+        "here, never as a number in prompt prose.",
+    )
+    abstract_only_ceiling: float = Field(
+        default=0.79,
+        ge=0.0,
+        le=1.0,
+        description="Maximum confidence a finding may keep when its cited paper "
+        "was never deep-read (RetrievedPaper.verbosity_achieved == 0). The top "
+        "confidence band requires a deep-read (verbosity >= 1) extract, so an "
+        "abstract-only paper cannot enter it; the node clamps any v0-cited "
+        "finding's confidence to this ceiling (the top of the highest band that "
+        "does NOT require a deep-read). Lives here as the single source of truth, "
+        "never as a number in the node or in prompt prose.",
+    )
+
+    def render(self) -> str:
+        """Render the rubric as the ``{CONFIDENCE_RUBRIC}`` prompt block.
+
+        This is the single place the numeric bands become prompt text — the
+        ``.md`` template carries the placeholder only, never the numbers.
+        """
+        lines = [
+            "Assign each finding's `confidence` using this rubric — pick the band "
+            "whose criteria the evidence meets:"
+        ]
+        for b in self.bands:
+            lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
+        lines.append(
+            f"- below {self.omit_below:.2f}: omit — do NOT generate a finding for this paper."
+        )
+        return "\n".join(lines)
+
+    def render_for_consumer(self) -> str:
+        """Render the rubric as a legend for a DOWNSTREAM consumer of the findings.
+
+        Same band semantics as ``render()``, but framed for a reader who is
+        *interpreting* confidence values (e.g. the proposer agent), not the
+        lit-review LLM *assigning* them. Injected into the lit-review
+        ``AgentCard.trust_guidance`` so the proposer knows what a finding's
+        ``confidence`` number means — satisfying invariant 3 ("consistently
+        interpreted by producer + consumer") of the "Scoring and rubric design
+        invariants" in docs/external_agents_architecture.md. The omit threshold
+        is producer-only (a consumer never sees an omitted finding), so it is
+        left out here.
+        """
+        lines = [
+            "Confidence scores in findings from this agent follow this rubric — "
+            "use it to weight findings appropriately:"
+        ]
+        for b in self.bands:
+            lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
+        return "\n".join(lines)
+
+
+class SynthesisConfig(BaseModel):
+    """Controls the omission threshold / transfer tolerance for synthesis.
+
+    ``min_confidence`` is intentionally NOT a field here — the omit threshold is
+    ``ConfidenceRubric.omit_below`` (single source of truth; see "Scoring and
+    rubric design invariants" in docs/external_agents_architecture.md). This
+    config governs only how readily synthesis emits a finding for a *cross-
+    domain* paper whose mechanism is transferable with caveats.
+    """
+
+    transfer_tolerance: Literal["strict", "moderate", "liberal"] = Field(
+        default="moderate",
+        description="How readily synthesis emits a finding for a cross-domain "
+        "paper. 'strict' omits cross-domain papers with fundamental domain "
+        "differences; 'moderate' (default) emits when a concrete mechanism "
+        "transfer exists, provided the Adaptation states the transfer "
+        "assumptions; 'liberal' emits for any potentially relevant technique and "
+        "lets the proposer judge. Selects the {OMISSION_RULE} block injected "
+        "into the synthesis prompt.",
+    )
+
+
 class LiteratureReviewInput(BaseModel):
     """Input to the ml_literature_review node.
 
@@ -221,6 +377,43 @@ class LiteratureReviewInput(BaseModel):
     run_name: str = Field(description="Run identifier shared with the workflow.")
     llm_provider: str = Field(description="LLMBridge provider name (e.g. 'openai').")
     llm_model_id: str = Field(description="LLMBridge model id (e.g. 'gpt-4o-mini').")
+    search_llm_provider: str | None = Field(
+        default=None,
+        description="Optional separate LLMBridge provider for the dynamic-search "
+        "DECISION call only (the cheap, templated query/escalate/done step). When "
+        "None, llm_provider is used. Lets the templated search step run on a cheaper "
+        "model (e.g. 'deepseek') while compression + synthesis stay on "
+        "llm_provider/llm_model_id. Mirrors LLMBridge.reflect_provider.",
+    )
+    search_llm_model_id: str | None = Field(
+        default=None,
+        description="Optional separate model id for the search-decision call "
+        "(e.g. 'deepseek-v4-pro'). When None, llm_model_id is used.",
+    )
+    confidence_rubric: ConfidenceRubric = Field(
+        default_factory=ConfidenceRubric,
+        description="Rubric defining what a finding's confidence score means. "
+        "Injected into the synthesis prompt; the single source of truth for "
+        "confidence semantics (see 'Scoring and rubric design invariants' in "
+        "docs/external_agents_architecture.md). Override to retune without "
+        "touching any prompt file.",
+    )
+    findings_verbosity: Literal[0, 1] = Field(
+        default=1,
+        description="Detail level for each finding's `content` string. 1 = "
+        "structured three-part Markdown (`**Implication:**` / `**Mechanism:**` / "
+        "`**Adaptation:**` + closing `(rationale: ...)`), the canonical "
+        "proposer-facing format paired with reference_library (§5b). 0 = "
+        "single-paragraph backward-compat. Only the synthesis prompt's content "
+        "format changes; the ExpertContextItem schema is unchanged either way.",
+    )
+    synthesis_config: SynthesisConfig = Field(
+        default_factory=SynthesisConfig,
+        description="Omission / transfer-tolerance knobs for the synthesis step. "
+        "Default tolerance is 'moderate' — cross-domain papers with a transferable "
+        "mechanism yield a finding carrying an explicit Adaptation transfer caveat, "
+        "rather than being omitted. See SynthesisConfig.",
+    )
 
 
 class LiteratureReviewOutput(ExternalAgentOutput):

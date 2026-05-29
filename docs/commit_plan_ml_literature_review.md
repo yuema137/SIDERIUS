@@ -41,10 +41,16 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
-- [ ] **Commit 4** — `nodes/ml_literature_review.py` core loop
-  · gate `tests/unit/agent/ml_literature_review/test_node.py` + real-run output reviewed
-  - [ ] **Checkpoint C** — Dynamic search loop behavior
-- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`)
+- [ ] **Commit 2c** — Three-tier full-text + formula extraction (arXiv source → marker → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
+  · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` (tier cascade) + `@real_run` Tier-1 on TIDMAD · extraction-pilot artifact
+  - [ ] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output)
+  - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
+- [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
+  · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` + `tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py` + `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`; protocol mapping deferred to Commit 5
+- [x] **Commit 4** — `nodes/ml_literature_review.py` core loop
+  · **4a** `820c548`; **4b-code** `c7860d7`; **4b-docs** `2ec1ae5`; **4b-final** `91461a2` (findings_verbosity + transfer_tolerance + node source-type routing + integration test → DeepSeek + Checkpoint C)
+  - [x] **Checkpoint C** — Dynamic search loop behavior · signed off 2026-05-28 (artifact `docs/dynamic_search_pilot.md`)
+- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **wires `reference_library` into `local_all_channels`** — deferred from 2d)
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
@@ -498,6 +504,153 @@ equation handling. Same file also captures the search-mode sanity check
 
 ---
 
+## Commit 2c — Three-tier full-text + formula extraction
+
+**Goal**: Implement the three-tier extraction strategy
+(`docs/external_agents_for_proposer.md` §5a) in `paper_resolver_skill`; add
+`key_equations_md`, `pseudocode_md`, and `extraction_method` to `PaperExtract`;
+run a pilot validating extraction quality on real papers. Logically this sits
+between Commit 2 (shipped the skill + pdfplumber path) and Commit 3 (locked the
+`PaperExtract` field set) — it extends the skill and **amends** both Commit 3's
+field-set lock and pilot finding **F3** ("no `key_equations`; prose only"): F3's
+rationale (pdfplumber degrades math) holds only for the Tier-3 path; Tiers 1–2
+carry equations verbatim. NOTE: introduced after Commits 3 and 4 already shipped,
+so it also requires re-validating the Commit-3 compression prompt against the
+new fields (Checkpoint F + the equation-aware prompt variant).
+
+**Checklist**:
+- [ ] Tier 1: arXiv source downloader (`https://arxiv.org/src/{id}` → `.tar.gz`)
+      + `.tex` parser for `equation`/`align`/`algorithm`/`figure` → clean Markdown.
+- [ ] Tier 2 marker integration: add marker-pdf to pyproject.toml as an
+      optional dependency (not in the default install group). The skill
+      detects availability at runtime via importlib.util.find_spec("marker")
+      and skips to Tier 3 if not found. CI (no GPU) must pass without marker
+      installed — the unit tests mock the marker call, never import it directly.
+- [ ] Tier 3: existing `pdfplumber` text path retained as last resort.
+- [ ] `extraction_method` wired end-to-end: set in skill, returned in the
+      response envelope, read by the node to select the compression-prompt variant.
+- [ ] Add `key_equations_md`, `pseudocode_md`, `extraction_method` to
+      `PaperExtract`; update the "locked field set" docstring note accordingly.
+- [ ] `render_paper_extract_prompt` becomes `extraction_method`-aware
+      (equation-aware for Tier 1–2; "reconstruct from degraded text, mark
+      unreliable" for Tier 3).
+- [ ] Unit tests: each tier in isolation (mocked HTTP for arXiv source, mocked
+      `marker`, existing pdfplumber mock) + the **fallback cascade**
+      (Tier 1 fail → Tier 2 → Tier 3 → abstract_only).
+- [ ] Pilot on TIDMAD (`arxiv:2406.04378`) and SNRAware (`arxiv:2503.18162`).
+- [ ] Re-validate LLM compression with new fields: after Checkpoint E is
+      signed off, run the compression prompt on TIDMAD (Tier 1) and SNRAware
+      (Tier 1) and verify:
+      (a) key_equations_md is populated with correct LaTeX (not garbled,
+          not hallucinated — cross-check against the raw .tex source)
+      (b) pseudocode_md is populated with the algorithm structure preserved
+      (c) extraction_method is correctly passed through the response envelope
+          to the node and reflected in the final PaperExtract
+      Show the full PaperExtract JSON for both papers before closing Commit 2c.
+      This is effectively a targeted re-run of Checkpoint B for the new fields.
+
+**Test gate**:
+- Unit: `tests/unit/agent/skills/test_paper_resolver_skill.py` — per-tier +
+  cascade, all HTTP/marker mocked.
+- Integration (`@real_run`): Tier-1 on TIDMAD with a **real** arXiv source
+  download; assert `key_equations_md` is non-empty and contains `$$`.
+
+#### 🔍 Behavioral Checkpoint E — Tier-1 formula extraction quality
+
+Run Tier-1 extraction on TIDMAD (`arxiv:2406.04378`) and SNRAware
+(`arxiv:2503.18162`); print the extracted `key_equations_md` and
+`pseudocode_md`; **show the results before proceeding.** Verify:
+- (a) TIDMAD's denoising-score formula extracts correctly;
+- (b) SNRAware's SNR-unit loss formula extracts correctly;
+- (c) the Markdown is clean enough to feed directly to the LLM compression prompt.
+
+This checkpoint **gates whether Tier 1 alone suffices** or Tier 2 (`marker`) is
+needed for acceptable quality. Do not proceed on the new fields until signed off.
+
+#### 🔍 Behavioral Checkpoint F — LLM compression quality for new fields
+
+After Checkpoint E is signed off, run the compression prompt on TIDMAD (Tier 1)
+and SNRAware (Tier 1) and verify the equation-aware prompt variant correctly
+populates the new fields:
+- (a) `key_equations_md` holds correct LaTeX (not garbled, not hallucinated —
+  cross-check against the raw `.tex`);
+- (b) `pseudocode_md` holds the algorithm structure, preserved;
+- (c) `extraction_method` is passed through the response envelope to the node
+  and reflected in the final `PaperExtract`.
+Show the full `PaperExtract` JSON for both papers before closing Commit 2c. This
+is a targeted re-run of Checkpoint B for the new fields.
+
+---
+
+## Commit 2d — reference_library channel
+
+**Goal**: Define the `PaperReference` schema, add `reference_library` to
+`LiteratureReviewOutput`, wire population logic in the node, add
+`reference_library` to `ProposalInput`, and add the proposer-prompt renderer.
+This makes the reference_library structurally complete. Equation content
+(`key_equations_md`, `pseudocode_md`) is `None` for most entries until Commit 2c
+lands — acceptable; structure first, content when 2c lands. Retroactive: extends
+Commits 2–3, implemented after Commit 4b closes.
+
+**Files**:
+- Edit: `agent/schemas/literature_review.py` (`PaperReference` + `LiteratureReviewOutput.reference_library`)
+- Edit: `agent/schemas/proposal.py` (`ProposalInput.reference_library` field)
+- Edit: `nodes/ml_literature_review.py` (populate reference_library from findings + retrieved_papers)
+- Edit: `agent/prompt_templates/proposal/__init__.py` (`render_reference_library`, wired after expert_context, before vocab)
+- Create: `nodes/ml_literature_review_README.md` (node-README convention — first instance; stub created alongside this design commit, completed during 2d implementation)
+- Protocol `local_all_channels` mapping → **deferred to Commit 5** (the protocol
+  file is Commit 5's deliverable; it does not exist yet).
+
+**Checklist**:
+- [ ] Define `PaperReference` in `agent/schemas/literature_review.py`.
+- [ ] Add `reference_library: list[PaperReference]` to `LiteratureReviewOutput`.
+- [ ] Node population: after synthesis, build reference_library by joining
+      findings' `cite_id`s with `retrieved_papers` where `verbosity_achieved >= 1`
+      and `extract` is present.
+- [ ] Add `reference_library: list[PaperReference] = Field(default_factory=list)`
+      to `ProposalInput` (full docstring explaining cite_id lookup + extraction_method
+      trust). Backward compatible (confirmed: no test asserts its absence).
+- [ ] Add `render_reference_library(entries) -> str` to
+      `agent/prompt_templates/proposal/__init__.py`; wire into the proposer user
+      prompt **after the expert_context block, before the vocab block**
+      (`ml_model_proposal_agent.py:1179–1181` — confirmed slot).
+- [ ] Complete `nodes/ml_literature_review_README.md` (sections: Purpose, Input,
+      Output, Output contract for downstream consumers, LLM routing, Known
+      limitations, Configuration example, CLI usage placeholder). Stub created
+      with the design docs; fill content during 2d implementation.
+- [ ] Unit tests:
+  - `PaperReference` validates; `verbosity_achieved >= 1`.
+  - reference_library contains only papers whose `cite_id` is in findings AND
+    `verbosity_achieved >= 1`; empty reference_library is valid.
+  - `render_reference_library` block contains `cite_id`, `extraction_method`,
+    and at least one of `key_equations_md` / `architecture_details`.
+  - `ProposalInput.reference_library` defaults to empty list (backward compatible).
+- Protocol `local_all_channels` mapping + its unit test → **Commit 5** (deferred).
+
+**Test gate**:
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/schemas/test_literature_review_schemas.py \
+  tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py -q
+.venv/bin/python -m ruff check agent/schemas/literature_review.py \
+  agent/schemas/proposal.py agent/prompt_templates/proposal/__init__.py \
+  nodes/ml_literature_review.py
+.venv/bin/python -m ruff format --check agent/schemas/literature_review.py \
+  agent/schemas/proposal.py agent/prompt_templates/proposal/__init__.py \
+  nodes/ml_literature_review.py
+.venv/bin/python -m pyright agent/schemas/literature_review.py agent/schemas/proposal.py
+```
+
+**Resolved open questions** (from the design draft):
+- render placement: after expert_context, before vocab — confirmed
+  (`ml_model_proposal_agent.py:1179–1181`).
+- `ProposalInput.reference_library` blast radius: no existing test constructs
+  `ProposalInput` against a fixed field set or asserts this field's absence;
+  `default_factory=list` is backward compatible — confirmed.
+
+---
+
 ## Commit 3 — Finalize `PaperExtract` + LLM compression prompt
 
 **Goal**: Replace the provisional `PaperExtract` with the field set the pilot
@@ -706,76 +859,193 @@ paper (no hallucinated regime). One targeted prompt revision was applied
 - New: `tests/unit/agent/ml_literature_review/test_node.py`
 - New: `tests/integration/nodes/test_ml_literature_review.py` (Tier-1, `@real_run`)
 
-**Checklist**:
-- [ ] Read `nodes/ml_hyperparameter_tune_agent.py` (specifically the `_run_skill`
-      helper at L497-507 and the LLMBridge instantiation block) and match the
-      conventions exactly:
-  - Skill import via `importlib.import_module(f"agent.skills.{folder}.wrapper")`.
-  - LLMBridge access as singleton (no new instance — `LLMBridge.get_instance()` or
-      whatever the actual accessor is — confirm by reading).
-  - JSON parsing pattern for `bridge.generate(...)` responses.
-- [ ] Implement the node as `def run(input: LiteratureReviewInput) -> LiteratureReviewOutput`
-      module-level function (match the simpler nodes in the project; if the
-      project convention is a class with `.run()`, follow that — confirm
-      before writing).
-- [ ] Root-paper resolution:
-  - [ ] For each `root_papers[i]`, compute cache path
-        `reference_data/root_papers_cache/{paper_id}.json`.
-  - [ ] Cache hit → load `RetrievedPaper` from JSON. Cache miss → call
-        `paper_resolver_skill.run_skill(None, ...)`, build `RetrievedPaper`,
-        write cache.
-  - [ ] For verbosity=1 root papers without an extract on cache miss: call
-        LLMBridge compression prompt (Commit 3) on the full text, then write
-        the extract back to cache with `verbosity_achieved=1`.
-- [ ] Dynamic search loop:
-  - [ ] At round 0: LLM is asked "given the experiment_history and the
-        root-paper extracts, what should we search S2 for?" (JSON output:
-        `{"query": str, "verbosity": int} | {"done": true}`).
-        Mark with `# TODO(reflector-split): this decision step is the
-        natural future reflector-model candidate (cheap, templated).`
-  - [ ] Each round: call `paper_resolver_skill.run_skill(None, mode="search",
-        query=..., limit=..., verbosity=0)` to get candidate papers as S2
-        metadata. If the LLM then requests verbosity escalation on a
-        specific paper, call `mode="resolve"` for that paper. Append to
-        `retrieved_papers`.
-  - [ ] LLM is asked "another query, escalate verbosity on paper X, or done?"
-        Same TODO marker.
-  - [ ] Terminate when LLM says `{"done": true}` OR when
-        `search_rounds_used >= input.dynamic_search.max_rounds`. The
-        max-rounds branch is the hard safety net.
-- [ ] Final synthesis call: LLM is given the full `retrieved_papers` list +
-      `experiment_history` and produces the four `ExternalAgentOutput`
-      channels (JSON). For v1, `new_vocab_candidates` and `suggested_mindset`
-      are documented in the prompt as "leave empty / null unless you have
-      strong cross-paper convergent evidence."
-- [ ] Build and return `LiteratureReviewOutput` with all fields populated;
-      `started_at`/`finished_at` ISO 8601 UTC.
-- [ ] Write `nodes/ml_literature_review.py` storage: dump the
-      `LiteratureReviewOutput` to
-      `{storage.local.workspace}/ml_literature_review_{run_name}.json` per
-      the inter-node communication invariant in `CLAUDE.md`.
-- [ ] Unit tests (`tests/unit/agent/ml_literature_review/test_node.py`):
-  - [ ] Full run with mocked LLMBridge (returns canned JSON for each call)
-        and mocked `paper_resolver_skill.run_skill` (returns canned
-        `RetrievedPaper` dicts). Asserts `LiteratureReviewOutput` validates
-        and has the expected `agent_card`, `findings`, `retrieved_papers`.
-  - [ ] Dynamic loop terminates at `max_rounds` even when mocked LLM never
-        emits `{"done": true}` — assert `search_rounds_used == max_rounds`.
-  - [ ] Root paper cache hit — file pre-written at the expected path; assert
-        `paper_resolver_skill.run_skill` is NOT called for that paper.
-  - [ ] Root paper cache miss — file absent; assert
-        `paper_resolver_skill.run_skill` IS called and a JSON cache file is
-        written at the expected path with the resolver's result.
-  - [ ] LLM compression fallback: mocked compression call returns malformed
-        JSON → resulting `RetrievedPaper.verbosity_achieved == 0`,
-        `extract is None`, but the node does not raise.
-  - [ ] Storage dump test: `LiteratureReviewOutput` JSON file written at the
-        documented path; round-trips through `model_validate_json`.
-- [ ] Integration test (`tests/integration/nodes/test_ml_literature_review.py`,
-      `@real_run`): one root paper (TIDMAD), `max_rounds=2`, real S2 + real
-      LLMBridge. Asserts `LiteratureReviewOutput` validates and has at least
-      one `ExpertContextItem` in `findings`. **Show the user the full output
-      before closing the commit.**
+**Sub-commit split** (decided 2026-05-27): **4a** = node + 2 new prompts + all
+unit tests (mocked); **4b** = Tier-1 `@real_run` integration test + Checkpoint C
+trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
+
+**Checklist** (4a unless marked 4b):
+- [x] Read existing nodes and match conventions — confirmed by reading
+      `result_interpretation_agent.py` / `ml_model_proposal_agent.py` /
+      `ml_hyperparameter_tune_agent.py`. **Two plan assumptions corrected:**
+  - Node entry is a **class with `.run()`** (all 5 nodes), not a module-level
+    `run()`. Class: `MLLiteratureReviewAgent`. (Checkpoint C snippet below
+    updated to class form.)
+  - **No `LLMBridge.get_instance()`** — the bridge is built lazily in `run()`
+    from `inp.llm_provider`/`inp.llm_model_id` via an injectable
+    `bridge_factory` (the tuner's pattern). `generate()` returns a parsed dict
+    → `model_validate`. Skill via direct `from …paper_resolver_skill.wrapper
+    import run_skill` (single skill → no `importlib` dispatch needed).
+- [x] Implement the node as `MLLiteratureReviewAgent.run(inp) -> LiteratureReviewOutput`.
+- [x] Root-paper resolution:
+  - [x] Cache path `{root_cache_dir}/{sanitized paper_id}.json`
+        (`paper_id = "{source_type}:{identifier}"`, non-`[A-Za-z0-9._-]`→`_`;
+        `root_cache_dir` is an injectable ctor arg, default
+        `reference_data/root_papers_cache`, now gitignored).
+  - [x] Cache hit → load `RetrievedPaper`; miss → `run_skill(None, ...)`, build
+        `RetrievedPaper`, write cache (skip caching hard errors).
+  - [x] verbosity≥1 → compression prompt on full text → `extract`; compression
+        failure degrades to metadata-only (`verbosity_achieved=0`).
+- [x] Dynamic search loop (new prompt `render_search_decision_prompt`):
+  - [x] Each round the LLM emits `{"action": "search"|"escalate"|"done", ...}`
+        grounded in `experiment_history` (key_findings + bottlenecks primary;
+        explored `model_types` + full-spectrum preference injected). TODO marker
+        added at the decision call site.
+  - [x] `search` → `run_skill(mode="search", limit=8, verbosity=0)` (metadata);
+        `escalate` (per-paper, when `escalation_allowed`) → `run_skill(resolve)`
+        + compress that paper. Each non-`done` decision consumes one round.
+  - [x] Terminate on `{"done"}` OR `rounds == max_rounds` (hard safety net).
+- [x] Final synthesis (new prompt `render_synthesis_prompt`): LLM emits
+      `{"findings": [...]}`; node wraps each into `ExpertContextItem`
+      (source/kind set by node). `new_vocab_candidates=[]`,
+      `suggested_mindset=None` for v1.
+- [x] **Synthesis prompt quality** — revise the 4a `render_synthesis_prompt` +
+      `_synthesize` to meet this *before committing 4a*. Collection-level prompt
+      (reasons across all retrieved papers together, not per-paper). System
+      prompt requirements:
+  - (a) Present `experiment_history.bottlenecks` + `key_findings` as the PRIMARY
+        input — every `ExpertContextItem` grounded in a specific current
+        bottleneck/finding, not a generic paper description.
+  - (b) Each item states the implication for a current bottleneck. "This paper
+        proposes X" is unacceptable; "Given bottleneck Y, finding Z suggests
+        trying W" is the target format.
+  - (c) Each item carries `confidence` (0.0–1.0). `ExpertContextItem` has no
+        rationale field, so the one-line justification for the score is appended
+        to `content`.
+  - (d) A paper with no actionable relevance to the current bottlenecks gets NO
+        item — omission beats a weak/generic item; an empty `findings` list is
+        valid output.
+  - (e) Every item's `cite_id` must exactly match the `paper_id` of a retrieved
+        `RetrievedPaper`; `_synthesize` soft-drops unmatched ids (log + omit
+        that item, keep the rest) — see open questions.
+  - (f) `new_vocab_candidates` / `suggested_mindset` stay empty for v1 (per
+        external_agents §2). The ≥3-paper cross-convergence rule is the
+        criterion for a FUTURE version, not v1.
+- [x] Build/return `LiteratureReviewOutput`; ISO-8601 UTC `started_at`/`finished_at`.
+- [x] Storage dump to `{workspace}/ml_literature_review_{run_name}.json`.
+- [x] Unit tests (`tests/unit/agent/ml_literature_review/test_node.py`): full
+      run; loop terminates at `max_rounds`; cache hit (resolver not called);
+      cache miss (resolver called + cache written); compression fallback
+      (`verbosity_achieved==0`, `extract is None`, no raise); storage round-trip;
+      **plus** an escalation-path test (search hit → deep-read → extract).
+- [x] Synthesis unit tests (added in the 4a revision):
+  - [x] mocked synthesis returns a valid `list[ExpertContextItem]` with
+        `confidence` scores — all items validate against the schema.
+  - [x] papers with no actionable relevance → zero `findings` items (empty list
+        valid, must not raise).
+  - [x] a `cite_id` not matching any retrieved `paper_id` is soft-dropped —
+        assert the bad item is omitted and the well-cited items remain.
+  - [x] `render_synthesis_prompt` deterministic content asserts — system prompt
+        contains the bottleneck-grounding instruction, the omission-over-weak-item
+        rule, the cite_id-matching instruction, and the task-description injection.
+**4a gate result (2026-05-27):** 58 unit passed (node + prompt + schema suites),
+ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
+
+**4b sub-commit ladder** (per `feedback_split_planned_commit_into_git_commits`):
+- [x] **4b-code** (`c7860d7`, 2026-05-27): node abstract-only confidence clamp;
+      escalation-assessment block in `search_decision_system.md`; `ConfidenceRubric`
+      + `render_for_consumer` + propagation to `AgentCard.trust_guidance` (proposal
+      `trust_guidance` `max_length` 400→800); Fix A (jargon translation) + Fix B
+      (full-spectrum guard) + Fix C (short keyword phrase + zero-hit feedback);
+      year override from S2 metadata; `search_llm_provider`/`search_llm_model_id`
+      routing; `abstract_only_ceiling=0.79`. 117 unit pass; ruff + format + pyright clean.
+- [x] **4b-docs** (`2ec1ae5`, 2026-05-27): §5a (three-tier extraction strategy) +
+      §5b (`reference_library` channel) in `external_agents_for_proposer.md`;
+      pull-channel paragraph in `external_agents_architecture.md`; Commit 2c + 2d
+      sections + status-board reorder in this doc; `nodes/ml_literature_review_README.md`
+      stub (first instance of the node-README convention).
+- [x] **4b-final** (`91461a2`, 2026-05-28):
+  - [x] **findings_verbosity + three-part content format** (impl 2026-05-27).
+        Added `findings_verbosity: Literal[0, 1] = 1` to `LiteratureReviewInput`;
+        replaced example + content-format section in `synthesis_system.md` with a
+        `{CONTENT_FORMAT_BLOCK}` placeholder; `render_synthesis_prompt` injects
+        V1 (three-part Markdown — **Implication:** ≤40 words / **Mechanism:**
+        ≤80 words / **Adaptation:** ≤50 words + closing `(rationale: …)`) or V0
+        (existing single-paragraph) per the input field. V1/V0 block constants
+        live in `agent/prompt_templates/literature_review/__init__.py`
+        (`_SYNTHESIS_CONTENT_FORMAT_V1` / `_V0`) so the .md template stays
+        neutral. Tests: schema default=1, v=0 accepted, v=2 rejected; rendered
+        prompt has the three headings + word budgets at v=1, the existing
+        single-paragraph rules at v=0, placeholder gone from both; raw .md
+        carries the placeholder only. Gate: **123 unit pass**, ruff + `ruff
+        format --check` clean, pyright 0 errors. Awaiting Checkpoint-style
+        DeepSeek validation (next bullet) before commit.
+  - [x] **Targeted DeepSeek synthesis validation** with `findings_verbosity=1`
+        on the Step 6b paper set (22 papers reused from `/tmp/step6b_output.json`;
+        `/tmp/synth_v1_validate.py`; ran 2026-05-28T02:34Z). Result: **6 findings,
+        all bottleneck-grounded, no frequency-split recs (Fix B holds), all
+        confidence in [0.40, 0.79]** (no v0 paper exceeded the clamp ceiling).
+        Format compliance: **5/6 with all three labels** (`**Implication:**` /
+        `**Mechanism:**` / `**Adaptation:**`); **6/6 with the closing
+        `(rationale: ...)`**. One finding (cite_id `doi:10.1109/ICCC68654...`)
+        wrote **`**Adaption:**`** (typo) instead of `**Adaptation:**`. Resolved
+        2026-05-27 via node-side soft normalization: added
+        `_normalize_finding_content_headings` (+ `_FINDING_HEADING_ALIASES` map,
+        documented for future variant additions) in `nodes/ml_literature_review.py`,
+        applied in `_synthesize` before each `ExpertContextItem` is built. Unit
+        test asserts `**Adaption:**` → `**Adaptation:**` and canonical content
+        unchanged. **124 unit pass; gate clean.**
+  - [x] **Integration test** (`tests/integration/nodes/test_ml_literature_review.py`,
+        `@real_run`) — switched to `deepseek` + `skipif DEEPSEEK_API_KEY` (2026-05-28);
+        runs with shipped defaults (findings_verbosity=1, transfer_tolerance=moderate);
+        one root (TIDMAD), `max_rounds=2`, real S2 + LLMBridge; asserts
+        `LiteratureReviewOutput` validates + ≥1 `ExpertContextItem`. Lint-clean +
+        collects (not executed here — real-API/network).
+  - [x] **Node source-type routing** (unit; 2026-05-28) — added `TestSourceTypeRouting`
+        confirming doi / local / openreview root papers route through
+        `_resolve_root_paper` → cache → compress with filesystem-safe cache filenames
+        (arxiv already covered). (Real-API source-type validation lives at the skill
+        level from Commit 2's `@real_run` tests.)
+  - [x] **Canonical trace run** (2026-05-28T03Z; `/tmp/canonical_trace.py`,
+        `/tmp/canonical_trace_output.json`; ran with `max_rounds=3` per user
+        direction, not the originally-planned 2): TIDMAD + SNRAware seeded at
+        v1, all-DeepSeek, escalation on, `findings_verbosity=1`. Result:
+        **2 findings** (seismic-GAN @0.42, Raman peak-preserving @0.48), both
+        with perfect 3/3 format compliance + rationale, all cite_ids match,
+        Fix B holds, confidence in [0.40, 0.48]. **Mandatory-escalation block
+        fired** (2 ESCALATE decisions logged with reasoning) but neither
+        produced a new v1 — Raman PDF unavailable (resolve=partial), SNRAware
+        already-v1 (no-op). **Neither v1 root cited in findings**: SNRAware's
+        compression `relevance_to_task` explicitly said *"No direct
+        applicability to SQUID dark-matter detector signal denoising"* (MRI 2D
+        vs 1D SQUID); TIDMAD is the benchmark/dataset paper (no new mechanism).
+        Both omissions are correct per the synthesis omission discipline.
+        **Clamp's deep-read branch remains unit-test-validated only** — the
+        only on-bottleneck v1 candidate (Raman, doi:10.3390/s21144623) was
+        identified by the LLM's escalation reasoning but couldn't be deep-read
+        because the resolver had no PDF for that DOI; this is precisely the
+        failure mode Commit 2c (three-tier extraction with Tier-2 marker) is
+        designed to fix.
+  - [x] **SynthesisConfig.transfer_tolerance** (impl 2026-05-28). Added
+        `SynthesisConfig` (`transfer_tolerance: Literal["strict","moderate","liberal"]
+        = "moderate"`; `min_confidence` deliberately NOT duplicated — omit
+        threshold stays in `ConfidenceRubric.omit_below`) + `synthesis_config`
+        field on `LiteratureReviewInput`. `synthesis_system.md`'s hardcoded
+        omission paragraph replaced with a `{OMISSION_RULE}` placeholder;
+        `render_synthesis_prompt(synthesis_config=...)` injects strict/moderate/
+        liberal blocks from `_SYNTHESIS_OMISSION_RULES` in `__init__.py`; the
+        Hard-rules "omission beats a weak item" line softened to defer to the
+        tolerance block. Created `configs/lit_review_config.yaml` STUB
+        (`synthesis.transfer_tolerance: moderate`; nothing loads it yet —
+        Commit 7). Tests: SynthesisConfig default/accept/reject, each tolerance
+        block injected, default=moderate, `.md` placeholder-only. **Rationale:**
+        strict tolerance omitted cross-domain-but-transferable papers (e.g.
+        SNRAware); moderate emits a finding with an explicit Adaptation transfer
+        caveat. Gate: **133 unit pass**, ruff + `ruff format --check` clean,
+        pyright 0 errors. **Canonical trace being re-run with moderate tolerance
+        (supersedes the strict run above).**
+  - [x] **Write `docs/dynamic_search_pilot.md`** (saved 2026-05-28, 307 lines).
+        Canonical artifact = the **moderate-tolerance full-loop trace** (3
+        grounded findings: Raman peak-loss @0.45, TADA adversarial-AE @0.50,
+        FreLE freq-loss @0.45 — two cross-domain-with-caveat, demonstrating
+        moderate). SNRAware escalated-first but not cited this sample (search-
+        vs-synthesis variance, documented §2/§7); §5.1 shows the SNRAware
+        v1-finding-with-caveat @0.65 from the isolated moderate comparison.
+        Sections: seed summary, loop trace, Checkpoint-C per-bullet verdicts
+        (all pass), Fix history 0–12, findings quality, PaperExtract 5×3 track
+        check (GW highlight), known limitations (incl. search-vs-synthesis
+        variance + transfer-tolerance framing), config summary, sign-off.
+        Verified clean (each section once; marker sentence intact).
+  - [x] **Checkpoint C sign-off** — signed off 2026-05-28; artifact `docs/dynamic_search_pilot.md`.
 
 **Test gate**:
 ```
@@ -805,7 +1075,7 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import (
     LiteratureReviewInput, DynamicSearchConfig, PaperSource,
 )
-from nodes import ml_literature_review
+from nodes.ml_literature_review import MLLiteratureReviewAgent
 
 # Seed: most recent interpretation output from the workspace.
 interp_path = sorted(Path("./workspace").glob("result_interpretation_*.json"))[-1]
@@ -823,7 +1093,7 @@ lit_in = LiteratureReviewInput(
     run_name="checkpoint_c",
     llm_provider="openai", llm_model_id="gpt-4o-mini",
 )
-out = ml_literature_review.run(lit_in)
+out = MLLiteratureReviewAgent().run(lit_in)
 
 # Per the node's contract, every round's decision MUST be printed:
 #   - the query string generated for this round
@@ -851,6 +1121,12 @@ out = ml_literature_review.run(lit_in)
   `MODEL_REGISTRY` (punet, wavenet, gated_fno, transformer, rnn)? High
   overlap means queries are too generic and rediscovering what we already
   have. Zero overlap across all rounds may mean queries are too narrow.
+- Do the `ExpertContextItem` entries in `findings` reference specific
+  bottlenecks from the `InterpretationOutput`, or are they generic paper
+  summaries that could have been written without reading the experiment
+  history? **This is the most important quality signal for the synthesis
+  call** — items not grounded in the current experimental context will be
+  rationally ignored by the proposer.
 
 **What this decides**: the dynamic search system prompt. Specifically:
 - If queries are too generic → add an explicit instruction to the prompt:
@@ -864,6 +1140,10 @@ out = ml_literature_review.run(lit_in)
 - If verbosity=1 selection is poor → add an explicit *"justify your upgrade
   decision by citing the specific finding in the abstract that makes this
   paper worth deep-reading"* instruction.
+- If `findings` items are not grounded in current bottlenecks → the synthesis
+  prompt must more forcefully front-load `bottlenecks` + `key_findings` and
+  explicitly forbid generic paper summaries. Revise the prompt and re-run the
+  checkpoint before proceeding to Commit 5.
 
 **Sign-off requirement**: a human must read the full loop trace and judge
 whether the search behavior is purposeful. "Good enough" means: the queries
@@ -877,13 +1157,79 @@ rounds, the system prompt needs revision before proceeding to Commit 5.
 loop trace, a 3-5 line human summary of the `InterpretationOutput` used as
 input (not the full JSON), and the human judgment on each inspection bullet.
 
+**Checkpoint C — iteration log (2026-05-27; real DeepSeek + OpenAI runs).**
+Seed for all runs: real `InterpretationOutput` from
+`/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/iter_014`
+(80 experiments, 12 spectral/wavelet architectures; bottlenecks = file-17
+under-recovery, optimization-to-metric mismatch, tiny-data robustness). Status:
+**Checkpoint C signed off 2026-05-28** — search-robustness fix (Fix C) +
+escalation-assessment block (Fix 9) + transfer_tolerance (Fix 12) landed; clean
+canonical trace captured in `docs/dynamic_search_pilot.md`.
+
+1. **First run (all gpt-4o-mini): two real failures.** (i) Search queries were
+   polluted with project-internal jargon ("file 17", "Impact_Score") → 0-hit /
+   junk queries. (ii) Synthesis *recommended frequency-split* (FC-Net) — the F4
+   anti-pattern.
+2. **Fix A (search prompt: translate internal jargon → general ML terms).** Two
+   revisions; reduced but did not fully eliminate the "file"/"late-file" leak on
+   gpt-4o-mini (model instruction-following limit). Documented as a residual.
+3. **Fix B (synthesis full-spectrum guard).** Added a hard rule: never recommend
+   frequency-split / per-band techniques; treat such results as cautionary.
+   Worked — subsequent runs correctly cautioned against FC-Net's frequency-split
+   score instead of recommending it.
+4. **5-paper / 3-track PaperExtract quality check (gpt-4o-mini): PASS.**
+   `architecture_details` specific, `key_results` regime-qualified,
+   `relevance_to_task` appropriately graded, no hallucinations across main (2),
+   application (1), denoising (2) tracks.
+5. **Model routing exploration → all-DeepSeek.**
+   - search-decision on **deepseek-v4-pro**: clean, consistent, well-targeted
+     queries (fixed the gpt-4o-mini jargon-leak variance).
+   - compression re-validated on deepseek (same 5 papers): **no empty-content
+     failures**, MORE detailed + MORE accurate than gpt-4o-mini — notably caught
+     DMF-Net's frequency-split regime that gpt-4o-mini missed.
+   - all-DeepSeek attempt: synthesis returned **empty `{"findings": []}`**
+     (DeepSeek over-applies the omission rule). Confirmed via raw capture (not a
+     bug / cite_id / shape issue — genuinely conservative).
+   - **Intervention 1** (verbosity-0/abstract clarification) fixed emptiness, but
+     introduced a magic number (`0.5-0.65`) in the prompt.
+6. **ConfidenceRubric refactor** (per "Scoring and rubric design invariants",
+   `external_agents_architecture.md`). Unified `ConfidenceRubric` Pydantic model
+   (3 bands + `omit_below`), injected via `{CONFIDENCE_RUBRIC}`, configurable via
+   `LiteratureReviewInput.confidence_rubric`; **zero numbers in the `.md`**.
+   Subsumes Intervention 1's magic numbers (abstract-only = the 0.40-0.59 band).
+   Word budgets deferred (open question, `external_agents_for_proposer.md` §9).
+7. **Year override.** Node overwrites LLM-extracted `year` with `s2_metadata`'s
+   value (DeepSeek often leaves year blank) — `_override_year_from_metadata` + test.
+8. **Search-variance finding (the current blocker).** Even on DeepSeek the loop
+   is high-variance: clean, well-targeted queries sometimes return 0 S2 hits.
+   **Direct S2-API check (2026-05-27)** of the three 0-hit queries: raw S2 returns
+   `total=0`, **identical to the skill** → not a skill bug; the queries are long
+   prose-like phrases too narrow for S2's keyword index (working queries are short
+   keyword phrases).
+9. **Fix C (APPROVED, pending implementation).** (a) search-prompt guideline:
+   short keyword phrase (~3-6 keywords, not a sentence) + good/bad examples;
+   (b) zero-hit feedback: pass prior `(query, hit_count)` into each round and
+   nudge the LLM to broaden after a 0-hit. Then re-validate + sign off.
+
+**Model decision (current):** `deepseek-v4-pro` for all three LLM steps
+(search-decision, compression, synthesis); `ConfidenceRubric` default;
+`search_llm_*` split fields kept as dormant capability (all-DeepSeek = main model
+deepseek, `search_llm_*` unset).
+
 **Open questions / decisions needed**:
-- **Node entry shape.** Class-with-`.run()` or module-level `run()`? Check
-  `nodes/ml_hyperparameter_tune_agent.py` and match. If unclear, ask.
-- **Per-round verbosity escalation policy.** The LLM is allowed to ask for
-  a specific paper to be re-fetched at higher verbosity. Should the node
-  cap how many escalations per round, or trust the LLM + `max_rounds`?
-  Lean: trust + `max_rounds`. Document the choice.
+- **Node entry shape.** RESOLVED — class `MLLiteratureReviewAgent` with
+  `.run()` (matches all 5 nodes); the bridge is built lazily in `run()` from the
+  input via an injectable `bridge_factory`.
+- **Synthesis `cite_id` mismatch.** RESOLVED — soft drop (log + omit the item,
+  keep the rest); a single hallucinated id must not discard a useful list.
+- **`results_per_query`.** RESOLVED — add as a `DynamicSearchConfig` field
+  (default 10) with the relevance-drop reasoning in its docstring (S2 relevance
+  drops sharply past position ~10; ~10 abstracts ≈ 2k tokens is a manageable
+  decision surface). Replaces the 4a node constant `SEARCH_LIMIT=8`.
+- **Per-round verbosity escalation cap.** RESOLVED — added
+  `DynamicSearchConfig.max_escalations_per_round` (default 2); the loop resets
+  the counter on each search round and logs+drops escalation requests beyond
+  the cap. Searches consume the round budget; escalations do not.
 
 ---
 

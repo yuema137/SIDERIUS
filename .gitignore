@@ -13,11 +13,15 @@ venv/
 env/
 *.env
 
-# Data and Binary files 
+# Data and Binary files
 *.npy
 *.pth
 *.pdf
 reports/
+
+# Root-paper resolution cache written at runtime by the ml_literature_review
+# node (reference_data/ is otherwise tracked; these JSONs are not source).
+reference_data/root_papers_cache/
 
 # Operating System files
 .DS_Store

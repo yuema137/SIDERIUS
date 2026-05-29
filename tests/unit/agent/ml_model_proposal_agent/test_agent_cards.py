@@ -69,8 +69,11 @@ class TestAgentCard:
             _make_card(expertise_domain="x" * 301)
 
     def test_trust_guidance_max_length_enforced(self):
+        # Raised from 400 to 800 to carry the ConfidenceRubric consumer legend
+        # (see ConfidenceRubric.render_for_consumer + AgentCard.trust_guidance).
+        _make_card(trust_guidance="x" * 800)  # 800 is allowed
         with pytest.raises(ValidationError):
-            _make_card(trust_guidance="x" * 401)
+            _make_card(trust_guidance="x" * 801)
 
     def test_missing_required_field_raises(self):
         with pytest.raises(ValidationError):

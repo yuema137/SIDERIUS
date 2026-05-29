@@ -290,6 +290,76 @@ this is a v2+ concern and intentionally not pre-designed here.
 
 ---
 
+## Scoring and rubric design invariants
+
+Any numeric score produced by an LLM agent (confidence, relevance, quality,
+etc.) must satisfy all four of the following invariants:
+
+1. **Single source of truth.** The rubric defining what a score means is
+   defined exactly once — as a Pydantic model in `agent/schemas/`. It is
+   never duplicated or paraphrased in prompt text.
+
+2. **Injected, not hardcoded.** Prompt templates (.md files) contain zero
+   numeric thresholds or band definitions. Instead they contain a named
+   placeholder (e.g. `{CONFIDENCE_RUBRIC}`) that is filled at render time
+   from the Pydantic model. A number appearing directly in a .md file is
+   a violation.
+
+3. **Consistent interpretation.** Every agent that produces a score and
+   every agent that consumes or acts on that score must use the same rubric
+   object. If the proposer sorts findings by confidence, it must have access
+   to the same rubric the lit-review agent used to assign those scores —
+   so it knows what 0.65 actually means.
+
+4. **Configurable, not hardcoded.** Rubric objects are fields on the relevant
+   Input schema (e.g. `LiteratureReviewInput.confidence_rubric`) with a
+   sensible default. A run or config can override the rubric without touching
+   any prompt file. Thresholds (e.g. "omit below 0.40") live in the rubric
+   object, not in prompt prose.
+
+**Current implementation**: `ConfidenceRubric` in
+`agent/schemas/literature_review.py`, injected into
+`agent/prompt_templates/literature_review/synthesis_system.md` via
+`{CONFIDENCE_RUBRIC}`. The omit threshold (< 0.40) is a field on the rubric,
+not a hardcoded number in the prompt.
+
+**Applies to**: any future score introduced anywhere in the system —
+proposal quality scores, interpretation confidence, tuner reward signals,
+external agent trust scores. Before adding a new numeric score, ask:
+where is the rubric defined? who injects it? who consumes it? are they
+using the same object?
+
+---
+
+## Mathematical content in reference_library
+
+Mathematical frameworks and pseudocode are **load-bearing content**, not
+decoration. A proposer reading a `reference_library` entry for a paper it has
+**never seen in training** depends *entirely* on the accuracy of
+`key_equations_md` and `pseudocode_md` to produce a correct architecture
+description: if those fields are wrong or empty, the proposer can at best repeat
+the paper's name, not implement its method. Structural prose ("uses a
+dual-branch SNR-aware design") tells the proposer *that* a mechanism exists;
+only the equations and pseudocode tell it *what the mechanism is*.
+
+The `extraction_method` field is the **trust signal** for this content. It
+records how the math was obtained, in descending reliability: `arxiv_source`
+(ground-truth LaTeX) > `marker_pdf` (ML PDF→Markdown) > `pdfplumber_llm`
+(degraded text + LLM reconstruction) > `abstract_only` (none). Every consumer of
+a reference_library entry must read `extraction_method` before relying on its
+equations: a `pdfplumber_llm` equation is a hint; an `arxiv_source` equation is
+ground truth. See "Full-text and formula extraction strategy" (§5a of
+`docs/external_agents_for_proposer.md`) for the tiers.
+
+The `reference_library` is a pull channel, not a push channel: the proposer is
+not required to read every entry, only the ones relevant to findings it wants to
+act on. The `cite_id` on each `ExpertContextItem` is the lookup key. This design
+keeps the proposer's context manageable — it reads the high-level findings first,
+then pulls the technical depth it needs for the specific papers it decides to
+build on.
+
+---
+
 ## §9 Open architectural questions (carry forward)
 
 These are not implementation TODOs; they are open *design* questions

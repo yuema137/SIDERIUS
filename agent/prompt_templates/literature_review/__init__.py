@@ -25,6 +25,107 @@ docs/paper_resolver_pilot.md findings F1-F4):
 """
 
 import os
+from typing import Literal
+
+from agent.schemas.literature_review import ConfidenceRubric, SynthesisConfig
+
+# ---------------------------------------------------------------------------
+# Synthesis omission-rule blocks (injected at the {OMISSION_RULE} placeholder
+# in synthesis_system.md based on SynthesisConfig.transfer_tolerance). The omit
+# *threshold* stays in ConfidenceRubric.omit_below; these blocks govern only how
+# readily a cross-domain-but-transferable paper yields a finding.
+# ---------------------------------------------------------------------------
+
+_SYNTHESIS_OMISSION_STRICT = (
+    "Omit a paper if you cannot construct a concrete, directly-applicable "
+    "implication. Cross-domain papers with fundamental domain differences "
+    "should be omitted."
+)
+
+_SYNTHESIS_OMISSION_MODERATE = (
+    "Generate a finding if you can construct a concrete implication, even for "
+    "cross-domain papers — provided the Adaptation section explicitly states "
+    "what transfer assumptions are required. A finding with a clear caveat is "
+    "more valuable than no finding at all. Omit only if no plausible mechanism "
+    "transfer exists whatsoever."
+)
+
+_SYNTHESIS_OMISSION_LIBERAL = (
+    "Generate a finding for any paper with a potentially relevant technique, "
+    "even if the domain transfer is speculative. The Adaptation section must "
+    "honestly flag transfer uncertainty. Let the proposer decide relevance."
+)
+
+_SYNTHESIS_OMISSION_RULES: dict[str, str] = {
+    "strict": _SYNTHESIS_OMISSION_STRICT,
+    "moderate": _SYNTHESIS_OMISSION_MODERATE,
+    "liberal": _SYNTHESIS_OMISSION_LIBERAL,
+}
+
+# ---------------------------------------------------------------------------
+# Synthesis content-format blocks (injected at the {CONTENT_FORMAT_BLOCK}
+# placeholder in synthesis_system.md based on findings_verbosity). Kept here so
+# the .md template stays neutral and a future verbosity level only needs a new
+# block, not a template rewrite.
+# ---------------------------------------------------------------------------
+
+_SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the three separate keys per finding plus
+structured `content`):
+
+  {"findings": [
+     {"content": "**Implication:** Given the high-frequency-overfitting bottleneck, try a wider dilation schedule for the convolutional decoder.\\n**Mechanism:** WaveNet's dilated causal convolutions widen the receptive field exponentially without extra depth, applied across the full 1-D signal in a single model.\\n**Adaptation:** Replace the current encoder\'s fixed-dilation convs with dilation powers of 2 to cover the high-frequency band without scaling parameters.\\n(rationale: single full-spectrum paper, not yet replicated here.)",
+      "cite_id": "arxiv:2406.04378",
+      "confidence": <a number assigned per the Confidence rubric below>}
+  ]}
+
+`content` format — structured three-part Markdown. Each item\'s `content` MUST
+be three labeled parts in this exact order, separated by newlines, followed by
+a closing rationale line:
+
+- **Implication:** name the specific current bottleneck (or key finding) it
+  addresses, and the concrete thing to try next. Ground every implication in
+  one of the listed bottlenecks. NOT "Paper X proposes dilated convolutions",
+  but "Given the high-frequency-overfitting bottleneck, Paper X\'s
+  receptive-field control suggests a wider dilation schedule." (≤ 40 words)
+- **Mechanism:** the specific architectural / loss / training mechanism from
+  the paper that supplies the implication — name layers, operations, or loss
+  terms concretely. Carry over any training-regime qualifier (e.g. "under
+  frequency-split training") and never present a regime-specific result as
+  general. (≤ 80 words)
+- **Adaptation:** how to bridge from the paper\'s domain/setup to the agent\'s
+  task (full-spectrum 1-D SQUID denoising). State a concrete adaptation step
+  or flag a transfer caveat. (≤ 50 words)
+
+After the three parts, end with `(rationale: <one line justifying the
+confidence per the rubric>)` on its own line.
+
+Use the heading text verbatim — `**Implication:**`, `**Mechanism:**`,
+`**Adaptation:**` — so downstream parsing stays trivial. Do NOT write the
+paper id inside `content`; the id belongs ONLY in `cite_id`."""
+
+_SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the three separate keys per finding):
+
+  {"findings": [
+     {"content": "Given the high-frequency-overfitting bottleneck, WaveNet\'s dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
+      "cite_id": "arxiv:2406.04378",
+      "confidence": <a number assigned per the Confidence rubric below>}
+  ]}
+
+`content` format — every item MUST:
+- Name the specific current bottleneck (or key finding) it addresses.
+- State the concrete implication for what to try next. NOT "Paper X proposes
+  dilated convolutions", but "Given the high-frequency-overfitting bottleneck,
+  Paper X\'s dilated-convolution receptive-field control suggests a wider
+  dilation schedule."
+- End with a one-line rationale in parentheses justifying the `confidence` score.
+- Carry over any training-regime qualifier from the paper (e.g. "under
+  frequency-split training"); never present a regime-specific result as general.
+- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`."""
+
+_SYNTHESIS_CONTENT_FORMAT_BLOCKS: dict[int, str] = {
+    0: _SYNTHESIS_CONTENT_FORMAT_V0,
+    1: _SYNTHESIS_CONTENT_FORMAT_V1,
+}
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -90,4 +191,173 @@ def render_paper_extract_prompt(
         text = text[:MAX_RAW_TEXT_CHARS] + _TRUNCATION_MARKER
 
     user_prompt = _USER_PROMPT_TEMPLATE.replace("{RAW_TEXT}", text)
+    return system_prompt, user_prompt
+
+
+def _bullets(items: list[str]) -> str:
+    """Render a list of strings as markdown bullets, or '(none)' when empty."""
+    cleaned = [s.strip() for s in (items or []) if s and s.strip()]
+    if not cleaned:
+        return "(none)"
+    return "\n".join(f"- {s}" for s in cleaned)
+
+
+def render_search_decision_prompt(
+    *,
+    key_findings: list[str],
+    bottlenecks: list[str],
+    take_home_message: str,
+    explored_models: list[str],
+    papers_seen: list[dict],
+    escalation_allowed: bool,
+    prior_search_results: list[tuple[str, int]] | None = None,
+    task_description: str = SIDERIUS_TASK,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt for one dynamic-search-loop decision.
+
+    The LLM returns one JSON action — ``search`` | ``escalate`` | ``done``.
+    Keyword-only so the node passes already-extracted primitives (the prompt
+    module stays free of schema coupling — it only formats strings).
+
+    Args:
+        key_findings/bottlenecks/take_home_message: pulled from the
+            InterpretationOutput; key_findings + bottlenecks are the primary
+            grounding signal for query generation (Checkpoint C).
+        explored_models: model_types already tried — steers away from
+            rediscovering known architectures.
+        papers_seen: list of ``{paper_id, title, year, verbosity_achieved,
+            snippet}`` for the papers retrieved so far (the escalation menu).
+        escalation_allowed: when False, the prompt tells the LLM to choose
+            ``search`` or ``done`` only.
+        prior_search_results: ``(query, hit_count)`` for each search already run
+            this run. Fed back so the LLM self-corrects — a 0-hit query is
+            flagged "too specific" and the LLM is nudged to broaden. Omitted on
+            the first round.
+    """
+    system_prompt = load_prompt("search_decision_system.md").replace(
+        "{TASK_DESCRIPTION}", task_description
+    )
+
+    explored = ", ".join(m for m in (explored_models or []) if m) or "(none recorded)"
+
+    prior_block = ""
+    if prior_search_results:
+        lines = ["## Queries already tried this run"]
+        any_zero = False
+        for query, hits in prior_search_results:
+            lines.append(f'- "{query}" → {hits} hits')
+            if hits == 0:
+                lines.append("  (too specific — try broader terms for the same concept)")
+                any_zero = True
+        if any_zero:
+            lines.append(
+                "\nA query that returned 0 hits was too narrow or off-vocabulary — "
+                "broaden it or try different keywords; do NOT repeat a 0-hit query."
+            )
+        prior_block = "\n".join(lines) + "\n\n"
+
+    if papers_seen:
+        lines = []
+        for p in papers_seen:
+            snippet = (p.get("snippet") or "").strip()
+            lines.append(
+                f"- [{p.get('paper_id', '?')}] (v{p.get('verbosity_achieved', 0)}) "
+                f"{p.get('title') or '(untitled)'} ({p.get('year') or 'n.d.'})"
+                + (f" — {snippet}" if snippet else "")
+            )
+        papers_block = "\n".join(lines)
+    else:
+        papers_block = "None yet — this is the first round."
+
+    escalation_note = (
+        ""
+        if escalation_allowed
+        else '\nEscalation is DISABLED this run — choose "search" or "done" only.\n'
+    )
+
+    user_prompt = (
+        "## Current experiment state\n\n"
+        f"Models already explored (do not rediscover): {explored}\n\n"
+        f"Key findings so far:\n{_bullets(key_findings)}\n\n"
+        f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
+        f"Take-home message: {take_home_message or '(none)'}\n\n"
+        f"{prior_block}"
+        "## Papers retrieved so far this run\n"
+        f"{papers_block}\n"
+        f"{escalation_note}\n"
+        "Decide the single best next action as one JSON object."
+    )
+    return system_prompt, user_prompt
+
+
+def render_synthesis_prompt(
+    *,
+    key_findings: list[str],
+    bottlenecks: list[str],
+    take_home_message: str,
+    papers: list[dict],
+    confidence_rubric: ConfidenceRubric | None = None,
+    findings_verbosity: Literal[0, 1] = 1,
+    synthesis_config: SynthesisConfig | None = None,
+    task_description: str = SIDERIUS_TASK,
+) -> tuple[str, str]:
+    """Build the (system, user) prompt for the final findings synthesis.
+
+    The LLM emits ``{"findings": [{content, cite_id, confidence}]}``. The node
+    wraps each into an ``ExpertContextItem``. ``papers`` is a list of
+    ``{paper_id, title, year, summary}`` where ``summary`` is the compressed
+    extract (preferred) or the abstract.
+
+    ``confidence_rubric`` (default = the standard ``ConfidenceRubric``) is the
+    single source of confidence semantics; its rendered form is injected into
+    the ``{CONFIDENCE_RUBRIC}`` placeholder. The ``.md`` template carries no
+    numeric thresholds — see "Scoring and rubric design invariants" in
+    docs/external_agents_architecture.md.
+
+    ``findings_verbosity`` (default 1) selects the content-format block injected
+    at ``{CONTENT_FORMAT_BLOCK}``. 1 = structured three-part Markdown
+    (Implication / Mechanism / Adaptation + closing rationale); 0 = the
+    single-paragraph backward-compat format. Only the prompt format changes;
+    ``ExpertContextItem.content`` is still a single string either way.
+
+    ``synthesis_config`` (default = the standard ``SynthesisConfig``,
+    ``transfer_tolerance="moderate"``) selects the ``{OMISSION_RULE}`` block.
+    'strict' omits cross-domain papers; 'moderate' emits a finding for a
+    transferable cross-domain mechanism with an explicit Adaptation caveat;
+    'liberal' emits for any potentially relevant technique.
+    """
+    rubric = confidence_rubric or ConfidenceRubric()
+    syn_cfg = synthesis_config or SynthesisConfig()
+    content_format = _SYNTHESIS_CONTENT_FORMAT_BLOCKS[findings_verbosity]
+    omission_rule = _SYNTHESIS_OMISSION_RULES[syn_cfg.transfer_tolerance]
+    system_prompt = (
+        load_prompt("synthesis_system.md")
+        .replace("{TASK_DESCRIPTION}", task_description)
+        .replace("{CONFIDENCE_RUBRIC}", rubric.render())
+        .replace("{CONTENT_FORMAT_BLOCK}", content_format)
+        .replace("{OMISSION_RULE}", omission_rule)
+    )
+
+    if papers:
+        blocks = []
+        for p in papers:
+            summary = (p.get("summary") or "").strip() or "(no extract or abstract available)"
+            blocks.append(
+                f"### [{p.get('paper_id', '?')}] {p.get('title') or '(untitled)'} "
+                f"({p.get('year') or 'n.d.'})\n{summary}"
+            )
+        papers_block = "\n\n".join(blocks)
+    else:
+        papers_block = "(no papers were retrieved this run)"
+
+    user_prompt = (
+        "## Current experiment state (PRIMARY — ground every finding in these)\n\n"
+        f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
+        f"Key findings:\n{_bullets(key_findings)}\n\n"
+        f"Take-home message: {take_home_message or '(none)'}\n\n"
+        "## Papers retrieved this iteration\n\n"
+        f"{papers_block}\n\n"
+        "Produce the findings JSON. Omit any paper that does not address one of "
+        "the bottlenecks above."
+    )
     return system_prompt, user_prompt
