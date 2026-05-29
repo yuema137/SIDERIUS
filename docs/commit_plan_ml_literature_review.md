@@ -553,17 +553,35 @@ new fields (Checkpoint F + the equation-aware prompt variant).
 - [ ] Unit tests: each tier in isolation (mocked HTTP for arXiv source, mocked
       `marker`, existing pdfplumber mock) + the **fallback cascade**
       (Tier 1 fail → Tier 2 → Tier 3 → abstract_only).
-- [ ] Pilot on TIDMAD (`arxiv:2406.04378`) and SNRAware (`arxiv:2503.18162`).
+- [ ] **`render_review_report`** — pure, deterministic Markdown renderer for a
+      lit-review run's artifacts (Phase 1 `RetrievedPaper` extracts and, when
+      present, Phase 2 findings / reference_library). Reusable in production
+      runs, not just §10. Location: `agent/prompt_templates/literature_review/__init__.py`
+      (alongside the compression / synthesis renderers). **Pure function — no
+      LLM, no I/O; the caller writes the rendered string to a file.** Unit
+      tests assert deterministic output + per-section presence for a fixture
+      `LiteratureReviewOutput` / `RetrievedPaper` list (with and without
+      findings).
+- [ ] Pilot on the **§10 corpus** (7 papers, §10.2): six Tier-1 papers
+      (#1–#6 Mamba / PatchTST / GW / DeepDenoiser / TADA / FreIE) and SNRAware
+      (#7) via the Tier-2 / Tier-3 fallback. Capture per-paper
+      `verbosity_achieved`, `extraction_method`, and full `PaperExtract`
+      (incl. `key_equations_md` / `pseudocode_md`). The pilot script calls
+      `render_review_report` and writes a single human-review Markdown file
+      covering all 7 papers — that file is the artifact Checkpoints E + F
+      sign off on.
 - [ ] Re-validate LLM compression with new fields: after Checkpoint E is
-      signed off, run the compression prompt on TIDMAD (Tier 1) and SNRAware
-      (Tier 1) and verify:
-      (a) key_equations_md is populated with correct LaTeX (not garbled,
-          not hallucinated — cross-check against the raw .tex source)
-      (b) pseudocode_md is populated with the algorithm structure preserved
-      (c) extraction_method is correctly passed through the response envelope
-          to the node and reflected in the final PaperExtract
-      Show the full PaperExtract JSON for both papers before closing Commit 2c.
-      This is effectively a targeted re-run of Checkpoint B for the new fields.
+      signed off, run the compression prompt on the §10 corpus and verify:
+      (a) `key_equations_md` is populated with correct LaTeX for the six
+          Tier-1 papers (cross-check against raw `.tex`); for SNRAware
+          (PDF-only) Tier-2 / Tier-3 produces a usable best-effort extract;
+      (b) `pseudocode_md` is populated with the algorithm structure preserved;
+      (c) `extraction_method` is correctly passed through the response envelope
+          to the node and reflected in the final `PaperExtract` (`arxiv_source`
+          for #1–#6; `marker_pdf` or `pdfplumber_llm` for #7).
+      The pilot's `render_review_report` output (above) contains the full
+      `PaperExtract` for all seven papers — that's the artifact for the
+      Checkpoint-F review. This is the **§10 Phase 1 partial run**.
 
 **Test gate**:
 - Unit: `tests/unit/agent/skills/test_paper_resolver_skill.py` — per-tier +
@@ -577,28 +595,41 @@ new fields (Checkpoint F + the equation-aware prompt variant).
 
 #### 🔍 Behavioral Checkpoint E — Tier-1 formula extraction quality
 
-Run Tier-1 extraction on TIDMAD (`arxiv:2406.04378`) and SNRAware
-(`arxiv:2503.18162`); print the extracted `key_equations_md` and
-`pseudocode_md`; **show the results before proceeding.** Verify:
-- (a) TIDMAD's denoising-score formula extracts correctly;
-- (b) SNRAware's SNR-unit loss formula extracts correctly;
-- (c) the Markdown is clean enough to feed directly to the LLM compression prompt.
+Run Tier-1 extraction on the **six §10 corpus papers with `.tex` source**
+(§10.2 #1–#6: Mamba `arxiv:2312.00752`, PatchTST `arxiv:2211.14730`,
+GW denoising `arxiv:2511.20731`, DeepDenoiser `arxiv:1811.02695`,
+TADA `arxiv:2501.04967`, FreIE `arxiv:2510.25800`); print each paper's
+extracted `key_equations_md` and `pseudocode_md`; **show the results before
+proceeding.** Verify per paper:
+- (a) each paper's key equations extract correctly (cross-check against the
+  raw `.tex` source);
+- (b) each paper's pseudocode / algorithm blocks (where present) preserve
+  structure;
+- (c) the Markdown is clean enough to feed directly to the LLM compression
+  prompt.
 
-This checkpoint **gates whether Tier 1 alone suffices** or Tier 2 (`marker`) is
-needed for acceptable quality. Do not proceed on the new fields until signed off.
+This checkpoint **gates whether Tier 1 alone suffices** on these six papers,
+or whether Tier 2 (`marker`) is needed for acceptable quality. Note: SNRAware
+(`arxiv:2503.18162`, §10 #7) is PDF-only (no `.tex` source) and exercises the
+Tier-2 / Tier-3 fallback path in Checkpoint F, not Tier-1 here. Do not proceed
+on the new fields until signed off.
 
 #### 🔍 Behavioral Checkpoint F — LLM compression quality for new fields
 
-After Checkpoint E is signed off, run the compression prompt on TIDMAD (Tier 1)
-and SNRAware (Tier 1) and verify the equation-aware prompt variant correctly
-populates the new fields:
-- (a) `key_equations_md` holds correct LaTeX (not garbled, not hallucinated —
-  cross-check against the raw `.tex`);
+After Checkpoint E is signed off, run the compression prompt on the **full §10
+corpus** (six Tier-1 papers from §10.2 #1–#6 + SNRAware (#7) via Tier-2 / Tier-3)
+and verify the equation-aware prompt variant correctly populates the new fields:
+- (a) `key_equations_md` holds correct LaTeX for the six Tier-1 papers
+  (cross-check against raw `.tex`); for SNRAware (PDF-only), Tier-2 / Tier-3
+  produces a usable best-effort extract;
 - (b) `pseudocode_md` holds the algorithm structure, preserved;
-- (c) `extraction_method` is passed through the response envelope to the node
-  and reflected in the final `PaperExtract`.
-Show the full `PaperExtract` JSON for both papers before closing Commit 2c. This
-is a targeted re-run of Checkpoint B for the new fields.
+- (c) `extraction_method` is correctly set per paper (`arxiv_source` for the
+  Tier-1 inputs; `marker_pdf` or `pdfplumber_llm` for SNRAware) and propagated
+  through the response envelope to the node and reflected in the final
+  `PaperExtract`.
+Show the full `PaperExtract` JSON for all seven papers before closing
+Commit 2c. This is a targeted re-run of Checkpoint B for the new fields at
+corpus scale (= the §10 Phase 1 partial run).
 
 ---
 

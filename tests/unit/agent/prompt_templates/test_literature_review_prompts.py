@@ -31,9 +31,10 @@ from agent.schemas.literature_review import (
     SynthesisConfig,
 )
 
-# The seven locked PaperExtract keys. Kept inline (not derived from the schema)
-# so the test fails loudly if either the schema or the prompt drifts away from
-# the agreed contract.
+# The nine LLM-emitted PaperExtract keys (the 10th field, `extraction_method`,
+# is set node-side, not by the LLM, so it is NOT in this contract). Kept inline
+# (not derived from the schema) so the test fails loudly if either the schema or
+# the prompt drifts away from the agreed contract.
 _EXPECTED_KEYS = (
     "title",
     "authors",
@@ -42,6 +43,9 @@ _EXPECTED_KEYS = (
     "architecture_details",
     "key_results",
     "relevance_to_task",
+    # Commit 2c additions (F3 conditionally superseded; see §5a):
+    "key_equations_md",
+    "pseudocode_md",
 )
 
 
@@ -57,16 +61,27 @@ class TestRenderStructure:
         b = render_paper_extract_prompt("identical input")
         assert a == b
 
-    def test_system_prompt_lists_all_seven_keys(self):
+    def test_system_prompt_lists_all_nine_keys(self):
+        # 7 original keys + 2 new (`key_equations_md`, `pseudocode_md`); the 10th
+        # `PaperExtract` field (`extraction_method`) is set node-side, NOT
+        # emitted by the LLM, so it does NOT appear as a contract key. (The word
+        # "extraction_method" can legitimately appear elsewhere in the prompt —
+        # e.g., the pdfplumber block's downstream-consumer note — so we don't
+        # assert its absence; the .md contract intro pins "EXACTLY these nine".)
         system, _ = render_paper_extract_prompt("text")
         for key in _EXPECTED_KEYS:
             assert key in system, f"system prompt missing key {key!r}"
+        assert "nine string keys and no others" in system
 
     def test_system_prompt_has_anti_noise_and_math_rules(self):
+        # Default extraction_method='pdfplumber_llm' selects the degraded-PDF
+        # instruction block, which contains these rules verbatim. Other tiers
+        # (arxiv_source / marker_pdf) have different blocks — see
+        # TestExtractionInstructions below.
         system, _ = render_paper_extract_prompt("text")
         # (cid:NN) glyph artifacts (F3) must be called out.
         assert "(cid:" in system
-        # Math-in-prose / no-LaTeX instruction (F3).
+        # Math-in-prose / approximate-LaTeX instruction (F3, Tier-3 path).
         assert "LaTeX" in system
         # Despacing tolerance (run-together words).
         assert "missing spaces" in system
@@ -86,6 +101,59 @@ class TestRenderStructure:
         # Must NOT name a specific paper (that would hallucinate for non-TIDMAD
         # papers compressed by the same prompt).
         assert "TIDMAD" not in system
+
+
+class TestExtractionInstructions:
+    """`render_paper_extract_prompt(extraction_method=...)` injects one of four
+    per-tier instruction blocks at the `{EXTRACTION_INSTRUCTIONS}` placeholder.
+    Each block's distinctive guidance must appear (and the wrong-tier guidance
+    must NOT appear)."""
+
+    def test_arxiv_source_block_injected(self):
+        system, _ = render_paper_extract_prompt("clean tex", extraction_method="arxiv_source")
+        assert "{EXTRACTION_INSTRUCTIONS}" not in system  # placeholder filled
+        assert "clean LaTeX / Markdown extracted from the arXiv source" in system
+        assert "DIRECTLY into `key_equations_md`" in system
+        # arxiv source is clean — pdfplumber's (cid:NN) artifact rule must NOT leak.
+        assert "(cid:" not in system
+
+    def test_marker_pdf_block_injected(self):
+        system, _ = render_paper_extract_prompt("md from marker", extraction_method="marker_pdf")
+        assert "Markdown extracted from the paper's PDF via the marker" in system
+        assert "DIRECTLY into `key_equations_md`" in system
+        assert "(cid:" not in system
+
+    def test_pdfplumber_block_injected_and_is_default(self):
+        # Explicit and default both select the degraded-PDF block.
+        for kwargs in ({}, {"extraction_method": "pdfplumber_llm"}):
+            system, _ = render_paper_extract_prompt("degraded text", **kwargs)
+            assert "(cid:" in system  # F3 degraded-PDF artifact rule
+            assert "approximate LaTeX form" in system  # Tier-3 best-effort note
+            assert 'extraction_method="pdfplumber_llm"' in system  # downstream trust signal
+
+    def test_abstract_only_block_injected(self):
+        system, _ = render_paper_extract_prompt("abstract", extraction_method="abstract_only")
+        assert "only the paper's abstract" in system.lower()
+        # Abstracts have no equations / pseudocode — block tells the LLM to leave both empty.
+        assert 'Leave `key_equations_md` and `pseudocode_md` as `""`' in system
+        # No degraded-PDF / arxiv-source content should leak.
+        assert "(cid:" not in system
+        assert "arXiv source" not in system
+
+    def test_md_template_has_extraction_placeholder(self):
+        # Per-tier guidance lives in __init__.py blocks; the .md template
+        # carries only the placeholder so a future extraction tier just needs a
+        # new block, not a template rewrite.
+        from pathlib import Path
+
+        import agent.prompt_templates.literature_review as mod
+
+        raw = Path(mod.__file__).with_name("paper_extract_system.md").read_text()
+        assert "{EXTRACTION_INSTRUCTIONS}" in raw
+        # tier-specific marker strings must NOT be in the raw .md
+        assert "arXiv source" not in raw
+        assert "marker converter" not in raw
+        assert "(cid:" not in raw
 
 
 class TestTaskInjection:
@@ -149,6 +217,9 @@ class TestPaperExtractValidationHalf:
             "architecture_details": "WaveNet: dilated causal convs, full-spectrum.",
             "key_results": "WaveNet 4.99/5.16 under full-spectrum training.",
             "relevance_to_task": "Only full-spectrum baseline; directly comparable.",
+            # Commit 2c fields the LLM emits (extraction_method is set node-side).
+            "key_equations_md": "$$s = -\\log\\|x - \\hat x\\|^2$$",
+            "pseudocode_md": "```python\nfor x in batch:\n    pass\n```",
         }
         bridge = MagicMock()
         bridge.generate.return_value = valid

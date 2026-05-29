@@ -154,6 +154,87 @@ _USER_PROMPT_TEMPLATE = (
     "--- END PAPER TEXT ---\n"
 )
 
+# ---------------------------------------------------------------------------
+# Paper-extract per-tier instruction blocks (injected at {EXTRACTION_INSTRUCTIONS}
+# in paper_extract_system.md). One block per ``PaperExtract.extraction_method``
+# value — the template stays neutral; each tier carries its own source-quality
+# / equation / pseudocode guidance.
+# ---------------------------------------------------------------------------
+
+_PAPER_EXTRACT_INSTRUCTIONS_ARXIV = """## Extraction (clean arXiv .tex / Markdown source)
+
+The text below is **clean LaTeX / Markdown extracted from the arXiv source** —
+math symbols are correct, sub / superscripts intact, equations and algorithm
+blocks preserved. Treat this as ground truth:
+
+- Extract the paper's key equations DIRECTLY into `key_equations_md`. Use
+  `$$...$$` for display math and `$...$` for inline. Preserve the original
+  LaTeX where it is clean; do not paraphrase equations as prose.
+- Extract algorithm / pseudocode blocks DIRECTLY into `pseudocode_md`, using
+  fenced Markdown (e.g. ```python ... ``` or ```algorithm ... ```).
+- Use prose only to introduce or contextualise an equation, never to substitute
+  for it. The equation IS the contribution; the proposer needs the formula.
+- The author affiliations / footnotes / bibliography that may appear in the
+  raw `.tex` are noise — ignore them."""
+
+_PAPER_EXTRACT_INSTRUCTIONS_MARKER = """## Extraction (PDF → Markdown via marker)
+
+The text below is **Markdown extracted from the paper's PDF via the marker
+converter**. Equations and pseudocode are largely preserved in LaTeX / Markdown
+but may have minor conversion artifacts:
+
+- Extract key equations DIRECTLY into `key_equations_md` (`$$...$$` display,
+  `$...$` inline). Clean up minor artifacts (stray spaces, malformed braces)
+  but preserve the equation's meaning. Do not paraphrase equations.
+- Extract algorithm / pseudocode blocks DIRECTLY into `pseudocode_md` (fenced
+  code blocks).
+- If a region looks too garbled to reliably reconstruct, prefer omission
+  (`""`) over hallucinated LaTeX."""
+
+_PAPER_EXTRACT_INSTRUCTIONS_PDFPLUMBER = """## Reading degraded PDF text
+
+The text below is extracted from a PDF via pdfplumber and is **imperfect**. You
+MUST read through these artifacts and never reproduce them in your output:
+
+- Glyph codes such as `(cid:88)` or `(cid:16)` — these are unmapped font symbols
+  (often math operators like the summation sign). Ignore them; never copy them.
+- Run-together words with missing spaces (e.g. "dilatedcausalconvolutions") —
+  read them as the intended separate words.
+- A rotated arXiv margin stamp that extracts as garbled text (e.g.
+  "5202 tcO 82 ]GL.sc[ ..."). Ignore it.
+- Author affiliations, email addresses, and table-of-contents regions with
+  dot-leaders ("` . . . . . `"). Ignore all of these.
+
+## Mathematics (degraded source)
+
+Equations extract poorly from this source. **Describe** important mathematical
+methods in plain prose first (e.g. "the denoising score is a log-ratio of
+signal-band to noise-band power"). Then, ONLY when the equation's structure is
+clear enough to be useful, emit an approximate LaTeX form in
+`key_equations_md`. If a paper's equations cannot be reliably reconstructed,
+leave `key_equations_md=""` — degraded LaTeX is worse than no LaTeX.
+
+Pseudocode blocks may survive partially. If you can identify them, put a
+best-effort Markdown version in `pseudocode_md`; otherwise leave `""`.
+
+Downstream consumers see `extraction_method="pdfplumber_llm"` and weight these
+two fields as approximate / lower-reliability."""
+
+_PAPER_EXTRACT_INSTRUCTIONS_ABSTRACT = """## Abstract-only input
+
+You have access to **only the paper's abstract** — no full text. Fill the prose
+fields (`title`, `authors`, `year`, `core_idea`, `architecture_details`,
+`key_results`, `relevance_to_task`) at the level of detail the abstract
+supports. Leave `key_equations_md` and `pseudocode_md` as `""` — abstracts do
+not contain extractable equations or pseudocode."""
+
+_PAPER_EXTRACT_INSTRUCTIONS: dict[str, str] = {
+    "arxiv_source": _PAPER_EXTRACT_INSTRUCTIONS_ARXIV,
+    "marker_pdf": _PAPER_EXTRACT_INSTRUCTIONS_MARKER,
+    "pdfplumber_llm": _PAPER_EXTRACT_INSTRUCTIONS_PDFPLUMBER,
+    "abstract_only": _PAPER_EXTRACT_INSTRUCTIONS_ABSTRACT,
+}
+
 
 def load_prompt(filename: str) -> str:
     """Load a prompt template from this directory."""
@@ -164,26 +245,40 @@ def load_prompt(filename: str) -> str:
 
 def render_paper_extract_prompt(
     raw_text: str,
+    extraction_method: Literal[
+        "arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"
+    ] = "pdfplumber_llm",
     task_description: str = SIDERIUS_TASK,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair for compressing one paper.
 
     Args:
-        raw_text:         The paper's full extracted text. Truncated to
-                          ``MAX_RAW_TEXT_CHARS`` (with a trailing marker) before
-                          injection — the bridge does not enforce any cap.
-        task_description: Concrete downstream task the proposer works on, used
-                          to ground ``relevance_to_task``. Defaults to
-                          ``SIDERIUS_TASK``.
+        raw_text:          The paper's full extracted text. Truncated to
+                           ``MAX_RAW_TEXT_CHARS`` (with a trailing marker)
+                           before injection — the bridge does not enforce any cap.
+        extraction_method: Which extraction tier produced ``raw_text``. Selects
+                           the per-tier instruction block injected at the
+                           ``{EXTRACTION_INSTRUCTIONS}`` placeholder. Default
+                           ``"pdfplumber_llm"`` preserves the pre-Commit-2c
+                           behaviour (current node call site feeds pdfplumber
+                           output). Commit 2c-b/c wires the cascade and the
+                           node will then pass the actual tier explicitly.
+        task_description:  Concrete downstream task the proposer works on, used
+                           to ground ``relevance_to_task``. Defaults to
+                           ``SIDERIUS_TASK``.
 
     Returns:
         ``(system_prompt, user_prompt)``. The system prompt instructs the LLM to
-        emit JSON matching ``PaperExtract``; the user prompt carries the (capped)
-        raw text. Feed straight into ``LLMBridge.generate(system, user)``, which
-        returns the parsed dict for ``PaperExtract.model_validate``.
+        emit a 9-key JSON object matching ``PaperExtract``'s LLM-emitted fields
+        (``extraction_method`` is set node-side, not by the LLM). Feed straight
+        into ``LLMBridge.generate(system, user)``, which returns the parsed dict
+        for ``PaperExtract.model_validate``.
     """
-    system_prompt = load_prompt("paper_extract_system.md").replace(
-        "{TASK_DESCRIPTION}", task_description
+    instructions = _PAPER_EXTRACT_INSTRUCTIONS[extraction_method]
+    system_prompt = (
+        load_prompt("paper_extract_system.md")
+        .replace("{TASK_DESCRIPTION}", task_description)
+        .replace("{EXTRACTION_INSTRUCTIONS}", instructions)
     )
 
     text = raw_text

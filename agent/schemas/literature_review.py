@@ -118,16 +118,21 @@ class PaperExtract(BaseModel):
 
     Produced by the compression prompt in
     ``agent/prompt_templates/literature_review`` from a paper's full text.
-    The field set is **final**, locked after the Commit 2 paper-resolver
-    pilot (docs/paper_resolver_pilot.md): seven free-text string fields, no
-    structured equation/diagram fields. Pilot finding F3 showed PDF-extracted
-    equations are too degraded (``∑`` → ``(cid:88)``, flattened sub/super-
-    scripts) to reconstruct as LaTeX, so mathematical methods are captured in
-    prose inside ``key_results`` / ``architecture_details`` rather than a
-    dedicated ``key_equations`` field.
 
-    All fields default to empty string (not ``None``) so the compression LLM
-    can emit a partial extract — Pydantic validation must not fail when a
+    **Field-set history.** The original seven-field set was locked after
+    Commit 2's paper-resolver pilot (docs/paper_resolver_pilot.md) per
+    pilot finding F3: PDF-extracted equations are too degraded (``∑`` →
+    ``(cid:88)``, flattened sub/superscripts) to reconstruct as LaTeX, so
+    mathematical methods were captured in prose inside ``key_results`` /
+    ``architecture_details``. Commit 2c **amends** that lock and adds three
+    fields — ``key_equations_md``, ``pseudocode_md``, ``extraction_method``
+    — once three-tier extraction (§5a of docs/external_agents_for_proposer.md)
+    made reliable formula content viable. F3's "no LaTeX" rationale now
+    applies only to the Tier-3 (pdfplumber) path; Tier-1 / Tier-2 inputs carry
+    equations and pseudocode verbatim.
+
+    All string fields default to empty string (not ``None``) so the compression
+    LLM can emit a partial extract — Pydantic validation must not fail when a
     paper genuinely has no content for a field. The compression prompt
     instructs the LLM to use ``""`` (never ``null``) for anything it cannot
     ground in the source text.
@@ -137,6 +142,12 @@ class PaperExtract(BaseModel):
       - ``architecture_details`` ≤ 150 words
       - ``key_results``          ≤ 120 words
       - ``relevance_to_task``    ≤ 100 words
+
+    ``key_equations_md`` and ``pseudocode_md`` are code/LaTeX content; their
+    length is paper-determined (no fixed word budget). ``extraction_method``
+    is set by the resolver skill / node based on which extraction tier
+    succeeded — it is NOT emitted by the LLM; the schema default
+    ``"abstract_only"`` applies until the cascade (Commit 2c-b/c) wires it.
     """
 
     title: str = Field(default="", description="Paper title.")
@@ -150,8 +161,9 @@ class PaperExtract(BaseModel):
         default="",
         description="Architectural description: model type, layer/block "
         "structure, key design choices, and how the approach compares to "
-        "alternatives the paper discusses (≤150 words). Math is described in "
-        "prose, not LaTeX (pilot finding F3).",
+        "alternatives the paper discusses (≤150 words). Math goes in "
+        "``key_equations_md`` for Tier-1/2 sources; prose-only for Tier-3 "
+        "(per F3's conditional supersession in §5a).",
     )
     key_results: str = Field(
         default="",
@@ -164,6 +176,30 @@ class PaperExtract(BaseModel):
         "(≤100 words). Task-agnostic by name so the framework generalizes "
         "beyond SQUID; the compression prompt injects the concrete task "
         "description so the LLM knows what 'task' means in context.",
+    )
+    key_equations_md: str = Field(
+        default="",
+        description="Core equations as Markdown LaTeX — ``$$...$$`` for display "
+        "math, ``$...$`` for inline. Reliable for Tier-1/2 inputs (clean source); "
+        "approximate / best-effort for Tier-3 (``pdfplumber_llm``); empty for "
+        "``abstract_only``. Trust signal lives on ``extraction_method``.",
+    )
+    pseudocode_md: str = Field(
+        default="",
+        description="Algorithm / pseudocode blocks as fenced Markdown (e.g. "
+        "`````python ... `````). Same tier "
+        "reliability semantics as ``key_equations_md``.",
+    )
+    extraction_method: Literal["arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"] = (
+        Field(
+            default="abstract_only",
+            description="First-class trust signal indicating which extraction tier "
+            "produced the source text. ``arxiv_source`` (Tier-1, ground-truth LaTeX) "
+            "> ``marker_pdf`` (Tier-2, ML PDF→Markdown) > ``pdfplumber_llm`` (Tier-3, "
+            "degraded text + LLM reconstruction) > ``abstract_only`` (no full text). "
+            "Set by the resolver skill / node — NOT emitted by the LLM. Default "
+            "``abstract_only`` applies until the cascade (Commit 2c-b/c) wires it.",
+        )
     )
 
 

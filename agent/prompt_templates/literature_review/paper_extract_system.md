@@ -17,7 +17,7 @@ specific task* — not a generic "this is about signal processing".
 
 ## Output contract
 
-Return a single JSON object with EXACTLY these seven string keys and no others:
+Return a single JSON object with EXACTLY these nine string keys and no others:
 
 - `title`                — paper title.
 - `authors`              — comma-separated author list.
@@ -35,34 +35,23 @@ Return a single JSON object with EXACTLY these seven string keys and no others:
                            training"); a bare score with no regime is misleading.
 - `relevance_to_task`    — why this paper is relevant to the task above, at most
                            100 words.
+- `key_equations_md`     — core equations as Markdown LaTeX (`$$...$$` for display
+                           math, `$...$` for inline). How to fill this depends on
+                           the source quality — see the extraction instructions
+                           below. `""` when there's no full text or no equations.
+- `pseudocode_md`        — algorithm / pseudocode blocks as fenced Markdown (e.g.
+                           ```` ```python ... ``` ````). Same source-quality
+                           caveats apply. `""` when none present.
 
 Rules for the JSON:
 - Every value is a string. Use "" (an empty string) — NEVER null — for any field
   you cannot ground in the source text.
-- Stay within each field's word budget. Going over wastes the proposer's limited
-  context; going too short loses information.
+- Stay within each prose field's word budget (`core_idea` / `architecture_details`
+  / `key_results` / `relevance_to_task`). `key_equations_md` and `pseudocode_md`
+  have no fixed budget — their length is paper-determined.
 - Output ONLY the JSON object. No markdown fences, no commentary before or after.
 
-## Reading degraded PDF text
-
-The text you receive is extracted from a PDF and is imperfect. You MUST read
-through the following artifacts and never reproduce them in your output:
-
-- Glyph codes such as `(cid:88)` or `(cid:16)` — these are unmapped font symbols
-  (often math operators like the summation sign). Ignore them; never copy them.
-- Run-together words with missing spaces (e.g. "dilatedcausalconvolutions") —
-  read them as the intended separate words.
-- A rotated arXiv margin stamp that extracts as garbled text (e.g.
-  "5202 tcO 82 ]GL.sc[ ..."). Ignore it.
-- Author affiliations, email addresses, and table-of-contents regions with
-  dot-leaders ("` . . . . . `"). Ignore all of these.
-
-## Mathematics
-
-Equations extract too poorly from the PDF to reconstruct reliably. Do NOT emit
-LaTeX and do NOT copy equation fragments. Describe any important mathematical
-method in plain prose (e.g. "the denoising score is a log-ratio of signal-band
-to noise-band power").
+{EXTRACTION_INSTRUCTIONS}
 
 ## Faithfulness
 

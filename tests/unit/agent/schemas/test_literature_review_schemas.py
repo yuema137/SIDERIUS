@@ -160,10 +160,14 @@ class TestDynamicSearchConfig:
 
 class TestPaperExtract:
     def test_field_set_is_locked(self):
-        # The canonical seven-field set is final (locked after the Commit 2
-        # pilot). This guards against re-adding key_equations/limitations
-        # (the latter conflicts with AgentCard.limitations) or key_findings
-        # (reserved for InterpretationOutput/CacheEntry).
+        # Original seven-field set was locked after Commit 2's pilot (F3:
+        # no LaTeX). Commit 2c amends the lock and adds three fields
+        # (`key_equations_md`, `pseudocode_md`, `extraction_method`) once
+        # three-tier extraction makes reliable formula content viable; see §5a
+        # of docs/external_agents_for_proposer.md. The lock now guards the
+        # ten-field set against re-adding `key_equations` (the OLD name, used
+        # by F3), `limitations` (conflicts with AgentCard.limitations), or
+        # `key_findings` (reserved for InterpretationOutput / CacheEntry).
         assert set(PaperExtract.model_fields) == {
             "title",
             "authors",
@@ -172,15 +176,33 @@ class TestPaperExtract:
             "architecture_details",
             "key_results",
             "relevance_to_task",
+            "key_equations_md",
+            "pseudocode_md",
+            "extraction_method",
         }
 
     def test_all_defaults_empty_string(self):
         # Empty-string defaults are intentional — the compression LLM can
-        # produce a partial extract without failing validation.
+        # produce a partial extract without failing validation. The
+        # `extraction_method` default ("abstract_only") is set node-side, not
+        # by the LLM, but the schema default applies until the cascade wires it.
         e = PaperExtract()
         assert e.title == ""
         assert e.core_idea == ""
         assert e.relevance_to_task == ""
+        assert e.key_equations_md == ""
+        assert e.pseudocode_md == ""
+        assert e.extraction_method == "abstract_only"
+
+    def test_extraction_method_accepts_each_valid_tier(self):
+        for tier in ("arxiv_source", "marker_pdf", "pdfplumber_llm", "abstract_only"):
+            assert PaperExtract(extraction_method=tier).extraction_method == tier
+
+    def test_extraction_method_unknown_value_rejected(self):
+        # Literal validation — anything outside the four tiers is a validation
+        # error (no quiet coerce; the field is a trust signal).
+        with pytest.raises(ValidationError):
+            PaperExtract(extraction_method="docling")  # type: ignore[arg-type]
 
     def test_populated(self):
         e = PaperExtract(
