@@ -21,15 +21,20 @@ from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
     SIDERIUS_TASK,
     render_paper_extract_prompt,
+    render_review_report,
     render_search_decision_prompt,
     render_synthesis_prompt,
 )
 from agent.schemas.literature_review import (
     ConfidenceBand,
     ConfidenceRubric,
+    LiteratureReviewOutput,
     PaperExtract,
+    PaperSource,
+    RetrievedPaper,
     SynthesisConfig,
 )
+from agent.schemas.proposal import AgentCard, ExpertContextItem
 
 # The nine LLM-emitted PaperExtract keys (the 10th field, `extraction_method`,
 # is set node-side, not by the LLM, so it is NOT in this contract). Kept inline
@@ -524,3 +529,472 @@ class TestSearchDecisionPrompt:
         assert '"spectral gating denoising" → 5 hits' in user
         assert "too specific" not in user  # no 0-hit annotation
         assert "do NOT repeat a 0-hit query" not in user  # no broaden nudge
+
+
+# ---------------------------------------------------------------------------
+# render_review_report — pure Markdown view of a LiteratureReviewOutput.
+# Pure function: same input → same output. No LLM, no I/O.
+# ---------------------------------------------------------------------------
+
+
+def _agent_card() -> AgentCard:
+    """Minimal AgentCard fixture — required by LiteratureReviewOutput's parent."""
+    return AgentCard(
+        agent_name="ml_literature_review",
+        role="Surveys recent literature and emits findings.",
+        expertise_domain="ML denoising / signal modelling literature.",
+        coverage="arXiv + S2 search, last 24 months.",
+        limitations="LLM-mediated extraction; equation fidelity tier-dependent.",
+        trust_guidance="Treat as promising priors; cross-check with experiments.",
+    )
+
+
+def _arxiv_extract(
+    title: str = "Mamba",
+    authors: str = "Albert Gu, Tri Dao",
+    year: str = "2023",
+    *,
+    key_equations_md: str = "$$h_t = \\bar{A} h_{t-1} + \\bar{B} x_t$$",
+    pseudocode_md: str = "```python\nfor t in range(L):\n    h = A @ h + B @ x[t]\n```",
+) -> PaperExtract:
+    """Tier-1 PaperExtract — clean LaTeX source, all fields populated."""
+    return PaperExtract(
+        title=title,
+        authors=authors,
+        year=year,
+        core_idea="Selective SSM with hardware-aware scan.",
+        architecture_details="Mamba block: linear projections, 1-D conv, selective SSM.",
+        key_results="Matches Pythia-2.8B perplexity at 1.4B params.",
+        relevance_to_task="Linear-time scan for long 1-D sequences — directly relevant.",
+        key_equations_md=key_equations_md,
+        pseudocode_md=pseudocode_md,
+        extraction_method="arxiv_source",
+    )
+
+
+def _pdfplumber_extract() -> PaperExtract:
+    """Tier-2 PaperExtract — degraded PDF, equations marked best-effort."""
+    return PaperExtract(
+        title="SNRAware",
+        authors="A. Researcher, B. Coauthor",
+        year="2025",
+        core_idea="SNR-aware loss reweighting for MRI denoising.",
+        architecture_details="U-Net denoiser; SNR-gated patch reweighting.",
+        key_results="1.4 dB PSNR over baseline U-Net on fastMRI knee.",
+        relevance_to_task="Loss-layer engineering is domain-portable to 1-D signals.",
+        key_equations_md="$$\\mathcal{L}_{SNR} = \\sum_i w(SNR_i) \\| \\hat{y}_i - y_i \\|^2$$",
+        pseudocode_md="```python\nfor patch in batch:\n    snr = estimate_snr(patch)\n```",
+        extraction_method="pdfplumber_llm",
+    )
+
+
+def _retrieved_paper(
+    paper_id: str = "arxiv:2312.00752",
+    source_type: str = "arxiv",
+    identifier: str = "2312.00752",
+    *,
+    extract: PaperExtract | None = None,
+    s2_metadata: dict | None = None,
+    verbosity_achieved: int = 1,
+    error: str | None = None,
+) -> RetrievedPaper:
+    if s2_metadata is None and extract is not None:
+        # Mirror what the resolver actually returns: S2 also carries the title
+        # so the title-lookup fallback chain is exercised.
+        s2_metadata = {
+            "title": extract.title,
+            "year": int(extract.year) if extract.year.isdigit() else None,
+            "paperId": "abc123",
+        }
+    return RetrievedPaper(
+        paper_id=paper_id,
+        source=PaperSource(source_type=source_type, identifier=identifier, verbosity=1),
+        s2_metadata=s2_metadata,
+        extract=extract,
+        verbosity_achieved=verbosity_achieved,  # type: ignore[arg-type]
+        error=error,
+    )
+
+
+def _output(
+    *,
+    retrieved_papers: list[RetrievedPaper] | None = None,
+    findings: list[ExpertContextItem] | None = None,
+    run_name: str = "test_run",
+    search_rounds_used: int = 0,
+) -> LiteratureReviewOutput:
+    return LiteratureReviewOutput(
+        agent_card=_agent_card(),
+        findings=findings or [],
+        retrieved_papers=retrieved_papers or [],
+        search_rounds_used=search_rounds_used,
+        run_name=run_name,
+        started_at="2026-05-29T14:21:18+00:00",
+        finished_at="2026-05-29T14:32:01+00:00",
+    )
+
+
+def _finding(
+    cite_id: str = "arxiv:2312.00752",
+    confidence: float | None = 0.85,
+    content: str = (
+        "**Implication.** Replace FCNet attention with a Mamba block.\n\n"
+        "**Mechanism.** Selective SSM with linear scan.\n\n"
+        "**Adaptation.** Drop in Mamba-1.4B; train full-spectrum.\n\n"
+        "*(rationale: deep-read; on-domain; mechanism implementable.)*"
+    ),
+) -> ExpertContextItem:
+    return ExpertContextItem(
+        source="ml_literature_review",
+        kind="literature",
+        content=content,
+        cite_id=cite_id,
+        confidence=confidence,
+    )
+
+
+class TestRenderReviewReportSummary:
+    """Top-of-report metadata banner — run name, timestamps, counts, tier
+    breakdown, rubric footnote."""
+
+    def test_run_name_and_timestamps_in_banner(self):
+        report = render_review_report(_output(run_name="squid_v1"))
+        assert "# Literature Review Report — squid_v1" in report
+        assert "`squid_v1`" in report
+        assert "`2026-05-29T14:21:18+00:00`" in report  # started_at
+        assert "`2026-05-29T14:32:01+00:00`" in report  # finished_at
+
+    def test_paper_and_finding_counts_in_banner(self):
+        papers = [_retrieved_paper(extract=_arxiv_extract())]
+        findings = [_finding()]
+        report = render_review_report(
+            _output(retrieved_papers=papers, findings=findings, search_rounds_used=2)
+        )
+        assert "Papers retrieved" in report
+        assert "Findings" in report
+        assert "Search rounds used" in report
+        assert "| 1 (" in report  # one paper
+        # findings count appears in its row
+        lines = [line for line in report.split("\n") if "Findings" in line]
+        assert any("1" in line for line in lines)
+
+    def test_tier_breakdown_counts_by_extraction_method(self):
+        papers = [
+            _retrieved_paper(paper_id="arxiv:1", identifier="1", extract=_arxiv_extract()),
+            _retrieved_paper(
+                paper_id="arxiv:2",
+                identifier="2",
+                extract=_arxiv_extract(title="P2"),
+            ),
+            _retrieved_paper(paper_id="arxiv:3", identifier="3", extract=_pdfplumber_extract()),
+        ]
+        report = render_review_report(_output(retrieved_papers=papers))
+        assert "2 × arxiv_source" in report
+        assert "1 × pdfplumber_llm" in report
+        assert "abstract_only" not in report  # no abstract_only paper this run
+
+    def test_unresolved_papers_counted_separately(self):
+        # A paper that failed resolution (no extract) shows up as "unresolved".
+        papers = [
+            _retrieved_paper(extract=_arxiv_extract()),
+            _retrieved_paper(
+                paper_id="arxiv:bad",
+                identifier="bad",
+                extract=None,
+                verbosity_achieved=0,
+                error="HTTP 404",
+            ),
+        ]
+        report = render_review_report(_output(retrieved_papers=papers))
+        assert "1 × arxiv_source" in report
+        assert "1 × unresolved" in report
+
+    def test_rubric_footnote_present(self):
+        report = render_review_report(_output())
+        assert "default" in report.lower() and "ConfidenceRubric" in report
+        # Numeric thresholds appear so the reader can map labels to numbers.
+        assert "≥0.80" in report and "≥0.60" in report and "≥0.40" in report
+
+
+class TestRenderReviewReportTier1Paper:
+    """A Tier-1 arxiv_source paper renders with the ✅ badge, no Tier-2
+    callout, no per-section caveats, and all populated prose sections."""
+
+    def test_arxiv_source_badge_with_check_mark(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "✅ `arxiv_source` (Tier 1 — clean LaTeX from arXiv source)" in report
+
+    def test_no_tier2_trust_callout_for_arxiv_paper(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "Trust note — Tier 2 source" not in report
+        assert "reconstructed from degraded PDF" not in report
+
+    def test_paper_heading_carries_paper_id_and_title(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract(title="Mamba"))])
+        )
+        assert "### 1. `arxiv:2312.00752` — Mamba" in report
+
+    def test_all_prose_sections_present_when_populated(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "**Core idea.**" in report
+        assert "**Architecture details.**" in report
+        assert "**Key results.**" in report
+        assert "**Relevance to task.**" in report
+        assert "**Key equations.**" in report
+        assert "**Pseudocode.**" in report
+
+    def test_empty_prose_field_is_skipped_not_left_as_hollow_heading(self):
+        extract = _arxiv_extract()
+        extract.core_idea = ""  # field genuinely empty
+        report = render_review_report(_output(retrieved_papers=[_retrieved_paper(extract=extract)]))
+        assert "**Core idea.**" not in report  # heading skipped entirely
+        # Other sections still present.
+        assert "**Architecture details.**" in report
+
+    def test_empty_equations_and_pseudocode_skipped(self):
+        extract = _arxiv_extract(key_equations_md="", pseudocode_md="")
+        report = render_review_report(_output(retrieved_papers=[_retrieved_paper(extract=extract)]))
+        assert "**Key equations.**" not in report
+        assert "**Pseudocode.**" not in report
+
+
+class TestRenderReviewReportTier2Paper:
+    """A pdfplumber_llm paper renders with the ⚠️ badge AND the Tier-2 trust
+    callout AND the per-section best-effort caveats — three trust channels
+    working together per the design."""
+
+    def test_pdfplumber_badge_with_warning_emoji(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        assert "⚠️ `pdfplumber_llm` (Tier 2 — degraded PDF text, LLM-reconstructed)" in report
+
+    def test_tier2_trust_callout_blockquote_present(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        assert "> ⚠️ **Trust note — Tier 2 source.**" in report
+        # The callout names which fields are reliable vs. best-effort.
+        assert "best-effort" in report
+        assert "verified against the source PDF" in report
+
+    def test_per_section_caveat_on_equations_and_pseudocode(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        # Caveat appears on BOTH the equations heading and the pseudocode heading.
+        assert (
+            "**Key equations.** *(reconstructed from degraded PDF — verify against source)*"
+            in report
+        )
+        assert (
+            "**Pseudocode.** *(reconstructed from degraded PDF — verify against source)*" in report
+        )
+
+    def test_tier2_paper_grepable_by_method_literal(self):
+        # Per the design: the literal string ``pdfplumber_llm`` appears in the
+        # extraction badge so reviewers can grep multi-paper reports. The
+        # banner also includes it (no backticks) in the tier breakdown.
+        report = render_review_report(
+            _output(
+                retrieved_papers=[
+                    _retrieved_paper(extract=_arxiv_extract()),
+                    _retrieved_paper(
+                        paper_id="arxiv:tier2",
+                        identifier="tier2",
+                        extract=_pdfplumber_extract(),
+                    ),
+                ]
+            )
+        )
+        # banner ("1 × pdfplumber_llm") + badge ("`pdfplumber_llm`") = at least 2.
+        assert report.count("pdfplumber_llm") >= 2
+
+
+class TestRenderReviewReportEdgeCases:
+    """Unresolved papers, abstract-only fallback, no-papers run."""
+
+    def test_unresolved_paper_renders_error_blockquote(self):
+        paper = _retrieved_paper(
+            paper_id="arxiv:bad",
+            identifier="bad",
+            extract=None,
+            verbosity_achieved=0,
+            error="HTTP 404 from arxiv.org",
+            s2_metadata={"title": "Missing", "paperId": "x"},
+        )
+        report = render_review_report(_output(retrieved_papers=[paper]))
+        assert "### 1. `arxiv:bad` — Missing" in report
+        assert "> ❌ **Resolver error:** HTTP 404 from arxiv.org" in report
+        # No prose / equation sections for an unresolved paper.
+        assert "**Core idea.**" not in report
+
+    def test_paper_without_s2_metadata_or_extract_renders_untitled(self):
+        paper = _retrieved_paper(
+            paper_id="local:foo.pdf",
+            source_type="local",
+            identifier="foo.pdf",
+            extract=None,
+            s2_metadata=None,
+            verbosity_achieved=0,
+        )
+        report = render_review_report(_output(retrieved_papers=[paper]))
+        assert "(untitled)" in report
+        assert "(no extract)" in report  # badge fallback
+
+    def test_no_retrieved_papers_section_shows_explicit_none(self):
+        report = render_review_report(_output(retrieved_papers=[]))
+        assert "## Retrieved papers" in report
+        assert "*(none — the agent retrieved zero papers this run.)*" in report
+
+
+class TestRenderReviewReportFindingsAbsent:
+    """Phase-1-only runs (no synthesis) get an honest 'none' callout that
+    surfaces the synthesis-didn't-run ambiguity."""
+
+    def test_empty_findings_renders_phase1_callout(self):
+        report = render_review_report(_output(findings=[]))
+        assert "## Findings" in report
+        assert "Phase-1-only extraction run" in report
+        assert "synthesis was not invoked" in report
+        # Reader is told what to cross-check.
+        assert "search_rounds_used" in report
+
+    def test_empty_findings_does_not_show_count_heading(self):
+        report = render_review_report(_output(findings=[]))
+        # The plural-count heading is reserved for the populated case.
+        assert "## Findings (0 total" not in report
+
+
+class TestRenderReviewReportFindingsPresent:
+    """Findings render with cite_id + matched paper title in the heading,
+    NEVER a title heuristically extracted from content (per the locked design
+    decision)."""
+
+    def test_finding_heading_uses_matched_paper_title(self):
+        papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
+        findings = [_finding(cite_id="arxiv:2312.00752")]
+        report = render_review_report(_output(retrieved_papers=papers, findings=findings))
+        # paper_id in code-quotes + dash + the matched title.
+        assert "### 1. `arxiv:2312.00752` — Mamba" in report
+
+    def test_finding_heading_falls_back_to_cite_id_only_when_no_match(self):
+        # Retrieved papers DO have titles, but none of them match the finding's
+        # cite_id — proves the renderer does not greedily inject the wrong
+        # title or fall back to a heuristic.
+        papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
+        findings = [_finding(cite_id="arxiv:9999.99999")]
+        report = render_review_report(_output(retrieved_papers=papers, findings=findings))
+        # The cite_id appears in a finding heading.
+        assert "### 1. `arxiv:9999.99999`" in report
+        # The unmatched paper's title must NOT leak into the finding heading.
+        # We extract the finding heading line and assert "Mamba" isn't on it.
+        finding_heading = next(
+            line
+            for line in report.split("\n")
+            if line.startswith("### 1.") and "arxiv:9999.99999" in line
+        )
+        assert "Mamba" not in finding_heading
+
+    def test_finding_content_rendered_verbatim_below_heading(self):
+        # The three-part content format is preserved exactly — the renderer
+        # does NOT try to parse, summarise, or re-label it.
+        findings = [_finding()]
+        report = render_review_report(_output(findings=findings))
+        assert "**Implication.** Replace FCNet attention" in report
+        assert "**Mechanism.** Selective SSM" in report
+        assert "**Adaptation.** Drop in Mamba-1.4B" in report
+        assert "*(rationale: deep-read" in report
+
+    def test_finding_metadata_line_shows_cite_source_kind(self):
+        findings = [_finding(cite_id="arxiv:2312.00752")]
+        report = render_review_report(_output(findings=findings))
+        assert "**Cite:** `arxiv:2312.00752`" in report
+        assert "**Source agent:** `ml_literature_review`" in report
+        assert "**Kind:** `literature`" in report
+
+    def test_confidence_band_label_mapping(self):
+        findings = [
+            _finding(cite_id="p:high", confidence=0.85),
+            _finding(cite_id="p:mod", confidence=0.65),
+            _finding(cite_id="p:low", confidence=0.45),
+        ]
+        report = render_review_report(_output(findings=findings))
+        # Numeric + band label both appear.
+        assert "confidence `0.85` (high)" in report
+        assert "confidence `0.65` (moderate)" in report
+        assert "confidence `0.45` (low)" in report
+
+    def test_findings_sorted_high_to_low_by_confidence(self):
+        # Deliberately fed in low-to-high order.
+        findings = [
+            _finding(cite_id="p:low", confidence=0.45),
+            _finding(cite_id="p:high", confidence=0.85),
+            _finding(cite_id="p:mod", confidence=0.65),
+        ]
+        report = render_review_report(_output(findings=findings))
+        idx_high = report.index("`p:high`")
+        idx_mod = report.index("`p:mod`")
+        idx_low = report.index("`p:low`")
+        assert idx_high < idx_mod < idx_low
+
+    def test_none_confidence_sorts_last_and_omits_band(self):
+        findings = [
+            _finding(cite_id="p:has_conf", confidence=0.65),
+            _finding(cite_id="p:no_conf", confidence=None),
+        ]
+        report = render_review_report(_output(findings=findings))
+        # The None-confidence finding shows no confidence suffix at all.
+        no_conf_block_start = report.index("`p:no_conf`")
+        no_conf_block_end = report.index("---", no_conf_block_start)
+        no_conf_block = report[no_conf_block_start:no_conf_block_end]
+        assert "confidence" not in no_conf_block
+        # ...and appears after the scored one.
+        assert report.index("`p:has_conf`") < report.index("`p:no_conf`")
+
+
+class TestRenderReviewReportDeterminism:
+    """Pure function: same input → byte-identical output, no time-of-day, no
+    randomness, no dict ordering ambiguity."""
+
+    def test_byte_identical_across_repeated_calls(self):
+        papers = [
+            _retrieved_paper(paper_id="arxiv:a", identifier="a", extract=_arxiv_extract()),
+            _retrieved_paper(paper_id="arxiv:b", identifier="b", extract=_pdfplumber_extract()),
+        ]
+        findings = [
+            _finding(cite_id="arxiv:a", confidence=0.65),
+            _finding(cite_id="arxiv:b", confidence=0.85),
+        ]
+        out = _output(retrieved_papers=papers, findings=findings, search_rounds_used=2)
+        r1 = render_review_report(out)
+        r2 = render_review_report(out)
+        assert r1 == r2
+
+    def test_tied_confidence_breaks_deterministically_by_cite_id(self):
+        # Two findings with the same confidence — secondary sort key is
+        # cite_id ascending — ensures stable diffs.
+        findings = [
+            _finding(cite_id="z:later", confidence=0.65),
+            _finding(cite_id="a:earlier", confidence=0.65),
+        ]
+        report = render_review_report(_output(findings=findings))
+        assert report.index("`a:earlier`") < report.index("`z:later`")
+
+
+class TestRenderReviewReportIsAvailableAsPublicAPI:
+    """The renderer is the documented public entrypoint — it must be
+    importable from the package (not just the submodule) so callers don't
+    couple to file layout."""
+
+    def test_render_review_report_importable_from_package(self):
+        from agent.prompt_templates.literature_review import render_review_report as r
+
+        assert callable(r)

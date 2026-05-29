@@ -25,9 +25,15 @@ docs/paper_resolver_pilot.md findings F1-F4):
 """
 
 import os
-from typing import Literal
+from typing import Any, Literal
 
-from agent.schemas.literature_review import ConfidenceRubric, SynthesisConfig
+from agent.schemas.literature_review import (
+    ConfidenceRubric,
+    LiteratureReviewOutput,
+    RetrievedPaper,
+    SynthesisConfig,
+)
+from agent.schemas.proposal import ExpertContextItem
 
 # ---------------------------------------------------------------------------
 # Synthesis omission-rule blocks (injected at the {OMISSION_RULE} placeholder
@@ -440,3 +446,380 @@ def render_synthesis_prompt(
         "the bottlenecks above."
     )
     return system_prompt, user_prompt
+
+
+# ---------------------------------------------------------------------------
+# render_review_report — deterministic Markdown view of a LiteratureReviewOutput.
+#
+# Pure function: no LLM, no I/O, no time-of-day; deterministic from its input.
+# Used as the canonical artifact for §10 Checkpoints E + F (extraction quality
+# review) and as a human-facing report for production runs. The caller is
+# responsible for writing the returned string to disk.
+#
+# The renderer accepts the validated ``LiteratureReviewOutput`` whole — single
+# source of truth per CLAUDE.md, future-proof against new output fields.
+#
+# Trust signals (the §10 contract): every retrieved paper carries a single
+# ``extraction_method`` badge in its metadata table and, for the lower-tier
+# ``pdfplumber_llm`` source, a callout blockquote and per-section italic
+# caveats. ``arxiv_source`` papers carry the same badge with a ✅ marker so the
+# tier is visible without reading the prose. The phrasing is fixed across all
+# reports so reviewers can grep / search consistently.
+# ---------------------------------------------------------------------------
+
+# Extraction-tier badge — fixed across all reports for grep-ability.
+# Wording matches the §10 acceptance criteria in external_agents_for_proposer.md
+# and the schema docstring on PaperExtract.extraction_method.
+_EXTRACTION_BADGES: dict[str, str] = {
+    "arxiv_source": "✅ `arxiv_source` (Tier 1 — clean LaTeX from arXiv source)",
+    "pdfplumber_llm": "⚠️ `pdfplumber_llm` (Tier 2 — degraded PDF text, LLM-reconstructed)",
+    "abstract_only": "⚪ `abstract_only` (no full text retrieved; abstract only)",
+}
+
+# Per-section caveat appended to `Key equations` / `Pseudocode` headings when
+# the source is degraded. Empty string for trustworthy tiers so the heading
+# stays clean. ``abstract_only`` should never reach an equations / pseudocode
+# render path (the compression prompt instructs the LLM to leave both empty
+# for that tier) but we keep an entry for completeness.
+_TIER_CAVEAT_PER_SECTION: dict[str, str] = {
+    "arxiv_source": "",
+    "pdfplumber_llm": " *(reconstructed from degraded PDF — verify against source)*",
+    "abstract_only": "",
+}
+
+# Tier-2 blockquote callout — rendered immediately under the metadata table
+# for ``pdfplumber_llm`` papers. Tier 1 and abstract-only papers don't get one.
+_TIER2_TRUST_CALLOUT = (
+    "> ⚠️ **Trust note — Tier 2 source.** This paper has no arXiv `.tex` "
+    "source, so the full text came from `pdfplumber` on the PDF. The "
+    "compression LLM reconstructed equations and pseudocode from degraded "
+    "glyphs. Prose fields (`core_idea`, `architecture_details`, `key_results`, "
+    "`relevance_to_task`) are generally reliable; `key_equations_md` and "
+    "`pseudocode_md` below are best-effort and must be verified against the "
+    "source PDF before use."
+)
+
+# Confidence band labels — derived from the default ConfidenceRubric thresholds
+# (0.80 / 0.60 / 0.40). Runs that override the rubric may map numbers to
+# different evidence criteria; the summary banner footnote tells the reader.
+_CONFIDENCE_BAND_THRESHOLDS: list[tuple[float, str]] = [
+    (0.80, "high"),
+    (0.60, "moderate"),
+    (0.40, "low"),
+]
+
+
+def _confidence_band_label(confidence: float | None) -> str:
+    """Map a numeric confidence to a default-rubric band name.
+
+    Returns ``""`` for ``None`` (synthesis didn't report one) so the caller can
+    skip the band suffix. Confidences below the lowest band map to
+    ``"below threshold"`` — these shouldn't ship in production (synthesis is
+    supposed to omit them) but surfacing them in the report aids audit.
+    """
+    if confidence is None:
+        return ""
+    for threshold, label in _CONFIDENCE_BAND_THRESHOLDS:
+        if confidence >= threshold:
+            return label
+    return "below threshold"
+
+
+def _format_authors(raw: Any) -> str:
+    """Normalise an author field from S2 metadata or PaperExtract into prose.
+
+    S2 stores authors as ``list[dict[str, Any]]`` with ``"name"`` keys; the
+    LLM-emitted ``PaperExtract.authors`` is already a comma-separated string.
+    Anything else (None, empty, unexpected shape) collapses to ``"(unknown)"``
+    so the renderer never crashes on partial data.
+    """
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    if isinstance(raw, list) and raw:
+        names = []
+        for entry in raw:
+            if isinstance(entry, dict):
+                name = entry.get("name")
+                if isinstance(name, str) and name.strip():
+                    names.append(name.strip())
+            elif isinstance(entry, str) and entry.strip():
+                names.append(entry.strip())
+        if names:
+            return ", ".join(names)
+    return "(unknown)"
+
+
+def _first_nonempty(*candidates: Any) -> str:
+    """Return the first candidate that is a non-empty string, else ``""``."""
+    for c in candidates:
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+    return ""
+
+
+def _render_summary_banner(output: LiteratureReviewOutput) -> str:
+    """Top-of-report metadata table + counts + rubric footnote."""
+    tier_counts: dict[str, int] = {"arxiv_source": 0, "pdfplumber_llm": 0, "abstract_only": 0}
+    unresolved = 0
+    for paper in output.retrieved_papers:
+        if paper.extract is not None:
+            tier_counts[paper.extract.extraction_method] = (
+                tier_counts.get(paper.extract.extraction_method, 0) + 1
+            )
+        else:
+            unresolved += 1
+
+    tier_parts = [f"{n} × {tier}" for tier, n in tier_counts.items() if n > 0]
+    if unresolved:
+        tier_parts.append(f"{unresolved} × unresolved (no extract)")
+    tier_breakdown = " · ".join(tier_parts) if tier_parts else "(none)"
+
+    findings_count = len(output.findings)
+    total = len(output.retrieved_papers)
+    return (
+        f"# Literature Review Report — {output.run_name}\n\n"
+        "| | |\n"
+        "|---|---|\n"
+        f"| **Run** | `{output.run_name}` |\n"
+        f"| **Started** | `{output.started_at}` |\n"
+        f"| **Finished** | `{output.finished_at}` |\n"
+        f"| **Papers retrieved** | {total} ({tier_breakdown}) |\n"
+        f"| **Findings** | {findings_count} (after rubric filtering) |\n"
+        f"| **Search rounds used** | {output.search_rounds_used} |\n"
+        "\n"
+        "> *Confidence labels (high / moderate / low) follow the default "
+        "ConfidenceRubric bands (≥0.80 / ≥0.60 / ≥0.40). Runs that override "
+        "the rubric may map numbers to different evidence criteria — see the "
+        "input config to verify.*"
+    )
+
+
+def _render_paper_block(idx: int, paper: RetrievedPaper) -> str:
+    """Render one ``RetrievedPaper`` as a Markdown sub-section.
+
+    Layout: heading → metadata table → optional Tier-2 callout → optional
+    error blockquote → prose sections (each skipped if empty) → equations →
+    pseudocode → trailing ``---`` separator.
+
+    ``paper_id`` always renders verbatim in the heading so a reader can grep
+    findings ↔ papers. Title falls back through ``extract.title`` →
+    ``s2_metadata['title']`` → ``"(untitled)"`` so partial-resolution papers
+    still render usefully.
+    """
+    s2 = paper.s2_metadata or {}
+    extract = paper.extract
+
+    title = (
+        _first_nonempty(
+            extract.title if extract else None,
+            s2.get("title"),
+        )
+        or "(untitled)"
+    )
+
+    if extract is not None:
+        badge = _EXTRACTION_BADGES.get(
+            extract.extraction_method,
+            f"`{extract.extraction_method}`",
+        )
+    else:
+        badge = "— (no extract)"
+
+    year = (
+        _first_nonempty(
+            extract.year if extract else None,
+            str(s2.get("year") or ""),
+        )
+        or "(unknown)"
+    )
+    authors = _format_authors((extract.authors if extract else None) or s2.get("authors"))
+    s2_paper_id = _first_nonempty(s2.get("paperId")) or "(none)"
+
+    metadata_table = (
+        "| Field | Value |\n"
+        "|---|---|\n"
+        f"| Source | `{paper.source.source_type}` : `{paper.source.identifier}` |\n"
+        f"| Verbosity achieved | `{paper.verbosity_achieved}` |\n"
+        f"| **Extraction** | {badge} |\n"
+        f"| Year | {year} |\n"
+        f"| Authors | {authors} |\n"
+        f"| S2 paperId | `{s2_paper_id}` |"
+    )
+
+    blocks: list[str] = [
+        f"### {idx}. `{paper.paper_id}` — {title}",
+        metadata_table,
+    ]
+
+    if extract is not None and extract.extraction_method == "pdfplumber_llm":
+        blocks.append(_TIER2_TRUST_CALLOUT)
+
+    if paper.error:
+        blocks.append(f"> ❌ **Resolver error:** {paper.error}")
+
+    if extract is not None:
+        # Prose sections — skip any field the LLM left empty so the report
+        # doesn't show hollow headings. Order matches the schema field order
+        # so a reviewer reading top-to-bottom always sees the same shape.
+        prose_sections = [
+            ("Core idea", extract.core_idea),
+            ("Architecture details", extract.architecture_details),
+            ("Key results", extract.key_results),
+            ("Relevance to task", extract.relevance_to_task),
+        ]
+        for heading, body in prose_sections:
+            body = body.strip()
+            if body:
+                blocks.append(f"**{heading}.** {body}")
+
+        # Equations / pseudocode get a tier-dependent caveat. Skip the entire
+        # section if the LLM produced no content (Tier 1 papers may genuinely
+        # have nothing publishable; abstract-only always does).
+        caveat = _TIER_CAVEAT_PER_SECTION.get(extract.extraction_method, "")
+        if extract.key_equations_md.strip():
+            blocks.append(f"**Key equations.**{caveat}\n\n{extract.key_equations_md.strip()}")
+        if extract.pseudocode_md.strip():
+            blocks.append(f"**Pseudocode.**{caveat}\n\n{extract.pseudocode_md.strip()}")
+
+    blocks.append("---")
+    return "\n\n".join(blocks)
+
+
+def _render_retrieved_papers_section(papers: list[RetrievedPaper]) -> str:
+    """The full "## Retrieved papers" section, numbered 1..N in input order.
+
+    Input order matters: root papers come first (as listed in the input),
+    then dynamic-search hits in the order they were discovered. Re-sorting
+    would obscure the agent's actual search trajectory.
+    """
+    if not papers:
+        return "## Retrieved papers\n\n*(none — the agent retrieved zero papers this run.)*"
+    blocks = [_render_paper_block(i + 1, p) for i, p in enumerate(papers)]
+    return "## Retrieved papers\n\n" + "\n\n".join(blocks)
+
+
+def _build_paper_title_lookup(papers: list[RetrievedPaper]) -> dict[str, str]:
+    """Map ``paper_id`` → resolved title for finding-heading cross-reference.
+
+    Falls back through ``extract.title`` → ``s2_metadata['title']``; ``None``
+    if neither is available so the caller can render cite_id-only headings.
+    """
+    lookup: dict[str, str] = {}
+    for paper in papers:
+        s2 = paper.s2_metadata or {}
+        title = _first_nonempty(
+            paper.extract.title if paper.extract else None,
+            s2.get("title"),
+        )
+        if title:
+            lookup[paper.paper_id] = title
+    return lookup
+
+
+def _render_finding_block(idx: int, item: ExpertContextItem, title_lookup: dict[str, str]) -> str:
+    """Render one ExpertContextItem as a Markdown sub-section.
+
+    Heading construction (per the design): ``cite_id — matched_title — confidence``
+    when a paper with ``paper_id == cite_id`` is in the lookup, else ``cite_id —
+    confidence``. We do NOT extract a title from the finding's ``content`` —
+    that proved fragile because the three-part format varies and any heuristic
+    would silently mislabel findings. ``content`` is rendered verbatim below
+    the heading.
+    """
+    confidence = item.confidence
+    band = _confidence_band_label(confidence)
+    conf_suffix = (
+        f" — confidence `{confidence:.2f}` ({band})"
+        if confidence is not None and band
+        else f" — confidence `{confidence:.2f}`"
+        if confidence is not None
+        else ""
+    )
+
+    matched_title = title_lookup.get(item.cite_id)
+    if matched_title:
+        heading = f"### {idx}. `{item.cite_id}` — {matched_title}{conf_suffix}"
+    else:
+        heading = f"### {idx}. `{item.cite_id}`{conf_suffix}"
+
+    metadata_line = (
+        f"**Cite:** `{item.cite_id}` · **Source agent:** `{item.source}` · **Kind:** `{item.kind}`"
+    )
+
+    return "\n\n".join([heading, metadata_line, item.content.strip(), "---"])
+
+
+def _render_findings_section(
+    findings: list[ExpertContextItem], title_lookup: dict[str, str]
+) -> str:
+    """The full "## Findings" section, sorted high→low by confidence.
+
+    Deterministic sort key: ``(-confidence, cite_id)``. ``None`` confidences
+    sort last (treated as ``-inf`` for the negated key). Findings are rendered
+    verbatim — the three-part Implication / Mechanism / Adaptation format
+    (when ``findings_verbosity=1`` was used) lives inside ``content`` already.
+    """
+    if not findings:
+        return (
+            "## Findings\n\n"
+            "*(none — either this report covers a Phase-1-only extraction "
+            "run (synthesis was not invoked) or synthesis ran and no findings "
+            "cleared the confidence threshold. Cross-check `search_rounds_used` "
+            "and the input config to disambiguate.)*"
+        )
+
+    def sort_key(item: ExpertContextItem) -> tuple[float, str]:
+        c = item.confidence if item.confidence is not None else float("-inf")
+        return (-c, item.cite_id)
+
+    sorted_findings = sorted(findings, key=sort_key)
+    blocks = [
+        _render_finding_block(i + 1, item, title_lookup) for i, item in enumerate(sorted_findings)
+    ]
+    return f"## Findings ({len(findings)} total, sorted by confidence)\n\n" + "\n\n".join(blocks)
+
+
+def render_review_report(output: LiteratureReviewOutput) -> str:
+    """Render a ``LiteratureReviewOutput`` as a Markdown report for human review.
+
+    Pure function — no I/O, no LLM, deterministic from its input. Callers
+    write the returned string to disk (e.g. ``docs/validation_suite_runs.md``).
+
+    Handles two scenarios with the same code path:
+
+    1. **§10 Phase 1 extraction reports** (Checkpoints E / F): the caller
+       constructs a minimal ``LiteratureReviewOutput`` with the resolved
+       papers and ``findings=[]``. The findings section honestly reports
+       "(none)" alongside ``search_rounds_used = 0`` so the reader sees
+       synthesis was not run.
+    2. **Production runs**: the renderer shows the same per-paper detail
+       plus the synthesised findings section, sorted high→low by confidence.
+
+    The Pydantic-validated ``LiteratureReviewOutput`` is the single source of
+    truth — per CLAUDE.md's "validated schema is the only execution input"
+    principle. This avoids signature drift when ``reference_library`` lands
+    in Commit 2d (it will be picked up via an optional-section block, no
+    signature change).
+
+    Confidence band labels (high / moderate / low) are derived from the
+    *default* ``ConfidenceRubric`` thresholds; runs that override the rubric
+    may map the same numbers to different evidence criteria — the summary
+    banner carries a footnote pointing readers at the input config.
+
+    Args:
+        output: A validated ``LiteratureReviewOutput`` produced by the
+                ml_literature_review node. Must be schema-valid; the renderer
+                does no further validation.
+
+    Returns:
+        A single Markdown document as a string. The same input always
+        produces the same output (deterministic sort, no time-of-day, no
+        randomness).
+    """
+    title_lookup = _build_paper_title_lookup(output.retrieved_papers)
+    sections = [
+        _render_summary_banner(output),
+        _render_retrieved_papers_section(output.retrieved_papers),
+        _render_findings_section(output.findings, title_lookup),
+    ]
+    return "\n\n".join(sections) + "\n"
