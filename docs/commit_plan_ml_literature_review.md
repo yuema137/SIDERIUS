@@ -43,6 +43,10 @@ commit). A commit is not "done" until both its automated test gate is green
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
 - [ ] **Commit 2c** — Three-tier full-text + formula extraction (arXiv source → marker → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` (tier cascade) + `@real_run` Tier-1 on TIDMAD · extraction-pilot artifact
+  - [x] **2c-a** — `PaperExtract` +3 fields + extraction-tier-aware compression prompt · committed `4da895d`
+  - [x] **2c-b** — Tier-1 arXiv source extraction wired end-to-end (parser + wrapper cascade + node propagation + 41 unit tests) · committed `1ebb034`
+  - [ ] **2c-c** — Tier-2 marker hook (optional dep, runtime detection, cascade tests)
+  - [ ] **2c-d** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F
   - [ ] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output)
   - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
 - [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
@@ -534,25 +538,46 @@ carry equations verbatim. NOTE: introduced after Commits 3 and 4 already shipped
 so it also requires re-validating the Commit-3 compression prompt against the
 new fields (Checkpoint F + the equation-aware prompt variant).
 
+**Sub-commit ladder**: split into four logical units committed sequentially —
+2c-a (schema + prompt), 2c-b (Tier-1 wire-up), 2c-c (Tier-2 marker hook),
+2c-d (pilot + render_review_report + Checkpoints E/F).
+
 **Checklist**:
-- [ ] Tier 1: arXiv source downloader (`https://arxiv.org/src/{id}` → `.tar.gz`)
+
+#### 2c-a — schema + prompt *(committed `4da895d`)*
+- [x] Add `key_equations_md`, `pseudocode_md`, `extraction_method` to
+      `PaperExtract`; update the "locked field set" docstring note accordingly.
+- [x] `render_paper_extract_prompt` becomes `extraction_method`-aware
+      (equation-aware for Tier 1–2; "reconstruct from degraded text, mark
+      unreliable" for Tier 3). Per-tier instruction blocks injected via the
+      `{EXTRACTION_INSTRUCTIONS}` placeholder.
+
+#### 2c-b — Tier-1 arXiv source wire-up *(committed `1ebb034`)*
+- [x] Tier 1: arXiv source downloader (`https://arxiv.org/src/{id}` → `.tar.gz`)
       + `.tex` parser for `equation`/`align`/`algorithm`/`figure` → clean Markdown.
+      Implemented in `agent/skills/paper_resolver_skill/arxiv_source.py` via
+      pylatexenc 2.x AST walk with verbatim slicing.
+- [x] Tier 3: existing `pdfplumber` text path retained as last resort
+      (no change to the path itself; cascade now arrives there only after
+      Tier-1 returns None).
+- [x] `extraction_method` wired end-to-end through the Tier-1 / Tier-3 paths:
+      set in the skill payload, returned in the response envelope, read by
+      the node and stamped on `PaperExtract` after LLM validation (so the
+      LLM cannot mint or override the trust signal).
+- [x] Unit tests for the **Tier-1 / Tier-3 cascade** (Tier-2 added in 2c-c):
+      21 parser tests + 10 wrapper cascade tests + 10 node propagation tests
+      (mocked HTTP throughout; no real network, no real LLM).
+
+#### 2c-c — Tier-2 marker hook
 - [ ] Tier 2 marker integration: add marker-pdf to pyproject.toml as an
       optional dependency (not in the default install group). The skill
       detects availability at runtime via importlib.util.find_spec("marker")
       and skips to Tier 3 if not found. CI (no GPU) must pass without marker
       installed — the unit tests mock the marker call, never import it directly.
-- [ ] Tier 3: existing `pdfplumber` text path retained as last resort.
-- [ ] `extraction_method` wired end-to-end: set in skill, returned in the
-      response envelope, read by the node to select the compression-prompt variant.
-- [ ] Add `key_equations_md`, `pseudocode_md`, `extraction_method` to
-      `PaperExtract`; update the "locked field set" docstring note accordingly.
-- [ ] `render_paper_extract_prompt` becomes `extraction_method`-aware
-      (equation-aware for Tier 1–2; "reconstruct from degraded text, mark
-      unreliable" for Tier 3).
-- [ ] Unit tests: each tier in isolation (mocked HTTP for arXiv source, mocked
-      `marker`, existing pdfplumber mock) + the **fallback cascade**
-      (Tier 1 fail → Tier 2 → Tier 3 → abstract_only).
+- [ ] Cascade-test extension: re-run the wrapper cascade suite with the
+      three-tier ordering (Tier 1 → Tier 2 → Tier 3 → abstract_only).
+
+#### 2c-d — pilot + render_review_report + Checkpoints E/F
 - [ ] **`render_review_report`** — pure, deterministic Markdown renderer for a
       lit-review run's artifacts (Phase 1 `RetrievedPaper` extracts and, when
       present, Phase 2 findings / reference_library). Reusable in production

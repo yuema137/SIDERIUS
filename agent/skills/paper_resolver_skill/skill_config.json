@@ -1,6 +1,6 @@
 {
   "name": "paper_resolver_skill",
-  "description": "Resolve a paper identifier (arxiv/doi/openreview/local) to S2 metadata + optional PDF text, or run a Semantic Scholar keyword search. Single skill, two modes: 'resolve' for one known paper, 'search' for keyword lookup. Shared per-paper mapping helper; only URL + envelope-unwrap differ between modes. Never raises — every exit returns a {status, data, message} envelope.",
+  "description": "Resolve a paper identifier (arxiv/doi/openreview/local) to S2 metadata + optional full text, or run a Semantic Scholar keyword search. Single skill, two modes: 'resolve' for one known paper, 'search' for keyword lookup. Full-text extraction (verbosity >= 1) uses a three-tier cascade: Tier 1 arXiv source (.tar.gz → cleaned LaTeX/Markdown, equations preserved) → Tier 2 marker-pdf (optional dep, PDF → Markdown) → Tier 3 pdfplumber (PDF text, degraded). The chosen tier is reported on the response as data.extraction_method (one of 'arxiv_source' / 'marker_pdf' / 'pdfplumber_llm' / 'abstract_only') — downstream consumers use it as a trust signal for equation/pseudocode reliability. Never raises — every exit returns a {status, data, message} envelope.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -21,7 +21,7 @@
       "verbosity": {
         "type": "integer",
         "enum": [0, 1, 2],
-        "description": "Depth of resolution. 0 = S2 metadata only (no PDF). 1 = metadata + extracted text snippet (later compressed to PaperExtract by the lit-review node). 2 = full extracted text. Resolve-mode default 1; search-mode default 0 (fan-out cost trap otherwise)."
+        "description": "Depth of resolution. 0 = S2 metadata only (no full-text fetch); data.extraction_method = 'abstract_only'. 1 = metadata + full text via the three-tier cascade (arXiv source → marker → pdfplumber), later compressed to PaperExtract by the lit-review node. 2 = same cascade as 1 but the full extracted text is also retained on the response. Resolve-mode default 1; search-mode default 0 (fan-out cost trap otherwise)."
       },
       "query": {
         "type": "string",
