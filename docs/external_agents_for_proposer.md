@@ -796,13 +796,13 @@ verified 2026-05-29 via `arxiv.org/src/{id}`.
 | 3 | Application — physics | `2511.20731` | Denoising gravitational wave with deep learning in the time-frequency domain | GW detector signal; tests `relevance_to_task` transfer to SQUID; prior extract data (Checkpoint B 5-paper check) | yes (Tier-1) |
 | 4 | Application — physics | `1811.02695` | Seismic Signal Denoising and Decomposition Using Deep Neural Networks (DeepDenoiser) | Different physical 1-D signal (geophysics); transfer-relevance test | yes (Tier-1) |
 | 5 | Denoising — architecture | `2501.04967` | Targeted Adversarial Denoising Autoencoders (TADA) for Neural Time Series Filtration | New 1-D neural-time-series denoising AE; prior data (canonical trace finding @0.50) | yes (Tier-1) |
-| 6 | Denoising — loss/training | `2510.25800` | FreIE: Low-Frequency Spectral Bias in Neural Networks for Time-Series Tasks | 1-D frequency-domain / metric-aligned loss; on-domain high-confidence path; prior data (canonical trace finding @0.45) | yes (Tier-1) |
+| 6 | Denoising — loss/training | `2510.25800` | FreLE: Frequency Loss Enhancement for Long-Term Time Series Prediction | 1-D frequency-domain loss enhancement (Fourier-amplitude MAE + adaptive frequency regularisation); on-domain high-confidence path; prior data (canonical trace finding @0.45). *(Title corrected post-2c-c.2 pilot — earlier revisions of this row said "FreIE: Low-Frequency Spectral Bias…", which was wrong.)* | yes (Tier-1) |
 | 7 | Denoising — loss/training (cross-domain) | `2503.18162` | SNRAware: Improved Deep Learning MRI Denoising with SNR Unit Training and G-factor Map Augmentation | **PDF-only fallback-tier case.** SNR-aware training exemplar; richest prior data (root in canonical trace; cited @0.65 in the isolated moderate comparison). Tests the moderate-tolerance cross-domain-with-caveat path **and** the Tier-2 (`pdfplumber + LLM`) extraction fallback | **no — PDF-only** (Tier-2) |
 
 **These papers are locked.** Do not substitute without updating this section and
 re-running the full suite. Additions (e.g. an 8th paper for a new track) are
 welcome but do not replace the seven core papers. **Two intentional design
-choices:** #6 (FreIE) and #7 (SNRAware) both occupy the denoising loss/training
+choices:** #6 (FreLE) and #7 (SNRAware) both occupy the denoising loss/training
 track because they exercise *different* behavioral paths — #6 the on-domain
 high-confidence path (0.60–0.79+ band), #7 the cross-domain transfer-caveat path
 (moderate tolerance) **and** the PDF-only extraction fallback (no `arxiv_source`).

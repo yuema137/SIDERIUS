@@ -47,8 +47,8 @@ commit). A commit is not "done" until both its automated test gate is green
   - [x] **2c-b** — Tier-1 arXiv source extraction wired end-to-end (parser + wrapper cascade + node propagation + 41 unit tests) · committed `1ebb034`
   - [ ] **2c-cleanup** — drop the `marker_pdf` tier entirely from schema/prompts/skill_config/docs (two-tier cascade locked: arXiv source → pdfplumber+LLM)
   - [ ] **2c-c** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F *(was 2c-d before Tier-2 was cancelled)*
-  - [ ] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output)
-  - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
+  - [x] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output) · signed off 2026-05-31 (§10 Phase-1 pilot artifact reviewed; equations correct + clean for all 6 .tex papers, pseudocode preserved for TADA + FreLE, others have no algorithm blocks)
+  - [x] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md` · signed off 2026-05-31 (compression passes across all 7 papers: architecture_details actionable, key_results carry regime qualifiers, relevance_to_task honest, zero hallucinations)
 - [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` + `tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py` + `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`; protocol mapping deferred to Commit 5
 - [x] **Commit 4** — `nodes/ml_literature_review.py` core loop
@@ -617,7 +617,7 @@ cascade is two-tier only — see "Why two tiers, not three" above)*
       `LiteratureReviewOutput` / `RetrievedPaper` list (with and without
       findings).
 - [ ] Pilot on the **§10 corpus** (7 papers, §10.2): six Tier-1 papers
-      (#1–#6 Mamba / PatchTST / GW / DeepDenoiser / TADA / FreIE) and SNRAware
+      (#1–#6 Mamba / PatchTST / GW / DeepDenoiser / TADA / FreLE) and SNRAware
       (#7) via the Tier-2 (`pdfplumber + LLM`) fallback. Capture per-paper
       `verbosity_achieved`, `extraction_method`, and full `PaperExtract`
       (incl. `key_equations_md` / `pseudocode_md`). The pilot script calls
@@ -652,7 +652,7 @@ cascade is two-tier only — see "Why two tiers, not three" above)*
 Run Tier-1 extraction on the **six §10 corpus papers with `.tex` source**
 (§10.2 #1–#6: Mamba `arxiv:2312.00752`, PatchTST `arxiv:2211.14730`,
 GW denoising `arxiv:2511.20731`, DeepDenoiser `arxiv:1811.02695`,
-TADA `arxiv:2501.04967`, FreIE `arxiv:2510.25800`); print each paper's
+TADA `arxiv:2501.04967`, FreLE `arxiv:2510.25800`); print each paper's
 extracted `key_equations_md` and `pseudocode_md`; **show the results before
 proceeding.** Verify per paper:
 - (a) each paper's key equations extract correctly (cross-check against the

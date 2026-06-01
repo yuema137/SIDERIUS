@@ -23,6 +23,13 @@ reports/
 # node (reference_data/ is otherwise tracked; these JSONs are not source).
 reference_data/root_papers_cache/
 
+# §10 Phase-1 pilot cache (Commit 2c-c.2). Committed reports live under
+# docs/validation_suite_runs.md once promoted; the cache holds raw arXiv
+# tarballs + intermediate JSON + the unpromoted rendered report, which are
+# not source. Per docs/external_agents_architecture.md §8: each external
+# agent owns its own reference_data/ subdirectory.
+reference_data/lit_review_pilot_cache/
+
 # Operating System files
 .DS_Store
 .claude/
