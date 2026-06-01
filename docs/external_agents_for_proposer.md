@@ -750,6 +750,20 @@ Still open:
    `agent/schemas/`, injected via a placeholder, no numbers in the .md). Deferred
    because changing them requires re-validating Checkpoint B. See the
    "Scoring and rubric design invariants" section in `external_agents_architecture.md`.
+7. **Dynamic `reference_library` routing (token optimization).** Today
+   `reference_library` is pushed into `ProposalInput` whole — every cited
+   paper's full `PaperExtract` (including `key_equations_md` and
+   `pseudocode_md`) lands in the prompt regardless of whether the proposer
+   actually reads it. A future optimization is to flip this into a
+   *pull / router* pattern: the proposer first reads `findings`, then
+   dynamically requests specific `PaperReference` entries via a
+   `lookup_reference(cite_id)` tool call. This would significantly reduce
+   prompt-token usage when the library is large (many cited papers,
+   equation-rich extracts). Natural implementation path: function-calling /
+   tool-use on the proposer side, keyed by `cite_id`. Deferred until the
+   `reference_library` is proven useful in production *and* the prompt
+   token budget becomes a real constraint — pre-optimising before either
+   condition holds would be premature.
 
 ---
 
