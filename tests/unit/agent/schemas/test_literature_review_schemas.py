@@ -347,7 +347,7 @@ class TestLiteratureReviewInput:
 
     def test_findings_verbosity_default_is_one(self):
         # Default = 1: structured three-part Markdown is the canonical
-        # proposer-facing format paired with reference_library (§5b).
+        # proposer-facing format.
         i = LiteratureReviewInput(
             experiment_history=_make_interp_output(),
             storage=_make_storage(),

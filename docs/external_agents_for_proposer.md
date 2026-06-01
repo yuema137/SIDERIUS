@@ -451,96 +451,115 @@ set). `PaperExtract` gains:
 - `extraction_method: Literal["arxiv_source","pdfplumber_llm","abstract_only"]`
   — first-class trust signal, default `"abstract_only"`.
 
-**Why Tier-1-first, and why it matters for the `reference_library`.** The
-`reference_library` (planned channel carrying the full `PaperExtract` for each
-verbosity≥1 paper cited in `findings`) is only as useful as the math it carries.
-For *recent* papers whose methods the proposer never saw in training, a finding
-that names a method without its equations/pseudocode is unimplementable — the
-proposer cannot describe or build a method it knows only by name. arXiv source
-is Tier 1 because it is ground-truth author text: no OCR, no font-glyph loss, no
-hallucination. `extraction_method` travels with the content so the proposer (and
-coder) can weight equation fidelity accordingly.
+**Why Tier-1-first, and why it matters for findings.** Equations and
+pseudocode reach the proposer by being **quoted inside
+`ExpertContextItem.content`** — the synthesis LLM lifts the relevant snippet
+out of `key_equations_md` / `pseudocode_md` while writing each finding's
+Mechanism (and Adaptation, where relevant). There is no separate channel
+carrying the full extracts to the proposer (see §5b). For that quoting to
+be trustworthy, the source extract has to be trustworthy: arXiv source is
+Tier 1 because it is ground-truth author text — no OCR, no font-glyph
+loss, no hallucination. The synthesis prompt is given each paper's
+`extraction_method` alongside the extracted fields so it can quote Tier-1
+equations verbatim and flag Tier-2 (`pdfplumber_llm`) ones as paraphrased.
 
 ---
 
-## §5b reference_library channel
+## §5b Equations and pseudocode in findings (Commit 2d)
 
-`findings` and `reference_library` are complementary channels:
-- **`findings`** (`List[ExpertContextItem]`) — LLM-synthesized implications:
-  *what to try*, grounded in the current bottlenecks. Always populated.
-- **`reference_library`** (`List[PaperReference]`) — the raw `PaperExtract` for
-  each cited paper: *how to implement it*, from the original source. Populated
-  only for papers deep-read at verbosity ≥ 1.
+**There is exactly one channel from the lit-review agent to the proposer:
+`expert_context: list[ExpertContextItem]`.** Earlier drafts of this doc
+proposed a parallel `reference_library` channel carrying typed
+`PaperReference` entries. That design has been **cancelled** —
+`LiteratureReviewOutput` gains nothing, `ProposalInput` gains nothing, no
+new schema crosses the boundary. The channel hierarchy in §2 stays at four
+(findings, vocab, mindset, disallowed_patterns), and `ProposalInput` is
+literally unchanged.
 
-A three-part finding tells the proposer a method exists and why it's relevant.
-But for a *recent* paper the proposer never saw in training, that is not enough
-to implement the method — it needs the original equations and pseudocode.
-`reference_library` carries exactly that, looked up by `cite_id`.
+### How equations and pseudocode reach the proposer
 
-**Schema** (`agent/schemas/literature_review.py`):
+The synthesis prompt
+(`agent/prompt_templates/literature_review/synthesis_system.md`) already
+receives a per-paper context block summarising each retrieved paper.
+Commit 2d extends that block to include `key_equations_md`,
+`pseudocode_md`, and `extraction_method` from each paper's `PaperExtract`,
+and updates the prompt to instruct the LLM to **quote the relevant snippet
+directly inside `ExpertContextItem.content`** when writing the finding —
+primarily in the **Mechanism** section, occasionally in **Adaptation**
+where the equation or algorithm IS the adaptation itself.
 
-```python
-class PaperReference(BaseModel):
-    """A single reference_library entry: the full PaperExtract for a paper
-    cited in findings, looked up by cite_id."""
-    paper_id: str            # matches RetrievedPaper.paper_id
-    cite_id: str             # matches ExpertContextItem.cite_id — the lookup key
-    title: str
-    year: str
-    extract: PaperExtract    # full extract incl. key_equations_md, pseudocode_md
-    verbosity_achieved: int  # always >= 1 for a reference_library entry
-    extraction_method: str   # propagated from PaperExtract.extraction_method —
-                             # equation-reliability signal for the proposer
-```
+The proposer sees the equations because they are *literally part of the
+finding's content string*. No new field, no lookup-by-cite_id, no
+proposer-side rendering. The proposer agent and `ProposalInput` schema do
+not change.
 
-**Population rule.** A `PaperReference` is emitted for exactly the papers that
-are (a) cited by at least one `ExpertContextItem` in `findings` **and** (b) have
-`verbosity_achieved >= 1`. Verbosity-0 (abstract-only) papers never appear — they
-have no `PaperExtract` to contribute. An **empty `reference_library` is valid**
-(every finding cited an abstract-only paper).
+### Trust signals (per-quote, not per-channel)
 
-**Lookup pattern (pull, not push).** The proposer reads `findings` first; for any
-finding it wants to act on, it takes that item's `cite_id` and looks up the
-matching `PaperReference` for the original equations/pseudocode/architecture. It
-is not required to read every entry — only the ones behind findings it builds on.
+`arxiv_source` quotes are verbatim ground truth; the synthesis prompt
+instructs the LLM to reproduce the LaTeX exactly. `pdfplumber_llm` quotes
+are best-effort and the prompt instructs the LLM to flag them explicitly
+("equation, paraphrased from a degraded PDF") rather than presenting them
+as authoritative. `abstract_only` papers contribute no equation content.
+The same `extraction_method` literal that drives the per-tier compression
+prompt (§5a) is surfaced into the synthesis prompt's per-paper block so
+the LLM can calibrate per quote.
 
-**Equation trust hierarchy** (`extraction_method`, descending reliability):
-`arxiv_source` (ground-truth LaTeX) > `pdfplumber_llm` (approximate) >
-`abstract_only` (not present — no reference_library entry).
+### Internal node-scratch state (not output)
 
-**Relationship to Commit 2c.** The `reference_library` *structure* lands in
-Commit 2d. Its equation *content* (`key_equations_md`, `pseudocode_md`) is
-reliably populated only once Commit 2c's two-tier extraction lands; before
-that, those fields are typically `None` — the structure is in place, content
-improves when 2c lands.
+The lit-review node may build a transient `cite_id → PaperExtract` lookup
+at synthesis-prompt-assembly time as a convenience — i.e. as it iterates
+the synthesis prompt's per-paper blocks, it pulls equations / pseudocode
+for each cited paper from this lookup. The lookup is **node-internal
+scratch state**: scoped to a single `synth()` call, not exposed on
+`LiteratureReviewOutput`, not serialised, not on disk, never crossing any
+module boundary. It is purely an implementation convenience inside the
+node — the output schema is unchanged.
 
-**Example — a finding and its reference_library entry side by side:**
+### Why this collapse is the right design
 
-A finding (in `expert_context`):
+A separate `list[PaperReference]` channel would have required schema
+dependencies between `proposal.py` and `literature_review.py` (or schema
+relocation gymnastics to avoid them), plus a new render function and a new
+proposer prompt slot. The end-to-end value — equations and pseudocode in
+front of the proposer — is delivered fully by extending the existing
+`ExpertContextItem.content` synthesis with the new fields. Strict
+zero-coupling at the schema layer; one channel only.
 
-    [LITERATURE REFERENCE] (from ml_literature_review, confidence=0.7,
+### Word budgets — unchanged for now
+
+`findings_verbosity=1`'s per-section caps (Implication ≤40 words,
+Mechanism ≤80 words, Adaptation ≤50 words) stay as they are. Equation
+LaTeX inside Mechanism counts toward the cap only if it carries
+surrounding prose words; the equation itself is short and the cap is
+generous. **Modify the caps only if real §10 Phase-2 runs show they
+squeeze out equation quotes** — not pre-emptively.
+
+### Relationship to Commit 2c
+
+Commit 2c put `key_equations_md` and `pseudocode_md` on `PaperExtract`;
+Commit 2d teaches the synthesis prompt to use them. The two are paired —
+2d is the consumer of 2c's payload, on the producer side of the boundary.
+
+### Example — equation quoted directly inside a finding
+
+A finding (in `expert_context`), with the equation lifted from the cited
+paper's `key_equations_md`:
+
+    [LITERATURE REFERENCE] (from ml_literature_review, confidence=0.65,
      cite_id=arxiv:2503.18162)
-      Given the optimization-to-metric mismatch, SNRAware's SNR-unit training
-      aligns the loss with the SNR metric rather than a proxy — try an
-      SNR-normalized reconstruction loss for the hard segments. (rationale:
-      deep-read, on-domain denoising with a clear mechanism transfer.)
+      **Implication.** Given the optimization-to-metric mismatch on
+      full-spectrum SQUID, try an SNR-normalized reconstruction loss for
+      the hard segments.
+      **Mechanism.** SNRAware aligns the loss with the SNR metric via
+      $$\mathcal{L}_{\text{SNR}} = -\log\frac{\|s\|^2}{\|s - \hat{s}\|^2}$$
+      (equation lifted from the paper's clean arXiv source).
+      **Adaptation.** Replace the MSE on high-SNR segments with this
+      log-ratio form; keep MSE elsewhere to avoid destabilising training.
+      (rationale: deep-read, on-domain mechanism transfer with a clear
+      ground-truth equation.)
 
-The matching reference_library entry (looked up by that `cite_id`):
-
-    paper_id:           arxiv:2503.18162
-    cite_id:            arxiv:2503.18162
-    title:              SNRAware: Improved Deep Learning MRI Denoising ...
-    year:               2025
-    verbosity_achieved: 1
-    extraction_method:  arxiv_source        # equations are ground truth
-    extract.key_equations_md:
-        The SNR-aware loss is:
-        $$\mathcal{L}_{\text{SNR}} = -\log\frac{\|s\|^2}{\|s - \hat{s}\|^2}$$
-    extract.architecture_details:
-        Dual-branch denoiser with an SNR-unit normalization front-end ...
-
-The proposer reads the finding to decide *whether* to pursue an SNR-aligned loss,
-then reads the reference entry to get the *exact* loss form to implement.
+The proposer reads one channel. The equation, the citation, and the
+adaptation step travel together inside `content`.
 
 ---
 
@@ -750,20 +769,6 @@ Still open:
    `agent/schemas/`, injected via a placeholder, no numbers in the .md). Deferred
    because changing them requires re-validating Checkpoint B. See the
    "Scoring and rubric design invariants" section in `external_agents_architecture.md`.
-7. **Dynamic `reference_library` routing (token optimization).** Today
-   `reference_library` is pushed into `ProposalInput` whole — every cited
-   paper's full `PaperExtract` (including `key_equations_md` and
-   `pseudocode_md`) lands in the prompt regardless of whether the proposer
-   actually reads it. A future optimization is to flip this into a
-   *pull / router* pattern: the proposer first reads `findings`, then
-   dynamically requests specific `PaperReference` entries via a
-   `lookup_reference(cite_id)` tool call. This would significantly reduce
-   prompt-token usage when the library is large (many cited papers,
-   equation-rich extracts). Natural implementation path: function-calling /
-   tool-use on the proposer side, keyed by `cite_id`. Deferred until the
-   `reference_library` is proven useful in production *and* the prompt
-   token budget becomes a real constraint — pre-optimising before either
-   condition holds would be premature.
 
 ---
 
@@ -777,8 +782,9 @@ This suite is the definitive answer to: *"does the system correctly extract
 technical content from papers and produce actionable findings for the
 proposer?"* It validates the **complete pipeline** end-to-end —
 `paper_resolver_skill` → `PaperExtract` (compression) → synthesis →
-`ExpertContextItem` findings → (Commit 2d) `reference_library` — on a fixed
-corpus of real arXiv papers, with human review of every intermediate artifact.
+`ExpertContextItem` findings (with equation / pseudocode quotes inlined from
+2c's `key_equations_md` / `pseudocode_md`, per 2d) — on a fixed corpus of
+real arXiv papers, with human review of every intermediate artifact.
 
 It is a **permanent fixture, not a one-time checkpoint**. The corpus of seven
 papers (§10.2) is *locked*: every future change to a prompt
@@ -854,13 +860,16 @@ record which values were used.
 
 > **Runnability — Commits 2c/2d dependency.** The suite is *fully* runnable only
 > after Commits 2c (two-tier extraction → `key_equations_md`, `pseudocode_md`,
-> `extraction_method`) and 2d (`reference_library`) land. Before then it is
+> `extraction_method`) and 2d (synthesis prompt quotes equations / pseudocode
+> inside `ExpertContextItem.content`) land. Before then it is
 > **partially runnable**: **runnable now** (Commit 4 shipped) — Step 1a (v0
 > metadata), Step 1b for the seven core `PaperExtract` fields, and all of Phase 2
 > (cite_id / confidence band / three-part content / Fix B / clamp); **requires
 > Commit 2c** — Step 1b's `key_equations_md` / `pseudocode_md` /
 > `extraction_method` checks; **requires Commit 2d** — Phase 2's
-> `reference_library` sub-check.
+> equation-aware-finding sub-check (content quotes equations from
+> `key_equations_md` for cited Tier-1 papers; flags or paraphrases for
+> Tier-2 papers).
 
 Run in two phases; capture and human-review every intermediate artifact.
 
@@ -897,10 +906,28 @@ Per `ExpertContextItem` in `findings`, review:
 - No frequency-split recommendations (Fix B must hold).
 - Cross-domain papers (esp. #7 SNRAware): does the **Adaptation** explicitly state the transfer assumption?
 
-Additionally, `reference_library` (after Commit 2d):
-- Each verbosity=1 paper cited in findings appears in `reference_library`?
-- Each `PaperReference.extract` matches the `PaperExtract` from Phase 1?
-- `extraction_method` correctly propagated (incl. the non-`arxiv_source` value for #7)?
+Additionally, **equation- and pseudocode-aware findings** (after Commit 2d):
+- For each finding citing a Tier-1 paper that has a non-empty
+  `key_equations_md`: does the finding's `content` quote at least one
+  equation verbatim (typically inside **Mechanism**)?
+- For each finding citing a Tier-1 paper that has a non-empty
+  `pseudocode_md`: does the finding's `content` reproduce the relevant
+  algorithm fragment (verbatim or near-verbatim) when the algorithm IS the
+  mechanism?
+- For findings citing Tier-2 (`pdfplumber_llm`) papers: are equations
+  flagged as paraphrased / approximate rather than presented as ground
+  truth?
+- For findings citing `abstract_only` papers: no equation quotes (correct
+  — there is no source to quote from).
+- Is each cited equation **consistent with the source paper's
+  `key_equations_md`** (no hallucination)?
+- Is the finding specific enough that a proposer reading only this
+  `ExpertContextItem` knows *how to implement* the method, not just
+  *that the method exists*?
+
+These sub-checks form **Checkpoint G** (see §10.5 and the commit-plan's
+behavioral-checkpoints section). They are the human-review acceptance bar
+for Commit 2d, replacing the cancelled `reference_library`-population check.
 
 ### §10.5 — Acceptance criteria
 
@@ -918,7 +945,14 @@ A run passes if **all** of the following hold.
 - All findings in the correct confidence band per the rubric.
 - All findings in `findings_verbosity=1` mode have all three labeled sections present.
 - Fix B holds: zero frequency-split recommendations.
-- `reference_library` contains entries for all verbosity=1 papers that appear in findings (after Commit 2d).
+- For findings citing Tier-1 papers with non-empty `key_equations_md`,
+  the equation appears verbatim inside `content` (after Commit 2d). Tier-2
+  citations carry a paraphrase flag instead of a verbatim quote. Cited
+  equations are consistent with the source paper (no hallucination).
+- For at least the majority of v=1-cited findings, a proposer reading the
+  `ExpertContextItem` knows *how to implement* the method (specific layer
+  types, equation form, training regime), not just *that a method exists*
+  (Checkpoint G).
 
 **Failure response:**
 - Phase 1 failure on `architecture_details` or `key_equations_md` → revise the compression prompt or extraction tier; re-run Checkpoints B / E / F.
@@ -934,12 +968,16 @@ A run passes if **all** of the following hold.
 | Checkpoint C | Dynamic search loop behavior | §10 Phase 2 uses the same synthesis evaluation criteria |
 | Checkpoint E | Tier-1 formula extraction quality (Commit 2c) | §10 Phase 1 Step 1b includes `key_equations_md` review (#1–#6) |
 | Checkpoint F | LLM compression for new fields (Commit 2c) | §10 Phase 1 Step 1b includes the equation/pseudocode field review |
+| Checkpoint G | Final synthesis output quality (Commit 2d) | §10 Phase 2 includes the equation-aware-finding sub-checks: equations quoted verbatim from Tier-1 sources inside `ExpertContextItem.content`, no hallucination vs source, findings specific enough to implement (not just name) the method, measurable improvement over pre-2d findings |
 | Checkpoint D | End-to-end proposer behavior change (Commit 6) | §10 is a **prerequisite** for Checkpoint D — the suite must pass before wiring into the workflow |
 
 ### §10.7 — When to run the suite
 
 - Before opening the PR for **Commit 2c** (Checkpoints E + F).
-- Before opening the PR for **Commit 2d** (`reference_library` population check).
+- Before opening the PR for **Commit 2d** (Checkpoint G — equation-aware
+  findings: do Tier-1 citations quote the equation verbatim inside
+  `content`, are quotes consistent with source, are findings specific
+  enough to implement?).
 - Before **Checkpoint D** (Commit 6) — must pass as a prerequisite.
 - Any time a prompt file is modified (`synthesis_system.md`, `search_decision_system.md`, `paper_extract_system.md`).
 - Any time `ConfidenceRubric` default values change.

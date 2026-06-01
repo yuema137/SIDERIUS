@@ -797,9 +797,7 @@ def render_review_report(output: LiteratureReviewOutput) -> str:
 
     The Pydantic-validated ``LiteratureReviewOutput`` is the single source of
     truth — per CLAUDE.md's "validated schema is the only execution input"
-    principle. This avoids signature drift when ``reference_library`` lands
-    in Commit 2d (it will be picked up via an optional-section block, no
-    signature change).
+    principle.
 
     Confidence band labels (high / moderate / low) are derived from the
     *default* ``ConfidenceRubric`` thresholds; runs that override the rubric

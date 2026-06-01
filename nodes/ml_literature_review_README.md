@@ -12,7 +12,7 @@ _TODO (Commit 2d)._ The `ml_literature_review` node is the first external agent
 feeding the proposal pipeline: it resolves root papers, runs a dynamic
 Semantic-Scholar search loop grounded in the current iteration's
 `InterpretationOutput`, deep-reads selected papers into `PaperExtract`s, and
-synthesizes `findings` (+ a `reference_library`) for the proposer.
+synthesizes `findings` for the proposer.
 
 ## Input
 
@@ -26,22 +26,31 @@ _TODO (Commit 2d): explain every `LiteratureReviewInput` field._ Fields:
 _TODO (Commit 2d)._ `LiteratureReviewOutput` (extends `ExternalAgentOutput`):
 - `agent_card` — static self-description + confidence-rubric legend (trust calibration).
 - `findings` — `ExpertContextItem`s: *what to try*, grounded in bottlenecks.
-- `reference_library` — `PaperReference`s: *how to implement it* (raw `PaperExtract`
-  per verbosity≥1 cited paper). See §5b.
+  When a cited paper has Tier-1 `key_equations_md` / `pseudocode_md`, the
+  synthesis LLM quotes the relevant equation / algorithm directly inside the
+  finding's `content` (primarily in **Mechanism**); the equation reaches the
+  proposer as a literal part of the finding string. See §5b of
+  `docs/external_agents_for_proposer.md`.
 - `retrieved_papers` — full audit trail; `search_rounds_used`; timestamps.
+
+**Sole output channel to the proposer:** `findings`. There is no separate
+`reference_library` output field — equations travel inline inside finding
+`content` (per the 2d revision; see §5b for the channel-cancellation
+rationale). The proposer-side schema (`ProposalInput`) is unchanged.
 
 ## Output contract for downstream consumers
 
 _TODO (Commit 2d)._ How to consume this node's output:
-- **findings** — read `content` (names the bottleneck + the concrete implication);
-  `cite_id` attributes it to a paper; `confidence` interpreted per the rubric.
-- **reference_library** — for a finding worth acting on, take its `cite_id` and
-  look up the matching `PaperReference` for the original equations
-  (`key_equations_md`), pseudocode (`pseudocode_md`), and architecture details.
-  Pull channel — read only the entries you need.
-- **confidence scores** — defined by `ConfidenceRubric` (single source of truth);
-  the bands are surfaced to the proposer via `agent_card.trust_guidance`.
-  `extraction_method` on each reference entry signals equation reliability.
+- **findings** — read `content` (names the bottleneck + the concrete
+  implication, and for Tier-1-cited papers carries the verbatim
+  equation / pseudocode inline); `cite_id` attributes it to a paper;
+  `confidence` interpreted per the rubric.
+- **confidence scores** — defined by `ConfidenceRubric` (single source of
+  truth); the bands are surfaced to the proposer via
+  `agent_card.trust_guidance`. The cited paper's `extraction_method`
+  drives whether the synthesis LLM quotes the equation verbatim
+  (Tier-1 `arxiv_source`) or as a flagged paraphrase
+  (Tier-2 `pdfplumber_llm`).
 
 ## LLM routing
 
@@ -59,8 +68,10 @@ _TODO (Commit 2d)._
   evaluates retrieved papers each round but applies a conservative
   "directly addresses a bottleneck with a specific actionable mechanism" bar, so
   verbosity≥1 findings arise mostly from root papers.
-- Equation content in `reference_library` is reliable only after Commit 2c's
-  three-tier extraction lands (`extraction_method` is the trust signal).
+- Equation content quoted inline inside finding `content` is reliable only
+  for Tier-1 (`arxiv_source`) papers — Commit 2c's two-tier extraction
+  drives this. Tier-2 (`pdfplumber_llm`) equations are quoted as flagged
+  paraphrases; `abstract_only` papers contribute no equations.
 - Cannot run experiments or judge SQUID-specific applicability without empirical
   confirmation (findings are promising priors only).
 

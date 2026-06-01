@@ -438,7 +438,7 @@ class LiteratureReviewInput(BaseModel):
         description="Detail level for each finding's `content` string. 1 = "
         "structured three-part Markdown (`**Implication:**` / `**Mechanism:**` / "
         "`**Adaptation:**` + closing `(rationale: ...)`), the canonical "
-        "proposer-facing format paired with reference_library (§5b). 0 = "
+        "proposer-facing format. 0 = "
         "single-paragraph backward-compat. Only the synthesis prompt's content "
         "format changes; the ExpertContextItem schema is unchanged either way.",
     )
