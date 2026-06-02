@@ -1106,3 +1106,196 @@ class TestExtractionMethodPropagation:
             f"system prompt for method={method!r} should mention {fingerprint!r}; "
             f"got: {system[:200]}..."
         )
+
+
+# ---------------------------------------------------------------------------
+# Commit 2d — node-side synthesis-prompt assembly.
+#
+# _paper_for_synthesis builds the per-paper dict the synthesis prompt's
+# render function reads. Commit 2d added three fields (key_equations_md,
+# pseudocode_md, extraction_method) so the LLM can quote equations directly
+# inside ExpertContextItem.content. These tests pin the assembly contract.
+# ---------------------------------------------------------------------------
+
+
+class TestPaperForSynthesis2dFields:
+    """``MLLiteratureReviewAgent._paper_for_synthesis`` must surface 2d's
+    new fields from the PaperExtract verbatim. The node is the producer of
+    the per-paper dict; if it drops the fields here, no downstream renderer
+    can recover them."""
+
+    def _agent(self, tmp_path):
+        bridge = FakeBridge()
+        return MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+
+    def _retrieved_with_extract(self, **extract_overrides):
+        extract_kwargs = {
+            "title": "T",
+            "authors": "A",
+            "year": "2024",
+            "core_idea": "ci",
+            "architecture_details": "AD",
+            "key_results": "KR",
+            "relevance_to_task": "RT",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        extract_kwargs.update(extract_overrides)
+        return RetrievedPaper(
+            paper_id="arxiv:test",
+            source=PaperSource(source_type="arxiv", identifier="test", verbosity=1),
+            s2_metadata={"title": "T", "year": 2024},
+            extract=PaperExtract(**extract_kwargs),
+            verbosity_achieved=1,
+        )
+
+    def test_tier1_extract_fields_propagate(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="$$y = f(x)$$",
+            pseudocode_md="```python\nfor i in range(N):\n    ...\n```",
+            extraction_method="arxiv_source",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == "$$y = f(x)$$"
+        assert d["pseudocode_md"] == "```python\nfor i in range(N):\n    ...\n```"
+        assert d["extraction_method"] == "arxiv_source"
+
+    def test_tier2_extract_fields_propagate(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="$$y \\approx f(x)$$",
+            pseudocode_md="",
+            extraction_method="pdfplumber_llm",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == "$$y \\approx f(x)$$"
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "pdfplumber_llm"
+
+    def test_abstract_only_paper_has_empty_quote_fields(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="",
+            pseudocode_md="",
+            extraction_method="abstract_only",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == ""
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "abstract_only"
+
+    def test_no_extract_defaults_to_abstract_only(self, tmp_path):
+        # A v=0 retrieval (no extract at all) still produces a usable dict
+        # with the safe-default tier — the synthesis prompt will see
+        # ``abstract_only`` and skip the equation sub-blocks.
+        rp = RetrievedPaper(
+            paper_id="arxiv:meta_only",
+            source=PaperSource(source_type="arxiv", identifier="meta_only", verbosity=0),
+            s2_metadata={"title": "MO", "year": 2020, "abstract": "Just an abstract."},
+            extract=None,
+            verbosity_achieved=0,
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == ""
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "abstract_only"
+        # Existing prose-summary fallback path still works.
+        assert d["summary"] == "Just an abstract."
+
+    def test_legacy_dict_keys_still_present(self, tmp_path):
+        # Backward compat: every consumer that read the old 4 keys must
+        # still find them. The new fields are additive.
+        rp = self._retrieved_with_extract(extraction_method="arxiv_source")
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        for key in ("paper_id", "title", "year", "summary"):
+            assert key in d, f"legacy key {key!r} missing"
+
+
+class TestSynthesisPromptReceivesPerPaperEquations:
+    """End-to-end: a v=1 retrieved paper with non-empty key_equations_md /
+    pseudocode_md must reach the rendered synthesis system+user prompts
+    such that the LLM sees the equation verbatim. Mocked bridge — no real
+    LLM call."""
+
+    def test_equation_and_pseudocode_reach_synthesis_user_prompt(self, tmp_path, monkeypatch):
+        # Stub the resolver to return a Tier-1 paper with equations + pseudocode
+        # in its extract; the node compresses it (via the FakeBridge) and then
+        # synthesises. We capture the synthesis prompt the bridge sees.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": {
+                    "title": "EquationCarryingPaper",
+                    "authors": "A. Auth",
+                    "year": "2024",
+                    "core_idea": "...",
+                    "architecture_details": "...",
+                    "key_results": "...",
+                    "relevance_to_task": "...",
+                    "key_equations_md": "$$\\hat{y} = M(x)$$",
+                    "pseudocode_md": "```algorithm\nfor t: y_t = M(x_t)\n```",
+                },
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        # Resolver returns v=1 text + arxiv_source tier so the node compresses
+        # via the bridge and the extract's tier is arxiv_source end-to-end.
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "EquationCarryingPaper", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "fake LaTeX body",
+                    "extraction_method": "arxiv_source",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.run(_input(tmp_path))
+
+        # Find the synthesis user prompt the bridge actually saw.
+        synth_user_prompts = [
+            user for (label, _sys, user) in bridge.prompts if label == "lit_review.synthesis"
+        ]
+        assert synth_user_prompts, "synthesis prompt was not issued"
+        user = synth_user_prompts[0]
+
+        # The equation reached the synthesis prompt verbatim — including
+        # the dollar-sign delimiters so the LLM can copy them into
+        # ``**Mechanism:**`` unchanged.
+        assert "$$\\hat{y} = M(x)$$" in user
+        # Pseudocode block also present.
+        assert "```algorithm" in user
+        assert "y_t = M(x_t)" in user
+        # Per-tier marker tells the LLM to quote verbatim.
+        assert "Extraction: arxiv_source (Tier 1" in user
+
+    def test_synthesis_system_prompt_carries_placement_rule(self, tmp_path, monkeypatch):
+        # Independent of the per-paper content, the locked placement rule
+        # (Mechanism = source-extracted; Adaptation = LLM reasoning, no raw
+        # equations) must reach the synthesis system prompt every run.
+        bridge = FakeBridge(responses={"lit_review.synthesis": {"findings": []}})
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.run(_input(tmp_path))
+        synth_systems = [
+            sys_ for (label, sys_, _user) in bridge.prompts if label == "lit_review.synthesis"
+        ]
+        assert synth_systems
+        system = synth_systems[0]
+        assert "Placement rule (LOCKED" in system
+        assert "Mechanism = source-extracted content ONLY" in system
+        assert "Adaptation MUST NOT contain raw equations" in system

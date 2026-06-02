@@ -600,9 +600,26 @@ class MLLiteratureReviewAgent:
         }
 
     def _paper_for_synthesis(self, rp: RetrievedPaper) -> dict:
-        """Fuller view for the synthesis prompt — prefers the compressed extract."""
+        """Fuller view for the synthesis prompt — prefers the compressed extract.
+
+        Returns a dict carrying the per-paper context the synthesis LLM sees.
+        Six fields:
+
+          - ``paper_id`` / ``title`` / ``year`` — citation header.
+          - ``summary`` — prose blob (architecture / results / relevance from
+            the extract, or the s2 abstract as fallback).
+          - ``key_equations_md`` / ``pseudocode_md`` / ``extraction_method``
+            (Commit 2d) — extracted-content fields the synthesis prompt uses
+            to quote equations and pseudocode directly inside the finding's
+            **Mechanism** section. Empty strings (and ``"abstract_only"`` for
+            ``extraction_method``) when the paper has no extract — the
+            renderer skips the corresponding blocks in that case.
+        """
         title = year = None
         summary = ""
+        key_equations_md = ""
+        pseudocode_md = ""
+        extraction_method = "abstract_only"
         if rp.s2_metadata:
             title = rp.s2_metadata.get("title")
             year = rp.s2_metadata.get("year")
@@ -619,7 +636,22 @@ class MLLiteratureReviewAgent:
                 parts.append(f"Relevance: {rp.extract.relevance_to_task}")
             if parts:
                 summary = "\n".join(parts)
-        return {"paper_id": rp.paper_id, "title": title, "year": year, "summary": summary}
+            # Commit 2d: surface equation + pseudocode + tier so the synthesis
+            # prompt can quote them inline inside Mechanism. extraction_method
+            # is always set when an extract exists (PaperExtract schema default
+            # is "abstract_only" — see agent/schemas/literature_review.py).
+            key_equations_md = rp.extract.key_equations_md
+            pseudocode_md = rp.extract.pseudocode_md
+            extraction_method = rp.extract.extraction_method
+        return {
+            "paper_id": rp.paper_id,
+            "title": title,
+            "year": year,
+            "summary": summary,
+            "key_equations_md": key_equations_md,
+            "pseudocode_md": pseudocode_md,
+            "extraction_method": extraction_method,
+        }
 
     # ------------------------------------------------------------------
     # Storage (log, not a channel — see CLAUDE.md inter-node invariant)

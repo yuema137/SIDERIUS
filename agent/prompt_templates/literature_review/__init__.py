@@ -79,28 +79,64 @@ _SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the three separate
 structured `content`):
 
   {"findings": [
-     {"content": "**Implication:** Given the high-frequency-overfitting bottleneck, try a wider dilation schedule for the convolutional decoder.\\n**Mechanism:** WaveNet's dilated causal convolutions widen the receptive field exponentially without extra depth, applied across the full 1-D signal in a single model.\\n**Adaptation:** Replace the current encoder\'s fixed-dilation convs with dilation powers of 2 to cover the high-frequency band without scaling parameters.\\n(rationale: single full-spectrum paper, not yet replicated here.)",
-      "cite_id": "arxiv:2406.04378",
+     {"content": "**Implication:** Given the optimization-to-metric mismatch on full-spectrum SQUID, try an SNR-normalised reconstruction loss for the hard segments.\\n**Mechanism:** SNRAware aligns the loss with the SNR metric via\\n$$\\\\mathcal{L}_{\\\\text{SNR}} = -\\\\log\\\\frac{\\\\|s\\\\|^2}{\\\\|s - \\\\hat{s}\\\\|^2}$$\\nover whitened single-coil segments, applied alongside G-factor map augmentation.\\n**Adaptation:** Replace MSE on high-SNR segments with this log-ratio form; keep MSE elsewhere to avoid destabilising the WaveNet backbone.\\n(rationale: deep-read, on-domain mechanism transfer with a clear ground-truth equation.)",
+      "cite_id": "arxiv:2503.18162",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
-`content` format — structured three-part Markdown. Each item\'s `content` MUST
+`content` format — structured three-part Markdown. Each item's `content` MUST
 be three labeled parts in this exact order, separated by newlines, followed by
-a closing rationale line:
+a closing rationale line.
+
+**Placement rule (LOCKED — do not violate):**
+
+- **Mechanism = source-extracted content ONLY.** Everything in Mechanism is
+  lifted from what the per-paper block above provides about the paper —
+  architecture / loss / training-regime description, plus any equation or
+  pseudocode block the per-paper context exposes. Mechanism contains NO
+  LLM-added reasoning, NO speculation, NO bridging-to-SQUID logic.
+- **Adaptation = LLM reasoning on top.** Adaptation is where you write how
+  to bridge from the paper's setup to the SQUID full-spectrum denoising
+  task. Adaptation MUST NOT contain raw equations from the source paper —
+  those belong in Mechanism. Adaptation references the equation by
+  describing the bridging step ("apply the SNR-weighted loss on
+  high-SNR segments"), not by re-quoting it.
+
+The three labeled parts:
 
 - **Implication:** name the specific current bottleneck (or key finding) it
   addresses, and the concrete thing to try next. Ground every implication in
   one of the listed bottlenecks. NOT "Paper X proposes dilated convolutions",
-  but "Given the high-frequency-overfitting bottleneck, Paper X\'s
+  but "Given the high-frequency-overfitting bottleneck, Paper X's
   receptive-field control suggests a wider dilation schedule." (≤ 40 words)
 - **Mechanism:** the specific architectural / loss / training mechanism from
-  the paper that supplies the implication — name layers, operations, or loss
-  terms concretely. Carry over any training-regime qualifier (e.g. "under
-  frequency-split training") and never present a regime-specific result as
-  general. (≤ 80 words)
-- **Adaptation:** how to bridge from the paper\'s domain/setup to the agent\'s
-  task (full-spectrum 1-D SQUID denoising). State a concrete adaptation step
-  or flag a transfer caveat. (≤ 50 words)
+  the paper — source content only. Quote it directly from the per-paper
+  block you were given:
+    * When the paper's `Extraction:` marker is `arxiv_source` AND the per-
+      paper block contains a `Key equations (verbatim from source ...)`
+      sub-block, quote at least one equation **verbatim** here — copy the
+      LaTeX exactly as given, preserve `$$...$$` / `$...$` delimiters.
+    * When the marker is `pdfplumber_llm`, the equation in the per-paper
+      block is best-effort reconstruction from a degraded PDF. Paraphrase
+      it in Mechanism and add an explicit flag like "approximate equation,
+      reconstructed from a degraded PDF" — do NOT present it as ground
+      truth.
+    * When the per-paper block contains a `Pseudocode (verbatim from
+      source ...)` sub-block AND the algorithm IS the mechanism (e.g.
+      reweighting / scheduling / scale-targeting algorithms), reproduce
+      the relevant 3-8 lines as a fenced code block inside Mechanism.
+      Otherwise just name the algorithm in prose.
+    * When the marker is `abstract_only`, the per-paper block carries no
+      equations or pseudocode — describe the mechanism in prose only.
+    * Carry over any training-regime qualifier ("under frequency-split
+      training") and never present a regime-specific result as general.
+  (≤ 80 words; the equation LaTeX itself does not count toward the cap.)
+- **Adaptation:** how to bridge from the paper's domain/setup to the agent's
+  task (full-spectrum 1-D SQUID denoising). LLM reasoning on top of the
+  Mechanism. State a concrete adaptation step or flag a transfer caveat.
+  **MUST NOT contain raw equations from the source paper** — those belong
+  in Mechanism. Reference equations by their effect, not by re-quoting.
+  (≤ 50 words)
 
 After the three parts, end with `(rationale: <one line justifying the
 confidence per the rubric>)` on its own line.
@@ -375,6 +411,95 @@ def render_search_decision_prompt(
     return system_prompt, user_prompt
 
 
+# ---------------------------------------------------------------------------
+# Synthesis per-paper-block formatter (Commit 2d).
+#
+# Each retrieved paper renders as one block inside the synthesis user prompt.
+# The block carries:
+#   - citation header (paper_id, title, year)
+#   - extraction-tier marker so the LLM knows whether to quote verbatim
+#     (Tier 1) or paraphrase with a flag (Tier 2)
+#   - the prose summary (architecture / results / relevance)
+#   - the verbatim ``key_equations_md`` block (when non-empty)
+#   - the verbatim ``pseudocode_md`` block (when non-empty)
+#
+# The synthesis LLM lifts equations / pseudocode out of the labeled blocks
+# directly into the finding's **Mechanism** section — see
+# ``_SYNTHESIS_CONTENT_FORMAT_V1`` for the placement rule (Mechanism =
+# source-extracted content; Adaptation = LLM reasoning on top, never raw
+# equations from source).
+# ---------------------------------------------------------------------------
+
+# Per-tier marker shown in each paper block. The phrasing tells the LLM
+# *how* to quote when it lifts the equation into Mechanism. abstract-only
+# papers carry no equations, so the marker says so explicitly.
+_SYNTHESIS_EXTRACTION_MARKERS: dict[str, str] = {
+    "arxiv_source": "arxiv_source (Tier 1 — ground-truth LaTeX; quote equations verbatim)",
+    "pdfplumber_llm": (
+        "pdfplumber_llm (Tier 2 — degraded PDF; paraphrase equations and flag as approximate)"
+    ),
+    "abstract_only": "abstract_only (no full text — no equations or pseudocode to quote)",
+}
+
+# Per-tier label that precedes the verbatim ``key_equations_md`` block.
+# Tier 1 carries ground-truth LaTeX (quote verbatim); Tier 2 is best-effort
+# reconstruction (the LLM must paraphrase + flag when lifting it into
+# Mechanism). For ``abstract_only`` the block is skipped entirely because
+# the field is empty by extraction contract.
+_SYNTHESIS_EQUATION_HEADERS: dict[str, str] = {
+    "arxiv_source": "Key equations (verbatim from source — quote as-is in Mechanism)",
+    "pdfplumber_llm": (
+        "Key equations (best-effort reconstruction from degraded PDF — paraphrase + "
+        "flag as approximate when lifting into Mechanism)"
+    ),
+    "abstract_only": "Key equations",
+}
+
+_SYNTHESIS_PSEUDOCODE_HEADERS: dict[str, str] = {
+    "arxiv_source": "Pseudocode (verbatim from source — reproduce as-is when the algorithm IS the mechanism)",
+    "pdfplumber_llm": (
+        "Pseudocode (best-effort reconstruction from degraded PDF — reproduce as-is "
+        "but flag as approximate)"
+    ),
+    "abstract_only": "Pseudocode",
+}
+
+
+def _render_synthesis_paper_block(p: dict) -> str:
+    """Render one per-paper block for the synthesis user prompt.
+
+    See the module-level comment above for the structure and the lift-into-
+    Mechanism contract. Skips the equation / pseudocode sub-blocks when the
+    corresponding field is empty; the LLM doesn't need to be told something
+    is missing — the absence is the signal.
+    """
+    paper_id = p.get("paper_id", "?")
+    title = p.get("title") or "(untitled)"
+    year = p.get("year") or "n.d."
+    summary = (p.get("summary") or "").strip() or "(no extract or abstract available)"
+    method = p.get("extraction_method") or "abstract_only"
+    marker = _SYNTHESIS_EXTRACTION_MARKERS.get(method, method)
+
+    lines = [
+        f"### [{paper_id}] {title} ({year})",
+        f"Extraction: {marker}",
+        "",
+        summary,
+    ]
+
+    key_equations = (p.get("key_equations_md") or "").strip()
+    if key_equations:
+        header = _SYNTHESIS_EQUATION_HEADERS.get(method, "Key equations")
+        lines += ["", f"{header}:", key_equations]
+
+    pseudocode = (p.get("pseudocode_md") or "").strip()
+    if pseudocode:
+        header = _SYNTHESIS_PSEUDOCODE_HEADERS.get(method, "Pseudocode")
+        lines += ["", f"{header}:", pseudocode]
+
+    return "\n".join(lines)
+
+
 def render_synthesis_prompt(
     *,
     key_findings: list[str],
@@ -424,13 +549,7 @@ def render_synthesis_prompt(
     )
 
     if papers:
-        blocks = []
-        for p in papers:
-            summary = (p.get("summary") or "").strip() or "(no extract or abstract available)"
-            blocks.append(
-                f"### [{p.get('paper_id', '?')}] {p.get('title') or '(untitled)'} "
-                f"({p.get('year') or 'n.d.'})\n{summary}"
-            )
+        blocks = [_render_synthesis_paper_block(p) for p in papers]
         papers_block = "\n\n".join(blocks)
     else:
         papers_block = "(no papers were retrieved this run)"

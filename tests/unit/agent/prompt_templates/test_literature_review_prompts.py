@@ -286,11 +286,14 @@ class TestSynthesisPrompt:
 
     def test_separate_keys_instruction_locked(self):
         # Locks the Step-1 fix: gpt-4o-mini collapsed cite_id/confidence into the
-        # content prose. The prompt must demand three separate keys AND show the
-        # exact example shape. Guards against a future edit re-collapsing them.
+        # content prose. The prompt must demand three separate keys AND show an
+        # example with cite_id as its own key. Guards against a future edit
+        # re-collapsing them. (The specific cite_id in the example is not
+        # locked — Commit 2d updated the example to SNRAware to demonstrate
+        # the new equation-quoting placement rule.)
         system, _ = self._render()
         assert "THREE SEPARATE keys" in system
-        assert '"cite_id": "arxiv:2406.04378"' in system  # example: cite_id as its own key
+        assert '"cite_id": "arxiv:' in system  # cite_id present as its own key
         assert (
             '"confidence":' in system
         )  # example: confidence as its own key (value is rubric-driven)
@@ -998,3 +1001,252 @@ class TestRenderReviewReportIsAvailableAsPublicAPI:
         from agent.prompt_templates.literature_review import render_review_report as r
 
         assert callable(r)
+
+
+# ---------------------------------------------------------------------------
+# Commit 2d — synthesis prompt sees key_equations_md / pseudocode_md /
+# extraction_method per paper, and the per-tier instruction blocks reach
+# the LLM via the Mechanism / Adaptation placement rule.
+# ---------------------------------------------------------------------------
+
+
+def _synth_render(papers, **overrides):
+    """Render the synthesis prompt with sensible defaults — caller supplies
+    only the per-paper dicts they care about."""
+    kwargs = {
+        "key_findings": ["high-frequency band overfits"],
+        "bottlenecks": ["loss saturates after ~5 epochs"],
+        "take_home_message": "need a wider receptive field",
+        "papers": papers,
+        "findings_verbosity": 1,
+    }
+    kwargs.update(overrides)
+    return render_synthesis_prompt(**kwargs)
+
+
+class TestSynthesisPerPaperBlockTier1:
+    """Tier-1 papers (`arxiv_source`) carry verbatim equations / pseudocode.
+    The per-paper block must show both the verbatim-quote marker AND the
+    actual LaTeX so the LLM can lift it into Mechanism unchanged."""
+
+    def _arxiv_paper(self, **overrides):
+        paper = {
+            "paper_id": "arxiv:2503.18162",
+            "title": "SNRAware",
+            "year": "2025",
+            "summary": "Architecture: U-Net with SNR-unit front-end.\nResults: 1.4 dB.",
+            "key_equations_md": (
+                "$$\\mathcal{L}_{\\text{SNR}} = -\\log\\frac{\\|s\\|^2}{\\|s - \\hat{s}\\|^2}$$"
+            ),
+            "pseudocode_md": (
+                "```python\nfor patch in batch:\n    w = compute_snr_weight(patch)\n```"
+            ),
+            "extraction_method": "arxiv_source",
+        }
+        paper.update(overrides)
+        return paper
+
+    def test_extraction_marker_says_quote_verbatim(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Extraction: arxiv_source (Tier 1" in user
+        assert "quote equations verbatim" in user
+
+    def test_key_equations_block_has_verbatim_label(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Key equations (verbatim from source" in user
+        # LaTeX appears verbatim — including the dollar-sign delimiters
+        # so the LLM can copy them as-is into Mechanism.
+        assert "$$\\mathcal{L}_{\\text{SNR}}" in user
+
+    def test_pseudocode_block_has_verbatim_label_when_present(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Pseudocode (verbatim from source" in user
+        assert "```python" in user
+        assert "compute_snr_weight(patch)" in user
+
+    def test_summary_prose_also_present(self):
+        # The new equation/pseudocode blocks supplement the prose summary;
+        # they don't replace it.
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "U-Net with SNR-unit front-end" in user
+        assert "1.4 dB" in user
+
+
+class TestSynthesisPerPaperBlockTier2:
+    """Tier-2 papers (`pdfplumber_llm`) carry best-effort reconstructed
+    equations. The per-paper block must tell the LLM to paraphrase + flag
+    when lifting into Mechanism, not quote verbatim."""
+
+    def _tier2_paper(self):
+        return {
+            "paper_id": "arxiv:2503.99999",
+            "title": "DegradedPDFPaper",
+            "year": "2024",
+            "summary": "Architecture: convnet.",
+            "key_equations_md": "$$y = f(x)$$",
+            "pseudocode_md": "",
+            "extraction_method": "pdfplumber_llm",
+        }
+
+    def test_extraction_marker_says_paraphrase_and_flag(self):
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Extraction: pdfplumber_llm (Tier 2" in user
+        assert "paraphrase equations" in user
+        assert "flag as approximate" in user
+
+    def test_key_equations_block_carries_best_effort_label(self):
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Key equations (best-effort reconstruction from degraded PDF" in user
+        # Equation still appears so the LLM can paraphrase it.
+        assert "y = f(x)" in user
+
+    def test_no_pseudocode_block_when_field_empty(self):
+        # Empty pseudocode_md → the sub-block is skipped (absence is the
+        # signal; no need to tell the LLM something is missing).
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Pseudocode" not in user
+
+
+class TestSynthesisPerPaperBlockAbstractOnly:
+    """abstract_only papers carry no equation or pseudocode content. The
+    block must say so explicitly so the LLM doesn't try to invent one."""
+
+    def _abstract_paper(self):
+        return {
+            "paper_id": "doi:10.1234/abc",
+            "title": "AbstractOnlyPaper",
+            "year": "2023",
+            "summary": "Abstract: a denoising method.",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+
+    def test_extraction_marker_says_no_equations_to_quote(self):
+        _, user = _synth_render([self._abstract_paper()])
+        assert "Extraction: abstract_only" in user
+        assert "no equations or pseudocode to quote" in user
+
+    def test_no_key_equations_or_pseudocode_blocks(self):
+        # Both fields empty → both sub-blocks suppressed.
+        _, user = _synth_render([self._abstract_paper()])
+        assert "Key equations" not in user
+        assert "Pseudocode" not in user
+
+
+class TestSynthesisPlacementRule:
+    """The locked Commit 2d rule: Mechanism = source-extracted content (incl.
+    verbatim equations); Adaptation = LLM reasoning on top, never raw
+    equations from source. Lives in the rendered system prompt
+    (_SYNTHESIS_CONTENT_FORMAT_V1 → {CONTENT_FORMAT_BLOCK})."""
+
+    def test_locked_rule_marker_in_system_prompt(self):
+        system, _ = _synth_render([])
+        # The lock phrase tells future readers (human + LLM) the rule is
+        # not negotiable.
+        assert "Placement rule (LOCKED" in system
+
+    def test_mechanism_is_source_extracted_only(self):
+        system, _ = _synth_render([])
+        assert "Mechanism = source-extracted content ONLY" in system
+        # Negative invariants the rule enforces. (Substrings chosen to fit
+        # within a single source line so the test is robust to wrapping.)
+        assert "LLM-added reasoning" in system
+        assert "NO bridging-to-SQUID logic" in system
+
+    def test_adaptation_is_llm_reasoning_no_raw_equations(self):
+        system, _ = _synth_render([])
+        assert "Adaptation = LLM reasoning on top" in system
+        # The placement rule must explicitly forbid raw equations in
+        # Adaptation — they belong in Mechanism.
+        assert "Adaptation MUST NOT contain raw equations" in system
+
+    def test_per_tier_mechanism_instructions_present(self):
+        # All three extraction-method paths must be addressed in the
+        # Mechanism section instructions so the LLM has explicit guidance
+        # whatever tier the cited paper landed at.
+        system, _ = _synth_render([])
+        assert "`arxiv_source`" in system
+        assert "verbatim" in system  # Tier-1 instruction
+        assert "`pdfplumber_llm`" in system
+        assert "approximate equation" in system  # Tier-2 flag
+        assert "`abstract_only`" in system
+        assert "prose only" in system  # abstract-only path
+
+    def test_pseudocode_when_algorithm_is_the_mechanism(self):
+        system, _ = _synth_render([])
+        assert "algorithm IS the mechanism" in system
+        assert "fenced code block" in system
+
+    def test_word_budgets_unchanged(self):
+        # Commit 2d locks: caps stay at 40 / 80 / 50 unless real Phase-2
+        # runs show otherwise. This test is the regression guard.
+        system, _ = _synth_render([])
+        assert "≤ 40 words" in system  # Implication
+        assert "≤ 80 words" in system  # Mechanism
+        assert "≤ 50 words" in system  # Adaptation
+
+    def test_equation_latex_explicitly_not_counted_in_mechanism_cap(self):
+        # The cap is on prose words, not LaTeX bytes — otherwise a long
+        # equation could push out the surrounding explanation.
+        system, _ = _synth_render([])
+        assert "equation LaTeX itself does not count toward the cap" in system
+
+
+class TestSynthesisMultiplePapersAndOrdering:
+    """Multiple papers render as separate, well-separated blocks; the
+    rendering preserves input order so the synthesis LLM sees them in the
+    same order the node assembled them."""
+
+    def test_papers_separated_by_blank_lines(self):
+        p1 = {
+            "paper_id": "arxiv:1",
+            "title": "First",
+            "year": "2020",
+            "summary": "S1",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        p2 = {
+            "paper_id": "arxiv:2",
+            "title": "Second",
+            "year": "2021",
+            "summary": "S2",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        _, user = _synth_render([p1, p2])
+        # Both blocks present, in input order.
+        idx1 = user.index("[arxiv:1]")
+        idx2 = user.index("[arxiv:2]")
+        assert idx1 < idx2
+
+    def test_empty_papers_list_does_not_crash(self):
+        # Backward-compat: existing dual-mode tests construct empty papers
+        # lists for synthesis-not-run scenarios.
+        _, user = _synth_render([])
+        assert "(no papers were retrieved this run)" in user
+
+
+class TestSynthesisBackwardCompat:
+    """Existing per-paper dicts (without 2d fields) must still render. The
+    new fields are additive — missing-key access goes through `.get()` with
+    sensible defaults."""
+
+    def test_legacy_dict_without_2d_fields_renders(self):
+        # Pre-2d dict: only paper_id / title / year / summary.
+        legacy = {
+            "paper_id": "arxiv:legacy",
+            "title": "Legacy",
+            "year": "2019",
+            "summary": "Architecture: a thing.",
+        }
+        _, user = _synth_render([legacy])
+        # Should render without raising; the absent extraction_method
+        # falls back to abstract_only marker.
+        assert "[arxiv:legacy]" in user
+        assert "Extraction: abstract_only" in user
+        assert "Key equations" not in user  # no equation field → no sub-block
+        assert "Pseudocode" not in user
