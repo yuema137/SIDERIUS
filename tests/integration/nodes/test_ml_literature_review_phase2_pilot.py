@@ -446,10 +446,29 @@ def test_phase2_pilot_real_run(tmp_path):
     agent.bridge = LLMBridge(provider=DEEPSEEK_PROVIDER, model_id=DEEPSEEK_MODEL_ID)
     findings = agent._synthesize(inp, retrieved)
 
-    # 1. Structural floor — §10.5 says >=4 findings.
+    # ----- Render the artifact FIRST, before any structural assertion. -----
+    # The DeepSeek call is the expensive part of this test. Whether or not the
+    # structural floor passes, the operator wants the rendered artifact on
+    # disk for Checkpoint G review — a failed assertion in the middle of the
+    # checks would otherwise lose the run's output entirely.
+    artifact = _render_phase2_artifact(findings, retrieved, inp)
+    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ARTIFACT_PATH.write_text(artifact, encoding="utf-8")
+    # Print the hand-off line up-front too so it's visible even when a later
+    # assertion fails.
+    print(f"\n=== §10 Phase-2 pilot artifact written to: {ARTIFACT_PATH} ===")
+    print(
+        "Review against Checkpoint G sub-criteria (§523 of "
+        "commit_plan_ml_literature_review.md), then promote into a dated "
+        "section of docs/validation_suite_runs.md after sign-off."
+    )
+
+    # ----- Structural floor checks (post-artifact-write). -----
+    # 1. §10.5 says >=4 findings.
     assert len(findings) >= 4, (
         f"expected >=4 findings (§10.5 acceptance), got {len(findings)}. "
-        f"Either the synthesis prompt regressed or DeepSeek omitted too many."
+        f"Either the synthesis prompt regressed or DeepSeek omitted too many. "
+        f"Artifact for review: {ARTIFACT_PATH}"
     )
 
     # 2. Every finding parses into three labeled sections.
@@ -471,7 +490,8 @@ def test_phase2_pilot_real_run(tmp_path):
             adaptation_violations.append(f"finding #{i} ({item.cite_id})")
     assert not adaptation_violations, (
         "Adaptation contains raw LaTeX ($$ blocks) — violates 2d placement "
-        f"rule. Offenders: {adaptation_violations}"
+        f"rule. Offenders: {adaptation_violations}. "
+        f"Artifact for review: {ARTIFACT_PATH}"
     )
 
     # 4. Tier-1 verbatim check: for findings citing a Tier-1 paper whose
@@ -496,7 +516,8 @@ def test_phase2_pilot_real_run(tmp_path):
     assert not tier1_missing_eq, (
         "Tier-1 citations missing a LaTeX equation in Mechanism (placement "
         f"rule violated): {tier1_missing_eq}. Source extracts had non-empty "
-        f"key_equations_md but the LLM omitted them — review the artifact."
+        f"key_equations_md but the LLM omitted them. "
+        f"Artifact for review: {ARTIFACT_PATH}"
     )
     # Tier-2 flag is a soft-strict check: only fails if a Tier-2 paper was
     # cited at all. If the LLM omitted SNRAware entirely, that's a valid
@@ -505,18 +526,6 @@ def test_phase2_pilot_real_run(tmp_path):
         "Tier-2 citations missing a paraphrase / flag word "
         f"(approximate / paraphrased / reconstructed / degraded): "
         f"{tier2_missing_flag}. Synthesis prompt's per-tier instruction "
-        f"may have regressed."
-    )
-
-    # 5. Render the artifact + write to disk.
-    artifact = _render_phase2_artifact(findings, retrieved, inp)
-    ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ARTIFACT_PATH.write_text(artifact, encoding="utf-8")
-
-    # Hand-off line for `-s` runs.
-    print(f"\n=== §10 Phase-2 pilot artifact written to: {ARTIFACT_PATH} ===")
-    print(
-        "Review against Checkpoint G sub-criteria (§523 of "
-        "commit_plan_ml_literature_review.md), then promote into a dated "
-        "section of docs/validation_suite_runs.md after sign-off."
+        f"may have regressed. "
+        f"Artifact for review: {ARTIFACT_PATH}"
     )
