@@ -198,6 +198,7 @@ class TestFullRun:
                         {
                             "content": "Dilated causal convs widen receptive field cheaply.",
                             "cite_id": "arxiv:2406.04378",
+                            "content_paper_id": "arxiv:2406.04378",
                             "confidence": 0.8,
                         }
                     ]
@@ -437,6 +438,7 @@ class TestSynthesis:
                         "content": "Given high-freq overfitting, dilated convs help. "
                         "(confidence 0.7: single full-spectrum paper)",
                         "cite_id": "arxiv:2406.04378",
+                        "content_paper_id": "arxiv:2406.04378",
                         "confidence": 0.7,
                     }
                 ]
@@ -459,10 +461,19 @@ class TestSynthesis:
             monkeypatch,
             {
                 "findings": [
-                    {"content": "well cited", "cite_id": "arxiv:2406.04378", "confidence": 0.6},
+                    {
+                        "content": "well cited",
+                        "cite_id": "arxiv:2406.04378",
+                        "content_paper_id": "arxiv:2406.04378",
+                        "confidence": 0.6,
+                    },
                     {
                         "content": "hallucinated cite",
                         "cite_id": "arxiv:9999.99999",
+                        # content_paper_id matches the (invalid) cite_id so the
+                        # test exercises only the cite_id check, not the new
+                        # content_paper_id hook (which would also drop it).
+                        "content_paper_id": "arxiv:9999.99999",
                         "confidence": 0.9,
                     },
                 ]
@@ -508,10 +519,16 @@ class TestAbstractOnlyConfidenceClamp:
             tmp_path,
             monkeypatch,
             [
-                {"content": "deep-read paper", "cite_id": "arxiv:2406.04378", "confidence": 0.85},
+                {
+                    "content": "deep-read paper",
+                    "cite_id": "arxiv:2406.04378",
+                    "content_paper_id": "arxiv:2406.04378",
+                    "confidence": 0.85,
+                },
                 {
                     "content": "abstract-only paper",
                     "cite_id": "arxiv:2301.00001",
+                    "content_paper_id": "arxiv:2301.00001",
                     "confidence": 0.85,
                 },
             ],
@@ -524,7 +541,14 @@ class TestAbstractOnlyConfidenceClamp:
         out = self._run(
             tmp_path,
             monkeypatch,
-            [{"content": "modest", "cite_id": "arxiv:2301.00001", "confidence": 0.6}],
+            [
+                {
+                    "content": "modest",
+                    "cite_id": "arxiv:2301.00001",
+                    "content_paper_id": "arxiv:2301.00001",
+                    "confidence": 0.6,
+                }
+            ],
         )
         assert out.findings[0].confidence == 0.6  # below ceiling → no clamp
 
@@ -532,7 +556,14 @@ class TestAbstractOnlyConfidenceClamp:
         out = self._run(
             tmp_path,
             monkeypatch,
-            [{"content": "abstract-only", "cite_id": "arxiv:2301.00001", "confidence": 0.85}],
+            [
+                {
+                    "content": "abstract-only",
+                    "cite_id": "arxiv:2301.00001",
+                    "content_paper_id": "arxiv:2301.00001",
+                    "confidence": 0.85,
+                }
+            ],
             rubric=ConfidenceRubric(abstract_only_ceiling=0.5),
         )
         assert out.findings[0].confidence == 0.5  # node reads the ceiling from the rubric
@@ -928,3 +959,562 @@ class TestEscalationCap:
         not_escalated = [p for p in out.retrieved_papers if p.verbosity_achieved == 0]
         assert len(not_escalated) == 1  # the third hit stayed metadata-only
         assert out.search_rounds_used == 1  # only the search counts as a round
+
+
+# ---------------------------------------------------------------------------
+# extraction_method propagation (Commit 2c-b)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionMethodPropagation:
+    """The skill emits ``extraction_method`` on the resolve response; the node
+    reads it from ``data`` and stamps it onto ``PaperExtract.extraction_method``
+    AFTER LLM validation (the LLM is not allowed to mint or overwrite this
+    trust signal). The instruction block injected into the prompt also varies
+    with the extraction method so the LLM knows what input quality to expect.
+    """
+
+    @pytest.mark.parametrize(
+        "method",
+        ["arxiv_source", "pdfplumber_llm", "abstract_only"],
+    )
+    def test_method_from_skill_lands_on_extract(self, tmp_path, monkeypatch, method):
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        # abstract_only carries no full_text — synthesize accordingly so the
+        # _compress path is still exercised (the node only compresses when
+        # full_text is present and verbosity≥1).
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Some prose body.",
+                    "extraction_method": method,
+                },
+                "message": f"resolved via {method}",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == method
+
+    def test_missing_method_in_data_defaults_to_pdfplumber_llm(self, tmp_path, monkeypatch):
+        # Pre-2c cached entries don't carry ``extraction_method``. The node
+        # must default to the conservative Tier-3 label so trust signals stay
+        # consistent (better than blindly claiming a higher tier).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            # NOTE: no "extraction_method" key in data.
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                },
+                "message": "legacy resolve response",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == "pdfplumber_llm"
+
+    def test_llm_cannot_override_extraction_method(self, tmp_path, monkeypatch):
+        # If the LLM hallucinates a higher tier (e.g. claims "arxiv_source")
+        # while the skill actually emitted "pdfplumber_llm", the node's
+        # post-validation stamp must win. This is the trust-signal invariant.
+        lying_extract = dict(_VALID_EXTRACT)
+        lying_extract["extraction_method"] = "arxiv_source"  # LLM lies
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": lying_extract,
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                    "extraction_method": "pdfplumber_llm",
+                },
+                "message": "tier-3 resolve",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        out = agent.run(_input(tmp_path))
+        rp = out.retrieved_papers[0]
+        assert rp.extract is not None
+        assert rp.extract.extraction_method == "pdfplumber_llm"  # skill wins
+
+    @pytest.mark.parametrize(
+        ("method", "fingerprint"),
+        [
+            ("arxiv_source", "clean LaTeX"),
+            ("pdfplumber_llm", "pdfplumber"),
+            ("abstract_only", "abstract"),
+        ],
+    )
+    def test_prompt_carries_tier_specific_instructions(
+        self, tmp_path, monkeypatch, method, fingerprint
+    ):
+        # The render function selects the instruction block matching the
+        # extraction tier. We check that a tier-distinctive phrase reaches
+        # the system prompt the bridge sees.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def resolve(_kw):
+            return {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "T", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "Body.",
+                    "extraction_method": method,
+                },
+                "message": "resolved",
+            }
+
+        skill = FakeSkill(resolve=resolve)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        agent.run(_input(tmp_path))
+        extract_prompts = [
+            (system, user)
+            for (label, system, user) in bridge.prompts
+            if label == "lit_review.paper_extract"
+        ]
+        assert extract_prompts, "no paper_extract prompt was issued"
+        system, _user = extract_prompts[0]
+        assert fingerprint.lower() in system.lower(), (
+            f"system prompt for method={method!r} should mention {fingerprint!r}; "
+            f"got: {system[:200]}..."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Commit 2d — node-side synthesis-prompt assembly.
+#
+# _paper_for_synthesis builds the per-paper dict the synthesis prompt's
+# render function reads. Commit 2d added three fields (key_equations_md,
+# pseudocode_md, extraction_method) so the LLM can quote equations directly
+# inside ExpertContextItem.content. These tests pin the assembly contract.
+# ---------------------------------------------------------------------------
+
+
+class TestPaperForSynthesis2dFields:
+    """``MLLiteratureReviewAgent._paper_for_synthesis`` must surface 2d's
+    new fields from the PaperExtract verbatim. The node is the producer of
+    the per-paper dict; if it drops the fields here, no downstream renderer
+    can recover them."""
+
+    def _agent(self, tmp_path):
+        bridge = FakeBridge()
+        return MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+
+    def _retrieved_with_extract(self, **extract_overrides):
+        extract_kwargs = {
+            "title": "T",
+            "authors": "A",
+            "year": "2024",
+            "core_idea": "ci",
+            "architecture_details": "AD",
+            "key_results": "KR",
+            "relevance_to_task": "RT",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        extract_kwargs.update(extract_overrides)
+        return RetrievedPaper(
+            paper_id="arxiv:test",
+            source=PaperSource(source_type="arxiv", identifier="test", verbosity=1),
+            s2_metadata={"title": "T", "year": 2024},
+            extract=PaperExtract(**extract_kwargs),
+            verbosity_achieved=1,
+        )
+
+    def test_tier1_extract_fields_propagate(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="$$y = f(x)$$",
+            pseudocode_md="```python\nfor i in range(N):\n    ...\n```",
+            extraction_method="arxiv_source",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == "$$y = f(x)$$"
+        assert d["pseudocode_md"] == "```python\nfor i in range(N):\n    ...\n```"
+        assert d["extraction_method"] == "arxiv_source"
+
+    def test_tier2_extract_fields_propagate(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="$$y \\approx f(x)$$",
+            pseudocode_md="",
+            extraction_method="pdfplumber_llm",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == "$$y \\approx f(x)$$"
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "pdfplumber_llm"
+
+    def test_abstract_only_paper_has_empty_quote_fields(self, tmp_path):
+        rp = self._retrieved_with_extract(
+            key_equations_md="",
+            pseudocode_md="",
+            extraction_method="abstract_only",
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == ""
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "abstract_only"
+
+    def test_no_extract_defaults_to_abstract_only(self, tmp_path):
+        # A v=0 retrieval (no extract at all) still produces a usable dict
+        # with the safe-default tier — the synthesis prompt will see
+        # ``abstract_only`` and skip the equation sub-blocks.
+        rp = RetrievedPaper(
+            paper_id="arxiv:meta_only",
+            source=PaperSource(source_type="arxiv", identifier="meta_only", verbosity=0),
+            s2_metadata={"title": "MO", "year": 2020, "abstract": "Just an abstract."},
+            extract=None,
+            verbosity_achieved=0,
+        )
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        assert d["key_equations_md"] == ""
+        assert d["pseudocode_md"] == ""
+        assert d["extraction_method"] == "abstract_only"
+        # Existing prose-summary fallback path still works.
+        assert d["summary"] == "Just an abstract."
+
+    def test_legacy_dict_keys_still_present(self, tmp_path):
+        # Backward compat: every consumer that read the old 4 keys must
+        # still find them. The new fields are additive.
+        rp = self._retrieved_with_extract(extraction_method="arxiv_source")
+        d = self._agent(tmp_path)._paper_for_synthesis(rp)
+        for key in ("paper_id", "title", "year", "summary"):
+            assert key in d, f"legacy key {key!r} missing"
+
+
+class TestSynthesisPromptReceivesPerPaperEquations:
+    """End-to-end: a v=1 retrieved paper with non-empty key_equations_md /
+    pseudocode_md must reach the rendered synthesis system+user prompts
+    such that the LLM sees the equation verbatim. Mocked bridge — no real
+    LLM call."""
+
+    def test_equation_and_pseudocode_reach_synthesis_user_prompt(self, tmp_path, monkeypatch):
+        # Stub the resolver to return a Tier-1 paper with equations + pseudocode
+        # in its extract; the node compresses it (via the FakeBridge) and then
+        # synthesises. We capture the synthesis prompt the bridge sees.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": {
+                    "title": "EquationCarryingPaper",
+                    "authors": "A. Auth",
+                    "year": "2024",
+                    "core_idea": "...",
+                    "architecture_details": "...",
+                    "key_results": "...",
+                    "relevance_to_task": "...",
+                    "key_equations_md": "$$\\hat{y} = M(x)$$",
+                    "pseudocode_md": "```algorithm\nfor t: y_t = M(x_t)\n```",
+                },
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        # Resolver returns v=1 text + arxiv_source tier so the node compresses
+        # via the bridge and the extract's tier is arxiv_source end-to-end.
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "source_type": "arxiv",
+                    "identifier": "2406.04378",
+                    "s2_metadata": {"title": "EquationCarryingPaper", "year": 2024},
+                    "verbosity_achieved": 1,
+                    "full_text": "fake LaTeX body",
+                    "extraction_method": "arxiv_source",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.run(_input(tmp_path))
+
+        # Find the synthesis user prompt the bridge actually saw.
+        synth_user_prompts = [
+            user for (label, _sys, user) in bridge.prompts if label == "lit_review.synthesis"
+        ]
+        assert synth_user_prompts, "synthesis prompt was not issued"
+        user = synth_user_prompts[0]
+
+        # The equation reached the synthesis prompt verbatim — including
+        # the dollar-sign delimiters so the LLM can copy them into
+        # ``**Mechanism:**`` unchanged.
+        assert "$$\\hat{y} = M(x)$$" in user
+        # Pseudocode block also present.
+        assert "```algorithm" in user
+        assert "y_t = M(x_t)" in user
+        # Per-tier marker tells the LLM to quote verbatim.
+        assert "Extraction: arxiv_source (Tier 1" in user
+
+    def test_synthesis_system_prompt_carries_placement_rule(self, tmp_path, monkeypatch):
+        # Independent of the per-paper content, the locked placement rule
+        # (Mechanism = source-extracted; Adaptation = LLM reasoning, no raw
+        # equations) must reach the synthesis system prompt every run.
+        bridge = FakeBridge(responses={"lit_review.synthesis": {"findings": []}})
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.run(_input(tmp_path))
+        synth_systems = [
+            sys_ for (label, sys_, _user) in bridge.prompts if label == "lit_review.synthesis"
+        ]
+        assert synth_systems
+        system = synth_systems[0]
+        assert "Placement rule (LOCKED" in system
+        assert "Mechanism = source-extracted content ONLY" in system
+        assert "Adaptation MUST NOT contain raw equations" in system
+
+
+# ---------------------------------------------------------------------------
+# Post-2c-c.2 cite-id-mismatch fix — Layer 2 (node-side validation).
+# The _validate_content_paper_id helper is the structural defence paired with
+# the Layer-1 prompt changes: it hard-drops findings whose declared
+# content_paper_id (the paper the LLM says it described in Mechanism) does
+# not match cite_id (the paper the LLM cited).
+# ---------------------------------------------------------------------------
+
+
+class TestValidateContentPaperIdHelper:
+    """Direct unit tests of ``_validate_content_paper_id``. Exercises all four
+    branches: match-passes, missing-field-drops, not-in-corpus-drops,
+    mismatch-drops. Imports the helper module-level (the function is part of
+    the file's documented internal API)."""
+
+    def _helper(self):
+        from nodes.ml_literature_review import _validate_content_paper_id
+
+        return _validate_content_paper_id
+
+    def test_match_passes(self):
+        helper = self._helper()
+        f = {
+            "cite_id": "arxiv:2406.04378",
+            "content_paper_id": "arxiv:2406.04378",
+            "content": "irrelevant for this check",
+        }
+        result = helper(f, {"arxiv:2406.04378", "arxiv:2301.00001"})
+        # Returned dict is the input unchanged (same identity).
+        assert result is f
+
+    def test_mismatch_drops(self):
+        helper = self._helper()
+        f = {
+            "cite_id": "arxiv:2510.25800",  # FreLE — what the LLM cited
+            "content_paper_id": "arxiv:2501.04967",  # TADA — what it actually described
+            "content": "TADA-shaped Mechanism content",
+        }
+        valid = {"arxiv:2510.25800", "arxiv:2501.04967"}
+        # Both ids are in the corpus, but they don't match → drop.
+        assert helper(f, valid) is None
+
+    def test_missing_content_paper_id_drops(self):
+        # Pre-2d-cite-id-fix mock or partial LLM output: the field is absent.
+        # Hook drops with the "missing content_paper_id" warning.
+        helper = self._helper()
+        f = {"cite_id": "arxiv:1", "content": "x"}  # no content_paper_id key
+        assert helper(f, {"arxiv:1"}) is None
+
+    def test_empty_string_content_paper_id_drops(self):
+        # Defence in depth: an empty string for content_paper_id is treated
+        # the same as missing — drop, don't compare-equal to an empty
+        # cite_id (which itself would also be dropped upstream).
+        helper = self._helper()
+        f = {"cite_id": "arxiv:1", "content_paper_id": "", "content": "x"}
+        assert helper(f, {"arxiv:1"}) is None
+
+    def test_content_paper_id_not_in_corpus_drops(self):
+        # The LLM emitted a real-looking arxiv id that isn't actually one of
+        # the retrieved papers. Hallucination — drop.
+        helper = self._helper()
+        f = {
+            "cite_id": "arxiv:2406.04378",
+            "content_paper_id": "arxiv:1234.56789",  # not in valid_ids
+            "content": "x",
+        }
+        assert helper(f, {"arxiv:2406.04378"}) is None
+
+
+class TestContentPaperIdHookInSynthesize:
+    """End-to-end inside ``_synthesize``: the hook drops mismatched findings
+    before they reach ``ExpertContextItem``, mirrors the existing cite_id
+    soft-drop pattern, and ``content_paper_id`` is consumed (never forwarded
+    onto the schema)."""
+
+    def _run_synthesis(self, tmp_path, monkeypatch, findings):
+        """Drive a minimal node run with the given mocked synthesis findings."""
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": findings},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge), root_cache_dir=str(tmp_path / "cache")
+        )
+        return agent.run(_input(tmp_path))  # dynamic disabled → retrieved = [root]
+
+    def test_mismatch_finding_dropped_end_to_end(self, tmp_path, monkeypatch):
+        # Two findings: one consistent, one with content_paper_id != cite_id.
+        # Only the consistent one reaches the output.
+        out = self._run_synthesis(
+            tmp_path,
+            monkeypatch,
+            [
+                {
+                    "content": "consistent finding",
+                    "cite_id": "arxiv:2406.04378",
+                    "content_paper_id": "arxiv:2406.04378",
+                    "confidence": 0.7,
+                },
+                {
+                    "content": "cited paper A, described paper B (hallucination)",
+                    "cite_id": "arxiv:2406.04378",
+                    # The valid_ids set in a single-paper run is just the root
+                    # paper, so any non-root id here is also "not in corpus".
+                    # We use a different in-corpus id by mocking — but with a
+                    # single retrieved paper this isn't possible end-to-end
+                    # from a node test. The point of THIS test is that the
+                    # hook fires; the not-in-corpus drop reason still soft-
+                    # drops the finding correctly.
+                    "content_paper_id": "arxiv:2510.25800",  # not retrieved
+                    "confidence": 0.8,
+                },
+            ],
+        )
+        assert len(out.findings) == 1
+        assert out.findings[0].content == "consistent finding"
+
+    def test_missing_content_paper_id_finding_dropped(self, tmp_path, monkeypatch):
+        # A finding lacking content_paper_id is soft-dropped (matches what
+        # would happen if the LLM produced a pre-2d-style response by mistake).
+        out = self._run_synthesis(
+            tmp_path,
+            monkeypatch,
+            [
+                {
+                    "content": "legacy-format finding without content_paper_id",
+                    "cite_id": "arxiv:2406.04378",
+                    "confidence": 0.7,
+                },
+            ],
+        )
+        assert out.findings == []
+
+    def test_content_paper_id_consumed_not_forwarded(self, tmp_path, monkeypatch):
+        # ExpertContextItem schema has six fields; content_paper_id is not
+        # one of them. After the hook validates, the field is read from the
+        # raw dict and never forwarded — the constructed ExpertContextItem
+        # carries cite_id only.
+        out = self._run_synthesis(
+            tmp_path,
+            monkeypatch,
+            [
+                {
+                    "content": "consistent finding",
+                    "cite_id": "arxiv:2406.04378",
+                    "content_paper_id": "arxiv:2406.04378",
+                    "confidence": 0.7,
+                },
+            ],
+        )
+        assert len(out.findings) == 1
+        item = out.findings[0]
+        # ExpertContextItem schema is unchanged — only the documented six
+        # fields exist, and content_paper_id is not among them.
+        assert not hasattr(item, "content_paper_id")
+        assert item.cite_id == "arxiv:2406.04378"
+
+    def test_hook_warning_logged_on_drop(self, tmp_path, monkeypatch, caplog):
+        # The hook emits a warning naming both ids so the operator can grep
+        # the run log for hallucinated findings.
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="nodes.ml_literature_review"):
+            self._run_synthesis(
+                tmp_path,
+                monkeypatch,
+                [
+                    {
+                        "content": "mismatched",
+                        "cite_id": "arxiv:2406.04378",
+                        "content_paper_id": "arxiv:2510.25800",  # not retrieved
+                        "confidence": 0.5,
+                    }
+                ],
+            )
+        # The not-in-corpus drop path fires (the test's single-paper setup
+        # can't reach the != cite_id branch end-to-end; that branch is
+        # covered by TestValidateContentPaperIdHelper).
+        assert any(
+            "content_paper_id" in record.message and "arxiv:2510.25800" in record.message
+            for record in caplog.records
+        )

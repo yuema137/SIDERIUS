@@ -33,7 +33,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -149,6 +149,69 @@ def _normalize_finding_content_headings(content: str) -> str:
         if variant != canonical:
             content = content.replace(variant, canonical)
     return content
+
+
+def _validate_content_paper_id(
+    finding: dict[str, Any], valid_ids: set[str]
+) -> dict[str, Any] | None:
+    """Hard-validate ``content_paper_id == cite_id`` on a synthesis finding.
+
+    Layer-2 defence (paired with the synthesis prompt's per-paper-block label
+    and the synthesis_system.md hard rule) against the cite-id-vs-content
+    mismatch failure mode observed on the first 2d real_run pilot. The
+    synthesis prompt requires the LLM to fill BOTH ``cite_id`` and
+    ``content_paper_id`` with the same paper_id: ``cite_id`` is the
+    citation; ``content_paper_id`` is the id of the paper whose content the
+    LLM described in Mechanism. If the two differ, the LLM cited Paper A but
+    wrote about Paper B — the finding is a hallucination and is dropped
+    before it reaches ``ExpertContextItem``.
+
+    Follows the soft-drop hook contract: returns the ``finding`` dict
+    unchanged when validation passes, returns ``None`` to signal the
+    caller's loop to ``continue`` (with a ``logger.warning`` already
+    emitted, matching the cite_id soft-drop in ``_synthesize``).
+
+    Args:
+      finding:   The raw finding dict from the synthesis JSON output.
+                 Expected to carry ``content_paper_id`` per the 2d
+                 synthesis-prompt contract; absence is itself a drop.
+      valid_ids: The set of corpus paper_ids — defence in depth against
+                 the LLM emitting a content_paper_id outside the corpus.
+
+    Returns:
+      ``finding`` (unchanged) on pass; ``None`` on any of the three drop
+      conditions (missing field / not in corpus / != cite_id). The
+      ``content_paper_id`` field is consumed here and not forwarded
+      downstream — ``ExpertContextItem`` schema is unchanged.
+    """
+    cite_id = str(finding.get("cite_id") or "")
+    content_paper_id = str(finding.get("content_paper_id") or "")
+    if not content_paper_id:
+        logger.warning(
+            "dropping finding citing %r: missing content_paper_id "
+            "(the 2d synthesis prompt requires it as a content-vs-cite_id "
+            "consistency check)",
+            cite_id,
+        )
+        return None
+    if content_paper_id not in valid_ids:
+        logger.warning(
+            "dropping finding citing %r: content_paper_id %r is not in the "
+            "retrieved-paper set (hallucination)",
+            cite_id,
+            content_paper_id,
+        )
+        return None
+    if content_paper_id != cite_id:
+        logger.warning(
+            "dropping finding: content_paper_id %r != cite_id %r — the LLM "
+            "described one paper's content but cited another (hallucination "
+            "the per-paper block format did not prevent)",
+            content_paper_id,
+            cite_id,
+        )
+        return None
+    return finding
 
 
 def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict | None) -> None:
@@ -278,6 +341,9 @@ class MLLiteratureReviewAgent:
         status = result.get("status")
         s2_meta = data.get("s2_metadata")
         full_text = data.get("full_text")
+        # Skill response carries the extraction tier (Commit 2c-b). Pre-2c
+        # cached entries don't have it — default to the conservative tier.
+        extraction_method = data.get("extraction_method") or "pdfplumber_llm"
         error = None if status == "ok" else result.get("message")
 
         extract: PaperExtract | None = None
@@ -285,7 +351,7 @@ class MLLiteratureReviewAgent:
         achieved: Literal[0, 1, 2] = _as_verbosity(data.get("verbosity_achieved", 0))
 
         if src.verbosity >= 1 and full_text:
-            extract = self._compress(full_text)
+            extract = self._compress(full_text, extraction_method=extraction_method)
             # On compression failure keep full text only if it was requested
             # (verbosity 2); otherwise degrade to metadata-only.
             achieved = src.verbosity if extract is not None else (2 if stored_full_text else 0)
@@ -441,7 +507,8 @@ class MLLiteratureReviewAgent:
         full_text = data.get("full_text")
         if not full_text:
             return
-        extract = self._compress(full_text)
+        extraction_method = data.get("extraction_method") or "pdfplumber_llm"
+        extract = self._compress(full_text, extraction_method=extraction_method)
         if extract is not None:
             _override_year_from_metadata(extract, target.s2_metadata)
             target.extract = extract
@@ -455,12 +522,32 @@ class MLLiteratureReviewAgent:
     # ------------------------------------------------------------------
     # LLM compression (verbosity-1 extract)
     # ------------------------------------------------------------------
-    def _compress(self, full_text: str) -> PaperExtract | None:
-        """Compress full text into a PaperExtract; never raises (returns None)."""
+    def _compress(
+        self,
+        full_text: str,
+        extraction_method: Literal[
+            "arxiv_source", "pdfplumber_llm", "abstract_only"
+        ] = "pdfplumber_llm",
+    ) -> PaperExtract | None:
+        """Compress full text into a PaperExtract; never raises (returns None).
+
+        ``extraction_method`` selects the per-tier instruction block in
+        ``render_paper_extract_prompt`` AND is stamped onto the resulting
+        ``PaperExtract.extraction_method`` (the field is set node-side, not by
+        the LLM — see §5a invariant). Defaults to ``"pdfplumber_llm"`` for
+        pre-cascade safety; callers should pass the value from the skill
+        response (``data["extraction_method"]``).
+        """
         try:
-            sys_prompt, user_prompt = render_paper_extract_prompt(full_text)
+            sys_prompt, user_prompt = render_paper_extract_prompt(
+                full_text, extraction_method=extraction_method
+            )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.paper_extract")
-            return PaperExtract.model_validate(raw)
+            extract = PaperExtract.model_validate(raw)
+            # Skill is authoritative for the tier signal; override any value
+            # the LLM may have accidentally emitted.
+            extract.extraction_method = extraction_method
+            return extract
         except Exception as e:  # resilience boundary — a bad extract must not abort the run
             logger.warning("paper compression failed: %s", e)
             return None
@@ -508,6 +595,14 @@ class MLLiteratureReviewAgent:
                     "dropping finding with unmatched cite_id %r (not in retrieved papers)",
                     cite_id,
                 )
+                continue
+            # 2d hook: hard-validate content_paper_id == cite_id. The synthesis
+            # prompt requires the LLM to name the paper its Mechanism describes;
+            # the name must match the citation. Mismatch → soft-drop (same
+            # contract as the cite_id check above; the hook emits its own
+            # logger.warning). content_paper_id is consumed here and not
+            # forwarded to ExpertContextItem (schema unchanged).
+            if _validate_content_paper_id(f, valid_ids) is None:
                 continue
             confidence = self._clamp_abstract_only_confidence(
                 f.get("confidence"), cite_id, verbosity_by_id, ceiling
@@ -576,9 +671,26 @@ class MLLiteratureReviewAgent:
         }
 
     def _paper_for_synthesis(self, rp: RetrievedPaper) -> dict:
-        """Fuller view for the synthesis prompt — prefers the compressed extract."""
+        """Fuller view for the synthesis prompt — prefers the compressed extract.
+
+        Returns a dict carrying the per-paper context the synthesis LLM sees.
+        Six fields:
+
+          - ``paper_id`` / ``title`` / ``year`` — citation header.
+          - ``summary`` — prose blob (architecture / results / relevance from
+            the extract, or the s2 abstract as fallback).
+          - ``key_equations_md`` / ``pseudocode_md`` / ``extraction_method``
+            (Commit 2d) — extracted-content fields the synthesis prompt uses
+            to quote equations and pseudocode directly inside the finding's
+            **Mechanism** section. Empty strings (and ``"abstract_only"`` for
+            ``extraction_method``) when the paper has no extract — the
+            renderer skips the corresponding blocks in that case.
+        """
         title = year = None
         summary = ""
+        key_equations_md = ""
+        pseudocode_md = ""
+        extraction_method = "abstract_only"
         if rp.s2_metadata:
             title = rp.s2_metadata.get("title")
             year = rp.s2_metadata.get("year")
@@ -595,7 +707,22 @@ class MLLiteratureReviewAgent:
                 parts.append(f"Relevance: {rp.extract.relevance_to_task}")
             if parts:
                 summary = "\n".join(parts)
-        return {"paper_id": rp.paper_id, "title": title, "year": year, "summary": summary}
+            # Commit 2d: surface equation + pseudocode + tier so the synthesis
+            # prompt can quote them inline inside Mechanism. extraction_method
+            # is always set when an extract exists (PaperExtract schema default
+            # is "abstract_only" — see agent/schemas/literature_review.py).
+            key_equations_md = rp.extract.key_equations_md
+            pseudocode_md = rp.extract.pseudocode_md
+            extraction_method = rp.extract.extraction_method
+        return {
+            "paper_id": rp.paper_id,
+            "title": title,
+            "year": year,
+            "summary": summary,
+            "key_equations_md": key_equations_md,
+            "pseudocode_md": pseudocode_md,
+            "extraction_method": extraction_method,
+        }
 
     # ------------------------------------------------------------------
     # Storage (log, not a channel — see CLAUDE.md inter-node invariant)

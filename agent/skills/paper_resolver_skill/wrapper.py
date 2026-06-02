@@ -33,6 +33,8 @@ from urllib.parse import quote
 
 import requests
 
+from agent.skills.paper_resolver_skill.arxiv_source import parse_arxiv_source
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -210,6 +212,47 @@ def _download_pdf(url: str, timeout: int = S2_DEFAULT_TIMEOUT_S) -> tuple[bytes 
         return None, f"PDF stream read failed: {exc}"
 
 
+# ---------------------------------------------------------------------------
+# Tier-1 arXiv source extraction
+# ---------------------------------------------------------------------------
+
+ARXIV_SRC_BASE_URL = "https://arxiv.org/src/"
+ARXIV_TIER1_USER_AGENT = "siderius-lit-review/1.0 (mailto:y5ma@ucsd.edu)"
+
+
+def _try_arxiv_tier1(arxiv_id: str, timeout: int = 60) -> str | None:
+    """Try Tier-1 arXiv source extraction.
+
+    Fetches ``arxiv.org/src/{arxiv_id}`` and parses the ``.tar.gz`` via
+    ``arxiv_source.parse_arxiv_source``. Returns cleaned Markdown on success,
+    ``None`` on any failure — PDF-only submission (content-type pdf), network
+    error, HTTP non-200, corrupt tarball, LaTeX parse error, or empty body.
+    Caller falls through to the next tier (Tier-3 pdfplumber on the PDF).
+    """
+    try:
+        resp = requests.get(
+            ARXIV_SRC_BASE_URL + arxiv_id,
+            headers={"User-Agent": ARXIV_TIER1_USER_AGENT},
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        logger.debug("Tier-1 arXiv-source network error for %s: %s", arxiv_id, exc)
+        return None
+    if resp.status_code != 200:
+        logger.debug("Tier-1 arXiv-source HTTP %d for %s", resp.status_code, arxiv_id)
+        return None
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    if "pdf" in ctype:
+        # PDF-only submission (e.g. SNRAware) — cleanly cascade to Tier-3.
+        logger.debug("Tier-1 arXiv-source: PDF-only submission for %s", arxiv_id)
+        return None
+    try:
+        return parse_arxiv_source(resp.content)
+    except Exception as exc:
+        logger.debug("Tier-1 arXiv-source unexpected exception for %s: %s", arxiv_id, exc)
+        return None
+
+
 def _extract_pdf_text(pdf_bytes: bytes) -> tuple[str | None, str | None]:
     """Extract text from PDF bytes via pdfplumber. Returns (text, error_message).
 
@@ -322,6 +365,7 @@ def _resolve_remote(source_type: str, identifier: str, verbosity: int) -> dict[s
                 "s2_metadata": None,
                 "verbosity_achieved": 0,
                 "full_text": None,
+                "extraction_method": "abstract_only",
             },
             "message": err or "S2 lookup returned no data",
         }
@@ -333,13 +377,31 @@ def _resolve_remote(source_type: str, identifier: str, verbosity: int) -> dict[s
         "s2_metadata": metadata,
         "verbosity_achieved": 0,
         "full_text": None,
+        "extraction_method": "abstract_only",
     }
 
     # verbosity 0 → metadata only, done.
     if verbosity == 0:
         return {"status": "ok", "data": payload, "message": "metadata only"}
 
-    # verbosity 1 / 2 → try the openAccessPdf, then arxiv fallback.
+    # Tier 1 — arXiv source (.tex via arxiv.org/src). Only for arxiv source
+    # type; for DOI / OpenReview we don't have an arxiv id to query.
+    if source_type == "arxiv":
+        tier1_text = _try_arxiv_tier1(identifier)
+        if tier1_text:
+            payload["full_text"] = tier1_text
+            payload["verbosity_achieved"] = 2 if verbosity == 2 else 1
+            payload["extraction_method"] = "arxiv_source"
+            return {
+                "status": "ok",
+                "data": payload,
+                "message": "extracted via arXiv source (Tier 1)",
+            }
+        # Tier 1 failed (PDF-only / network / parse) → fall through to Tier 2.
+
+    # Tier 2 — openAccessPdf / arxiv-fallback PDF + pdfplumber. (A GPU-based
+    # PDF→Markdown tier was considered for this slot — see §5a of
+    # docs/external_agents_for_proposer.md — and dropped before 2c-c.)
     pdf_url = None
     if metadata.get("openAccessPdf"):
         oap = metadata["openAccessPdf"]
@@ -373,6 +435,7 @@ def _resolve_remote(source_type: str, identifier: str, verbosity: int) -> dict[s
         }
     payload["full_text"] = text
     payload["verbosity_achieved"] = 2 if verbosity == 2 else 1
+    payload["extraction_method"] = "pdfplumber_llm"
     return {
         "status": "ok",
         "data": payload,
@@ -393,6 +456,7 @@ def _run_resolve_mode(source_type: str, identifier: str, verbosity: int) -> dict
                     "s2_metadata": None,
                     "verbosity_achieved": 0,
                     "full_text": None,
+                    "extraction_method": "abstract_only",
                 },
                 "message": err or "local file read failed",
             }
@@ -404,6 +468,8 @@ def _run_resolve_mode(source_type: str, identifier: str, verbosity: int) -> dict
                 "s2_metadata": None,
                 "verbosity_achieved": 2 if verbosity == 2 else 1,
                 "full_text": text,
+                # Local files are pre-extracted text — Tier-3-equivalent trust.
+                "extraction_method": "pdfplumber_llm",
             },
             "message": "local file read",
         }

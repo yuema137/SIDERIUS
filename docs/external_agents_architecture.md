@@ -331,32 +331,40 @@ using the same object?
 
 ---
 
-## Mathematical content in reference_library
+## Mathematical content travels inline inside findings
 
 Mathematical frameworks and pseudocode are **load-bearing content**, not
-decoration. A proposer reading a `reference_library` entry for a paper it has
-**never seen in training** depends *entirely* on the accuracy of
-`key_equations_md` and `pseudocode_md` to produce a correct architecture
-description: if those fields are wrong or empty, the proposer can at best repeat
-the paper's name, not implement its method. Structural prose ("uses a
-dual-branch SNR-aware design") tells the proposer *that* a mechanism exists;
-only the equations and pseudocode tell it *what the mechanism is*.
+decoration. A proposer reading an `ExpertContextItem` for a paper it has
+**never seen in training** depends entirely on the accuracy of the
+equations and algorithm fragments it sees: if those are wrong or absent,
+the proposer can at best repeat the paper's name, not implement its
+method. Structural prose ("uses a dual-branch SNR-aware design") tells the
+proposer *that* a mechanism exists; only the equations and pseudocode tell
+it *what the mechanism is*.
 
-The `extraction_method` field is the **trust signal** for this content. It
-records how the math was obtained, in descending reliability: `arxiv_source`
-(ground-truth LaTeX) > `marker_pdf` (ML PDF→Markdown) > `pdfplumber_llm`
-(degraded text + LLM reconstruction) > `abstract_only` (none). Every consumer of
-a reference_library entry must read `extraction_method` before relying on its
-equations: a `pdfplumber_llm` equation is a hint; an `arxiv_source` equation is
-ground truth. See "Full-text and formula extraction strategy" (§5a of
-`docs/external_agents_for_proposer.md`) for the tiers.
+Mathematical content reaches the proposer **inside `ExpertContextItem.content`**,
+not via a separate channel. The lit-review agent's synthesis LLM has access
+to each cited paper's `key_equations_md` / `pseudocode_md` and quotes the
+relevant snippet directly inside the finding's Mechanism section (and
+Adaptation, where the equation IS the adaptation). The proposer reads one
+channel — `expert_context` — and the math travels with the citation.
 
-The `reference_library` is a pull channel, not a push channel: the proposer is
-not required to read every entry, only the ones relevant to findings it wants to
-act on. The `cite_id` on each `ExpertContextItem` is the lookup key. This design
-keeps the proposer's context manageable — it reads the high-level findings first,
-then pulls the technical depth it needs for the specific papers it decides to
-build on.
+The `PaperExtract.extraction_method` field is the **trust signal** the
+synthesis LLM uses to decide *how* to quote. In descending reliability:
+`arxiv_source` (ground-truth LaTeX) > `pdfplumber_llm` (degraded text + LLM
+reconstruction) > `abstract_only` (none). The synthesis prompt instructs the
+LLM to quote Tier-1 equations verbatim and to flag Tier-2 equations as
+paraphrases. See "Full-text and formula extraction strategy" (§5a of
+`docs/external_agents_for_proposer.md`) for the tier definitions and
+"Equations and pseudocode in findings" (§5b of the same doc) for the
+synthesis-prompt design.
+
+Earlier drafts of this architecture proposed a parallel `reference_library`
+pull-channel — typed `list[PaperReference]` on the lit-review output,
+mapped into the proposer via the protocol. That design was cancelled
+because the same end-to-end value (equations and pseudocode in front of
+the proposer) is delivered by extending the existing `findings` content,
+without any new schema on either side of the boundary.
 
 ---
 

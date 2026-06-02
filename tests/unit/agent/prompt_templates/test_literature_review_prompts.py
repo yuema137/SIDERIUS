@@ -21,19 +21,25 @@ from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
     SIDERIUS_TASK,
     render_paper_extract_prompt,
+    render_review_report,
     render_search_decision_prompt,
     render_synthesis_prompt,
 )
 from agent.schemas.literature_review import (
     ConfidenceBand,
     ConfidenceRubric,
+    LiteratureReviewOutput,
     PaperExtract,
+    PaperSource,
+    RetrievedPaper,
     SynthesisConfig,
 )
+from agent.schemas.proposal import AgentCard, ExpertContextItem
 
-# The seven locked PaperExtract keys. Kept inline (not derived from the schema)
-# so the test fails loudly if either the schema or the prompt drifts away from
-# the agreed contract.
+# The nine LLM-emitted PaperExtract keys (the 10th field, `extraction_method`,
+# is set node-side, not by the LLM, so it is NOT in this contract). Kept inline
+# (not derived from the schema) so the test fails loudly if either the schema or
+# the prompt drifts away from the agreed contract.
 _EXPECTED_KEYS = (
     "title",
     "authors",
@@ -42,6 +48,9 @@ _EXPECTED_KEYS = (
     "architecture_details",
     "key_results",
     "relevance_to_task",
+    # Commit 2c additions (F3 conditionally superseded; see §5a):
+    "key_equations_md",
+    "pseudocode_md",
 )
 
 
@@ -57,16 +66,27 @@ class TestRenderStructure:
         b = render_paper_extract_prompt("identical input")
         assert a == b
 
-    def test_system_prompt_lists_all_seven_keys(self):
+    def test_system_prompt_lists_all_nine_keys(self):
+        # 7 original keys + 2 new (`key_equations_md`, `pseudocode_md`); the 10th
+        # `PaperExtract` field (`extraction_method`) is set node-side, NOT
+        # emitted by the LLM, so it does NOT appear as a contract key. (The word
+        # "extraction_method" can legitimately appear elsewhere in the prompt —
+        # e.g., the pdfplumber block's downstream-consumer note — so we don't
+        # assert its absence; the .md contract intro pins "EXACTLY these nine".)
         system, _ = render_paper_extract_prompt("text")
         for key in _EXPECTED_KEYS:
             assert key in system, f"system prompt missing key {key!r}"
+        assert "nine string keys and no others" in system
 
     def test_system_prompt_has_anti_noise_and_math_rules(self):
+        # Default extraction_method='pdfplumber_llm' selects the degraded-PDF
+        # instruction block, which contains these rules verbatim. The other
+        # tier (arxiv_source) has a different block — see
+        # TestExtractionInstructions below.
         system, _ = render_paper_extract_prompt("text")
         # (cid:NN) glyph artifacts (F3) must be called out.
         assert "(cid:" in system
-        # Math-in-prose / no-LaTeX instruction (F3).
+        # Math-in-prose / approximate-LaTeX instruction (F3, Tier-2 path).
         assert "LaTeX" in system
         # Despacing tolerance (run-together words).
         assert "missing spaces" in system
@@ -86,6 +106,52 @@ class TestRenderStructure:
         # Must NOT name a specific paper (that would hallucinate for non-TIDMAD
         # papers compressed by the same prompt).
         assert "TIDMAD" not in system
+
+
+class TestExtractionInstructions:
+    """`render_paper_extract_prompt(extraction_method=...)` injects one of three
+    per-tier instruction blocks at the `{EXTRACTION_INSTRUCTIONS}` placeholder.
+    Each block's distinctive guidance must appear (and the wrong-tier guidance
+    must NOT appear)."""
+
+    def test_arxiv_source_block_injected(self):
+        system, _ = render_paper_extract_prompt("clean tex", extraction_method="arxiv_source")
+        assert "{EXTRACTION_INSTRUCTIONS}" not in system  # placeholder filled
+        assert "clean LaTeX / Markdown extracted from the arXiv source" in system
+        assert "DIRECTLY into `key_equations_md`" in system
+        # arxiv source is clean — pdfplumber's (cid:NN) artifact rule must NOT leak.
+        assert "(cid:" not in system
+
+    def test_pdfplumber_block_injected_and_is_default(self):
+        # Explicit and default both select the degraded-PDF block.
+        for kwargs in ({}, {"extraction_method": "pdfplumber_llm"}):
+            system, _ = render_paper_extract_prompt("degraded text", **kwargs)
+            assert "(cid:" in system  # F3 degraded-PDF artifact rule
+            assert "approximate LaTeX form" in system  # Tier-2 best-effort note
+            assert 'extraction_method="pdfplumber_llm"' in system  # downstream trust signal
+
+    def test_abstract_only_block_injected(self):
+        system, _ = render_paper_extract_prompt("abstract", extraction_method="abstract_only")
+        assert "only the paper's abstract" in system.lower()
+        # Abstracts have no equations / pseudocode — block tells the LLM to leave both empty.
+        assert 'Leave `key_equations_md` and `pseudocode_md` as `""`' in system
+        # No degraded-PDF / arxiv-source content should leak.
+        assert "(cid:" not in system
+        assert "arXiv source" not in system
+
+    def test_md_template_has_extraction_placeholder(self):
+        # Per-tier guidance lives in __init__.py blocks; the .md template
+        # carries only the placeholder so a future extraction tier just needs a
+        # new block, not a template rewrite.
+        from pathlib import Path
+
+        import agent.prompt_templates.literature_review as mod
+
+        raw = Path(mod.__file__).with_name("paper_extract_system.md").read_text()
+        assert "{EXTRACTION_INSTRUCTIONS}" in raw
+        # tier-specific fingerprints must NOT be in the raw .md
+        assert "arXiv source" not in raw
+        assert "(cid:" not in raw
 
 
 class TestTaskInjection:
@@ -149,6 +215,9 @@ class TestPaperExtractValidationHalf:
             "architecture_details": "WaveNet: dilated causal convs, full-spectrum.",
             "key_results": "WaveNet 4.99/5.16 under full-spectrum training.",
             "relevance_to_task": "Only full-spectrum baseline; directly comparable.",
+            # Commit 2c fields the LLM emits (extraction_method is set node-side).
+            "key_equations_md": "$$s = -\\log\\|x - \\hat x\\|^2$$",
+            "pseudocode_md": "```python\nfor x in batch:\n    pass\n```",
         }
         bridge = MagicMock()
         bridge.generate.return_value = valid
@@ -217,11 +286,15 @@ class TestSynthesisPrompt:
 
     def test_separate_keys_instruction_locked(self):
         # Locks the Step-1 fix: gpt-4o-mini collapsed cite_id/confidence into the
-        # content prose. The prompt must demand three separate keys AND show the
-        # exact example shape. Guards against a future edit re-collapsing them.
+        # content prose. The prompt must demand four separate keys (post-2d
+        # cite-id-mismatch fix: ``content_paper_id`` is the fourth required key)
+        # AND show an example with cite_id as its own key. Guards against a
+        # future edit re-collapsing them. The specific cite_id in the example
+        # is not locked.
         system, _ = self._render()
-        assert "THREE SEPARATE keys" in system
-        assert '"cite_id": "arxiv:2406.04378"' in system  # example: cite_id as its own key
+        assert "FOUR SEPARATE keys" in system
+        assert '"cite_id": "arxiv:' in system  # cite_id present as its own key
+        assert '"content_paper_id": "arxiv:' in system  # 2d cite-id-mismatch fix
         assert (
             '"confidence":' in system
         )  # example: confidence as its own key (value is rubric-driven)
@@ -460,3 +533,863 @@ class TestSearchDecisionPrompt:
         assert '"spectral gating denoising" → 5 hits' in user
         assert "too specific" not in user  # no 0-hit annotation
         assert "do NOT repeat a 0-hit query" not in user  # no broaden nudge
+
+
+# ---------------------------------------------------------------------------
+# render_review_report — pure Markdown view of a LiteratureReviewOutput.
+# Pure function: same input → same output. No LLM, no I/O.
+# ---------------------------------------------------------------------------
+
+
+def _agent_card() -> AgentCard:
+    """Minimal AgentCard fixture — required by LiteratureReviewOutput's parent."""
+    return AgentCard(
+        agent_name="ml_literature_review",
+        role="Surveys recent literature and emits findings.",
+        expertise_domain="ML denoising / signal modelling literature.",
+        coverage="arXiv + S2 search, last 24 months.",
+        limitations="LLM-mediated extraction; equation fidelity tier-dependent.",
+        trust_guidance="Treat as promising priors; cross-check with experiments.",
+    )
+
+
+def _arxiv_extract(
+    title: str = "Mamba",
+    authors: str = "Albert Gu, Tri Dao",
+    year: str = "2023",
+    *,
+    key_equations_md: str = "$$h_t = \\bar{A} h_{t-1} + \\bar{B} x_t$$",
+    pseudocode_md: str = "```python\nfor t in range(L):\n    h = A @ h + B @ x[t]\n```",
+) -> PaperExtract:
+    """Tier-1 PaperExtract — clean LaTeX source, all fields populated."""
+    return PaperExtract(
+        title=title,
+        authors=authors,
+        year=year,
+        core_idea="Selective SSM with hardware-aware scan.",
+        architecture_details="Mamba block: linear projections, 1-D conv, selective SSM.",
+        key_results="Matches Pythia-2.8B perplexity at 1.4B params.",
+        relevance_to_task="Linear-time scan for long 1-D sequences — directly relevant.",
+        key_equations_md=key_equations_md,
+        pseudocode_md=pseudocode_md,
+        extraction_method="arxiv_source",
+    )
+
+
+def _pdfplumber_extract() -> PaperExtract:
+    """Tier-2 PaperExtract — degraded PDF, equations marked best-effort."""
+    return PaperExtract(
+        title="SNRAware",
+        authors="A. Researcher, B. Coauthor",
+        year="2025",
+        core_idea="SNR-aware loss reweighting for MRI denoising.",
+        architecture_details="U-Net denoiser; SNR-gated patch reweighting.",
+        key_results="1.4 dB PSNR over baseline U-Net on fastMRI knee.",
+        relevance_to_task="Loss-layer engineering is domain-portable to 1-D signals.",
+        key_equations_md="$$\\mathcal{L}_{SNR} = \\sum_i w(SNR_i) \\| \\hat{y}_i - y_i \\|^2$$",
+        pseudocode_md="```python\nfor patch in batch:\n    snr = estimate_snr(patch)\n```",
+        extraction_method="pdfplumber_llm",
+    )
+
+
+def _retrieved_paper(
+    paper_id: str = "arxiv:2312.00752",
+    source_type: str = "arxiv",
+    identifier: str = "2312.00752",
+    *,
+    extract: PaperExtract | None = None,
+    s2_metadata: dict | None = None,
+    verbosity_achieved: int = 1,
+    error: str | None = None,
+) -> RetrievedPaper:
+    if s2_metadata is None and extract is not None:
+        # Mirror what the resolver actually returns: S2 also carries the title
+        # so the title-lookup fallback chain is exercised.
+        s2_metadata = {
+            "title": extract.title,
+            "year": int(extract.year) if extract.year.isdigit() else None,
+            "paperId": "abc123",
+        }
+    return RetrievedPaper(
+        paper_id=paper_id,
+        source=PaperSource(source_type=source_type, identifier=identifier, verbosity=1),
+        s2_metadata=s2_metadata,
+        extract=extract,
+        verbosity_achieved=verbosity_achieved,  # type: ignore[arg-type]
+        error=error,
+    )
+
+
+def _output(
+    *,
+    retrieved_papers: list[RetrievedPaper] | None = None,
+    findings: list[ExpertContextItem] | None = None,
+    run_name: str = "test_run",
+    search_rounds_used: int = 0,
+) -> LiteratureReviewOutput:
+    return LiteratureReviewOutput(
+        agent_card=_agent_card(),
+        findings=findings or [],
+        retrieved_papers=retrieved_papers or [],
+        search_rounds_used=search_rounds_used,
+        run_name=run_name,
+        started_at="2026-05-29T14:21:18+00:00",
+        finished_at="2026-05-29T14:32:01+00:00",
+    )
+
+
+def _finding(
+    cite_id: str = "arxiv:2312.00752",
+    confidence: float | None = 0.85,
+    content: str = (
+        "**Implication.** Replace FCNet attention with a Mamba block.\n\n"
+        "**Mechanism.** Selective SSM with linear scan.\n\n"
+        "**Adaptation.** Drop in Mamba-1.4B; train full-spectrum.\n\n"
+        "*(rationale: deep-read; on-domain; mechanism implementable.)*"
+    ),
+) -> ExpertContextItem:
+    return ExpertContextItem(
+        source="ml_literature_review",
+        kind="literature",
+        content=content,
+        cite_id=cite_id,
+        confidence=confidence,
+    )
+
+
+class TestRenderReviewReportSummary:
+    """Top-of-report metadata banner — run name, timestamps, counts, tier
+    breakdown, rubric footnote."""
+
+    def test_run_name_and_timestamps_in_banner(self):
+        report = render_review_report(_output(run_name="squid_v1"))
+        assert "# Literature Review Report — squid_v1" in report
+        assert "`squid_v1`" in report
+        assert "`2026-05-29T14:21:18+00:00`" in report  # started_at
+        assert "`2026-05-29T14:32:01+00:00`" in report  # finished_at
+
+    def test_paper_and_finding_counts_in_banner(self):
+        papers = [_retrieved_paper(extract=_arxiv_extract())]
+        findings = [_finding()]
+        report = render_review_report(
+            _output(retrieved_papers=papers, findings=findings, search_rounds_used=2)
+        )
+        assert "Papers retrieved" in report
+        assert "Findings" in report
+        assert "Search rounds used" in report
+        assert "| 1 (" in report  # one paper
+        # findings count appears in its row
+        lines = [line for line in report.split("\n") if "Findings" in line]
+        assert any("1" in line for line in lines)
+
+    def test_tier_breakdown_counts_by_extraction_method(self):
+        papers = [
+            _retrieved_paper(paper_id="arxiv:1", identifier="1", extract=_arxiv_extract()),
+            _retrieved_paper(
+                paper_id="arxiv:2",
+                identifier="2",
+                extract=_arxiv_extract(title="P2"),
+            ),
+            _retrieved_paper(paper_id="arxiv:3", identifier="3", extract=_pdfplumber_extract()),
+        ]
+        report = render_review_report(_output(retrieved_papers=papers))
+        assert "2 × arxiv_source" in report
+        assert "1 × pdfplumber_llm" in report
+        assert "abstract_only" not in report  # no abstract_only paper this run
+
+    def test_unresolved_papers_counted_separately(self):
+        # A paper that failed resolution (no extract) shows up as "unresolved".
+        papers = [
+            _retrieved_paper(extract=_arxiv_extract()),
+            _retrieved_paper(
+                paper_id="arxiv:bad",
+                identifier="bad",
+                extract=None,
+                verbosity_achieved=0,
+                error="HTTP 404",
+            ),
+        ]
+        report = render_review_report(_output(retrieved_papers=papers))
+        assert "1 × arxiv_source" in report
+        assert "1 × unresolved" in report
+
+    def test_rubric_footnote_present(self):
+        report = render_review_report(_output())
+        assert "default" in report.lower() and "ConfidenceRubric" in report
+        # Numeric thresholds appear so the reader can map labels to numbers.
+        assert "≥0.80" in report and "≥0.60" in report and "≥0.40" in report
+
+
+class TestRenderReviewReportTier1Paper:
+    """A Tier-1 arxiv_source paper renders with the ✅ badge, no Tier-2
+    callout, no per-section caveats, and all populated prose sections."""
+
+    def test_arxiv_source_badge_with_check_mark(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "✅ `arxiv_source` (Tier 1 — clean LaTeX from arXiv source)" in report
+
+    def test_no_tier2_trust_callout_for_arxiv_paper(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "Trust note — Tier 2 source" not in report
+        assert "reconstructed from degraded PDF" not in report
+
+    def test_paper_heading_carries_paper_id_and_title(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract(title="Mamba"))])
+        )
+        assert "### 1. `arxiv:2312.00752` — Mamba" in report
+
+    def test_all_prose_sections_present_when_populated(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_arxiv_extract())])
+        )
+        assert "**Core idea.**" in report
+        assert "**Architecture details.**" in report
+        assert "**Key results.**" in report
+        assert "**Relevance to task.**" in report
+        assert "**Key equations.**" in report
+        assert "**Pseudocode.**" in report
+
+    def test_empty_prose_field_is_skipped_not_left_as_hollow_heading(self):
+        extract = _arxiv_extract()
+        extract.core_idea = ""  # field genuinely empty
+        report = render_review_report(_output(retrieved_papers=[_retrieved_paper(extract=extract)]))
+        assert "**Core idea.**" not in report  # heading skipped entirely
+        # Other sections still present.
+        assert "**Architecture details.**" in report
+
+    def test_empty_equations_and_pseudocode_skipped(self):
+        extract = _arxiv_extract(key_equations_md="", pseudocode_md="")
+        report = render_review_report(_output(retrieved_papers=[_retrieved_paper(extract=extract)]))
+        assert "**Key equations.**" not in report
+        assert "**Pseudocode.**" not in report
+
+
+class TestRenderReviewReportTier2Paper:
+    """A pdfplumber_llm paper renders with the ⚠️ badge AND the Tier-2 trust
+    callout AND the per-section best-effort caveats — three trust channels
+    working together per the design."""
+
+    def test_pdfplumber_badge_with_warning_emoji(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        assert "⚠️ `pdfplumber_llm` (Tier 2 — degraded PDF text, LLM-reconstructed)" in report
+
+    def test_tier2_trust_callout_blockquote_present(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        assert "> ⚠️ **Trust note — Tier 2 source.**" in report
+        # The callout names which fields are reliable vs. best-effort.
+        assert "best-effort" in report
+        assert "verified against the source PDF" in report
+
+    def test_per_section_caveat_on_equations_and_pseudocode(self):
+        report = render_review_report(
+            _output(retrieved_papers=[_retrieved_paper(extract=_pdfplumber_extract())])
+        )
+        # Caveat appears on BOTH the equations heading and the pseudocode heading.
+        assert (
+            "**Key equations.** *(reconstructed from degraded PDF — verify against source)*"
+            in report
+        )
+        assert (
+            "**Pseudocode.** *(reconstructed from degraded PDF — verify against source)*" in report
+        )
+
+    def test_tier2_paper_grepable_by_method_literal(self):
+        # Per the design: the literal string ``pdfplumber_llm`` appears in the
+        # extraction badge so reviewers can grep multi-paper reports. The
+        # banner also includes it (no backticks) in the tier breakdown.
+        report = render_review_report(
+            _output(
+                retrieved_papers=[
+                    _retrieved_paper(extract=_arxiv_extract()),
+                    _retrieved_paper(
+                        paper_id="arxiv:tier2",
+                        identifier="tier2",
+                        extract=_pdfplumber_extract(),
+                    ),
+                ]
+            )
+        )
+        # banner ("1 × pdfplumber_llm") + badge ("`pdfplumber_llm`") = at least 2.
+        assert report.count("pdfplumber_llm") >= 2
+
+
+class TestRenderReviewReportEdgeCases:
+    """Unresolved papers, abstract-only fallback, no-papers run."""
+
+    def test_unresolved_paper_renders_error_blockquote(self):
+        paper = _retrieved_paper(
+            paper_id="arxiv:bad",
+            identifier="bad",
+            extract=None,
+            verbosity_achieved=0,
+            error="HTTP 404 from arxiv.org",
+            s2_metadata={"title": "Missing", "paperId": "x"},
+        )
+        report = render_review_report(_output(retrieved_papers=[paper]))
+        assert "### 1. `arxiv:bad` — Missing" in report
+        assert "> ❌ **Resolver error:** HTTP 404 from arxiv.org" in report
+        # No prose / equation sections for an unresolved paper.
+        assert "**Core idea.**" not in report
+
+    def test_paper_without_s2_metadata_or_extract_renders_untitled(self):
+        paper = _retrieved_paper(
+            paper_id="local:foo.pdf",
+            source_type="local",
+            identifier="foo.pdf",
+            extract=None,
+            s2_metadata=None,
+            verbosity_achieved=0,
+        )
+        report = render_review_report(_output(retrieved_papers=[paper]))
+        assert "(untitled)" in report
+        assert "(no extract)" in report  # badge fallback
+
+    def test_no_retrieved_papers_section_shows_explicit_none(self):
+        report = render_review_report(_output(retrieved_papers=[]))
+        assert "## Retrieved papers" in report
+        assert "*(none — the agent retrieved zero papers this run.)*" in report
+
+
+class TestRenderReviewReportFindingsAbsent:
+    """Phase-1-only runs (no synthesis) get an honest 'none' callout that
+    surfaces the synthesis-didn't-run ambiguity."""
+
+    def test_empty_findings_renders_phase1_callout(self):
+        report = render_review_report(_output(findings=[]))
+        assert "## Findings" in report
+        assert "Phase-1-only extraction run" in report
+        assert "synthesis was not invoked" in report
+        # Reader is told what to cross-check.
+        assert "search_rounds_used" in report
+
+    def test_empty_findings_does_not_show_count_heading(self):
+        report = render_review_report(_output(findings=[]))
+        # The plural-count heading is reserved for the populated case.
+        assert "## Findings (0 total" not in report
+
+
+class TestRenderReviewReportFindingsPresent:
+    """Findings render with cite_id + matched paper title in the heading,
+    NEVER a title heuristically extracted from content (per the locked design
+    decision)."""
+
+    def test_finding_heading_uses_matched_paper_title(self):
+        papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
+        findings = [_finding(cite_id="arxiv:2312.00752")]
+        report = render_review_report(_output(retrieved_papers=papers, findings=findings))
+        # paper_id in code-quotes + dash + the matched title.
+        assert "### 1. `arxiv:2312.00752` — Mamba" in report
+
+    def test_finding_heading_falls_back_to_cite_id_only_when_no_match(self):
+        # Retrieved papers DO have titles, but none of them match the finding's
+        # cite_id — proves the renderer does not greedily inject the wrong
+        # title or fall back to a heuristic.
+        papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
+        findings = [_finding(cite_id="arxiv:9999.99999")]
+        report = render_review_report(_output(retrieved_papers=papers, findings=findings))
+        # The cite_id appears in a finding heading.
+        assert "### 1. `arxiv:9999.99999`" in report
+        # The unmatched paper's title must NOT leak into the finding heading.
+        # We extract the finding heading line and assert "Mamba" isn't on it.
+        finding_heading = next(
+            line
+            for line in report.split("\n")
+            if line.startswith("### 1.") and "arxiv:9999.99999" in line
+        )
+        assert "Mamba" not in finding_heading
+
+    def test_finding_content_rendered_verbatim_below_heading(self):
+        # The three-part content format is preserved exactly — the renderer
+        # does NOT try to parse, summarise, or re-label it.
+        findings = [_finding()]
+        report = render_review_report(_output(findings=findings))
+        assert "**Implication.** Replace FCNet attention" in report
+        assert "**Mechanism.** Selective SSM" in report
+        assert "**Adaptation.** Drop in Mamba-1.4B" in report
+        assert "*(rationale: deep-read" in report
+
+    def test_finding_metadata_line_shows_cite_source_kind(self):
+        findings = [_finding(cite_id="arxiv:2312.00752")]
+        report = render_review_report(_output(findings=findings))
+        assert "**Cite:** `arxiv:2312.00752`" in report
+        assert "**Source agent:** `ml_literature_review`" in report
+        assert "**Kind:** `literature`" in report
+
+    def test_confidence_band_label_mapping(self):
+        findings = [
+            _finding(cite_id="p:high", confidence=0.85),
+            _finding(cite_id="p:mod", confidence=0.65),
+            _finding(cite_id="p:low", confidence=0.45),
+        ]
+        report = render_review_report(_output(findings=findings))
+        # Numeric + band label both appear.
+        assert "confidence `0.85` (high)" in report
+        assert "confidence `0.65` (moderate)" in report
+        assert "confidence `0.45` (low)" in report
+
+    def test_findings_sorted_high_to_low_by_confidence(self):
+        # Deliberately fed in low-to-high order.
+        findings = [
+            _finding(cite_id="p:low", confidence=0.45),
+            _finding(cite_id="p:high", confidence=0.85),
+            _finding(cite_id="p:mod", confidence=0.65),
+        ]
+        report = render_review_report(_output(findings=findings))
+        idx_high = report.index("`p:high`")
+        idx_mod = report.index("`p:mod`")
+        idx_low = report.index("`p:low`")
+        assert idx_high < idx_mod < idx_low
+
+    def test_none_confidence_sorts_last_and_omits_band(self):
+        findings = [
+            _finding(cite_id="p:has_conf", confidence=0.65),
+            _finding(cite_id="p:no_conf", confidence=None),
+        ]
+        report = render_review_report(_output(findings=findings))
+        # The None-confidence finding shows no confidence suffix at all.
+        no_conf_block_start = report.index("`p:no_conf`")
+        no_conf_block_end = report.index("---", no_conf_block_start)
+        no_conf_block = report[no_conf_block_start:no_conf_block_end]
+        assert "confidence" not in no_conf_block
+        # ...and appears after the scored one.
+        assert report.index("`p:has_conf`") < report.index("`p:no_conf`")
+
+
+class TestRenderReviewReportDeterminism:
+    """Pure function: same input → byte-identical output, no time-of-day, no
+    randomness, no dict ordering ambiguity."""
+
+    def test_byte_identical_across_repeated_calls(self):
+        papers = [
+            _retrieved_paper(paper_id="arxiv:a", identifier="a", extract=_arxiv_extract()),
+            _retrieved_paper(paper_id="arxiv:b", identifier="b", extract=_pdfplumber_extract()),
+        ]
+        findings = [
+            _finding(cite_id="arxiv:a", confidence=0.65),
+            _finding(cite_id="arxiv:b", confidence=0.85),
+        ]
+        out = _output(retrieved_papers=papers, findings=findings, search_rounds_used=2)
+        r1 = render_review_report(out)
+        r2 = render_review_report(out)
+        assert r1 == r2
+
+    def test_tied_confidence_breaks_deterministically_by_cite_id(self):
+        # Two findings with the same confidence — secondary sort key is
+        # cite_id ascending — ensures stable diffs.
+        findings = [
+            _finding(cite_id="z:later", confidence=0.65),
+            _finding(cite_id="a:earlier", confidence=0.65),
+        ]
+        report = render_review_report(_output(findings=findings))
+        assert report.index("`a:earlier`") < report.index("`z:later`")
+
+
+class TestRenderReviewReportIsAvailableAsPublicAPI:
+    """The renderer is the documented public entrypoint — it must be
+    importable from the package (not just the submodule) so callers don't
+    couple to file layout."""
+
+    def test_render_review_report_importable_from_package(self):
+        from agent.prompt_templates.literature_review import render_review_report as r
+
+        assert callable(r)
+
+
+# ---------------------------------------------------------------------------
+# Commit 2d — synthesis prompt sees key_equations_md / pseudocode_md /
+# extraction_method per paper, and the per-tier instruction blocks reach
+# the LLM via the Mechanism / Adaptation placement rule.
+# ---------------------------------------------------------------------------
+
+
+def _synth_render(papers, **overrides):
+    """Render the synthesis prompt with sensible defaults — caller supplies
+    only the per-paper dicts they care about."""
+    kwargs = {
+        "key_findings": ["high-frequency band overfits"],
+        "bottlenecks": ["loss saturates after ~5 epochs"],
+        "take_home_message": "need a wider receptive field",
+        "papers": papers,
+        "findings_verbosity": 1,
+    }
+    kwargs.update(overrides)
+    return render_synthesis_prompt(**kwargs)
+
+
+class TestSynthesisPerPaperBlockTier1:
+    """Tier-1 papers (`arxiv_source`) carry verbatim equations / pseudocode.
+    The per-paper block must show both the verbatim-quote marker AND the
+    actual LaTeX so the LLM can lift it into Mechanism unchanged."""
+
+    def _arxiv_paper(self, **overrides):
+        paper = {
+            "paper_id": "arxiv:2503.18162",
+            "title": "SNRAware",
+            "year": "2025",
+            "summary": "Architecture: U-Net with SNR-unit front-end.\nResults: 1.4 dB.",
+            "key_equations_md": (
+                "$$\\mathcal{L}_{\\text{SNR}} = -\\log\\frac{\\|s\\|^2}{\\|s - \\hat{s}\\|^2}$$"
+            ),
+            "pseudocode_md": (
+                "```python\nfor patch in batch:\n    w = compute_snr_weight(patch)\n```"
+            ),
+            "extraction_method": "arxiv_source",
+        }
+        paper.update(overrides)
+        return paper
+
+    def test_extraction_marker_says_quote_verbatim(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Extraction: arxiv_source (Tier 1" in user
+        assert "quote equations verbatim" in user
+
+    def test_key_equations_block_has_verbatim_label(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Key equations (verbatim from source" in user
+        # LaTeX appears verbatim — including the dollar-sign delimiters
+        # so the LLM can copy them as-is into Mechanism.
+        assert "$$\\mathcal{L}_{\\text{SNR}}" in user
+
+    def test_pseudocode_block_has_verbatim_label_when_present(self):
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "Pseudocode (verbatim from source" in user
+        assert "```python" in user
+        assert "compute_snr_weight(patch)" in user
+
+    def test_summary_prose_also_present(self):
+        # The new equation/pseudocode blocks supplement the prose summary;
+        # they don't replace it.
+        _, user = _synth_render([self._arxiv_paper()])
+        assert "U-Net with SNR-unit front-end" in user
+        assert "1.4 dB" in user
+
+
+class TestSynthesisPerPaperBlockTier2:
+    """Tier-2 papers (`pdfplumber_llm`) carry best-effort reconstructed
+    equations. The per-paper block must tell the LLM to paraphrase + flag
+    when lifting into Mechanism, not quote verbatim."""
+
+    def _tier2_paper(self):
+        return {
+            "paper_id": "arxiv:2503.99999",
+            "title": "DegradedPDFPaper",
+            "year": "2024",
+            "summary": "Architecture: convnet.",
+            "key_equations_md": "$$y = f(x)$$",
+            "pseudocode_md": "",
+            "extraction_method": "pdfplumber_llm",
+        }
+
+    def test_extraction_marker_says_paraphrase_and_flag(self):
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Extraction: pdfplumber_llm (Tier 2" in user
+        assert "paraphrase equations" in user
+        assert "flag as approximate" in user
+
+    def test_key_equations_block_carries_best_effort_label(self):
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Key equations (best-effort reconstruction from degraded PDF" in user
+        # Equation still appears so the LLM can paraphrase it.
+        assert "y = f(x)" in user
+
+    def test_no_pseudocode_block_when_field_empty(self):
+        # Empty pseudocode_md → the sub-block is skipped (absence is the
+        # signal; no need to tell the LLM something is missing).
+        _, user = _synth_render([self._tier2_paper()])
+        assert "Pseudocode" not in user
+
+
+class TestSynthesisPerPaperBlockAbstractOnly:
+    """abstract_only papers carry no equation or pseudocode content. The
+    block must say so explicitly so the LLM doesn't try to invent one."""
+
+    def _abstract_paper(self):
+        return {
+            "paper_id": "doi:10.1234/abc",
+            "title": "AbstractOnlyPaper",
+            "year": "2023",
+            "summary": "Abstract: a denoising method.",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+
+    def test_extraction_marker_says_no_equations_to_quote(self):
+        _, user = _synth_render([self._abstract_paper()])
+        assert "Extraction: abstract_only" in user
+        assert "no equations or pseudocode to quote" in user
+
+    def test_no_key_equations_or_pseudocode_blocks(self):
+        # Both fields empty → both sub-blocks suppressed.
+        _, user = _synth_render([self._abstract_paper()])
+        assert "Key equations" not in user
+        assert "Pseudocode" not in user
+
+
+class TestSynthesisPlacementRule:
+    """The locked Commit 2d rule: Mechanism = source-extracted content (incl.
+    verbatim equations); Adaptation = LLM reasoning on top, never raw
+    equations from source. Lives in the rendered system prompt
+    (_SYNTHESIS_CONTENT_FORMAT_V1 → {CONTENT_FORMAT_BLOCK})."""
+
+    def test_locked_rule_marker_in_system_prompt(self):
+        system, _ = _synth_render([])
+        # The lock phrase tells future readers (human + LLM) the rule is
+        # not negotiable.
+        assert "Placement rule (LOCKED" in system
+
+    def test_mechanism_is_source_extracted_only(self):
+        system, _ = _synth_render([])
+        assert "Mechanism = source-extracted content ONLY" in system
+        # Negative invariants the rule enforces. (Substrings chosen to fit
+        # within a single source line so the test is robust to wrapping.)
+        assert "LLM-added reasoning" in system
+        assert "NO bridging-to-SQUID logic" in system
+
+    def test_adaptation_is_llm_reasoning_no_raw_equations(self):
+        system, _ = _synth_render([])
+        assert "Adaptation = LLM reasoning on top" in system
+        # The placement rule must explicitly forbid raw equations in
+        # Adaptation — they belong in Mechanism.
+        assert "Adaptation MUST NOT contain raw equations" in system
+
+    def test_per_tier_mechanism_instructions_present(self):
+        # All three extraction-method paths must be addressed in the
+        # Mechanism section instructions so the LLM has explicit guidance
+        # whatever tier the cited paper landed at.
+        system, _ = _synth_render([])
+        assert "`arxiv_source`" in system
+        assert "verbatim" in system  # Tier-1 instruction
+        assert "`pdfplumber_llm`" in system
+        assert "approximate equation" in system  # Tier-2 flag
+        assert "`abstract_only`" in system
+        assert "prose only" in system  # abstract-only path
+
+    def test_pseudocode_when_algorithm_is_the_mechanism(self):
+        system, _ = _synth_render([])
+        assert "algorithm IS the mechanism" in system
+        assert "fenced code block" in system
+
+    def test_word_budgets_unchanged(self):
+        # Commit 2d locks: caps stay at 40 / 80 / 50 unless real Phase-2
+        # runs show otherwise. This test is the regression guard.
+        system, _ = _synth_render([])
+        assert "≤ 40 words" in system  # Implication
+        assert "≤ 80 words" in system  # Mechanism
+        assert "≤ 50 words" in system  # Adaptation
+
+    def test_equation_latex_explicitly_not_counted_in_mechanism_cap(self):
+        # The cap is on prose words, not LaTeX bytes — otherwise a long
+        # equation could push out the surrounding explanation.
+        system, _ = _synth_render([])
+        assert "equation LaTeX itself does not count toward the cap" in system
+
+
+class TestSynthesisMultiplePapersAndOrdering:
+    """Multiple papers render as separate, well-separated blocks; the
+    rendering preserves input order so the synthesis LLM sees them in the
+    same order the node assembled them."""
+
+    def test_papers_separated_by_blank_lines(self):
+        p1 = {
+            "paper_id": "arxiv:1",
+            "title": "First",
+            "year": "2020",
+            "summary": "S1",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        p2 = {
+            "paper_id": "arxiv:2",
+            "title": "Second",
+            "year": "2021",
+            "summary": "S2",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "abstract_only",
+        }
+        _, user = _synth_render([p1, p2])
+        # Both blocks present, in input order. Post-2d the paper_id appears
+        # as a backtick-quoted code span in the labeled cite_id / content_paper_id
+        # line, not bracketed in the markdown header.
+        idx1 = user.index("`arxiv:1`")
+        idx2 = user.index("`arxiv:2`")
+        assert idx1 < idx2
+
+    def test_empty_papers_list_does_not_crash(self):
+        # Backward-compat: existing dual-mode tests construct empty papers
+        # lists for synthesis-not-run scenarios.
+        _, user = _synth_render([])
+        assert "(no papers were retrieved this run)" in user
+
+
+class TestSynthesisBackwardCompat:
+    """Existing per-paper dicts (without 2d fields) must still render. The
+    new fields are additive — missing-key access goes through `.get()` with
+    sensible defaults."""
+
+    def test_legacy_dict_without_2d_fields_renders(self):
+        # Pre-2d dict: only paper_id / title / year / summary.
+        legacy = {
+            "paper_id": "arxiv:legacy",
+            "title": "Legacy",
+            "year": "2019",
+            "summary": "Architecture: a thing.",
+        }
+        _, user = _synth_render([legacy])
+        # Should render without raising; the absent extraction_method
+        # falls back to abstract_only marker. Post-2d the paper_id appears in
+        # the labeled cite_id / content_paper_id line as a backtick-quoted
+        # code span.
+        assert "`arxiv:legacy`" in user
+        assert "Extraction: abstract_only" in user
+        assert "Key equations" not in user  # no equation field → no sub-block
+        assert "Pseudocode" not in user
+
+
+# ---------------------------------------------------------------------------
+# Post-2c-c.2 cite-id-mismatch fix — Layer 1 (prompt changes).
+# Verifies the per-paper block surfaces paper_id as a labeled, code-quoted
+# field (not embedded in a markdown header), and that the synthesis prompt's
+# output contract + hard rules require ``content_paper_id`` as a fourth key
+# with explicit content-vs-cite_id consistency semantics.
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesisCiteIdProminence:
+    """The per-paper block must surface paper_id as a labeled field, not
+    embedded in a markdown header decoration. Prevents the TADA/FreLE cite-id
+    mismatch failure mode observed on the first 2d real_run pilot (LLM cited
+    Paper A but described Paper B because paper_id was buried in adjacent
+    header brackets)."""
+
+    def _paper(self, paper_id: str = "arxiv:2501.04967") -> dict:
+        return {
+            "paper_id": paper_id,
+            "title": "TADA",
+            "year": "2025",
+            "summary": "S",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "arxiv_source",
+        }
+
+    def test_paper_id_appears_on_labeled_line_with_both_key_names(self):
+        # The labeled line must name BOTH JSON keys (cite_id AND
+        # content_paper_id) and code-quote the paper_id so the LLM has an
+        # unambiguous string to copy.
+        _, user = _synth_render([self._paper()])
+        assert "cite_id / content_paper_id (use this exact string for both):" in user
+        assert "`arxiv:2501.04967`" in user
+        # The label and the id are on the same line — the LLM doesn't have
+        # to scan across line breaks to associate them.
+        for line in user.split("\n"):
+            if "cite_id / content_paper_id" in line:
+                assert "`arxiv:2501.04967`" in line
+                break
+        else:
+            raise AssertionError("labeled cite_id line not found in rendered prompt")
+
+    def test_paper_id_not_in_header_brackets(self):
+        # Pre-2d cite-id-mismatch-fix format had `### [paper_id] Title (Year)`.
+        # The brackets form must be gone.
+        _, user = _synth_render([self._paper(paper_id="arxiv:2501.04967")])
+        assert "[arxiv:2501.04967]" not in user
+
+
+class TestSynthesisContentPaperIdInOutputContract:
+    """The synthesis system prompt's output contract names ``content_paper_id``
+    as a required fourth key on every finding, and the hard rules explicitly
+    mandate content-vs-cite_id consistency. Applies to BOTH findings_verbosity
+    paths (V1 + V0)."""
+
+    def test_v1_contract_lists_four_keys_and_content_paper_id(self):
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        assert "FOUR SEPARATE keys" in system
+        # The four keys are named in the output-contract intro.
+        for key in ("`content`", "`cite_id`", "`content_paper_id`", "`confidence`"):
+            assert key in system, f"output contract intro missing {key!r}"
+        # The V1 example JSON shows content_paper_id alongside cite_id.
+        assert '"content_paper_id": "arxiv:' in system
+
+    def test_v0_contract_also_lists_four_keys_and_content_paper_id(self):
+        # findings_verbosity=0 is a supported configuration; V0 must carry
+        # the same content_paper_id requirement or the hook would soft-drop
+        # every finding on a v=0 run.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=0,
+        )
+        assert "four separate keys" in system  # V0 uses lowercase phrasing
+        assert '"content_paper_id": "arxiv:' in system
+
+    def test_v0_id_bullet_mentions_both_cite_id_and_content_paper_id(self):
+        # The V0 block's trailing rule used to read "the id belongs ONLY in
+        # `cite_id`". Post-2d-cite-id-fix it must broaden to both keys.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=0,
+        )
+        # Both key names appear in the broadened bullet. Use whitespace-
+        # tolerant matching because the substrings may span line wraps in
+        # the source-file formatting.
+        normalised = " ".join(system.split())
+        assert "`cite_id` and `content_paper_id`" in normalised
+        assert "both must hold the same paper_id" in normalised
+
+    def test_hard_rules_require_content_consistency_check(self):
+        # The synthesis_system.md hard rule must:
+        #  (a) name content_paper_id as a separate required key
+        #  (b) declare the node will drop on mismatch
+        #  (c) prescribe a pre-emit re-read protocol
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        # Whitespace-tolerant matching — the substrings may span line wraps
+        # in the source-file formatting of synthesis_system.md.
+        normalised = " ".join(system.split())
+        assert "`content_paper_id` is a SEPARATE key" in normalised
+        assert "DROP your finding if" in normalised
+        assert "`content_paper_id != cite_id`" in normalised
+        # Pre-emit cross-check protocol — the LLM is told to re-read its
+        # own Mechanism before emitting.
+        assert "re-read your Mechanism" in normalised
+
+    def test_hard_rules_point_at_labeled_per_paper_line(self):
+        # The cite_id rule was rewritten to point at the new labeled line in
+        # the per-paper block (Change 1A), closing the loop between the rule
+        # and the block format.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        assert '"cite_id / content_paper_id (use this exact string for both):"' in system

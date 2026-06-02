@@ -41,16 +41,22 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
-- [ ] **Commit 2c** — Three-tier full-text + formula extraction (arXiv source → marker → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
+- [x] **Commit 2c** — Two-tier full-text + formula extraction (arXiv source → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)* · committed across `4da895d` (2c-a), `1ebb034` (2c-b), `963b628` (2c-cleanup), `5133662` + `81a63c6` (2c-c); Checkpoints E + F signed off 2026-05-31
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` (tier cascade) + `@real_run` Tier-1 on TIDMAD · extraction-pilot artifact
-  - [ ] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output)
-  - [ ] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md`
-- [ ] **Commit 2d** — reference_library channel — *(retroactive — extends Commits 2–3; see §5b of `external_agents_for_proposer.md`)*
-  · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` + `tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py` + `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`; protocol mapping deferred to Commit 5
+  - [x] **2c-a** — `PaperExtract` +3 fields + extraction-tier-aware compression prompt · committed `4da895d`
+  - [x] **2c-b** — Tier-1 arXiv source extraction wired end-to-end (parser + wrapper cascade + node propagation + 41 unit tests) · committed `1ebb034`
+  - [x] **2c-cleanup** — drop the `marker_pdf` tier entirely from schema/prompts/skill_config/docs (two-tier cascade locked: arXiv source → pdfplumber+LLM) · committed `963b628`
+  - [x] **2c-c** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F *(was 2c-d before Tier-2 was cancelled)* · committed `5133662` (render_review_report) + `81a63c6` (§10 Phase-1 pilot + Checkpoints E/F sign-off)
+  - [x] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output) · signed off 2026-05-31 (§10 Phase-1 pilot artifact reviewed; equations correct + clean for all 6 .tex papers, pseudocode preserved for TADA + FreLE, others have no algorithm blocks)
+  - [x] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md` · signed off 2026-05-31 (compression passes across all 7 papers: architecture_details actionable, key_results carry regime qualifiers, relevance_to_task honest, zero hallucinations)
+- [x] **Commit 2d** — equation-/pseudocode-aware synthesis prompt — *(retroactive — extends Commit 2c; see §5b of `external_agents_for_proposer.md`)* · committed across `e9efddf` (synthesis prompt + per-paper block + locked Mechanism-vs-Adaptation placement rule), `7a5c093` (Phase-2 pilot script), `c51c231` (pilot artifact-first fix), `ce67cd2` (two-layer cite-id-mismatch fix: prompt labeled-id line + node-side `_validate_content_paper_id` hook), `7d466b2` (Phase-2 pilot floor + LaTeX-regex tuning); Checkpoint G signed off 2026-06-02
+  · scope: feed `key_equations_md` / `pseudocode_md` / `extraction_method` into `render_synthesis_prompt`'s per-paper block; update `synthesis_system.md` so the synthesis LLM quotes Tier-1 equations verbatim and flags Tier-2 quotes as paraphrased — directly inside `ExpertContextItem.content`. **Zero schema changes** — `LiteratureReviewOutput` keeps its four `ExternalAgentOutput` channels, `ProposalInput` is untouched, `proposal.py` imports nothing from `literature_review.py`. The `reference_library` design earlier drafts proposed (typed output channel of `PaperReference` entries) is cancelled — equations travel inline inside finding `content`. `reference_library` lives only as transient node-scratch state during the `synth()` call; it is never serialised, never on output, never crosses any boundary.
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + `tests/unit/agent/ml_literature_review/`
+  - [x] **Checkpoint G** — Final synthesis output quality (equation-aware findings) · signed off 2026-06-02 (§10 Phase-2 pilot artifact reviewed; 3 findings emitted, all citing the paper they describe — zero TADA/FreLE-style cite-id-vs-content mismatches; equations quoted verbatim from Tier-1 sources inside Mechanism; Adaptation clean of LaTeX on all three findings; equation fidelity spot-checked against source `key_equations_md`; confidence calibration honest (0.90 / 0.85 / 0.70 ordering matches the on-domain → cross-domain gradient); each Adaptation describes a concrete implementation step)
 - [x] **Commit 4** — `nodes/ml_literature_review.py` core loop
   · **4a** `820c548`; **4b-code** `c7860d7`; **4b-docs** `2ec1ae5`; **4b-final** `91461a2` (findings_verbosity + transfer_tolerance + node source-type routing + integration test → DeepSeek + Checkpoint C)
   - [x] **Checkpoint C** — Dynamic search loop behavior · signed off 2026-05-28 (artifact `docs/dynamic_search_pilot.md`)
-- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **wires `reference_library` into `local_all_channels`** — deferred from 2d)
+- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **4-kwarg shape**: `expert_context` / `vocab_seed` / `agent_cards` / `mindset`. No `reference_library` plumbing — that channel was cancelled in the 2d revision; equations travel inline inside finding `content`.)
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
@@ -520,54 +526,124 @@ equation handling. Same file also captures the search-mode sanity check
 
 ---
 
-## Commit 2c — Three-tier full-text + formula extraction
+## Commit 2c — Two-tier full-text + formula extraction
 
-**Goal**: Implement the three-tier extraction strategy
+**Goal**: Implement the two-tier extraction strategy
 (`docs/external_agents_for_proposer.md` §5a) in `paper_resolver_skill`; add
 `key_equations_md`, `pseudocode_md`, and `extraction_method` to `PaperExtract`;
 run a pilot validating extraction quality on real papers. Logically this sits
 between Commit 2 (shipped the skill + pdfplumber path) and Commit 3 (locked the
 `PaperExtract` field set) — it extends the skill and **amends** both Commit 3's
 field-set lock and pilot finding **F3** ("no `key_equations`; prose only"): F3's
-rationale (pdfplumber degrades math) holds only for the Tier-3 path; Tiers 1–2
-carry equations verbatim. NOTE: introduced after Commits 3 and 4 already shipped,
-so it also requires re-validating the Commit-3 compression prompt against the
-new fields (Checkpoint F + the equation-aware prompt variant).
+rationale (pdfplumber degrades math) holds only for the Tier-2 path; Tier 1
+carries equations verbatim. NOTE: introduced after Commits 3 and 4 already
+shipped, so it also requires re-validating the Commit-3 compression prompt
+against the new fields (Checkpoint F + the equation-aware prompt variant).
+
+**Why two tiers, not three.** An early plan slotted in a GPU-based PDF→Markdown
+tier (`marker-pdf`) between arXiv source and pdfplumber. We dropped it: the lab
+GPU (5090) does not have `marker-pdf` installed, and the marginal quality gain
+over `pdfplumber + LLM` is small for math-heavy papers (both paths ultimately
+depend on the compression LLM to reconstruct LaTeX). The framework stays
+extensible — a Tier-1.5 GPU converter can be slotted in later without touching
+the existing wire-up — but the locked design here is two-tier only.
+
+**Sub-commit ladder**: split into logical units committed sequentially — 2c-a
+(schema + prompt), 2c-b (Tier-1 wire-up), 2c-cleanup (drop `marker_pdf` from
+schema/prompts/docs after the Tier-2 cancellation decision), 2c-c (pilot +
+render_review_report + Checkpoints E/F; renumbered from the original 2c-d after
+the cancellation).
 
 **Checklist**:
-- [ ] Tier 1: arXiv source downloader (`https://arxiv.org/src/{id}` → `.tar.gz`)
-      + `.tex` parser for `equation`/`align`/`algorithm`/`figure` → clean Markdown.
-- [ ] Tier 2 marker integration: add marker-pdf to pyproject.toml as an
-      optional dependency (not in the default install group). The skill
-      detects availability at runtime via importlib.util.find_spec("marker")
-      and skips to Tier 3 if not found. CI (no GPU) must pass without marker
-      installed — the unit tests mock the marker call, never import it directly.
-- [ ] Tier 3: existing `pdfplumber` text path retained as last resort.
-- [ ] `extraction_method` wired end-to-end: set in skill, returned in the
-      response envelope, read by the node to select the compression-prompt variant.
-- [ ] Add `key_equations_md`, `pseudocode_md`, `extraction_method` to
+
+#### 2c-a — schema + prompt *(committed `4da895d`)*
+- [x] Add `key_equations_md`, `pseudocode_md`, `extraction_method` to
       `PaperExtract`; update the "locked field set" docstring note accordingly.
-- [ ] `render_paper_extract_prompt` becomes `extraction_method`-aware
+- [x] `render_paper_extract_prompt` becomes `extraction_method`-aware
       (equation-aware for Tier 1–2; "reconstruct from degraded text, mark
-      unreliable" for Tier 3).
-- [ ] Unit tests: each tier in isolation (mocked HTTP for arXiv source, mocked
-      `marker`, existing pdfplumber mock) + the **fallback cascade**
-      (Tier 1 fail → Tier 2 → Tier 3 → abstract_only).
-- [ ] Pilot on TIDMAD (`arxiv:2406.04378`) and SNRAware (`arxiv:2503.18162`).
+      unreliable" for Tier 3). Per-tier instruction blocks injected via the
+      `{EXTRACTION_INSTRUCTIONS}` placeholder.
+
+#### 2c-b — Tier-1 arXiv source wire-up *(committed `1ebb034`)*
+- [x] Tier 1: arXiv source downloader (`https://arxiv.org/src/{id}` → `.tar.gz`)
+      + `.tex` parser for `equation`/`align`/`algorithm`/`figure` → clean Markdown.
+      Implemented in `agent/skills/paper_resolver_skill/arxiv_source.py` via
+      pylatexenc 2.x AST walk with verbatim slicing.
+- [x] Tier 2 (formerly Tier-3): existing `pdfplumber` text path retained as the
+      fallback. No change to the path itself; the cascade now arrives there only
+      after Tier-1 returns None.
+- [x] `extraction_method` wired end-to-end through both tiers: set in the skill
+      payload, returned in the response envelope, read by the node and stamped
+      on `PaperExtract` after LLM validation (so the LLM cannot mint or override
+      the trust signal).
+- [x] Unit tests for the **Tier-1 / Tier-2 cascade**: 21 parser tests + 10
+      wrapper cascade tests + 10 node propagation tests (mocked HTTP throughout;
+      no real network, no real LLM).
+
+#### 2c-cleanup — drop `marker_pdf` from schema/prompts/docs
+*(post-2c-b decision: cancel the planned Tier-2 marker hook entirely; the
+cascade is two-tier only — see "Why two tiers, not three" above)*
+- [ ] `agent/schemas/literature_review.py`: remove `"marker_pdf"` from the
+      `extraction_method` Literal; update the field docstring to describe a
+      two-tier scale (`arxiv_source` > `pdfplumber_llm` > `abstract_only`).
+- [ ] `agent/prompt_templates/literature_review/__init__.py`: remove
+      `_PAPER_EXTRACT_INSTRUCTIONS_MARKER` constant and its entry in the
+      `_PAPER_EXTRACT_INSTRUCTIONS` dict; tighten `render_paper_extract_prompt`'s
+      `extraction_method` parameter Literal to drop `"marker_pdf"`.
+- [ ] `agent/prompt_templates/literature_review/paper_extract_system.md`:
+      no edit needed if `marker_pdf` is not mentioned in the static template —
+      verify and confirm.
+- [ ] `agent/skills/paper_resolver_skill/skill_config.json`: update the
+      top-level description to list two tiers (drop `marker_pdf`) and update
+      the `verbosity` description correspondingly.
+- [ ] `agent/skills/paper_resolver_skill/wrapper.py`: drop any reference to
+      `marker_pdf` in payload dicts / log lines (none exist today — verify
+      and confirm).
+- [ ] `nodes/ml_literature_review.py`: tighten the `_compress` and call-site
+      Literals to drop `"marker_pdf"`.
+- [ ] Tests: remove the `marker_pdf` parametrize case from
+      `test_node.py::TestExtractionMethodPropagation::test_method_from_skill_lands_on_extract`
+      and from the `test_prompt_carries_tier_specific_instructions` parametrize.
+- [ ] Run the full gate (pytest + ruff + ruff format --check + pyright) on the
+      affected suites; confirm green.
+
+#### 2c-c — pilot + render_review_report + Checkpoints E/F
+*(renumbered from the original 2c-d after Tier-2 was cancelled)*
+- [ ] **`render_review_report`** — pure, deterministic Markdown renderer for a
+      lit-review run's artifacts (Phase 1 `RetrievedPaper` extracts and, when
+      present, Phase 2 findings). Reusable in production runs, not just §10.
+      Location: `agent/prompt_templates/literature_review/__init__.py`
+      (alongside the compression / synthesis renderers). **Pure function — no
+      LLM, no I/O; the caller writes the rendered string to a file.** Unit
+      tests assert deterministic output + per-section presence for a fixture
+      `LiteratureReviewOutput` / `RetrievedPaper` list (with and without
+      findings). *(Note: earlier drafts also planned a Phase-2
+      `reference_library` section — cancelled per the 2d revision; the
+      renderer is single-channel.)*
+- [ ] Pilot on the **§10 corpus** (7 papers, §10.2): six Tier-1 papers
+      (#1–#6 Mamba / PatchTST / GW / DeepDenoiser / TADA / FreLE) and SNRAware
+      (#7) via the Tier-2 (`pdfplumber + LLM`) fallback. Capture per-paper
+      `verbosity_achieved`, `extraction_method`, and full `PaperExtract`
+      (incl. `key_equations_md` / `pseudocode_md`). The pilot script calls
+      `render_review_report` and writes a single human-review Markdown file
+      covering all 7 papers — that file is the artifact Checkpoints E + F
+      sign off on.
 - [ ] Re-validate LLM compression with new fields: after Checkpoint E is
-      signed off, run the compression prompt on TIDMAD (Tier 1) and SNRAware
-      (Tier 1) and verify:
-      (a) key_equations_md is populated with correct LaTeX (not garbled,
-          not hallucinated — cross-check against the raw .tex source)
-      (b) pseudocode_md is populated with the algorithm structure preserved
-      (c) extraction_method is correctly passed through the response envelope
-          to the node and reflected in the final PaperExtract
-      Show the full PaperExtract JSON for both papers before closing Commit 2c.
-      This is effectively a targeted re-run of Checkpoint B for the new fields.
+      signed off, run the compression prompt on the §10 corpus and verify:
+      (a) `key_equations_md` is populated with correct LaTeX for the six
+          Tier-1 papers (cross-check against raw `.tex`); for SNRAware
+          (PDF-only) Tier-2 produces a usable best-effort extract;
+      (b) `pseudocode_md` is populated with the algorithm structure preserved;
+      (c) `extraction_method` is correctly passed through the response envelope
+          to the node and reflected in the final `PaperExtract` (`arxiv_source`
+          for #1–#6; `pdfplumber_llm` for #7).
+      The pilot's `render_review_report` output (above) contains the full
+      `PaperExtract` for all seven papers — that's the artifact for the
+      Checkpoint-F review. This is the **§10 Phase 1 partial run**.
 
 **Test gate**:
 - Unit: `tests/unit/agent/skills/test_paper_resolver_skill.py` — per-tier +
-  cascade, all HTTP/marker mocked.
+  cascade, all HTTP mocked.
 - Integration (`@real_run`): Tier-1 on TIDMAD with a **real** arXiv source
   download; assert `key_equations_md` is non-empty and contains `$$`.
 - **§10 partial run** (before closing 2c): run §10 Phase 1 (Steps 1a/1b incl.
@@ -577,102 +653,224 @@ new fields (Checkpoint F + the equation-aware prompt variant).
 
 #### 🔍 Behavioral Checkpoint E — Tier-1 formula extraction quality
 
-Run Tier-1 extraction on TIDMAD (`arxiv:2406.04378`) and SNRAware
-(`arxiv:2503.18162`); print the extracted `key_equations_md` and
-`pseudocode_md`; **show the results before proceeding.** Verify:
-- (a) TIDMAD's denoising-score formula extracts correctly;
-- (b) SNRAware's SNR-unit loss formula extracts correctly;
-- (c) the Markdown is clean enough to feed directly to the LLM compression prompt.
+Run Tier-1 extraction on the **six §10 corpus papers with `.tex` source**
+(§10.2 #1–#6: Mamba `arxiv:2312.00752`, PatchTST `arxiv:2211.14730`,
+GW denoising `arxiv:2511.20731`, DeepDenoiser `arxiv:1811.02695`,
+TADA `arxiv:2501.04967`, FreLE `arxiv:2510.25800`); print each paper's
+extracted `key_equations_md` and `pseudocode_md`; **show the results before
+proceeding.** Verify per paper:
+- (a) each paper's key equations extract correctly (cross-check against the
+  raw `.tex` source);
+- (b) each paper's pseudocode / algorithm blocks (where present) preserve
+  structure;
+- (c) the Markdown is clean enough to feed directly to the LLM compression
+  prompt.
 
-This checkpoint **gates whether Tier 1 alone suffices** or Tier 2 (`marker`) is
-needed for acceptable quality. Do not proceed on the new fields until signed off.
+This checkpoint **gates Tier-1 quality** on these six papers — equations,
+pseudocode, and figure captions must come through cleanly enough for the
+compression LLM to fill `key_equations_md` / `pseudocode_md` verbatim. If
+Tier-1 turns out to be insufficient on a paper, that paper degrades to the
+Tier-2 (`pdfplumber + LLM`) path instead — same fallback SNRAware uses below.
+(Inserting a future GPU-based converter as a Tier-1.5 is left open by the
+two-tier design, but is out of scope for Commit 2c.) Note: SNRAware
+(`arxiv:2503.18162`, §10 #7) is PDF-only (no `.tex` source) and exercises the
+Tier-2 fallback path in Checkpoint F, not Tier-1 here. Do not proceed on the
+new fields until signed off.
 
 #### 🔍 Behavioral Checkpoint F — LLM compression quality for new fields
 
-After Checkpoint E is signed off, run the compression prompt on TIDMAD (Tier 1)
-and SNRAware (Tier 1) and verify the equation-aware prompt variant correctly
+After Checkpoint E is signed off, run the compression prompt on the **full §10
+corpus** (six Tier-1 papers from §10.2 #1–#6 + SNRAware (#7) via Tier-2
+(`pdfplumber + LLM`)) and verify the equation-aware prompt variant correctly
 populates the new fields:
-- (a) `key_equations_md` holds correct LaTeX (not garbled, not hallucinated —
-  cross-check against the raw `.tex`);
+- (a) `key_equations_md` holds correct LaTeX for the six Tier-1 papers
+  (cross-check against raw `.tex`); for SNRAware (PDF-only), Tier-2 produces
+  a usable best-effort extract;
 - (b) `pseudocode_md` holds the algorithm structure, preserved;
-- (c) `extraction_method` is passed through the response envelope to the node
-  and reflected in the final `PaperExtract`.
-Show the full `PaperExtract` JSON for both papers before closing Commit 2c. This
-is a targeted re-run of Checkpoint B for the new fields.
+- (c) `extraction_method` is correctly set per paper (`arxiv_source` for the
+  Tier-1 inputs; `pdfplumber_llm` for SNRAware) and propagated through the
+  response envelope to the node and reflected in the final `PaperExtract`.
+Show the full `PaperExtract` JSON for all seven papers before closing
+Commit 2c. This is a targeted re-run of Checkpoint B for the new fields at
+corpus scale (= the §10 Phase 1 partial run).
 
 ---
 
-## Commit 2d — reference_library channel
+## Commit 2d — equation-/pseudocode-aware synthesis prompt
 
-**Goal**: Define the `PaperReference` schema, add `reference_library` to
-`LiteratureReviewOutput`, wire population logic in the node, add
-`reference_library` to `ProposalInput`, and add the proposer-prompt renderer.
-This makes the reference_library structurally complete. Equation content
-(`key_equations_md`, `pseudocode_md`) is `None` for most entries until Commit 2c
-lands — acceptable; structure first, content when 2c lands. Retroactive: extends
-Commits 2–3, implemented after Commit 4b closes.
+**Goal**: Teach the synthesis prompt to use 2c's new `PaperExtract` fields
+(`key_equations_md`, `pseudocode_md`, `extraction_method`) so the synthesis
+LLM quotes equations and algorithm fragments **directly inside
+`ExpertContextItem.content`** — primarily in the **Mechanism** section,
+occasionally in **Adaptation**. The equation reaches the proposer as a
+literal part of the finding's content string; the proposer reads one
+channel (`expert_context`) and the math travels with the citation.
 
-**Files**:
-- Edit: `agent/schemas/literature_review.py` (`PaperReference` + `LiteratureReviewOutput.reference_library`)
-- Edit: `agent/schemas/proposal.py` (`ProposalInput.reference_library` field)
-- Edit: `nodes/ml_literature_review.py` (populate reference_library from findings + retrieved_papers)
-- Edit: `agent/prompt_templates/proposal/__init__.py` (`render_reference_library`, wired after expert_context, before vocab)
-- Create: `nodes/ml_literature_review_README.md` (node-README convention — first instance; stub created alongside this design commit, completed during 2d implementation)
-- Protocol `local_all_channels` mapping → **deferred to Commit 5** (the protocol
-  file is Commit 5's deliverable; it does not exist yet).
+### Hard invariants (locked)
 
-**Checklist**:
-- [ ] Define `PaperReference` in `agent/schemas/literature_review.py`.
-- [ ] Add `reference_library: list[PaperReference]` to `LiteratureReviewOutput`.
-- [ ] Node population: after synthesis, build reference_library by joining
-      findings' `cite_id`s with `retrieved_papers` where `verbosity_achieved >= 1`
-      and `extract` is present.
-- [ ] Add `reference_library: list[PaperReference] = Field(default_factory=list)`
-      to `ProposalInput` (full docstring explaining cite_id lookup + extraction_method
-      trust). Backward compatible (confirmed: no test asserts its absence).
-- [ ] Add `render_reference_library(entries) -> str` to
-      `agent/prompt_templates/proposal/__init__.py`; wire into the proposer user
-      prompt **after the expert_context block, before the vocab block**
-      (`ml_model_proposal_agent.py:1179–1181` — confirmed slot).
-- [ ] Complete `nodes/ml_literature_review_README.md` (sections: Purpose, Input,
-      Output, Output contract for downstream consumers, LLM routing, Known
-      limitations, Configuration example, CLI usage placeholder). Stub created
-      with the design docs; fill content during 2d implementation.
+- `LiteratureReviewOutput` is **unchanged**. No `reference_library` field.
+  No new field of any kind. The four `ExternalAgentOutput` channels
+  (`findings`, `new_vocab_candidates`, `suggested_mindset`, `agent_card`)
+  stay exactly as they are, plus the existing audit-trail fields
+  (`retrieved_papers`, `search_rounds_used`, `run_name`, timestamps).
+- `ProposalInput` is **unchanged**. No `reference_library` field, no
+  `reference_library_md` field, no new field of any kind.
+- `agent/schemas/proposal.py` imports **nothing** from
+  `agent/schemas/literature_review.py`. `PaperReference` does not exist
+  and will not be added. `PaperExtract` stays in
+  `agent/schemas/literature_review.py` and is not exported anywhere new.
+- `reference_library`, if it exists at all in 2d, is **transient
+  node-internal scratch state** — a `cite_id → PaperExtract` lookup the
+  node may build during `synth()` to populate the synthesis prompt's
+  per-paper block. Not on the output schema, never serialised, never
+  written to disk, never spread into a protocol kwarg.
+- The only producer-side change is the synthesis prompt (the system `.md`
+  + the `render_synthesis_prompt` per-paper formatter + the node-side
+  assembly site that builds the per-paper dict). The proposer side is
+  untouched.
+- **Word budgets stay as-is.** `findings_verbosity=1`'s per-section caps
+  (Implication ≤40w, Mechanism ≤80w, Adaptation ≤50w) are not modified
+  in this commit. Modify only if real §10 Phase-2 runs show the caps
+  squeeze out equation quotes — not pre-emptively.
+
+### Files
+
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  (`render_synthesis_prompt` — extend the per-paper block to include
+  `key_equations_md`, `pseudocode_md`, and `extraction_method` from each
+  cited paper's `PaperExtract`)
+- Edit: `agent/prompt_templates/literature_review/synthesis_system.md`
+  (instructions to the LLM: quote Tier-1 equations verbatim inside the
+  Mechanism section; flag Tier-2 quotes as paraphrased / approximate;
+  preserve fenced pseudocode blocks where the algorithm itself is the
+  mechanism)
+- Edit: `nodes/ml_literature_review.py` (build the transient
+  `cite_id → PaperExtract` scratch lookup at synthesis time; pass the
+  extra fields through to `render_synthesis_prompt`. **No schema change,
+  no change to `LiteratureReviewOutput(...)` construction.**)
+- Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
+  (assert the rendered prompt contains the new fields and the new
+  per-tier instructions)
+
+**Explicitly NOT changed** in 2d (to make the invariants concrete):
+`agent/schemas/proposal.py`, `agent/schemas/literature_review.py`,
+`agent/schemas/external_agents.py`, `agent/prompt_templates/proposal/__init__.py`,
+`ml_model_proposal_agent.py`. Touching any of these would violate the
+zero-schema-change invariant.
+
+### Checklist
+
+- [ ] Verify the existing `papers: list[dict]` parameter on
+      `render_synthesis_prompt` and confirm where in the node the dict is
+      assembled today. Add `key_equations_md`, `pseudocode_md`, and
+      `extraction_method` to each per-paper dict at the assembly site.
+- [ ] Extend `render_synthesis_prompt`'s per-paper block formatter to
+      emit the new fields when non-empty. Tier-2 papers get an
+      `extraction_method: pdfplumber_llm (best-effort)` marker; Tier-1
+      papers get `extraction_method: arxiv_source (ground-truth LaTeX)`;
+      `abstract_only` papers naturally have nothing to emit.
+- [ ] Update `synthesis_system.md`:
+  - Mechanism section instructions: when the cited paper has a non-empty
+    `key_equations_md` AND `extraction_method` is `arxiv_source`, quote
+    the relevant equation verbatim inside the Mechanism block (Markdown
+    LaTeX preserved). When `extraction_method` is `pdfplumber_llm`, the
+    equation may be quoted as a paraphrase — must be flagged
+    ("approximate equation, reconstructed from a degraded PDF") rather
+    than presented as ground truth.
+  - Pseudocode rule: if the algorithm IS the mechanism (e.g. TADA's
+    Scale-Targeting), reproduce the relevant 3–8 lines of pseudocode
+    inside the Mechanism block as a fenced code block. Otherwise just
+    name the algorithm and cite.
+  - Abstract-only citations: no equation quotes, no pseudocode.
 - [ ] Unit tests:
-  - `PaperReference` validates; `verbosity_achieved >= 1`.
-  - reference_library contains only papers whose `cite_id` is in findings AND
-    `verbosity_achieved >= 1`; empty reference_library is valid.
-  - `render_reference_library` block contains `cite_id`, `extraction_method`,
-    and at least one of `key_equations_md` / `architecture_details`.
-  - `ProposalInput.reference_library` defaults to empty list (backward compatible).
-- Protocol `local_all_channels` mapping + its unit test → **Commit 5** (deferred).
+  - `render_synthesis_prompt` injects `key_equations_md` into the
+    per-paper block when the paper has it.
+  - `render_synthesis_prompt` injects `extraction_method` per paper.
+  - The Tier-1 / Tier-2 / abstract-only instruction blocks all reach the
+    rendered system prompt.
+  - Existing synthesis-prompt tests still pass unchanged (no regression
+    in confidence rubric / omission rules / content format wiring).
+- **No schema test changes** — `LiteratureReviewOutput` and
+  `ProposalInput` are untouched.
 
-**Test gate**:
+### Test gate
+
 ```
 .venv/bin/python -m pytest \
-  tests/unit/agent/schemas/test_literature_review_schemas.py \
-  tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py \
-  tests/unit/agent/prompt_templates/test_literature_review_prompts.py -q
-.venv/bin/python -m ruff check agent/schemas/literature_review.py \
-  agent/schemas/proposal.py agent/prompt_templates/proposal/__init__.py \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py \
+  tests/unit/agent/ml_literature_review/ -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/__init__.py \
   nodes/ml_literature_review.py
-.venv/bin/python -m ruff format --check agent/schemas/literature_review.py \
-  agent/schemas/proposal.py agent/prompt_templates/proposal/__init__.py \
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/__init__.py \
   nodes/ml_literature_review.py
-.venv/bin/python -m pyright agent/schemas/literature_review.py agent/schemas/proposal.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py \
+  nodes/ml_literature_review.py
 ```
 
-**§10 trigger** (before closing 2d): run §10 Phase 2 `reference_library`
-sub-check on the corpus; then — since 2c + 2d are both done — perform the
-**first FULL §10 run** (suite is now fully runnable per the §10.4 callout).
-Record both in `docs/validation_suite_runs.md`.
+### §10 trigger
 
-**Resolved open questions** (from the design draft):
-- render placement: after expert_context, before vocab — confirmed
-  (`ml_model_proposal_agent.py:1179–1181`).
-- `ProposalInput.reference_library` blast radius: no existing test constructs
-  `ProposalInput` against a fixed field set or asserts this field's absence;
-  `default_factory=list` is backward compatible — confirmed.
+Before closing 2d: run §10 Phase 2 on the §10.2 corpus end-to-end. The
+new acceptance bullets (see §10.4 Phase 2 and §10.5 in
+`external_agents_for_proposer.md`) require findings citing Tier-1 papers
+to quote equations verbatim inside `content` (typically Mechanism) and
+findings citing Tier-2 papers to flag the equation as paraphrased. This
+is the **first FULL §10 run** — the suite is now fully runnable per the
+§10.4 callout. Promotion of the artifact into
+`docs/validation_suite_runs.md` happens in a separate sign-off commit
+after operator review.
+
+#### 🔍 Behavioral Checkpoint G — Final synthesis output quality
+
+Run §10 Phase 2 on the corpus with 2d shipped. **Show the rendered
+`ExpertContextItem` content for every finding before proceeding.** Verify:
+
+- (a) For each finding citing a Tier-1 paper (#1–#6 plus any v=1
+  search-found Tier-1 paper) that has a non-empty `key_equations_md`:
+  the finding's `content` quotes at least one equation verbatim,
+  typically inside **Mechanism**. The LaTeX matches the source (no
+  hallucination, no silent edits).
+- (b) For each finding citing a Tier-1 paper with non-empty
+  `pseudocode_md` *where the algorithm IS the mechanism*: the finding's
+  `content` reproduces the relevant 3–8 lines as a fenced code block.
+- (c) For each finding citing a Tier-2 (`pdfplumber_llm`) paper —
+  including SNRAware (#7) — equations are quoted as paraphrased /
+  approximate (explicit flag like "approximate equation, reconstructed
+  from a degraded PDF"), not as ground truth.
+- (d) For each finding citing an `abstract_only` paper: no equation
+  quotes. The Mechanism describes the method in prose only.
+- (e) **Implementability bar.** For at least the majority of v=1-cited
+  findings, a proposer reading only the `ExpertContextItem` (not the
+  source paper, not the `PaperExtract`) knows *how to implement* the
+  method — names specific layer types / equation form / training regime,
+  not just *that a method exists*.
+- (f) **Measurable improvement over pre-2d findings.** Compared to the
+  2c-c.2 §10 Phase-1 artifact (`docs/validation_suite_runs.md` post-
+  promotion of 2c-c.2's artifact, when available), the 2d findings carry
+  noticeably more concrete equation / pseudocode content for the same
+  cited papers.
+
+This checkpoint **gates whether equations are arriving inside finding
+`content` at usable fidelity**, which is the entire point of Commit 2d.
+The earlier-planned `reference_library`-population check (cancelled) is
+explicitly replaced by Checkpoint G. Do not close Commit 2d until signed
+off.
+
+### Resolved open questions (post-2c-c.2 revision)
+
+- No schema changes on either side: `LiteratureReviewOutput` keeps its
+  four channels; `ProposalInput` is untouched. Confirmed.
+- Equations reach the proposer inside `ExpertContextItem.content`, not
+  via a parallel channel. Confirmed.
+- `reference_library` is node-internal scratch state only, scoped to
+  `synth()`. Not output, not serialised, not on disk. Confirmed.
+- Word budgets unchanged for now; revisit only if real Phase-2 runs show
+  they squeeze out equation quotes. Confirmed.
+- `PaperReference` schema does not exist. `render_reference_library`
+  function does not exist. Both were cancelled in the 2d revision and
+  must not be reintroduced.
 
 ---
 
@@ -978,6 +1176,15 @@ ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
       pull-channel paragraph in `external_agents_architecture.md`; Commit 2c + 2d
       sections + status-board reorder in this doc; `nodes/ml_literature_review_README.md`
       stub (first instance of the node-README convention).
+      **Supersession (post-2c-c.2):** §5a's three-tier design was cancelled
+      in `963b628` (two-tier locked). §5b's `reference_library` channel was
+      cancelled entirely in the 2d revision — equations now travel inline
+      inside `ExpertContextItem.content`; no separate channel. Both §5a and
+      §5b were rewritten in place; `external_agents_architecture.md`'s
+      "Mathematical content in reference_library" section was rewritten as
+      "Mathematical content travels inline inside findings"; the 2d section
+      was rewritten to reflect the new scope (synthesis-prompt update only,
+      zero schema changes).
 - [x] **4b-final** (`91461a2`, 2026-05-28):
   - [x] **findings_verbosity + three-part content format** (impl 2026-05-27).
         Added `findings_verbosity: Literal[0, 1] = 1` to `LiteratureReviewInput`;
@@ -1038,8 +1245,13 @@ ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
         only on-bottleneck v1 candidate (Raman, doi:10.3390/s21144623) was
         identified by the LLM's escalation reasoning but couldn't be deep-read
         because the resolver had no PDF for that DOI; this is precisely the
-        failure mode Commit 2c (three-tier extraction with Tier-2 marker) is
-        designed to fix.
+        failure mode Commit 2c (originally three-tier extraction with a
+        Tier-2 marker hook for DOI-only PDFs) was designed to fix.
+        **Supersession (post-2c-b):** the marker hook was cancelled (see
+        §523 "Why two tiers, not three"). The two-tier cascade fixes this
+        failure mode only when the paper has an arXiv ID; DOI-only papers
+        like the Raman example remain pdfplumber-extracted (Tier-2) or
+        abstract-only.
   - [x] **SynthesisConfig.transfer_tolerance** (impl 2026-05-28). Added
         `SynthesisConfig` (`transfer_tolerance: Literal["strict","moderate","liberal"]
         = "moderate"`; `min_confidence` deliberately NOT duplicated — omit
@@ -1268,9 +1480,11 @@ deepseek, `search_llm_*` unset).
 **Files**:
 - New: `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
 - New: `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
-- Edit: `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` — add
-  `reference_library` parameter to `local_full_context` (no longer audit-only;
-  Q6 audit 2026-05-29).
+- **No edit** to `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` —
+  the 4-kwarg shape already in place (`expert_context` / `vocab_seed` /
+  `agent_cards` / `mindset`) is sufficient. The earlier-planned
+  `reference_library` parameter was dropped along with the
+  `reference_library` channel cancellation in the 2d revision.
 
 **Checklist**:
 - [ ] **Audit step (no code change)**: open
@@ -1283,32 +1497,26 @@ deepseek, `search_llm_*` unset).
       matching the conventions in `ml_result_interp_to_ml_model_propose.py`:
   - Module docstring listing implemented vs planned protocols.
   - `local_all_channels(output: LiteratureReviewOutput) -> dict[str, Any]`
-    — returns a dict with the **five** kwargs that `local_full_context` expects
+    — returns a dict with the **four** kwargs that `local_full_context` expects
     from external agents: `expert_context=output.findings`,
     `vocab_seed=output.new_vocab_candidates`, `agent_cards=[output.agent_card]`,
-    `mindset=output.suggested_mindset`,
-    `reference_library=output.reference_library`. Returns a dict (not a typed
-    object) because it gets spread into `local_full_context(**update_dict, ...)`.
+    `mindset=output.suggested_mindset`. Returns a dict (not a typed object)
+    because it gets spread into `local_full_context(**update_dict, ...)`.
+    **No `reference_library` / `reference_library_md` kwarg** — that channel
+    was cancelled in the 2d revision. Equations reach the proposer inside
+    `ExpertContextItem.content`, which already travels through `expert_context`.
   - `database_all_channels(...) -> dict[str, Any]` placeholder that raises
     `NotImplementedError`.
-- [ ] **Edit `local_full_context`** in
-      `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`: add a
-      `reference_library: list[PaperReference] | None = None` parameter that maps
-      into `ProposalInput.reference_library` when present (mirrors how it already
-      threads `mindset`/`agent_cards`). Without this, the `reference_library`
-      kwarg spread from `local_all_channels` never reaches `ProposalInput` — the
-      field is permanently empty in production (Q6 audit 2026-05-29).
 - [ ] Tests:
-  - [ ] `local_all_channels` maps all five channels correctly with a fully
+  - [ ] `local_all_channels` maps all four channels correctly with a fully
         populated `LiteratureReviewOutput`.
   - [ ] `local_all_channels` passes through `new_vocab_candidates=[]` and
         `suggested_mindset=None` without error (v1 wired-empty channels).
   - [ ] `local_all_channels` wraps a single `agent_card` into a list of one
         (the field on `ProposalInput` is `agent_cards: list[AgentCard]`).
-  - [ ] `local_all_channels` emits `reference_library` (5th kwarg) from a
-        populated output.
-  - [ ] `local_full_context` populates `ProposalInput.reference_library`
-        end-to-end from the spread dict (non-empty round-trip).
+  - [ ] `local_all_channels` does NOT emit any `reference_library` or
+        `reference_library_md` kwarg (regression guard against the
+        cancelled design).
   - [ ] `database_all_channels` raises `NotImplementedError`.
 
 **Test gate**:
@@ -1354,18 +1562,18 @@ as the always-true trigger.
       as a module-level function in `workflows/model_exploration.py` (or a
       sibling helper file if that's the convention; check the file's
       existing helper placement). Behaviour:
-  - `findings`: concatenate across outputs.
+  - `findings`: concatenate across outputs. Findings already carry their
+    cited paper's equations / pseudocode inline inside `content` (per the
+    2d revision); the merge does not need any equation-specific handling.
   - `new_vocab_candidates`: concatenate.
   - `agent_cards`: one card per output, accumulated.
   - `suggested_mindset`: last non-None wins (documented as a v1 rule; flagged
     for revisit when the second agent populates this — see §9 Q2 of the
     architecture doc).
-  - `reference_library`: concatenate across outputs. **Dependency on Commit 5**:
-    requires `local_all_channels` to emit `reference_library` AND
-    `local_full_context` to accept it (Q6 audit 2026-05-29); without those this
-    field is silently dropped.
-  - Returns the **five-kwarg** dict directly consumable by `local_full_context`
-    (fifth = `reference_library`).
+  - Returns the **four-kwarg** dict directly consumable by `local_full_context`.
+    The earlier-planned 5th `reference_library` kwarg was cancelled in the
+    2d revision — equations now travel inline inside finding `content`, so
+    the merge has nothing extra to concatenate beyond the four channels.
 - [ ] Add `should_run_literature_review(interp_output: InterpretationOutput) -> bool`:
       always returns `True` for v1. Docstring includes the cost-tradeoff
       note from spec §6.
