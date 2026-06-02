@@ -41,12 +41,12 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 3** — Finalize `PaperExtract` + compression prompt
   · gate 42 passed (schema + prompt suites) + real-run extract reviewed · artifact `docs/paper_extract_pilot.md` · committed `879e90e`
   - [x] **Checkpoint B** — Single paper LLM compression quality · signed off 2026-05-26 (hard requirement passes on both papers; one targeted prompt revision applied)
-- [ ] **Commit 2c** — Two-tier full-text + formula extraction (arXiv source → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)*
+- [x] **Commit 2c** — Two-tier full-text + formula extraction (arXiv source → pdfplumber+LLM) — *(retroactive — amends Commit 2's skill; see §5a of `external_agents_for_proposer.md`)* · committed across `4da895d` (2c-a), `1ebb034` (2c-b), `963b628` (2c-cleanup), `5133662` + `81a63c6` (2c-c); Checkpoints E + F signed off 2026-05-31
   · gate `tests/unit/agent/skills/test_paper_resolver_skill.py` (tier cascade) + `@real_run` Tier-1 on TIDMAD · extraction-pilot artifact
   - [x] **2c-a** — `PaperExtract` +3 fields + extraction-tier-aware compression prompt · committed `4da895d`
   - [x] **2c-b** — Tier-1 arXiv source extraction wired end-to-end (parser + wrapper cascade + node propagation + 41 unit tests) · committed `1ebb034`
-  - [ ] **2c-cleanup** — drop the `marker_pdf` tier entirely from schema/prompts/skill_config/docs (two-tier cascade locked: arXiv source → pdfplumber+LLM)
-  - [ ] **2c-c** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F *(was 2c-d before Tier-2 was cancelled)*
+  - [x] **2c-cleanup** — drop the `marker_pdf` tier entirely from schema/prompts/skill_config/docs (two-tier cascade locked: arXiv source → pdfplumber+LLM) · committed `963b628`
+  - [x] **2c-c** — `render_review_report` + §10 corpus pilot run + Checkpoints E/F *(was 2c-d before Tier-2 was cancelled)* · committed `5133662` (render_review_report) + `81a63c6` (§10 Phase-1 pilot + Checkpoints E/F sign-off)
   - [x] **Checkpoint E** — Tier-1 formula extraction quality (raw .tex output) · signed off 2026-05-31 (§10 Phase-1 pilot artifact reviewed; equations correct + clean for all 6 .tex papers, pseudocode preserved for TADA + FreLE, others have no algorithm blocks)
   - [x] **Checkpoint F** — LLM compression quality for `key_equations_md` / `pseudocode_md` · signed off 2026-05-31 (compression passes across all 7 papers: architecture_details actionable, key_results carry regime qualifiers, relevance_to_task honest, zero hallucinations)
 - [x] **Commit 2d** — equation-/pseudocode-aware synthesis prompt — *(retroactive — extends Commit 2c; see §5b of `external_agents_for_proposer.md`)* · committed across `e9efddf` (synthesis prompt + per-paper block + locked Mechanism-vs-Adaptation placement rule), `7a5c093` (Phase-2 pilot script), `c51c231` (pilot artifact-first fix), `ce67cd2` (two-layer cite-id-mismatch fix: prompt labeled-id line + node-side `_validate_content_paper_id` hook), `7d466b2` (Phase-2 pilot floor + LaTeX-regex tuning); Checkpoint G signed off 2026-06-02
