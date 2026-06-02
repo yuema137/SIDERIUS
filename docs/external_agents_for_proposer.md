@@ -968,7 +968,7 @@ A run passes if **all** of the following hold.
 | Checkpoint C | Dynamic search loop behavior | §10 Phase 2 uses the same synthesis evaluation criteria |
 | Checkpoint E | Tier-1 formula extraction quality (Commit 2c) | §10 Phase 1 Step 1b includes `key_equations_md` review (#1–#6) |
 | Checkpoint F | LLM compression for new fields (Commit 2c) | §10 Phase 1 Step 1b includes the equation/pseudocode field review |
-| Checkpoint G | Final synthesis output quality (Commit 2d) | §10 Phase 2 includes the equation-aware-finding sub-checks: equations quoted verbatim from Tier-1 sources inside `ExpertContextItem.content`, no hallucination vs source, findings specific enough to implement (not just name) the method, measurable improvement over pre-2d findings |
+| Checkpoint G | Final synthesis output quality (Commit 2d) | §10 Phase 2 includes the equation-aware-finding sub-checks: equations quoted verbatim from Tier-1 sources inside `ExpertContextItem.content`, no hallucination vs source, findings specific enough to implement (not just name) the method, measurable improvement over pre-2d findings. *First signed off 2026-06-02 — see `docs/validation_suite_runs.md`.* |
 | Checkpoint D | End-to-end proposer behavior change (Commit 6) | §10 is a **prerequisite** for Checkpoint D — the suite must pass before wiring into the workflow |
 
 ### §10.7 — When to run the suite
