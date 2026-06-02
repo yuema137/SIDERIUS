@@ -75,12 +75,13 @@ _SYNTHESIS_OMISSION_RULES: dict[str, str] = {
 # block, not a template rewrite.
 # ---------------------------------------------------------------------------
 
-_SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the three separate keys per finding plus
+_SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the four separate keys per finding plus
 structured `content`):
 
   {"findings": [
      {"content": "**Implication:** Given the optimization-to-metric mismatch on full-spectrum SQUID, try an SNR-normalised reconstruction loss for the hard segments.\\n**Mechanism:** SNRAware aligns the loss with the SNR metric via\\n$$\\\\mathcal{L}_{\\\\text{SNR}} = -\\\\log\\\\frac{\\\\|s\\\\|^2}{\\\\|s - \\\\hat{s}\\\\|^2}$$\\nover whitened single-coil segments, applied alongside G-factor map augmentation.\\n**Adaptation:** Replace MSE on high-SNR segments with this log-ratio form; keep MSE elsewhere to avoid destabilising the WaveNet backbone.\\n(rationale: deep-read, on-domain mechanism transfer with a clear ground-truth equation.)",
       "cite_id": "arxiv:2503.18162",
+      "content_paper_id": "arxiv:2503.18162",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
@@ -145,11 +146,12 @@ Use the heading text verbatim — `**Implication:**`, `**Mechanism:**`,
 `**Adaptation:**` — so downstream parsing stays trivial. Do NOT write the
 paper id inside `content`; the id belongs ONLY in `cite_id`."""
 
-_SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the three separate keys per finding):
+_SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the four separate keys per finding):
 
   {"findings": [
      {"content": "Given the high-frequency-overfitting bottleneck, WaveNet\'s dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
       "cite_id": "arxiv:2406.04378",
+      "content_paper_id": "arxiv:2406.04378",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
@@ -162,7 +164,9 @@ _SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the three sep
 - End with a one-line rationale in parentheses justifying the `confidence` score.
 - Carry over any training-regime qualifier from the paper (e.g. "under
   frequency-split training"); never present a regime-specific result as general.
-- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`."""
+- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`
+  and `content_paper_id` (both must hold the same paper_id — see Hard rules
+  in the system prompt)."""
 
 _SYNTHESIS_CONTENT_FORMAT_BLOCKS: dict[int, str] = {
     0: _SYNTHESIS_CONTENT_FORMAT_V0,
@@ -481,7 +485,8 @@ def _render_synthesis_paper_block(p: dict) -> str:
     marker = _SYNTHESIS_EXTRACTION_MARKERS.get(method, method)
 
     lines = [
-        f"### [{paper_id}] {title} ({year})",
+        f"### {title} ({year})",
+        f"**cite_id / content_paper_id (use this exact string for both):** `{paper_id}`",
         f"Extraction: {marker}",
         "",
         summary,

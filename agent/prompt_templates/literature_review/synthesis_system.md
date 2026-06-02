@@ -21,10 +21,12 @@ try, GIVEN one of the current bottlenecks?"
 
 ## Output contract
 
-Return ONE JSON object. Every finding is an object with THREE SEPARATE keys —
-`content`, `cite_id`, and `confidence`. Do NOT collapse them into one string:
-the paper id goes in `cite_id` (its own key), the score goes in `confidence`
-(its own key), and only the prose + rationale go in `content`.
+Return ONE JSON object. Every finding is an object with FOUR SEPARATE keys —
+`content`, `cite_id`, `content_paper_id`, and `confidence`. Do NOT collapse
+them into one string: the paper id goes in BOTH `cite_id` AND
+`content_paper_id` (a consistency check explained in the Hard rules below),
+the score goes in `confidence` (its own key), and only the prose + rationale
+go in `content`.
 
 {CONTENT_FORMAT_BLOCK}
 
@@ -33,9 +35,19 @@ the paper id goes in `cite_id` (its own key), the score goes in `confidence`
 {CONFIDENCE_RUBRIC}
 
 Hard rules:
-- `cite_id` is a SEPARATE key and MUST be the exact `paper_id` of one of the
-  papers listed below (copy it verbatim, e.g. "arxiv:2406.04378"). Omitting the
-  key, or inventing an id, drops the item.
+- `cite_id` is a SEPARATE key and MUST be the exact paper_id of one of the
+  papers listed below, copied verbatim from that paper's labeled line
+  **"cite_id / content_paper_id (use this exact string for both):"** in the
+  per-paper block. Omitting the key, or inventing an id, drops the item.
+- `content_paper_id` is a SEPARATE key and MUST be the exact paper_id of
+  the paper whose content you described in Mechanism — copied verbatim from
+  that paper's labeled line (the same line as cite_id). It is a hard
+  consistency check: **the node will DROP your finding if
+  `content_paper_id != cite_id`.** Before emitting a finding, re-read your
+  Mechanism, identify which paper's content you just summarised, copy THAT
+  paper's labeled paper_id into `content_paper_id`, and confirm it matches
+  your `cite_id`. A mismatch means you cited Paper A but wrote about Paper
+  B — the node drops these silently so they never reach the proposer.
 - `confidence` is a SEPARATE key, required on every item — assign it using the
   Confidence rubric above (it also defines the omit threshold).
 - Follow the omission / transfer rule in "How to think" above — do not pad the

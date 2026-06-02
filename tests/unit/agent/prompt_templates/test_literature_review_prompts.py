@@ -286,14 +286,15 @@ class TestSynthesisPrompt:
 
     def test_separate_keys_instruction_locked(self):
         # Locks the Step-1 fix: gpt-4o-mini collapsed cite_id/confidence into the
-        # content prose. The prompt must demand three separate keys AND show an
-        # example with cite_id as its own key. Guards against a future edit
-        # re-collapsing them. (The specific cite_id in the example is not
-        # locked — Commit 2d updated the example to SNRAware to demonstrate
-        # the new equation-quoting placement rule.)
+        # content prose. The prompt must demand four separate keys (post-2d
+        # cite-id-mismatch fix: ``content_paper_id`` is the fourth required key)
+        # AND show an example with cite_id as its own key. Guards against a
+        # future edit re-collapsing them. The specific cite_id in the example
+        # is not locked.
         system, _ = self._render()
-        assert "THREE SEPARATE keys" in system
+        assert "FOUR SEPARATE keys" in system
         assert '"cite_id": "arxiv:' in system  # cite_id present as its own key
+        assert '"content_paper_id": "arxiv:' in system  # 2d cite-id-mismatch fix
         assert (
             '"confidence":' in system
         )  # example: confidence as its own key (value is rubric-driven)
@@ -1218,9 +1219,11 @@ class TestSynthesisMultiplePapersAndOrdering:
             "extraction_method": "abstract_only",
         }
         _, user = _synth_render([p1, p2])
-        # Both blocks present, in input order.
-        idx1 = user.index("[arxiv:1]")
-        idx2 = user.index("[arxiv:2]")
+        # Both blocks present, in input order. Post-2d the paper_id appears
+        # as a backtick-quoted code span in the labeled cite_id / content_paper_id
+        # line, not bracketed in the markdown header.
+        idx1 = user.index("`arxiv:1`")
+        idx2 = user.index("`arxiv:2`")
         assert idx1 < idx2
 
     def test_empty_papers_list_does_not_crash(self):
@@ -1245,8 +1248,148 @@ class TestSynthesisBackwardCompat:
         }
         _, user = _synth_render([legacy])
         # Should render without raising; the absent extraction_method
-        # falls back to abstract_only marker.
-        assert "[arxiv:legacy]" in user
+        # falls back to abstract_only marker. Post-2d the paper_id appears in
+        # the labeled cite_id / content_paper_id line as a backtick-quoted
+        # code span.
+        assert "`arxiv:legacy`" in user
         assert "Extraction: abstract_only" in user
         assert "Key equations" not in user  # no equation field → no sub-block
         assert "Pseudocode" not in user
+
+
+# ---------------------------------------------------------------------------
+# Post-2c-c.2 cite-id-mismatch fix — Layer 1 (prompt changes).
+# Verifies the per-paper block surfaces paper_id as a labeled, code-quoted
+# field (not embedded in a markdown header), and that the synthesis prompt's
+# output contract + hard rules require ``content_paper_id`` as a fourth key
+# with explicit content-vs-cite_id consistency semantics.
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesisCiteIdProminence:
+    """The per-paper block must surface paper_id as a labeled field, not
+    embedded in a markdown header decoration. Prevents the TADA/FreLE cite-id
+    mismatch failure mode observed on the first 2d real_run pilot (LLM cited
+    Paper A but described Paper B because paper_id was buried in adjacent
+    header brackets)."""
+
+    def _paper(self, paper_id: str = "arxiv:2501.04967") -> dict:
+        return {
+            "paper_id": paper_id,
+            "title": "TADA",
+            "year": "2025",
+            "summary": "S",
+            "key_equations_md": "",
+            "pseudocode_md": "",
+            "extraction_method": "arxiv_source",
+        }
+
+    def test_paper_id_appears_on_labeled_line_with_both_key_names(self):
+        # The labeled line must name BOTH JSON keys (cite_id AND
+        # content_paper_id) and code-quote the paper_id so the LLM has an
+        # unambiguous string to copy.
+        _, user = _synth_render([self._paper()])
+        assert "cite_id / content_paper_id (use this exact string for both):" in user
+        assert "`arxiv:2501.04967`" in user
+        # The label and the id are on the same line — the LLM doesn't have
+        # to scan across line breaks to associate them.
+        for line in user.split("\n"):
+            if "cite_id / content_paper_id" in line:
+                assert "`arxiv:2501.04967`" in line
+                break
+        else:
+            raise AssertionError("labeled cite_id line not found in rendered prompt")
+
+    def test_paper_id_not_in_header_brackets(self):
+        # Pre-2d cite-id-mismatch-fix format had `### [paper_id] Title (Year)`.
+        # The brackets form must be gone.
+        _, user = _synth_render([self._paper(paper_id="arxiv:2501.04967")])
+        assert "[arxiv:2501.04967]" not in user
+
+
+class TestSynthesisContentPaperIdInOutputContract:
+    """The synthesis system prompt's output contract names ``content_paper_id``
+    as a required fourth key on every finding, and the hard rules explicitly
+    mandate content-vs-cite_id consistency. Applies to BOTH findings_verbosity
+    paths (V1 + V0)."""
+
+    def test_v1_contract_lists_four_keys_and_content_paper_id(self):
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        assert "FOUR SEPARATE keys" in system
+        # The four keys are named in the output-contract intro.
+        for key in ("`content`", "`cite_id`", "`content_paper_id`", "`confidence`"):
+            assert key in system, f"output contract intro missing {key!r}"
+        # The V1 example JSON shows content_paper_id alongside cite_id.
+        assert '"content_paper_id": "arxiv:' in system
+
+    def test_v0_contract_also_lists_four_keys_and_content_paper_id(self):
+        # findings_verbosity=0 is a supported configuration; V0 must carry
+        # the same content_paper_id requirement or the hook would soft-drop
+        # every finding on a v=0 run.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=0,
+        )
+        assert "four separate keys" in system  # V0 uses lowercase phrasing
+        assert '"content_paper_id": "arxiv:' in system
+
+    def test_v0_id_bullet_mentions_both_cite_id_and_content_paper_id(self):
+        # The V0 block's trailing rule used to read "the id belongs ONLY in
+        # `cite_id`". Post-2d-cite-id-fix it must broaden to both keys.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=0,
+        )
+        # Both key names appear in the broadened bullet. Use whitespace-
+        # tolerant matching because the substrings may span line wraps in
+        # the source-file formatting.
+        normalised = " ".join(system.split())
+        assert "`cite_id` and `content_paper_id`" in normalised
+        assert "both must hold the same paper_id" in normalised
+
+    def test_hard_rules_require_content_consistency_check(self):
+        # The synthesis_system.md hard rule must:
+        #  (a) name content_paper_id as a separate required key
+        #  (b) declare the node will drop on mismatch
+        #  (c) prescribe a pre-emit re-read protocol
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        # Whitespace-tolerant matching — the substrings may span line wraps
+        # in the source-file formatting of synthesis_system.md.
+        normalised = " ".join(system.split())
+        assert "`content_paper_id` is a SEPARATE key" in normalised
+        assert "DROP your finding if" in normalised
+        assert "`content_paper_id != cite_id`" in normalised
+        # Pre-emit cross-check protocol — the LLM is told to re-read its
+        # own Mechanism before emitting.
+        assert "re-read your Mechanism" in normalised
+
+    def test_hard_rules_point_at_labeled_per_paper_line(self):
+        # The cite_id rule was rewritten to point at the new labeled line in
+        # the per-paper block (Change 1A), closing the loop between the rule
+        # and the block format.
+        system, _ = render_synthesis_prompt(
+            key_findings=[],
+            bottlenecks=[],
+            take_home_message="",
+            papers=[],
+            findings_verbosity=1,
+        )
+        assert '"cite_id / content_paper_id (use this exact string for both):"' in system

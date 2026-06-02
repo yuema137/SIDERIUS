@@ -33,7 +33,7 @@ import logging
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -149,6 +149,69 @@ def _normalize_finding_content_headings(content: str) -> str:
         if variant != canonical:
             content = content.replace(variant, canonical)
     return content
+
+
+def _validate_content_paper_id(
+    finding: dict[str, Any], valid_ids: set[str]
+) -> dict[str, Any] | None:
+    """Hard-validate ``content_paper_id == cite_id`` on a synthesis finding.
+
+    Layer-2 defence (paired with the synthesis prompt's per-paper-block label
+    and the synthesis_system.md hard rule) against the cite-id-vs-content
+    mismatch failure mode observed on the first 2d real_run pilot. The
+    synthesis prompt requires the LLM to fill BOTH ``cite_id`` and
+    ``content_paper_id`` with the same paper_id: ``cite_id`` is the
+    citation; ``content_paper_id`` is the id of the paper whose content the
+    LLM described in Mechanism. If the two differ, the LLM cited Paper A but
+    wrote about Paper B — the finding is a hallucination and is dropped
+    before it reaches ``ExpertContextItem``.
+
+    Follows the soft-drop hook contract: returns the ``finding`` dict
+    unchanged when validation passes, returns ``None`` to signal the
+    caller's loop to ``continue`` (with a ``logger.warning`` already
+    emitted, matching the cite_id soft-drop in ``_synthesize``).
+
+    Args:
+      finding:   The raw finding dict from the synthesis JSON output.
+                 Expected to carry ``content_paper_id`` per the 2d
+                 synthesis-prompt contract; absence is itself a drop.
+      valid_ids: The set of corpus paper_ids — defence in depth against
+                 the LLM emitting a content_paper_id outside the corpus.
+
+    Returns:
+      ``finding`` (unchanged) on pass; ``None`` on any of the three drop
+      conditions (missing field / not in corpus / != cite_id). The
+      ``content_paper_id`` field is consumed here and not forwarded
+      downstream — ``ExpertContextItem`` schema is unchanged.
+    """
+    cite_id = str(finding.get("cite_id") or "")
+    content_paper_id = str(finding.get("content_paper_id") or "")
+    if not content_paper_id:
+        logger.warning(
+            "dropping finding citing %r: missing content_paper_id "
+            "(the 2d synthesis prompt requires it as a content-vs-cite_id "
+            "consistency check)",
+            cite_id,
+        )
+        return None
+    if content_paper_id not in valid_ids:
+        logger.warning(
+            "dropping finding citing %r: content_paper_id %r is not in the "
+            "retrieved-paper set (hallucination)",
+            cite_id,
+            content_paper_id,
+        )
+        return None
+    if content_paper_id != cite_id:
+        logger.warning(
+            "dropping finding: content_paper_id %r != cite_id %r — the LLM "
+            "described one paper's content but cited another (hallucination "
+            "the per-paper block format did not prevent)",
+            content_paper_id,
+            cite_id,
+        )
+        return None
+    return finding
 
 
 def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict | None) -> None:
@@ -532,6 +595,14 @@ class MLLiteratureReviewAgent:
                     "dropping finding with unmatched cite_id %r (not in retrieved papers)",
                     cite_id,
                 )
+                continue
+            # 2d hook: hard-validate content_paper_id == cite_id. The synthesis
+            # prompt requires the LLM to name the paper its Mechanism describes;
+            # the name must match the citation. Mismatch → soft-drop (same
+            # contract as the cite_id check above; the hook emits its own
+            # logger.warning). content_paper_id is consumed here and not
+            # forwarded to ExpertContextItem (schema unchanged).
+            if _validate_content_paper_id(f, valid_ids) is None:
                 continue
             confidence = self._clamp_abstract_only_confidence(
                 f.get("confidence"), cite_id, verbosity_by_id, ceiling
