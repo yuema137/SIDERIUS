@@ -1055,7 +1055,7 @@ def run_workflow(
                             f"{len(accumulated_key_findings)} prior iter(s):\n"
                             f"{bullet_block}"
                         ),
-                        cite_id="prior_iters_key_findings",
+                        source_ref="prior_iters_key_findings",
                     )
                 )
 

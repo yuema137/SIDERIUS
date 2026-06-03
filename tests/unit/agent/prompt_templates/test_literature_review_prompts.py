@@ -272,8 +272,8 @@ class TestSynthesisPrompt:
         assert "bottleneck" in system
         # (d) omission / transfer rule present (default _render = moderate tolerance)
         assert "no plausible mechanism transfer exists" in system
-        # (e) cite_id-matching instruction
-        assert "cite_id" in system and "paper_id" in system
+        # (e) source_ref-matching instruction
+        assert "source_ref" in system and "paper_id" in system
         # task-description injection
         assert SIDERIUS_TASK in system
         assert "{TASK_DESCRIPTION}" not in system
@@ -282,18 +282,18 @@ class TestSynthesisPrompt:
         _, user = self._render()
         assert "PRIMARY" in user
         assert "loss saturates after ~5 epochs" in user  # bottleneck present
-        assert "arxiv:1" in user  # paper id available for cite_id matching
+        assert "arxiv:1" in user  # paper id available for source_ref matching
 
     def test_separate_keys_instruction_locked(self):
-        # Locks the Step-1 fix: gpt-4o-mini collapsed cite_id/confidence into the
+        # Locks the Step-1 fix: gpt-4o-mini collapsed source_ref/confidence into the
         # content prose. The prompt must demand four separate keys (post-2d
         # cite-id-mismatch fix: ``content_paper_id`` is the fourth required key)
-        # AND show an example with cite_id as its own key. Guards against a
-        # future edit re-collapsing them. The specific cite_id in the example
+        # AND show an example with source_ref as its own key. Guards against a
+        # future edit re-collapsing them. The specific source_ref in the example
         # is not locked.
         system, _ = self._render()
         assert "FOUR SEPARATE keys" in system
-        assert '"cite_id": "arxiv:' in system  # cite_id present as its own key
+        assert '"source_ref": "arxiv:' in system  # source_ref present as its own key
         assert '"content_paper_id": "arxiv:' in system  # 2d cite-id-mismatch fix
         assert (
             '"confidence":' in system
@@ -639,7 +639,7 @@ def _output(
 
 
 def _finding(
-    cite_id: str = "arxiv:2312.00752",
+    source_ref: str = "arxiv:2312.00752",
     confidence: float | None = 0.85,
     content: str = (
         "**Implication.** Replace FCNet attention with a Mamba block.\n\n"
@@ -652,7 +652,7 @@ def _finding(
         source="ml_literature_review",
         kind="literature",
         content=content,
-        cite_id=cite_id,
+        source_ref=source_ref,
         confidence=confidence,
     )
 
@@ -878,25 +878,25 @@ class TestRenderReviewReportFindingsAbsent:
 
 
 class TestRenderReviewReportFindingsPresent:
-    """Findings render with cite_id + matched paper title in the heading,
+    """Findings render with source_ref + matched paper title in the heading,
     NEVER a title heuristically extracted from content (per the locked design
     decision)."""
 
     def test_finding_heading_uses_matched_paper_title(self):
         papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
-        findings = [_finding(cite_id="arxiv:2312.00752")]
+        findings = [_finding(source_ref="arxiv:2312.00752")]
         report = render_review_report(_output(retrieved_papers=papers, findings=findings))
         # paper_id in code-quotes + dash + the matched title.
         assert "### 1. `arxiv:2312.00752` — Mamba" in report
 
     def test_finding_heading_falls_back_to_cite_id_only_when_no_match(self):
         # Retrieved papers DO have titles, but none of them match the finding's
-        # cite_id — proves the renderer does not greedily inject the wrong
+        # source_ref — proves the renderer does not greedily inject the wrong
         # title or fall back to a heuristic.
         papers = [_retrieved_paper(extract=_arxiv_extract(title="Mamba"))]
-        findings = [_finding(cite_id="arxiv:9999.99999")]
+        findings = [_finding(source_ref="arxiv:9999.99999")]
         report = render_review_report(_output(retrieved_papers=papers, findings=findings))
-        # The cite_id appears in a finding heading.
+        # The source_ref appears in a finding heading.
         assert "### 1. `arxiv:9999.99999`" in report
         # The unmatched paper's title must NOT leak into the finding heading.
         # We extract the finding heading line and assert "Mamba" isn't on it.
@@ -918,7 +918,7 @@ class TestRenderReviewReportFindingsPresent:
         assert "*(rationale: deep-read" in report
 
     def test_finding_metadata_line_shows_cite_source_kind(self):
-        findings = [_finding(cite_id="arxiv:2312.00752")]
+        findings = [_finding(source_ref="arxiv:2312.00752")]
         report = render_review_report(_output(findings=findings))
         assert "**Cite:** `arxiv:2312.00752`" in report
         assert "**Source agent:** `ml_literature_review`" in report
@@ -926,9 +926,9 @@ class TestRenderReviewReportFindingsPresent:
 
     def test_confidence_band_label_mapping(self):
         findings = [
-            _finding(cite_id="p:high", confidence=0.85),
-            _finding(cite_id="p:mod", confidence=0.65),
-            _finding(cite_id="p:low", confidence=0.45),
+            _finding(source_ref="p:high", confidence=0.85),
+            _finding(source_ref="p:mod", confidence=0.65),
+            _finding(source_ref="p:low", confidence=0.45),
         ]
         report = render_review_report(_output(findings=findings))
         # Numeric + band label both appear.
@@ -939,9 +939,9 @@ class TestRenderReviewReportFindingsPresent:
     def test_findings_sorted_high_to_low_by_confidence(self):
         # Deliberately fed in low-to-high order.
         findings = [
-            _finding(cite_id="p:low", confidence=0.45),
-            _finding(cite_id="p:high", confidence=0.85),
-            _finding(cite_id="p:mod", confidence=0.65),
+            _finding(source_ref="p:low", confidence=0.45),
+            _finding(source_ref="p:high", confidence=0.85),
+            _finding(source_ref="p:mod", confidence=0.65),
         ]
         report = render_review_report(_output(findings=findings))
         idx_high = report.index("`p:high`")
@@ -951,8 +951,8 @@ class TestRenderReviewReportFindingsPresent:
 
     def test_none_confidence_sorts_last_and_omits_band(self):
         findings = [
-            _finding(cite_id="p:has_conf", confidence=0.65),
-            _finding(cite_id="p:no_conf", confidence=None),
+            _finding(source_ref="p:has_conf", confidence=0.65),
+            _finding(source_ref="p:no_conf", confidence=None),
         ]
         report = render_review_report(_output(findings=findings))
         # The None-confidence finding shows no confidence suffix at all.
@@ -974,8 +974,8 @@ class TestRenderReviewReportDeterminism:
             _retrieved_paper(paper_id="arxiv:b", identifier="b", extract=_pdfplumber_extract()),
         ]
         findings = [
-            _finding(cite_id="arxiv:a", confidence=0.65),
-            _finding(cite_id="arxiv:b", confidence=0.85),
+            _finding(source_ref="arxiv:a", confidence=0.65),
+            _finding(source_ref="arxiv:b", confidence=0.85),
         ]
         out = _output(retrieved_papers=papers, findings=findings, search_rounds_used=2)
         r1 = render_review_report(out)
@@ -984,10 +984,10 @@ class TestRenderReviewReportDeterminism:
 
     def test_tied_confidence_breaks_deterministically_by_cite_id(self):
         # Two findings with the same confidence — secondary sort key is
-        # cite_id ascending — ensures stable diffs.
+        # source_ref ascending — ensures stable diffs.
         findings = [
-            _finding(cite_id="z:later", confidence=0.65),
-            _finding(cite_id="a:earlier", confidence=0.65),
+            _finding(source_ref="z:later", confidence=0.65),
+            _finding(source_ref="a:earlier", confidence=0.65),
         ]
         report = render_review_report(_output(findings=findings))
         assert report.index("`a:earlier`") < report.index("`z:later`")
@@ -1220,7 +1220,7 @@ class TestSynthesisMultiplePapersAndOrdering:
         }
         _, user = _synth_render([p1, p2])
         # Both blocks present, in input order. Post-2d the paper_id appears
-        # as a backtick-quoted code span in the labeled cite_id / content_paper_id
+        # as a backtick-quoted code span in the labeled source_ref / content_paper_id
         # line, not bracketed in the markdown header.
         idx1 = user.index("`arxiv:1`")
         idx2 = user.index("`arxiv:2`")
@@ -1249,7 +1249,7 @@ class TestSynthesisBackwardCompat:
         _, user = _synth_render([legacy])
         # Should render without raising; the absent extraction_method
         # falls back to abstract_only marker. Post-2d the paper_id appears in
-        # the labeled cite_id / content_paper_id line as a backtick-quoted
+        # the labeled source_ref / content_paper_id line as a backtick-quoted
         # code span.
         assert "`arxiv:legacy`" in user
         assert "Extraction: abstract_only" in user
@@ -1262,7 +1262,7 @@ class TestSynthesisBackwardCompat:
 # Verifies the per-paper block surfaces paper_id as a labeled, code-quoted
 # field (not embedded in a markdown header), and that the synthesis prompt's
 # output contract + hard rules require ``content_paper_id`` as a fourth key
-# with explicit content-vs-cite_id consistency semantics.
+# with explicit content-vs-source_ref consistency semantics.
 # ---------------------------------------------------------------------------
 
 
@@ -1285,20 +1285,20 @@ class TestSynthesisCiteIdProminence:
         }
 
     def test_paper_id_appears_on_labeled_line_with_both_key_names(self):
-        # The labeled line must name BOTH JSON keys (cite_id AND
+        # The labeled line must name BOTH JSON keys (source_ref AND
         # content_paper_id) and code-quote the paper_id so the LLM has an
         # unambiguous string to copy.
         _, user = _synth_render([self._paper()])
-        assert "cite_id / content_paper_id (use this exact string for both):" in user
+        assert "source_ref / content_paper_id (use this exact string for both):" in user
         assert "`arxiv:2501.04967`" in user
         # The label and the id are on the same line — the LLM doesn't have
         # to scan across line breaks to associate them.
         for line in user.split("\n"):
-            if "cite_id / content_paper_id" in line:
+            if "source_ref / content_paper_id" in line:
                 assert "`arxiv:2501.04967`" in line
                 break
         else:
-            raise AssertionError("labeled cite_id line not found in rendered prompt")
+            raise AssertionError("labeled source_ref line not found in rendered prompt")
 
     def test_paper_id_not_in_header_brackets(self):
         # Pre-2d cite-id-mismatch-fix format had `### [paper_id] Title (Year)`.
@@ -1310,7 +1310,7 @@ class TestSynthesisCiteIdProminence:
 class TestSynthesisContentPaperIdInOutputContract:
     """The synthesis system prompt's output contract names ``content_paper_id``
     as a required fourth key on every finding, and the hard rules explicitly
-    mandate content-vs-cite_id consistency. Applies to BOTH findings_verbosity
+    mandate content-vs-source_ref consistency. Applies to BOTH findings_verbosity
     paths (V1 + V0)."""
 
     def test_v1_contract_lists_four_keys_and_content_paper_id(self):
@@ -1323,9 +1323,9 @@ class TestSynthesisContentPaperIdInOutputContract:
         )
         assert "FOUR SEPARATE keys" in system
         # The four keys are named in the output-contract intro.
-        for key in ("`content`", "`cite_id`", "`content_paper_id`", "`confidence`"):
+        for key in ("`content`", "`source_ref`", "`content_paper_id`", "`confidence`"):
             assert key in system, f"output contract intro missing {key!r}"
-        # The V1 example JSON shows content_paper_id alongside cite_id.
+        # The V1 example JSON shows content_paper_id alongside source_ref.
         assert '"content_paper_id": "arxiv:' in system
 
     def test_v0_contract_also_lists_four_keys_and_content_paper_id(self):
@@ -1344,7 +1344,7 @@ class TestSynthesisContentPaperIdInOutputContract:
 
     def test_v0_id_bullet_mentions_both_cite_id_and_content_paper_id(self):
         # The V0 block's trailing rule used to read "the id belongs ONLY in
-        # `cite_id`". Post-2d-cite-id-fix it must broaden to both keys.
+        # `source_ref`". Post-2d-cite-id-fix it must broaden to both keys.
         system, _ = render_synthesis_prompt(
             key_findings=[],
             bottlenecks=[],
@@ -1356,7 +1356,7 @@ class TestSynthesisContentPaperIdInOutputContract:
         # tolerant matching because the substrings may span line wraps in
         # the source-file formatting.
         normalised = " ".join(system.split())
-        assert "`cite_id` and `content_paper_id`" in normalised
+        assert "`source_ref` and `content_paper_id`" in normalised
         assert "both must hold the same paper_id" in normalised
 
     def test_hard_rules_require_content_consistency_check(self):
@@ -1376,13 +1376,13 @@ class TestSynthesisContentPaperIdInOutputContract:
         normalised = " ".join(system.split())
         assert "`content_paper_id` is a SEPARATE key" in normalised
         assert "DROP your finding if" in normalised
-        assert "`content_paper_id != cite_id`" in normalised
+        assert "`content_paper_id != source_ref`" in normalised
         # Pre-emit cross-check protocol — the LLM is told to re-read its
         # own Mechanism before emitting.
         assert "re-read your Mechanism" in normalised
 
     def test_hard_rules_point_at_labeled_per_paper_line(self):
-        # The cite_id rule was rewritten to point at the new labeled line in
+        # The source_ref rule was rewritten to point at the new labeled line in
         # the per-paper block (Change 1A), closing the loop between the rule
         # and the block format.
         system, _ = render_synthesis_prompt(
@@ -1392,4 +1392,4 @@ class TestSynthesisContentPaperIdInOutputContract:
             papers=[],
             findings_verbosity=1,
         )
-        assert '"cite_id / content_paper_id (use this exact string for both):"' in system
+        assert '"source_ref / content_paper_id (use this exact string for both):"' in system

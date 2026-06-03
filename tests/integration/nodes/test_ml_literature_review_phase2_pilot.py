@@ -330,7 +330,7 @@ def _render_phase2_artifact(
         "",
     ]
     for i, item in enumerate(findings, start=1):
-        rp = by_paper_id.get(item.cite_id)
+        rp = by_paper_id.get(item.source_ref)
         method = rp.extract.extraction_method if rp and rp.extract else "unknown"
         source_eq = (rp.extract.key_equations_md if rp and rp.extract else "").strip()
         sections = _extract_sections(item.content)
@@ -338,7 +338,7 @@ def _render_phase2_artifact(
         adaptation_has_eq = bool(_LATEX_DELIMITER_RE.search(sections["adaptation"]))
 
         lines += [
-            f"### Finding {i} — `{item.cite_id}` (Tier: `{method}`)",
+            f"### Finding {i} — `{item.source_ref}` (Tier: `{method}`)",
             "",
             f"**Confidence:** `{item.confidence}`",
             "",
@@ -506,7 +506,7 @@ def test_phase2_pilot_real_run(tmp_path):
         sections = _extract_sections(item.content)
         for name in ("implication", "mechanism", "adaptation"):
             assert sections[name], (
-                f"finding #{i} ({item.cite_id!r}) missing **{name.title()}:** "
+                f"finding #{i} ({item.source_ref!r}) missing **{name.title()}:** "
                 f"section. Content: {item.content!r}"
             )
 
@@ -516,7 +516,7 @@ def test_phase2_pilot_real_run(tmp_path):
     for i, item in enumerate(findings, start=1):
         sections = _extract_sections(item.content)
         if _LATEX_DELIMITER_RE.search(sections["adaptation"]):
-            adaptation_violations.append(f"finding #{i} ({item.cite_id})")
+            adaptation_violations.append(f"finding #{i} ({item.source_ref})")
     assert not adaptation_violations, (
         "Adaptation contains raw LaTeX ($$ blocks) — violates 2d placement "
         f"rule. Offenders: {adaptation_violations}. "
@@ -529,18 +529,18 @@ def test_phase2_pilot_real_run(tmp_path):
     tier1_missing_eq: list[str] = []
     tier2_missing_flag: list[str] = []
     for i, item in enumerate(findings, start=1):
-        rp = by_paper_id.get(item.cite_id)
+        rp = by_paper_id.get(item.source_ref)
         if rp is None or rp.extract is None:
             continue
         method = rp.extract.extraction_method
         sections = _extract_sections(item.content)
         if method == "arxiv_source" and rp.extract.key_equations_md.strip():
             if not _LATEX_DELIMITER_RE.search(sections["mechanism"]):
-                tier1_missing_eq.append(f"finding #{i} ({item.cite_id})")
+                tier1_missing_eq.append(f"finding #{i} ({item.source_ref})")
         elif method == "pdfplumber_llm":
             mech_lower = sections["mechanism"].lower()
             if not any(flag in mech_lower for flag in _TIER2_FLAG_WORDS):
-                tier2_missing_flag.append(f"finding #{i} ({item.cite_id})")
+                tier2_missing_flag.append(f"finding #{i} ({item.source_ref})")
 
     assert not tier1_missing_eq, (
         "Tier-1 citations missing a LaTeX equation in Mechanism (placement "

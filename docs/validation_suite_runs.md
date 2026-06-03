@@ -63,7 +63,7 @@ bar of ≥4 of 7 papers does not apply to this narrower spot-check). All
 three correctly cite the paper they describe — zero TADA/FreLE-style
 cite-id-vs-content mismatches.
 
-| # | cite_id | Paper | Confidence | Mechanism content (one-line) |
+| # | source_ref | Paper | Confidence | Mechanism content (one-line) |
 |---|---|---|---|---|
 | 1 | `arxiv:2312.00752` | Mamba | 0.70 | Selective SSM `$$h_t = Ā h_{t-1} + B̄ x_t$$` lifted verbatim from source |
 | 2 | `arxiv:2501.04967` | TADA | 0.90 | Logistic rescaling `$$ω = 1/(1+exp(-20(R_i-τ)))$$` + variance-match formula lifted verbatim |
@@ -97,9 +97,9 @@ sequence modeling) — ordering matches the rubric's evidence ladder.
 none in Adaptation (regex check `_LATEX_DELIMITER_RE` matched Mechanism on
 all three, Adaptation on zero of three).
 
-**Cite-id-mismatch fix validated:** zero `content_paper_id != cite_id`
-drops, zero unmatched-cite_id soft-drops in the run log. The two-layer
-fix (labeled `cite_id / content_paper_id` per-paper line + node-side
+**Cite-id-mismatch fix validated:** zero `content_paper_id != source_ref`
+drops, zero unmatched-source_ref soft-drops in the run log. The two-layer
+fix (labeled `source_ref / content_paper_id` per-paper line + node-side
 hard-validation hook) eliminated the TADA-as-FreLE hallucination
 observed on the pre-`ce67cd2` first real_run.
 

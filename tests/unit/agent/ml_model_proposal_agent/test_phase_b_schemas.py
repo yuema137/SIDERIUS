@@ -148,7 +148,7 @@ class TestInheritedComponent:
             }
         )
         assert ic.from_run is None
-        assert ic.citation_source is None
+        assert ic.source_ref is None
 
     def test_valid_full(self):
         ic = InheritedComponent.model_validate(
@@ -157,11 +157,11 @@ class TestInheritedComponent:
                 "from_model_type": "wavenet",
                 "from_run": "hpt_full_v1",
                 "contribution_evidence": "Gating improved selectivity by 20%.",
-                "citation_source": "human_advice_001",
+                "source_ref": "human_advice_001",
             }
         )
         assert ic.from_run == "hpt_full_v1"
-        assert ic.citation_source == "human_advice_001"
+        assert ic.source_ref == "human_advice_001"
 
     def test_missing_component_raises(self):
         with pytest.raises(ValidationError):
@@ -196,7 +196,7 @@ class TestExpertContextItem:
                 "source": "human",
                 "kind": "human",
                 "content": "Focus on low-frequency recovery.",
-                "cite_id": "human_001",
+                "source_ref": "human_001",
             }
         )
         assert eci.confidence is None
@@ -209,7 +209,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": kind,
                     "content": "test content",
-                    "cite_id": f"test_{kind}",
+                    "source_ref": f"test_{kind}",
                 }
             )
             assert eci.kind == kind
@@ -221,7 +221,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "invalid_kind",
                     "content": "test",
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                 }
             )
 
@@ -233,7 +233,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "empirical",
                     "content": "test",
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                     "confidence": 1.5,
                 }
             )
@@ -245,7 +245,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "human",
                     "content": "x" * 100001,
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                 }
             )
 
@@ -298,7 +298,7 @@ class TestDiscoveryMemo:
                 "predicted_failure_modes", ["a", "b", "c", "d"], id="too_many_failure_modes"
             ),
             pytest.param(
-                "citation_sources",
+                "source_refs",
                 ["a", "b", "c", "d", "e", "f"],
                 id="citations_over_max_5",
             ),
@@ -315,7 +315,7 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert memo.inherited_components == []
         assert memo.proposed_vocab_candidates == []
-        assert memo.citation_sources == []
+        assert memo.source_refs == []
 
     def test_with_inherited_components(self, valid_memo):
         valid_memo["inherited_components"] = [
@@ -357,9 +357,9 @@ class TestDiscoveryMemo:
         assert memo.proposed_vocab_links == []
 
     def test_citations_exactly_5_ok(self, valid_memo):
-        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e"]
+        valid_memo["source_refs"] = ["a", "b", "c", "d", "e"]
         memo = DiscoveryMemo.model_validate(valid_memo)
-        assert len(memo.citation_sources) == 5
+        assert len(memo.source_refs) == 5
 
 
 # ---------------------------------------------------------------------------

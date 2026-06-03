@@ -253,7 +253,7 @@ class RetrievedPaper(BaseModel):
     abstract: str
     citation_count: Optional[int]
     open_access_url: Optional[str]
-    source_id: str                  # used as cite_id in ExpertContextItem
+    source_id: str                  # used as source_ref in ExpertContextItem
     is_root: bool
     human_notes: Optional[str]      # root papers only
     extract: Optional[PaperExtract] # populated at verbosity>=1
@@ -368,7 +368,7 @@ Node responsibilities:
    - If upgrade requested: resolver-skill round-trip plus `LLMBridge`
      compression.
 4. Final `LLMBridge` call: synthesise all root + dynamic results into a
-   `LiteratureReviewOutput` — populate `findings` (with stable `cite_id`s
+   `LiteratureReviewOutput` — populate `findings` (with stable `source_ref`s
    matching `RetrievedPaper.source_id`), leave `new_vocab_candidates=[]`
    and `suggested_mindset=None` per §2.
 
@@ -510,7 +510,7 @@ primarily in the **Mechanism** section, occasionally in **Adaptation**
 where the equation or algorithm IS the adaptation itself.
 
 The proposer sees the equations because they are *literally part of the
-finding's content string*. No new field, no lookup-by-cite_id, no
+finding's content string*. No new field, no lookup-by-source_ref, no
 proposer-side rendering. The proposer agent and `ProposalInput` schema do
 not change.
 
@@ -527,7 +527,7 @@ the LLM can calibrate per quote.
 
 ### Internal node-scratch state (not output)
 
-The lit-review node may build a transient `cite_id → PaperExtract` lookup
+The lit-review node may build a transient `source_ref → PaperExtract` lookup
 at synthesis-prompt-assembly time as a convenience — i.e. as it iterates
 the synthesis prompt's per-paper blocks, it pulls equations / pseudocode
 for each cited paper from this lookup. The lookup is **node-internal
@@ -567,7 +567,7 @@ A finding (in `expert_context`), with the equation lifted from the cited
 paper's `key_equations_md`:
 
     [LITERATURE REFERENCE] (from ml_literature_review, confidence=0.65,
-     cite_id=arxiv:2503.18162)
+     source_ref=arxiv:2503.18162)
       **Implication.** Given the optimization-to-metric mismatch on
       full-spectrum SQUID, try an SNR-normalized reconstruction loss for
       the hard segments.
@@ -769,7 +769,7 @@ Still open:
 4. **Item-volume management.** With one external agent this is fine; with
    two or more, `expert_context` can grow large. The workflow-level
    curation strategy — token-budgeted trimming, confidence sorting,
-   dedup by `cite_id` — is TBD when a second external agent is wired.
+   dedup by `source_ref` — is TBD when a second external agent is wired.
    Existing renderer-side dedup and confidence sorting in
    `render_expert_context` are already in place to soften this.
 5. **OpenReview source type has no fallback when S2 does not index the URL.**
@@ -885,7 +885,7 @@ record which values were used.
 > inside `ExpertContextItem.content`) land. Before then it is
 > **partially runnable**: **runnable now** (Commit 4 shipped) — Step 1a (v0
 > metadata), Step 1b for the seven core `PaperExtract` fields, and all of Phase 2
-> (cite_id / confidence band / three-part content / Fix B / clamp); **requires
+> (source_ref / confidence band / three-part content / Fix B / clamp); **requires
 > Commit 2c** — Step 1b's `key_equations_md` / `pseudocode_md` /
 > `extraction_method` checks; **requires Commit 2d** — Phase 2's
 > equation-aware-finding sub-check (content quotes equations from
@@ -917,7 +917,7 @@ verbosity levels and capture the full output.
 `transfer_tolerance=moderate`, `max_rounds=3`; run the full node.
 
 Per `ExpertContextItem` in `findings`, review:
-- `cite_id`: matches a real retrieved paper?
+- `source_ref`: matches a real retrieved paper?
 - `confidence`: in the correct rubric band given the paper's verbosity + domain? Was it clamped by `abstract_only_ceiling` (if the cited paper was verbosity=0)?
 - `content` three-part check:
   - **Implication** — names a specific bottleneck? concrete next step? ≤40 words?
@@ -1075,11 +1075,16 @@ any external agent can have any kind of source reference. Examples:
 - human directive: `source_ref = "human:instruction_20260602"`
 - chain-internal: `source_ref = "experiment:wavenet_iter12"`
 
-Blast radius: 28 files, 247 occurrences. Includes
+Blast radius: 36 files, 319 occurrences (initial estimate of 28 / 247 in
+the P-design commit was based on a `cite_id`-only grep; final tally adds
+`citation_sources` and `citation_source` hits and 8 small files missed in
+the first survey: 6 advice JSONs in `advice/workflow/`, 1 pseudo-data
+JSON, and `agent/llm_bridge.py`). Includes
 `DiscoveryMemo.citation_sources` → `source_refs` and
 `InheritedComponent.citation_source` → `source_ref` for naming consistency.
 Pure mechanical rename — zero LLM-output behavior change.
 
 The citation-discipline mechanism
 (`nodes/ml_model_proposal_agent.py:133-164`, `_check_citation_discipline`)
-keeps its logic — iterates over `source_refs` instead of `citation_sources`.
+keeps its logic — iterates over `source_refs` instead of the
+pre-rename `citation_sources`.

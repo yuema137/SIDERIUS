@@ -131,33 +131,33 @@ def _run_preflight_check(
 
 
 def _check_citation_discipline(
-    citation_sources: list,
+    source_refs: list,
     causal_hypothesis: str,
     proposed_change: str,
 ) -> list:
-    """Return a warning message for each cite_id that was cited but not referenced.
+    """Return a warning message for each source_ref that was cited but not referenced.
 
-    Each cite_id in citation_sources must appear verbatim in causal_hypothesis
+    Each source_ref in source_refs must appear verbatim in causal_hypothesis
     or proposed_change.  Violations are soft warnings — the proposal is not
     rejected, but the issues are appended to ProposalOutput.memo_consistency_notes
     so the validator and the human reviewer can see them.
 
     Args:
-        citation_sources: list of cite_id strings from DiscoveryMemo.
+        source_refs: list of source_ref strings from DiscoveryMemo.
         causal_hypothesis: the reasoning text that should reference the cited items.
         proposed_change: the change description that should reference the cited items.
 
     Returns:
-        List of violation strings, one per uncited cite_id.  Empty = all citations
+        List of violation strings, one per uncited source_ref.  Empty = all citations
         are properly referenced in the reasoning text.
     """
     combined = causal_hypothesis + " " + proposed_change
     violations = []
-    for cite_id in citation_sources:
-        if cite_id not in combined:
+    for source_ref in source_refs:
+        if source_ref not in combined:
             violations.append(
-                f"CITATION_NOT_REFERENCED: cite_id '{cite_id}' is listed in "
-                f"citation_sources but does not appear verbatim in causal_hypothesis "
+                f"CITATION_NOT_REFERENCED: source_ref '{source_ref}' is listed in "
+                f"source_refs but does not appear verbatim in causal_hypothesis "
                 f"or proposed_change. Either reference it in your reasoning or remove "
                 f"it from citations."
             )
@@ -1400,7 +1400,7 @@ class MLModelProposalAgent:
                     )
                     # Citation discipline — warnings, not hard failures.
                     citation_violations = _check_citation_discipline(
-                        citation_sources=reasoning_output.get("citation_sources", []),
+                        source_refs=reasoning_output.get("source_refs", []),
                         causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
                         proposed_change=reasoning_output.get("proposed_change", ""),
                     )

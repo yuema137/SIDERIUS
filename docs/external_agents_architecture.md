@@ -123,7 +123,7 @@ Concretely:
 The proposer's system prompt teaches it to read the
 `## External Contributors` block first and use each card's
 `trust_guidance` to weight that agent's findings. If two agents disagree
-on the same `cite_id`, the proposer adjudicates using the cards plus the
+on the same `source_ref`, the proposer adjudicates using the cards plus the
 finding texts; we don't build a precedence resolver in code.
 
 **Implication**: trust composition between agents is the proposer's
@@ -245,7 +245,7 @@ infrastructure-level treatment as the agent count grows.
 
 With one external agent, `ProposalInput.expert_context` is bounded.
 With three or four, it can blow the proposer's token budget. The
-renderer (`render_expert_context`) already dedups by `cite_id` and
+renderer (`render_expert_context`) already dedups by `source_ref` and
 sorts by confidence, which softens this — but the workflow remains
 responsible for token-budgeted trimming before the protocol runs.
 
@@ -264,7 +264,7 @@ Pre-identified in `external_agents_for_proposer.md` §2. To specify:
 
 - Schema field on `ExternalAgentOutput` (likely
   `disallowed_patterns: List[DisallowedPattern]` with `pattern`,
-  `rationale`, `cite_id`).
+  `rationale`, `source_ref`).
 - Wiring into the existing `disallowed_architectural_patterns`
   mechanism in `ProposalInput` (or a sibling field).
 - Human-approval workflow: every disallowed pattern an external agent

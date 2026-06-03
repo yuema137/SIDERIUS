@@ -136,7 +136,7 @@ def local_full_context(
                     source="human",
                     kind="human",
                     content=advice_text,
-                    cite_id="human_advice",
+                    source_ref="human_advice",
                 )
             )
 

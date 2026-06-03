@@ -197,7 +197,7 @@ class TestFullRun:
                     "findings": [
                         {
                             "content": "Dilated causal convs widen receptive field cheaply.",
-                            "cite_id": "arxiv:2406.04378",
+                            "source_ref": "arxiv:2406.04378",
                             "content_paper_id": "arxiv:2406.04378",
                             "confidence": 0.8,
                         }
@@ -412,7 +412,7 @@ class TestStorageDump:
 
 
 class TestSynthesis:
-    """Synthesis-call behavior: valid items, empty findings, cite_id soft-drop."""
+    """Synthesis-call behavior: valid items, empty findings, source_ref soft-drop."""
 
     def _run(self, tmp_path, monkeypatch, synthesis_response):
         bridge = FakeBridge(
@@ -437,7 +437,7 @@ class TestSynthesis:
                     {
                         "content": "Given high-freq overfitting, dilated convs help. "
                         "(confidence 0.7: single full-spectrum paper)",
-                        "cite_id": "arxiv:2406.04378",
+                        "source_ref": "arxiv:2406.04378",
                         "content_paper_id": "arxiv:2406.04378",
                         "confidence": 0.7,
                     }
@@ -449,7 +449,7 @@ class TestSynthesis:
         assert item.confidence == 0.7
         assert item.kind == "literature"
         assert item.source == "ml_literature_review"
-        assert item.cite_id == "arxiv:2406.04378"
+        assert item.source_ref == "arxiv:2406.04378"
 
     def test_no_relevant_papers_yields_empty_findings(self, tmp_path, monkeypatch):
         out = self._run(tmp_path, monkeypatch, {"findings": []})
@@ -463,15 +463,15 @@ class TestSynthesis:
                 "findings": [
                     {
                         "content": "well cited",
-                        "cite_id": "arxiv:2406.04378",
+                        "source_ref": "arxiv:2406.04378",
                         "content_paper_id": "arxiv:2406.04378",
                         "confidence": 0.6,
                     },
                     {
                         "content": "hallucinated cite",
-                        "cite_id": "arxiv:9999.99999",
-                        # content_paper_id matches the (invalid) cite_id so the
-                        # test exercises only the cite_id check, not the new
+                        "source_ref": "arxiv:9999.99999",
+                        # content_paper_id matches the (invalid) source_ref so the
+                        # test exercises only the source_ref check, not the new
                         # content_paper_id hook (which would also drop it).
                         "content_paper_id": "arxiv:9999.99999",
                         "confidence": 0.9,
@@ -479,9 +479,9 @@ class TestSynthesis:
                 ]
             },
         )
-        # Only the well-cited item survives; the bad cite_id is dropped, not raised.
+        # Only the well-cited item survives; the bad source_ref is dropped, not raised.
         assert len(out.findings) == 1
-        assert out.findings[0].cite_id == "arxiv:2406.04378"
+        assert out.findings[0].source_ref == "arxiv:2406.04378"
 
 
 class TestAbstractOnlyConfidenceClamp:
@@ -521,19 +521,19 @@ class TestAbstractOnlyConfidenceClamp:
             [
                 {
                     "content": "deep-read paper",
-                    "cite_id": "arxiv:2406.04378",
+                    "source_ref": "arxiv:2406.04378",
                     "content_paper_id": "arxiv:2406.04378",
                     "confidence": 0.85,
                 },
                 {
                     "content": "abstract-only paper",
-                    "cite_id": "arxiv:2301.00001",
+                    "source_ref": "arxiv:2301.00001",
                     "content_paper_id": "arxiv:2301.00001",
                     "confidence": 0.85,
                 },
             ],
         )
-        by_cite = {f.cite_id: f.confidence for f in out.findings}
+        by_cite = {f.source_ref: f.confidence for f in out.findings}
         assert by_cite["arxiv:2406.04378"] == 0.85  # v1 deep-read: untouched
         assert by_cite["arxiv:2301.00001"] == 0.79  # v0 abstract-only: clamped to ceiling
 
@@ -544,7 +544,7 @@ class TestAbstractOnlyConfidenceClamp:
             [
                 {
                     "content": "modest",
-                    "cite_id": "arxiv:2301.00001",
+                    "source_ref": "arxiv:2301.00001",
                     "content_paper_id": "arxiv:2301.00001",
                     "confidence": 0.6,
                 }
@@ -559,7 +559,7 @@ class TestAbstractOnlyConfidenceClamp:
             [
                 {
                     "content": "abstract-only",
-                    "cite_id": "arxiv:2301.00001",
+                    "source_ref": "arxiv:2301.00001",
                     "content_paper_id": "arxiv:2301.00001",
                     "confidence": 0.85,
                 }
@@ -1337,7 +1337,7 @@ class TestSynthesisPromptReceivesPerPaperEquations:
 # The _validate_content_paper_id helper is the structural defence paired with
 # the Layer-1 prompt changes: it hard-drops findings whose declared
 # content_paper_id (the paper the LLM says it described in Mechanism) does
-# not match cite_id (the paper the LLM cited).
+# not match source_ref (the paper the LLM cited).
 # ---------------------------------------------------------------------------
 
 
@@ -1355,7 +1355,7 @@ class TestValidateContentPaperIdHelper:
     def test_match_passes(self):
         helper = self._helper()
         f = {
-            "cite_id": "arxiv:2406.04378",
+            "source_ref": "arxiv:2406.04378",
             "content_paper_id": "arxiv:2406.04378",
             "content": "irrelevant for this check",
         }
@@ -1366,7 +1366,7 @@ class TestValidateContentPaperIdHelper:
     def test_mismatch_drops(self):
         helper = self._helper()
         f = {
-            "cite_id": "arxiv:2510.25800",  # FreLE — what the LLM cited
+            "source_ref": "arxiv:2510.25800",  # FreLE — what the LLM cited
             "content_paper_id": "arxiv:2501.04967",  # TADA — what it actually described
             "content": "TADA-shaped Mechanism content",
         }
@@ -1378,15 +1378,15 @@ class TestValidateContentPaperIdHelper:
         # Pre-2d-cite-id-fix mock or partial LLM output: the field is absent.
         # Hook drops with the "missing content_paper_id" warning.
         helper = self._helper()
-        f = {"cite_id": "arxiv:1", "content": "x"}  # no content_paper_id key
+        f = {"source_ref": "arxiv:1", "content": "x"}  # no content_paper_id key
         assert helper(f, {"arxiv:1"}) is None
 
     def test_empty_string_content_paper_id_drops(self):
         # Defence in depth: an empty string for content_paper_id is treated
         # the same as missing — drop, don't compare-equal to an empty
-        # cite_id (which itself would also be dropped upstream).
+        # source_ref (which itself would also be dropped upstream).
         helper = self._helper()
-        f = {"cite_id": "arxiv:1", "content_paper_id": "", "content": "x"}
+        f = {"source_ref": "arxiv:1", "content_paper_id": "", "content": "x"}
         assert helper(f, {"arxiv:1"}) is None
 
     def test_content_paper_id_not_in_corpus_drops(self):
@@ -1394,7 +1394,7 @@ class TestValidateContentPaperIdHelper:
         # the retrieved papers. Hallucination — drop.
         helper = self._helper()
         f = {
-            "cite_id": "arxiv:2406.04378",
+            "source_ref": "arxiv:2406.04378",
             "content_paper_id": "arxiv:1234.56789",  # not in valid_ids
             "content": "x",
         }
@@ -1403,7 +1403,7 @@ class TestValidateContentPaperIdHelper:
 
 class TestContentPaperIdHookInSynthesize:
     """End-to-end inside ``_synthesize``: the hook drops mismatched findings
-    before they reach ``ExpertContextItem``, mirrors the existing cite_id
+    before they reach ``ExpertContextItem``, mirrors the existing source_ref
     soft-drop pattern, and ``content_paper_id`` is consumed (never forwarded
     onto the schema)."""
 
@@ -1423,7 +1423,7 @@ class TestContentPaperIdHookInSynthesize:
         return agent.run(_input(tmp_path))  # dynamic disabled → retrieved = [root]
 
     def test_mismatch_finding_dropped_end_to_end(self, tmp_path, monkeypatch):
-        # Two findings: one consistent, one with content_paper_id != cite_id.
+        # Two findings: one consistent, one with content_paper_id != source_ref.
         # Only the consistent one reaches the output.
         out = self._run_synthesis(
             tmp_path,
@@ -1431,13 +1431,13 @@ class TestContentPaperIdHookInSynthesize:
             [
                 {
                     "content": "consistent finding",
-                    "cite_id": "arxiv:2406.04378",
+                    "source_ref": "arxiv:2406.04378",
                     "content_paper_id": "arxiv:2406.04378",
                     "confidence": 0.7,
                 },
                 {
                     "content": "cited paper A, described paper B (hallucination)",
-                    "cite_id": "arxiv:2406.04378",
+                    "source_ref": "arxiv:2406.04378",
                     # The valid_ids set in a single-paper run is just the root
                     # paper, so any non-root id here is also "not in corpus".
                     # We use a different in-corpus id by mocking — but with a
@@ -1462,7 +1462,7 @@ class TestContentPaperIdHookInSynthesize:
             [
                 {
                     "content": "legacy-format finding without content_paper_id",
-                    "cite_id": "arxiv:2406.04378",
+                    "source_ref": "arxiv:2406.04378",
                     "confidence": 0.7,
                 },
             ],
@@ -1473,14 +1473,14 @@ class TestContentPaperIdHookInSynthesize:
         # ExpertContextItem schema has six fields; content_paper_id is not
         # one of them. After the hook validates, the field is read from the
         # raw dict and never forwarded — the constructed ExpertContextItem
-        # carries cite_id only.
+        # carries source_ref only.
         out = self._run_synthesis(
             tmp_path,
             monkeypatch,
             [
                 {
                     "content": "consistent finding",
-                    "cite_id": "arxiv:2406.04378",
+                    "source_ref": "arxiv:2406.04378",
                     "content_paper_id": "arxiv:2406.04378",
                     "confidence": 0.7,
                 },
@@ -1491,7 +1491,7 @@ class TestContentPaperIdHookInSynthesize:
         # ExpertContextItem schema is unchanged — only the documented six
         # fields exist, and content_paper_id is not among them.
         assert not hasattr(item, "content_paper_id")
-        assert item.cite_id == "arxiv:2406.04378"
+        assert item.source_ref == "arxiv:2406.04378"
 
     def test_hook_warning_logged_on_drop(self, tmp_path, monkeypatch, caplog):
         # The hook emits a warning naming both ids so the operator can grep
@@ -1505,14 +1505,14 @@ class TestContentPaperIdHookInSynthesize:
                 [
                     {
                         "content": "mismatched",
-                        "cite_id": "arxiv:2406.04378",
+                        "source_ref": "arxiv:2406.04378",
                         "content_paper_id": "arxiv:2510.25800",  # not retrieved
                         "confidence": 0.5,
                     }
                 ],
             )
         # The not-in-corpus drop path fires (the test's single-paper setup
-        # can't reach the != cite_id branch end-to-end; that branch is
+        # can't reach the != source_ref branch end-to-end; that branch is
         # covered by TestValidateContentPaperIdHelper).
         assert any(
             "content_paper_id" in record.message and "arxiv:2510.25800" in record.message

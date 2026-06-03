@@ -52,10 +52,10 @@ injected into `accumulated`).
 
 ---
 
-**G2 — `citation_sources` validator not enforced**
+**G2 — `source_refs` validator not enforced**
 
 The design doc (§2A centrifugal force #5 and §2D "Why citation matters") says each
-`cite_id` in `DiscoveryMemo.citation_sources` must appear verbatim in `causal_hypothesis`
+`source_ref` in `DiscoveryMemo.source_refs` must appear verbatim in `causal_hypothesis`
 or `proposed_change` text. The `DiscoveryMemo` schema documents this requirement but the
 pipeline runner never checks it.
 
@@ -64,7 +64,7 @@ rigorous") without actually using any of them. The citation audit trail is meani
 
 **Fix location**: `nodes/ml_model_proposal_agent.py` — after Stage 2 output is validated,
 add a `_check_citation_discipline(memo, expert_context_items)` helper that cross-checks each
-`cite_id` in `citation_sources` against the text of `causal_hypothesis` and `proposed_change`.
+`source_ref` in `source_refs` against the text of `causal_hypothesis` and `proposed_change`.
 Violations are injected as warnings (not hard failures) on the first iteration; converted to
 failures after one retry.
 
@@ -184,7 +184,7 @@ calibrate trust differently between empirical and theoretical sources?
 
 **Test to write**: inject one `AgentCard` with `trust_guidance="treat as empirical ground
 truth"` and one with `trust_guidance="treat as a prior only"`, both providing conflicting
-advice. Check that `DiscoveryMemo.citation_sources` reflects the empirical source more
+advice. Check that `DiscoveryMemo.source_refs` reflects the empirical source more
 heavily. (Real-LLM only.)
 
 ---
@@ -249,8 +249,8 @@ Stage 2 is re-run (not Stage 1 — comparisons are expensive and don't need to c
 ### Fix 3 — Citation discipline validator (G2) ✅ DONE
 **File**: `nodes/ml_model_proposal_agent.py`
 
-Added module-level `_check_citation_discipline(citation_sources, causal_hypothesis, proposed_change) -> list`
-that returns a violation message for each `cite_id` not appearing verbatim in either text field.
+Added module-level `_check_citation_discipline(source_refs, causal_hypothesis, proposed_change) -> list`
+that returns a violation message for each `source_ref` not appearing verbatim in either text field.
 Violations are appended to `ProposalOutput.memo_consistency_notes` (soft warning, not a hard rejection).
 Wired just before `return output` in the proposing retry block, using the raw `reasoning_output` dict.
 
@@ -260,8 +260,8 @@ Wired just before `return output` in the proposing retry block, using the raw `r
 
 | Group | What it covers | Tests |
 |-------|---------------|-------|
-| `TestCheckCitationDiscipline` | Pure function: empty list, cite_id in hypothesis, cite_id in proposed_change, absent cite_id, multiple cites (all present / one absent / all absent), empty fields, verbatim-match requirement | 10 |
-| `TestCitationDisciplinePipelineIntegration` | violations appended to `memo_consistency_notes`; no violations when all cited; existing notes preserved; empty `citation_sources` → no notes | 4 |
+| `TestCheckCitationDiscipline` | Pure function: empty list, source_ref in hypothesis, source_ref in proposed_change, absent source_ref, multiple cites (all present / one absent / all absent), empty fields, verbatim-match requirement | 10 |
+| `TestCitationDisciplinePipelineIntegration` | violations appended to `memo_consistency_notes`; no violations when all cited; existing notes preserved; empty `source_refs` → no notes | 4 |
 
 All 14 tests pass. Committed in two steps: code (`da490d1`), then tests + doc.
 
@@ -403,11 +403,11 @@ and `ProposalOutput.model_config`.
 **What**: corresponds to BG4 (G2 enforcement in practice). Depends on Fix 3 being landed.
 
 **Setup**: run the full pipeline with several `ExpertContextItem`s, only one of which is
-genuinely relevant to the proposed change. Inspect `DiscoveryMemo.citation_sources`.
+genuinely relevant to the proposed change. Inspect `DiscoveryMemo.source_refs`.
 
 **Assertions** (soft — these are quality checks, not hard gates):
-- `len(citation_sources) <= 5` (enforced by `max_length=5` on the schema field).
-- Every `cite_id` in `citation_sources` appears in `causal_hypothesis` or `proposed_change`.
+- `len(source_refs) <= 5` (enforced by `max_length=5` on the schema field).
+- Every `source_ref` in `source_refs` appears in `causal_hypothesis` or `proposed_change`.
 - The irrelevant `ExpertContextItem`s are NOT cited (the signal-to-noise check).
 
 Print a citation quality report: which items were cited, which were ignored, and whether
@@ -425,8 +425,8 @@ empirical one says "low-frequency performance is bottlenecked by receptive field
 literature one says "attention mechanisms dominate in recent SOTA".
 
 **Assertions** (observational):
-- `DiscoveryMemo.citation_sources` cites the empirical source's `cite_id` and/or the
-  literature source's `cite_id`. Print which was cited.
+- `DiscoveryMemo.source_refs` cites the empirical source's `source_ref` and/or the
+  literature source's `source_ref`. Print which was cited.
 - `causal_hypothesis` text references the domain it chose to follow.
 - If both sources are cited, print a note: the LLM did not discriminate — worth inspecting.
 

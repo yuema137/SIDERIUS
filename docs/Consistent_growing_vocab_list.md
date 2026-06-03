@@ -277,7 +277,7 @@ if accumulated_key_findings:
                 f"{len(accumulated_key_findings)} prior iter(s):\n"
                 f"{bullet_block}"
             ),
-            cite_id="prior_iters_key_findings",
+            source_ref="prior_iters_key_findings",
         )
     )
 ```
@@ -1912,7 +1912,7 @@ if accumulated_key_findings:
             source="prior_iters",
             kind="findings",
             content=header + bullet_block,
-            cite_id="prior_iters_key_findings",
+            source_ref="prior_iters_key_findings",
         )
     )
 ```

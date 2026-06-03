@@ -92,11 +92,11 @@ def test_node_real_run(tmp_path):
     # --- Structural assertions ---
     assert out.agent_card.agent_name == "ml_literature_review"
     assert out.retrieved_papers, "expected at least the root paper"
-    # Every cited paper_id must exist in the retrieved set (cite_id soft-drop).
+    # Every cited paper_id must exist in the retrieved set (source_ref soft-drop).
     retrieved_ids = {rp.paper_id for rp in out.retrieved_papers}
     assert out.findings, "expected at least one ExpertContextItem in findings"
     for item in out.findings:
-        assert item.cite_id in retrieved_ids, f"finding cites unknown paper {item.cite_id!r}"
+        assert item.source_ref in retrieved_ids, f"finding cites unknown paper {item.source_ref!r}"
         assert item.confidence is None or 0.0 <= item.confidence <= 1.0
 
     # Root paper resolved + compressed.

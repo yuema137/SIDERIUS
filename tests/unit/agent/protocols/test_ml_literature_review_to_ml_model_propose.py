@@ -39,7 +39,7 @@ def _make_agent_card() -> AgentCard:
     )
 
 
-def _make_finding(cite_id: str, content_paper_id: str | None = None) -> ExpertContextItem:
+def _make_finding(source_ref: str, content_paper_id: str | None = None) -> ExpertContextItem:
     # content_paper_id is a soft contract enforced inside the lit-review node;
     # here we only need a valid ExpertContextItem for the protocol pass-through.
     return ExpertContextItem(
@@ -51,7 +51,7 @@ def _make_finding(cite_id: str, content_paper_id: str | None = None) -> ExpertCo
             "\\delta L^f + (1-\\delta) L^t$ (FreLE). Adaptation: apply to the "
             "SQUID denoiser with clean-signal Fourier magnitudes as target."
         ),
-        cite_id=cite_id,
+        source_ref=source_ref,
         confidence=0.85,
     )
 
@@ -93,7 +93,7 @@ class TestLocalAllChannels:
     def test_fully_populated_output_maps_all_four_channels(self):
         """All four kwargs land in the returned dict, each from the right
         source field on the lit-review output."""
-        finding = _make_finding(cite_id="arxiv:2510.25800")
+        finding = _make_finding(source_ref="arxiv:2510.25800")
         vocab = _make_vocab_entry(name="composite_frequency_loss")
         mindset = "Prioritise spectral-coverage adaptations of the existing backbone."
         output = _make_output(findings=[finding], vocab=[vocab], mindset=mindset)
@@ -128,7 +128,7 @@ class TestLocalAllChannels:
     def test_v1_wired_empty_channels_pass_through_without_error(self):
         """v1 leaves new_vocab_candidates empty and suggested_mindset None.
         The protocol must surface those as empty list / None, not raise."""
-        output = _make_output(findings=[_make_finding(cite_id="arxiv:2312.00752")])
+        output = _make_output(findings=[_make_finding(source_ref="arxiv:2312.00752")])
 
         channels = local_all_channels(output)
 
@@ -172,7 +172,7 @@ class TestLocalAllChannels:
         must not reappear. The returned dict must contain none of the
         names that earlier drafts proposed for that channel."""
         output = _make_output(
-            findings=[_make_finding(cite_id="arxiv:2510.25800")],
+            findings=[_make_finding(source_ref="arxiv:2510.25800")],
             vocab=[_make_vocab_entry(name="composite_frequency_loss")],
             mindset="any mindset",
         )

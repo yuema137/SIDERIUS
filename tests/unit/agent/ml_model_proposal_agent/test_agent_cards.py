@@ -34,14 +34,14 @@ def _make_card(**kwargs) -> AgentCard:
 
 
 def _make_item(
-    cite_id: str,
+    source_ref: str,
     kind: str = "empirical",
     source: str = "ml_lit",
     confidence=None,
     content: str = "finding",
 ) -> dict:
     return {
-        "cite_id": cite_id,
+        "source_ref": source_ref,
         "kind": kind,
         "source": source,
         "confidence": confidence,
@@ -181,7 +181,7 @@ class TestRenderAgentCards:
 
 
 # ---------------------------------------------------------------------------
-# F.5 — render_expert_context(): dedup by cite_id + confidence sorting
+# F.5 — render_expert_context(): dedup by source_ref + confidence sorting
 # ---------------------------------------------------------------------------
 
 
@@ -207,7 +207,7 @@ class TestRenderExpertContextDedup:
         assert "arxiv_002" in result
 
     def test_empty_cite_id_dedup(self):
-        """Items with empty cite_id should deduplicate to last one."""
+        """Items with empty source_ref should deduplicate to last one."""
         items = [
             _make_item("", content="first empty"),
             _make_item("", content="second empty"),

@@ -43,7 +43,7 @@ rationale). The proposer-side schema (`ProposalInput`) is unchanged.
 _TODO (Commit 2d)._ How to consume this node's output:
 - **findings** — read `content` (names the bottleneck + the concrete
   implication, and for Tier-1-cited papers carries the verbatim
-  equation / pseudocode inline); `cite_id` attributes it to a paper;
+  equation / pseudocode inline); `source_ref` attributes it to a paper;
   `confidence` interpreted per the rubric.
 - **confidence scores** — defined by `ConfidenceRubric` (single source of
   truth); the bands are surfaced to the proposer via
@@ -204,8 +204,8 @@ count-vs-quality picture is complete.
 | Hook | Location | Drop condition |
 |---|---|---|
 | Missing content | `_synthesize` for-loop | `f.get("content")` is falsy or `f` is not a dict |
-| Unmatched cite_id | `_synthesize` for-loop | `cite_id not in valid_ids` (cited paper not in the retrieved set) |
-| `content_paper_id` consistency (post-2d cite-id fix) | `_validate_content_paper_id` (`nodes/ml_literature_review.py`) | `content_paper_id` missing, not in `valid_ids`, or `!= cite_id` |
+| Unmatched source_ref | `_synthesize` for-loop | `source_ref not in valid_ids` (cited paper not in the retrieved set) |
+| `content_paper_id` consistency (post-2d cite-id fix) | `_validate_content_paper_id` (`nodes/ml_literature_review.py`) | `content_paper_id` missing, not in `valid_ids`, or `!= source_ref` |
 | Confidence clamp (`abstract_only_ceiling`) | `_clamp_abstract_only_confidence` | (clip, not drop) — v=0-cited finding's confidence is clipped to the ceiling |
 | Heading normalisation (`_normalize_finding_content_headings`) | `_synthesize` for-loop | (transform, not drop) — rewrites known heading variants to canonical form |
 | `ExpertContextItem` schema validation | constructor `try/except ValidationError` | Unexpected schema violation on the LLM payload |

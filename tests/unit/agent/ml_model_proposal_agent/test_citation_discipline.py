@@ -31,7 +31,7 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent, _check_citation_
 class TestCheckCitationDiscipline:
     def test_empty_citation_list_returns_no_violations(self):
         violations = _check_citation_discipline(
-            citation_sources=[],
+            source_refs=[],
             causal_hypothesis="Spectral conv addresses the low-frequency gap.",
             proposed_change="Add a spectral conv layer after the dilated stack.",
         )
@@ -39,7 +39,7 @@ class TestCheckCitationDiscipline:
 
     def test_cite_id_present_in_causal_hypothesis(self):
         violations = _check_citation_discipline(
-            citation_sources=["data_psd_50hz"],
+            source_refs=["data_psd_50hz"],
             causal_hypothesis="The data_psd_50hz finding shows a 50 Hz artifact.",
             proposed_change="Add a notch filter.",
         )
@@ -47,7 +47,7 @@ class TestCheckCitationDiscipline:
 
     def test_cite_id_present_in_proposed_change(self):
         violations = _check_citation_discipline(
-            citation_sources=["data_psd_50hz"],
+            source_refs=["data_psd_50hz"],
             causal_hypothesis="A 50 Hz artifact was found in the data.",
             proposed_change="Based on data_psd_50hz, add a notch filter.",
         )
@@ -55,7 +55,7 @@ class TestCheckCitationDiscipline:
 
     def test_cite_id_absent_from_both_fields_returns_violation(self):
         violations = _check_citation_discipline(
-            citation_sources=["data_psd_50hz"],
+            source_refs=["data_psd_50hz"],
             causal_hypothesis="Spectral processing addresses the low-freq gap.",
             proposed_change="Add a spectral conv layer.",
         )
@@ -65,7 +65,7 @@ class TestCheckCitationDiscipline:
 
     def test_violation_message_names_the_cite_id(self):
         violations = _check_citation_discipline(
-            citation_sources=["phys_axion_mass_bound"],
+            source_refs=["phys_axion_mass_bound"],
             causal_hypothesis="Spectral conv addresses the low-freq gap.",
             proposed_change="Add a spectral layer.",
         )
@@ -73,7 +73,7 @@ class TestCheckCitationDiscipline:
 
     def test_multiple_citations_all_present(self):
         violations = _check_citation_discipline(
-            citation_sources=["cite_a", "cite_b"],
+            source_refs=["cite_a", "cite_b"],
             causal_hypothesis="cite_a finding motivates the change.",
             proposed_change="Based on cite_b, we add a layer.",
         )
@@ -81,7 +81,7 @@ class TestCheckCitationDiscipline:
 
     def test_multiple_citations_one_absent(self):
         violations = _check_citation_discipline(
-            citation_sources=["cite_a", "cite_b"],
+            source_refs=["cite_a", "cite_b"],
             causal_hypothesis="cite_a finding motivates the change.",
             proposed_change="Add a spectral layer.",  # cite_b not referenced
         )
@@ -90,7 +90,7 @@ class TestCheckCitationDiscipline:
 
     def test_multiple_citations_all_absent(self):
         violations = _check_citation_discipline(
-            citation_sources=["cite_a", "cite_b"],
+            source_refs=["cite_a", "cite_b"],
             causal_hypothesis="Spectral conv addresses the gap.",
             proposed_change="Add a spectral layer.",
         )
@@ -100,7 +100,7 @@ class TestCheckCitationDiscipline:
 
     def test_empty_hypothesis_and_change_produces_violation(self):
         violations = _check_citation_discipline(
-            citation_sources=["data_psd"],
+            source_refs=["data_psd"],
             causal_hypothesis="",
             proposed_change="",
         )
@@ -108,9 +108,9 @@ class TestCheckCitationDiscipline:
         assert "data_psd" in violations[0]
 
     def test_cite_id_must_match_verbatim(self):
-        """Partial substring of a cite_id does not count as a reference."""
+        """Partial substring of a source_ref does not count as a reference."""
         violations = _check_citation_discipline(
-            citation_sources=["data_psd_50hz_peak"],
+            source_refs=["data_psd_50hz_peak"],
             causal_hypothesis="The data_psd_50hz finding is relevant.",  # shorter id
             proposed_change="Add a filter.",
         )
@@ -194,12 +194,12 @@ def _make_agent(responses: list) -> tuple[MLModelProposalAgent, MagicMock]:
 
 class TestCitationDisciplinePipelineIntegration:
     def test_violations_appended_to_memo_consistency_notes(self, tmp_path):
-        """When a cite_id is not referenced in the reasoning text, the violation
+        """When a source_ref is not referenced in the reasoning text, the violation
         is appended to output.memo_consistency_notes (not a hard failure)."""
         reasoning = {
             "proposed_change": "Add a spectral conv layer.",
             "causal_hypothesis": "Spectral processing addresses the low-freq gap.",
-            "citation_sources": ["data_psd_50hz"],  # not referenced in either text
+            "source_refs": ["data_psd_50hz"],  # not referenced in either text
             "falsifiable_prediction": {
                 "metric": "denoising_score",
                 "current_value": 5.5,
@@ -228,12 +228,12 @@ class TestCitationDisciplinePipelineIntegration:
         assert "data_psd_50hz" in violation_notes[0]
 
     def test_no_violations_when_all_citations_referenced(self, tmp_path):
-        """When every cite_id appears in the reasoning text, memo_consistency_notes
+        """When every source_ref appears in the reasoning text, memo_consistency_notes
         contains no CITATION_NOT_REFERENCED entries."""
         reasoning = {
             "proposed_change": "Based on data_psd_50hz, add a notch filter.",
             "causal_hypothesis": "Spectral processing addresses the low-freq gap.",
-            "citation_sources": ["data_psd_50hz"],
+            "source_refs": ["data_psd_50hz"],
             "falsifiable_prediction": {
                 "metric": "denoising_score",
                 "current_value": 5.5,
@@ -265,7 +265,7 @@ class TestCitationDisciplinePipelineIntegration:
         reasoning = {
             "proposed_change": "Add a spectral layer.",
             "causal_hypothesis": "Spectral addresses gap.",
-            "citation_sources": ["missing_cite"],
+            "source_refs": ["missing_cite"],
             "falsifiable_prediction": {
                 "metric": "denoising_score",
                 "current_value": 5.5,
@@ -299,7 +299,7 @@ class TestCitationDisciplinePipelineIntegration:
         reasoning = {
             "proposed_change": "Add a spectral layer.",
             "causal_hypothesis": "Spectral addresses gap.",
-            "citation_sources": [],
+            "source_refs": [],
             "falsifiable_prediction": {
                 "metric": "denoising_score",
                 "current_value": 5.5,

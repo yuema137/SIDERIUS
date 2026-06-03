@@ -100,9 +100,9 @@ class InheritedComponent(BaseModel):
         max_length=1000,
         description="Why this component contributes — link it to its measured benefit.",
     )
-    citation_source: str | None = Field(
+    source_ref: str | None = Field(
         default=None,
-        description="cite_id of the ExpertContextItem that motivated inheriting "
+        description="source_ref of the ExpertContextItem that motivated inheriting "
         "this component. None = driven purely by experiment records.",
     )
 
@@ -129,9 +129,9 @@ class ExpertContextItem(BaseModel):
         )
     )
     content: str = Field(max_length=100000, description="The actual advice / finding / constraint.")
-    cite_id: str = Field(
+    source_ref: str = Field(
         description="Short stable ID the proposal agent can reference in its "
-        "DiscoveryMemo.citation_sources."
+        "DiscoveryMemo.source_refs."
     )
     produced_at: str | None = Field(
         default=None, description="ISO timestamp of when the finding was produced."
@@ -319,12 +319,12 @@ class DiscoveryMemo(BaseModel):
     )
 
     # --- Citations ---
-    citation_sources: list[str] = Field(
+    source_refs: list[str] = Field(
         default_factory=list,
         max_length=5,
-        description="cite_id values of ExpertContextItems that materially "
+        description="source_ref values of ExpertContextItems that materially "
         "shaped this memo. Max 5 — cite only items that changed "
-        "your hypothesis. The pipeline runner verifies each cite_id "
+        "your hypothesis. The pipeline runner verifies each source_ref "
         "appears in causal_hypothesis or proposed_change text.",
     )
 
@@ -647,7 +647,7 @@ class ProposalInput(BaseModel):
     expert_context: list[ExpertContextItem] = Field(
         default_factory=list,
         description="Polymorphic upstream context — human advice, agent findings, etc. "
-        "Each item carries a source, kind, content, and cite_id for attribution. "
+        "Each item carries a source, kind, content, and source_ref for attribution. "
         "Replaces human_advice as the primary advice channel. See §2D.",
     )
     reasoning_pipeline: ReasoningPipelineConfig = Field(

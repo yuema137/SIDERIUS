@@ -123,7 +123,7 @@ A JSON object with these fields:
    silently reuse a feature without attribution.
 
 6. **Cite sparingly.** If expert context items influenced your hypothesis,
-   list their `cite_id` values. Cite ONLY items that materially changed your
+   list their `source_ref` values. Cite ONLY items that materially changed your
    reasoning. Maximum 5 citations.
 
 {# EXPLORATION_MODE_BLOCK #}

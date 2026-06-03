@@ -37,7 +37,7 @@
     "3. Do NOT feel obligated to inherit wavenet's structure. A clean novel architecture that directly addresses the bottleneck is preferable to a wavenet patch that partially addresses it.",
     "4. Draw on your knowledge of recent SOTA for 1D signal denoising: SSMs (S4, Mamba), TCNs, FNO/spectral methods, diffusion-based denoisers, modern RNNs. One of these may be fundamentally better suited.",
     "5. Each proposal should be a clear, testable hypothesis: 'Architecture family X addresses bottleneck Y because mechanism Z.'",
-    "6. Learn from the accumulated vocabulary and past discoveries. If a direction was tried and failed, do NOT repeat it. If a discovery confirms a mechanism, cite it explicitly in your causal_hypothesis — use the exact cite_id from citation_sources and reference it verbatim in the text.",
+    "6. Learn from the accumulated vocabulary and past discoveries. If a direction was tried and failed, do NOT repeat it. If a discovery confirms a mechanism, cite it explicitly in your causal_hypothesis — use the exact source_ref from source_refs and reference it verbatim in the text.",
     "",
     "VOCABULARY:",
     "When your proposal introduces a new architectural mechanism (e.g. 'selective_state_space', 'frequency_band_filter', 'multi_resolution_wavelet'), add it to proposed_vocab_candidates with kind='feature'. When you identify a capability it enables (e.g. 'long_range_context', 'sub_band_coverage'), propose a vocab link (proposed_vocab_links) connecting feature to capability. Novel architectures are where new vocabulary matters most — name the mechanisms you introduce."
