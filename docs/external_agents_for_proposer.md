@@ -36,9 +36,13 @@ layer first (Vision → Spec → Plan), never the reverse.
 
 ## §0 What's already landed (receiving end)
 
-Earlier revisions of this doc described several schema additions as
-"prerequisites." Those are now in `agent/schemas/proposal.py`. Nothing in this
-list blocks the implementation order in §8.
+Earlier revisions described several schema additions as "prerequisites."
+The schema-level work has landed; the **proposer-side prompt + render
+behavior in pipeline mode does NOT yet match what the schemas advertise**.
+The Q1–Q7 audit (see §11) found four structural problems that Commit P
+fixes before Checkpoint D fires. Treat §0 as the "schemas landed" record
+and §11 as the "and here's what we still have to do on the proposer
+side" companion.
 
 | Item | Where it lives |
 |---|---|
@@ -48,17 +52,29 @@ list blocks the implementation order in §8.
 | `VocabEntry.origin: str \| None` (decouples external vocab from `seen_in_runs` promotion) | `agent/schemas/proposal.py` |
 | `ExpertContextItem.kind="literature"` literal | `agent/schemas/proposal.py` |
 
-The proposal agent already consumes all four channels (`agent_cards`,
-`expert_context`, `vocab_seed`, `mindset`) uniformly regardless of which
-upstream agent produced them. Adding a new upstream agent requires a new
-output schema, a new protocol file, and a workflow wiring change — but no
-edits to the proposal agent itself.
+**Important qualification**: the proposal agent has a *legacy mode* and a
+*pipeline mode* (see `nodes/ml_model_proposal_agent.py:874-881`). Production
+runs (`workflows/model_exploration.py:1600-1605` always builds a
+`ProposalLLMConfig`) use **pipeline mode exclusively**. The above schemas
+are wired into legacy mode but **only partially into pipeline mode**.
+Specifically, pipeline mode currently:
 
-One residual item to check during Step 5 of §8: the
-`ml_result_interp_to_ml_model_propose` protocol's `local_full_context`
-function may not yet thread `mindset` / `agent_cards` from caller kwargs into
-the constructed `ProposalInput`. If not, that's a one-line addition; flag in
-Step 5 and fix in place.
+- renders `agent_cards`, `expert_context`, `mindset`, and `vocab_seed`
+  correctly (✓);
+- silently drops `constraints`, `hardware_context`, `vram_budget_gb`, and
+  `expert_advice` from every stage's user prompt (✗);
+- places `agent_cards` and `expert_context` at the BOTTOM of the user
+  prompt, after KB of experiment history (position bias);
+- references "Advice JSON" and `[HARDWARE CONTEXT]` in the system prompt
+  but never delivers either to the user prompt — dangling pointers.
+
+Commit P fixes all of the above. See §11.
+
+`local_full_context` audit-on-Commit-5:
+`agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py:43-222`
+already accepts and threads `expert_context` / `vocab_seed` / `mindset` /
+`agent_cards` into `ProposalInput`. Confirmed by Commit 5 (`db55537`);
+no patch was required.
 
 ---
 
@@ -96,12 +112,17 @@ for future use.
 ### Active in v1
 
 1. **`ExpertContextItem`** — structured findings with `source`, `kind`,
-   `content`, `cite_id`, and optional `confidence`. The primary channel.
+   `content`, `source_ref` (renamed from `cite_id` in Commit P-a), and
+   optional `confidence`. The primary channel.
 2. **`AgentCard`** — static self-description of the contributing agent
    (`agent_name`, `role`, `expertise_domain`, `coverage`, `limitations`,
-   `trust_guidance`). Required so the proposal LLM can calibrate trust before
-   reading findings. The card is *defined once in the agent* and emitted on
-   every run.
+   `trust_guidance`, `trust_level` (added in Commit P-b)). Required so the
+   proposal LLM can calibrate trust before reading findings. The card is
+   *defined once in the agent* and emitted on every run. `trust_level` is
+   the machine-readable calibration the proposer prompt references via
+   structured rules (Commit P-c); `trust_guidance` is the human-readable
+   complement that renders alongside it in the Contributors block. When
+   the two disagree, `trust_level` is authoritative for routing decisions.
 
 ### Wired but empty in v1
 
@@ -982,3 +1003,83 @@ A run passes if **all** of the following hold.
 - Any time a prompt file is modified (`synthesis_system.md`, `search_decision_system.md`, `paper_extract_system.md`).
 - Any time `ConfidenceRubric` default values change.
 - Any time `SynthesisConfig.transfer_tolerance` default changes.
+
+---
+
+## §11 Proposer-side updates (Commit P)
+
+**Status**: scoped, not yet implemented. Trigger: Q1–Q7 audit conducted
+after Commit 5 (`db55537`) found four structural problems that prevent the
+proposer from acting on external-agent findings in production (pipeline)
+mode. Commit P fixes all four. Generic by construction — no agent-specific
+names hardcoded in schemas or prompts.
+
+### §11.1 — Problems found
+
+| # | Problem | Evidence |
+|---|---|---|
+| 1 | `causal_reasoning_stage.md` Rule 1 instructs *"every claim in `causal_hypothesis` must reference a specific ModelComparison from Stage 1. Do not introduce mechanisms that were not analyzed in the comparisons."* Literature findings introduce mechanisms by construction. Rule 1 is a direct instruction to ignore them. | `agent/prompt_templates/proposal/causal_reasoning_stage.md:99-103` |
+| 2 | Pipeline-mode `_run_pipeline` silently drops `constraints`, `hardware_context`, `vram_budget_gb`, and `expert_advice` from every stage's user prompt. Yet the system prompts reference `[HARDWARE CONTEXT]` and "Advice JSON" as if present. Dangling pointers. | `nodes/ml_model_proposal_agent.py:1011-1494` — zero references to `inp.constraints` / `inp.hardware_context` / `inp.vram_budget_gb` / `inp.expert_advice`. System-prompt pointers: `causal_reasoning_stage.md:32-34`, `*_explore.md`/`*_exploit.md` Contract Hierarchy sections. |
+| 3 | `agent_cards_block` and `expert_context_block` are appended to the BOTTOM of the user prompt at `nodes/ml_model_proposal_agent.py:1175-1181`, after KB of candidate source code and the experiment-history JSON dump. Position bias. | `nodes/ml_model_proposal_agent.py:1175-1181` (reasoning stages) and `:1345-1349` (proposing stage). |
+| 4 | No prompt instruction tells the LLM how to synthesize experiment history + external findings + human directives into one coherent proposal. The three sources are present in the prompt but there is no integration rule. | `causal_reasoning_stage.md:1-134` — the MANDATORY block at lines 36–69 covers science-vs-engineering only, not multi-source synthesis. |
+
+### §11.2 — Generic fixes (no agent names hardcoded)
+
+| Problem | Fix | Commit |
+|---|---|---|
+| 1 | Generic multi-source Rule 1: every claim attributable to a source. Valid sources: ModelComparison (experiment lens); ExpertContextItem with `trust_level` in {strong_prior, soft_prior}; hard_limit constraint. Plus weakening of `comparison_stage.md` Rule 4 ("no generic ML knowledge") to allow literature signals with explicit provenance. | P-c |
+| 2 | Render `_render_hardware_context_block` and a new `_render_constraints_block` from `_run_pipeline` (currently called only from legacy mode). Hard-remove `ProposalInput.expert_advice` (no production caller; rewrite the dangling "Advice JSON" mode-file references to point at the synthesis rules). `human_advice` workaround keeps existing wrap path but additionally injects a synthesized `human` `AgentCard` so the wrapped item carries `trust_level="strong_prior"`. | P-b + P-c + P-d |
+| 3 | Reorder per-stage user-prompt assembly so the order is: HARDWARE CONTEXT → Constraints → External Contributors → Expert Context → candidate markdown + accumulated JSON → vocab block. Findings now precede experiment history. | P-d |
+| 4 | New MANDATORY "Multi-source synthesis" section in `causal_reasoning_stage.md`, inserted between the existing MANDATORY block and the `## What you produce` section. Tells the LLM how to weigh hard_limit / strong_prior / soft_prior sources, anchor on experiment history, and synthesize rather than anchor on any single source. | P-c |
+
+### §11.3 — `AgentCard.trust_level` semantics
+
+| Level | Meaning | Default for v1 agents |
+|---|---|---|
+| `hard_limit` | Findings define non-negotiable constraints. The proposer MUST NOT violate them. Reserved for objective constraint agents (physics, hardware). | (no v1 agent uses this) |
+| `strong_prior` | Findings are near-equal to experiment data. The proposer gives them comparable weight. | The synthesized `human` `AgentCard` for wrapped human_advice. |
+| `soft_prior` | Findings are inspirational priors. Experiment data takes precedence on conflict. Findings expand the design space beyond what has been tried. | `ml_literature_review`. |
+
+The vision-doc invariant *"trust calibration lives entirely in the
+`AgentCard.trust_guidance` string"* (`external_agents_architecture.md` §4)
+is amended in P-e: `trust_level` is authoritative for **machine-readable
+routing decisions** (rule application, synthesis weighting); `trust_guidance`
+remains the **human-readable** complement and is authoritative for human
+review. When they disagree, `trust_level` wins for the proposer's
+synthesis rules.
+
+### §11.4 — Checkpoint P
+
+A **structural, offline, zero-LLM-call** checkpoint that audits the
+rendered user + system prompts in pipeline mode against the seven
+sub-criteria listed in `docs/commit_plan_ml_literature_review.md` §"Commit
+P". Gates Commit 6 from starting. Cheap, fast, catches problems Checkpoint
+D would otherwise re-discover after expensive LLM runs.
+
+### §11.5 — Relationship to existing checkpoints
+
+| Checkpoint | Layer | Relation to Commit P |
+|---|---|---|
+| A–G | Lit-review producer side | Unchanged. Commit P does not touch the lit-review node's own output quality. |
+| Checkpoint D | Proposer behavior end-to-end | Now depends on Commit P having landed. Without Commit P, Checkpoint D fails in known ways. |
+| Checkpoint P (NEW) | Proposer prompt structure (offline) | Gates Checkpoint D from firing. Cheaper, faster, and catches the structural problems Checkpoint D would otherwise hit. |
+
+### §11.6 — `cite_id` → `source_ref` rename (Commit P-a)
+
+`cite_id` is too narrow — it implies "paper citation", which is
+literature-specific. Renamed to `source_ref` in Commit P-a to reflect that
+any external agent can have any kind of source reference. Examples:
+
+- literature agent: `source_ref = "arxiv:2312.00752"`
+- physics agent: `source_ref = "physics:squid_band_limit_v1"`
+- human directive: `source_ref = "human:instruction_20260602"`
+- chain-internal: `source_ref = "experiment:wavenet_iter12"`
+
+Blast radius: 28 files, 247 occurrences. Includes
+`DiscoveryMemo.citation_sources` → `source_refs` and
+`InheritedComponent.citation_source` → `source_ref` for naming consistency.
+Pure mechanical rename — zero LLM-output behavior change.
+
+The citation-discipline mechanism
+(`nodes/ml_model_proposal_agent.py:133-164`, `_check_citation_discipline`)
+keeps its logic — iterates over `source_refs` instead of `citation_sources`.
