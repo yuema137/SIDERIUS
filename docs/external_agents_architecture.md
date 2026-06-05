@@ -108,27 +108,54 @@ principle.
 ## §4 Trust calibration via `AgentCard`
 
 There is no hardcoded "physics is hard, literature is soft" logic
-anywhere in the infrastructure. That calibration lives entirely in the
-`AgentCard.trust_guidance` string each agent emits.
+anywhere in the infrastructure. That calibration lives on the
+`AgentCard` each agent emits, across two complementary fields:
+
+- **`trust_level: Literal["hard_limit", "strong_prior", "soft_prior"]`**
+  (introduced in Commit P-b) — the **machine-readable** calibration the
+  proposer's synthesis rules read programmatically. Authoritative for
+  routing decisions (rule application, synthesis weighting).
+- **`trust_guidance: str`** — the **human-readable** complement that
+  renders alongside `trust_level` in the Contributors block. Authoritative
+  for human review. Carries domain-specific framing the LLM benefits from
+  but the structural rules don't need.
+
+When the two appear to disagree, `trust_level` wins for the proposer's
+synthesis rules. `trust_guidance` should always be consistent with the
+chosen level; if you find yourself writing prose that contradicts the
+declared level, the level is probably wrong — fix it.
 
 Concretely:
 
-- A literature agent's card says *"Treat as promising priors; only
-  experiment runs confirm applicability."*
-- A physics agent's card says *"Physical constraints are HARD LIMITS;
-  do not override without explicit physics justification."*
-- A narrative agent's card says *"Continuity signal for prompt framing;
-  not evidence."*
+- A literature agent declares `trust_level="soft_prior"` and the
+  `trust_guidance` says *"Treat as promising priors; only experiment
+  runs confirm applicability."*
+- A physics agent declares `trust_level="hard_limit"` and the
+  `trust_guidance` says *"Physical constraints are HARD LIMITS; do not
+  override without explicit physics justification."*
+- A narrative agent declares `trust_level="soft_prior"` (until evidence
+  of stronger transfer) and the `trust_guidance` says *"Continuity
+  signal for prompt framing; not evidence."*
 
-The proposer's system prompt teaches it to read the
-`## External Contributors` block first and use each card's
-`trust_guidance` to weight that agent's findings. If two agents disagree
-on the same `source_ref`, the proposer adjudicates using the cards plus the
-finding texts; we don't build a precedence resolver in code.
+The proposer's system prompt (`causal_reasoning_stage.md`'s
+`## MANDATORY — Multi-source synthesis` block, landed in Commit P-c)
+teaches the LLM to read the `## External Contributors` block first,
+note each card's `Trust Level`, and apply the structural synthesis
+rules. The rules are generic over `trust_level` values, not over agent
+type names — the proposer does **not** pattern-match "Literature agents"
+or "Physics agents". Any agent declaring a level routes through the
+same rule.
+
+If two agents at different `trust_level` values disagree on the same
+`source_ref`, the proposer resolves by the structural rule: `hard_limit`
+beats `strong_prior` beats `soft_prior`. Adjudication between two
+sources at the **same** `trust_level` is a separate open question — see
+§9 Q1.
 
 **Implication**: trust composition between agents is the proposer's
 problem, not the workflow's. Adding a new agent does not require
-rewriting any priority rules — write a clear card and stop.
+rewriting any priority rules — declare the right `trust_level`, write
+a consistent `trust_guidance`, and stop.
 
 ### Human notes override misleading literature signals
 
@@ -373,10 +400,15 @@ without any new schema on either side of the boundary.
 These are not implementation TODOs; they are open *design* questions
 that the next external agent will force us to answer.
 
-1. **Trust composition when agents disagree.** Two agents cite the same
-   paper with contradictory framings. The proposer adjudicates today via
-   the `AgentCard.trust_guidance` strings. Is that enough at three
-   agents? At five? Open until tested in practice.
+1. **Trust composition when agents disagree.** *(Partially resolved by
+   Commits P-b + P-c — 2026-06-05.)* The cross-`trust_level` case is
+   resolved structurally: `hard_limit` beats `strong_prior` beats
+   `soft_prior`, applied as a synthesis rule generic over
+   `trust_level` values (see §4). Adjudication between two sources at
+   the **same** `trust_level` is deferred — this scenario requires
+   multiple `strong_prior` or `hard_limit` agents to be active
+   simultaneously, which is not the case until a second external agent
+   is added.
 2. **`suggested_mindset` collision.** §6 of the proposer-spec uses
    *last-non-None wins*. With two agents both populating mindset (e.g.
    physics + narrative), is the last-wins rule acceptable? Likely needs

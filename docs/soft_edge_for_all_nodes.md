@@ -130,3 +130,7 @@ This schema is generic enough for any node:
 - `expert_advice` defaults to `""` (empty string) — existing code works unchanged
 - `ExpertAdviceInput = Union[str, ExpertAdvice]` — both forms accepted
 - No protocol changes needed — expert_advice is a soft input, not a protocol field
+
+## Exceptions
+
+`ProposalInput` is a deliberate exception: it receives both human directives and external agent findings through the unified `expert_context` channel (with `agent_cards` for trust calibration), treating them as parallel inputs at the same level. The `expert_advice` soft-input pattern applies to nodes that receive human guidance only; once a node needs to synthesize multiple external sources, `expert_context` supersedes it.
