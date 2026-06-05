@@ -702,11 +702,16 @@ class ProposalInput(BaseModel):
         description="Hard limits the proposed architecture must respect "
         "(e.g. 'VRAM < 10 GB', 'params < 50M', 'no external dependencies').",
     )
-    expert_advice: ExpertAdviceInput = Field(
-        default="",
-        description="Structured guidance from upstream agents or orchestrators. "
-        "Accepts a plain string or a structured ExpertAdvice object.",
-    )
+    # NOTE: ProposalInput.expert_advice was hard-removed in Commit P-d.
+    # Rationale: for the Proposal node specifically, human directives and
+    # external agent findings are parallel inputs at the same level — both
+    # flow through `expert_context` with `agent_cards` for trust calibration,
+    # and the proposer treats them uniformly. The `expert_advice` raw-string
+    # pattern still applies to nodes that receive human guidance only
+    # (Interpretation / Implementor / Validator / HyperparamTune); once a
+    # node needs to synthesize multiple external sources, `expert_context`
+    # supersedes it. See docs/soft_edge_for_all_nodes.md "Exceptions" for
+    # the cross-cutting note.
     human_advice: ExpertAdviceInput | None = Field(
         default=None,
         description="DEPRECATED — use expert_context instead. Legacy human-provided guidance. "

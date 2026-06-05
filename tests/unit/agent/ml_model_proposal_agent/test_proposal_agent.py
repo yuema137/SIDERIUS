@@ -438,62 +438,13 @@ class TestBuildReasoningPromptEnriched:
         assert "test bottleneck" in prompt
         assert "File Vector" not in prompt
 
-    @pytest.mark.parametrize(
-        "advice, expected_in, expected_not_in",
-        [
-            pytest.param(
-                "Prioritize architectures with skip connections",
-                ["Expert Guidance", "skip connections"],
-                [],
-                id="string_advice",
-            ),
-            pytest.param(
-                "",
-                [],
-                ["Expert Guidance"],
-                id="empty_string_excluded",
-            ),
-            pytest.param(
-                ExpertAdvice(
-                    focus_areas=["low-frequency denoising"],
-                    constraints=["VRAM < 8 GB"],
-                    known_failures=[],
-                    suggested_directions=["try dilated convolutions"],
-                    rationale="Files 0-3 consistently weak.",
-                ),
-                [
-                    "Expert Guidance",
-                    "low-frequency denoising",
-                    "VRAM < 8 GB",
-                    "dilated convolutions",
-                ],
-                [],
-                id="structured_advice",
-            ),
-        ],
-    )
-    def test_expert_advice_propagation(self, advice, expected_in, expected_not_in):
-        """expert_advice handling: string advice renders under "Expert Guidance",
-        empty string omits the section, and structured ExpertAdvice surfaces
-        every populated field. Replaces three flat tests
-        (includes_expert_advice_string, excludes_expert_when_empty,
-        includes_structured_expert_advice)."""
-        inp = self._make_enriched_input()
-        inp.expert_advice = advice
-        prompt = _build_reasoning_prompt(inp)
-        for s in expected_in:
-            assert s in prompt
-        for s in expected_not_in:
-            assert s not in prompt
-
-    def test_expert_advice_before_human_advice(self):
-        inp = self._make_enriched_input()
-        inp.expert_advice = "Expert says X"
-        inp.human_advice = "Human says Y"
-        prompt = _build_reasoning_prompt(inp)
-        expert_pos = prompt.index("Expert Guidance")
-        human_pos = prompt.index("Human Expert Advice")
-        assert expert_pos < human_pos
+    # NOTE: tests test_expert_advice_propagation and
+    # test_expert_advice_before_human_advice were removed in Commit P-d
+    # alongside the hard-remove of ProposalInput.expert_advice. The legacy
+    # rendering block in _build_reasoning_prompt is gone; there is no
+    # behavior left to test. Human_advice behavior is covered by
+    # test_advice_strings_propagate_into_reasoning_prompt and
+    # test_no_advice_omits_human_section above.
 
 
 # ---------------------------------------------------------------------------
