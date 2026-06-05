@@ -782,7 +782,12 @@ class ProposalInput(BaseModel):
         description="Self-descriptions of all external agents contributing context this round. "
         "Rendered as a 'Contributors' section before the Expert Context block. "
         "The proposal LLM reads these first to calibrate trust in each source. "
-        "Empty = no external agents this round (internal-only run).",
+        "Empty = no external agents this round (internal-only run). "
+        "When a facilitator agent is used to combine multiple external agents' "
+        "outputs, include the cards of the original agents (not the facilitator's "
+        "own card) so the proposer can calibrate trust per source. The "
+        "facilitator's synthesis is reflected in the ExpertContextItem list, "
+        "not in this field.",
     )
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(

@@ -18,12 +18,9 @@ it must be falsifiable, comparative, and architecturally concrete.
 - **Expert context**: upstream findings, human directives, strategy reports.
 - **Contributors** (when present): external agents contributing findings this round.
   Read the Contributors section before the Expert Context. Each contributor's
-  `Trust guidance` field tells you how to calibrate their findings:
-  - Literature agents: treat as promising priors that lower exploration cost.
-    Only experiment runs confirm applicability to TIDMAD.
-  - Physics agents: physical constraints are HARD LIMITS. Do not propose
-    architectures that violate them without explicit physics justification.
-  - Human directives: always take precedence over agent findings.
+  `Trust Level` field in the Contributors block is the authoritative calibration.
+  Apply the synthesis rules in the *Multi-source synthesis* MANDATORY block
+  below based on that field — do not pattern-match agent names.
 - **Previous Failed Proposals** (when present): may include one or more
   `[PHYSICAL REJECTION]` blocks emitted by the tuner's VRAM engine. Each
   block names the rejected `model_type`, the dominant layer that caused
@@ -67,6 +64,31 @@ no mention of the physical rejection, OR one that addresses only the VRAM
 cap with no scientific rationale, is incomplete. Cite the previous failure
 as a design constraint to be solved alongside the scientific bottlenecks.
 
+## MANDATORY — Multi-source synthesis
+
+Before forming your hypothesis, synthesize all available evidence channels:
+
+1. **Experiment history** (the ModelComparisons from Stage 1) — your primary
+   evidence base. What has been tried; what worked; what failed.
+2. **Expert context items** (the Expert Context block) — weight each item by
+   its contributor's `trust_level` (visible in the Contributors block):
+   - `hard_limit`: non-negotiable constraint. Your hypothesis MUST NOT
+     violate it.
+   - `strong_prior`: weight comparably to experiment data. Override only
+     with explicit justification citing why the experimental evidence
+     outweighs it.
+   - `soft_prior`: inspirational prior. Experiment data takes precedence
+     on conflict; you may use it to motivate exploration beyond what
+     experiment history has tried.
+
+A finding from any source at `trust_level=strong_prior` or higher may
+directly motivate your `proposed_change`, not just inform it. Record its
+`source_ref` in `source_refs` when it materially changes your hypothesis.
+
+This rule is generic over `trust_level` values, not over agent type names.
+The proposer reads `Trust Level` off the card; it does not pattern-match
+"Literature agents" or "Physics agents" or any other prose label.
+
 ## What you produce
 
 A JSON object with these fields:
@@ -99,9 +121,13 @@ A JSON object with these fields:
 
 ## Rules — the four structural teeth
 
-1. **Comparison-backed**: every claim in `causal_hypothesis` must reference
-   a specific ModelComparison from Stage 1. Do not introduce mechanisms that
-   were not analyzed in the comparisons.
+1. **Evidence-backed**: every claim in `causal_hypothesis` must reference
+   either (a) a specific ModelComparison from Stage 1, or (b) an
+   ExpertContextItem whose contributor's `trust_level` is `strong_prior`
+   or `hard_limit`. Cite the `source_ref` explicitly in either case
+   (model_type for ModelComparisons, the item's `source_ref` for expert
+   context). A claim with no source from either lens is rejected as
+   unsupported.
 
 2. **Falsifiable**: your `falsifiable_prediction` must commit to a SPECIFIC
    NUMERICAL OUTCOME. The boldness (abs(predicted - current) / abs(current))
@@ -119,9 +145,11 @@ A JSON object with these fields:
 
 ## Additional rules
 
-5. **Inherit explicitly.** Every architectural primitive you carry over from
-   a past model must appear in `inherited_components` with evidence. Do not
-   silently reuse a feature without attribution.
+5. **Inherit explicitly.** Every architectural primitive or technique you
+   carry over from any source — past experiment, external agent finding,
+   or human directive — must appear in `inherited_components` with the
+   appropriate `source_type` (`experiment` / `external_agent` / `human`)
+   and `source_id`. Do not silently reuse a feature without attribution.
 
 6. **Cite sparingly.** If expert context items influenced your hypothesis,
    list their `source_ref` values. Cite ONLY items that materially changed your
