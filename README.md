@@ -201,7 +201,6 @@ SIDERIUS/
 │
 ├── scripts/                          # Standalone runners (no longer at repo root)
 │   ├── run_comparison.py             # Baseline-vs-agent comparison for a single model
-│   ├── run_exploration.py            # 5-agent exploration workflow launcher
 │   ├── compute_raw_baseline.py       # Raw (undenoised) reference score per file (Option B, global s_max)
 │   ├── compute_ground_truth.py       # Perfect-denoiser ceiling per file + scalar (anchor-only, no HDF5 read)
 │   ├── run_all_models.sh             # Lilab multi-model parallel launcher
