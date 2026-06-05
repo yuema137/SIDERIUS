@@ -139,35 +139,81 @@ class TestFalsifiablePrediction:
 
 
 class TestInheritedComponent:
-    def test_valid_minimal(self):
+    def test_valid_minimal_experiment(self):
         ic = InheritedComponent.model_validate(
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Gave wavenet a +0.15 lift on low_freq.",
             }
         )
         assert ic.from_run is None
-        assert ic.source_ref is None
+        assert ic.source_type == "experiment"
+        assert ic.source_id == "wavenet"
 
-    def test_valid_full(self):
+    def test_valid_external_agent_with_colon_format(self):
+        """Happy-path for the regex-validated branch (source_type='external_agent')."""
         ic = InheritedComponent.model_validate(
             {
-                "component": "gated_activation",
-                "from_model_type": "wavenet",
-                "from_run": "hpt_full_v1",
-                "contribution_evidence": "Gating improved selectivity by 20%.",
-                "source_ref": "human_advice_001",
+                "component": "composite_frequency_loss",
+                "source_type": "external_agent",
+                "source_id": "arxiv:2510.25800",
+                "contribution_evidence": "FreLE composite loss closes spectral gap.",
             }
         )
-        assert ic.from_run == "hpt_full_v1"
-        assert ic.source_ref == "human_advice_001"
+        assert ic.source_id == "arxiv:2510.25800"
+
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "no_colon_at_all",  # missing colon entirely
+            "prefix:",  # colon present but empty identifier
+        ],
+    )
+    def test_external_source_id_regex_rejects_malformed(self, bad_id):
+        with pytest.raises(ValidationError, match="does not match the required format"):
+            InheritedComponent.model_validate(
+                {
+                    "component": "x",
+                    "source_type": "external_agent",
+                    "source_id": bad_id,
+                    "contribution_evidence": "evidence",
+                }
+            )
+
+    def test_experiment_source_id_skips_regex(self):
+        """The conditional branch of the validator: source_type='experiment'
+        accepts a bare token (no colon) — different code path from external_agent."""
+        ic = InheritedComponent.model_validate(
+            {
+                "component": "x",
+                "source_type": "experiment",
+                "source_id": "wavenet",
+                "contribution_evidence": "evidence",
+            }
+        )
+        assert ic.source_id == "wavenet"
+
+    def test_source_type_rejects_unknown_value(self):
+        """Runtime Literal boundary check — pyright catches static callers
+        only; dict input from JSON/LLM bypasses static analysis."""
+        with pytest.raises(ValidationError):
+            InheritedComponent.model_validate(
+                {
+                    "component": "x",
+                    "source_type": "speculative",
+                    "source_id": "x:y",
+                    "contribution_evidence": "evidence",
+                }
+            )
 
     def test_missing_component_raises(self):
         with pytest.raises(ValidationError):
             InheritedComponent.model_validate(
                 {
-                    "from_model_type": "wavenet",
+                    "source_type": "experiment",
+                    "source_id": "wavenet",
                     "contribution_evidence": "something",
                 }
             )
@@ -178,7 +224,8 @@ class TestInheritedComponent:
             InheritedComponent.model_validate(
                 {
                     "component": "test",
-                    "from_model_type": "wavenet",
+                    "source_type": "experiment",
+                    "source_id": "wavenet",
                     "contribution_evidence": "x" * 1001,
                 }
             )
@@ -321,7 +368,8 @@ class TestDiscoveryMemo:
         valid_memo["inherited_components"] = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Core mechanism of wavenet's success.",
             }
         ]

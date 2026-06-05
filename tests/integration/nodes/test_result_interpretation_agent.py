@@ -248,7 +248,8 @@ _PREVIOUS_PROPOSAL_REFUTED = {
     "inherited_components": [
         {
             "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Core mechanism of wavenet's 5.576 score.",
         },
     ],
@@ -268,7 +269,8 @@ _PREVIOUS_PROPOSAL_CONFIRMED = {
     "inherited_components": [
         {
             "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Core mechanism of wavenet's 5.576 score.",
         },
     ],

@@ -853,7 +853,8 @@ class TestInheritanceDecoupledFromPassed:
             inherited_components=[
                 InheritedComponent(
                     component="spectral_conv",
-                    from_model_type="gated_fno",
+                    source_type="experiment",
+                    source_id="gated_fno",
                     contribution_evidence="Claimed but absent in source.",
                 )
             ],
@@ -876,7 +877,8 @@ class TestInheritanceDecoupledFromPassed:
             inherited_components=[
                 InheritedComponent(
                     component="spectral_conv",
-                    from_model_type="gated_fno",
+                    source_type="experiment",
+                    source_id="gated_fno",
                     contribution_evidence="Claimed but absent in source.",
                 )
             ],
@@ -897,7 +899,8 @@ class TestInheritanceDecoupledFromPassed:
             inherited_components=[
                 InheritedComponent(
                     component="embedding_layer",
-                    from_model_type="punet",
+                    source_type="experiment",
+                    source_id="punet",
                     contribution_evidence="ADC encoding.",
                 )
             ],
@@ -926,7 +929,8 @@ class TestInheritanceDecoupledFromPassed:
                 inherited_components=[
                     InheritedComponent(
                         component="embedding_layer",
-                        from_model_type="punet",
+                        source_type="experiment",
+                        source_id="punet",
                         contribution_evidence="ADC encoding.",
                     )
                 ],

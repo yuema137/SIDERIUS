@@ -9,6 +9,7 @@ for consumption by both ml_model_implementor and tune_ml_hyperparam_agent.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -78,33 +79,79 @@ class FalsifiablePrediction(BaseModel):
 
 
 # B.2 — Inherited component (lineage tracking)
+_EXTERNAL_SOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*:[\w./-]+$")
+
+
 class InheritedComponent(BaseModel):
-    """One building block carried over from a past winning run.
+    """One building block carried over into the proposed architecture.
 
     Can be a concrete feature ('dilated_causal_conv') or a higher-level
     concept ('receptive_field') — both are tracked in the unified vocabulary.
-    See §2B of the V2 design doc.
+    Generic across source types: an inherited component may come from a past
+    experiment, from an external agent's finding, or from a human directive.
+    See §2B of the V2 design doc + §11.3 of
+    ``docs/external_agents_for_proposer.md``.
     """
 
     component: str = Field(
         description="Short canonical name from the vocabulary. "
         "E.g. 'dilated_causal_conv' (feature) or 'receptive_field' (concept)."
     )
-    from_model_type: str = Field(description="The ancestor model_type, e.g. 'wavenet'.")
+    source_type: Literal["experiment", "external_agent", "human"] = Field(
+        description=(
+            "Where this inherited component comes from:\n"
+            "  - ``experiment``: a past run of the chain. ``source_id`` is the "
+            "    ``model_type`` (e.g. 'wavenet'); ``from_run`` may carry the "
+            "    specific run name.\n"
+            "  - ``external_agent``: an external agent's finding. ``source_id`` "
+            "    is the ``source_ref`` of the originating ExpertContextItem "
+            "    (e.g. 'arxiv:2312.00752', 'physics:squid_band_limit_v1').\n"
+            "  - ``human``: a human directive. ``source_id`` is the human "
+            "    instruction identifier (e.g. 'human:instruction_20260603')."
+        )
+    )
+    source_id: str = Field(
+        description=(
+            "Stable identifier for the source. Format depends on ``source_type``:\n"
+            "  - experiment: a bare ``model_type`` token (no colon required), "
+            "    e.g. 'wavenet'.\n"
+            "  - external_agent / human: ``<prefix>:<identifier>`` matching the "
+            "    regex ``^[a-z][a-z0-9_-]*:[\\w./-]+$`` — same format as "
+            "    ExpertContextItem.source_ref. The validator rejects obviously "
+            "    malformed values for these source types."
+        )
+    )
     from_run: str | None = Field(
         default=None,
         description="The specific run where this component first proved out. "
-        "None for built-in models.",
+        "Only meaningful when ``source_type='experiment'``. None for built-in "
+        "models and for non-experiment sources.",
     )
     contribution_evidence: str = Field(
         max_length=1000,
-        description="Why this component contributes — link it to its measured benefit.",
+        description="Why this component contributes. For experiment sources: link "
+        "to measured benefit. For external_agent sources: state the mechanism the "
+        "source describes plus why it addresses the current bottleneck. For human "
+        "sources: state the directive in one line.",
     )
-    source_ref: str | None = Field(
-        default=None,
-        description="source_ref of the ExpertContextItem that motivated inheriting "
-        "this component. None = driven purely by experiment records.",
-    )
+
+    @model_validator(mode="after")
+    def _validate_source_id_format(self):
+        # source_type='experiment' accepts any non-empty source_id (a model_type
+        # is a bare snake_case token, no colon). For external_agent and human
+        # the source_id must match '<prefix>:<identifier>'.
+        if self.source_type in {"external_agent", "human"} and not _EXTERNAL_SOURCE_ID_RE.match(
+            self.source_id
+        ):
+            raise ValueError(
+                f"source_id {self.source_id!r} does not match the required "
+                f"format for source_type={self.source_type!r}: expected "
+                f"'<prefix>:<identifier>' (regex "
+                f"{_EXTERNAL_SOURCE_ID_RE.pattern!r}). "
+                f"Examples: 'arxiv:2312.00752', 'human:instruction_20260603', "
+                f"'physics:squid_band_limit_v1'."
+            )
+        return self
 
 
 # B.3 — Expert context item (polymorphic upstream input)
@@ -175,10 +222,32 @@ class AgentCard(BaseModel):
     limitations: str = Field(
         max_length=300, description="What this agent cannot assess or may get wrong."
     )
+    trust_level: Literal["hard_limit", "strong_prior", "soft_prior"] = Field(
+        description=(
+            "Structured trust calibration the proposer reads programmatically. "
+            "The free-text ``trust_guidance`` stays for human-readable explanation; "
+            "``trust_level`` is the machine-readable equivalent the proposer prompt "
+            "references via its synthesis rules. When the two disagree, "
+            "``trust_level`` is authoritative for routing decisions (rule application, "
+            "synthesis weighting); ``trust_guidance`` is authoritative for human review. "
+            "\n\n"
+            "Levels:\n"
+            "  - ``hard_limit``: findings define non-negotiable constraints; the "
+            "    proposer MUST NOT violate them. Reserved for objective constraint "
+            "    agents (physics, hardware). No default — explicit assignment only.\n"
+            "  - ``strong_prior``: findings carry weight comparable to experiment "
+            "    data. Reserved for high-confidence empirical or theoretical sources, "
+            "    and for human directives wrapped into the expert_context channel.\n"
+            "  - ``soft_prior``: findings are inspirational priors; the proposer may "
+            "    use them to expand beyond what experiment history has tried, but "
+            "    experiment data takes precedence on conflict. Default for "
+            "    survey-style sources like literature review."
+        ),
+    )
     trust_guidance: str = Field(
         max_length=800,
-        description="Instructs the proposal LLM how to weight this agent's findings "
-        "relative to experiment results and other sources. May carry a confidence "
+        description="Human-readable explanation of the trust calibration. Renders "
+        "alongside ``trust_level`` in the Contributors block. May carry a confidence "
         "rubric legend so the proposer knows what a finding's confidence score means "
         "(see ConfidenceRubric.render_for_consumer); 800 chars accommodates the full "
         "band criteria. E.g. 'Treat as promising priors — only experiment runs confirm "

@@ -683,7 +683,8 @@ previous_proposal = {
         "rationale": "...",
     },
     "inherited_components": [
-        {"component": "dilated_causal_conv", "from_model_type": "wavenet", "contribution_evidence": "..."}
+        {"component": "dilated_causal_conv", "source_type": "experiment",
+ "source_id": "wavenet", "contribution_evidence": "..."}
     ],
     "proposed_vocab_links": [],
     "proposed_discoveries": [],

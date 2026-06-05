@@ -101,6 +101,7 @@ def _pilot_agent_card() -> AgentCard:
         expertise_domain="ML denoising architectures; Semantic Scholar corpus.",
         coverage="ArXiv/S2 results any year; §10 corpus for Phase-1 pilot.",
         limitations=("Phase-1 pilot does not run synthesis; findings list is empty by design."),
+        trust_level="soft_prior",
         trust_guidance=(
             "Phase-1 pilot artifact for Checkpoint E/F human review — not a production output."
         ),

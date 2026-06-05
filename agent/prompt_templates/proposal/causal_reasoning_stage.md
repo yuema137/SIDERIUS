@@ -89,7 +89,8 @@ A JSON object with these fields:
   "inherited_components": [
     {
       "component": "dilated_causal_conv",
-      "from_model_type": "wavenet",
+      "source_type": "experiment",
+      "source_id": "wavenet",
       "contribution_evidence": "Core mechanism of wavenet's 5.57 SOTA score."
     }
   ]

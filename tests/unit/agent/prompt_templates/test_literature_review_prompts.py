@@ -549,6 +549,7 @@ def _agent_card() -> AgentCard:
         expertise_domain="ML denoising / signal modelling literature.",
         coverage="arXiv + S2 search, last 24 months.",
         limitations="LLM-mediated extraction; equation fidelity tier-dependent.",
+        trust_level="soft_prior",
         trust_guidance="Treat as promising priors; cross-check with experiments.",
     )
 

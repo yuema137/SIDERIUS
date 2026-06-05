@@ -1122,15 +1122,17 @@ def run_workflow(
                 if hasattr(proposal, "inherited_components") and proposal.inherited_components:
                     from nodes.proposal_helpers import load_model_source
 
-                    ref_models = set()
-                    for ic in proposal.inherited_components:
-                        mt = (
-                            ic.from_model_type
-                            if hasattr(ic, "from_model_type")
-                            else ic.get("from_model_type")
-                        )
-                        if mt:
-                            ref_models.add(mt)
+                    # Reference code is only available for experiment-source
+                    # inheritances (past chain runs). External-agent and human
+                    # source inheritances have no plugin source to load.
+                    # ProposalOutput.inherited_components is typed as
+                    # list[InheritedComponent] (Pydantic-validated upstream), so
+                    # no dict fallback is required here.
+                    ref_models = {
+                        ic.source_id
+                        for ic in proposal.inherited_components
+                        if ic.source_type == "experiment" and ic.source_id
+                    }
                     for mt in ref_models:
                         src = load_model_source(mt)
                         if src:

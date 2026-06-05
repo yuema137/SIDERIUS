@@ -35,6 +35,7 @@ def _make_agent_card() -> AgentCard:
         expertise_domain="Time-series denoising and 1-D sequence modeling.",
         coverage="Papers indexed by Semantic Scholar through 2026.",
         limitations="Cannot validate transfer to SQUID denoising empirically.",
+        trust_level="soft_prior",
         trust_guidance="Treat as promising priors — only experiment runs confirm applicability.",
     )
 

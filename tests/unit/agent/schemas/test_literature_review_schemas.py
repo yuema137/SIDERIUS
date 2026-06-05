@@ -42,6 +42,7 @@ def _make_agent_card() -> AgentCard:
             "Cannot run experiments; cannot judge SQUID-specific applicability "
             "without empirical confirmation."
         ),
+        trust_level="soft_prior",
         trust_guidance=(
             "Treat findings as promising priors; only experiment runs confirm applicability."
         ),

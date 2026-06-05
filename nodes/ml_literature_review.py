@@ -71,6 +71,12 @@ _AGENT_CARD = AgentCard(
         "Cannot run experiments; cannot judge SQUID-specific applicability "
         "without empirical confirmation."
     ),
+    # Survey-style source: literature findings are inspirational priors. The
+    # proposer's synthesis rules treat soft_prior findings as candidates that
+    # expand the design space beyond what experiment history has tried, but
+    # experiment data takes precedence on conflict. See AgentCard.trust_level
+    # docstring for the full semantics.
+    trust_level="soft_prior",
     # The proposer reads raw confidence numbers off each finding; the rubric
     # legend here tells it what those numbers mean (single source of truth =
     # ConfidenceRubric — invariant 3). Uses the DEFAULT rubric. If a run ever

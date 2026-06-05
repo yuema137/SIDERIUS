@@ -94,14 +94,24 @@ def render_agent_cards(cards: list) -> str:
 
     lines = [
         "## External Contributors\n",
-        "Read each contributor's role and trust guidance before reading their findings.\n",
+        "Read each contributor's trust level and trust guidance before reading their findings.\n",
     ]
     for card in cards:
         if hasattr(card, "model_dump"):
             card = card.model_dump()
         name = card.get("agent_name", "unknown")
         lines.append(f"### {name}")
-        for field in ("role", "expertise_domain", "coverage", "limitations", "trust_guidance"):
+        # trust_level renders first — it is the machine-readable calibration the
+        # proposer's synthesis rules reference; the prose fields are explanatory
+        # context underneath.
+        for field in (
+            "trust_level",
+            "role",
+            "expertise_domain",
+            "coverage",
+            "limitations",
+            "trust_guidance",
+        ):
             val = card.get(field, "")
             if val:
                 lines.append(f"  {field.replace('_', ' ').title()}: {val}")

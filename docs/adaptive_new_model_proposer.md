@@ -324,7 +324,7 @@ The four structural teeth above are **centripetal** — they pull the agent towa
 - Records are already append-only, schema-validated, and the natural unit of "what we tried and what happened".
 - The registry as a permanent metadata store would be an inter-node communication channel by another name (you'd be reading state out of `MODEL_REGISTRY` during proposal generation, which the records-via-protocol path already provides cleanly).
 
-**`InheritedComponent`** (`agent/schemas/proposal.py`) — one building block carried over from a past winning run. Fields: `component` (canonical name from vocab, e.g. `dilated_causal_conv`), `from_model_type`, `from_run` (optional), `contribution_evidence` (one sentence, evidence-linked), `source_ref` (source_ref of the `ExpertContextItem` that motivated the inheritance, if any).
+**`InheritedComponent`** (`agent/schemas/proposal.py`) — one building block carried over into the proposed architecture. Generic across source types since Commit P-b. Fields: `component` (canonical name from vocab, e.g. `dilated_causal_conv`), `source_type` (`experiment` / `external_agent` / `human`), `source_id` (bare `model_type` token for experiments; `<prefix>:<identifier>` for external_agent and human, e.g. `arxiv:2312.00752`), `from_run` (optional, experiment sources only), `contribution_evidence` (one sentence, evidence-linked).
 
 **Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and capabilities):
 
@@ -499,7 +499,7 @@ class ProposalInput(BaseModel):
 2. **Discovery Memo layer (medium)**. The reasoning sub-call's `DiscoveryMemo.sota_model_type` is **forcibly set** to `directive.base_model` in guided mode (not chosen by the LLM). The `proposed_change` field must therefore be expressed as a delta against the chosen base. The LLM physically cannot frame the proposal as "a fresh transformer" because the comparative anchor is fixed.
 
 3. **Validator layer (hard)**. `ml_code_validator_agent` gets two new checks, only active in guided mode:
-   - **`check_base_model_inheritance`**: the proposed plugin must `import` from or structurally resemble the `base_model`'s module. (Concretely: at least one `inherited_components` entry must have `from_model_type == directive.base_model`.)
+   - **`check_base_model_inheritance`**: the proposed plugin must `import` from or structurally resemble the `base_model`'s module. (Concretely: at least one `inherited_components` entry must have `source_type == "experiment"` and `source_id == directive.base_model`.)
    - **`check_forbidden_components`**: each entry in `directive.forbidden_components` is mapped to a regex in `FORBIDDEN_PATTERNS` (e.g. `attention` → `nn\.MultiheadAttention|self_attention`) and matched against the plugin source. Any hit fails validation.
 
 Failures from layers 2 and 3 trigger the existing implementor retry loop with a clear error message. The LLM gets up to N retries to comply; after that, the iteration is marked failed and the orchestrator is notified.
