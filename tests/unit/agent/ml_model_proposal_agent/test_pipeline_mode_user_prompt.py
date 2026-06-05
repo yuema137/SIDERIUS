@@ -33,7 +33,6 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -199,8 +198,9 @@ def captured_prompts():
         captured.append((label, system_prompt, user_prompt))
         return ""
 
-    with patch("agent.llm_bridge.LLMBridge.generate", side_effect=_fake_generate), patch(
-        "agent.llm_bridge.LLMBridge.generate_text", side_effect=_fake_generate_text
+    with (
+        patch("agent.llm_bridge.LLMBridge.generate", side_effect=_fake_generate),
+        patch("agent.llm_bridge.LLMBridge.generate_text", side_effect=_fake_generate_text),
     ):
         yield captured
 
