@@ -223,9 +223,7 @@ def _canned_response_for(label: str) -> dict:
                 "threshold_for_refutation": 0.7,
                 "rationale": "FreLE's spectral loss is on-domain for 1-D denoising.",
             },
-            "predicted_failure_modes": [
-                "Composite loss may destabilise training in early epochs."
-            ],
+            "predicted_failure_modes": ["Composite loss may destabilise training in early epochs."],
             "inherited_components": [
                 {
                     "component": "dilated_causal_conv",
@@ -329,7 +327,7 @@ def _run_prechecks(captures: list[tuple[str, str, str]]) -> str:
             "S7 — no `expert_advice` field-name reference in rendered USER prompts "
             "(system prompts retain it as the ProposalOutput field for the LLM to emit)",
             not any("expert_advice" in u for _, _s, u in captures),
-        evidence="User-prompt assembly carries no inp.expert_advice (it was hard-removed in P-d).",
+            evidence="User-prompt assembly carries no inp.expert_advice (it was hard-removed in P-d).",
         )
     )
     lines.append(
@@ -346,8 +344,7 @@ def _run_prechecks(captures: list[tuple[str, str, str]]) -> str:
         _precheck(
             "S8 — comparison_stage.md Rule 4 allows external signals with provenance",
             (
-                "Do not promote a link to confirmed status on external evidence alone."
-                in comp
+                "Do not promote a link to confirmed status on external evidence alone." in comp
                 and "provenance" in comp.lower()
                 and "arxiv:" in comp.lower()
             ),
@@ -365,9 +362,7 @@ def _run_prechecks(captures: list[tuple[str, str, str]]) -> str:
         "proposing_stage_explore.md",
         "proposing_stage_exploit.md",
     ]
-    all_mode_text = {
-        m: (PROPOSAL_PROMPT_DIR / m).read_text(encoding="utf-8") for m in mode_files
-    }
+    all_mode_text = {m: (PROPOSAL_PROMPT_DIR / m).read_text(encoding="utf-8") for m in mode_files}
     lines.append(
         _precheck(
             "S8 — no hardcoded trust-hierarchy phrases in any of the 6 *_explore.md/*_exploit.md files",
@@ -404,8 +399,7 @@ def _run_prechecks(captures: list[tuple[str, str, str]]) -> str:
     user_blob = "\n".join(u for _, _s, u in captures)
     lines.append(
         _precheck(
-            f"S9 — rendered user prompts contain literal `{expected_soft}` "
-            "(lit-review card)",
+            f"S9 — rendered user prompts contain literal `{expected_soft}` (lit-review card)",
             expected_soft in user_blob,
             evidence="Substring search across every captured user prompt.",
         )
@@ -481,8 +475,9 @@ def _capture_prompts(inp: ProposalInput) -> list[tuple[str, str, str]]:
         captured.append((label, system_prompt, user_prompt))
         return ""
 
-    with patch("agent.llm_bridge.LLMBridge.generate", side_effect=_fake_generate), patch(
-        "agent.llm_bridge.LLMBridge.generate_text", side_effect=_fake_generate_text
+    with (
+        patch("agent.llm_bridge.LLMBridge.generate", side_effect=_fake_generate),
+        patch("agent.llm_bridge.LLMBridge.generate_text", side_effect=_fake_generate_text),
     ):
         agent = MLModelProposalAgent(provider="openai", model_id="gpt-4o-mini")
         agent.run(inp)
@@ -561,10 +556,19 @@ def _write_artifact(captures: list[tuple[str, str, str]]) -> None:
         ("S3", "`## External Contributors` block next, both Trust Level values visible"),
         ("S4", "`## Expert Context` block next, lit-review + wrapped-human items present"),
         ("S5", "Candidate markdown + accumulated JSON renders below all of the above"),
-        ("S6", "causal_reasoning_stage.md system prompt is post-P-c (rule 1 + MANDATORY synthesis; no hardcoded hierarchy)"),
+        (
+            "S6",
+            "causal_reasoning_stage.md system prompt is post-P-c (rule 1 + MANDATORY synthesis; no hardcoded hierarchy)",
+        ),
         ("S7", "no `expert_advice` field-name in user prompts; no `cite_id` anywhere"),
-        ("S8", "comparison_stage.md weakened Rule 4 + 6 mode files clean of hardcoded hierarchy / Advice JSON"),
-        ("S9", "rendered Contributors block contains literal `Trust Level: soft_prior` AND `Trust Level: strong_prior`"),
+        (
+            "S8",
+            "comparison_stage.md weakened Rule 4 + 6 mode files clean of hardcoded hierarchy / Advice JSON",
+        ),
+        (
+            "S9",
+            "rendered Contributors block contains literal `Trust Level: soft_prior` AND `Trust Level: strong_prior`",
+        ),
     ]
     for sid, short in criteria_short:
         parts.append(f"| {sid} | {short} | _ | _ |")
