@@ -15,7 +15,7 @@ training, no GPU.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -128,9 +128,13 @@ def _make_input(
 def captured_prompts():
     """Capture every (system_prompt, user_prompt) pair the bridge receives.
 
-    We mock the bridge's generate() to return a minimal valid response shape
-    for each stage so the pipeline runs end-to-end without an LLM. Each call
-    is recorded so the test can assert on the user_prompt structure.
+    Yields ``(captured, bridge_factory)``. Pass ``bridge_factory`` into the
+    agent constructor so it never instantiates a real ``LLMBridge`` (which
+    would build an ``OpenAI`` client and require ``OPENAI_API_KEY``).
+
+    The injected mock bridge's ``generate`` / ``generate_text`` return
+    minimal valid response shapes per stage so the pipeline runs end-to-end
+    without an LLM. Each call is recorded.
     """
     captured: list[tuple[str, str, str]] = []  # (label, system_prompt, user_prompt)
 
@@ -198,11 +202,11 @@ def captured_prompts():
         captured.append((label, system_prompt, user_prompt))
         return ""
 
-    with (
-        patch("agent.llm_bridge.LLMBridge.generate", side_effect=_fake_generate),
-        patch("agent.llm_bridge.LLMBridge.generate_text", side_effect=_fake_generate_text),
-    ):
-        yield captured
+    bridge = MagicMock()
+    bridge.generate.side_effect = _fake_generate
+    bridge.generate_text.side_effect = _fake_generate_text
+
+    yield captured, lambda **kw: bridge
 
 
 # ---------------------------------------------------------------------------
@@ -219,18 +223,21 @@ class TestPipelineModeUserPromptOrder:
         user prompt, before KB of experiment history. Pre-P-d these blocks
         appended at the BOTTOM and the LLM systematically anchored on
         experiment data."""
+        captured, bridge_factory = captured_prompts
         inp = _make_input(
             constraints=["VRAM < 10 GB"],
             hardware=True,
             agent_cards=[_make_agent_card()],
             expert_context=[_make_finding("arxiv:2312.00752")],
         )
-        agent = MLModelProposalAgent(provider="openai", model_id="gpt-4o-mini")
+        agent = MLModelProposalAgent(
+            provider="openai", model_id="gpt-4o-mini", bridge_factory=bridge_factory
+        )
         agent.run(inp)
 
         # We captured 3 stages (comparison + causal_reasoning + proposing).
-        assert len(captured_prompts) >= 2
-        for label, _system_prompt, user_prompt in captured_prompts:
+        assert len(captured) >= 2
+        for label, _system_prompt, user_prompt in captured:
             # The accumulated JSON dump is anchored on this exact header
             i_accum = user_prompt.find("## Accumulated context")
             assert i_accum >= 0, f"no accumulated JSON in {label!r} user prompt"
@@ -254,16 +261,19 @@ class TestPipelineModeUserPromptOrder:
     def test_block_order_hardware_constraints_cards_context(self, captured_prompts):
         """Among the four top blocks, the exact order is locked:
         hardware → constraints → cards → context."""
+        captured, bridge_factory = captured_prompts
         inp = _make_input(
             constraints=["VRAM < 10 GB"],
             hardware=True,
             agent_cards=[_make_agent_card()],
             expert_context=[_make_finding("arxiv:2312.00752")],
         )
-        agent = MLModelProposalAgent(provider="openai", model_id="gpt-4o-mini")
+        agent = MLModelProposalAgent(
+            provider="openai", model_id="gpt-4o-mini", bridge_factory=bridge_factory
+        )
         agent.run(inp)
 
-        for label, _system_prompt, user_prompt in captured_prompts:
+        for label, _system_prompt, user_prompt in captured:
             i_hardware = user_prompt.find("[HARDWARE CONTEXT]")
             i_constraints = user_prompt.find("## Constraints")
             i_cards = user_prompt.find("## External Contributors")
@@ -278,12 +288,15 @@ class TestPipelineModeOptionalBlocksOmitted:
         """When inp.hardware_context is None the [HARDWARE CONTEXT] block is
         omitted entirely (no empty header, no blank line). Same idiom as
         pre-P-d behavior for the agent_cards block."""
+        captured, bridge_factory = captured_prompts
         inp = _make_input(hardware=False)
-        agent = MLModelProposalAgent(provider="openai", model_id="gpt-4o-mini")
+        agent = MLModelProposalAgent(
+            provider="openai", model_id="gpt-4o-mini", bridge_factory=bridge_factory
+        )
         agent.run(inp)
 
-        assert captured_prompts
-        for label, _system_prompt, user_prompt in captured_prompts:
+        assert captured
+        for label, _system_prompt, user_prompt in captured:
             assert "[HARDWARE CONTEXT]" not in user_prompt, (
                 f"hardware block leaked into {label!r} when hardware_context=None"
             )
@@ -291,6 +304,7 @@ class TestPipelineModeOptionalBlocksOmitted:
     def test_no_constraints_no_existing_models_no_constraints_block(self, captured_prompts):
         """When both constraints and existing_model_types are empty the
         ## Constraints block is omitted entirely."""
+        captured, bridge_factory = captured_prompts
         inp = ProposalInput(
             interpretation=_make_interpretation(),
             existing_model_types=[],  # explicitly empty
@@ -307,11 +321,13 @@ class TestPipelineModeOptionalBlocksOmitted:
                 local=LocalStorageConfig(workspace="/tmp/p_d_test_b", run_name="r1"),
             ),
         )
-        agent = MLModelProposalAgent(provider="openai", model_id="gpt-4o-mini")
+        agent = MLModelProposalAgent(
+            provider="openai", model_id="gpt-4o-mini", bridge_factory=bridge_factory
+        )
         agent.run(inp)
 
-        assert captured_prompts
-        for label, _system_prompt, user_prompt in captured_prompts:
+        assert captured
+        for label, _system_prompt, user_prompt in captured:
             assert "## Constraints" not in user_prompt, (
                 f"constraints block leaked into {label!r} when both inputs empty"
             )
