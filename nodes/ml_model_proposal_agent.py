@@ -28,7 +28,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
-from agent.schemas.hyperparam_tuning import GateExhaustionInfo, serialize_expert_advice
+from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
@@ -131,33 +131,33 @@ def _run_preflight_check(
 
 
 def _check_citation_discipline(
-    citation_sources: list,
+    source_refs: list,
     causal_hypothesis: str,
     proposed_change: str,
 ) -> list:
-    """Return a warning message for each cite_id that was cited but not referenced.
+    """Return a warning message for each source_ref that was cited but not referenced.
 
-    Each cite_id in citation_sources must appear verbatim in causal_hypothesis
+    Each source_ref in source_refs must appear verbatim in causal_hypothesis
     or proposed_change.  Violations are soft warnings — the proposal is not
     rejected, but the issues are appended to ProposalOutput.memo_consistency_notes
     so the validator and the human reviewer can see them.
 
     Args:
-        citation_sources: list of cite_id strings from DiscoveryMemo.
+        source_refs: list of source_ref strings from DiscoveryMemo.
         causal_hypothesis: the reasoning text that should reference the cited items.
         proposed_change: the change description that should reference the cited items.
 
     Returns:
-        List of violation strings, one per uncited cite_id.  Empty = all citations
+        List of violation strings, one per uncited source_ref.  Empty = all citations
         are properly referenced in the reasoning text.
     """
     combined = causal_hypothesis + " " + proposed_change
     violations = []
-    for cite_id in citation_sources:
-        if cite_id not in combined:
+    for source_ref in source_refs:
+        if source_ref not in combined:
             violations.append(
-                f"CITATION_NOT_REFERENCED: cite_id '{cite_id}' is listed in "
-                f"citation_sources but does not appear verbatim in causal_hypothesis "
+                f"CITATION_NOT_REFERENCED: source_ref '{source_ref}' is listed in "
+                f"source_refs but does not appear verbatim in causal_hypothesis "
                 f"or proposed_change. Either reference it in your reasoning or remove "
                 f"it from citations."
             )
@@ -342,6 +342,44 @@ def _render_hardware_context_block(
         "effective cap at baseline) so the tuner has headroom to vary batch_size "
         "and segmentation_size upward."
     )
+    return "\n".join(lines)
+
+
+def _render_constraints_block(
+    constraints: list[str],
+    existing_model_types: list[str],
+) -> str:
+    """Render the ``## Constraints`` prompt block (Commit P-d).
+
+    Restores the constraints render path in pipeline mode. Pre-P-d this
+    block was assembled only inside the legacy ``_build_reasoning_prompt``
+    (at line 762-764), so production runs — which use pipeline mode
+    exclusively — never saw `ProposalInput.constraints` nor the
+    "your model_name must NOT be any of these" reminder list. This helper
+    fixes that and is called at the top of every stage's user prompt by
+    ``_run_pipeline``.
+
+    Empty inputs yield an empty string so callers can skip-append in the
+    same idiom as ``_render_hardware_context_block``.
+
+    The proposing-stage `existing_model_types` name-uniqueness rule also
+    reaches the LLM via the proposing system prompt's template variable
+    ``{existing_model_types}``; rendering it again at the top of the user
+    prompt is a deliberate redundancy — name-uniqueness is a frequent
+    violation and the prompt is long enough that one reference at the top
+    of the system prompt is insufficient signal.
+    """
+    if not constraints and not existing_model_types:
+        return ""
+
+    lines = ["## Constraints"]
+    if existing_model_types:
+        lines.append(
+            f"Existing model type keys (your `model_name` must NOT be any of "
+            f"these): {list(existing_model_types)}"
+        )
+    for c in constraints or []:
+        lines.append(f"  - {c}")
     return "\n".join(lines)
 
 
@@ -777,14 +815,10 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     if gate_block:
         lines += [gate_block, ""]
 
-    # --- Expert advice (from upstream agents) ---
-    expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
-    if expert_advice_str:
-        lines += [
-            "## Expert Guidance (from upstream agents)",
-            expert_advice_str,
-            "",
-        ]
+    # NOTE: legacy ProposalInput.expert_advice render block was removed in
+    # Commit P-d. The field was hard-removed from the schema; see proposal.py
+    # for the rationale. External agent findings reach the proposer via
+    # `agent_cards` + `expert_context` (rendered in _run_pipeline).
 
     if inp.human_advice:
         lines.append("## Human Expert Advice (high priority — address these explicitly)")
@@ -1082,7 +1116,12 @@ class MLModelProposalAgent:
             f"non-candidates: {[o['model_type'] for o in non_candidates_overview]}"
         )
 
-        # Prepare shared context for all stages
+        # Prepare shared context for all stages.
+        # P-d: hardware + constraints blocks are now rendered in pipeline mode
+        # (pre-P-d these were rendered only in legacy mode at _build_reasoning_prompt
+        # so production runs never saw them — dangling pointers in the system prompts).
+        hardware_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
+        constraints_block = _render_constraints_block(inp.constraints, inp.existing_model_types)
         agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_block = render_expert_context(inp.expert_context)
         vocab_block = self._render_vocabulary(inp.vocab_seed)
@@ -1165,20 +1204,35 @@ class MLModelProposalAgent:
                 mindset=inp.mindset,
             )
 
-            # Build user prompt: candidate markdown block + JSON region + cards + context + vocab
+            # Build user prompt in the P-d order:
+            #   1. [HARDWARE CONTEXT] block
+            #   2. ## Constraints block
+            #   3. ## External Contributors block
+            #   4. ## Expert Context block
+            #   5. Candidate markdown + accumulated JSON region
+            #   6. Vocab block
+            # Findings now precede the experiment-history dump so the LLM
+            # reads external calibration before anchoring on past results
+            # (position-bias fix, Problem 3 of the audit).
             clamped_accumulated = clamp_and_backstop_accumulated(
                 accumulated,
                 top_k=policy.comparative_analysis_top_k,
                 max_chars=policy.prior_stage_max_chars,
                 input_keys=_PROPOSER_INPUT_KEYS,
             )
-            user_prompt = _render_stage_user_prompt(clamped_accumulated)
+            user_prompt_parts: list[str] = []
+            if hardware_block:
+                user_prompt_parts.append(hardware_block)
+            if constraints_block:
+                user_prompt_parts.append(constraints_block)
             if agent_cards_block:
-                user_prompt += f"\n\n{agent_cards_block}"
+                user_prompt_parts.append(agent_cards_block)
             if expert_context_block:
-                user_prompt += f"\n\n{expert_context_block}"
+                user_prompt_parts.append(expert_context_block)
+            user_prompt_parts.append(_render_stage_user_prompt(clamped_accumulated))
             if vocab_block:
-                user_prompt += f"\n\n{vocab_block}"
+                user_prompt_parts.append(vocab_block)
+            user_prompt = "\n\n".join(user_prompt_parts)
 
             print(f"   Stage '{stage.name}': calling LLM... [PROMPT_SIZE] {len(user_prompt)} chars")
             stage_audit = _audit_proposer_components(
@@ -1254,13 +1308,22 @@ class MLModelProposalAgent:
                                 max_chars=policy.prior_stage_max_chars,
                                 input_keys=_PROPOSER_INPUT_KEYS,
                             )
-                            retry_user = _render_stage_user_prompt(clamped_accumulated)
+                            # P-d order: hardware → constraints → cards →
+                            # context → accumulated → vocab (matches the main
+                            # reasoning-stage assembly above).
+                            retry_parts: list[str] = []
+                            if hardware_block:
+                                retry_parts.append(hardware_block)
+                            if constraints_block:
+                                retry_parts.append(constraints_block)
                             if agent_cards_block:
-                                retry_user += f"\n\n{agent_cards_block}"
+                                retry_parts.append(agent_cards_block)
                             if expert_context_block:
-                                retry_user += f"\n\n{expert_context_block}"
+                                retry_parts.append(expert_context_block)
+                            retry_parts.append(_render_stage_user_prompt(clamped_accumulated))
                             if vocab_block:
-                                retry_user += f"\n\n{vocab_block}"
+                                retry_parts.append(vocab_block)
+                            retry_user = "\n\n".join(retry_parts)
                             print("   Stage 'causal_reasoning': retrying (boldness)...")
                             retry_audit = _audit_proposer_components(
                                 inp=inp,
@@ -1342,11 +1405,21 @@ class MLModelProposalAgent:
                     max_chars=policy.prior_stage_max_chars,
                     input_keys=_PROPOSER_INPUT_KEYS,
                 )
-                proposing_user = _render_stage_user_prompt(clamped_accumulated)
+                # Proposing-stage user prompt — P-d order matches the reasoning
+                # stages above except the vocab block is intentionally omitted
+                # (proposing-stage prompts already cite vocab via system-prompt
+                # template_vars; rendering it again would bloat the prompt).
+                proposing_parts: list[str] = []
+                if hardware_block:
+                    proposing_parts.append(hardware_block)
+                if constraints_block:
+                    proposing_parts.append(constraints_block)
                 if agent_cards_block:
-                    proposing_user += f"\n\n{agent_cards_block}"
+                    proposing_parts.append(agent_cards_block)
                 if expert_context_block:
-                    proposing_user += f"\n\n{expert_context_block}"
+                    proposing_parts.append(expert_context_block)
+                proposing_parts.append(_render_stage_user_prompt(clamped_accumulated))
+                proposing_user = "\n\n".join(proposing_parts)
 
                 print(
                     f"   Stage 'proposing': calling LLM "
@@ -1400,7 +1473,7 @@ class MLModelProposalAgent:
                     )
                     # Citation discipline — warnings, not hard failures.
                     citation_violations = _check_citation_discipline(
-                        citation_sources=reasoning_output.get("citation_sources", []),
+                        source_refs=reasoning_output.get("source_refs", []),
                         causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
                         proposed_change=reasoning_output.get("proposed_change", ""),
                     )

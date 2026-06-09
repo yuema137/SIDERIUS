@@ -94,14 +94,24 @@ def render_agent_cards(cards: list) -> str:
 
     lines = [
         "## External Contributors\n",
-        "Read each contributor's role and trust guidance before reading their findings.\n",
+        "Read each contributor's trust level and trust guidance before reading their findings.\n",
     ]
     for card in cards:
         if hasattr(card, "model_dump"):
             card = card.model_dump()
         name = card.get("agent_name", "unknown")
         lines.append(f"### {name}")
-        for field in ("role", "expertise_domain", "coverage", "limitations", "trust_guidance"):
+        # trust_level renders first — it is the machine-readable calibration the
+        # proposer's synthesis rules reference; the prose fields are explanatory
+        # context underneath.
+        for field in (
+            "trust_level",
+            "role",
+            "expertise_domain",
+            "coverage",
+            "limitations",
+            "trust_guidance",
+        ):
             val = card.get(field, "")
             if val:
                 lines.append(f"  {field.replace('_', ' ').title()}: {val}")
@@ -114,7 +124,7 @@ def render_expert_context(items: list) -> str:
     """
     Render a list of ExpertContextItem dicts into a labeled prompt block.
 
-    Groups items by kind, deduplicates by cite_id (last occurrence wins),
+    Groups items by kind, deduplicates by source_ref (last occurrence wins),
     and sorts each group by confidence descending (None last).
     The grouping and labeling IS the priority system — no explicit weights.
 
@@ -136,11 +146,11 @@ def render_expert_context(items: list) -> str:
         else:
             normalized.append(item)
 
-    # Deduplicate by cite_id — last occurrence wins (most recent agent's version kept)
+    # Deduplicate by source_ref — last occurrence wins (most recent agent's version kept)
     seen_cite_ids: dict[str, dict] = {}
     for item in normalized:
-        cite_id = item.get("cite_id", "")
-        seen_cite_ids[cite_id] = item
+        source_ref = item.get("source_ref", "")
+        seen_cite_ids[source_ref] = item
     deduplicated = list(seen_cite_ids.values())
 
     # Group by kind
@@ -173,9 +183,9 @@ def render_expert_context(items: list) -> str:
             source = item.get("source", "unknown")
             confidence = item.get("confidence")
             conf_str = f", confidence={confidence}" if confidence is not None else ""
-            cite_id = item.get("cite_id", "")
+            source_ref = item.get("source_ref", "")
 
-            lines.append(f"[{label}] (from {source}{conf_str}, cite_id={cite_id})")
+            lines.append(f"[{label}] (from {source}{conf_str}, source_ref={source_ref})")
             lines.append(f"  {item.get('content', '')}")
             lines.append("")
 

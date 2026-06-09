@@ -111,7 +111,8 @@ _PREVIOUS_PROPOSAL_ITER2 = {
     "inherited_components": [
         {
             "component": "focal_loss",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Focal loss improved wavenet score by +0.35 vs CE.",
         },
     ],
@@ -334,7 +335,8 @@ _PROMO_PROPOSAL_ITER0 = {
     "inherited_components": [
         {
             "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Core mechanism of wavenet's 5.576 score.",
         },
     ],
@@ -356,7 +358,8 @@ _PROMO_PROPOSAL_ITER1 = {
     "inherited_components": [
         {
             "component": "focal_loss",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Focal loss improved wavenet by +0.35.",
         },
     ],
@@ -378,12 +381,14 @@ _PROMO_PROPOSAL_ITER2 = {
     "inherited_components": [
         {
             "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Backbone from wavenet.",
         },
         {
             "component": "focal_loss",
-            "from_model_type": "spectral_net",
+            "source_type": "experiment",
+            "source_id": "spectral_net",
             "contribution_evidence": "Maintained from spectral_net.",
         },
     ],
@@ -812,7 +817,8 @@ _E4_PROPOSAL_REFUTED = {
     "inherited_components": [
         {
             "component": "dilated_causal_conv",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Core mechanism of wavenet's 5.576 score.",
         },
     ],
@@ -840,7 +846,8 @@ _E4_PROPOSAL_CONFIRMED = {
     "inherited_components": [
         {
             "component": "focal_loss",
-            "from_model_type": "wavenet",
+            "source_type": "experiment",
+            "source_id": "wavenet",
             "contribution_evidence": "Focal loss improved wavenet by +0.35.",
         },
     ],

@@ -34,7 +34,7 @@ the `static_v` gate spectrum:
 JSON with **multiple top-level keys**, one per agent in the 5-agent chain
 (`interpret`, `propose`, `implement`, `validate`, `tune`) — plus an optional
 `mindset` preamble used by the proposer. Used by chain workflows
-(`scripts/run_exploration.py`, `sdsc_submission_scripts/run_chain.sh`).
+(`sdsc_submission_scripts/run_chain.sh`).
 
 ```json
 {

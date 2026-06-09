@@ -42,6 +42,7 @@ def _make_agent_card() -> AgentCard:
             "Cannot run experiments; cannot judge SQUID-specific applicability "
             "without empirical confirmation."
         ),
+        trust_level="soft_prior",
         trust_guidance=(
             "Treat findings as promising priors; only experiment runs confirm applicability."
         ),
@@ -282,7 +283,7 @@ class TestExternalAgentOutput:
             source="ml_literature_review",
             kind="literature",
             content="Dilated CNNs improve receptive field without depth.",
-            cite_id="lit_paper_001",
+            source_ref="lit_paper_001",
         )
         out = ExternalAgentOutput(agent_card=_make_agent_card(), findings=[item])
         assert len(out.findings) == 1
@@ -430,7 +431,7 @@ class TestLiteratureReviewOutput:
             source="ml_literature_review",
             kind="literature",
             content="Paper X proposes Y.",
-            cite_id="paper_x",
+            source_ref="paper_x",
         )
         vocab = VocabEntry(
             name="dilated_causal_conv",

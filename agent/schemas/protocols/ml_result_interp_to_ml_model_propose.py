@@ -126,8 +126,15 @@ def local_full_context(
         schema defaults apply.
       - storage              : passed through from the orchestrator
     """
-    # Build expert_context — start with what's passed, wrap legacy human_advice
+    # Build expert_context — start with what's passed, wrap legacy human_advice.
+    # P-d: when human_advice is wrapped into an ExpertContextItem we ALSO
+    # inject a synthesized `human` AgentCard with trust_level="strong_prior"
+    # into agent_cards so the proposer's Contributors block carries the right
+    # calibration for the wrapped item under the P-c synthesis rules.
+    # Without this injection the wrapped item would render under an unknown
+    # contributor and the synthesis rules would have no trust_level to apply.
     merged_context = list(expert_context or [])
+    merged_agent_cards = list(agent_cards or [])
     if human_advice is not None:
         advice_text = serialize_expert_advice(human_advice)
         if advice_text:
@@ -136,7 +143,24 @@ def local_full_context(
                     source="human",
                     kind="human",
                     content=advice_text,
-                    cite_id="human_advice",
+                    source_ref="human:human_advice",
+                )
+            )
+            merged_agent_cards.append(
+                AgentCard(
+                    agent_name="human",
+                    role="Human operator providing direct guidance for this iteration.",
+                    expertise_domain="Task-specific operational knowledge and strategic intent.",
+                    coverage=(
+                        "This iteration only — human_advice is per-run, not accumulated "
+                        "across iterations."
+                    ),
+                    limitations="May not have full visibility into all past experiment results.",
+                    trust_level="strong_prior",
+                    trust_guidance=(
+                        "Human directives carry strong_prior weight — treat them comparably "
+                        "to experiment data. Override only with explicit justification."
+                    ),
                 )
             )
 
@@ -171,9 +195,9 @@ def local_full_context(
     if mindset is not None:
         result["mindset"] = mindset
 
-    if agent_cards:
+    if merged_agent_cards:
         result["agent_cards"] = [
-            c.model_dump() if hasattr(c, "model_dump") else c for c in agent_cards
+            c.model_dump() if hasattr(c, "model_dump") else c for c in merged_agent_cards
         ]
 
     # Run-level fields for the proposer's evaluate_time_skill gate. Each is

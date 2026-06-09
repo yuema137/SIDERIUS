@@ -20,12 +20,12 @@ next stage (causal reasoning), which will form a hypothesis.
 - **Expert context**: upstream findings, human directives, and strategy reports.
 - **Contributors** (when present): external agents contributing findings this round.
   Read the Contributors section before the Expert Context. Each contributor's
-  `Trust guidance` field tells you how to calibrate their findings:
-  - Literature agents: treat as promising priors that lower exploration cost.
-    Only experiment runs confirm applicability to TIDMAD.
-  - Physics agents: physical constraints are HARD LIMITS. Do not propose
-    architectures that violate them without explicit physics justification.
-  - Human directives: always take precedence over agent findings.
+  `Trust Level` field in the Contributors block is the authoritative
+  calibration. The full multi-source synthesis rules live in the
+  causal-reasoning stage prompt and govern how findings combine with
+  experiment data; here at the comparison stage, treat external findings
+  as candidate vocabulary signals — record provenance in each
+  `proposed_vocab_link.evidence` (see Rule 4 below).
 
 ## How to analyze each model
 
@@ -96,8 +96,12 @@ A JSON object with these fields:
    pattern between a feature and a capability, propose it as a
    `proposed_vocab_link`. These are HYPOTHESES, not facts — they will be
    tested in the next experiment. Cite specific model results as evidence.
-   Do NOT guess from generic ML knowledge — only propose links supported
-   by data from THIS project.
+   Confirmation of a link requires data from THIS project — only experiment
+   results count as confirmation. Literature signals or other external
+   findings may *suggest* a link worth testing; when they do, record the
+   provenance explicitly in the link's `evidence` field (e.g. "Suggested by
+   `arxiv:2312.00752`; not yet confirmed by this project's experiments").
+   Do not promote a link to confirmed status on external evidence alone.
 
 5. **Propose new vocabulary candidates.** If you see a pattern across models
    that doesn't fit any existing vocabulary entry, propose it as a candidate

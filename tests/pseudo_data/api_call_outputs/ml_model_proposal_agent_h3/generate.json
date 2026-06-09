@@ -50,12 +50,16 @@
         "inherited_components": [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+
+                "source_id": "wavenet",
                 "contribution_evidence": "Core mechanism behind wavenet's SOTA score of 5.576."
             },
             {
                 "component": "gated_activation",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+
+                "source_id": "wavenet",
                 "contribution_evidence": "Enables selective signal modulation in wavenet's gating blocks."
             }
         ],

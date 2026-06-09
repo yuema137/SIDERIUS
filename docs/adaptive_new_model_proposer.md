@@ -219,7 +219,7 @@ Forward-looking causal hypothesis, building on Stage 1's comparisons. Produces t
 - `causal_hypothesis` — why it should help: (a) SOTA mechanism preserved, (b) bottleneck relaxed, (c) new mechanism introduced
 - `falsifiable_prediction` — `FalsifiablePrediction(metric, current_value, predicted_value, threshold_for_refutation)`. Metric is free-text: `denoising_score`, `mean(file_vector[0:5])`, `file_vector[17]`, etc.
 - `predicted_failure_modes` — at least one way the proposal could fail (schema-enforced)
-- `inherited_components`, `citation_sources` — lineage and attribution (§2B, §2D)
+- `inherited_components`, `source_refs` — lineage and attribution (§2B, §2D)
 
 #### Stage 3: Proposing — "How exactly do we build it?"
 
@@ -292,8 +292,8 @@ The four structural teeth above are **centripetal** — they pull the agent towa
 *Risk*: The LLM cites every `ExpertContextItem` to appear rigorous, diluting the signal of which upstream findings actually mattered.
 
 *Mitigation (Architecture + Advice)*:
-- `DiscoveryMemo.citation_sources` gains `max_length=5` — hard cap on citations per memo.
-- Validator check: each `cite_id` in `citation_sources` must appear verbatim in either `causal_hypothesis` or `proposed_change` text. If you cite it, you must reference it in your reasoning.
+- `DiscoveryMemo.source_refs` gains `max_length=5` — hard cap on citations per memo.
+- Validator check: each `source_ref` in `source_refs` must appear verbatim in either `causal_hypothesis` or `proposed_change` text. If you cite it, you must reference it in your reasoning.
 - Prompt: "Cite ONLY items that materially changed your hypothesis. If removing a citation would not change your proposal, do not include it."
 - *Phase*: B (validator + prompt).
 
@@ -324,7 +324,7 @@ The four structural teeth above are **centripetal** — they pull the agent towa
 - Records are already append-only, schema-validated, and the natural unit of "what we tried and what happened".
 - The registry as a permanent metadata store would be an inter-node communication channel by another name (you'd be reading state out of `MODEL_REGISTRY` during proposal generation, which the records-via-protocol path already provides cleanly).
 
-**`InheritedComponent`** (`agent/schemas/proposal.py`) — one building block carried over from a past winning run. Fields: `component` (canonical name from vocab, e.g. `dilated_causal_conv`), `from_model_type`, `from_run` (optional), `contribution_evidence` (one sentence, evidence-linked), `citation_source` (cite_id of the `ExpertContextItem` that motivated the inheritance, if any).
+**`InheritedComponent`** (`agent/schemas/proposal.py`) — one building block carried over into the proposed architecture. Generic across source types since Commit P-b. Fields: `component` (canonical name from vocab, e.g. `dilated_causal_conv`), `source_type` (`experiment` / `external_agent` / `human`), `source_id` (bare `model_type` token for experiments; `<prefix>:<identifier>` for external_agent and human, e.g. `arxiv:2312.00752`), `from_run` (optional, experiment sources only), `contribution_evidence` (one sentence, evidence-linked).
 
 **Open vocabulary with structured promotion** (unified `VocabEntry` — replaces the earlier `PRIMITIVE_VOCAB` concept with a broader system that tracks both features and capabilities):
 
@@ -499,7 +499,7 @@ class ProposalInput(BaseModel):
 2. **Discovery Memo layer (medium)**. The reasoning sub-call's `DiscoveryMemo.sota_model_type` is **forcibly set** to `directive.base_model` in guided mode (not chosen by the LLM). The `proposed_change` field must therefore be expressed as a delta against the chosen base. The LLM physically cannot frame the proposal as "a fresh transformer" because the comparative anchor is fixed.
 
 3. **Validator layer (hard)**. `ml_code_validator_agent` gets two new checks, only active in guided mode:
-   - **`check_base_model_inheritance`**: the proposed plugin must `import` from or structurally resemble the `base_model`'s module. (Concretely: at least one `inherited_components` entry must have `from_model_type == directive.base_model`.)
+   - **`check_base_model_inheritance`**: the proposed plugin must `import` from or structurally resemble the `base_model`'s module. (Concretely: at least one `inherited_components` entry must have `source_type == "experiment"` and `source_id == directive.base_model`.)
    - **`check_forbidden_components`**: each entry in `directive.forbidden_components` is mapped to a regex in `FORBIDDEN_PATTERNS` (e.g. `attention` → `nn\.MultiheadAttention|self_attention`) and matched against the plugin source. Any hit fails validation.
 
 Failures from layers 2 and 3 trigger the existing implementor retry loop with a clear error message. The LLM gets up to N retries to comply; after that, the iteration is marked failed and the orchestrator is notified.
@@ -530,7 +530,7 @@ Crucially, these agents differ in *what* they say but not in *how* they say it �
 
 #### The polymorphic field: `ExpertContextItem`
 
-**`ExpertContextItem`** (`agent/schemas/proposal.py`) — the single typed interface all upstream sources go through. Fields: `source` (free-text producer id), `kind` (`empirical`/`theoretical`/`literature`/`human`/`narrative`), `content` (max 4 KB), `cite_id` (stable id for `DiscoveryMemo.citation_sources`), `produced_at`, `confidence`. Lives in `ProposalInput.expert_context: List[ExpertContextItem]`.
+**`ExpertContextItem`** (`agent/schemas/proposal.py`) — the single typed interface all upstream sources go through. Fields: `source` (free-text producer id), `kind` (`empirical`/`theoretical`/`literature`/`human`/`narrative`), `content` (max 4 KB), `source_ref` (stable id for `DiscoveryMemo.source_refs`), `produced_at`, `confidence`. Lives in `ProposalInput.expert_context: List[ExpertContextItem]`.
 
 The migration is non-breaking: legacy `human_advice` strings are wrapped at the protocol boundary into `ExpertContextItem(source="human", kind="human")`. Adding a new upstream agent = emitting more items through its own protocol function — no schema changes needed.
 
@@ -557,7 +557,7 @@ Three small gaps in the current code that would cause problems as soon as the fi
 
 1. **`VocabEntry.proposed_by_run` overloading**: this field is currently used for both attribution (who suggested the term) and promotion counting (injected into `seen_in_runs`, promotion fires at count ≥ 3). If an external agent sets `proposed_by_run="ml_literature_review"`, that string enters `seen_in_runs` and the term gets promoted after 3 literature scans — without experimental validation. Fix: add `origin: Optional[str]` to `VocabEntry`. External agents set `origin=` and leave `proposed_by_run=None`. Promotion stays experiment-driven.
 
-2. **`render_expert_context` has no deduplication**: two agents may independently cite the same paper (`cite_id` collision). Fix: deduplicate by `cite_id` before rendering (last occurrence wins).
+2. **`render_expert_context` has no deduplication**: two agents may independently cite the same paper (`source_ref` collision). Fix: deduplicate by `source_ref` before rendering (last occurrence wins).
 
 3. **`render_expert_context` has no confidence-based ordering**: within a `kind` group, items are in insertion order. Fix: sort each group by `confidence` descending; items with `confidence=None` sort last.
 
@@ -569,22 +569,22 @@ The reasoning sub-call (§2A) iterates over `expert_context` and renders each it
 
 ```
 [CONTEXT]
-─── source: data_analysis_agent (empirical, confidence=0.92, cite_id=data_2026_04_09_psd_50hz_peak) ───
+─── source: data_analysis_agent (empirical, confidence=0.92, source_ref=data_2026_04_09_psd_50hz_peak) ───
 The validation set shows a strong periodic contamination at exactly 50 Hz across
 all 20 files, with sidebands at ±0.5 Hz. This is consistent with mains pickup
 and is unrelated to the injected axion signals. Models that attempt to fit it
 will overfit; models that filter it out should improve low_freq_kHz scores.
 
-─── source: physics_expert_agent (theoretical, confidence=0.85, cite_id=phys_2026_04_08_axion_mass_bounds) ───
+─── source: physics_expert_agent (theoretical, confidence=0.85, source_ref=phys_2026_04_08_axion_mass_bounds) ───
 Axion-like particle masses below 10⁻¹⁰ eV correspond to oscillation frequencies
 above 24 Hz. Signal contributions below 24 Hz are unphysical for the target
 model and should be ignored or down-weighted in scoring.
 
-─── source: human (human, cite_id=human_advice) ───
+─── source: human (human, source_ref=human_advice) ───
 Stick with WaveNet-family modifications this iteration; no transformers.
 ```
 
-The proposal agent's reasoning is then explicitly required to **cite** the items that influenced its memo via `DiscoveryMemo.citation_sources`. Continuing the example, a memo motivated by the 50 Hz finding would set `citation_sources=["data_2026_04_09_psd_50hz_peak"]` and would justify the proposed gating layer in `causal_hypothesis` by referencing that specific empirical fact.
+The proposal agent's reasoning is then explicitly required to **cite** the items that influenced its memo via `DiscoveryMemo.source_refs`. Continuing the example, a memo motivated by the 50 Hz finding would set `source_refs=["data_2026_04_09_psd_50hz_peak"]` and would justify the proposed gating layer in `causal_hypothesis` by referencing that specific empirical fact.
 
 #### Why citation matters
 
@@ -662,7 +662,7 @@ Each phase has its own tests. Each is independently revertable. Each is small en
 5. **Hit rate as feedback to the planner**. Phase E is in place — `scientific_accuracy` is now computed and carried forward in `InterpretationOutput`. Next step: surface it in the Phase 2 synthesis prompt alongside `cumulative_information_gain`, so the LLM can see its own track record. Risk: the LLM becomes overconfident or defensive in response to low hit rates.
 
 6. **First non-human upstream agents — Literature Review Agents**. Phase B introduces the `ExpertContextItem` polymorphic input slot and Phase F makes the receiving end fully ready. The first real external agents are `ml_literature_review` and `physics_literature_review` (see `docs/external_agents_for_proposer.md` for the full design). Open questions for those future PRs:
-   - How do agents produce `cite_id` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug? A stable `cite_id` is required for the citation audit trail to work across rounds.
+   - How do agents produce `source_ref` values that are stable across re-runs of the same analysis? Hash of the finding content? Timestamped slug? A stable `source_ref` is required for the citation audit trail to work across rounds.
    - How do we evaluate whether a literature agent's findings are actually useful — citation hit rate (per §2D) is the right metric, but it requires Phase E's `prediction_outcome` to be populated before we can cross-reference citations with confirmed hypotheses.
    - Should physics agent findings be persisted into the records or live only in memory per chain? Persisting them turns the records into a growing knowledge base; not persisting keeps the chain stateless.
 
@@ -957,7 +957,7 @@ The first real test of these channels will be in the phase that implements `ml_l
 
 **Files changed**:
 - `agent/schemas/proposal.py` — new `AgentCard` schema; `VocabEntry.origin` field; `ProposalInput.agent_cards` field.
-- `agent/prompt_templates/proposal/__init__.py` — new `render_agent_cards()`; updated `render_expert_context()` (dedup by `cite_id`, sort by `confidence` desc).
+- `agent/prompt_templates/proposal/__init__.py` — new `render_agent_cards()`; updated `render_expert_context()` (dedup by `source_ref`, sort by `confidence` desc).
 - `agent/prompt_templates/proposal/comparison_stage.md` — "Contributors" instruction in "What you receive".
 - `agent/prompt_templates/proposal/causal_reasoning_stage.md` — same.
 - `nodes/ml_model_proposal_agent.py` — inject `agent_cards_block` before `expert_context_block` in both per-stage and proposing-stage user prompts.
@@ -969,7 +969,7 @@ The first real test of these channels will be in the phase that implements `ml_l
 - ☑ F.2 Add `ProposalInput.agent_cards: List[AgentCard] = []`.
 - ☑ F.3 Add `VocabEntry.origin: Optional[str] = None`.
 - ☑ F.4 Implement `render_agent_cards()` — returns empty string when `agent_cards` is empty (no noise in single-agent runs).
-- ☑ F.5 Update `render_expert_context()`: (a) deduplicate by `cite_id` before grouping; (b) sort each group by `confidence` descending, `None` last.
+- ☑ F.5 Update `render_expert_context()`: (a) deduplicate by `source_ref` before grouping; (b) sort each group by `confidence` descending, `None` last.
 - ☑ F.6 Inject `agent_cards_block` in `_run_pipeline()` before `expert_context_block`.
 - ☑ F.7 Add contributor instruction block to `comparison_stage.md` and `causal_reasoning_stage.md`.
 - ☑ F.8 Add `mindset` and `agent_cards` parameters to `local_full_context` in the protocol file.
@@ -1134,7 +1134,7 @@ See §2A "Centrifugal forces" for the full design rationale of each.
 | **#2 — Predictive Risk Aversion** | `FalsifiablePrediction` grading incentivizes trivially safe predictions to maximize hit rate. | `boldness` property on `FalsifiablePrediction` (`abs(predicted−current)/current`). `information_gain = boldness × (1 if confirmed else 0)` per iteration. `cumulative_information_gain` accumulated across iterations and shown to Phase 2 synthesis LLM. `minimum_boldness` threshold (schema validator, default 0.05). | ✅ Done — `evaluate_prediction()` computes info gain per round; `InterpretationInput.cumulative_information_gain` carries it forward; `InterpretationOutput.cumulative_information_gain` stores the running total. |
 | **#3 — Error Propagation** | Stage 3 implements Stage 1 hallucinations. | `ProposalOutput.memo_consistency_notes` — Stage 3 flags inconsistencies between DiscoveryMemo and implementability. Validator surfaces as warnings (not veto). Experiment is the primary error-corrector. | ✅ Done (Phase B) — schema field exists, validator surfaces it. |
 | **#4 — Promotion Spuriousness** | Vocab entry promoted because it co-occurred with high scores, not caused them. | Component delta: `avg_score_with − avg_score_without`. Requires ablation runs where the component is absent. `require_positive_delta` flag in `ResearchPolicy` (default True, deferred until ablation data exists). | ☐ Deferred — `require_positive_delta` field exists in schema but is not yet enforced in `promote_candidates()`. Needs ablation run data. |
-| **#5 — Citation Pollution** | LLM cites every `ExpertContextItem` to appear rigorous. | `DiscoveryMemo.citation_sources` capped at `max_length=5`. Validator: each cited `cite_id` must appear verbatim in `causal_hypothesis` or `proposed_change`. | ✅ Done (Phase B) — schema cap + validator check implemented. |
+| **#5 — Citation Pollution** | LLM cites every `ExpertContextItem` to appear rigorous. | `DiscoveryMemo.source_refs` capped at `max_length=5`. Validator: each cited `source_ref` must appear verbatim in `causal_hypothesis` or `proposed_change`. | ✅ Done (Phase B) — schema cap + validator check implemented. |
 
 ---
 

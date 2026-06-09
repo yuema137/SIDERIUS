@@ -160,7 +160,7 @@ iteration 1 and later iterations are called out explicitly.
 │  │            sota_model_type, sota_mechanism, proposed_change,                  │ │
 │  │            causal_hypothesis, falsifiable_prediction,                          │ │
 │  │            predicted_failure_modes, inherited_components,                     │ │
-│  │            citation_sources                                                    │ │
+│  │            source_refs                                                    │ │
 │  │                                                                                │ │
 │  │  Stage 3 — Proposing (1 LLM call):                                            │ │
 │  │    Input: full DiscoveryMemo + accumulated pipeline context                   │ │

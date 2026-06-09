@@ -56,8 +56,18 @@ commit). A commit is not "done" until both its automated test gate is green
 - [x] **Commit 4** — `nodes/ml_literature_review.py` core loop
   · **4a** `820c548`; **4b-code** `c7860d7`; **4b-docs** `2ec1ae5`; **4b-final** `91461a2` (findings_verbosity + transfer_tolerance + node source-type routing + integration test → DeepSeek + Checkpoint C)
   - [x] **Checkpoint C** — Dynamic search loop behavior · signed off 2026-05-28 (artifact `docs/dynamic_search_pilot.md`)
-- [ ] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **4-kwarg shape**: `expert_context` / `vocab_seed` / `agent_cards` / `mindset`. No `reference_library` plumbing — that channel was cancelled in the 2d revision; equations travel inline inside finding `content`.)
+- [x] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **4-kwarg shape**: `expert_context` / `vocab_seed` / `agent_cards` / `mindset`. No `reference_library` plumbing — that channel was cancelled in the 2d revision; equations travel inline inside finding `content`.) · committed `db55537`
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
+- [ ] **Commit P** — Proposer awareness for external findings — *(retroactive — fixes structural gaps the Q1–Q7 audit surfaced after Commit 5; see new §11 of `external_agents_for_proposer.md`)*
+  · scope: make the proposer actually read external-agent findings in production (pipeline) mode. Generic by construction — no agent-specific names in schemas or prompts. Resolves four problems found in audit: Rule 1 blocks literature, pipeline drops `constraints`/`hardware_context`/`vram_budget_gb`/`expert_advice`, literature renders at the bottom of the user prompt, no synthesis instruction.
+  · gate `tests/unit/agent/ml_model_proposal_agent/` + `tests/unit/agent/schemas/` + prompt-template snapshot tests
+  - [x] **P-design** — Doc-only scope contract: new `## Commit P` section in this file + new §11 in `external_agents_for_proposer.md`. No code touched. · committed `c0c0ea4`
+  - [x] **P-a** — `cite_id` → `source_ref` rename across 36 files (also `DiscoveryMemo.citation_sources` → `source_refs`, `InheritedComponent.citation_source` → `source_ref`). Pure mechanical rename, zero behavior change. · committed `0c280ba`
+  - [x] **P-b** — Schema additions: `AgentCard.trust_level: Literal["hard_limit", "strong_prior", "soft_prior"]`; `InheritedComponent.source_type: Literal["experiment", "external_agent", "human"]` + `source_id: str` (hard-remove `from_model_type` AND `source_ref` — both dead, no production callers); `render_agent_cards` surfaces `Trust Level` first; lit-review's emitted `AgentCard` declares `trust_level="soft_prior"`; `workflows/model_exploration.py` reference-code loop reads `source_id` when `source_type=="experiment"`. Test floor follows `feedback_dont_test_static_analysis` — pytest covers runtime-only behavior (validator regex, conditional branches, dict-input Literal rejection, render order); pyright/ruff/Pydantic-declaration trivia is NOT re-tested. · committed `a629e4a`
+  - [x] **P-c** — Prompt rewrites: generic multi-source Rule 1 in `causal_reasoning_stage.md`; parallel weakening of "no generic ML knowledge" in `comparison_stage.md` Rule 4; new MANDATORY synthesis section in `causal_reasoning_stage.md`; remove hardcoded literature/physics/human trust hierarchy from both stage prompts; rewrite Contract Hierarchy in all six `*_explore.md`/`*_exploit.md` files to point at the synthesis rules instead of the dead "Advice JSON". · committed `69e7234`
+  - [x] **P-d** — Pipeline-mode dead-field fixes + position-bias fix: render `_render_hardware_context_block` and a new `_render_constraints_block` at the TOP of every stage's user prompt; move `agent_cards_block` and `expert_context_block` from the bottom to the top (above the candidate markdown); hard-remove `ProposalInput.expert_advice`; `human_advice` workaround keeps existing behavior but the wrapped `ExpertContextItem` now carries a synthesized `human` `AgentCard` with `trust_level="strong_prior"` so its synthesis weight is correct. · committed `aeb4d9f`
+  - [x] **P-e** — Doc + status-board updates: update vision doc §4 (`AgentCard.trust_level` is now structured; `trust_guidance` prose stays for humans); close vision doc §9 question 1 *(partial — same-trust_level adjudication deferred until a second external agent is added)*; soft-edge doc gains an `Exceptions` section noting `ProposalInput` is the deliberate exception; tick the P-b/P-c/P-d boxes (P-e is the lockstep tick commit); update `nodes/ml_literature_review.md` Parameter Reference to mention the emitted `AgentCard.trust_level` constant. · committed `6348ece`
+  - [x] **Checkpoint P** — Proposer pipeline-mode prompt audit (offline) · signed off 2026-06-05 (all 9 sub-criteria PASS; 10/10 automated pre-checks PASS; visual sub-criteria S1–S5 verified in the captured prompts; artifact `docs/proposer_prompt_audit.md` carries the per-criterion verdict table + 3 captured (system, user) prompt pairs covering comparison → causal_reasoning → proposing in pipeline mode). Driver: `scripts/render_proposer_prompts_for_audit.py` (zero LLM calls, runs in ~1 second). **Gates Commit 6 from starting — now unblocked.**
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
@@ -66,9 +76,11 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **§10 End-to-end validation suite** — permanent acceptance gate
   (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
   commit. Run log: `docs/validation_suite_runs.md`.
-  - [ ] **First FULL run** — after Commit 2d closes (Commit-2 family complete →
-        suite fully runnable per the §10.4 runnability callout)
-  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass)
+  - [ ] **First FULL run** — after Commit P closes (Commit-2 family complete +
+        proposer-awareness landed; suite validates the *post-P* proposer
+        behavior, not the broken pre-P one)
+  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
+        the post-P proposer)
 
 ---
 
@@ -142,7 +154,7 @@ These are already in main and form the receiving end for lit-review:
   `agent/schemas/proposal.py`.
 - `local_full_context` end-to-end threading of `mindset` and `agent_cards` —
   `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py`.
-- `render_agent_cards` and `render_expert_context` with dedup-by-`cite_id` and
+- `render_agent_cards` and `render_expert_context` with dedup-by-`source_ref` and
   confidence-descending sort — `agent/prompt_templates/proposal/__init__.py`.
 - Phase F tests covering the agent-card path through the proposer —
   `tests/unit/agent/ml_model_proposal_agent/test_agent_cards.py`.
@@ -720,7 +732,7 @@ channel (`expert_context`) and the math travels with the citation.
   and will not be added. `PaperExtract` stays in
   `agent/schemas/literature_review.py` and is not exported anywhere new.
 - `reference_library`, if it exists at all in 2d, is **transient
-  node-internal scratch state** — a `cite_id → PaperExtract` lookup the
+  node-internal scratch state** — a `source_ref → PaperExtract` lookup the
   node may build during `synth()` to populate the synthesis prompt's
   per-paper block. Not on the output schema, never serialised, never
   written to disk, never spread into a protocol kwarg.
@@ -745,7 +757,7 @@ channel (`expert_context`) and the math travels with the citation.
   preserve fenced pseudocode blocks where the algorithm itself is the
   mechanism)
 - Edit: `nodes/ml_literature_review.py` (build the transient
-  `cite_id → PaperExtract` scratch lookup at synthesis time; pass the
+  `source_ref → PaperExtract` scratch lookup at synthesis time; pass the
   extra fields through to `render_synthesis_prompt`. **No schema change,
   no change to `LiteratureReviewOutput(...)` construction.**)
 - Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
@@ -1137,7 +1149,7 @@ trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
   - (d) A paper with no actionable relevance to the current bottlenecks gets NO
         item — omission beats a weak/generic item; an empty `findings` list is
         valid output.
-  - (e) Every item's `cite_id` must exactly match the `paper_id` of a retrieved
+  - (e) Every item's `source_ref` must exactly match the `paper_id` of a retrieved
         `RetrievedPaper`; `_synthesize` soft-drops unmatched ids (log + omit
         that item, keep the rest) — see open questions.
   - (f) `new_vocab_candidates` / `suggested_mindset` stay empty for v1 (per
@@ -1155,11 +1167,11 @@ trace + `docs/dynamic_search_pilot.md`. Mirrors Commit 2/3 staging.
         `confidence` scores — all items validate against the schema.
   - [x] papers with no actionable relevance → zero `findings` items (empty list
         valid, must not raise).
-  - [x] a `cite_id` not matching any retrieved `paper_id` is soft-dropped —
+  - [x] a `source_ref` not matching any retrieved `paper_id` is soft-dropped —
         assert the bad item is omitted and the well-cited items remain.
   - [x] `render_synthesis_prompt` deterministic content asserts — system prompt
         contains the bottleneck-grounding instruction, the omission-over-weak-item
-        rule, the cite_id-matching instruction, and the task-description injection.
+        rule, the source_ref-matching instruction, and the task-description injection.
 **4a gate result (2026-05-27):** 58 unit passed (node + prompt + schema suites),
 ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
 
@@ -1208,7 +1220,7 @@ ruff check + `ruff format --check` clean, pyright 0 errors. Committed `820c548`.
         confidence in [0.40, 0.79]** (no v0 paper exceeded the clamp ceiling).
         Format compliance: **5/6 with all three labels** (`**Implication:**` /
         `**Mechanism:**` / `**Adaptation:**`); **6/6 with the closing
-        `(rationale: ...)`**. One finding (cite_id `doi:10.1109/ICCC68654...`)
+        `(rationale: ...)`**. One finding (source_ref `doi:10.1109/ICCC68654...`)
         wrote **`**Adaption:**`** (typo) instead of `**Adaptation:**`. Resolved
         2026-05-27 via node-side soft normalization: added
         `_normalize_finding_content_headings` (+ `_FINDING_HEADING_ALIASES` map,
@@ -1426,7 +1438,7 @@ canonical trace captured in `docs/dynamic_search_pilot.md`.
      DMF-Net's frequency-split regime that gpt-4o-mini missed.
    - all-DeepSeek attempt: synthesis returned **empty `{"findings": []}`**
      (DeepSeek over-applies the omission rule). Confirmed via raw capture (not a
-     bug / cite_id / shape issue — genuinely conservative).
+     bug / source_ref / shape issue — genuinely conservative).
    - **Intervention 1** (verbosity-0/abstract clarification) fixed emptiness, but
      introduced a magic number (`0.5-0.65`) in the prompt.
 6. **ConfidenceRubric refactor** (per "Scoring and rubric design invariants",
@@ -1457,7 +1469,7 @@ deepseek, `search_llm_*` unset).
 - **Node entry shape.** RESOLVED — class `MLLiteratureReviewAgent` with
   `.run()` (matches all 5 nodes); the bridge is built lazily in `run()` from the
   input via an injectable `bridge_factory`.
-- **Synthesis `cite_id` mismatch.** RESOLVED — soft drop (log + omit the item,
+- **Synthesis `source_ref` mismatch.** RESOLVED — soft drop (log + omit the item,
   keep the rest); a single hallucinated id must not discard a useful list.
 - **`results_per_query`.** RESOLVED — add as a `DynamicSearchConfig` field
   (default 10) with the relevance-drop reasoning in its docstring (S2 relevance
@@ -1535,6 +1547,191 @@ line numbers), so no patch to the existing protocol was required.
   upstream protocol). Lean: `local_all_channels` because the data scope is
   literally the four channels, not the full context. Open to override if the
   convention is to mirror the upstream name.
+
+---
+
+## Commit P — Proposer awareness for external findings
+
+**Status**: retroactive. The Q1–Q7 audit conducted after Commit 5 landed found
+four structural problems that prevent the proposer from acting on external
+findings in production (pipeline) mode. All four must be fixed before
+Checkpoint D fires, otherwise Checkpoint D will fail in known ways and we
+will be back here anyway.
+
+**Trigger**: failed structural audit on `_run_pipeline`
+(`nodes/ml_model_proposal_agent.py`). See
+`docs/external_agents_for_proposer.md` §11 for the audit findings.
+
+**Generic by construction**. None of the changes hardcode agent names
+(`ml_literature_review`, `physics`, `human`). All differentiation is by
+structural roles (`trust_level`, `source_type`) any future agent can adopt.
+
+**Files**:
+- `agent/schemas/proposal.py` — `ExpertContextItem.source_ref` (rename),
+  `DiscoveryMemo.source_refs` (rename), `InheritedComponent.source_type` +
+  `source_id` (additions; remove `from_model_type`),
+  `AgentCard.trust_level` (addition), `ProposalInput.expert_advice` (REMOVE).
+- `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` —
+  `human_advice` wrap injects a synthesized `human` `AgentCard`.
+- `agent/prompt_templates/proposal/__init__.py` — `render_agent_cards`
+  surfaces `Trust Level`; `render_expert_context` uses `source_ref`.
+- `agent/prompt_templates/proposal/causal_reasoning_stage.md` — Rule 1
+  rewrite; new MANDATORY synthesis section; remove hardcoded trust hierarchy.
+- `agent/prompt_templates/proposal/comparison_stage.md` — weaken Rule 4;
+  remove hardcoded trust hierarchy.
+- `agent/prompt_templates/proposal/*_explore.md` /
+  `agent/prompt_templates/proposal/*_exploit.md` (6 files) — rewrite Contract
+  Hierarchy to point at synthesis rules in the base prompt.
+- `nodes/ml_model_proposal_agent.py` — call `_render_hardware_context_block`
+  and a new `_render_constraints_block` from `_run_pipeline`; reorder block
+  appends (cards + context BEFORE candidate markdown, hardware + constraints
+  ABOVE that).
+- `nodes/ml_literature_review.py` — emitted `AgentCard` declares
+  `trust_level="soft_prior"`.
+- Every test / doc / cache that referenced the pre-rename `cite_id` /
+  `citation_sources` / `citation_source` (36 files — see P-a blast
+  radius below).
+
+### Sub-commit ladder
+
+The ladder is **design-doc-first**: this section (and §11 of the spec doc)
+is committed BEFORE any code change. Each subsequent code commit reads from
+this section as its scope contract.
+
+#### P-design *(this commit — doc-only)*
+
+Scope: this section + new §11 of `docs/external_agents_for_proposer.md` +
+vision-doc §4 amendment placeholder (the actual vision-doc edit is in P-e).
+No code touched. Establishes the design contract in tree so code commits
+can be reviewed against it.
+
+#### P-a — `cite_id` → `source_ref` rename
+Pure mechanical rename across 36 files (319 occurrences; the initial
+estimate of 28 / 247 in P-design was based on a `cite_id`-only grep and
+undercounted `citation_sources` / `citation_source` hits and 8 small
+files: 6 advice JSONs in `advice/workflow/`, 1 pseudo-data JSON, and
+`agent/llm_bridge.py`). Includes
+`DiscoveryMemo.citation_sources` → `source_refs` and
+`InheritedComponent.citation_source` → `source_ref`. Zero behavior change
+at LLM level — same data, different key name.
+
+Gate: full unit suite green (`tests/unit/`);
+`git grep -lE "cite_id|citation_source"` returns only
+`docs/audit/unit_tests_rubric_audit.md` (the standing exclusion) and this
+commit-plan doc itself (where the pre-rename names appear as explanatory
+text describing the rename).
+
+#### P-b — Schema additions
+`AgentCard.trust_level: Literal["hard_limit", "strong_prior", "soft_prior"]`.
+`InheritedComponent.source_type: Literal["experiment", "external_agent", "human"]`
++ `source_id: str`. Hard-remove `InheritedComponent.from_model_type` (breaking
+change; tests must update; no production callers since SIDERIUS has no
+external API consumers). `render_agent_cards` outputs `Trust Level: <level>`
+on every card. Lit-review's emitted card declares `trust_level="soft_prior"`.
+
+Gate: new schema unit tests; existing tests updated to populate new required
+fields.
+
+#### P-c — Prompt rewrites
+Rewrite `causal_reasoning_stage.md` Rule 1 to be source-attributable rather
+than ModelComparison-only. Weaken `comparison_stage.md` Rule 4 to allow
+literature signals to influence the comparison, with provenance recorded
+explicitly. Insert new MANDATORY "Multi-source synthesis" section in
+`causal_reasoning_stage.md` between the existing MANDATORY block (ends line
+69) and the `## What you produce` section (starts line 70). Remove hardcoded
+literature/physics/human trust hierarchy from both stage prompts (lines
+21-26 of `causal_reasoning_stage.md` and 23-28 of `comparison_stage.md`).
+Replace with one generic line referencing `Trust Level` on cards. Rewrite
+Contract Hierarchy in all six `*_explore.md`/`*_exploit.md` files to point
+at the synthesis rules instead of the now-dead "Advice JSON".
+
+Gate: prompt-template snapshot tests; `_check_citation_discipline` regression
+test still passes with renamed field.
+
+#### P-d — Pipeline-mode dead-field fixes + position-bias fix
+Add `_render_constraints_block(constraints, existing_model_types)` helper.
+Call both `_render_hardware_context_block` and `_render_constraints_block`
+from `_run_pipeline`. Reorder per-stage user-prompt assembly so the order is:
+
+1. `[HARDWARE CONTEXT]` block
+2. `## Constraints` block
+3. `## External Contributors` (`agent_cards_block`)
+4. `## Expert Context` (`expert_context_block`)
+5. Candidate markdown + `## Accumulated context` JSON
+6. Vocab block (reasoning stages only)
+
+Hard-remove `ProposalInput.expert_advice` (the field, all its render calls,
+all its references in tests/docs). The `human_advice` wrap in
+`ml_result_interp_to_ml_model_propose.py:131-141` additionally injects a
+synthesized `human` `AgentCard` so the wrapped `ExpertContextItem` carries
+proper trust framing under the new structural rules.
+
+Gate: existing proposal-agent unit tests pass after fixture updates; new
+test asserting that the assembled user prompt in pipeline mode contains
+`[HARDWARE CONTEXT]` and `## Constraints` strings when corresponding inputs
+are present.
+
+#### P-e — Doc + status-board updates
+Vision doc `external_agents_architecture.md` §4 update for structured
+`trust_level`. Close §9 open question 1. Commit-plan status board ticks for
+P-a/P-b/P-c/P-d. Node README `nodes/ml_literature_review.md` Parameter
+Reference adds an entry for the emitted `AgentCard.trust_level`.
+
+Gate: doc-only, no test gate; lockstep tick of status board with the four
+preceding sub-commits.
+
+### Test gate (whole-Commit-P)
+
+```
+.venv/bin/python -m pytest tests/unit/ -q
+.venv/bin/python -m ruff check <every file P-a/P-b/P-c/P-d touched>
+.venv/bin/python -m ruff format --check <every file P-a/P-b/P-c/P-d touched>
+.venv/bin/python -m pyright <every code file P-a/P-b/P-c/P-d touched>
+```
+
+Plus **Checkpoint P** below.
+
+#### 🔍 Behavioral Checkpoint P — Proposer pipeline-mode prompt audit (offline)
+
+Render the assembled user prompt + system prompt for each stage in pipeline
+mode using a synthetic `ProposalInput` that contains:
+
+- one literature `ExpertContextItem` with a non-`experiment` `source_ref`
+  and an `AgentCard(trust_level="soft_prior")`
+- one non-empty `constraints` list
+- one `HardwareContext` manifest (GPU available)
+- one `human_advice` string
+
+Inspect the rendered prompts by eye and verify:
+
+- (P.1) `[HARDWARE CONTEXT]` block renders at the top of every stage's user
+  prompt.
+- (P.2) `## Constraints` block renders right below `[HARDWARE CONTEXT]`.
+- (P.3) `## External Contributors` block renders next, with `Trust Level:
+  soft_prior` visible on the lit-review card and `Trust Level: strong_prior`
+  visible on the synthesized `human` card.
+- (P.4) `## Expert Context` block renders next, with the literature finding
+  carrying its `source_ref` and the wrapped human directive carrying
+  `source_ref=human:human_advice` (post-rename).
+- (P.5) Candidate markdown + accumulated JSON renders below all of the
+  above.
+- (P.6) `causal_reasoning_stage.md` system prompt contains the new
+  MANDATORY synthesis section and the rewritten Rule 1; no hardcoded
+  "Literature agents / Physics agents / Human directives" text remains in
+  the system prompt.
+- (P.7) No `expert_advice` field appears anywhere in the rendered prompts;
+  no `cite_id` field name appears (all renamed to `source_ref`).
+
+**Sign-off requirement**: a human reads the rendered prompts and confirms
+all seven sub-criteria PASS. Artifact: `docs/proposer_prompt_audit.md`.
+
+**Cost**: zero LLM calls. The audit is purely textual on the rendered
+strings. Cheap and fast; gates Commit 6 from starting.
+
+**Why this checkpoint precedes Checkpoint D**: Checkpoint D requires real
+LLM runs and is expensive. Checkpoint P is free and catches structural
+problems Checkpoint D would otherwise re-discover. Failing Checkpoint P
+means re-iterate the prompts before spending on Checkpoint D.
 
 ---
 
@@ -1684,8 +1881,8 @@ architecture description and the reasoning trace.
   rationale that could only have come from the literature.
 - Does Run B produce a qualitatively different proposal, or is it
   essentially the same with the literature references stripped out?
-- Are the `cite_id` values in Run A's reasoning real — do they match actual
-  `cite_id` values from `LiteratureReviewOutput.findings`? Or has the
+- Are the `source_ref` values in Run A's reasoning real — do they match actual
+  `source_ref` values from `LiteratureReviewOutput.findings`? Or has the
   proposer hallucinated citations?
 - Does the proposal in Run A feel more grounded and specific, or does the
   literature just add decorative references to an otherwise unchanged
@@ -1702,9 +1899,9 @@ the highest-stakes checkpoint. Possible failure modes and responses:
   tighten the `ExpertContextItem` generation prompt in
   `ml_literature_review`, or add an explicit instruction in the proposer's
   system prompt to engage with literature findings before proposing.
-- If Run A has hallucinated `cite_id`s → the proposer is generating
+- If Run A has hallucinated `source_ref`s → the proposer is generating
   plausible-sounding references rather than using the actual ones. Fix: add
-  an explicit instruction to the proposer to only cite `cite_id` values
+  an explicit instruction to the proposer to only cite `source_ref` values
   that appear in the provided `expert_context` block.
 - If Run A's proposal is more specific but the specificity comes from the
   `AgentCard` trust framing rather than the actual findings → the findings

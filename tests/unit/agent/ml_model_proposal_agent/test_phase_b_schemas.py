@@ -139,35 +139,81 @@ class TestFalsifiablePrediction:
 
 
 class TestInheritedComponent:
-    def test_valid_minimal(self):
+    def test_valid_minimal_experiment(self):
         ic = InheritedComponent.model_validate(
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Gave wavenet a +0.15 lift on low_freq.",
             }
         )
         assert ic.from_run is None
-        assert ic.citation_source is None
+        assert ic.source_type == "experiment"
+        assert ic.source_id == "wavenet"
 
-    def test_valid_full(self):
+    def test_valid_external_agent_with_colon_format(self):
+        """Happy-path for the regex-validated branch (source_type='external_agent')."""
         ic = InheritedComponent.model_validate(
             {
-                "component": "gated_activation",
-                "from_model_type": "wavenet",
-                "from_run": "hpt_full_v1",
-                "contribution_evidence": "Gating improved selectivity by 20%.",
-                "citation_source": "human_advice_001",
+                "component": "composite_frequency_loss",
+                "source_type": "external_agent",
+                "source_id": "arxiv:2510.25800",
+                "contribution_evidence": "FreLE composite loss closes spectral gap.",
             }
         )
-        assert ic.from_run == "hpt_full_v1"
-        assert ic.citation_source == "human_advice_001"
+        assert ic.source_id == "arxiv:2510.25800"
+
+    @pytest.mark.parametrize(
+        "bad_id",
+        [
+            "no_colon_at_all",  # missing colon entirely
+            "prefix:",  # colon present but empty identifier
+        ],
+    )
+    def test_external_source_id_regex_rejects_malformed(self, bad_id):
+        with pytest.raises(ValidationError, match="does not match the required format"):
+            InheritedComponent.model_validate(
+                {
+                    "component": "x",
+                    "source_type": "external_agent",
+                    "source_id": bad_id,
+                    "contribution_evidence": "evidence",
+                }
+            )
+
+    def test_experiment_source_id_skips_regex(self):
+        """The conditional branch of the validator: source_type='experiment'
+        accepts a bare token (no colon) — different code path from external_agent."""
+        ic = InheritedComponent.model_validate(
+            {
+                "component": "x",
+                "source_type": "experiment",
+                "source_id": "wavenet",
+                "contribution_evidence": "evidence",
+            }
+        )
+        assert ic.source_id == "wavenet"
+
+    def test_source_type_rejects_unknown_value(self):
+        """Runtime Literal boundary check — pyright catches static callers
+        only; dict input from JSON/LLM bypasses static analysis."""
+        with pytest.raises(ValidationError):
+            InheritedComponent.model_validate(
+                {
+                    "component": "x",
+                    "source_type": "speculative",
+                    "source_id": "x:y",
+                    "contribution_evidence": "evidence",
+                }
+            )
 
     def test_missing_component_raises(self):
         with pytest.raises(ValidationError):
             InheritedComponent.model_validate(
                 {
-                    "from_model_type": "wavenet",
+                    "source_type": "experiment",
+                    "source_id": "wavenet",
                     "contribution_evidence": "something",
                 }
             )
@@ -178,7 +224,8 @@ class TestInheritedComponent:
             InheritedComponent.model_validate(
                 {
                     "component": "test",
-                    "from_model_type": "wavenet",
+                    "source_type": "experiment",
+                    "source_id": "wavenet",
                     "contribution_evidence": "x" * 1001,
                 }
             )
@@ -196,7 +243,7 @@ class TestExpertContextItem:
                 "source": "human",
                 "kind": "human",
                 "content": "Focus on low-frequency recovery.",
-                "cite_id": "human_001",
+                "source_ref": "human_001",
             }
         )
         assert eci.confidence is None
@@ -209,7 +256,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": kind,
                     "content": "test content",
-                    "cite_id": f"test_{kind}",
+                    "source_ref": f"test_{kind}",
                 }
             )
             assert eci.kind == kind
@@ -221,7 +268,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "invalid_kind",
                     "content": "test",
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                 }
             )
 
@@ -233,7 +280,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "empirical",
                     "content": "test",
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                     "confidence": 1.5,
                 }
             )
@@ -245,7 +292,7 @@ class TestExpertContextItem:
                     "source": "test",
                     "kind": "human",
                     "content": "x" * 100001,
-                    "cite_id": "test_001",
+                    "source_ref": "test_001",
                 }
             )
 
@@ -298,7 +345,7 @@ class TestDiscoveryMemo:
                 "predicted_failure_modes", ["a", "b", "c", "d"], id="too_many_failure_modes"
             ),
             pytest.param(
-                "citation_sources",
+                "source_refs",
                 ["a", "b", "c", "d", "e", "f"],
                 id="citations_over_max_5",
             ),
@@ -315,13 +362,14 @@ class TestDiscoveryMemo:
         memo = DiscoveryMemo.model_validate(valid_memo)
         assert memo.inherited_components == []
         assert memo.proposed_vocab_candidates == []
-        assert memo.citation_sources == []
+        assert memo.source_refs == []
 
     def test_with_inherited_components(self, valid_memo):
         valid_memo["inherited_components"] = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Core mechanism of wavenet's success.",
             }
         ]
@@ -357,9 +405,9 @@ class TestDiscoveryMemo:
         assert memo.proposed_vocab_links == []
 
     def test_citations_exactly_5_ok(self, valid_memo):
-        valid_memo["citation_sources"] = ["a", "b", "c", "d", "e"]
+        valid_memo["source_refs"] = ["a", "b", "c", "d", "e"]
         memo = DiscoveryMemo.model_validate(valid_memo)
-        assert len(memo.citation_sources) == 5
+        assert len(memo.source_refs) == 5
 
 
 # ---------------------------------------------------------------------------

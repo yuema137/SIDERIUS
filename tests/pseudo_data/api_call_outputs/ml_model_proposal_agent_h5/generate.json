@@ -36,7 +36,7 @@
         "_comment": "H.5 Stage 2: Causal reasoning — references dilated_causal_conv link, no dangling citations",
         "proposed_change": "Add a multi-resolution wavelet decomposition layer after the dilated_causal_conv stack to extend receptive_field coverage to sub-10Hz frequencies.",
         "causal_hypothesis": "The confirmed link (dilated_causal_conv → receptive_field) explains wavenet's strength at mid-frequencies. Wavelet decomposition extends this receptive_field to sub-10Hz bands, addressing the remaining gap at files 0-2.",
-        "citation_sources": [],
+        "source_refs": [],
         "falsifiable_prediction": {
             "metric": "denoising_score",
             "current_value": 6.1,
@@ -51,12 +51,16 @@
         "inherited_components": [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+
+                "source_id": "wavenet",
                 "contribution_evidence": "Core mechanism behind wavenet's SOTA score of 5.576; confirmed to extend receptive_field."
             },
             {
                 "component": "spectral_conv",
-                "from_model_type": "spectral_net",
+                "source_type": "experiment",
+
+                "source_id": "spectral_net",
                 "contribution_evidence": "Addresses the low-frequency gap confirmed in spectral_net's 6.1 score."
             }
         ],

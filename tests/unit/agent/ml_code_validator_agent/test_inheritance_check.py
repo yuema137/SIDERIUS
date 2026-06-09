@@ -89,17 +89,20 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Core mechanism.",
             },
             {
                 "component": "gated_activation",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Enables selective modulation.",
             },
             {
                 "component": "skip_connection",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Gradient flow.",
             },
         ]
@@ -112,7 +115,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "spectral_conv",
-                "from_model_type": "gated_fno",
+                "source_type": "experiment",
+                "source_id": "gated_fno",
                 "contribution_evidence": "Frequency processing.",
             },
         ]
@@ -125,7 +129,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "custom_attention_layer",
-                "from_model_type": "custom",
+                "source_type": "experiment",
+                "source_id": "custom",
                 "contribution_evidence": "Novel mechanism.",
             },
         ]
@@ -138,7 +143,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "receptive_field",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Wide temporal coverage.",
             },
         ]
@@ -157,12 +163,14 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Dilation.",
             },
             {
                 "component": "spectral_conv",
-                "from_model_type": "gated_fno",
+                "source_type": "experiment",
+                "source_id": "gated_fno",
                 "contribution_evidence": "FFT.",
             },
         ]
@@ -180,7 +188,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Dilation.",
             },
         ]
@@ -194,7 +203,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "embedding_layer",
-                "from_model_type": "punet",
+                "source_type": "experiment",
+                "source_id": "punet",
                 "contribution_evidence": "ADC encoding.",
             },
         ]
@@ -206,7 +216,8 @@ class TestInheritanceCheck:
         claims = [
             {
                 "component": "dilated_causal_conv",
-                "from_model_type": "wavenet",
+                "source_type": "experiment",
+                "source_id": "wavenet",
                 "contribution_evidence": "Claimed but not used.",
             },
         ]

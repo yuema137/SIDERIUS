@@ -80,7 +80,7 @@ structured `content`):
 
   {"findings": [
      {"content": "**Implication:** Given the optimization-to-metric mismatch on full-spectrum SQUID, try an SNR-normalised reconstruction loss for the hard segments.\\n**Mechanism:** SNRAware aligns the loss with the SNR metric via\\n$$\\\\mathcal{L}_{\\\\text{SNR}} = -\\\\log\\\\frac{\\\\|s\\\\|^2}{\\\\|s - \\\\hat{s}\\\\|^2}$$\\nover whitened single-coil segments, applied alongside G-factor map augmentation.\\n**Adaptation:** Replace MSE on high-SNR segments with this log-ratio form; keep MSE elsewhere to avoid destabilising the WaveNet backbone.\\n(rationale: deep-read, on-domain mechanism transfer with a clear ground-truth equation.)",
-      "cite_id": "arxiv:2503.18162",
+      "source_ref": "arxiv:2503.18162",
       "content_paper_id": "arxiv:2503.18162",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
@@ -144,13 +144,13 @@ confidence per the rubric>)` on its own line.
 
 Use the heading text verbatim — `**Implication:**`, `**Mechanism:**`,
 `**Adaptation:**` — so downstream parsing stays trivial. Do NOT write the
-paper id inside `content`; the id belongs ONLY in `cite_id`."""
+paper id inside `content`; the id belongs ONLY in `source_ref`."""
 
 _SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the four separate keys per finding):
 
   {"findings": [
      {"content": "Given the high-frequency-overfitting bottleneck, WaveNet\'s dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
-      "cite_id": "arxiv:2406.04378",
+      "source_ref": "arxiv:2406.04378",
       "content_paper_id": "arxiv:2406.04378",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
@@ -164,7 +164,7 @@ _SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the four sepa
 - End with a one-line rationale in parentheses justifying the `confidence` score.
 - Carry over any training-regime qualifier from the paper (e.g. "under
   frequency-split training"); never present a regime-specific result as general.
-- Do NOT write the paper id inside `content`; the id belongs ONLY in `cite_id`
+- Do NOT write the paper id inside `content`; the id belongs ONLY in `source_ref`
   and `content_paper_id` (both must hold the same paper_id — see Hard rules
   in the system prompt)."""
 
@@ -486,7 +486,7 @@ def _render_synthesis_paper_block(p: dict) -> str:
 
     lines = [
         f"### {title} ({year})",
-        f"**cite_id / content_paper_id (use this exact string for both):** `{paper_id}`",
+        f"**source_ref / content_paper_id (use this exact string for both):** `{paper_id}`",
         f"Extraction: {marker}",
         "",
         summary,
@@ -518,7 +518,7 @@ def render_synthesis_prompt(
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for the final findings synthesis.
 
-    The LLM emits ``{"findings": [{content, cite_id, confidence}]}``. The node
+    The LLM emits ``{"findings": [{content, source_ref, confidence}]}``. The node
     wraps each into an ``ExpertContextItem``. ``papers`` is a list of
     ``{paper_id, title, year, summary}`` where ``summary`` is the compressed
     extract (preferred) or the abstract.
@@ -826,7 +826,7 @@ def _build_paper_title_lookup(papers: list[RetrievedPaper]) -> dict[str, str]:
     """Map ``paper_id`` → resolved title for finding-heading cross-reference.
 
     Falls back through ``extract.title`` → ``s2_metadata['title']``; ``None``
-    if neither is available so the caller can render cite_id-only headings.
+    if neither is available so the caller can render source_ref-only headings.
     """
     lookup: dict[str, str] = {}
     for paper in papers:
@@ -843,8 +843,8 @@ def _build_paper_title_lookup(papers: list[RetrievedPaper]) -> dict[str, str]:
 def _render_finding_block(idx: int, item: ExpertContextItem, title_lookup: dict[str, str]) -> str:
     """Render one ExpertContextItem as a Markdown sub-section.
 
-    Heading construction (per the design): ``cite_id — matched_title — confidence``
-    when a paper with ``paper_id == cite_id`` is in the lookup, else ``cite_id —
+    Heading construction (per the design): ``source_ref — matched_title — confidence``
+    when a paper with ``paper_id == source_ref`` is in the lookup, else ``source_ref —
     confidence``. We do NOT extract a title from the finding's ``content`` —
     that proved fragile because the three-part format varies and any heuristic
     would silently mislabel findings. ``content`` is rendered verbatim below
@@ -860,15 +860,13 @@ def _render_finding_block(idx: int, item: ExpertContextItem, title_lookup: dict[
         else ""
     )
 
-    matched_title = title_lookup.get(item.cite_id)
+    matched_title = title_lookup.get(item.source_ref)
     if matched_title:
-        heading = f"### {idx}. `{item.cite_id}` — {matched_title}{conf_suffix}"
+        heading = f"### {idx}. `{item.source_ref}` — {matched_title}{conf_suffix}"
     else:
-        heading = f"### {idx}. `{item.cite_id}`{conf_suffix}"
+        heading = f"### {idx}. `{item.source_ref}`{conf_suffix}"
 
-    metadata_line = (
-        f"**Cite:** `{item.cite_id}` · **Source agent:** `{item.source}` · **Kind:** `{item.kind}`"
-    )
+    metadata_line = f"**Cite:** `{item.source_ref}` · **Source agent:** `{item.source}` · **Kind:** `{item.kind}`"
 
     return "\n\n".join([heading, metadata_line, item.content.strip(), "---"])
 
@@ -878,7 +876,7 @@ def _render_findings_section(
 ) -> str:
     """The full "## Findings" section, sorted high→low by confidence.
 
-    Deterministic sort key: ``(-confidence, cite_id)``. ``None`` confidences
+    Deterministic sort key: ``(-confidence, source_ref)``. ``None`` confidences
     sort last (treated as ``-inf`` for the negated key). Findings are rendered
     verbatim — the three-part Implication / Mechanism / Adaptation format
     (when ``findings_verbosity=1`` was used) lives inside ``content`` already.
@@ -894,7 +892,7 @@ def _render_findings_section(
 
     def sort_key(item: ExpertContextItem) -> tuple[float, str]:
         c = item.confidence if item.confidence is not None else float("-inf")
-        return (-c, item.cite_id)
+        return (-c, item.source_ref)
 
     sorted_findings = sorted(findings, key=sort_key)
     blocks = [

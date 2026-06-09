@@ -27,6 +27,7 @@ def _make_card(**kwargs) -> AgentCard:
         expertise_domain="Signal processing, deep learning for time-series.",
         coverage="arXiv + OpenReview 2018-present.",
         limitations="Cannot assess physics feasibility.",
+        trust_level="soft_prior",
         trust_guidance="Treat as promising priors — only experiment runs confirm applicability.",
     )
     defaults.update(kwargs)
@@ -34,14 +35,14 @@ def _make_card(**kwargs) -> AgentCard:
 
 
 def _make_item(
-    cite_id: str,
+    source_ref: str,
     kind: str = "empirical",
     source: str = "ml_lit",
     confidence=None,
     content: str = "finding",
 ) -> dict:
     return {
-        "cite_id": cite_id,
+        "source_ref": source_ref,
         "kind": kind,
         "source": source,
         "confidence": confidence,
@@ -82,9 +83,16 @@ class TestAgentCard:
                 expertise_domain="e",
                 coverage="c",
                 limitations="l",
+                trust_level="soft_prior",
                 trust_guidance="t",
                 # missing agent_name
             )
+
+    def test_trust_level_rejects_unknown_value(self):
+        """Runtime Literal boundary check — pyright catches static callers only;
+        dict input from JSON/LLM bypasses static analysis."""
+        with pytest.raises(ValidationError):
+            _make_card(trust_level="medium_prior")
 
 
 # ---------------------------------------------------------------------------
@@ -156,11 +164,28 @@ class TestRenderAgentCards:
 
     def test_single_card_contains_all_fields(self):
         result = render_agent_cards([_make_card()])
+        assert "Trust Level:" in result
         assert "Role:" in result
         assert "Expertise Domain:" in result
         assert "Coverage:" in result
         assert "Limitations:" in result
         assert "Trust Guidance:" in result
+
+    def test_trust_level_renders_first_after_agent_name(self):
+        """trust_level is the machine-readable calibration the proposer's
+        synthesis rules reference — it must render before the prose fields
+        so the LLM reads it first (P-d will move the Contributors block
+        itself to the top of the user prompt; this test locks the per-card
+        ordering)."""
+        result = render_agent_cards([_make_card()])
+        # Trust Level must precede Role, Expertise Domain, Trust Guidance.
+        i_trust_level = result.index("Trust Level:")
+        i_role = result.index("Role:")
+        i_expertise = result.index("Expertise Domain:")
+        i_trust_guidance = result.index("Trust Guidance:")
+        assert i_trust_level < i_role
+        assert i_trust_level < i_expertise
+        assert i_trust_level < i_trust_guidance
 
     def test_trust_guidance_read_before_findings_marker(self):
         result = render_agent_cards([_make_card()])
@@ -181,7 +206,7 @@ class TestRenderAgentCards:
 
 
 # ---------------------------------------------------------------------------
-# F.5 — render_expert_context(): dedup by cite_id + confidence sorting
+# F.5 — render_expert_context(): dedup by source_ref + confidence sorting
 # ---------------------------------------------------------------------------
 
 
@@ -207,7 +232,7 @@ class TestRenderExpertContextDedup:
         assert "arxiv_002" in result
 
     def test_empty_cite_id_dedup(self):
-        """Items with empty cite_id should deduplicate to last one."""
+        """Items with empty source_ref should deduplicate to last one."""
         items = [
             _make_item("", content="first empty"),
             _make_item("", content="second empty"),

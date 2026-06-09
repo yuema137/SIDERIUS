@@ -37,7 +37,7 @@
     "3. Do NOT feel obligated to inherit wavenet's structure. A clean novel architecture that directly addresses the bottleneck is preferable to a wavenet patch that partially addresses it.",
     "4. Draw on your knowledge of recent SOTA for 1D signal denoising: SSMs (S4, Mamba), TCNs, FNO/spectral methods, diffusion-based denoisers, modern RNNs. One of these may be fundamentally better suited.",
     "5. Each proposal should be a clear, testable hypothesis: 'Architecture family X addresses bottleneck Y because mechanism Z.'",
-    "6. Learn from the accumulated vocabulary and past discoveries. If a direction was tried and failed, do NOT repeat it. If a discovery confirms a mechanism, cite it explicitly in your causal_hypothesis — use the exact cite_id from citation_sources and reference it verbatim in the text.",
+    "6. Learn from the accumulated vocabulary and past discoveries. If a direction was tried and failed, do NOT repeat it. If a discovery confirms a mechanism, cite it explicitly in your causal_hypothesis — use the exact source_ref from source_refs and reference it verbatim in the text.",
     "",
     "PRIOR ITERATION FEEDBACK:",
     "If a `[PRIOR ITERATION GATE EXHAUSTION]` block appears in your context, treat it as load-bearing evidence about the previous iteration's bottleneck — propose in the direction it recommends (smaller VRAM footprint or shorter wall time) rather than repeating the failed configuration. Do NOT re-attempt the same architecture class at the same scale that just exhausted its budget.",

@@ -2075,7 +2075,7 @@ class StubLLMBridge(LLMBridge):
             "predicted_failure_modes": ["Stub mode: failure modes not predicted."],
             "proposed_vocab_links": [],
             "proposed_vocab_candidates": [],
-            "citation_sources": [],
+            "source_refs": [],
         }
 
     def _synth_proposer_proposing(self) -> dict:

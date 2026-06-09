@@ -308,7 +308,7 @@ def _reconstruct_expert_context_block(cache: dict[str, Any]) -> str:
                 source="result_interpretation_agent",
                 kind="empirical",
                 content=statement,
-                cite_id=f"cache:{mt}",
+                source_ref=f"cache:{mt}",
                 confidence=0.7,
             )
         )

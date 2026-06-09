@@ -43,7 +43,7 @@ rationale). The proposer-side schema (`ProposalInput`) is unchanged.
 _TODO (Commit 2d)._ How to consume this node's output:
 - **findings** — read `content` (names the bottleneck + the concrete
   implication, and for Tier-1-cited papers carries the verbatim
-  equation / pseudocode inline); `cite_id` attributes it to a paper;
+  equation / pseudocode inline); `source_ref` attributes it to a paper;
   `confidence` interpreted per the rubric.
 - **confidence scores** — defined by `ConfidenceRubric` (single source of
   truth); the bands are surfaced to the proposer via
@@ -182,6 +182,7 @@ produces more than 2-4 distinct findings.
 | `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review.py:61` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
 | `SIDERIUS_TASK` | `agent/prompt_templates/literature_review/__init__.py:188` | task-description string | Downstream task description injected into the compression + synthesis prompts. `render_paper_extract_prompt` accepts a `task_description=` kwarg if generalizing beyond SQUID. | finding quality (relevance grounding), extraction quality (`relevance_to_task` field) |
 | `S2_DEFAULT_TIMEOUT_S` / `S2_MIN_REQUEST_INTERVAL_S` / `S2_MAX_RETRIES` | `agent/skills/paper_resolver_skill/wrapper.py:46-51` | `30` / `1.1` / `3` | S2 network behavior (per-request timeout, throttle interval, retry count on 429/5xx). | extraction success rate |
+| `_AGENT_CARD.trust_level` | `nodes/ml_literature_review.py:65` | `"soft_prior"` | Machine-readable trust calibration emitted on every run, read by the proposer's synthesis rules (P-b + P-c). Three valid levels: `hard_limit` (non-negotiable — physics-style constraints), `strong_prior` (weight comparably to experiment data — human directives), `soft_prior` (inspirational priors requiring experiment validation — literature). Lit-review is `soft_prior` by design: findings expand the design space but require experiment confirmation. **Override only by changing the constant in code** — overriding per-run would defeat the calibration's role as a stable signal the proposer can trust. | proposal weighting (the proposer's synthesis rules treat soft_prior findings as inspirational; experiment data takes precedence on conflict) |
 
 ### Resolver-skill parameters NOT currently exposed via `LiteratureReviewInput`
 
@@ -204,8 +205,8 @@ count-vs-quality picture is complete.
 | Hook | Location | Drop condition |
 |---|---|---|
 | Missing content | `_synthesize` for-loop | `f.get("content")` is falsy or `f` is not a dict |
-| Unmatched cite_id | `_synthesize` for-loop | `cite_id not in valid_ids` (cited paper not in the retrieved set) |
-| `content_paper_id` consistency (post-2d cite-id fix) | `_validate_content_paper_id` (`nodes/ml_literature_review.py`) | `content_paper_id` missing, not in `valid_ids`, or `!= cite_id` |
+| Unmatched source_ref | `_synthesize` for-loop | `source_ref not in valid_ids` (cited paper not in the retrieved set) |
+| `content_paper_id` consistency (post-2d cite-id fix) | `_validate_content_paper_id` (`nodes/ml_literature_review.py`) | `content_paper_id` missing, not in `valid_ids`, or `!= source_ref` |
 | Confidence clamp (`abstract_only_ceiling`) | `_clamp_abstract_only_confidence` | (clip, not drop) — v=0-cited finding's confidence is clipped to the ceiling |
 | Heading normalisation (`_normalize_finding_content_headings`) | `_synthesize` for-loop | (transform, not drop) — rewrites known heading variants to canonical form |
 | `ExpertContextItem` schema validation | constructor `try/except ValidationError` | Unexpected schema violation on the LLM payload |
