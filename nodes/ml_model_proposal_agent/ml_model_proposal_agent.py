@@ -1,4 +1,4 @@
-# nodes/ml_model_proposal_agent.py
+# nodes/ml_model_proposal_agent/ml_model_proposal_agent.py
 """
 ml_model_proposal_agent — Node 3 in the SIDERIUS graph.
 

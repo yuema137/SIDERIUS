@@ -1,4 +1,4 @@
-# nodes/ml_code_validator_agent.py
+# nodes/ml_code_validator_agent/ml_code_validator_agent.py
 """
 ml_code_validator_agent — Node 5 in the SIDERIUS graph.
 
@@ -480,9 +480,11 @@ class MLCodeValidatorAgent:
             vocab_for_check = None
             try:
                 import json as _json
+                from pathlib import Path as _Path
 
+                # parents[2]: nodes/<agent>/<agent>.py → nodes/<agent> → nodes → repo root
                 seed_path = os.path.join(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    _Path(__file__).resolve().parents[2],
                     "agent",
                     "schemas",
                     "vocab_seed.json",
