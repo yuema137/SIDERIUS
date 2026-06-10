@@ -1759,21 +1759,53 @@ as the always-true trigger.
       as a module-level function in `workflows/model_exploration.py` (or a
       sibling helper file if that's the convention; check the file's
       existing helper placement). Behaviour:
-  - `findings`: concatenate across outputs. Findings already carry their
-    cited paper's equations / pseudocode inline inside `content` (per the
-    2d revision); the merge does not need any equation-specific handling.
-  - `new_vocab_candidates`: concatenate.
-  - `agent_cards`: one card per output, accumulated.
-  - `suggested_mindset`: last non-None wins (documented as a v1 rule; flagged
-    for revisit when the second agent populates this — see §9 Q2 of the
-    architecture doc).
+  - **N=1 case**: equivalent to calling the per-agent protocol's
+    `local_all_channels(outputs[0])` directly — the Commit 5 protocol at
+    `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
+    already produces the 4-kwarg shape this merge returns. The merge
+    function should `from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import local_all_channels`
+    and delegate for N=1; the merge logic only fires for N>=2. Avoids
+    duplicating the per-agent → 4-kwarg mapping.
+  - **N>=2 case** (no v1 caller; future-facing):
+    - `findings`: concatenate across outputs. Findings already carry their
+      cited paper's equations / pseudocode inline inside `content` (per the
+      2d revision); the merge does not need any equation-specific handling.
+    - `new_vocab_candidates`: concatenate.
+    - `agent_cards`: one card per output, accumulated.
+    - `suggested_mindset`: last non-None wins (documented as a v1 rule; flagged
+      for revisit when the second agent populates this — see §9 Q2 of the
+      architecture doc).
+  - **N=0 case**: returns the empty default
+    (`expert_context=[], vocab_seed=[], agent_cards=[], mindset=None`).
+    The proposer's downstream caller handles empty as "internal-only run".
   - Returns the **four-kwarg** dict directly consumable by `local_full_context`.
     The earlier-planned 5th `reference_library` kwarg was cancelled in the
     2d revision — equations now travel inline inside finding `content`, so
     the merge has nothing extra to concatenate beyond the four channels.
-- [ ] Add `should_run_literature_review(interp_output: InterpretationOutput) -> bool`:
-      always returns `True` for v1. Docstring includes the cost-tradeoff
-      note from spec §6.
+- [ ] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
+      reads the resolved `enabled` flag (CLI → YAML → default True). For v1
+      the gate is just `return enabled` — `interp_output` is reserved for
+      future content-based gating (e.g. "skip lit-review when interpretation
+      confidence > 0.9"). Docstring includes the cost-tradeoff note from
+      spec §6.
+
+  **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09):
+  - **YAML layer** (`configs/lit_review_config.yaml`): top-level
+    `enabled: bool` defaulting to `True`. Operators edit the YAML to
+    disable lit-review for an entire experiment chain.
+  - **CLI layer** (`run_one_iteration.py` / `run_chain.sh`): add a
+    `--lit_review_enabled` / `--no-lit_review_enabled` pair via
+    `argparse.BooleanOptionalAction`. Overrides the YAML default for a
+    single run without editing the config file.
+  - **Resolution priority**: CLI flag (when explicitly set) >
+    YAML `enabled` > default `True`. The workflow resolves this in one
+    place before calling `should_run_literature_review`, then passes the
+    resolved boolean as a kwarg.
+  - **Scope**: the CLI flag controls **enable/disable only**, not the
+    lit-review parameters. `root_papers`, `dynamic_search`, `synthesis`,
+    `confidence_rubric`, etc. all stay in the YAML — config-file-only.
+    This keeps the CLI surface manageable; operators wanting parameter
+    tweaks edit the YAML.
 - [ ] Load `configs/lit_review_config.yaml` at workflow startup (path resolved
       relative to project root via the same mechanism the workflow already
       uses for other configs — grep for `yaml.safe_load` to confirm). Convert
@@ -1782,7 +1814,8 @@ as the always-true trigger.
 - [ ] At the per-iteration insertion point:
   ```
   interp_output = result_interpretation_agent.run(...)
-  if should_run_literature_review(interp_output):
+  lit_review_enabled = _resolve_lit_review_enabled(cli_args, lit_review_config)
+  if should_run_literature_review(interp_output, enabled=lit_review_enabled):
       lit_input = build_lit_review_input(lit_review_config, interp_output, ...)
       lit_output = ml_literature_review.run(lit_input)
       external_outputs = [lit_output]
@@ -1791,12 +1824,33 @@ as the always-true trigger.
   external_channels = merge_external_agent_outputs(external_outputs)
   for attempt in range(1, max_proposal_attempts+1):
       proposal_input = local_full_context(
-          interp_output, ..., **external_channels,
+          interp_output,
+          attempt_storage,
+          human_advice=human_advice_propose,  # P-d wrap path stays alive
+          **external_channels,                # P-c/P-d channels: expert_context, vocab_seed, agent_cards, mindset
+          # ...other existing run-level kwargs (is_trial / trial_strategy /
+          # trial_time_budget_minutes / hardware_context / vram_budget_gb / etc.)
       )
       ...
   ```
-- [ ] Create `configs/lit_review_config.yaml`:
+  **Important: `human_advice=human_advice_propose` stays as a kwarg
+  alongside `**external_channels`.** The P-d wrap path (in
+  `ml_result_interp_to_ml_model_propose.local_full_context`) handles the
+  `human_advice` value by wrapping it into an `ExpertContextItem` and
+  injecting a synthesized `human` `AgentCard` with
+  `trust_level="strong_prior"`. Dropping `human_advice` here would lose
+  the only path human directives reach the proposer.
+- [ ] Flesh out `configs/lit_review_config.yaml` (a stub exists from
+      Commit 4b-final containing only the `synthesis.transfer_tolerance`
+      block; the stub's note "Commit 7 will flesh out" is **outdated** —
+      Commit 6 does this, Commit 7 just adds the cache README + audit).
+      Replace the stub with:
   ```yaml
+  # Top-level enable/disable flag — Risk 4 two-layer gate. Operators may
+  # also override at the CLI via --no-lit_review_enabled / --lit_review_enabled
+  # without editing this file.
+  enabled: true
+
   root_papers:
     - source_type: arxiv
       identifier: "2406.04378"      # TIDMAD
@@ -1806,13 +1860,25 @@ as the always-true trigger.
     max_rounds: 3
     initial_verbosity: 0
     escalation_allowed: true
+  synthesis:
+    transfer_tolerance: moderate    # preserved from the 4b-final stub
   ```
 - [ ] Create `reference_data/root_papers_cache/README.md` explaining: format
       (one JSON file per paper, named `{paper_id}.json`, content is a
       serialized `RetrievedPaper`), invalidation (delete the file manually
-      to force re-fetch + re-compression), and why this cache is committed
-      (per-agent committed cache per architecture doc §8 *Cache and
-      reproducibility*).
+      to force re-fetch + re-compression), and the contract with the
+      lit-review node (`DEFAULT_ROOT_CACHE_DIR` constant at
+      `nodes/ml_literature_review.py:61` points here by default).
+
+  **Risk 5 resolution (P-design 2026-06-09)**: only the README is
+  committed in Commit 6 — NOT the cache files themselves. Production
+  runs populate the cache via the S2 + extraction path on first run;
+  subsequent runs hit the cache. Operators wanting bit-for-bit
+  reproducibility can manually copy the Phase-1 pilot cache files from
+  `reference_data/lit_review_pilot_cache/` (the gitignored pilot cache
+  the Phase-1 / Phase-2 / §10 FULL tests use) into
+  `reference_data/root_papers_cache/`. We may revisit committing the
+  files if reproducibility issues from S2 variability become a problem.
 - [ ] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`):
   - [ ] `merge_external_agent_outputs([single_output])` returns the four
         channels mapped correctly.
@@ -1826,10 +1892,16 @@ as the always-true trigger.
         a canned `LiteratureReviewOutput`, invoke the per-iter section and
         assert the `ProposalInput` arriving at the proposer has the expected
         `agent_cards` and `expert_context` entries.
-- [ ] Tier-0 dual-mode integration test (existing workflow test, if any) is
-      re-run to confirm nothing broke. If there is no existing dual-mode
-      test for this insertion point, the wiring smoke test above stands as
-      the gate.
+- [ ] **Extend an existing dual-mode test to cover the lit-review insertion
+      point** (Risk 6 resolution, P-design 2026-06-09 — do NOT just rely
+      on the wiring smoke test). Candidates from
+      `tests/integration/workflows/`: `test_k9_invented_model_dual_mode.py`
+      or `test_n_recent_gate_exhaustions_dual_mode.py`. The extension
+      mocks `MLLiteratureReviewAgent.run` to return a canned
+      `LiteratureReviewOutput` and asserts the per-iteration
+      `ProposalInput` carries the expected `agent_cards` + `expert_context`.
+      Catches workflow-level wiring regressions for free on every
+      dual-mode CI run.
 
 **Test gate**:
 ```
@@ -1850,6 +1922,15 @@ Commit-2d full run. Record in `docs/validation_suite_runs.md`.
 highest-stakes checkpoint — it decides whether the entire lit-review
 addition produces a measurable, traceable improvement in the proposer's
 output.
+
+**Cost callout (Risk 7, P-design 2026-06-09)**: Checkpoint D runs **two
+complete workflow iterations** (Run A lit-review ON, Run B OFF) on the
+same starting state. Each iteration touches the proposer LLM + the
+lit-review pipeline + downstream tuner gates. **Realistic per-iteration
+cost: $1-6 each → $2-12 total for the A/B**, plus the §10 FULL
+prerequisite re-run ($1-6) if any prompt / `ConfidenceRubric` /
+`transfer_tolerance` default has changed since the most recent §10 FULL
+sign-off. Operator should be aware before scheduling.
 
 **How to run**: run two complete workflow iterations back-to-back using the
 same starting state (same model, same experiment history, same seed):
