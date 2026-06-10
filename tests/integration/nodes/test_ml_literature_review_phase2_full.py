@@ -72,12 +72,13 @@ load_dotenv(dotenv_path=_PROJECT_ROOT / ".env")
 # Imported by reference rather than copied so a corpus update in the pilot
 # automatically propagates here.
 from tests.integration.nodes.test_ml_literature_review_phase2_pilot import (  # noqa: E402
-    _LATEX_DELIMITER_RE,  # locked Mechanism-vs-Adaptation placement regex
+    _LATEX_DELIMITER_RE,  # broad LaTeX-delimiter regex (Tier-1 verbatim-quote check)
     _TIER2_FLAG_WORDS,  # Tier-2 paraphrase flag tokens
     CACHE_DIR,
     CORPUS,
     DEEPSEEK_MODEL_ID,
     DEEPSEEK_PROVIDER,
+    _contains_equation_latex,  # equation-vs-shape discriminator for Adaptation rule
     _extract_sections,  # parser for 3-part finding content
     _interp_seed,
     _load_corpus_or_skip,
@@ -212,18 +213,23 @@ def test_phase2_full_real_run(tmp_path):
                 f"section. Artifact: {ARTIFACT_PATH}"
             )
 
-    # (b) Locked placement rule: Adaptation MUST NOT contain raw LaTeX
-    # (any standard delimiter form: `$$`, `$`, `\(`, `\[`). Applies to ALL
-    # findings regardless of tier. Catches the 2026-06-09 regression.
+    # (b) Locked placement rule: Adaptation MUST NOT contain a re-quoted
+    # equation. Applies to ALL findings regardless of tier. Pure shape
+    # annotations like \([B,256,T]\) and single-variable references like
+    # $T$ are allowed — only equation-like content (has '=' or a LaTeX
+    # operator macro) is a violation. See _contains_equation_latex.
     adaptation_violations: list[str] = []
     for i, item in enumerate(findings, start=1):
         sections = _extract_sections(item.content)
-        if _LATEX_DELIMITER_RE.search(sections["adaptation"]):
+        if _contains_equation_latex(sections["adaptation"]):
             adaptation_violations.append(f"finding #{i} ({item.source_ref})")
     assert not adaptation_violations, (
-        "Adaptation contains raw LaTeX — Commit 2d locked "
-        "Mechanism-vs-Adaptation placement rule violated. Offenders: "
-        f"{adaptation_violations}. Artifact: {ARTIFACT_PATH}"
+        "Adaptation contains a re-quoted equation — Commit 2d locked "
+        "Mechanism-vs-Adaptation placement rule violated. Equation-like "
+        "content (has '=' or a LaTeX operator macro) must stay in "
+        "Mechanism, not Adaptation. Shape annotations like \\([B,T]\\) "
+        f"are allowed. Offenders: {adaptation_violations}. "
+        f"Artifact: {ARTIFACT_PATH}"
     )
 
     # (c) Tier-1 verbatim check + Tier-2 paraphrase-flag check.
@@ -259,7 +265,7 @@ def test_phase2_full_real_run(tmp_path):
 
     # ----- §10.5 collapse-detection floor (Phase 2): ≥2 of 7 root papers ----
     # The floor is the stable-attractor count for the current 2-bottleneck
-    # seed, not the typical yield (which is stochastic in the 2–3 range).
+    # seed, not the typical yield (which is stochastic in the 2-3 range).
     # Per-finding structural quality is gated by the assertions above; this
     # backstop only fires on catastrophic synthesis collapse. See §10.5.a in
     # docs/external_agents_for_proposer.md.
