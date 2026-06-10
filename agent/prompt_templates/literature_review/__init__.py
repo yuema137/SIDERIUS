@@ -79,9 +79,9 @@ _SYNTHESIS_CONTENT_FORMAT_V1 = """Produce EXACTLY this shape (the four separate 
 structured `content`):
 
   {"findings": [
-     {"content": "**Implication:** Given the optimization-to-metric mismatch on full-spectrum SQUID, try an SNR-normalised reconstruction loss for the hard segments.\\n**Mechanism:** SNRAware aligns the loss with the SNR metric via\\n$$\\\\mathcal{L}_{\\\\text{SNR}} = -\\\\log\\\\frac{\\\\|s\\\\|^2}{\\\\|s - \\\\hat{s}\\\\|^2}$$\\nover whitened single-coil segments, applied alongside G-factor map augmentation.\\n**Adaptation:** Replace MSE on high-SNR segments with this log-ratio form; keep MSE elsewhere to avoid destabilising the WaveNet backbone.\\n(rationale: deep-read, on-domain mechanism transfer with a clear ground-truth equation.)",
-      "source_ref": "arxiv:2503.18162",
-      "content_paper_id": "arxiv:2503.18162",
+     {"content": "**Implication:** Given the optimization-to-metric mismatch under noisy targets, try training on paired noisy realizations instead of clean references when paired SQUID acquisitions are available.\\n**Mechanism:** Noise2Noise trains a denoiser using two independent noisy observations $y_1$, $y_2$ of the same clean signal with the symmetric L2 loss\\n$$\\\\mathcal{L} = \\\\mathbb{E}\\\\left[\\\\|f_\\\\theta(y_1) - y_2\\\\|^2\\\\right]$$\\n(approximate equation, reconstructed from a degraded PDF; the original paper derives this form under zero-mean noise).\\n**Adaptation:** When two SQUID acquisitions of the same dark-matter signal are available, train with one as input and the other as the regression target; this preserves the WaveNet backbone while removing the need for a clean reference.\\n(rationale: deep-read, cross-domain (image -> 1-D signal) but the loss form transfers directly under independent noisy pairs.)",
+      "source_ref": "arxiv:1803.04189",
+      "content_paper_id": "arxiv:1803.04189",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
@@ -149,9 +149,9 @@ paper id inside `content`; the id belongs ONLY in `source_ref`."""
 _SYNTHESIS_CONTENT_FORMAT_V0 = """Produce EXACTLY this shape (note the four separate keys per finding):
 
   {"findings": [
-     {"content": "Given the high-frequency-overfitting bottleneck, WaveNet\'s dilated causal convolutions widen the receptive field without extra depth — try a wider dilation schedule. (rationale: single full-spectrum paper, not yet replicated here.)",
-      "source_ref": "arxiv:2406.04378",
-      "content_paper_id": "arxiv:2406.04378",
+     {"content": "Given the optimization-to-metric mismatch under noisy targets, Noise2Noise\'s symmetric L2 loss across two independent noisy observations suggests training with one SQUID acquisition as input and another as target — removing the need for a clean reference. (rationale: deep-read, cross-domain (image -> 1-D signal) but the loss form transfers directly under independent noisy pairs.)",
+      "source_ref": "arxiv:1803.04189",
+      "content_paper_id": "arxiv:1803.04189",
       "confidence": <a number assigned per the Confidence rubric below>}
   ]}
 
