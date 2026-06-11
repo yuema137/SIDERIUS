@@ -58,7 +58,7 @@ commit). A commit is not "done" until both its automated test gate is green
   - [x] **Checkpoint C** — Dynamic search loop behavior · signed off 2026-05-28 (artifact `docs/dynamic_search_pilot.md`)
 - [x] **Commit 5** — Protocol `ml_literature_review_to_ml_model_propose.py` (audit-only on `local_full_context`; **4-kwarg shape**: `expert_context` / `vocab_seed` / `agent_cards` / `mindset`. No `reference_library` plumbing — that channel was cancelled in the 2d revision; equations travel inline inside finding `content`.) · committed `db55537`
   · gate `tests/unit/agent/protocols/test_ml_literature_review_to_ml_model_propose.py`
-- [ ] **Commit P** — Proposer awareness for external findings — *(retroactive — fixes structural gaps the Q1–Q7 audit surfaced after Commit 5; see new §11 of `external_agents_for_proposer.md`)*
+- [x] **Commit P** — Proposer awareness for external findings — *(retroactive — fixes structural gaps the Q1–Q7 audit surfaced after Commit 5; see new §11 of `external_agents_for_proposer.md`)* · committed across `c0c0ea4` (P-design), `0c280ba` (P-a), `a629e4a` (P-b), `69e7234` (P-c), `aeb4d9f` (P-d), `6348ece` (P-e); Checkpoint P signed off 2026-06-05
   · scope: make the proposer actually read external-agent findings in production (pipeline) mode. Generic by construction — no agent-specific names in schemas or prompts. Resolves four problems found in audit: Rule 1 blocks literature, pipeline drops `constraints`/`hardware_context`/`vram_budget_gb`/`expert_advice`, literature renders at the bottom of the user prompt, no synthesis instruction.
   · gate `tests/unit/agent/ml_model_proposal_agent/` + `tests/unit/agent/schemas/` + prompt-template snapshot tests
   - [x] **P-design** — Doc-only scope contract: new `## Commit P` section in this file + new §11 in `external_agents_for_proposer.md`. No code touched. · committed `c0c0ea4`
@@ -76,9 +76,7 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **§10 End-to-end validation suite** — permanent acceptance gate
   (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
   commit. Run log: `docs/validation_suite_runs.md`.
-  - [ ] **First FULL run** — after Commit P closes (Commit-2 family complete +
-        proposer-awareness landed; suite validates the *post-P* proposer
-        behavior, not the broken pre-P one)
+  - [x] **First FULL run** — completed across the 2026-06-09 + 2026-06-10 chain; FAILED under the original ≥4 floor, PASSED under the amended ≥2 floor. See `docs/validation_suite_runs.md` 2026-06-09 + 2026-06-10 entries. Floor amendment landed in `5e312ab` (§10.5 floor 4→2 + new §10.5.a stable-attractor calibration); the assertion broadness + V1/V0 example pattern-leak fixes that closed the chain landed in `9f731fe` (Noise2Noise example replacement) + `d652a3b` (equation-vs-shape discriminator).
   - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
         the post-P proposer)
 
@@ -1499,13 +1497,13 @@ deepseek, `search_llm_*` unset).
   `reference_library` channel cancellation in the 2d revision.
 
 **Checklist**:
-- [ ] **Audit step (no code change)**: open
+- [x] **Audit step (no code change)**: open
       `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py:43-222`
       and confirm `local_full_context` accepts `mindset: str | None` and
       `agent_cards: list[AgentCard] | None` kwargs and maps them into
       `ProposalInput`. Pre-conversation analysis confirmed this; verify
       once more before declaring the audit closed.
-- [ ] Write `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
+- [x] Write `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
       matching the conventions in `ml_result_interp_to_ml_model_propose.py`:
   - Module docstring listing implemented vs planned protocols.
   - `local_all_channels(output: LiteratureReviewOutput) -> dict[str, Any]`
@@ -1519,17 +1517,17 @@ deepseek, `search_llm_*` unset).
     `ExpertContextItem.content`, which already travels through `expert_context`.
   - `database_all_channels(...) -> dict[str, Any]` placeholder that raises
     `NotImplementedError`.
-- [ ] Tests:
-  - [ ] `local_all_channels` maps all four channels correctly with a fully
+- [x] Tests:
+  - [x] `local_all_channels` maps all four channels correctly with a fully
         populated `LiteratureReviewOutput`.
-  - [ ] `local_all_channels` passes through `new_vocab_candidates=[]` and
+  - [x] `local_all_channels` passes through `new_vocab_candidates=[]` and
         `suggested_mindset=None` without error (v1 wired-empty channels).
-  - [ ] `local_all_channels` wraps a single `agent_card` into a list of one
+  - [x] `local_all_channels` wraps a single `agent_card` into a list of one
         (the field on `ProposalInput` is `agent_cards: list[AgentCard]`).
-  - [ ] `local_all_channels` does NOT emit any `reference_library` or
+  - [x] `local_all_channels` does NOT emit any `reference_library` or
         `reference_library_md` kwarg (regression guard against the
         cancelled design).
-  - [ ] `database_all_channels` raises `NotImplementedError`.
+  - [x] `database_all_channels` raises `NotImplementedError`.
 
 **Test gate**:
 ```
