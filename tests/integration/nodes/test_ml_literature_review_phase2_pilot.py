@@ -131,6 +131,74 @@ _LATEX_DELIMITER_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
+# Equation-vs-shape discriminator for the Adaptation placement rule.
+#
+# The locked Mechanism-vs-Adaptation rule's intent is "no re-quoting of
+# equations from the source paper", NOT "no math-mode markup at all."
+# A shape annotation like ``\([B,256,T]\)`` or a single-variable reference
+# like ``$T$`` is legitimate math-mode use in Adaptation; only re-quoted
+# equations are violations.
+#
+# Discriminator: a math segment is equation-like iff its inner content
+# contains ``=`` (equality / assignment) OR a major LaTeX operator macro
+# (sum / int / frac / log / partial / leq / to / ...). Math fonts
+# (``\mathcal``, ``\mathbb``), decorations (``\hat``, ``\bar``), boldface
+# (``\bm``), and shape-multiplication operators (``\times``, ``\cdot``) are
+# NOT flagged — they appear in both equations and legitimate shape /
+# variable references.
+#
+# The original ``_LATEX_DELIMITER_RE`` above stays for the Tier-1
+# verbatim-quote check (which only needs "is any LaTeX delimiter present?"
+# in Mechanism); this discriminator is for the Adaptation placement rule.
+# ---------------------------------------------------------------------------
+
+_MATH_SEGMENT_RE = re.compile(
+    r"""
+    \$\$(.*?)\$\$                # $$ ... $$
+    | \\\[(.*?)\\\]              # \[ ... \]
+    | (?<!\\)\$([^$\n]+?)\$      # $ ... $ (avoid escaped \$, single line)
+    | \\\((.*?)\\\)              # \( ... \)
+    """,
+    re.VERBOSE | re.DOTALL,
+)
+
+_EQUATION_INDICATOR_RE = re.compile(
+    r"""
+    =                            # equality / assignment
+    | \\(?:                      # operator macros
+        sum|int|prod|lim
+        | frac|sqrt
+        | log|exp|sin|cos|tan
+        | partial|nabla
+        | leq|geq|neq|approx|propto|equiv
+        | to|rightarrow|mapsto
+      )(?![a-zA-Z])              # not followed by a letter (so `\summary` won't match `\sum`,
+                                 # but `\sum_i`, `\sum^N`, `\sum{...}` all match correctly)
+    """,
+    re.VERBOSE,
+)
+
+
+def _contains_equation_latex(text: str) -> bool:
+    """True if ``text`` contains a LaTeX math segment whose inner content
+    looks like an equation (has ``=`` or an operator macro like
+    ``\\sum``, ``\\frac``, ``\\log``, ``\\partial``, ``\\nabla``,
+    ``\\to``, ``\\leq``, etc.). Pure shape annotations like
+    ``\\([B,256,T]\\)`` or single-variable references like ``$T$`` or
+    ``\\(\\hat{y}\\)`` do NOT match.
+
+    Used by the Adaptation placement-rule assertion to encode the locked
+    rule's INTENT (no re-quoting of equations from the source paper)
+    without over-broadly forbidding all math-mode markup.
+    """
+    for match in _MATH_SEGMENT_RE.finditer(text):
+        inner = next((g for g in match.groups() if g is not None), "")
+        if _EQUATION_INDICATOR_RE.search(inner):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Cache loader — reads the two-file Phase-1 cache, rebuilds RetrievedPaper.
 # Mirrors Phase-1's `_cache_paths` naming convention exactly.
 # ---------------------------------------------------------------------------
@@ -334,8 +402,8 @@ def _render_phase2_artifact(
         method = rp.extract.extraction_method if rp and rp.extract else "unknown"
         source_eq = (rp.extract.key_equations_md if rp and rp.extract else "").strip()
         sections = _extract_sections(item.content)
-        mechanism_has_eq = bool(_LATEX_DELIMITER_RE.search(sections["mechanism"]))
-        adaptation_has_eq = bool(_LATEX_DELIMITER_RE.search(sections["adaptation"]))
+        mechanism_has_eq = _contains_equation_latex(sections["mechanism"])
+        adaptation_has_eq = _contains_equation_latex(sections["adaptation"])
 
         lines += [
             f"### Finding {i} — `{item.source_ref}` (Tier: `{method}`)",
@@ -510,16 +578,22 @@ def test_phase2_pilot_real_run(tmp_path):
                 f"section. Content: {item.content!r}"
             )
 
-    # 3. Locked placement rule: Adaptation MUST NOT contain raw LaTeX ($$
-    # blocks). Applies to ALL findings regardless of tier.
+    # 3. Locked placement rule: Adaptation MUST NOT contain a re-quoted
+    # equation. Applies to ALL findings regardless of tier. Pure shape
+    # annotations like \([B,256,T]\) and single-variable references like
+    # $T$ are allowed — only equation-like content (has '=' or a LaTeX
+    # operator macro) is a violation. See _contains_equation_latex.
     adaptation_violations: list[str] = []
     for i, item in enumerate(findings, start=1):
         sections = _extract_sections(item.content)
-        if _LATEX_DELIMITER_RE.search(sections["adaptation"]):
+        if _contains_equation_latex(sections["adaptation"]):
             adaptation_violations.append(f"finding #{i} ({item.source_ref})")
     assert not adaptation_violations, (
-        "Adaptation contains raw LaTeX ($$ blocks) — violates 2d placement "
-        f"rule. Offenders: {adaptation_violations}. "
+        "Adaptation contains a re-quoted equation — Commit 2d locked "
+        "Mechanism-vs-Adaptation placement rule violated. Equation-like "
+        "content (has '=' or a LaTeX operator macro) must stay in "
+        "Mechanism, not Adaptation. Shape annotations like \\([B,T]\\) "
+        f"are allowed. Offenders: {adaptation_violations}. "
         f"Artifact for review: {ARTIFACT_PATH}"
     )
 

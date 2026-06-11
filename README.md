@@ -340,17 +340,17 @@ Tunes hyperparameters of one model over N rounds. Each round = plan → train �
 
 ```bash
 # Minimal — Gemini, 1 round, agent picks model
-python nodes/ml_hyperparameter_tune_agent.py --max_rounds 1 --run_name first_run
+python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py --max_rounds 1 --run_name first_run
 
 # Trial mode — sparse multi-file sampling, ideal for quick iteration
-python nodes/ml_hyperparameter_tune_agent.py \
+python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
     --is_trial \
     --force_model punet \
     --max_rounds 20 \
     --run_name punet_trial_v1
 
 # With per-experiment advice (recommended for serious runs)
-python nodes/ml_hyperparameter_tune_agent.py \
+python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
     --force_model gated_fno \
     --is_trial \
     --max_rounds 20 \
@@ -716,7 +716,7 @@ When deploying SIDERIUS on a new machine:
 | GPU | RTX 5090 (32 GB) | V100 / A100 (`gpu-shared`) |
 | Workspace | `/home/klz/Data/SIDEREIS_DATA/` | `/expanse/lustre/projects/ddp433/ym137/siderius_workspace/` |
 | Chain runner | `run_chain.sh --mode lilab` (foreground) | `run_chain.sh --mode sdsc` (slurm `afterany`) |
-| Single tuner | `python nodes/ml_hyperparameter_tune_agent.py ...` | `sbatch sdsc_submission_scripts/submit_hpt_agent.slurm ...` |
+| Single tuner | `python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py ...` | `sbatch sdsc_submission_scripts/submit_hpt_agent.slurm ...` |
 
 More in [`docs/memories/reference_sdsc_workspace_paths.md`](docs/memories/reference_sdsc_workspace_paths.md) (gitignored — read locally).
 

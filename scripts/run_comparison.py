@@ -8,7 +8,7 @@ Phases:
                if already present.
   2. Seed:     Pre-populate the agent's summary.json with the baseline result so the
                agent knows what benchmark it must beat from round 1.
-  3. Agent:    Launch nodes/ml_hyperparameter_tune_agent.py for --max_rounds exploration rounds, locked to
+  3. Agent:    Launch nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py for --max_rounds exploration rounds, locked to
                the same model type but free to vary config, loss, and train hparams.
 
 Output structure:
@@ -49,7 +49,7 @@ LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_
 def _agent_env() -> dict:
     """
     Build a subprocess environment with all SIDERIUS paths on PYTHONPATH
-    so that flat imports in nodes/ml_hyperparameter_tune_agent.py, train_engine_sandbox.py, etc. resolve.
+    so that flat imports in nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py, train_engine_sandbox.py, etc. resolve.
     """
     extra = [
         SIDERIUS_ROOT,
@@ -429,7 +429,7 @@ def run_agent(
     formal_train_portion: float = 1.0,
 ):
     """
-    Launches nodes/ml_hyperparameter_tune_agent.py as a subprocess, locked to
+    Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
     model_type, for max_rounds rounds.
 
     The tuner makes two distinct LLM calls per round (planner + reflector).
@@ -447,7 +447,12 @@ def run_agent(
 
     cmd = [
         sys.executable,
-        os.path.join(SIDERIUS_ROOT, "nodes", "ml_hyperparameter_tune_agent.py"),
+        os.path.join(
+            SIDERIUS_ROOT,
+            "nodes",
+            "ml_hyperparameter_tune_agent",
+            "ml_hyperparameter_tune_agent.py",
+        ),
         "--provider",
         provider,
         "--model_id",

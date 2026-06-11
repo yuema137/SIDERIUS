@@ -1,4 +1,4 @@
-# nodes/ml_literature_review.py
+# nodes/ml_literature_review/ml_literature_review.py
 """
 ml_literature_review node — the external literature-review agent.
 
@@ -15,7 +15,8 @@ Pipeline (one ``run``):
      communication invariant in CLAUDE.md — a log, not a channel).
 
 Conventions match the existing nodes (confirmed by reading
-``nodes/result_interpretation_agent.py`` and ``ml_hyperparameter_tune_agent.py``):
+``nodes/result_interpretation_agent/result_interpretation_agent.py`` and
+``nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py``):
   - class with ``.run(inp) -> Output``;
   - the LLMBridge is built lazily in ``run()`` from ``inp.llm_provider`` /
     ``inp.llm_model_id`` via an injectable ``bridge_factory`` (tests pass a fake;

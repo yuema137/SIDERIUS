@@ -1,0 +1,245 @@
+# HyperparamTuningAgent
+
+> Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = full data for canonical scoring) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
+
+## Position in the pipeline
+
+- **Node type**: **standalone-capable** — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` exposes a CLI `main()` that takes the model + budgets + LLM config as flags, builds a `HyperparamTuningInput`, runs the full optimization loop, and writes `run_output_{run_name}.json` to the workspace. The CLI is the historical TIDMAD-style invocation and is what `scripts/run_comparison.py` calls.
+- **Upstream**: `ml_model_proposal_agent` (provides `model_type`, `expert_advice`, `baseline_config`, `parameter_count_estimate` via the `proposal_to_hyperparam_seeded_v1` protocol). Plus `ml_code_validator_agent` gates whether a plugin reaches the tuner (only `passed=True` plugins get tuned).
+- **Downstream**: `result_interpretation_agent` (consumes `HyperparamTuningOutput` per model, converted via `tuning_output_to_model_run_summary` into a `ModelRunSummary` that feeds the next interpretation iteration).
+- **Protocol (upstream)**: `proposal_to_hyperparam_seeded_v1` — maps `ProposalOutput.{model_name, expert_advice, baseline_config, parameter_count_estimate}` into this node's seed.
+
+## Input
+
+**Schema**: `HyperparamTuningInput` in `agent/schemas/hyperparam_tuning.py`
+
+### Core (model + LLM routing + guidance)
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `model_type` | `str` | Yes | — | Architecture to tune. One of the registered model keys (`punet`, `wavenet`, `fcnet`, `transformer`, `rnn`), or `"auto"` to let the planner pick. Plugin types (from `ml_model_implementor`) require `seed_plugin_path`. |
+| `seed_plugin_path` | `str \| None` | No | `None` | Optional path to a plugin `.py` file used as the seed model. Required when `model_type` is a plugin (not built-in). The tuner copies the file into `{workspace}/plugins/{run_name}/` at run start so the training subprocess sees it via `SIDERIUS_PLUGIN_DIRS`. The file's `PLUGIN_MODEL_TYPE` must equal `model_type`. |
+| `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents (typically `ml_model_proposal_agent.expert_advice`). Accepts a plain string or a structured `ExpertAdvice` object. Injected into the planner prompt. |
+| `human_advice` | `str \| None` | No | `None` | Optional human-provided guidance. Injected into the planner prompt alongside `expert_advice` under a `[Human Guidance (high priority)]` header. |
+| `seed_records` | `list[dict[str, Any]]` | No | `[]` | Pre-existing experiment records injected into the agent's memory before round 1. Typically contains the baseline result so the planner has prior history to reason from. |
+| `llm_provider` | `Literal["gemini", "openai", "deepseek"]` | No | `"gemini"` | Provider for the planner sub-call (and default for the reflector when not overridden). |
+| `llm_model_id` | `str` | No | `"gemini-3.1-flash-lite-preview"` | Model ID for the planner sub-call (and default for the reflector). |
+| `reflect_provider` | `Literal["gemini", "openai", "deepseek"] \| None` | No | `None` | Optional separate provider for the reflector sub-call. When `None`, the reflector uses `llm_provider`. Enables planner/reflector split (e.g. cheap planner + smarter reflector). |
+| `reflect_model_id` | `str \| None` | No | `None` | Optional separate model ID for the reflector. When `None`, falls back to `llm_model_id`. |
+| `max_retries` | `int \| None` | No | `None` | Maximum retry attempts for transient API errors (429, 5xx). `None` = retry indefinitely; the process owner (Slurm wall time / operator interrupt) is expected to terminate stalled runs. |
+| `plan_overrides` | `dict[str, Any]` | No | `{}` | Hard overrides applied to every `ExperimentPlan` after the LLM produces it. Keys must be valid `ExperimentPlan` field names. Used to force-pin specific hyperparameters that the LLM is incorrectly drifting on. |
+
+### Round / attempt budgets
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `max_rounds` | `int` | No | `50` | Maximum number of **completed** experiment rounds (OOM-skipped attempts do not count). |
+| `attempts_per_round` | `int` | No | `3` | Per-round attempt budget for trial rounds. Each round retries up to this many times after a gate-skip or error before the round is recorded as a failure. |
+| `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because the formal round runs on the full dataset and a single retry is much more expensive. |
+| `max_fail_rounds` | `int` | No | `3` | Consecutive-failed-round abort trigger. When this many rounds in a row exhaust their attempt budget without a success, the tuner exits with `termination_reason="aborted_fail_rounds"`. |
+| `max_epochs` | `int \| None` | No | `None` | Hard cap on epochs per round. When set, the tuner clamps the LLM's planned epochs to `min(planned_epochs, max_epochs)`. |
+| `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in formal mode (full dataset) regardless of what the planner picked. |
+| `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_train_plus_formal_eval"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` re-runs the best trial verbatim on full data; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
+| `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set, the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
+
+### Trial mode sampling
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `is_trial` | `bool` | No | `False` | When `True`, run in trial-explore mode with sparse multi-file sampling for fast exploration. The default (`False`) means rounds run in formal mode unless the planner picks trial. |
+| `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (specific files via `target_files`). |
+| `trial_portion` | `float` | No | `0.1` | Fraction of segments per file for the training scope. |
+| `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
+| `train_portion` | `float` | No | `0.1` | Per-epoch subsample fraction from the training scope. Matches legacy TIDMAD default. |
+| `eval_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy for validation. |
+| `eval_portion` | `float` | No | `0.1` | Fraction of segments per file for validation. Set to `1.0` for formal mode. |
+| `train_validation_align` | `bool` | No | `True` | When `True`, train and eval scopes use the same segment indices (different physical files). |
+| `file_index` | `int` | No | `6` | Validation/training file index (0-39). Default 6 matches the paper's standard split. **Ignored when `is_trial=True`.** |
+
+### Formal mode sampling
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `formal_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Training-side sampling strategy in formal mode. Overrides the planner's `trial_strategy` on any round promoted to formal. |
+| `formal_portion` | `float` | No | `0.1` | Fraction of segments per file for training scope in formal mode. |
+| `formal_train_portion` | `float` | No | `1.0` | Per-epoch iteration fraction from the formal training scope. |
+| `formal_eval_portion` | `float` | No | `1.0` | Fraction of segments per file used for formal-mode eval scope (`snapshot` strategy). Default `1.0` reproduces the legacy full-clone behavior. |
+
+### Sampling seeds
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()` — determines which PSD segments form the data scope. When `None`, auto-generated from `SHA-256(run_name + model_type)`. |
+| `train_base_seed` | `int \| None` | No | `None` | Base seed for per-epoch training subsampling. Epoch `n` uses `train_base_seed + n`. When `None`, auto-generated. |
+
+### Pre-flight gates (resource budgets)
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `trial_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks trial mode. `None` = trial time-gate disabled. |
+| `formal_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks formal mode. `None` = formal time-gate disabled. |
+| `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
+| `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
+| `data_dir` | `str \| None` | No | `None` | Filesystem path to the TIDMAD data directory. Forwarded to `evaluate_time_skill` so the real-dataset warmup can read 1 PSD from disk. |
+
+### Workflow-populated fields
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `storage` | `StorageConfig` | Yes | — | Where this node reads its inputs and writes its outputs. Supports the local filesystem backend; populated by `main()` in CLI mode or by `workflows/model_exploration.py` in workflow mode. |
+| `cleanup_denoised` | `bool` | No | `False` | Delete denoised HDF5 files after scoring each round. Saves disk space (~4 GB per file × 20 files = 80 GB per formal round). Scores have already been computed by the time cleanup runs. |
+| `progress_bar` | `bool` | No | `False` | Stream live tqdm progress bars from training/inference subprocesses. |
+
+## Output
+
+**Schema**: `HyperparamTuningOutput` in `agent/schemas/hyperparam_tuning.py`
+
+| Field | Type | Description |
+|---|---|---|
+| `run_name` | `str` | Echoed from `storage.local.run_name`. |
+| `model_type` | `str` | The architecture that was tuned. |
+| `file_index` | `int` | Validation file index used (formal mode only — ignored under trial). |
+| `status` | `Literal["completed", "partial", "failed"]` | `completed` = reached `max_rounds`. `partial` = hit attempt limit before `max_rounds`. `failed` = unrecoverable error. |
+| `completed_rounds` | `int` | Number of rounds that produced a valid experiment record. |
+| `total_attempts` | `int` | Total attempt count across all rounds (includes OOM-skipped + gate-rejected). |
+| `best_exp_id` | `str \| None` | `exp_id` of the experiment with the highest `denoising_score`. |
+| `best_denoising_score` | `float \| None` | Highest `denoising_score` achieved across all completed rounds. |
+| `best_config` | `dict[str, Any] \| None` | `model_config` + `train_config` + `loss_config` that produced `best_denoising_score`. |
+| `best_file_vector` | `list[float \| None] \| None` | Length-20 score vector from the best experiment. `None` for files not included. |
+| `best_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the best experiment. Enriches `best_file_vector` with raw_baseline + ground_truth columns. |
+| `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful formal (full 20-file) round. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
+| `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, and OOM-skipped rounds. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
+| `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated only when the iteration ended without ever training successfully AND ≥1 attempt was rejected by the pre-flight resource gate. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. |
+| `physical_rejections` | `list[PhysicalRejection]` | One entry per VRAM-gate rejection in this run. Empty list on iterations with no infeasible attempts. |
+| `attempts_per_round` | `int` | Echo of the input value used for this run. |
+| `attempts_per_formal_round` | `int` | Echo of the input value used for this run. |
+| `max_fail_rounds` | `int` | Echo of the input value used for this run. |
+| `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds"]` | Why the loop exited. |
+| `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
+| `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
+
+## CLI usage
+
+```bash
+.venv/bin/python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
+    --provider gemini \
+    --model_id gemini-3.1-flash-lite-preview \
+    --force_model wavenet \
+    --max_rounds 10 \
+    --is_trial \
+    --trial_strategy snapshot \
+    --trial_portion 0.1 \
+    --train_portion 0.1 \
+    --run_name v1 \
+    --workspace ./siderius_workspace \
+    --file_index 6
+```
+
+The CLI is the historical TIDMAD-style invocation and is what `scripts/run_comparison.py` calls. It supports the full range of input fields via flags (the schema's 38 fields map to ~30 CLI args). Result lands at `{workspace}/run_output_{run_name}.json`.
+
+**Limitations of standalone CLI use** (vs workflow-driven):
+
+- **No `seed_records`** — the CLI has no flag to inject prior experiment history, so round 1 starts cold.
+- **No `expert_advice` structured object** — the `--expert_advice` flag takes a string only; structured `ExpertAdvice` requires the Python API.
+- **No `plan_overrides`** — the CLI cannot force-pin specific hyperparameters.
+
+### CLI arguments (key subset — full list via `--help`)
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for the planner sub-call. |
+| `--model_id` | `str` | `gemini-3.1-flash-lite-preview` | Model ID for the planner. |
+| `--reflect_provider` | `str` (optional) | `None` | Optional separate provider for the reflector. |
+| `--reflect_model_id` | `str` (optional) | `None` | Optional separate model for the reflector. |
+| `--expert_advice` | `str` | `"None"` | Initial human-expert advice as a string (legacy CLI shape). |
+| `--max_rounds` | `int` | `10` | Maximum rounds. |
+| `--force_model` | `str` (registry key \| plugin type \| `"auto"`) | `"auto"` | Force a specific architecture. |
+| `--seed_plugin_path` | `str` (optional) | `None` | Path to a plugin `.py` for plugin model_types. |
+| `--run_name` | `str` | `"test_run"` | Run name. |
+| `--workspace` | `str` | `./siderius_workspace` | Workspace root. |
+| `--is_trial` | flag | `False` | Enable trial-explore mode. |
+| `--trial_strategy` / `--trial_portion` / `--train_portion` / `--target_files` / ... | various | various | Mirror the schema fields above. |
+| `--file_index` | `int` | `6` | Validation file index (formal mode). Ignored under `--is_trial` per `feedback_no_file_index_in_trial`. |
+| `--progress_bar` | flag | `False` | Stream subprocess tqdm output. |
+
+## Python API usage
+
+```python
+from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+
+inp = HyperparamTuningInput(
+    model_type="attn_unet",  # from upstream proposal
+    seed_plugin_path="/abs/path/to/agent_generated/models/attn_unet.py",
+    expert_advice=proposal_output.expert_advice,  # structured ExpertAdvice
+    seed_records=[baseline_record],  # prior experiments
+    max_rounds=10,
+    attempts_per_round=3,
+    attempts_per_formal_round=5,
+    max_fail_rounds=3,
+    # Trial mode + sampling:
+    is_trial=True,
+    trial_strategy="snapshot",
+    trial_portion=0.1,
+    train_portion=0.1,
+    # Pre-flight gates:
+    trial_time_budget_minutes=20.0,
+    trial_vram_budget_gb=8.0,
+    data_dir="/home/klz/Data/TIDMAD",
+    # LLM routing:
+    llm_provider="gemini",
+    llm_model_id="gemini-3.1-flash-lite-preview",
+    reflect_provider="openai",  # split planner / reflector
+    reflect_model_id="gpt-5-mini",
+    # Storage:
+    storage=StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace="./workspace", run_name="iter_001"),
+    ),
+)
+
+agent = HyperparamTuningAgent()  # bridge_factory + sandbox_factory inferred
+output = agent.run(inp)  # -> HyperparamTuningOutput
+```
+
+The constructor accepts `bridge_factory` and `sandbox_factory` (for test injection — both default to the real `LLMBridge` and `TidmadSandbox` classes; pseudo-mode tests inject `RecordingLLMBridge` / `RecordingSandbox`). The LLM bridge is built **lazily inside `run()`** (not at construction) because it depends on input-field LLM routing — the workflow uses `agent.set_run_context(...)` to deposit token-usage audit args that get applied right after the lazy bridge build.
+
+## Storage outputs
+
+- **Run output JSON**: `{storage.local.workspace}/run_output_{run_name}.json` — the validated `HyperparamTuningOutput` dumped at the end of `run()`. Contains `all_records` (the full per-round audit trail) plus the best run + score tables + gate-exhaustion / physical-rejection info. The workflow reads this and converts it to `ModelRunSummary` via `tuning_output_to_model_run_summary` for the next interpretation pass.
+- **Run config snapshot**: `{workspace}/run_config_{run_name}.json` — the resolved input config (after defaults + plan-overrides). Audit log for reproducibility.
+- **Per-round trial config**: `{workspace}/trial_config_{run_name}_round{N}.json` — the resolved `TrialConfig` for round N, written before the training subprocess starts. Used by `core.resume.restore_prior_state` for crash-recovery.
+- **Token usage**: `{workspace}/token_usage.jsonl` (when `set_run_context` is called by the workflow) — append-only log of every LLM call's token cost.
+- **Per-run plugin dir**: `{workspace}/plugins/{run_name}/` — copy of `seed_plugin_path` written at run start so the training subprocess can find the plugin via `SIDERIUS_PLUGIN_DIRS`. Only populated when `seed_plugin_path` is set.
+- **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`.
+
+## Key behavioral notes
+
+- **Round-loop structure**: each round runs **plan → resource check → train → infer → score → reflect**:
+  1. **Plan** — `bridge.plan(...)` produces an `ExperimentPlan` (hyperparameters + `is_trial` choice). Subject to `plan_overrides`.
+  2. **Resource check** — `evaluate_vram_skill` + `evaluate_time_skill` pre-flight gates. A failure here counts as an *attempt* (not a *round*); the round retries up to its budget.
+  3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs.
+  4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
+  5. **Score** — `scoring_skill` computes `denoising_score`. Cleanup runs after if `cleanup_denoised=True`.
+  6. **Reflect** — `bridge.reflect(...)` analyses the round's result and updates memory for the next plan call.
+- **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
+- **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
+- **`max_fail_rounds` termination trigger.** When this many *consecutive* rounds exhaust their attempt budget without producing a successful record, the tuner exits with `termination_reason="aborted_fail_rounds"`. The downstream interpreter reads `consecutive_fail_rounds_at_exit` to recognize this exit.
+- **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last** round in the loop has `plan.is_trial` forcibly set to `False` so it runs on the full dataset. The `formal_round_strategy` controls how that round's config is built: `full_clone` (re-run best trial verbatim), `hybrid_params` (best-trial hyperparams + formal sampling), `independent` (planner proposes fresh), or `inherit_best_train_plus_formal_eval` (best train + formal eval scope).
+- **Pre-flight gates use static-formula estimates + brief warmup.** `evaluate_time_skill` uses a static formula by default; when `data_dir` is set, it adds a brief real-dataset warmup that reads 1 PSD from disk. `evaluate_vram_skill` uses architectural pattern tagging (`TIME_FACTOR_THRESHOLD`, `VRAM_FACTOR_THRESHOLD`) and a per-pattern memory budget. Both gates emit a `GateExhaustionInfo` payload when they reject all attempts in a round.
+- **Sandbox subprocess for skill execution.** Each skill runs in a fresh subprocess via `TidmadSandbox` for memory isolation (PyTorch's CUDA context doesn't reliably release VRAM in-process). The sandbox communicates via JSON files in a temp dir and reports back through `get_summary()`. Pseudo-mode tests replace the sandbox with a `RecordingSandbox` that returns canned results without subprocess overhead.
+- **Per-run plugin dir** isolates agent-generated plugins. When `seed_plugin_path` is set, the file is copied into `{workspace}/plugins/{run_name}/` and the training subprocess sees this via `SIDERIUS_PLUGIN_DIRS`. Plugins from one run don't pollute another's `MODEL_REGISTRY`. See `docs/run_scoped_plugins.md` Phase 3.
+- **Hardware context per run.** `core.hardware_context.get_or_create(workspace, run_name)` writes a per-run manifest (device, total memory, hostname, availability). Subprocess children read this via file IPC instead of probing CUDA themselves. See Phase 6.6 §3.9.
+- **OOM-skipped attempts are saved to memory but don't count as rounds.** This is deliberate: the LLM needs to see the OOM failure to avoid proposing the same config again, but it shouldn't burn round budget on a config that never trained.
+- **Run-scoped plugins are NOT cached across iterations.** Each iteration starts with an empty `{workspace}/plugins/{run_name}/`. If the workflow needs to chain plugins, it re-copies `seed_plugin_path` each time. (See `feedback_no_file_index_in_trial` — `--file_index` is silently ignored in trial mode.)
+
+## Dependencies
+
+- **LLM**: two call signatures per round, both via `LLMBridge`:
+  - **Planner** — `bridge.plan(...)` (internally a `bridge.generate(...)` against the planner system prompt). One call per attempt; total per run = `total_attempts`.
+  - **Reflector** — `bridge.reflect(...)` (internally a `bridge.generate(...)` against the reflector system prompt). One call per *successful* round; total per run = `completed_rounds`.
+  - Worst-case total LLM calls per run = `max_rounds × max(attempts_per_round, attempts_per_formal_round) + max_rounds = 50 × 5 + 50 = 300` planner calls + 50 reflector calls under the default budget envelope.
+- **GPU**: **required** for the training and inference skills. The pre-flight `evaluate_vram_skill` uses architectural pattern tagging to estimate VRAM need; rejected configs never reach the GPU. The training subprocess respects `hardware_context.usable_cap_gb` as a hard ceiling.
+- **External services**: none directly. The tuner is the only node that reads the TIDMAD dataset directly (via the training/inference subprocesses); `data_dir` must point at a real TIDMAD root for any GPU run. The `evaluate_time_skill` real-dataset warmup also reads 1 PSD from `data_dir` when set. No network calls outside `LLMBridge`. Filesystem: writes `run_output_{run_name}.json` + intermediate configs + token usage log + per-run plugin dir under the workspace; reads `data_dir` for TIDMAD HDF5s; spawns subprocesses via `TidmadSandbox`.
