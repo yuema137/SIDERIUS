@@ -124,9 +124,7 @@ def main() -> int:
         workspace = Path(tmp)
         inp = _diagnostic_input(workspace)
         agent = MLLiteratureReviewAgent(root_cache_dir=str(CACHE_DIR))
-        agent.bridge = LLMBridge(
-            provider=DEEPSEEK_PROVIDER, model_id=DEEPSEEK_MODEL_ID
-        )
+        agent.bridge = LLMBridge(provider=DEEPSEEK_PROVIDER, model_id=DEEPSEEK_MODEL_ID)
 
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
         print(f"\n=== §10 Phase-2 diagnostic (no-dynamic-search) START {started_at} ===")
@@ -142,11 +140,7 @@ def main() -> int:
     per_root_finding_count: dict[str, int] = {a: 0 for a in root_arxiv_ids}
     for item in findings:
         # source_ref is "{source_type}:{identifier}" — strip the prefix.
-        ref = (
-            item.source_ref.split(":", 1)[-1]
-            if ":" in item.source_ref
-            else item.source_ref
-        )
+        ref = item.source_ref.split(":", 1)[-1] if ":" in item.source_ref else item.source_ref
         if ref in per_root_finding_count:
             per_root_finding_count[ref] += 1
 
@@ -156,10 +150,7 @@ def main() -> int:
         aid = paper["arxiv_id"]
         title = paper.get("short_title", paper.get("title", aid))
         print(f"  {aid:<14} ({title:<24}) — findings: {per_root_finding_count[aid]}")
-    print(
-        f"\nRoot papers with ≥1 finding: {cited_roots} of {len(CORPUS)}  "
-        f"(§10.5 floor: ≥4 of 7)"
-    )
+    print(f"\nRoot papers with ≥1 finding: {cited_roots} of {len(CORPUS)}  (§10.5 floor: ≥4 of 7)")
     print(f"Total findings: {len(findings)}")
 
     # Render the same artifact the FULL test renders, but write to the
