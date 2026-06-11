@@ -1,0 +1,152 @@
+# MLModelImplementor
+
+> Reads a `ProposalOutput` and writes three files: a runnable PyTorch plugin (`{model_name}.py`), a description doc (`description.md`), and a test file (`test_{model_name}.py`). Two-call chain-of-thought (reasoning → code) wrapped in a 5-check validation pipeline plus a self-correction repair loop.
+
+## Position in the pipeline
+
+- **Node type**: **standalone-capable** — `nodes/ml_model_implementor/ml_model_implementor.py` exposes a CLI `main()` that reads `proposal_{run_name}.json` from the workspace, builds an `ImplementorInput`, runs the agent, and writes the plugin + description + test files to `agent_generated/`.
+- **Upstream**: `ml_model_proposal_agent` (provides `model_name`, `model_description`, `mathematical_definition`, `baseline_config` via the `proposal_to_implementor_v1` protocol).
+- **Downstream**: `ml_code_validator_agent` (consumes the three file paths + `model_description` + `mathematical_definition` for the eight-check validation pass via the `ml_model_impl_to_ml_model_valid` protocol).
+- **Protocol (upstream)**: `proposal_to_implementor_v1` — maps `ProposalOutput.{model_name, model_description, mathematical_definition, baseline_config}` into this node's `ImplementorInput`, plus loads `reference_code` from any `inherited_components` so the implementor can read ancestor model source.
+
+## Input
+
+**Schema**: `ImplementorInput` in `agent/schemas/implementor.py`
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `model_name` | `str` | Yes | — | snake_case model type key. Used as the plugin filename and the `PLUGIN_MODEL_TYPE` constant. |
+| `model_description` | `str` | Yes | — | Plain-English description of the architecture from the proposer. Injected into the reasoning prompt and written into the description.md file. |
+| `mathematical_definition` | `str` | Yes | — | Precise layer-by-layer spec from the proposer. The LLM uses this to write `__init__` and `forward`. |
+| `baseline_config` | `dict[str, Any]` | Yes | — | Safe starting configuration from the proposer. Used to derive sensible default values for the Pydantic config fields AND for the Phase B.2a baseline-schema-compatibility check (instantiate `PLUGIN_CONFIG_CLASS` with `baseline_config.model_config` to catch implementor-invented constraints). |
+| `plugin_dir` | `str` | No | `"agent_generated/models"` | Directory where the model plugin file is written. **Fixed output destination independent of `storage.local.workspace`** — agent-generated plugins live in a single common pool so `MODEL_REGISTRY` can pick them up at runtime. |
+| `test_dir` | `str` | No | `"agent_generated/tests"` | Directory where the test file is written. **Fixed output destination independent of `storage.local.workspace`**. |
+| `max_retries` | `int` | No | `2` | Maximum self-correction attempts after the initial code commit. On each retry the LLM receives the validation error and its previous code via `IMPLEMENTOR_REPAIR_PROMPT`. |
+| `reference_code` | `dict[str, str]` | No | `{}` | Source code of referenced ancestor models, keyed by `model_type`. Loaded automatically from `inherited_components`. The implementor uses this as inline context so it can faithfully carry over claimed components. |
+| `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured `ExpertAdvice` object. |
+| `human_advice` | `str \| None` | No | `None` | Optional human-provided guidance — **highest priority**, overrides `expert_advice` when present. Injected into the reasoning prompt as high-priority context. |
+| `previous_validation_failure` | `str \| None` | No | `None` | Validation error message from a previous implementation attempt for this same proposal. When set, the implementor knows upfront what spec-vs-code mismatch to avoid. Populated by the workflow when retrying after the downstream validator rejected the plugin. |
+
+### Workflow-populated fields
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `storage` | `StorageConfig` | Yes | — | Where this node reads its inputs and writes its own output record (e.g. `implementor_output_{run_name}.json`). Note that `plugin_dir` and `test_dir` above are independent of this — the plugin and test files go to `agent_generated/` regardless. |
+
+## Output
+
+**Schema**: `ImplementorOutput` in `agent/schemas/implementor.py`
+
+| Field | Type | Description |
+|---|---|---|
+| `model_type` | `str` | The `PLUGIN_MODEL_TYPE` key written into the plugin file. Same as the input `model_name`. |
+| `model_file_path` | `str` | Absolute path to the written plugin file (e.g. `.../agent_generated/models/attn_unet.py`). |
+| `description_file_path` | `str` | Absolute path to the written `description.md` (e.g. `.../agent_generated/models/attn_unet/description.md`). Used by `result_interpretation_agent` to load architecture knowledge for the next iteration. |
+| `test_file_path` | `str` | Absolute path to the written test file (e.g. `.../agent_generated/tests/test_attn_unet.py`). |
+| `config_fields` | `dict[str, Any]` | Summary of the Pydantic config fields generated by the LLM. Keys are field names, values are their default values. Read by the downstream validator + the tuner. |
+| `model_description` | `str` | Plain-English description of the architecture, passed through from `ImplementorInput`. Carried forward so the downstream validator can provide it to its LLM-review step. |
+| `mathematical_definition` | `str` | Precise mathematical/architectural specification from the proposal, passed through from `ImplementorInput`. Used by the validator's LLM-review step to assess spec-vs-implementation alignment. |
+| `baseline_config_adjustments` | `dict[str, ConfigAdjustment]` | Audit trail of field-level adjustments the implementor made to the proposer's `baseline_config["model_config"]` to satisfy its own Pydantic field constraints. Empty when the implementor accepted the proposer's values verbatim. |
+
+## CLI usage
+
+```bash
+.venv/bin/python nodes/ml_model_implementor/ml_model_implementor.py \
+    --workspace ./siderius_workspace \
+    --run_name v1 \
+    --provider gemini \
+    --model_id gemini-3.1-pro-preview
+```
+
+The CLI reads `{workspace}/proposal_{run_name}.json` (the upstream proposal agent's output), builds a minimal `ImplementorInput` (no `reference_code`, no `expert_advice`, default `plugin_dir` / `test_dir`), runs the agent, and writes:
+- `agent_generated/models/{model_name}.py` (the plugin)
+- `agent_generated/models/{model_name}/description.md` (the description)
+- `agent_generated/tests/test_{model_name}.py` (the test)
+
+**Limitations of standalone CLI use**:
+
+- **No `reference_code`** — inherited-component carryover from past winning runs is skipped. The implementor reasons from `mathematical_definition` alone.
+- **No `previous_validation_failure`** — if the downstream validator rejected a prior plugin, the CLI cannot replay that feedback.
+- **No `expert_advice` / `human_advice`** — fresh attempt, no guidance carryover.
+
+### CLI arguments
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `--workspace` | `str` | `./siderius_workspace` | Root directory for reading `proposal_{run_name}.json`. The plugin/test files always land under `agent_generated/`, NOT here. |
+| `--run_name` | `str` | `v1` | Filename suffix shared across the chain (proposal, implementor). |
+| `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for both the reasoning and code calls. |
+| `--model_id` | `str` | `gemini-3.1-pro-preview` | Specific model id. Note the default is `gemini-3.1-pro-preview` (not `flash-lite`) — code generation benefits from the stronger model. |
+
+## Python API usage
+
+```python
+from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
+from agent.schemas.implementor import ImplementorInput
+from agent.schemas.storage import StorageConfig, LocalStorageConfig
+
+inp = ImplementorInput(
+    model_name="attn_unet",
+    model_description="UNet with multi-head self-attention in the bottleneck...",
+    mathematical_definition="Encoder: Conv1d(1->32, k=7) -> MaxPool(2) -> ...",
+    baseline_config={
+        "model_config": {
+            "segmentation_size": 16384,
+            "batch_size": 4,
+            "embed_dim": 32,
+            "num_heads": 4,
+        },
+        # ... train_config, loss_config, sample_set_config, ...
+    },
+    # Optional inherited-component carryover:
+    reference_code={"wavenet": "<source of wavenet.py>"},
+    # Optional guidance + retry signal:
+    expert_advice="prefer GroupNorm over BatchNorm",
+    previous_validation_failure=None,  # set if the validator rejected a prior plugin
+    # Storage for the output record:
+    storage=StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace="./workspace", run_name="iter_001"),
+    ),
+)
+
+agent = MLModelImplementor(provider="gemini", model_id="gemini-3.1-pro-preview")
+output = agent.run(inp)  # -> ImplementorOutput
+```
+
+The constructor accepts `bridge_factory` (test injection — defaults to `LLMBridge`) and `max_retries` (defaults to `None`, infinite quota retry per project policy). Note `max_retries` on the constructor is the LLMBridge-level network retry; the **code self-correction repair count** is a separate field on `ImplementorInput` (`inp.max_retries`, default `2`).
+
+## Storage outputs
+
+This node writes **four files**, on two different paths:
+
+- **Plugin file** (independent of workspace): `{inp.plugin_dir}/{inp.model_name}.py` — runnable PyTorch plugin assembled from `PLUGIN_TEMPLATE` with LLM-generated sections substituted in. Defines `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE`. Default location: `agent_generated/models/{model_name}.py`.
+- **Description file** (independent of workspace): `{inp.plugin_dir}/{inp.model_name}/description.md` — markdown description carried over from `model_description` + a code block with the `baseline_config`. Read by `result_interpretation_agent` to surface architecture knowledge in subsequent iterations. Default location: `agent_generated/models/{model_name}/description.md`.
+- **Test file** (independent of workspace): `{inp.test_dir}/test_{inp.model_name}.py` — pytest file assembled from `TEST_TEMPLATE`. Tests forward-pass shape, NaN-freeness, and config instantiation. The test file's `sys.path.insert(0, "../models")` line resolves at test runtime to `agent_generated/models/`, where the plugin lives. Default location: `agent_generated/tests/test_{model_name}.py`.
+- **Output record JSON** (in the workspace): `{storage.local.workspace}/implementor_output_{run_name}.json` — the validated `ImplementorOutput` (file paths + config_fields + adjustments + passthrough description/spec). Audit log only; the downstream node receives data through the protocol in memory.
+
+The plugin + description + test paths are **deliberately independent of `storage.local.workspace`**: `MODEL_REGISTRY` scans `agent_generated/models/` at runtime via the plugin loader, so plugins from any workspace pool together. Test discovery follows the same convention.
+
+## Key behavioral notes
+
+- **Two-call chain-of-thought.** Call 1 = `bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, ...)` — free-form reasoning about PyTorch modules, shape handling, config-field choices. Call 2 = `bridge.generate(IMPLEMENTOR_CODE_PROMPT, ...)` — commit to specific code sections as strict JSON. The LLM never writes raw plugin boilerplate — it writes only the marked sections (`init_body`, `forward_body`, `config_fields_code`, `helper_class_defs`, etc.) and `_assemble_plugin` substitutes them into `PLUGIN_TEMPLATE`.
+- **5-check validation pipeline** runs after every commit/repair call (`_validate_code`):
+  1. **Config field consistency** — every `config.<field>` referenced in `init_body` must have a corresponding `Field` declaration in `config_fields_code`.
+  2. **Scalar-only config fields** — all config field values must be `int`, `float`, or `bool`. The hyperparameter tuner only searches scalar dimensions; strings/lists/dicts are rejected.
+  3. **Syntax check** — `ast.parse(plugin_src)` on the fully-assembled plugin source.
+  4. **Smoke test** — `_smoke_test_plugin` instantiates `PLUGIN_CONFIG_CLASS()` with schema defaults, builds `PLUGIN_MODEL_CLASS(config)`, runs a forward pass on a small dummy `[1, 64]` input, asserts output shape `[1, 256, 64]`.
+  5. **Baseline schema compatibility** (Phase B.2a) — instantiate `PLUGIN_CONFIG_CLASS` with the proposer's actual `baseline_config["model_config"]` (NOT defaults) to catch implementor-invented constraints (e.g. `multiple_of=2`) that reject the proposer's values. Adjustments the implementor itself made to `model_config` to fit its constraints are recorded in `ImplementorOutput.baseline_config_adjustments`.
+- **Self-correction repair loop.** On any validation failure, the implementor calls `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` with the previous code + the validation error message — up to `inp.max_retries` times (default 2). Total worst-case LLM calls per run: 1 reasoning + 1 commit + 2 repairs = 4.
+- **Common-mistake patching** (`_patch_common_mistakes`). Before validation, known LLM quirks get rewritten in-place: `self.embedding(input)` → `self.embedding(x)` (Python keyword collision), trailing `$` artefacts stripped, etc. This avoids burning a repair slot on cosmetic LLM errors.
+- **Plugin contract enforced by `PLUGIN_TEMPLATE`.** Every generated plugin defines exactly four module-level attributes — `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE` — in that order. The plugin loader (`core/plugin_loader.py`) refuses to register a plugin missing any of these. The LLM never writes the contract; only the section bodies.
+- **Forward-pass shape contract**: `[B, T] int → [B, 256, T] float` (256-class per-timestep classification head). Hardcoded into `TEST_TEMPLATE.test_forward_shape` and asserted in `_smoke_test_plugin`. Any architecture that fails this shape contract fails the smoke test and triggers a repair.
+- **`reference_code` carries ancestor source verbatim.** When `inherited_components` claims a primitive from a prior model (e.g. "spectral_conv from gated_fno"), the workflow loads the source of `gated_fno.py` into `reference_code["gated_fno"]` and injects it into the reasoning prompt. The downstream validator's inheritance check verifies the claimed primitive's regex actually matches the new plugin's source.
+
+## Dependencies
+
+- **LLM**: 2–4 call sites per run, all via `LLMBridge`:
+  - **Reasoning** — exactly one `bridge.generate_text(IMPLEMENTOR_REASONING_PROMPT, ...)` call per run.
+  - **Code commit** — one `bridge.generate(IMPLEMENTOR_CODE_PROMPT, ...)` call (strict JSON).
+  - **Repair** — up to `inp.max_retries` (default 2) `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` calls when validation fails.
+- **GPU**: not required. The `_smoke_test_plugin` forward pass runs on CPU with a tiny `[1, 64]` dummy input; no GPU needed even when the eventual training will use one.
+- **External services**: none. Depends on the upstream proposal file (in CLI mode) or upstream protocol (in workflow mode). No network calls outside `LLMBridge`. Filesystem dependencies: writes plugin + description + test under `agent_generated/`, writes the output record JSON under the workspace; reads the upstream proposal JSON when running standalone.
