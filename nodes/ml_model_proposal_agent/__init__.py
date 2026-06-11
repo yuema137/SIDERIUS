@@ -16,13 +16,13 @@ via the package path automatically.
 """
 
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
-    LLMBridge,
-    MLModelProposalAgent,
-    PROPOSAL_COMMIT_PROMPT,
-    PROPOSAL_REASONING_PROMPT,
     _MAX_PREFLIGHT_ATTEMPTS,
     _MAX_PROPOSING_RETRIES,
     _PROPOSER_INPUT_KEYS,
+    PROPOSAL_COMMIT_PROMPT,
+    PROPOSAL_REASONING_PROMPT,
+    LLMBridge,
+    MLModelProposalAgent,
     _audit_proposer_components,
     _build_preflight_rejection_block,
     _build_reasoning_prompt,
@@ -34,13 +34,13 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
 )
 
 __all__ = [
-    "LLMBridge",
-    "MLModelProposalAgent",
     "PROPOSAL_COMMIT_PROMPT",
     "PROPOSAL_REASONING_PROMPT",
     "_MAX_PREFLIGHT_ATTEMPTS",
     "_MAX_PROPOSING_RETRIES",
     "_PROPOSER_INPUT_KEYS",
+    "LLMBridge",
+    "MLModelProposalAgent",
     "_audit_proposer_components",
     "_build_preflight_rejection_block",
     "_build_reasoning_prompt",
@@ -57,8 +57,8 @@ __all__ = [
 # resolve to the SAME module object. After this line, attribute lookups on the
 # package path are forwarded to the inner module — making
 # `unittest.mock.patch` work correctly regardless of which path the test uses.
-import sys  # noqa: E402
+import sys
 
-from nodes.ml_model_proposal_agent import ml_model_proposal_agent as _impl  # noqa: E402
+from nodes.ml_model_proposal_agent import ml_model_proposal_agent as _impl
 
 sys.modules[__name__] = _impl

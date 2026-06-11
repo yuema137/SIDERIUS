@@ -35,8 +35,8 @@ __all__ = [
 # to the SAME module object. After this line, attribute lookups on the package
 # path are forwarded to the inner module — making `unittest.mock.patch` work
 # correctly regardless of which path the test uses.
-import sys  # noqa: E402
+import sys
 
-from nodes.ml_literature_review import ml_literature_review as _impl  # noqa: E402
+from nodes.ml_literature_review import ml_literature_review as _impl
 
 sys.modules[__name__] = _impl

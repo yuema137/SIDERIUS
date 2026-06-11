@@ -16,10 +16,10 @@ via the package path automatically.
 """
 
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+    _FORMAL_STRATEGY_REGISTRY,
     HyperparamTuningAgent,
     LLMBridge,
     TidmadSandbox,
-    _FORMAL_STRATEGY_REGISTRY,
     _apply_degeneracy_reaction,
     _apply_mode_override_chain,
     _best_trial_winner,
@@ -41,10 +41,10 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
 )
 
 __all__ = [
+    "_FORMAL_STRATEGY_REGISTRY",
     "HyperparamTuningAgent",
     "LLMBridge",
     "TidmadSandbox",
-    "_FORMAL_STRATEGY_REGISTRY",
     "_apply_degeneracy_reaction",
     "_apply_mode_override_chain",
     "_best_trial_winner",
@@ -71,8 +71,8 @@ __all__ = [
 # module) resolve to the SAME module object. After this line, attribute lookups
 # on the package path are forwarded to the inner module — making
 # `unittest.mock.patch` work correctly regardless of which path the test uses.
-import sys  # noqa: E402
+import sys
 
-from nodes.ml_hyperparameter_tune_agent import ml_hyperparameter_tune_agent as _impl  # noqa: E402
+from nodes.ml_hyperparameter_tune_agent import ml_hyperparameter_tune_agent as _impl
 
 sys.modules[__name__] = _impl

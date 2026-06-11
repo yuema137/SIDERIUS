@@ -16,10 +16,10 @@ via the package path automatically.
 """
 
 from nodes.result_interpretation_agent.result_interpretation_agent import (
-    LLMBridge,
     PER_MODEL_SYSTEM_PROMPT,
-    ResultInterpretationAgent,
     SYNTHESIS_SYSTEM_PROMPT,
+    LLMBridge,
+    ResultInterpretationAgent,
     _append_evolution_log,
     _build_per_model_prompt,
     _build_synthesis_prompt,
@@ -29,10 +29,10 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
 )
 
 __all__ = [
-    "LLMBridge",
     "PER_MODEL_SYSTEM_PROMPT",
-    "ResultInterpretationAgent",
     "SYNTHESIS_SYSTEM_PROMPT",
+    "LLMBridge",
+    "ResultInterpretationAgent",
     "_append_evolution_log",
     "_build_per_model_prompt",
     "_build_synthesis_prompt",
@@ -47,8 +47,8 @@ __all__ = [
 # module) resolve to the SAME module object. After this line, attribute lookups
 # on the package path are forwarded to the inner module — making
 # `unittest.mock.patch` work correctly regardless of which path the test uses.
-import sys  # noqa: E402
+import sys
 
-from nodes.result_interpretation_agent import result_interpretation_agent as _impl  # noqa: E402
+from nodes.result_interpretation_agent import result_interpretation_agent as _impl
 
 sys.modules[__name__] = _impl
