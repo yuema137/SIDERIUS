@@ -150,7 +150,7 @@ def main() -> int:
         aid = paper["arxiv_id"]
         title = paper.get("short_title", paper.get("title", aid))
         print(f"  {aid:<14} ({title:<24}) — findings: {per_root_finding_count[aid]}")
-    print(f"\nRoot papers with ≥1 finding: {cited_roots} of {len(CORPUS)}  (§10.5 floor: ≥4 of 7)")
+    print(f"\nRoot papers with ≥1 finding: {cited_roots} of {len(CORPUS)}  (§10.5 floor: ≥2 of 7)")
     print(f"Total findings: {len(findings)}")
 
     # Render the same artifact the FULL test renders, but write to the
