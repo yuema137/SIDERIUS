@@ -117,7 +117,7 @@ def _phase2_full_input(tmp_path: Path) -> LiteratureReviewInput:
             enabled=True,
             max_rounds=3,
         ),
-        synthesis=SynthesisConfig(transfer_tolerance="moderate"),
+        synthesis_config=SynthesisConfig(transfer_tolerance="moderate"),
         findings_verbosity=1,
         storage=StorageConfig(
             backend="local",

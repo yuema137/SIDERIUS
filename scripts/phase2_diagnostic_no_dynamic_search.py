@@ -26,8 +26,8 @@ Inputs:
 Output artifact:
   reference_data/lit_review_pilot_cache/phase2_diagnostic_no_search_report.md
 
-Cost: synthesis-only on cached extracts. Realistic budget: $0.30–$1.50,
-2–5 minute wall time on deepseek-v4-pro. No dynamic-search calls means
+Cost: synthesis-only on cached extracts. Realistic budget: $0.30-$1.50,
+2-5 minute wall time on deepseek-v4-pro. No dynamic-search calls means
 no per-round search-decision LLM cost.
 
 Run with:
@@ -94,7 +94,7 @@ def _diagnostic_input(workspace: Path) -> LiteratureReviewInput:
             enabled=False,  # the diagnostic variable
             max_rounds=3,
         ),
-        synthesis=SynthesisConfig(transfer_tolerance="moderate"),
+        synthesis_config=SynthesisConfig(transfer_tolerance="moderate"),
         findings_verbosity=1,
         storage=StorageConfig(
             backend="local",
