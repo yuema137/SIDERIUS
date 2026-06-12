@@ -1740,6 +1740,70 @@ between interpretation and proposal, with `merge_external_agent_outputs` as
 the (currently single-input) aggregator and `should_run_literature_review`
 as the always-true trigger.
 
+### Implementation log (sub-step progress within Commit 6)
+
+| Sub-step | Status | Notes |
+|---|---|---|
+| Pre-flight A — `workflows/` added to `pyrightconfig.json` + 11 errors / 8 warnings fixed | ✅ done | `pyrightconfig.json` adds `workflows` to the `include` list; pre-existing pyright issues in `workflows/llm_config.py` + `workflows/model_exploration.py` cleaned to **0/0** without any `# type: ignore`. Two pre-existing `# type: ignore[arg-type]` lines at `llm_config.py:341,350` (in `.uniform()`) intentionally left alone — fixing them would propagate Literal types to external callers and is out of scope for Commit 6. |
+| Pre-flight B — Fix `dynamic_search.initial_verbosity` dormant-field bug (Step 1 of 2026-06-11 implementation order) | ⏳ next | Schema field `DynamicSearchConfig.initial_verbosity` defaults `0` but the node hardcodes `verbosity=0` in `_retrieved_from_search_result` (`nodes/ml_literature_review/ml_literature_review.py:494`). Wire `inp.dynamic_search.initial_verbosity` through instead so the field becomes operator-tunable. Pre-flight because it's an orthogonal node-level bug fix; lands before 6b. |
+| 6a — Read insertion point | ✅ done | Insertion point: between `interpretation = _interp_agent.run(...)` at `model_exploration.py:1080-1083` and `proposal = None` at line 1086. The cross-iter failure seeding (1086-1137) runs after lit-review so the proposer's `previous_failures` history is unaffected. |
+| 6b Part 1 — `LitReviewLLMConfig` nested config on `WorkflowLLMConfig` (Step 2 of 2026-06-11 implementation order) | ⏳ pending | **Architecture revised per Design Decision 3, 2026-06-11**: was earlier sketched as a single `lit_review: NodeLLMConfig \| None` slot mirroring `interpret`/`implement`; replaced with a nested `LitReviewLLMConfig` carrying two sub-slots `main` (drives compression + synthesis) and `search` (drives the cheap search-decision call). `.get("lit_review")` flattens to the 4-field shape `{llm_provider, llm_model_id, search_llm_provider, search_llm_model_id}` that the lit-review node already reads (`nodes/ml_literature_review/ml_literature_review.py:267,271-277`). |
+| 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ⏳ pending | `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. |
+| 6b Part 3 — Update existing `llm_configs/*.json` (Step 3 of 2026-06-11 implementation order) | ⏳ pending | Add a `lit_review` block to all 4 existing JSON configs (`certify_minimal.json`, `deepseek_tiered_pro.json`, `openai_tiered_pro.json`, `openai_tiered_v1.json`) so they remain valid against the new schema. Default routing: both sub-slots set to `deepseek`/`deepseek-v4-pro` (the cheap-but-strong synthesis model surfaced during §10 Phase-2 work). |
+| 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ⏭️ deferred | Both params folded into 6e's wiring patch (signature change + body wiring land together — cleaner than no-op standalone signature edits). The path param (Design Decision 2, 2026-06-11) lets different experiments use different lit-review configs without editing the default file. |
+| 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ⏳ next | Replace the 4b-final `synthesis.transfer_tolerance`-only stub with the **full operator-visible knob set** per Design Decision 3 (all knobs explicit even when they match schema defaults — single source of truth for what's tunable). No LLM routing fields in this YAML — those live exclusively in `WorkflowLLMConfig.lit_review` per Design Decision 3. |
+| 6e — Wire per-iteration insertion point | ⏳ pending | Build `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (no pre-parsed dict crosses the API boundary). Conditional `MLLiteratureReviewAgent.run`; pass `**merge_external_agent_outputs([...])` into `local_full_context` alongside `human_advice=human_advice_propose`. Also lands the two signature additions deferred from 6c. |
+| 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ⏳ pending | Two CLI flags (Design Decision 1, 2026-06-11): (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled`; resolution priority CLI > YAML `enabled` > default `False`. (2) `--ml_lit_review_config` with default `"configs/lit_review_config.yaml"`. **Scope**: exactly these two flags for lit-review; all other parameters live in the YAML. |
+| 6g — `reference_data/root_papers_cache/README.md` | ⏳ pending | README only — cache files themselves are not committed (Risk 5 resolution). |
+| 6h — Tests | ⏳ pending | Covers the new surface: helpers, `LitReviewLLMConfig` flatten + JSON loading, `initial_verbosity` regression, CLI flag naming (`--ml_*` prefix enforced), `lit_review_config_path` passthrough + absence-tolerance, wiring smoke. |
+
+### Design decisions log (2026-06-11)
+
+Three decisions confirmed after the schema audit:
+
+1. **CLI flag naming convention** — every external-agent CLI gate uses an `--ml_*` (or future `--phys_*` etc.) prefix. Lit-review's flags are `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` (not the earlier-drafted `--lit_review_enabled`). Establishes a forward-compatible pattern for when a second external agent lands.
+2. **Lit-review config path is operator-configurable** — `run_workflow` receives `lit_review_config_path: str = "configs/lit_review_config.yaml"`; the runner exposes `--ml_lit_review_config <path>` so different experiments can use different configs without editing the default file. The workflow opens + parses the YAML internally (the runner does not pre-parse).
+3. **LLM routing architecture** — the lit-review node has two bridges (main + search-decision). The original 6b Part 1 sketched a single `NodeLLMConfig` lit_review slot; that's replaced with a nested `LitReviewLLMConfig(main: NodeLLMConfig, search: NodeLLMConfig)`. Operators set LLM routing in `WorkflowLLMConfig` (not the lit-review YAML) — matches the existing precedent of tuner planner/reflector + proposer comparison/reasoning/proposing nested configs.
+
+**Pre-flight verification** (after pyright cleanup landed):
+- `.venv/bin/python -m ruff check workflows/` → All checks passed
+- `.venv/bin/python -m ruff format --check workflows/` → 2 files already formatted
+- `.venv/bin/python -m pyright workflows/` → 0 errors, 0 warnings, 0 informations
+- `.venv/bin/python -m pyright` (whole-repo CI gate) → 0 errors, 0 warnings, 0 informations
+
+### Pre-flight B — Fix `dynamic_search.initial_verbosity` dormant-field bug
+
+**Trigger**: schema audit on 2026-06-11 (response to Design Decision 3
+investigation). `DynamicSearchConfig.initial_verbosity` is defined on
+the schema with default `0` and a docstring describing it as the
+starting verbosity floor for newly retrieved search results — but the
+node never reads it. `_retrieved_from_search_result` at
+`nodes/ml_literature_review/ml_literature_review.py:494` hardcodes
+`PaperSource(..., verbosity=0)` on every search hit, so any non-default
+value an operator sets in the YAML would be silently ignored.
+
+**Fix**: thread `inp.dynamic_search.initial_verbosity` from `run()` →
+`_run_search_loop` → `_do_search` → `_retrieved_from_search_result`,
+replacing the hardcoded `verbosity=0`. The default behaviour stays
+identical (the schema default is `0`), so this is a non-breaking change.
+
+**Why pre-flight, not 6d**: it's a node-level bug, orthogonal to the
+workflow integration. Lands before any Commit 6 sub-step so 6d can ship
+a YAML that promises a working knob.
+
+**Files**:
+- Edit: `nodes/ml_literature_review/ml_literature_review.py` —
+  `_retrieved_from_search_result` accepts and uses
+  `initial_verbosity`; `_do_search` accepts and threads it;
+  `_run_search_loop` reads `cfg.initial_verbosity` and passes it down.
+
+**Test gate**:
+- Existing tests in `tests/unit/agent/ml_literature_review/` keep
+  passing (the default-value path is unchanged).
+- One new regression test: with `initial_verbosity=2`, a mocked search
+  hit produces a `RetrievedPaper.source.verbosity == 2`. Covered as
+  part of 6h.
+
 **Files**:
 - Edit: `workflows/model_exploration.py`
 - Edit: `configs/lit_review_config.yaml` (stub created in 4b-final; Commit 6 fills
@@ -1750,13 +1814,16 @@ as the always-true trigger.
   insertion point (depending on test design — confirm before editing).
 
 **Checklist**:
-- [ ] Read `workflows/model_exploration.py` end-to-end and **show the user
+- [x] Read `workflows/model_exploration.py` end-to-end and **show the user
       the insertion point** (post-interpretation, pre-proposal loop) with
-      surrounding line numbers before patching.
+      surrounding line numbers before patching. **Insertion point**: between
+      line 1083 (interpretation print) and line 1086 (`proposal = None`),
+      before the cross-iter failure seeding at 1086-1137.
 - [ ] Add `merge_external_agent_outputs(outputs: list[ExternalAgentOutput]) -> dict[str, Any]`
       as a module-level function in `workflows/model_exploration.py` (or a
       sibling helper file if that's the convention; check the file's
-      existing helper placement). Behaviour:
+      existing helper placement). **Module-level placement** chosen — one
+      call site, one external agent in v1. Behaviour:
   - **N=1 case**: equivalent to calling the per-agent protocol's
     `local_all_channels(outputs[0])` directly — the Commit 5 protocol at
     `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
@@ -1781,40 +1848,121 @@ as the always-true trigger.
     2d revision — equations now travel inline inside finding `content`, so
     the merge has nothing extra to concatenate beyond the four channels.
 - [ ] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
-      reads the resolved `enabled` flag (CLI → YAML → default True). For v1
-      the gate is just `return enabled` — `interp_output` is reserved for
-      future content-based gating (e.g. "skip lit-review when interpretation
-      confidence > 0.9"). Docstring includes the cost-tradeoff note from
-      spec §6.
+      reads the resolved `enabled` flag (CLI → YAML → default `False`,
+      see Two-layer gate below). For v1 the gate is just `return enabled`
+      — `interp_output` is reserved for future content-based gating
+      (e.g. "skip lit-review when interpretation confidence > 0.9").
+      Docstring includes the cost-tradeoff note from spec §6.
 
-  **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09):
-  - **YAML layer** (`configs/lit_review_config.yaml`): top-level
-    `enabled: bool` defaulting to `True`. Operators edit the YAML to
-    disable lit-review for an entire experiment chain.
-  - **CLI layer** (`run_one_iteration.py` / `run_chain.sh`): add a
-    `--lit_review_enabled` / `--no-lit_review_enabled` pair via
-    `argparse.BooleanOptionalAction`. Overrides the YAML default for a
-    single run without editing the config file.
+  **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09;
+  CLI flag naming locked to the `--ml_*` prefix and the config path made
+  operator-configurable per Design Decisions 1 + 2, 2026-06-11):
+  - **YAML layer** (default file `configs/lit_review_config.yaml`, but
+    the path is parameterised — see "Configurable config path" below):
+    top-level `enabled: bool` defaulting to `true`. Operators edit the
+    YAML to disable lit-review for an entire experiment chain.
+  - **CLI layer** (`run_one_iteration.py` / `run_chain.sh`): exactly
+    **two** flags for lit-review — no more.
+    1. **`--ml_lit_review_enabled` / `--no-ml_lit_review_enabled`** via
+       `argparse.BooleanOptionalAction`. Overrides the YAML default for
+       a single run without editing the config file. The `ml_` prefix
+       (Design Decision 1, 2026-06-11) establishes a naming convention
+       for future external agents — e.g. `--ml_physics_agent_enabled` /
+       `--no-ml_physics_agent_enabled` when the physics agent lands.
+       Earlier drafts of this doc used `--lit_review_enabled` without
+       the prefix; that name is **not** what ships and the tests
+       enforce a parser error on the pre-rename name (see Tests block
+       below).
+    2. **`--ml_lit_review_config`** (Design Decision 2, 2026-06-11)
+       with default `"configs/lit_review_config.yaml"`. Threaded
+       straight through to `run_workflow(lit_review_config_path=...)`
+       so the workflow opens + parses the YAML at the operator-supplied
+       path. Lets different experiments use different lit-review
+       configs without editing the default file.
   - **Resolution priority**: CLI flag (when explicitly set) >
-    YAML `enabled` > default `True`. The workflow resolves this in one
-    place before calling `should_run_literature_review`, then passes the
-    resolved boolean as a kwarg.
-  - **Scope**: the CLI flag controls **enable/disable only**, not the
-    lit-review parameters. `root_papers`, `dynamic_search`, `synthesis`,
+    YAML `enabled` > default `False`. The workflow resolves this in one
+    place before calling `should_run_literature_review`, then passes
+    the resolved boolean as a kwarg. *(Default changed from the earlier
+    draft's `True` to `False` so the production default is off until
+    operators opt in.)*
+  - **Scope (Design Decision 1, 2026-06-11)**: the CLI surface for
+    lit-review contains **exactly** these two flags — the enable/disable
+    toggle and the config path. **No other lit-review parameter is
+    exposed at the CLI.** `root_papers`, `dynamic_search`, `synthesis`,
     `confidence_rubric`, etc. all stay in the YAML — config-file-only.
-    This keeps the CLI surface manageable; operators wanting parameter
-    tweaks edit the YAML.
-- [ ] Load `configs/lit_review_config.yaml` at workflow startup (path resolved
-      relative to project root via the same mechanism the workflow already
-      uses for other configs — grep for `yaml.safe_load` to confirm). Convert
-      the parsed dict into `LiteratureReviewInput` minus the
-      `experiment_history` field (filled in per-iter from interp output).
+    LLM routing (`llm_provider` / `llm_model_id` /
+    `search_llm_provider` / `search_llm_model_id`) lives separately in
+    `WorkflowLLMConfig.lit_review` (Design Decision 3, 2026-06-11 —
+    see "LLM routing architecture" below) and is **not** in the
+    lit-review YAML either.
+
+  **LLM routing architecture** (Design Decision 3, 2026-06-11):
+  Lit-review makes three LLM calls (compression, search-decision,
+  synthesis). The original 6b Part 1 sketched a single
+  `lit_review: NodeLLMConfig | None` slot on `WorkflowLLMConfig`
+  driving all three calls through one bridge. That's replaced with
+  a nested `LitReviewLLMConfig` carrying two sub-slots — `main`
+  (compression + synthesis) and `search` (search-decision). The node
+  already reads four fields off `LiteratureReviewInput` for this split:
+  `llm_provider` + `llm_model_id` build the main bridge unconditionally
+  (`nodes/ml_literature_review/ml_literature_review.py:267`); the
+  optional `search_llm_provider` + `search_llm_model_id` build a
+  separate search-bridge when either is set, falling back per-field to
+  the main bridge otherwise (`:271-277`). `WorkflowLLMConfig.get("lit_review")`
+  flattens its two sub-slots into the matching 4-field shape so the
+  workflow can splat into `LiteratureReviewInput`. The earlier draft's
+  plan to expose `search_llm_provider` / `search_llm_model_id` in the
+  lit-review YAML is cancelled — all LLM routing lives in
+  `WorkflowLLMConfig` (mirrors the tuner planner/reflector + proposer
+  comparison/reasoning/proposing nested-config precedent).
+- [ ] Load the lit-review YAML at workflow startup via the new
+      `lit_review_config_path: str = "configs/lit_review_config.yaml"`
+      kwarg on `run_workflow` (Design Decision 2, 2026-06-11). The path
+      is resolved relative to project root via the same mechanism the
+      workflow already uses for other configs (grep for `yaml.safe_load`
+      to confirm). **The workflow opens + parses the YAML internally —
+      it does NOT receive a pre-parsed dict from the caller**, so the
+      runner stays focused on argument passing and the workflow owns
+      the config schema's interpretation. Open + parse the file only
+      when `lit_review_enabled=True` (an unused path never hits the
+      filesystem). Convert the parsed dict into the non-LLM fields of
+      `LiteratureReviewInput`; the four LLM-routing fields come from
+      `llm_config.get("lit_review")` (Design Decision 3, 2026-06-11),
+      `experiment_history` comes from the per-iter `InterpretationOutput`,
+      `storage` + `run_name` come from the workflow's run-scoped state.
 - [ ] At the per-iteration insertion point:
-  ```
+  ```python
+  # ----- In run_one_iteration.py — resolved ONCE per chain process,
+  # then passed as two separate kwargs into run_workflow.
+  # ml_lit_review_enabled is None when neither --ml_lit_review_enabled
+  # nor --no-ml_lit_review_enabled was passed (BooleanOptionalAction
+  # signals "fall through to YAML" with None). When non-None, the CLI
+  # overrides the YAML.
+  if args.ml_lit_review_enabled is not None:
+      ml_lit_review_enabled = args.ml_lit_review_enabled
+  else:
+      with open(args.ml_lit_review_config) as f:
+          ml_lit_review_enabled = yaml.safe_load(f).get("enabled", False)
+
+  run_workflow(
+      ...,
+      lit_review_enabled=ml_lit_review_enabled,
+      lit_review_config_path=args.ml_lit_review_config,  # default "configs/lit_review_config.yaml"
+  )
+
+  # ----- In run_workflow — opens + parses the YAML internally, only
+  # when actually used (lit_review_enabled=True). An unused path never
+  # hits the filesystem.
   interp_output = result_interpretation_agent.run(...)
-  lit_review_enabled = _resolve_lit_review_enabled(cli_args, lit_review_config)
   if should_run_literature_review(interp_output, enabled=lit_review_enabled):
-      lit_input = build_lit_review_input(lit_review_config, interp_output, ...)
+      with open(lit_review_config_path) as f:
+          lit_review_config = yaml.safe_load(f)
+      lit_input = _build_lit_review_input(
+          lit_review_config,
+          interp_output,
+          llm_kwargs=llm_config.get("lit_review"),  # 4-field flatten from LitReviewLLMConfig
+          ...,
+      )
       lit_output = ml_literature_review.run(lit_input)
       external_outputs = [lit_output]
   else:
@@ -1838,29 +1986,142 @@ as the always-true trigger.
   injecting a synthesized `human` `AgentCard` with
   `trust_level="strong_prior"`. Dropping `human_advice` here would lose
   the only path human directives reach the proposer.
-- [ ] Flesh out `configs/lit_review_config.yaml` (a stub exists from
-      Commit 4b-final containing only the `synthesis.transfer_tolerance`
-      block; the stub's note "Commit 7 will flesh out" is **outdated** —
-      Commit 6 does this, Commit 7 just adds the cache README + audit).
+- [ ] **Step 3 — Update existing `llm_configs/*.json`** to add a
+      `lit_review` block matching the new `LitReviewLLMConfig` shape.
+      Four files affected:
+      - `llm_configs/certify_minimal.json`
+      - `llm_configs/deepseek_tiered_pro.json`
+      - `llm_configs/openai_tiered_pro.json`
+      - `llm_configs/openai_tiered_v1.json`
+
+      The new `lit_review` block adds two sub-slots `main` + `search`,
+      both as full `NodeLLMConfig` objects. Default routing per
+      operator instruction (2026-06-11): both sub-slots set to
+      `deepseek` / `deepseek-v4-pro` (the cheap-but-strong synthesis
+      model the §10 Phase-2 work converged on; the search-decision
+      step is the cheap templated call, deepseek is a fine match for
+      both).
+
+      Example block (uniform across all 4 files):
+  ```json
+  "lit_review": {
+    "main": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "search": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
+  }
+  ```
+
+      Without this update, an operator loading any of the 4 existing
+      configs against the new `WorkflowLLMConfig` schema would still
+      validate (the `lit_review` slot is `LitReviewLLMConfig | None`
+      with default `None`) — but `.get("lit_review")` would fall back
+      to `interpret`, producing a 2-field flatten that the lit-review
+      node would treat as "no search-bridge override" and route the
+      search-decision call through the main bridge. That's a correct
+      fallback, not a bug — but the explicit `lit_review` block is
+      the operator-visible source of truth Design Decision 3 calls for.
+- [ ] Flesh out `configs/lit_review_config.yaml` — **the default
+      lit-review config**, at the default path (operators wanting a
+      non-default config copy this and point at it via
+      `--ml_lit_review_config /path/to/other.yaml`, per Design Decision
+      2, 2026-06-11). A stub exists from Commit 4b-final containing
+      only the `synthesis.transfer_tolerance` block; the stub's note
+      "Commit 7 will flesh out" is **outdated** — Commit 6 does this,
+      Commit 7 just adds the cache README + audit.
+
+      Per Design Decision 3 (2026-06-11), **every operator-visible
+      knob is written explicitly even when it matches the schema
+      default** — operators see all available knobs in one place
+      without reading the schema source. The only fields omitted are
+      (a) workflow-filled internal fields (`experiment_history` /
+      `storage` / `run_name`) and (b) LLM routing fields (which live
+      in `WorkflowLLMConfig.lit_review` per Design Decision 3 — NOT
+      in this file).
+
       Replace the stub with:
   ```yaml
-  # Top-level enable/disable flag — Risk 4 two-layer gate. Operators may
-  # also override at the CLI via --no-lit_review_enabled / --lit_review_enabled
-  # without editing this file.
+  # Top-level enable/disable flag — Risk 4 two-layer gate. Operators
+  # may also override at the CLI via --no-ml_lit_review_enabled /
+  # --ml_lit_review_enabled without editing this file. The CLI flag's
+  # `ml_` prefix establishes a naming convention for future external
+  # agents (Design Decision 1, 2026-06-11).
   enabled: true
 
+  # ---------------------------------------------------------------------------
+  # Root papers — curated foundational papers always resolved at agent start.
+  # Per-paper extracts cached on disk under reference_data/root_papers_cache/.
+  # ---------------------------------------------------------------------------
   root_papers:
     - source_type: arxiv
-      identifier: "2406.04378"      # TIDMAD
-      verbosity: 1
+      identifier: "2406.04378"          # TIDMAD primary paper
+      verbosity: 1                      # 0=metadata only / 1=PaperExtract / 2=full text
+
+  # ---------------------------------------------------------------------------
+  # Dynamic S2 search loop — runs after root-paper resolution, finds related
+  # papers, lets the LLM escalate selected hits to deeper verbosity.
+  # ---------------------------------------------------------------------------
   dynamic_search:
-    enabled: true
-    max_rounds: 3
-    initial_verbosity: 0
-    escalation_allowed: true
+    enabled: true                       # master switch for the search loop
+    max_rounds: 3                       # hard cap on search iterations
+    initial_verbosity: 0                # starting verbosity for new search results (wired through after Pre-flight B fix)
+    escalation_allowed: true            # whether the LLM may upgrade specific papers mid-loop
+    results_per_query: 10               # S2 hits per query (>10 mostly adds noise)
+    max_escalations_per_round: 2        # cap on deep-reads per round; 0 disables escalation entirely
+
+  # ---------------------------------------------------------------------------
+  # Output detail — 1 = three-part Implication/Mechanism/Adaptation format
+  # (proposer-facing); 0 = single paragraph (backward-compat).
+  # ---------------------------------------------------------------------------
+  findings_verbosity: 1
+
+  # ---------------------------------------------------------------------------
+  # Synthesis — controls cross-domain transfer permissiveness for findings.
+  # ---------------------------------------------------------------------------
   synthesis:
-    transfer_tolerance: moderate    # preserved from the 4b-final stub
+    transfer_tolerance: moderate        # strict / moderate / liberal
+
+  # ---------------------------------------------------------------------------
+  # Confidence rubric — single source of truth for what a finding's
+  # confidence number means. Injected into the synthesis prompt; the
+  # lit-review node clamps abstract-only-cited findings at
+  # ``abstract_only_ceiling``.
+  #
+  # Note: overriding bands here affects the SYNTHESIS PROMPT only. The
+  # lit-review node's emitted ``AgentCard.trust_guidance`` is built from
+  # the SCHEMA DEFAULTS at module-load time (see
+  # nodes/ml_literature_review/ml_literature_review.py:83-86) and does
+  # not see a per-run override. Known limitation, not blocking — the
+  # synthesis behaviour (what the LLM is told and what gets emitted)
+  # follows the override; only the proposer-facing trust legend stays
+  # on defaults.
+  # ---------------------------------------------------------------------------
+  confidence_rubric:
+    omit_below: 0.40
+    abstract_only_ceiling: 0.79
+    bands:
+      - lower: 0.80
+        upper: 1.00
+        criteria: "deep-read (verbosity >= 1 extract) AND on-domain (1D / broadband signal denoising) AND directly addresses a current bottleneck"
+      - lower: 0.60
+        upper: 0.79
+        criteria: "deep-read with a clear mechanism transfer, OR an on-domain abstract with a strong specific signal"
+      - lower: 0.40
+        upper: 0.59
+        criteria: "abstract-only evidence, OR cross-domain with a plausible (unvalidated) transfer rationale"
   ```
+
+  **Knobs NOT in this file** (and why):
+  - `llm_provider` / `llm_model_id` / `search_llm_provider` /
+    `search_llm_model_id` — LLM routing lives in `WorkflowLLMConfig.lit_review`
+    (Design Decision 3, 2026-06-11). The workflow flattens that nested
+    config into the 4 fields the lit-review node reads.
+  - `experiment_history` — workflow fills per-iter from `InterpretationOutput`.
+  - `storage` / `run_name` — workflow fills with chain-scoped state.
 - [ ] Create `reference_data/root_papers_cache/README.md` explaining: format
       (one JSON file per paper, named `{paper_id}.json`, content is a
       serialized `RetrievedPaper`), invalidation (delete the file manually
@@ -1884,12 +2145,62 @@ as the always-true trigger.
         (`findings=[], new_vocab_candidates=[], agent_cards=[], mindset=None`).
   - [ ] `merge_external_agent_outputs([a, b])` — concat-then-last-wins for
         mindset; concatenation for the list channels.
-  - [ ] `should_run_literature_review(...)` returns `True` for an arbitrary
-        `InterpretationOutput`.
-  - [ ] Wiring smoke test: with `ml_literature_review.run` mocked to return
-        a canned `LiteratureReviewOutput`, invoke the per-iter section and
-        assert the `ProposalInput` arriving at the proposer has the expected
-        `agent_cards` and `expert_context` entries.
+  - [ ] `should_run_literature_review(...)` respects the `enabled` kwarg
+        in both directions (True → True, False → False).
+  - [ ] **`lit_review_config_path` passthrough** (Design Decision 2,
+        2026-06-11): with a tmp YAML at a non-default path, invoke
+        `run_workflow(lit_review_config_path=tmp_path, lit_review_enabled=True, ...)`
+        and assert the workflow opens + parses *that* file, not the
+        default at `configs/lit_review_config.yaml`. Asserts both
+        (a) the YAML at `tmp_path` is read, and (b) the resulting
+        `LiteratureReviewInput.root_papers` matches the tmp file's
+        contents.
+  - [ ] **`lit_review_config_path` is NOT touched when
+        `lit_review_enabled=False`**: with `lit_review_config_path`
+        pointed at a path that does not exist, the workflow runs
+        without raising — confirms the path is opened only when
+        actually used.
+  - [ ] Wiring smoke test: with `MLLiteratureReviewAgent.run` mocked to
+        return a canned `LiteratureReviewOutput`, invoke the per-iter
+        section and assert the `ProposalInput` arriving at the proposer
+        has the expected `agent_cards` and `expert_context` entries.
+
+- [ ] Tests for `LitReviewLLMConfig` (`tests/unit/workflows/test_llm_config.py`
+      — extend existing file; Design Decision 3, 2026-06-11):
+  - [ ] `WorkflowLLMConfig.get("lit_review")` returns a 4-field dict
+        when the slot is configured: `{llm_provider, llm_model_id,
+        search_llm_provider, search_llm_model_id}`.
+  - [ ] `WorkflowLLMConfig.get("lit_review")` falls back to
+        `.get("interpret")` semantics when `lit_review is None` (back-compat).
+  - [ ] `WorkflowLLMConfig.uniform("openai", "gpt-4o-mini")` populates
+        both `lit_review.main` and `lit_review.search` with the same
+        `NodeLLMConfig`.
+  - [ ] All 4 existing `llm_configs/*.json` files parse successfully
+        against the updated schema (regression — guards against the
+        Step 3 update being incomplete).
+
+- [ ] Tests for `sdsc_submission_scripts/run_one_iteration.py` CLI flag
+      naming + threading (Design Decision 1, 2026-06-11):
+  - [ ] `argparse` accepts `--ml_lit_review_enabled` (→ `True`) and
+        `--no-ml_lit_review_enabled` (→ `False`); when neither flag is
+        passed, the namespace value is `None` (the BooleanOptionalAction
+        sentinel for "fall through to YAML").
+  - [ ] `argparse` rejects the **pre-rename name** `--lit_review_enabled`
+        with a parser error — confirms the `ml_` prefix is enforced,
+        not just documented. Use `pytest.raises(SystemExit)` on
+        `parse_args`.
+  - [ ] `--ml_lit_review_config /path/to/other.yaml` is threaded through
+        unchanged to `run_workflow(lit_review_config_path=...)` (mock
+        `run_workflow` and assert the kwarg value).
+  - [ ] Default `--ml_lit_review_config` value is
+        `"configs/lit_review_config.yaml"` when the flag is omitted.
+
+- [ ] **`initial_verbosity` regression test** (Pre-flight B,
+      2026-06-11) in `tests/unit/agent/ml_literature_review/`: with
+      `DynamicSearchConfig(initial_verbosity=2)`, a mocked S2 search
+      hit produces a `RetrievedPaper.source.verbosity == 2`. Default
+      (`initial_verbosity=0`) path keeps existing behaviour — guard
+      against silent regression.
 - [ ] **Extend an existing dual-mode test to cover the lit-review insertion
       point** (Risk 6 resolution, P-design 2026-06-09 — do NOT just rely
       on the wiring smoke test). Candidates from
