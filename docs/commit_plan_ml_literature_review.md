@@ -1754,7 +1754,7 @@ as the always-true trigger.
 | 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ✅ done | Committed `546ce72` (2026-06-11). Replaced the 4b-final stub with the full operator-visible knob set per Design Decision 3 — every knob explicit (6 top-level keys: `enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`, `synthesis`, `confidence_rubric`), all values match schema defaults verbatim so the file is a self-documenting tunable surface. Verification: `yaml.safe_load` parses cleanly; per-block `DynamicSearchConfig.model_validate` / `SynthesisConfig.model_validate` / `ConfidenceRubric.model_validate` / `PaperSource.model_validate` all pass. +88/-7 lines. |
 | 6e — Wire per-iteration insertion point | ✅ done | Committed `59cc76e` (2026-06-12). New `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (relative paths resolved against `SIDERIUS_ROOT`); conditional `MLLiteratureReviewAgent.run` once per iter; `merge_external_agent_outputs` produces `external_channels` which extends `expert_context` + `vocab_seed` and supplies `agent_cards` + `mindset` to every per-attempt `local_full_context` call. Also landed the two signature additions deferred from 6c. Bit-identical behaviour when `lit_review_enabled=False` — protocol's existing `list(x or [])` and `if mindset is not None` guards collapse empty channels to "no contributor block". Verification: ruff + pyright (file + whole-repo) clean; 3/3 smoke tests pass (symbols importable, signature defaults correct, `_build_lit_review_input` round-trips every operator-visible knob from the canonical YAML). |
 | 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ✅ done | Committed `596b206` (2026-06-12). Two CLI flags landed at the end of `build_parser` per Design Decision 1: (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled` (default `None` = "fall through to YAML"); (2) `--ml_lit_review_config <path>` (default `"configs/lit_review_config.yaml"`). Resolution logic in `main()` peeks at the YAML's `enabled` key only when neither CLI flag was passed; fail-safe behaviour (FileNotFoundError / yaml.YAMLError → False) prevents a misconfigured YAML from silently enabling the gate. Resolved boolean + raw path threaded into `run_workflow` right before the pseudo-mode factories. Verification: ruff clean; 6/6 smoke tests pass — including the regression check that argparse REJECTS the pre-rename name `--lit_review_enabled` (proves the `ml_` prefix is enforced, not just documented). |
-| 6g — `reference_data/root_papers_cache/README.md` | ⏳ pending | README only — cache files themselves are not committed (Risk 5 resolution). |
+| 6g — `reference_data/root_papers_cache/README.md` | ✅ done | Committed `4019849` (2026-06-12). README documents the cache contract (one JSON per `RetrievedPaper`, filename via `_sanitize_paper_id`, paper_id is the cache key, manual deletion to invalidate) + the `DEFAULT_ROOT_CACHE_DIR` node contract. `.gitignore` tightened to `reference_data/root_papers_cache/*` + an explicit `!README.md` negation so only the README is tracked — JSON cache files stay gitignored per Risk 5. Verification: `git check-ignore -v` matches the negation rule on README and the wildcard rule on a phantom `*.json`; `git add --dry-run` accepts the README and rejects the phantom. |
 | 6h — Tests | ⏳ pending | Covers the new surface: helpers, `LitReviewLLMConfig` flatten + JSON loading, `initial_verbosity` regression, CLI flag naming (`--ml_*` prefix enforced), `lit_review_config_path` passthrough + absence-tolerance, wiring smoke. |
 
 ### Design decisions log (2026-06-11)
@@ -2152,12 +2152,16 @@ a YAML that promises a working knob.
     config into the 4 fields the lit-review node reads.
   - `experiment_history` — workflow fills per-iter from `InterpretationOutput`.
   - `storage` / `run_name` — workflow fills with chain-scoped state.
-- [ ] Create `reference_data/root_papers_cache/README.md` explaining: format
+- [x] Create `reference_data/root_papers_cache/README.md` explaining: format
       (one JSON file per paper, named `{paper_id}.json`, content is a
       serialized `RetrievedPaper`), invalidation (delete the file manually
       to force re-fetch + re-compression), and the contract with the
       lit-review node (`DEFAULT_ROOT_CACHE_DIR` constant at
       `nodes/ml_literature_review.py:61` points here by default).
+      **Done — committed `4019849` (2026-06-12).** Also tightened
+      `.gitignore` from a whole-dir ignore to `*` + `!README.md` so
+      only the README escapes the ignore — keeps the "JSONs only,
+      README is documentation" intent visible to future operators.
 
   **Risk 5 resolution (P-design 2026-06-09)**: only the README is
   committed in Commit 6 — NOT the cache files themselves. Production
