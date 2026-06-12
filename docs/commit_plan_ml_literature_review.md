@@ -1751,7 +1751,7 @@ as the always-true trigger.
 | 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ⏳ pending | `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. |
 | 6b Part 3 — Update existing `llm_configs/*.json` (Step 3 of 2026-06-11 implementation order) | ✅ done | Committed `8764e46` (2026-06-11). All 4 configs got the same `lit_review` block (both sub-slots = `deepseek`/`deepseek-v4-pro`), uniformly across both the OpenAI-routed (`openai_tiered_*.json`, `certify_minimal.json`) and the deepseek-routed (`deepseek_tiered_pro.json`) configs — lit-review-specific routing isolated from main-pipeline routing. Verification: JSON parse + `WorkflowLLMConfig.model_validate` + `.get('lit_review')` returns the expected 4-field dict on all 4 files. +40/-0 lines total. |
 | 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ⏭️ deferred | Both params folded into 6e's wiring patch (signature change + body wiring land together — cleaner than no-op standalone signature edits). The path param (Design Decision 2, 2026-06-11) lets different experiments use different lit-review configs without editing the default file. |
-| 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ⏳ next | Replace the 4b-final `synthesis.transfer_tolerance`-only stub with the **full operator-visible knob set** per Design Decision 3 (all knobs explicit even when they match schema defaults — single source of truth for what's tunable). No LLM routing fields in this YAML — those live exclusively in `WorkflowLLMConfig.lit_review` per Design Decision 3. |
+| 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ✅ done | Committed `546ce72` (2026-06-11). Replaced the 4b-final stub with the full operator-visible knob set per Design Decision 3 — every knob explicit (6 top-level keys: `enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`, `synthesis`, `confidence_rubric`), all values match schema defaults verbatim so the file is a self-documenting tunable surface. Verification: `yaml.safe_load` parses cleanly; per-block `DynamicSearchConfig.model_validate` / `SynthesisConfig.model_validate` / `ConfidenceRubric.model_validate` / `PaperSource.model_validate` all pass. +88/-7 lines. |
 | 6e — Wire per-iteration insertion point | ⏳ pending | Build `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (no pre-parsed dict crosses the API boundary). Conditional `MLLiteratureReviewAgent.run`; pass `**merge_external_agent_outputs([...])` into `local_full_context` alongside `human_advice=human_advice_propose`. Also lands the two signature additions deferred from 6c. |
 | 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ⏳ pending | Two CLI flags (Design Decision 1, 2026-06-11): (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled`; resolution priority CLI > YAML `enabled` > default `False`. (2) `--ml_lit_review_config` with default `"configs/lit_review_config.yaml"`. **Scope**: exactly these two flags for lit-review; all other parameters live in the YAML. |
 | 6g — `reference_data/root_papers_cache/README.md` | ⏳ pending | README only — cache files themselves are not committed (Risk 5 resolution). |
@@ -2031,7 +2031,7 @@ a YAML that promises a working knob.
       verified by JSON parse + `WorkflowLLMConfig.model_validate` +
       `.get('lit_review')` → 4-field `{llm_provider, llm_model_id,
       search_llm_provider, search_llm_model_id}` dict on every file.
-- [ ] Flesh out `configs/lit_review_config.yaml` — **the default
+- [x] Flesh out `configs/lit_review_config.yaml` — **the default
       lit-review config**, at the default path (operators wanting a
       non-default config copy this and point at it via
       `--ml_lit_review_config /path/to/other.yaml`, per Design Decision
@@ -2039,6 +2039,14 @@ a YAML that promises a working knob.
       only the `synthesis.transfer_tolerance` block; the stub's note
       "Commit 7 will flesh out" is **outdated** — Commit 6 does this,
       Commit 7 just adds the cache README + audit.
+
+      **Status (2026-06-11)**: ✅ Done — committed `546ce72`. Replaced
+      the stub with the full 6-key operator-visible knob set
+      (`enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`,
+      `synthesis`, `confidence_rubric`); every value matches the
+      schema default verbatim per the source-of-truth principle.
+      Verification: yaml.safe_load + per-block Pydantic validation
+      all pass.
 
       Per Design Decision 3 (2026-06-11), **every operator-visible
       knob is written explicitly even when it matches the schema
