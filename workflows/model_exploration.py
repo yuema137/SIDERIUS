@@ -65,14 +65,19 @@ import time
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Literal
+from typing import Any, Literal
 
+from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
     PhysicalRejection,
 )
-from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
+from agent.schemas.interpretation import (
+    InterpretationInput,
+    InterpretationOutput,
+    ModelRunSummary,
+)
 from agent.schemas.proposal import ExpertContextItem, VocabEntry
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
@@ -386,6 +391,114 @@ def _render_physical_rejection(rej: PhysicalRejection, n_rejections: int) -> str
     if rej.suggestion:
         lines.append(f"  Suggestion: {rej.suggestion}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Commit 6 — external-agent integration helpers
+# ---------------------------------------------------------------------------
+
+
+def should_run_literature_review(
+    interp_output: InterpretationOutput,
+    *,
+    enabled: bool,
+) -> bool:
+    """Decide whether to run the literature-review node this iteration.
+
+    For v1 this is just the resolved ``enabled`` flag (resolution priority
+    CLI > YAML > default False — Design Decisions 1 + 2, 2026-06-11). The
+    runner ``sdsc_submission_scripts/run_one_iteration.py`` resolves the
+    boolean from ``--ml_lit_review_enabled`` / ``--no-ml_lit_review_enabled``
+    (BooleanOptionalAction) against the YAML's top-level ``enabled``,
+    then passes the result into ``run_workflow(lit_review_enabled=...)``.
+
+    ``interp_output`` is reserved for future content-based gating — e.g.
+    skip lit-review when ``cumulative_information_gain`` is above a
+    threshold (the proposer has enough signal), or skip in pure-exploit
+    mode. Marked unused via ``del`` to keep the contract obvious.
+
+    Args:
+        interp_output: This iteration's ``InterpretationOutput``.
+            Reserved for future content-based gating; not consulted in v1.
+        enabled: Resolved enable flag.
+
+    Returns:
+        ``True`` if lit-review should fire this iteration.
+    """
+    del interp_output  # reserved for future content-based gating
+    return enabled
+
+
+def merge_external_agent_outputs(
+    outputs: list[ExternalAgentOutput],
+) -> dict[str, Any]:
+    """Merge external-agent outputs into the four-channel kwargs dict
+    consumed by ``local_full_context(...)`` via ``**channels`` spreading.
+
+    Three cases:
+
+    * **N=0** (no external agents fired this iter): returns the empty
+      default so the downstream call can ``**`` spread it unconditionally
+      without branching on emptiness.
+    * **N=1** (v1 — only ``ml_literature_review`` is active): delegates
+      to the Commit-5 protocol's ``local_all_channels`` so the per-agent
+      mapping logic is not duplicated here. The protocol's 4-kwarg dict
+      is returned verbatim.
+    * **N>=2** (future, when a second external agent — e.g. a physics
+      agent — lands): list channels are concatenated; ``mindset`` uses
+      the last non-``None`` (a v1 rule per commit plan §6.4 — flagged
+      for revisit when a second agent populates ``mindset``).
+
+    Args:
+        outputs: External-agent outputs that ran this iteration. Order
+            matters only for the ``last non-None mindset wins`` rule.
+
+    Returns:
+        Dict with exactly the 4 keys ``local_full_context`` accepts:
+        ``expert_context``, ``vocab_seed``, ``agent_cards``, ``mindset``.
+    """
+    if not outputs:
+        return {
+            "expert_context": [],
+            "vocab_seed": [],
+            "agent_cards": [],
+            "mindset": None,
+        }
+    if len(outputs) == 1:
+        # Lazy imports: keep workflows.model_exploration's top-level
+        # imports identical to pre-Commit-6 and avoid any risk of a
+        # circular dependency if the protocol module ever needs to
+        # reach back into a workflows.* helper.
+        from agent.schemas.literature_review import LiteratureReviewOutput
+        from agent.schemas.protocols.ml_literature_review_to_ml_model_propose import (
+            local_all_channels,
+        )
+
+        # ``isinstance`` narrows ``outputs[0]`` from ``ExternalAgentOutput`` to
+        # the protocol's expected ``LiteratureReviewOutput``. In v1 only
+        # lit-review is wired, so this branch always fires; once a second
+        # external agent (e.g. a physics agent) lands, an unknown subtype
+        # would fall through to the generic merge below — future-proofing
+        # without a special case today.
+        if isinstance(outputs[0], LiteratureReviewOutput):
+            return local_all_channels(outputs[0])
+    # N>=2, OR N==1 with a non-lit-review subtype (future) — generic merge
+    merged_findings: list[ExpertContextItem] = []
+    merged_vocab: list[VocabEntry] = []
+    merged_cards: list = []
+    last_mindset: str | None = None
+    for output in outputs:
+        merged_findings.extend(output.findings)
+        merged_vocab.extend(output.new_vocab_candidates)
+        merged_cards.append(output.agent_card)
+        if output.suggested_mindset is not None:
+            last_mindset = output.suggested_mindset
+    return {
+        "expert_context": merged_findings,
+        "vocab_seed": merged_vocab,
+        "agent_cards": merged_cards,
+        "mindset": last_mindset,
+    }
 
 
 def _cap_knowledge_cache(
