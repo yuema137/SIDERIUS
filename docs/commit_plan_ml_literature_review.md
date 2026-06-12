@@ -2172,14 +2172,17 @@ a YAML that promises a working knob.
   the Phase-1 / Phase-2 / §10 FULL tests use) into
   `reference_data/root_papers_cache/`. We may revisit committing the
   files if reproducibility issues from S2 variability become a problem.
-- [ ] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`):
-  - [ ] `merge_external_agent_outputs([single_output])` returns the four
+- [ ] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`)
+      — partial: helpers + `_build_lit_review_input` done in commit
+      `35c1f21` (Files 1-4 of 6h); 3 workflow-level tests deferred to
+      File 5 (dual-mode integration extension):
+  - [x] `merge_external_agent_outputs([single_output])` returns the four
         channels mapped correctly.
-  - [ ] `merge_external_agent_outputs([])` returns the empty default
+  - [x] `merge_external_agent_outputs([])` returns the empty default
         (`findings=[], new_vocab_candidates=[], agent_cards=[], mindset=None`).
-  - [ ] `merge_external_agent_outputs([a, b])` — concat-then-last-wins for
+  - [x] `merge_external_agent_outputs([a, b])` — concat-then-last-wins for
         mindset; concatenation for the list channels.
-  - [ ] `should_run_literature_review(...)` respects the `enabled` kwarg
+  - [x] `should_run_literature_review(...)` respects the `enabled` kwarg
         in both directions (True → True, False → False).
   - [ ] **`lit_review_config_path` passthrough** (Design Decision 2,
         2026-06-11): with a tmp YAML at a non-default path, invoke
@@ -2188,53 +2191,76 @@ a YAML that promises a working knob.
         default at `configs/lit_review_config.yaml`. Asserts both
         (a) the YAML at `tmp_path` is read, and (b) the resulting
         `LiteratureReviewInput.root_papers` matches the tmp file's
-        contents.
+        contents. *(Deferred to File 5 — requires running the full
+        workflow end-to-end; the unit test of `_build_lit_review_input`
+        at `tests/unit/workflows/test_model_exploration_lit_review_wiring.py::TestBuildLitReviewInput::test_custom_root_papers_override`
+        verifies the YAML→LiteratureReviewInput transformation
+        standalone.)*
   - [ ] **`lit_review_config_path` is NOT touched when
         `lit_review_enabled=False`**: with `lit_review_config_path`
         pointed at a path that does not exist, the workflow runs
         without raising — confirms the path is opened only when
-        actually used.
+        actually used. *(Deferred to File 5 — workflow-level test.)*
   - [ ] Wiring smoke test: with `MLLiteratureReviewAgent.run` mocked to
         return a canned `LiteratureReviewOutput`, invoke the per-iter
         section and assert the `ProposalInput` arriving at the proposer
         has the expected `agent_cards` and `expert_context` entries.
+        *(Deferred to File 5 — workflow-level test.)*
 
-- [ ] Tests for `LitReviewLLMConfig` (`tests/unit/workflows/test_llm_config.py`
-      — extend existing file; Design Decision 3, 2026-06-11):
-  - [ ] `WorkflowLLMConfig.get("lit_review")` returns a 4-field dict
+- [x] Tests for `LitReviewLLMConfig` (`tests/unit/workflows/test_llm_config.py`
+      — extend existing file; Design Decision 3, 2026-06-11) — **Done,
+      committed `35c1f21` (2026-06-12)**, 7 new tests + 1 modified
+      (test_default_all_slots_none now asserts cfg.lit_review is None).
+      All 4 sub-bullets pass:
+  - [x] `WorkflowLLMConfig.get("lit_review")` returns a 4-field dict
         when the slot is configured: `{llm_provider, llm_model_id,
         search_llm_provider, search_llm_model_id}`.
-  - [ ] `WorkflowLLMConfig.get("lit_review")` falls back to
+  - [x] `WorkflowLLMConfig.get("lit_review")` falls back to
         `.get("interpret")` semantics when `lit_review is None` (back-compat).
-  - [ ] `WorkflowLLMConfig.uniform("openai", "gpt-4o-mini")` populates
+        Implementation note: the fallback translates key names
+        (`provider` → `llm_provider`, `model_id` → `llm_model_id`);
+        the test asserts the translated shape, not the verbatim
+        `.get("interpret")` dict.
+  - [x] `WorkflowLLMConfig.uniform("openai", "gpt-4o-mini")` populates
         both `lit_review.main` and `lit_review.search` with the same
         `NodeLLMConfig`.
-  - [ ] All 4 existing `llm_configs/*.json` files parse successfully
+  - [x] All 4 existing `llm_configs/*.json` files parse successfully
         against the updated schema (regression — guards against the
         Step 3 update being incomplete).
 
-- [ ] Tests for `sdsc_submission_scripts/run_one_iteration.py` CLI flag
-      naming + threading (Design Decision 1, 2026-06-11):
-  - [ ] `argparse` accepts `--ml_lit_review_enabled` (→ `True`) and
+- [x] Tests for `sdsc_submission_scripts/run_one_iteration.py` CLI flag
+      naming + threading (Design Decision 1, 2026-06-11) — **Done,
+      committed `35c1f21` (2026-06-12)**, 6 new tests in
+      `TestLitReviewCLI` (one extra test splits the True/False
+      `--ml_lit_review_enabled` cases for clarity). All 4 sub-bullets
+      pass:
+  - [x] `argparse` accepts `--ml_lit_review_enabled` (→ `True`) and
         `--no-ml_lit_review_enabled` (→ `False`); when neither flag is
         passed, the namespace value is `None` (the BooleanOptionalAction
         sentinel for "fall through to YAML").
-  - [ ] `argparse` rejects the **pre-rename name** `--lit_review_enabled`
+  - [x] `argparse` rejects the **pre-rename name** `--lit_review_enabled`
         with a parser error — confirms the `ml_` prefix is enforced,
         not just documented. Use `pytest.raises(SystemExit)` on
         `parse_args`.
-  - [ ] `--ml_lit_review_config /path/to/other.yaml` is threaded through
+  - [x] `--ml_lit_review_config /path/to/other.yaml` is threaded through
         unchanged to `run_workflow(lit_review_config_path=...)` (mock
-        `run_workflow` and assert the kwarg value).
-  - [ ] Default `--ml_lit_review_config` value is
+        `run_workflow` and assert the kwarg value). *(Implementation
+        note: argparse-level only — the test asserts
+        `args.ml_lit_review_config == "/path/to/other.yaml"`; the
+        threading-through-to-`run_workflow` part is exercised
+        end-to-end in File 5.)*
+  - [x] Default `--ml_lit_review_config` value is
         `"configs/lit_review_config.yaml"` when the flag is omitted.
 
-- [ ] **`initial_verbosity` regression test** (Pre-flight B,
+- [x] **`initial_verbosity` regression test** (Pre-flight B,
       2026-06-11) in `tests/unit/agent/ml_literature_review/`: with
       `DynamicSearchConfig(initial_verbosity=2)`, a mocked S2 search
       hit produces a `RetrievedPaper.source.verbosity == 2`. Default
       (`initial_verbosity=0`) path keeps existing behaviour — guard
-      against silent regression.
+      against silent regression. **Done, committed `35c1f21`
+      (2026-06-12)**, 2 tests in `TestInitialVerbosity` (the explicit
+      `initial_verbosity=2` test + a default-zero regression that
+      guards against accidental knob-flip from the Pre-flight B fix).
 - [ ] **Extend an existing dual-mode test to cover the lit-review insertion
       point** (Risk 6 resolution, P-design 2026-06-09 — do NOT just rely
       on the wiring smoke test). Candidates from
