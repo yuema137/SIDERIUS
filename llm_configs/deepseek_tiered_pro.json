@@ -34,5 +34,15 @@
       "provider": "deepseek",
       "model_id": "deepseek-v4-pro"
     }
+  },
+  "lit_review": {
+    "main": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "search": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
   }
 }

@@ -35,5 +35,15 @@
       "provider": "openai",
       "model_id": "gpt-4o-mini"
     }
+  },
+  "lit_review": {
+    "main": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "search": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
   }
 }
