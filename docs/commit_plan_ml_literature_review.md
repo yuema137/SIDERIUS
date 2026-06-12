@@ -1748,7 +1748,7 @@ as the always-true trigger.
 | Pre-flight B — Fix `dynamic_search.initial_verbosity` dormant-field bug (Step 1 of 2026-06-11 implementation order) | ✅ done | Committed `6c493ee` (2026-06-11). `_run_search_loop` reads `cfg.initial_verbosity` and passes it to `_do_search`; `_do_search` accepts the new kwarg and forwards to `_retrieved_from_search_result`; `_retrieved_from_search_result` uses it on the `PaperSource(verbosity=...)` construction. Default-value path is bit-identical (50/50 existing tests pass unchanged). Interpretation chosen (minimal — interpretation `a` per the design review): set the operator's REQUESTED verbosity on `RetrievedPaper.source.verbosity` but leave `verbosity_achieved` at 0; the S2 search itself stays metadata-only and actual deep-reads continue via the LLM's escalation decisions. Verification: ruff + pyright (file + whole-repo) clean; 50/50 lit-review unit tests pass. |
 | 6a — Read insertion point | ✅ done | Insertion point: between `interpretation = _interp_agent.run(...)` at `model_exploration.py:1080-1083` and `proposal = None` at line 1086. The cross-iter failure seeding (1086-1137) runs after lit-review so the proposer's `previous_failures` history is unaffected. |
 | 6b Part 1 — `LitReviewLLMConfig` nested config on `WorkflowLLMConfig` (Step 2 of 2026-06-11 implementation order) | ✅ done | Committed `592ec6a` (2026-06-11). New `LitReviewLLMConfig(main, search)` class added; `WorkflowLLMConfig.lit_review: LitReviewLLMConfig \| None` slot added; `.get("lit_review")` flattens to the 4-field shape `{llm_provider, llm_model_id, search_llm_provider, search_llm_model_id}` when configured, and falls back to a translated 2-field dict from `interpret` when not. `.uniform()` populates lit_review with both sub-slots = `base_cfg`. Schema-level defaults: `deepseek` / `deepseek-v4-pro` for both sub-slots (matches Step 3's JSON defaults). Verification: ruff + pyright (file + whole-repo) clean; 10/10 smoke tests pass — including a backward-compat check that all 4 existing `llm_configs/*.json` still parse against the new schema. |
-| 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ⏳ pending | `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. |
+| 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ✅ done | Committed `65bc50e` (2026-06-12). `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. Verification: ruff + pyright (file + whole-repo) clean; 5/5 smoke tests pass (enabled True/False + N=0/N=1/N=2 merge cases). |
 | 6b Part 3 — Update existing `llm_configs/*.json` (Step 3 of 2026-06-11 implementation order) | ✅ done | Committed `8764e46` (2026-06-11). All 4 configs got the same `lit_review` block (both sub-slots = `deepseek`/`deepseek-v4-pro`), uniformly across both the OpenAI-routed (`openai_tiered_*.json`, `certify_minimal.json`) and the deepseek-routed (`deepseek_tiered_pro.json`) configs — lit-review-specific routing isolated from main-pipeline routing. Verification: JSON parse + `WorkflowLLMConfig.model_validate` + `.get('lit_review')` returns the expected 4-field dict on all 4 files. +40/-0 lines total. |
 | 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ⏭️ deferred | Both params folded into 6e's wiring patch (signature change + body wiring land together — cleaner than no-op standalone signature edits). The path param (Design Decision 2, 2026-06-11) lets different experiments use different lit-review configs without editing the default file. |
 | 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ✅ done | Committed `546ce72` (2026-06-11). Replaced the 4b-final stub with the full operator-visible knob set per Design Decision 3 — every knob explicit (6 top-level keys: `enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`, `synthesis`, `confidence_rubric`), all values match schema defaults verbatim so the file is a self-documenting tunable surface. Verification: `yaml.safe_load` parses cleanly; per-block `DynamicSearchConfig.model_validate` / `SynthesisConfig.model_validate` / `ConfidenceRubric.model_validate` / `PaperSource.model_validate` all pass. +88/-7 lines. |
@@ -1819,11 +1819,12 @@ a YAML that promises a working knob.
       surrounding line numbers before patching. **Insertion point**: between
       line 1083 (interpretation print) and line 1086 (`proposal = None`),
       before the cross-iter failure seeding at 1086-1137.
-- [ ] Add `merge_external_agent_outputs(outputs: list[ExternalAgentOutput]) -> dict[str, Any]`
+- [x] Add `merge_external_agent_outputs(outputs: list[ExternalAgentOutput]) -> dict[str, Any]`
       as a module-level function in `workflows/model_exploration.py` (or a
       sibling helper file if that's the convention; check the file's
       existing helper placement). **Module-level placement** chosen — one
-      call site, one external agent in v1. Behaviour:
+      call site, one external agent in v1. **Done — committed `65bc50e`
+      (2026-06-12).** Behaviour:
   - **N=1 case**: equivalent to calling the per-agent protocol's
     `local_all_channels(outputs[0])` directly — the Commit 5 protocol at
     `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
@@ -1847,12 +1848,15 @@ a YAML that promises a working knob.
     The earlier-planned 5th `reference_library` kwarg was cancelled in the
     2d revision — equations now travel inline inside finding `content`, so
     the merge has nothing extra to concatenate beyond the four channels.
-- [ ] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
+- [x] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
       reads the resolved `enabled` flag (CLI → YAML → default `False`,
       see Two-layer gate below). For v1 the gate is just `return enabled`
       — `interp_output` is reserved for future content-based gating
       (e.g. "skip lit-review when interpretation confidence > 0.9").
       Docstring includes the cost-tradeoff note from spec §6.
+      **Done — committed `65bc50e` (2026-06-12).** Docstring also
+      names the locked CLI flags `--ml_lit_review_enabled` /
+      `--no-ml_lit_review_enabled` per Design Decision 1.
 
   **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09;
   CLI flag naming locked to the `--ml_*` prefix and the config path made
