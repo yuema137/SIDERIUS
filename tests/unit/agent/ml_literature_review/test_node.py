@@ -1518,3 +1518,107 @@ class TestContentPaperIdHookInSynthesize:
             "content_paper_id" in record.message and "arxiv:2510.25800" in record.message
             for record in caplog.records
         )
+
+
+class TestInitialVerbosity:
+    """Pre-flight B regression (commit 6c493ee, 2026-06-11) —
+    ``DynamicSearchConfig.initial_verbosity`` is wired through
+    ``_run_search_loop`` → ``_do_search`` → ``_retrieved_from_search_result``
+    so it lands on ``PaperSource.verbosity`` for every new search hit.
+    Before the fix this knob was schema-defined but never read."""
+
+    def test_initial_verbosity_threaded_to_paper_source(self, tmp_path, monkeypatch):
+        """initial_verbosity=2 → RetrievedPaper.source.verbosity == 2."""
+        bridge = FakeBridge(
+            responses={
+                # One search round, then done. No escalations.
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                # Synthesis returns no findings — we only inspect retrieved_papers.
+                "lit_review.synthesis": {"findings": []},
+            },
+        )
+        skill = FakeSkill(search=_search_ok)  # no root papers, only search
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        inp = LiteratureReviewInput(
+            experiment_history=_interp(),
+            root_papers=[],
+            dynamic_search=DynamicSearchConfig(
+                enabled=True,
+                max_rounds=1,
+                initial_verbosity=2,  # the Pre-flight B knob
+                escalation_allowed=False,
+                results_per_query=10,
+                max_escalations_per_round=0,
+            ),
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="iv_test"),
+            ),
+            run_name="iv_test",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(inp)
+
+        assert len(out.retrieved_papers) == 1
+        rp = out.retrieved_papers[0]
+        # Operator's REQUESTED verbosity (2) is recorded on source.verbosity.
+        # verbosity_achieved stays at 0 because the S2 search itself is
+        # metadata-only — escalation (disabled here) is what would actually
+        # produce a deep-read. See nodes/ml_literature_review/ml_literature_review.py
+        # _do_search docstring for the full semantic.
+        assert rp.source.verbosity == 2, (
+            f"initial_verbosity=2 should propagate to PaperSource.verbosity; "
+            f"got {rp.source.verbosity}"
+        )
+        assert rp.verbosity_achieved == 0  # search retrieved metadata only
+
+    def test_initial_verbosity_default_zero_preserves_pre_fix_behaviour(
+        self, tmp_path, monkeypatch
+    ):
+        """When initial_verbosity is left at the schema default 0, the
+        search hit's source.verbosity must remain 0 — guards against any
+        accidental knob-flip from the Pre-flight B fix."""
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.synthesis": {"findings": []},
+            },
+        )
+        skill = FakeSkill(search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        inp = LiteratureReviewInput(
+            experiment_history=_interp(),
+            root_papers=[],
+            dynamic_search=DynamicSearchConfig(enabled=True, max_rounds=1),
+            # initial_verbosity NOT passed → schema default 0
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="default_iv_test"),
+            ),
+            run_name="default_iv_test",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(inp)
+
+        assert len(out.retrieved_papers) == 1
+        assert out.retrieved_papers[0].source.verbosity == 0

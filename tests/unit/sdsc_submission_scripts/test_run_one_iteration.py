@@ -1019,3 +1019,65 @@ class TestPseudoModeFactoryWiring:
         err = capsys.readouterr().err
         assert "[PSEUDO-MODE ACTIVE]" in err
         assert "LLM + training" in err
+
+
+class TestLitReviewCLI:
+    """Commit 6 sub-step 6f (commit 596b206, 2026-06-12) — the two
+    ``--ml_lit_review_*`` CLI flags.
+
+    Design Decision 1 (2026-06-11): the ``--ml_*`` prefix is enforced —
+    argparse REJECTS the pre-rename name ``--lit_review_enabled``.
+
+    Design Decision 2 (2026-06-11): ``--ml_lit_review_config`` lets
+    operators point at a non-default YAML without editing the default
+    file."""
+
+    def _argv(self, *extra):
+        return [
+            "--workspace",
+            "/tmp/ws",
+            "--run_name",
+            "iter_001",
+            "--seed_paths",
+            "/tmp/seed.json",
+            "--start_iteration",
+            "1",
+            *extra,
+        ]
+
+    def test_ml_lit_review_enabled_yields_true(self):
+        args = runner.build_parser().parse_args(self._argv("--ml_lit_review_enabled"))
+        assert args.ml_lit_review_enabled is True
+
+    def test_no_ml_lit_review_enabled_yields_false(self):
+        args = runner.build_parser().parse_args(self._argv("--no-ml_lit_review_enabled"))
+        assert args.ml_lit_review_enabled is False
+
+    def test_neither_flag_yields_none_sentinel(self):
+        """BooleanOptionalAction signals 'fall through to YAML' with None
+        when neither --ml_lit_review_enabled nor --no-ml_lit_review_enabled
+        is passed. main() handles None by peeking at the YAML's `enabled`
+        key (see 6f resolution logic)."""
+        args = runner.build_parser().parse_args(self._argv())
+        assert args.ml_lit_review_enabled is None
+
+    def test_pre_rename_name_rejected_with_systemexit(self):
+        """The pre-rename name --lit_review_enabled (without the ml_ prefix)
+        is REJECTED by argparse — confirms Design Decision 1's naming
+        convention is enforced, not just documented."""
+        with pytest.raises(SystemExit):
+            runner.build_parser().parse_args(self._argv("--lit_review_enabled"))
+
+    def test_ml_lit_review_config_passthrough(self):
+        """A custom --ml_lit_review_config path threads through verbatim
+        to args.ml_lit_review_config (Design Decision 2)."""
+        args = runner.build_parser().parse_args(
+            self._argv("--ml_lit_review_config", "/path/to/other.yaml")
+        )
+        assert args.ml_lit_review_config == "/path/to/other.yaml"
+
+    def test_ml_lit_review_config_default(self):
+        """Default --ml_lit_review_config value is the canonical
+        configs/lit_review_config.yaml path."""
+        args = runner.build_parser().parse_args(self._argv())
+        assert args.ml_lit_review_config == "configs/lit_review_config.yaml"
