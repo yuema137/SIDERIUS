@@ -67,6 +67,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, Literal
 
+import yaml
+
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -87,6 +89,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from nodes.ml_literature_review import MLLiteratureReviewAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import (
@@ -501,6 +504,58 @@ def merge_external_agent_outputs(
     }
 
 
+def _build_lit_review_input(
+    config: dict,
+    interp_output: InterpretationOutput,
+    *,
+    llm_kwargs: dict,
+    storage: StorageConfig,
+    run_name: str,
+):
+    """Build a ``LiteratureReviewInput`` from the parsed YAML + workflow state.
+
+    Maps the YAML's operator-visible knobs into the schema fields, fills the
+    workflow-supplied fields (``experiment_history`` / ``storage`` / ``run_name``)
+    and the LLM-routing fields from ``llm_kwargs`` (the 4-field flatten from
+    ``WorkflowLLMConfig.get('lit_review')``).
+
+    Schema ``default_factory`` fires for any block omitted from the YAML, but
+    Design Decision 3 (2026-06-11) requires every operator-visible knob to be
+    present in the YAML — operator visibility, not minimal config.
+
+    Args:
+        config: Parsed YAML dict from ``configs/lit_review_config.yaml`` (or
+            the operator-supplied path via ``--ml_lit_review_config``).
+        interp_output: This iteration's ``InterpretationOutput``; populates
+            ``experiment_history``.
+        llm_kwargs: 4-field LLM routing flatten from
+            ``WorkflowLLMConfig.get('lit_review')``: ``llm_provider``,
+            ``llm_model_id``, ``search_llm_provider``,
+            ``search_llm_model_id``.
+        storage: Iter-scoped storage; the lit-review node writes its
+            output under
+            ``{storage.local.workspace}/ml_literature_review_{run_name}.json``.
+        run_name: Chain-wide run name (same as the rest of the workflow).
+    """
+    # Lazy import keeps top-of-file imports identical to pre-Commit-6 for
+    # the lit-review schema types (which form a long import chain).
+    from agent.schemas.literature_review import LiteratureReviewInput
+
+    return LiteratureReviewInput.model_validate(
+        {
+            "experiment_history": interp_output,
+            "root_papers": config.get("root_papers", []),
+            "dynamic_search": config.get("dynamic_search", {}),
+            "synthesis_config": config.get("synthesis", {}),
+            "confidence_rubric": config.get("confidence_rubric", {}),
+            "findings_verbosity": config.get("findings_verbosity", 1),
+            "storage": storage,
+            "run_name": run_name,
+            **llm_kwargs,
+        }
+    )
+
+
 def _cap_knowledge_cache(
     cache: dict,
     current_model: str,
@@ -774,6 +829,26 @@ def run_workflow(
     # forward-only contract enforced by the bridge.
     chain_run_name: str | None = None,
     run_id: str | None = None,
+    # --- External agents (Commit 6) ---
+    # When True, the per-iteration loop fires ``MLLiteratureReviewAgent``
+    # between interpretation and proposal, threading its findings +
+    # agent_card + suggested_mindset into the proposer via the four
+    # external-agent channels (``expert_context`` / ``vocab_seed`` /
+    # ``agent_cards`` / ``mindset``). When False (default), the
+    # per-iteration loop runs identically to pre-Commit-6 — no
+    # ``MLLiteratureReviewAgent`` instantiation, no lit-review LLM
+    # calls.
+    # The runner ``sdsc_submission_scripts/run_one_iteration.py``
+    # resolves ``lit_review_enabled`` from ``--ml_lit_review_enabled``
+    # / ``--no-ml_lit_review_enabled`` (CLI) > YAML ``enabled`` >
+    # default ``False``. ``lit_review_config_path`` is the YAML to
+    # open + parse internally (Design Decision 2, 2026-06-11); defaults
+    # to the canonical config, operators can pass
+    # ``--ml_lit_review_config /path/to/other.yaml``. The workflow
+    # only opens the file when ``lit_review_enabled=True`` — an unused
+    # path never hits the filesystem.
+    lit_review_enabled: bool = False,
+    lit_review_config_path: str = "configs/lit_review_config.yaml",
     # --- Pseudo-mode factories (Stage 3, Commit 4.5) ---
     # Optional class/factory swaps for the LLM bridge and the sandbox.
     # When None (default), each agent uses its built-in production class
@@ -1109,6 +1184,42 @@ def run_workflow(
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
 
+        # --- Lit-review (Commit 6 sub-step 6e) ---
+        # Runs ONCE per iteration (before the propose/impl/valid attempts).
+        # The 4-channel merge output is concatenated with the existing
+        # accumulated context and threaded into every attempt's
+        # ``local_full_context`` call. When ``lit_review_enabled=False``
+        # (default), ``external_outputs`` stays empty and
+        # ``external_channels`` is the 4-channel zero — the merge call
+        # is a no-op and the proposer's behaviour is bit-identical to
+        # pre-Commit-6.
+        external_outputs: list[ExternalAgentOutput] = []
+        if should_run_literature_review(interpretation, enabled=lit_review_enabled):
+            yaml_path = lit_review_config_path
+            if not os.path.isabs(yaml_path):
+                yaml_path = os.path.join(SIDERIUS_ROOT, yaml_path)
+            print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
+            with open(yaml_path, encoding="utf-8") as _f:
+                lit_review_config = yaml.safe_load(_f)
+            lit_storage = _make_storage(iter_dir, run_name)
+            lit_input = _build_lit_review_input(
+                lit_review_config,
+                interpretation,
+                llm_kwargs=llm_config.get("lit_review"),
+                storage=lit_storage,
+                run_name=run_name,
+            )
+            lit_agent = MLLiteratureReviewAgent(bridge_factory=bridge_factory)
+            _bind_iter_context(lit_agent)
+            lit_output = lit_agent.run(lit_input)
+            external_outputs.append(lit_output)
+            print(
+                f"    Lit-review: {len(lit_output.findings)} finding(s), "
+                f"{lit_output.search_rounds_used} search round(s), "
+                f"{len(lit_output.retrieved_papers)} paper(s) retrieved"
+            )
+        external_channels = merge_external_agent_outputs(external_outputs)
+
         # --- Propose → Implement → Validate (retry loop) ---
         proposal = None
         impl_output = None
@@ -1201,11 +1312,23 @@ def run_workflow(
                 # Forward the trial-mode mirror + budget set so the proposer's
                 # evaluate_time_skill gate constructs the same sample_set the
                 # tuner will (docs/resource_estimator_implement.md §2.7.2).
+                # External-agent channels (Commit 6 sub-step 6e) — when
+                # lit-review fires for this iter, its findings extend the
+                # proposer's ``expert_context`` (+ its ``vocab_seed`` /
+                # ``agent_cards`` / ``mindset``). When disabled,
+                # ``external_channels`` is the 4-channel zero so the
+                # concatenations are no-ops and ``agent_cards=[]`` /
+                # ``mindset=None`` reach the protocol — which collapses
+                # both to "no contributor block" via its existing
+                # ``list(x or [])`` and ``if mindset is not None`` guards
+                # (see ``ml_result_interp_to_ml_model_propose.py:136-198``).
                 propose_input = local_full_context(
                     interpretation,
                     attempt_storage,
-                    expert_context=expert_context_for_propose,
-                    vocab_seed=vocab_seed,
+                    expert_context=expert_context_for_propose + external_channels["expert_context"],
+                    vocab_seed=vocab_seed + external_channels["vocab_seed"],
+                    agent_cards=external_channels["agent_cards"],
+                    mindset=external_channels["mindset"],
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
                     is_trial=is_trial,
