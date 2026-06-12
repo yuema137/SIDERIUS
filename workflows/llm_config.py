@@ -24,7 +24,7 @@ Usage:
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -241,7 +241,11 @@ class WorkflowLLMConfig(BaseModel):
         if isinstance(config, TunerLLMConfig):
             # Flatten the nested TunerLLMConfig into the legacy flat keys
             # that HyperparamTuningInput / LLMBridge expect.
-            result = {
+            # ``dict[str, Any]`` because the optional ``max_retries`` value is
+            # an ``int`` while everything else is a ``str``; the consumer
+            # (LLMBridge) reads each key by name, so a heterogeneous-value
+            # dict is the honest type here.
+            result: dict[str, Any] = {
                 "provider": config.planner.provider,
                 "model_id": config.planner.model_id,
                 "reflect_provider": config.reflector.provider,
@@ -254,7 +258,9 @@ class WorkflowLLMConfig(BaseModel):
         if isinstance(config, ProposalLLMConfig):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
             # The proposal agent reads these to construct per-stage bridges.
-            result = {
+            # ``dict[str, Any]`` for the same reason as the tuner branch:
+            # ``max_retries`` is an ``int`` mixed with string-valued keys.
+            result: dict[str, Any] = {
                 "comparison_provider": config.comparison.provider,
                 "comparison_model_id": config.comparison.model_id,
                 "reasoning_provider": config.reasoning.provider,
@@ -332,6 +338,11 @@ class WorkflowLLMConfig(BaseModel):
             interpret=base_cfg,
             propose=propose_cfg,
             implement=base_cfg,
-            validate_model=base_cfg,
+            # ``validate`` is the public alias of the ``validate_model``
+            # field (set via ``Field(alias="validate")`` + ``populate_by_name=True``).
+            # The pyright Pydantic plugin keys construction kwargs off the
+            # alias, not the underlying attribute name — using the alias
+            # here is the canonical form.
+            validate=base_cfg,
             tune=tune_cfg,
         )

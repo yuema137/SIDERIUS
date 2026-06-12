@@ -65,6 +65,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
+from typing import Literal
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -91,6 +92,22 @@ from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Centralised Literal type aliases that match the protocol-layer signatures.
+# Defined here so the four strategy kwargs threaded through ``run_workflow`` /
+# ``_get_reasoning_pipeline`` carry the same narrow types as their downstream
+# consumers (``ReasoningPipelineConfig.exploration_mode``,
+# ``local_full_context.trial_strategy``, ``local_validated_model.{trial,eval,
+# formal,formal_round}_strategy``) without per-call casts.
+ExplorationMode = Literal["auto", "explore", "exploit"]
+StrategyMode = Literal["snapshot", "anchors", "target"]
+FormalRoundStrategy = Literal[
+    "full_clone",
+    "hybrid_params",
+    "independent",
+    "inherit_best_trial",
+    "llm_propose",
+]
+
 
 def _load_vocab_seed() -> list:
     """Load the canonical vocabulary seed from agent/schemas/vocab_seed.json.
@@ -114,7 +131,7 @@ def _load_vocab_seed() -> list:
 
 def _get_reasoning_pipeline(
     llm_config: WorkflowLLMConfig,
-    exploration_mode: str = "auto",
+    exploration_mode: ExplorationMode = "auto",
     minimum_boldness: float = 0.05,
     n_candidates: int | None = None,
 ):
@@ -508,6 +525,13 @@ def _register_plugin(
             f"{impl_output.description_file_path}, skipping registration"
         )
 
+    if primary_plugin is None:
+        # ``dest_plugin_dirs`` was empty after normalization — the copy loop
+        # never ran, so there is nothing to register. Defensive guard; also
+        # narrows ``primary_plugin`` from ``str | None`` to ``str`` for the
+        # call below.
+        return
+
     try:
         registered = _add_plugin_to_registries(primary_plugin)
         if registered:
@@ -544,11 +568,11 @@ def run_workflow(
     human_advice_mindset: str | None = None,
     # --- Trial mode (optional — defaults preserve single-file behavior) ---
     is_trial: bool = False,
-    trial_strategy: str = "snapshot",
+    trial_strategy: StrategyMode = "snapshot",
     trial_portion: float = 0.1,
     target_files: list[int] | None = None,
     train_portion: float = 0.1,
-    eval_strategy: str = "snapshot",
+    eval_strategy: StrategyMode = "snapshot",
     eval_portion: float = 0.1,
     train_validation_align: bool = True,
     sampling_seed: int | None = None,
@@ -568,12 +592,12 @@ def run_workflow(
     # strategy is locked to ``snapshot``; ``formal_eval_portion`` defaults to
     # 1.0 (production full-clone, §12.2) and is operator-controllable for
     # smoke / CI runs that need to fit a tight formal_time_budget_minutes.
-    formal_strategy: str = "snapshot",
+    formal_strategy: StrategyMode = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
     formal_eval_portion: float = 1.0,
     force_formal_round: bool = True,
-    formal_round_strategy: str = "full_clone",
+    formal_round_strategy: FormalRoundStrategy = "full_clone",
     # --- Degenerate-output reaction policy (paired with execute_tools.squid_health_checks) ---
     degenerate_penalty_score: float | None = None,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
@@ -584,7 +608,7 @@ def run_workflow(
     attempts_per_formal_round: int = 5,
     max_fail_rounds: int = 3,
     # --- Reasoning pipeline ---
-    exploration_mode: str = "auto",
+    exploration_mode: ExplorationMode = "auto",
     minimum_boldness: float = 0.05,
     n_candidates: int | None = None,
     # --- Implementation retry ---
@@ -1223,6 +1247,14 @@ def run_workflow(
                 f"attempts without passing validation. Skipping to next iteration."
             )
             continue
+
+        # Invariant: ``validation.passed`` is True here, which means the
+        # propose → impl → validate chain ran end-to-end this iteration —
+        # ``proposal`` was assigned before ``impl_input`` was constructed.
+        # The assert documents the invariant and narrows
+        # ``proposal: ProposalOutput | None`` to ``ProposalOutput`` for the
+        # rest of the iteration body (tuning + cache update + score check).
+        assert proposal is not None
 
         # --- Tune (set up storage + run-scoped plugin dir up front) ---
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
