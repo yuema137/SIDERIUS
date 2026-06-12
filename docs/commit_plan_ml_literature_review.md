@@ -1750,9 +1750,9 @@ as the always-true trigger.
 | 6b Part 1 — `LitReviewLLMConfig` nested config on `WorkflowLLMConfig` (Step 2 of 2026-06-11 implementation order) | ✅ done | Committed `592ec6a` (2026-06-11). New `LitReviewLLMConfig(main, search)` class added; `WorkflowLLMConfig.lit_review: LitReviewLLMConfig \| None` slot added; `.get("lit_review")` flattens to the 4-field shape `{llm_provider, llm_model_id, search_llm_provider, search_llm_model_id}` when configured, and falls back to a translated 2-field dict from `interpret` when not. `.uniform()` populates lit_review with both sub-slots = `base_cfg`. Schema-level defaults: `deepseek` / `deepseek-v4-pro` for both sub-slots (matches Step 3's JSON defaults). Verification: ruff + pyright (file + whole-repo) clean; 10/10 smoke tests pass — including a backward-compat check that all 4 existing `llm_configs/*.json` still parse against the new schema. |
 | 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ✅ done | Committed `65bc50e` (2026-06-12). `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. Verification: ruff + pyright (file + whole-repo) clean; 5/5 smoke tests pass (enabled True/False + N=0/N=1/N=2 merge cases). |
 | 6b Part 3 — Update existing `llm_configs/*.json` (Step 3 of 2026-06-11 implementation order) | ✅ done | Committed `8764e46` (2026-06-11). All 4 configs got the same `lit_review` block (both sub-slots = `deepseek`/`deepseek-v4-pro`), uniformly across both the OpenAI-routed (`openai_tiered_*.json`, `certify_minimal.json`) and the deepseek-routed (`deepseek_tiered_pro.json`) configs — lit-review-specific routing isolated from main-pipeline routing. Verification: JSON parse + `WorkflowLLMConfig.model_validate` + `.get('lit_review')` returns the expected 4-field dict on all 4 files. +40/-0 lines total. |
-| 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ⏭️ deferred | Both params folded into 6e's wiring patch (signature change + body wiring land together — cleaner than no-op standalone signature edits). The path param (Design Decision 2, 2026-06-11) lets different experiments use different lit-review configs without editing the default file. |
+| 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ✅ done (folded) | Committed as part of `59cc76e` (2026-06-12, sub-step 6e). Both params landed atop `run_workflow`'s signature between `run_id` and the pseudo-mode factories group, with a doc-comment explaining the resolution chain and the operator-configurable path semantics. |
 | 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ✅ done | Committed `546ce72` (2026-06-11). Replaced the 4b-final stub with the full operator-visible knob set per Design Decision 3 — every knob explicit (6 top-level keys: `enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`, `synthesis`, `confidence_rubric`), all values match schema defaults verbatim so the file is a self-documenting tunable surface. Verification: `yaml.safe_load` parses cleanly; per-block `DynamicSearchConfig.model_validate` / `SynthesisConfig.model_validate` / `ConfidenceRubric.model_validate` / `PaperSource.model_validate` all pass. +88/-7 lines. |
-| 6e — Wire per-iteration insertion point | ⏳ pending | Build `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (no pre-parsed dict crosses the API boundary). Conditional `MLLiteratureReviewAgent.run`; pass `**merge_external_agent_outputs([...])` into `local_full_context` alongside `human_advice=human_advice_propose`. Also lands the two signature additions deferred from 6c. |
+| 6e — Wire per-iteration insertion point | ✅ done | Committed `59cc76e` (2026-06-12). New `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (relative paths resolved against `SIDERIUS_ROOT`); conditional `MLLiteratureReviewAgent.run` once per iter; `merge_external_agent_outputs` produces `external_channels` which extends `expert_context` + `vocab_seed` and supplies `agent_cards` + `mindset` to every per-attempt `local_full_context` call. Also landed the two signature additions deferred from 6c. Bit-identical behaviour when `lit_review_enabled=False` — protocol's existing `list(x or [])` and `if mindset is not None` guards collapse empty channels to "no contributor block". Verification: ruff + pyright (file + whole-repo) clean; 3/3 smoke tests pass (symbols importable, signature defaults correct, `_build_lit_review_input` round-trips every operator-visible knob from the canonical YAML). |
 | 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ⏳ pending | Two CLI flags (Design Decision 1, 2026-06-11): (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled`; resolution priority CLI > YAML `enabled` > default `False`. (2) `--ml_lit_review_config` with default `"configs/lit_review_config.yaml"`. **Scope**: exactly these two flags for lit-review; all other parameters live in the YAML. |
 | 6g — `reference_data/root_papers_cache/README.md` | ⏳ pending | README only — cache files themselves are not committed (Risk 5 resolution). |
 | 6h — Tests | ⏳ pending | Covers the new surface: helpers, `LitReviewLLMConfig` flatten + JSON loading, `initial_verbosity` regression, CLI flag naming (`--ml_*` prefix enforced), `lit_review_config_path` passthrough + absence-tolerance, wiring smoke. |
@@ -1919,7 +1919,7 @@ a YAML that promises a working knob.
   lit-review YAML is cancelled — all LLM routing lives in
   `WorkflowLLMConfig` (mirrors the tuner planner/reflector + proposer
   comparison/reasoning/proposing nested-config precedent).
-- [ ] Load the lit-review YAML at workflow startup via the new
+- [x] Load the lit-review YAML at workflow startup via the new
       `lit_review_config_path: str = "configs/lit_review_config.yaml"`
       kwarg on `run_workflow` (Design Decision 2, 2026-06-11). The path
       is resolved relative to project root via the same mechanism the
@@ -1934,7 +1934,19 @@ a YAML that promises a working knob.
       `llm_config.get("lit_review")` (Design Decision 3, 2026-06-11),
       `experiment_history` comes from the per-iter `InterpretationOutput`,
       `storage` + `run_name` come from the workflow's run-scoped state.
-- [ ] At the per-iteration insertion point:
+      **Done — committed `59cc76e` (2026-06-12).** Relative paths
+      resolve to `SIDERIUS_ROOT` via `os.path.isabs` check;
+      `_build_lit_review_input` uses `LiteratureReviewInput.model_validate`
+      to drive Pydantic's nested-schema validation in one shot.
+- [x] At the per-iteration insertion point: **Done — committed
+      `59cc76e` (2026-06-12).** Implementation matches the pseudo-code
+      example below; the proposal-loop's `local_full_context` call now
+      receives `expert_context = expert_context_for_propose +
+      external_channels["expert_context"]`, `vocab_seed = vocab_seed +
+      external_channels["vocab_seed"]`, `agent_cards =
+      external_channels["agent_cards"]`, `mindset =
+      external_channels["mindset"]` — bit-identical to pre-Commit-6
+      behaviour when `lit_review_enabled=False`.
   ```python
   # ----- In run_one_iteration.py — resolved ONCE per chain process,
   # then passed as two separate kwargs into run_workflow.
