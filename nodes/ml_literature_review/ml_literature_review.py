@@ -434,7 +434,13 @@ class MLLiteratureReviewAgent:
                         "search action with empty query at round %d; ending loop", rounds
                     )
                     break
-                n_hits = self._do_search(query, retrieved, index, cfg.results_per_query)
+                n_hits = self._do_search(
+                    query,
+                    retrieved,
+                    index,
+                    cfg.results_per_query,
+                    cfg.initial_verbosity,
+                )
                 prior_search_results.append((query, n_hits))
                 rounds += 1
                 escalations_this_round = 0  # fresh escalation budget for the new round
@@ -467,31 +473,50 @@ class MLLiteratureReviewAgent:
         retrieved: list[RetrievedPaper],
         index: dict[str, RetrievedPaper],
         limit: int,
+        initial_verbosity: Literal[0, 1, 2] = 0,
     ) -> int:
         """Run one S2 search; append new papers; return the number of hits S2
-        returned for ``query`` (fed back to the next round for self-correction)."""
+        returned for ``query`` (fed back to the next round for self-correction).
+
+        ``initial_verbosity`` is recorded on each new ``RetrievedPaper.source``
+        as the operator's requested resolve depth (``DynamicSearchConfig.initial_verbosity``,
+        2026-06-11 Pre-flight B fix). The S2 search itself stays at metadata-only
+        (verbosity=0 in ``run_skill``); ``verbosity_achieved`` therefore also
+        stays at 0 — actual deep-reads happen via the LLM's escalation decisions
+        in ``_run_search_loop``.
+        """
         result = run_skill(None, mode="search", query=query, limit=limit, verbosity=0)
         if result.get("status") not in ("ok", "partial"):
             logger.warning("search failed for query %r: %s", query, result.get("message"))
             return 0
         results = (result.get("data") or {}).get("results", [])
         for r in results:
-            rp = self._retrieved_from_search_result(r)
+            rp = self._retrieved_from_search_result(r, initial_verbosity)
             if rp is not None and rp.paper_id not in index:
                 retrieved.append(rp)
                 index[rp.paper_id] = rp
         return len(results)
 
-    def _retrieved_from_search_result(self, r: dict) -> RetrievedPaper | None:
+    def _retrieved_from_search_result(
+        self, r: dict, initial_verbosity: Literal[0, 1, 2] = 0
+    ) -> RetrievedPaper | None:
         source_type, identifier = _source_type_from_external_ids(r.get("externalIds") or {})
         if source_type is None or identifier is None:
             # No resolvable id → cannot be escalated; skip the audit entry.
             logger.debug("skipping search hit with no arxiv/doi id: %s", r.get("title"))
             return None
         paper_id = f"{source_type}:{identifier}"
+        # ``source.verbosity`` records the operator's requested resolve depth
+        # (``DynamicSearchConfig.initial_verbosity``, default 0). ``verbosity_achieved``
+        # stays at 0 because the S2 search call itself is metadata-only; subsequent
+        # LLM-driven escalation calls in ``_run_search_loop`` raise the achieved
+        # value when they fetch + compress the full text. 2026-06-11 Pre-flight B —
+        # the field was dormant before this fix.
         return RetrievedPaper(
             paper_id=paper_id,
-            source=PaperSource(source_type=source_type, identifier=identifier, verbosity=0),
+            source=PaperSource(
+                source_type=source_type, identifier=identifier, verbosity=initial_verbosity
+            ),
             s2_metadata=r,
             verbosity_achieved=0,
         )
