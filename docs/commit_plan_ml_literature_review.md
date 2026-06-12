@@ -1755,7 +1755,7 @@ as the always-true trigger.
 | 6e — Wire per-iteration insertion point | ✅ done | Committed `59cc76e` (2026-06-12). New `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (relative paths resolved against `SIDERIUS_ROOT`); conditional `MLLiteratureReviewAgent.run` once per iter; `merge_external_agent_outputs` produces `external_channels` which extends `expert_context` + `vocab_seed` and supplies `agent_cards` + `mindset` to every per-attempt `local_full_context` call. Also landed the two signature additions deferred from 6c. Bit-identical behaviour when `lit_review_enabled=False` — protocol's existing `list(x or [])` and `if mindset is not None` guards collapse empty channels to "no contributor block". Verification: ruff + pyright (file + whole-repo) clean; 3/3 smoke tests pass (symbols importable, signature defaults correct, `_build_lit_review_input` round-trips every operator-visible knob from the canonical YAML). |
 | 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ✅ done | Committed `596b206` (2026-06-12). Two CLI flags landed at the end of `build_parser` per Design Decision 1: (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled` (default `None` = "fall through to YAML"); (2) `--ml_lit_review_config <path>` (default `"configs/lit_review_config.yaml"`). Resolution logic in `main()` peeks at the YAML's `enabled` key only when neither CLI flag was passed; fail-safe behaviour (FileNotFoundError / yaml.YAMLError → False) prevents a misconfigured YAML from silently enabling the gate. Resolved boolean + raw path threaded into `run_workflow` right before the pseudo-mode factories. Verification: ruff clean; 6/6 smoke tests pass — including the regression check that argparse REJECTS the pre-rename name `--lit_review_enabled` (proves the `ml_` prefix is enforced, not just documented). |
 | 6g — `reference_data/root_papers_cache/README.md` | ✅ done | Committed `4019849` (2026-06-12). README documents the cache contract (one JSON per `RetrievedPaper`, filename via `_sanitize_paper_id`, paper_id is the cache key, manual deletion to invalidate) + the `DEFAULT_ROOT_CACHE_DIR` node contract. `.gitignore` tightened to `reference_data/root_papers_cache/*` + an explicit `!README.md` negation so only the README is tracked — JSON cache files stay gitignored per Risk 5. Verification: `git check-ignore -v` matches the negation rule on README and the wildcard rule on a phantom `*.json`; `git add --dry-run` accepts the README and rejects the phantom. |
-| 6h — Tests | ⏳ pending | Covers the new surface: helpers, `LitReviewLLMConfig` flatten + JSON loading, `initial_verbosity` regression, CLI flag naming (`--ml_*` prefix enforced), `lit_review_config_path` passthrough + absence-tolerance, wiring smoke. |
+| 6h — Tests | ✅ done | Landed across two commits — Files 1-4 (helper unit tests + LitReviewLLMConfig + JSON regression + initial_verbosity regression + CLI flag naming) in `35c1f21` (2026-06-12, 24 tests + 1 modified across 4 files); File 5 (workflow-level dual-mode integration — operator-YAML passthrough, absence-tolerance, channels-reach-proposer smoke) in `82bbf94` (2026-06-12, 2 tests). Total: **26 new tests** + 1 modified. All tests pass under ruff + pytest (2/2 on the new dual-mode file in 1.10s; 135/135 on the 4 unit-test files combined). |
 
 ### Design decisions log (2026-06-11)
 
@@ -2172,10 +2172,16 @@ a YAML that promises a working knob.
   the Phase-1 / Phase-2 / §10 FULL tests use) into
   `reference_data/root_papers_cache/`. We may revisit committing the
   files if reproducibility issues from S2 variability become a problem.
-- [ ] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`)
-      — partial: helpers + `_build_lit_review_input` done in commit
-      `35c1f21` (Files 1-4 of 6h); 3 workflow-level tests deferred to
-      File 5 (dual-mode integration extension):
+- [x] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`)
+      — **complete** as of `82bbf94` (File 5). Helpers + `_build_lit_review_input`
+      land as unit tests in `35c1f21`; the 3 workflow-level tests
+      (config_path passthrough, absence-tolerance, wiring smoke) live as
+      dual-mode integration tests in
+      `tests/integration/workflows/test_lit_review_wiring_dual_mode.py`
+      (commit `82bbf94`) — splitting the test surface into the
+      lighter-weight unit file and the heavier dual-mode file matches
+      the test-classification rule (unit = mocked helpers; integration =
+      workflow-level wiring with all 5 node agents patched).
   - [x] `merge_external_agent_outputs([single_output])` returns the four
         channels mapped correctly.
   - [x] `merge_external_agent_outputs([])` returns the empty default
@@ -2184,28 +2190,34 @@ a YAML that promises a working knob.
         mindset; concatenation for the list channels.
   - [x] `should_run_literature_review(...)` respects the `enabled` kwarg
         in both directions (True → True, False → False).
-  - [ ] **`lit_review_config_path` passthrough** (Design Decision 2,
+  - [x] **`lit_review_config_path` passthrough** (Design Decision 2,
         2026-06-11): with a tmp YAML at a non-default path, invoke
         `run_workflow(lit_review_config_path=tmp_path, lit_review_enabled=True, ...)`
         and assert the workflow opens + parses *that* file, not the
         default at `configs/lit_review_config.yaml`. Asserts both
         (a) the YAML at `tmp_path` is read, and (b) the resulting
         `LiteratureReviewInput.root_papers` matches the tmp file's
-        contents. *(Deferred to File 5 — requires running the full
-        workflow end-to-end; the unit test of `_build_lit_review_input`
-        at `tests/unit/workflows/test_model_exploration_lit_review_wiring.py::TestBuildLitReviewInput::test_custom_root_papers_override`
-        verifies the YAML→LiteratureReviewInput transformation
-        standalone.)*
-  - [ ] **`lit_review_config_path` is NOT touched when
+        contents. **Done — landed in
+        `tests/integration/workflows/test_lit_review_wiring_dual_mode.py::test_lit_review_enabled_threads_operator_yaml_channels_to_proposer`
+        (commit `82bbf94`, 2026-06-12)**. Sentinel arxiv id "9999.99999"
+        in the tmp YAML is asserted on the captured
+        `LiteratureReviewInput.root_papers[0].identifier`.
+  - [x] **`lit_review_config_path` is NOT touched when
         `lit_review_enabled=False`**: with `lit_review_config_path`
         pointed at a path that does not exist, the workflow runs
         without raising — confirms the path is opened only when
-        actually used. *(Deferred to File 5 — workflow-level test.)*
-  - [ ] Wiring smoke test: with `MLLiteratureReviewAgent.run` mocked to
+        actually used. **Done — landed in
+        `test_lit_review_wiring_dual_mode.py::test_lit_review_disabled_tolerates_missing_yaml_path`
+        (commit `82bbf94`)**.
+  - [x] Wiring smoke test: with `MLLiteratureReviewAgent.run` mocked to
         return a canned `LiteratureReviewOutput`, invoke the per-iter
         section and assert the `ProposalInput` arriving at the proposer
         has the expected `agent_cards` and `expert_context` entries.
-        *(Deferred to File 5 — workflow-level test.)*
+        **Done — landed in
+        `test_lit_review_wiring_dual_mode.py::test_lit_review_enabled_threads_operator_yaml_channels_to_proposer`
+        (commit `82bbf94`)**, with assertions on
+        `prop_input.agent_cards[0].agent_name == "ml_literature_review"`
+        and the lit-review finding's `source_ref`.
 
 - [x] Tests for `LitReviewLLMConfig` (`tests/unit/workflows/test_llm_config.py`
       — extend existing file; Design Decision 3, 2026-06-11) — **Done,
@@ -2261,7 +2273,7 @@ a YAML that promises a working knob.
       (2026-06-12)**, 2 tests in `TestInitialVerbosity` (the explicit
       `initial_verbosity=2` test + a default-zero regression that
       guards against accidental knob-flip from the Pre-flight B fix).
-- [ ] **Extend an existing dual-mode test to cover the lit-review insertion
+- [x] **Extend an existing dual-mode test to cover the lit-review insertion
       point** (Risk 6 resolution, P-design 2026-06-09 — do NOT just rely
       on the wiring smoke test). Candidates from
       `tests/integration/workflows/`: `test_k9_invented_model_dual_mode.py`
@@ -2270,7 +2282,16 @@ a YAML that promises a working knob.
       `LiteratureReviewOutput` and asserts the per-iteration
       `ProposalInput` carries the expected `agent_cards` + `expert_context`.
       Catches workflow-level wiring regressions for free on every
-      dual-mode CI run.
+      dual-mode CI run. **Done — committed `82bbf94` (2026-06-12).**
+      Deviation from the spec: rather than extending one of the
+      existing files (both of which test `agent.run()` directly,
+      not `run_workflow`), a NEW dedicated file
+      `tests/integration/workflows/test_lit_review_wiring_dual_mode.py`
+      was created — same dual-mode `pytestmark`, same mocking pattern,
+      cleaner separation of concerns (the existing files focus on
+      tuner-state and gate-exhaustion propagation; this one focuses
+      on lit-review insertion). 2 tests cover both the enabled and
+      disabled paths.
 
 **Test gate**:
 ```
