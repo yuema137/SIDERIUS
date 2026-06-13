@@ -416,9 +416,12 @@ class TestEscalation:
             bridge_factory=_bridge_factory(bridge),
             root_cache_dir=str(tmp_path / "cache"),
         )
-        # Set self.bridge manually since we're not going through run() —
-        # it's what _compress (called inside _escalate) reads.
+        # Set self.bridge AND self._task_description manually since we're
+        # not going through run() — both are read by _compress (called
+        # inside _escalate). Fix 6 (6.5b-5) added _task_description as a
+        # run()-set attribute.
         agent.bridge = bridge
+        agent._task_description = "test task"
 
         target = RetrievedPaper(
             paper_id="arxiv:1",
@@ -696,6 +699,68 @@ class TestParseDimension:
         # wasn't followed).
         assert _parse_dimension("targets the model directly without naming a dimension") is None
         assert _parse_dimension("") is None
+
+
+class TestTaskDescriptionPlumbing:
+    """Fix 6 (Commit 6.5b-5): the `task_description` from
+    LiteratureReviewInput must reach all three LLM-facing render calls
+    (paper-extract, search-decision, synthesis) via the
+    {TASK_DESCRIPTION} prompt placeholder. The node stores
+    inp.task_description as self._task_description in run() and passes
+    it explicitly to each render call site.
+    """
+
+    def test_task_description_reaches_all_three_render_calls(self, tmp_path, monkeypatch):
+        TASK = "denoise audio recordings of whale song at 48 kHz sample rate"
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "audio denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok(), search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # _input default sets 1 root paper at verbosity=1, which triggers
+        # _compress → paper_extract render call. Override the
+        # task_description on the validated input.
+        inp = _input(
+            tmp_path,
+            dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=False),
+        )
+        inp.task_description = TASK
+        agent.run(inp)
+
+        # Group the captured system prompts by their bridge call label.
+        prompts_by_label: dict[str, list[str]] = {}
+        for label, system, _user in bridge.prompts:
+            prompts_by_label.setdefault(label, []).append(system)
+
+        # All 3 labels must have been called at least once.
+        assert "lit_review.paper_extract" in prompts_by_label
+        assert "lit_review.search_decision" in prompts_by_label
+        assert "lit_review.synthesis" in prompts_by_label
+
+        # The custom TASK string must appear in EVERY system prompt
+        # captured under each of the 3 labels (injected at the
+        # {TASK_DESCRIPTION} placeholder).
+        for label in (
+            "lit_review.paper_extract",
+            "lit_review.search_decision",
+            "lit_review.synthesis",
+        ):
+            for system in prompts_by_label[label]:
+                assert TASK in system, (
+                    f"task_description '{TASK}' not found in {label} system prompt"
+                )
 
 
 class TestStorageDump:

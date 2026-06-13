@@ -41,6 +41,7 @@ from pydantic import ValidationError
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
+    SIDERIUS_TASK,
     render_paper_extract_prompt,
     render_search_decision_prompt,
     render_synthesis_prompt,
@@ -279,6 +280,7 @@ class MLLiteratureReviewAgent:
     # cheaper model than the main reasoning bridge); falls back to ``bridge``.
     bridge: LLMBridge
     search_bridge: LLMBridge
+    _task_description: str  # Fix 6 (6.5b-5): set in run() from inp.task_description
 
     def __init__(self, bridge_factory=None, root_cache_dir: str = DEFAULT_ROOT_CACHE_DIR):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -301,6 +303,12 @@ class MLLiteratureReviewAgent:
             )
         else:
             self.search_bridge = self.bridge
+        # Fix 6 (6.5b-5): the task description threaded into all three render
+        # call sites (compression / search-decision / synthesis). When the
+        # input field is empty, fall back to the SIDERIUS_TASK default. Commit
+        # F follows up by deleting SIDERIUS_TASK and changing render defaults
+        # from SIDERIUS_TASK to "".
+        self._task_description = inp.task_description or SIDERIUS_TASK
         cache_dir = Path(self._root_cache_dir)
 
         retrieved: list[RetrievedPaper] = []
@@ -469,6 +477,7 @@ class MLLiteratureReviewAgent:
                 prior_search_results=prior_search_results,
                 prior_escalation_results=prior_escalation_results,  # Fix 3 (6.5b-2)
                 dimension_counts=dimension_counts,  # Fix 5 (6.5b-4)
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             # The search-decision is the cheap, templated step — routed through
             # self.search_bridge (a cheaper model when configured; else the main
@@ -696,7 +705,9 @@ class MLLiteratureReviewAgent:
         """
         try:
             sys_prompt, user_prompt = render_paper_extract_prompt(
-                full_text, extraction_method=extraction_method
+                full_text,
+                extraction_method=extraction_method,
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.paper_extract")
             extract = PaperExtract.model_validate(raw)
@@ -725,6 +736,7 @@ class MLLiteratureReviewAgent:
                 confidence_rubric=inp.confidence_rubric,
                 findings_verbosity=inp.findings_verbosity,
                 synthesis_config=inp.synthesis_config,
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
         except Exception as e:  # resilience boundary

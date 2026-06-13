@@ -30,6 +30,24 @@
 enabled: true
 
 # ---------------------------------------------------------------------------
+# Task description — what research task this lit-review run is supporting.
+# Injected into all three lit-review LLM calls (paper-extract,
+# search-decision, synthesis) via the {TASK_DESCRIPTION} placeholder.
+# Drives the search LLM's query anchor words (e.g. "1D", "broadband",
+# "SQUID") and the synthesis LLM's relevance framing.
+#
+# Strongly recommended — an empty value falls back to the SIDERIUS_TASK
+# default constant defined in agent/prompt_templates/literature_review/
+# __init__.py. The workflow prints a Warning at YAML-load time when
+# this field is empty so operators see the fallback is happening.
+# ---------------------------------------------------------------------------
+task_description: |
+  full-spectrum 1-D time-series denoising of SQUID dark-matter
+  detector data: map a noisy [B, T] integer signal to a clean
+  [B, 256, T] reconstruction, trained across the whole frequency
+  spectrum at once (not split into per-band models).
+
+# ---------------------------------------------------------------------------
 # Root papers — curated foundational papers always resolved at agent start.
 # Per-paper extracts cached on disk under reference_data/root_papers_cache/.
 # ---------------------------------------------------------------------------

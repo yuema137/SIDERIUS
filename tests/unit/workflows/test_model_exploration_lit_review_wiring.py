@@ -210,3 +210,62 @@ class TestBuildLitReviewInput:
         assert inp.root_papers == []
         assert inp.dynamic_search.enabled is True  # schema default
         assert inp.findings_verbosity == 1
+
+    def test_warns_on_empty_task_description(self, tmp_path, capsys):
+        # Fix 6 (Commit 6.5b-5): when the YAML config has no
+        # task_description key (or an empty/whitespace-only value),
+        # _build_lit_review_input prints a Warning so operators know the
+        # lit-review LLM calls will fall back to the SIDERIUS_TASK default
+        # constant. All three "no usable value" inputs trigger the warning.
+
+        # Case 1: key missing entirely.
+        _build_lit_review_input(
+            {},
+            _interp(),
+            llm_kwargs=_LLM_KWARGS,
+            storage=_storage(tmp_path),
+            run_name="t",
+        )
+        captured = capsys.readouterr()
+        assert "Warning: lit_review config has no `task_description`" in captured.out
+        assert "SIDERIUS_TASK default constant" in captured.out
+
+        # Case 2: key present but empty string.
+        _build_lit_review_input(
+            {"task_description": ""},
+            _interp(),
+            llm_kwargs=_LLM_KWARGS,
+            storage=_storage(tmp_path),
+            run_name="t",
+        )
+        captured2 = capsys.readouterr()
+        assert "Warning: lit_review config has no `task_description`" in captured2.out
+
+        # Case 3: key present but whitespace-only — .strip() collapses it
+        # to empty, same warning fires.
+        _build_lit_review_input(
+            {"task_description": "   \n\t  "},
+            _interp(),
+            llm_kwargs=_LLM_KWARGS,
+            storage=_storage(tmp_path),
+            run_name="t",
+        )
+        captured3 = capsys.readouterr()
+        assert "Warning: lit_review config has no `task_description`" in captured3.out
+
+    def test_no_warning_when_task_description_set(self, tmp_path, capsys):
+        # Fix 6 (Commit 6.5b-5): when the YAML config carries a non-empty
+        # task_description, NO warning is printed AND the value flows
+        # through to LiteratureReviewInput.task_description for the node
+        # to read.
+        inp = _build_lit_review_input(
+            {"task_description": "denoise audio recordings of whale song"},
+            _interp(),
+            llm_kwargs=_LLM_KWARGS,
+            storage=_storage(tmp_path),
+            run_name="t",
+        )
+        captured = capsys.readouterr()
+        assert "Warning: lit_review config has no `task_description`" not in captured.out
+        # And the value reaches the validated input.
+        assert inp.task_description == "denoise audio recordings of whale song"

@@ -2618,7 +2618,7 @@ disk for Checkpoint S to be meaningful.
       e.g. *"Coverage so far: bottleneck=2, take_home=0,
       architectural_gap=0, adjacent_technique=0."*
 
-  **Landed 2026-06-12 in 6.5b-4 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-4 sub-commit (SHA d3bfbd4).**
   Implementation across two files:
   * `agent/prompt_templates/literature_review/__init__.py`:
     - New `DIMENSION_LABELS: tuple[str, ...]` constant (single source
@@ -2808,7 +2808,7 @@ regrouping):
       `target.verbosity_achieved >= requested_verbosity` BEFORE running
       the skill call.
 
-  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
   Implementation: the pre-call check
   (`if target.verbosity_achieved >= target_verbosity: return "noop"`)
   fires at the top of `_escalate` per spec — skips the resolve skill
@@ -2825,7 +2825,7 @@ regrouping):
       `(paper_id, was_noop, reasoning)` — passed into
       `render_search_decision_prompt` as a new kwarg.
 
-  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
   Implementation deviation: tuple slot 2 is `str` (one of
   `"ok"` / `"noop"` / `"error"`), not `bool was_noop`. Preserves the
   3-state signal end-to-end so the LLM distinguishes errors from
@@ -2842,7 +2842,7 @@ regrouping):
   - "arxiv:2501.04967" → deep-read produced extract (now v=1)
   ```
 
-  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
   Implementation deviation: the rendered format is richer than the
   spec sample. Each row carries the status's user-facing label
   (`"success — paper now deep-read"` / `"no-change — paper was already
@@ -2857,7 +2857,7 @@ regrouping):
       escalating it again wastes a round; pick a different on-bottleneck
       paper."*
 
-  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
   Implementation deviation: the nudge lives in the **user prompt**
   (appended to the escalation-history block when non-empty), not in
   the system prompt. Wording is *"Do NOT re-escalate a paper whose
@@ -2925,7 +2925,7 @@ Tests delivered:
           "(degenerate); 'done' (stop).")
   ```
 
-  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
   **Implementation deviations from the spec draft above** (all resolved
   in this conversation):
   * `round_idx` → `round_index` (more readable; Decision 3 reaffirmed
@@ -2948,7 +2948,7 @@ Tests delivered:
       Field(default_factory=list)` to `LiteratureReviewOutput`.
       Backward-compat: existing serialised outputs default to `[]`; no
       migration needed. **Landed 2026-06-12 in 6.5b-1 schema sub-commit
-      (SHA pending).** Field description landed slightly expanded:
+      (SHA faaeed7).** Field description landed slightly expanded:
       *"Audit trail of LLM decisions inside the dynamic-search loop —
       one record per LLM call. Empty when the search loop did not run
       (dynamic_search.enabled=False) or the LLM call raised before any
@@ -2968,7 +2968,7 @@ Tests delivered:
   )
   ```
 
-  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
   Implementation deviation: `ge=0` constraint added on
   `discovered_in_round` to reject negative values explicitly (the
   semantics — 0 for roots, 1+ for search hits — make negatives
@@ -2981,7 +2981,7 @@ Tests delivered:
       every LLM call (search, escalate-success, escalate-noop,
       escalate-cap-hit, done) into a local `decisions` list.
 
-  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
   Implementation: closure-style helper `_append_decision(action_str,
   outcome)` defined inside the while loop, captures `decision` and
   `rounds` via default-arg locking per `feedback_ruff_fix_patterns`
@@ -3005,7 +3005,7 @@ Tests delivered:
 - [x] Pass `round_idx` + current query string down into `_do_search` +
       `_retrieved_from_search_result` so new papers carry provenance.
 
-  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
   Implementation: `_do_search` gained `round_index: int` keyword-only
   parameter; threads it + the `query` string down to
   `_retrieved_from_search_result` (which also gained both as
@@ -3025,7 +3025,7 @@ Tests delivered:
 - [x] Populate `LiteratureReviewOutput.search_decisions` from the
       accumulated records in `MLLiteratureReviewAgent.run`.
 
-  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
   Implementation: `run()` unpacks `_run_search_loop`'s new tuple
   return — `rounds_used, search_decisions = self._run_search_loop(...)` —
   then passes `search_decisions` to the `LiteratureReviewOutput`
@@ -3066,7 +3066,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
       set this via configs/lit_review_config.yaml's `task_description:`
       key so the LLM has a concrete domain to anchor its queries on."*
 
-  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
   Landed wording reframes the recommendation around the Commit F
   bridge explicitly: *"...When empty, the node falls back to
   ``SIDERIUS_TASK`` (the lit-review module's default constant) — this
@@ -3077,7 +3077,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
   it in YAML is still present); the wording change makes the
   Commit-F dependency more discoverable from the field docstring
   itself.
-- [ ] Add `task_description:` to `configs/lit_review_config.yaml` with
+- [x] Add `task_description:` to `configs/lit_review_config.yaml` with
       a multi-line comment + a SIDERIUS-default example. Place it
       immediately under `enabled:` so operators see it first when
       editing. Example block:
@@ -3097,11 +3097,25 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
     reconstruction, trained across the whole frequency spectrum at once
     (not split into per-band models).
   ```
-- [ ] Modify `_build_lit_review_input` (in
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  Implementation landed with slightly different framing in the YAML
+  comment block — references "the SIDERIUS_TASK default constant"
+  explicitly and notes the workflow prints a Warning at YAML-load time.
+  Default value lower-cased to match the prompt-module SIDERIUS_TASK
+  constant verbatim.
+- [x] Modify `_build_lit_review_input` (in
       `workflows/model_exploration.py`) to read
       `config.get("task_description", "")` from the YAML dict and pass
       it into the `LiteratureReviewInput` constructor.
-- [ ] **Log an INFO-level warning in `_build_lit_review_input`** (in
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  Implementation: `str(config.get("task_description", "") or "").strip()`
+  collapses missing key, None value, empty string, and whitespace-only
+  — all into "" before the `if not task_description:` warning check.
+  Then included in the `model_validate` dict so the validated input
+  carries it through to the node.
+- [x] **Log an INFO-level warning in `_build_lit_review_input`** (in
       `workflows/model_exploration.py`) when `task_description == ""`
       — wording: *"`task_description` is empty in lit_review_config.yaml;
       lit-review LLM calls will receive no task-domain anchor and may
@@ -3110,20 +3124,70 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
       Open Q2.) The warning fires at YAML-load time, NOT at render time
       — render-time warnings would fire 3+ times per run and clutter
       logs.
-- [ ] Modify `MLLiteratureReviewAgent` call sites in
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  Implementation deviation: uses `print("Warning: ...")` rather than
+  `logger.info(...)`. Reason: `workflows/model_exploration.py` has no
+  logger setup — file convention is `print("Warning: ...")` for
+  operator-visible warnings (matches existing pattern at line 136 for
+  vocab seed load failure). Operator approval received in-conversation
+  2026-06-12 (Fix 6.C revision). Wording landed slightly expanded:
+  *"Warning: lit_review config has no `task_description` — the
+  lit-review agent will fall back to the SIDERIUS_TASK default constant.
+  Set `task_description:` in configs/lit_review_config.yaml to
+  specialize the agent's search/synthesis behavior for your problem."*
+- [x] Modify `MLLiteratureReviewAgent` call sites in
       `nodes/ml_literature_review/ml_literature_review.py` to pass
       `inp.task_description` to all three render functions
       (`render_paper_extract_prompt`, `render_search_decision_prompt`,
       `render_synthesis_prompt`).
-- [ ] **No `.md` file changes** — all three prompts already have the
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  Implementation: `run()` computes `self._task_description =
+  inp.task_description or SIDERIUS_TASK` once after bridge setup, then
+  all three render call sites pass `task_description=self._task_description`.
+  Storing on `self` (rather than threading `inp.task_description`
+  through `_compress`'s signature) keeps `_compress` callable from
+  `_escalate` without a parameter chain.
+
+  Pre-existing test fix: `test_escalate_returns_ok_when_verbosity_raised`
+  (from 6.5b-2) bypassed `agent.run()` and called `_escalate` directly,
+  which now indirectly requires `self._task_description`. The test was
+  updated to set `agent._task_description = "test task"` manually
+  alongside the existing `agent.bridge = bridge` setup.
+- [x] **No `.md` file changes** — all three prompts already have the
       `{TASK_DESCRIPTION}` placeholder (confirmed 2026-06-12); this fix
       only wires the data source from the YAML through to the
-      placeholder substitution.
-- [ ] **Commit-F dependency**: this fix REPLACES the `SIDERIUS_TASK`
+      placeholder substitution. Confirmed during 6.5b-5 implementation:
+      no `.md` files were touched.
+- [x] **Commit-F dependency**: this fix REPLACES the `SIDERIUS_TASK`
       default usage in node call sites but leaves the constant defined
       in `__init__.py`. Commit F follows up by deleting the constant +
       changing the render defaults from `SIDERIUS_TASK` to `""`. Order
       matters — Commit F must NOT land before Commit 6.5b.
+      Dependency now unblocked — 6.5b-5 is the last sub-commit of
+      6.5b, so Commit F can land next once the operator approves.
+
+#### Test gate run — 6.5b-5 (pre-commit, 2026-06-12)
+
+198 passed in 4.08s (195 baseline + 3 net-new). `ruff check` + `ruff
+format --check` + `pyright` all green on the 2 production files
+(`nodes/ml_literature_review/ml_literature_review.py`,
+`workflows/model_exploration.py`).
+
+Tests delivered:
+- `tests/unit/workflows/test_model_exploration_lit_review_wiring.py::TestBuildLitReviewInput::test_warns_on_empty_task_description`
+  — 3 sub-cases (missing key / empty string / whitespace-only) all
+  trigger the warning via capsys.
+- `...::test_no_warning_when_task_description_set` — non-empty value
+  → no warning + flows to `inp.task_description`.
+- `tests/unit/agent/ml_literature_review/test_node.py::TestTaskDescriptionPlumbing::test_task_description_reaches_all_three_render_calls`
+  — custom value reaches all 3 LLM-facing system prompts (paper_extract
+  / search_decision / synthesis) captured by FakeBridge.
+
+Bonus: pre-existing `test_escalate_returns_ok_when_verbosity_raised`
+(from 6.5b-2) updated with one-line setup expansion to set
+`agent._task_description` since it bypasses `agent.run()`.
 
 #### Test gate — 6.5b
 
