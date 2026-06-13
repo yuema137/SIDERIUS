@@ -2769,38 +2769,76 @@ regrouping):
 
 #### Checklist — Fix 4: Persistent search decision log
 
-- [ ] Add `SearchDecisionRecord` Pydantic class in
+- [x] Add `SearchDecisionRecord` Pydantic class in
       `agent/schemas/literature_review.py`:
   ```python
   class SearchDecisionRecord(BaseModel):
-      round_idx: int = Field(
-          description="0-indexed loop iteration when this decision was made.",
+      round_index: int = Field(
+          ge=1,
+          description="1-indexed round the decision belongs to. Search "
+          "actions consume this round; escalate / done actions occur "
+          "within it.",
       )
-      action: Literal["search", "escalate", "done"]
+      action: str = Field(
+          description="Action the LLM returned. Expected: 'search' | "
+          "'escalate' | 'done', but typed as ``str`` (not ``Literal``) so "
+          "anomalous responses surface in the audit trail instead of "
+          "raising ValidationError and crashing the loop "
+          "(Decision 4, 2026-06-12).",
+      )
       query: str | None = Field(default=None,
           description="The S2 query string, set when action='search'.")
       paper_id: str | None = Field(default=None,
           description="The escalation target's paper_id, set when action='escalate'.")
-      reasoning: str = Field(
-          description="The LLM's `reasoning` field, untruncated. May contain "
-          "the LLM's mental ranking from Fix 2's enumerative block and the "
-          "Fix 5 dimension label.")
-      hits: int | None = Field(default=None,
-          description="S2 result count for action='search'; None otherwise.")
-      noop: bool = Field(default=False,
-          description="True when action='escalate' and target was already at requested verbosity.")
-      cap_hit: bool = Field(default=False,
-          description="True when action='escalate' silently dropped because "
-          "escalations_this_round >= max_escalations_per_round.")
+      verbosity: int | None = Field(default=None,
+          description="Requested verbosity tier for the escalation "
+          "(typically 1 or 2).")
+      reasoning: str = Field(default="",
+          description="The LLM's free-text justification, captured "
+          "verbatim. The dynamic-search rule requires the LLM to label "
+          "which of {bottleneck, take_home, architectural_gap, "
+          "adjacent_technique} the query targets; the node trusts the "
+          "label (no parser-enforced contract).")
+      outcome: str = Field(
+          description="Post-execution result. Canonical values: 'ok' / "
+          "'noop' / 'error' (escalate); 'n_hits=N' (search); "
+          "'budget_exceeded' / 'target_not_found' / 'unknown_action' "
+          "(degenerate); 'done' (stop).")
   ```
-- [ ] Add `search_decisions: list[SearchDecisionRecord] =
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  **Implementation deviations from the spec draft above** (all resolved
+  in this conversation):
+  * `round_idx` → `round_index` (more readable; Decision 3 reaffirmed
+    1-indexing means search-only, so `ge=1` rejects 0/negative).
+  * `action: Literal[...]` → `action: str` — Decision 4 (type-permissive
+    so anomalous LLM responses surface in the audit trail instead of
+    crashing the loop with `ValidationError`).
+  * The three outcome flags (`hits: int | None`, `noop: bool`,
+    `cap_hit: bool`) are collapsed into a single `outcome: str` field
+    with canonical values listed above. Rationale: one string field
+    extends to new outcome categories (e.g. `"empty_query"`,
+    `"target_not_found"`) without schema changes; the typed-triple
+    would have needed a parallel bool added per category.
+  * New `verbosity: int | None` field — captures the LLM's requested
+    escalation tier (1 or 2) so the audit log is self-describing
+    without re-reading the live log.
+  * `reasoning` made optional (`default=""`) — a malformed LLM
+    response that omits `reasoning` still records.
+- [x] Add `search_decisions: list[SearchDecisionRecord] =
       Field(default_factory=list)` to `LiteratureReviewOutput`.
       Backward-compat: existing serialised outputs default to `[]`; no
-      migration needed.
-- [ ] Add provenance fields to `RetrievedPaper`:
+      migration needed. **Landed 2026-06-12 in 6.5b-1 schema sub-commit
+      (SHA pending).** Field description landed slightly expanded:
+      *"Audit trail of LLM decisions inside the dynamic-search loop —
+      one record per LLM call. Empty when the search loop did not run
+      (dynamic_search.enabled=False) or the LLM call raised before any
+      decision was logged. See SearchDecisionRecord."*
+- [x] Add provenance fields to `RetrievedPaper`:
   ```python
   discovered_in_round: int | None = Field(
       default=None,
+      ge=0,
       description="0 = root paper (pre-loop); 1..max_rounds = the search "
       "round that surfaced this paper. None for legacy/cached entries.",
   )
@@ -2810,6 +2848,16 @@ regrouping):
       "root papers and for legacy/cached entries.",
   )
   ```
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  Implementation deviation: `ge=0` constraint added on
+  `discovered_in_round` to reject negative values explicitly (the
+  semantics — 0 for roots, 1+ for search hits — make negatives
+  meaningless). Field descriptions also expanded to spell out the
+  "Pydantic default fires when key is absent → backward-compat with
+  pre-6.5b cached JSON" claim, which is what the new schema-side test
+  `test_provenance_fields_default_and_legacy_cache_backward_compat`
+  proves end-to-end via `RetrievedPaper.model_validate_json`.
 - [ ] Modify `_run_search_loop` to build a `SearchDecisionRecord` after
       every LLM call (search, escalate-success, escalate-noop,
       escalate-cap-hit, done) into a local `decisions` list.
@@ -2820,7 +2868,7 @@ regrouping):
 
 #### Checklist — Fix 6: `task_description` config field + node threading
 
-- [ ] Add `task_description: str = ""` to `LiteratureReviewInput` in
+- [x] Add `task_description: str = ""` to `LiteratureReviewInput` in
       `agent/schemas/literature_review.py`. `Field` description must
       strongly recommend operators fill it in: *"Concrete downstream
       task description shown to all three lit-review LLM calls
@@ -2829,6 +2877,18 @@ regrouping):
       string means 'task block omitted from prompts'; operators SHOULD
       set this via configs/lit_review_config.yaml's `task_description:`
       key so the LLM has a concrete domain to anchor its queries on."*
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA pending).**
+  Landed wording reframes the recommendation around the Commit F
+  bridge explicitly: *"...When empty, the node falls back to
+  ``SIDERIUS_TASK`` (the lit-review module's default constant) — this
+  is a temporary bridge; Commit F flips the default to the empty
+  string and removes ``SIDERIUS_TASK`` entirely. Workflow logs a
+  warning when this field is empty."* Operationally identical (the
+  Field's default value is still `""` and the recommendation to set
+  it in YAML is still present); the wording change makes the
+  Commit-F dependency more discoverable from the field docstring
+  itself.
 - [ ] Add `task_description:` to `configs/lit_review_config.yaml` with
       a multi-line comment + a SIDERIUS-default example. Place it
       immediately under `enabled:` so operators see it first when

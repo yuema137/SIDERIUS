@@ -22,6 +22,7 @@ from agent.schemas.literature_review import (
     PaperExtract,
     PaperSource,
     RetrievedPaper,
+    SearchDecisionRecord,
     SynthesisConfig,
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem, VocabEntry
@@ -264,6 +265,52 @@ class TestRetrievedPaper:
         assert p.error == "HTTP 404"
         assert p.s2_metadata is None
         assert p.extract is None
+
+    def test_provenance_fields_default_and_legacy_cache_backward_compat(self):
+        # Fix 4.B (Commit 6.5b-1): RetrievedPaper gained discovered_in_round +
+        # discovered_via_query. Both default to None when omitted, which is
+        # also what fires when pre-6.5b cached JSON without these keys is
+        # loaded via model_validate_json. This test locks in three guarantees:
+        #   (1) Omitting the new fields gives None (no migration required).
+        #   (2) discovered_in_round rejects negative values (ge=0 boundary);
+        #       0 is allowed (root-paper marker).
+        #   (3) Pre-6.5b JSON (no provenance keys) deserializes successfully
+        #       — proves the backward-compat claim in the field docstrings.
+        p = RetrievedPaper(
+            paper_id="arxiv:2406.04378",
+            source=PaperSource(source_type="arxiv", identifier="2406.04378"),
+            verbosity_achieved=0,
+        )
+        assert p.discovered_in_round is None
+        assert p.discovered_via_query is None
+
+        # ge=0 boundary: 0 is allowed (root-paper marker), negative rejected.
+        ok_root = RetrievedPaper(
+            paper_id="arxiv:1",
+            source=PaperSource(source_type="arxiv", identifier="1"),
+            verbosity_achieved=0,
+            discovered_in_round=0,
+        )
+        assert ok_root.discovered_in_round == 0
+        with pytest.raises(ValidationError):
+            RetrievedPaper(
+                paper_id="arxiv:1",
+                source=PaperSource(source_type="arxiv", identifier="1"),
+                verbosity_achieved=0,
+                discovered_in_round=-1,
+            )
+
+        # Backward-compat: pre-6.5b cached JSON has no provenance keys.
+        # model_validate_json must succeed and fill them with None defaults.
+        legacy_json = (
+            '{"paper_id": "arxiv:legacy",'
+            ' "source": {"source_type": "arxiv", "identifier": "legacy"},'
+            ' "verbosity_achieved": 0}'
+        )
+        legacy = RetrievedPaper.model_validate_json(legacy_json)
+        assert legacy.discovered_in_round is None
+        assert legacy.discovered_via_query is None
+        assert legacy.paper_id == "arxiv:legacy"
 
 
 # ---------------------------------------------------------------------------
@@ -582,3 +629,55 @@ class TestConfidenceRubric:
         assert "replicated only" in text
         # Default-rubric bands must NOT appear when a custom rubric is supplied.
         assert "0.40-0.59" not in text
+
+
+# ---------------------------------------------------------------------------
+# SearchDecisionRecord — dynamic-search audit-trail row (Commit 6.5b-1)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchDecisionRecord:
+    def test_action_is_permissive_str_not_literal(self):
+        # Decision 4 (2026-06-12): `action` is typed as `str`, not Literal,
+        # so anomalous LLM responses (typos, hallucinated actions, anything
+        # outside {search, escalate, done}) surface in the audit trail
+        # instead of raising ValidationError and crashing the search loop.
+        rec = SearchDecisionRecord(
+            round_index=1,
+            action="weird_unexpected_action",
+            reasoning="LLM emitted a non-canonical action",
+            outcome="unknown_action",
+        )
+        assert rec.action == "weird_unexpected_action"
+        # Empty string is also accepted (no min_length constraint) — the
+        # audit trail should never lose a decision because the LLM omitted
+        # an action.
+        rec2 = SearchDecisionRecord(
+            round_index=1,
+            action="",
+            reasoning="r",
+            outcome="malformed",
+        )
+        assert rec2.action == ""
+
+    def test_round_index_rejects_zero_and_negative(self):
+        # round_index is 1-indexed (decisions only happen during the
+        # dynamic-search loop, which is itself 1-indexed: root papers
+        # occupy round 0 and have NO SearchDecisionRecord; the first LLM
+        # decision belongs to round 1). round_index < 1 has no meaning.
+        for bad in (0, -1, -5):
+            with pytest.raises(ValidationError):
+                SearchDecisionRecord(
+                    round_index=bad,
+                    action="search",
+                    reasoning="r",
+                    outcome="n_hits=3",
+                )
+        # 1 is the minimum acceptable value.
+        ok = SearchDecisionRecord(
+            round_index=1,
+            action="search",
+            reasoning="r",
+            outcome="n_hits=3",
+        )
+        assert ok.round_index == 1
