@@ -2613,14 +2613,73 @@ disk for Checkpoint S to be meaningful.
       query targets — one of `bottleneck`, `take_home`,
       `architectural_gap`, `adjacent_technique`. Across the run, you
       MUST cover ≥ 2 distinct dimensions."*
-- [ ] **DEFERRED to 6.5b** — Extend `prior_search_results` rendering in
+- [x] Extend `prior_search_results` rendering in
       `render_search_decision_prompt` to show **coverage distribution**:
       e.g. *"Coverage so far: bottleneck=2, take_home=0,
-      architectural_gap=0, adjacent_technique=0 — you have not yet
-      addressed the take_home priority; consider it next round."*
-      Rationale: coverage distribution rendering needs the
-      `search_decisions[].reasoning` capture from Fix 4 to compute the
-      counts; Fix 4 lands in 6.5b, so this rendering deferred there.
+      architectural_gap=0, adjacent_technique=0."*
+
+  **Landed 2026-06-12 in 6.5b-4 sub-commit (SHA pending).**
+  Implementation across two files:
+  * `agent/prompt_templates/literature_review/__init__.py`:
+    - New `DIMENSION_LABELS: tuple[str, ...]` constant (single source
+      of truth for the 4 dimension vocabulary).
+    - `render_search_decision_prompt` gained
+      `dimension_counts: dict[str, int] | None = None` kwarg.
+    - Coverage line rendered INSIDE the `## Queries already tried this
+      run` block, AFTER the per-query lines and BEFORE the 0-hit
+      broaden nudge. Format: `Coverage so far: bottleneck=N,
+      take_home=N, architectural_gap=N, adjacent_technique=N.` (no
+      interpretive suffix — LLM reads the counts and decides). Omitted
+      when `dimension_counts` is None/empty, or when
+      `prior_search_results` is None.
+  * `nodes/ml_literature_review/ml_literature_review.py`:
+    - `DIMENSION_LABELS` added to the existing import.
+    - New module-level helper `_parse_dimension(reasoning: str) -> str
+      | None`: case-insensitive substring scan returning the
+      LEFTMOST-mention label; None when no label appears (diagnostic
+      signal that the LLM didn't follow the labelling rule).
+    - `_run_search_loop` initializes `dimension_counts: dict[str, int]`
+      with all 4 labels at 0; after each successful search action,
+      parses the dimension label from `decision.get("reasoning")` and
+      increments. Threaded through to `render_search_decision_prompt`
+      every round.
+    - Pyright-required refactor: `_append_decision` was moved OUT of
+      the while loop (was inside per 6.5b-3) and now takes
+      `dec: dict[str, Any]` + `current_rounds: int` as explicit args.
+      The in-loop closure-with-default-args pattern triggered a
+      `reportGeneralTypeIssues` self-reference error from pyright
+      after adding the dimension_counts mutation in the same loop
+      body; the function-scope helper resolves it cleanly while
+      preserving the DRY benefit and eliminating any B023 lint risk.
+      All 7 call sites updated to pass `decision, rounds` explicitly.
+      Audit-trail output is byte-identical to 6.5b-3.
+
+  Implementation deviation from the spec sample: NO interpretive
+  suffix (the spec wrote *"...you have not yet addressed the take_home
+  priority; consider it next round."*). Bare counts let the LLM
+  reason about coverage based on the system prompt's four-dimensions
+  section; adding a directive suffix would duplicate that guidance.
+
+  Source-of-counts deviation: spec said "needs the
+  `search_decisions[].reasoning` capture from Fix 4 to compute the
+  counts." Implementation reads from `decision.get("reasoning")`
+  directly in `_run_search_loop` at decision time — same string,
+  accessed earlier in the data flow. The `search_decisions` audit
+  trail still captures the reasoning for post-hoc inspection.
+
+  **Test gate run — 6.5b-4 (pre-commit, 2026-06-12)**: 163 passed in
+  1.19s (160 baseline + 3 net-new). `ruff check` + `ruff format
+  --check` + `pyright` all green on the 2 production files.
+
+  Tests delivered:
+  - `tests/unit/agent/ml_literature_review/test_node.py::TestParseDimension::test_parse_dimension_first_label_heuristic`
+    — case-insensitive leftmost-match for all 4 labels; None for
+    no-match and empty.
+  - `tests/unit/agent/prompt_templates/test_literature_review_prompts.py::TestSearchDecisionPrompt::test_dimension_coverage_line_renders_inside_prior_block`
+    — coverage line renders with all 4 labels in correct ordering
+    (queries → coverage → broaden nudge).
+  - `...::test_dimension_coverage_omitted_when_no_counts_or_no_prior`
+    — None / empty dict / None prior_search_results all skip the line.
 - [x] **Trusted dimension labels** (resolved 2026-06-12, was Open Q1):
       labels in the `reasoning` field are TRUSTED — the node counts
       what the LLM self-reports, no parser-enforced contract. A missing

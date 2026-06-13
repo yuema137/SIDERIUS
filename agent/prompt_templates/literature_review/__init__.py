@@ -327,6 +327,22 @@ def _bullets(items: list[str]) -> str:
     return "\n".join(f"- {s}" for s in cleaned)
 
 
+# Fix 5 (Commit 6.5b-4): the four query-generation dimensions the
+# search-decision LLM must cover across a run (see
+# search_decision_system.md's "## Query generation — four dimensions to
+# cover"). Exported so the node can parse the LLM's self-reported
+# dimension label out of `reasoning` and surface a coverage-distribution
+# line back to the LLM next round. Trusted labels (no parser-enforced
+# contract — Open Q1 resolution, 2026-06-12); a missing label is itself
+# a diagnostic signal that Fix 5 is incomplete.
+DIMENSION_LABELS: tuple[str, ...] = (
+    "bottleneck",
+    "take_home",
+    "architectural_gap",
+    "adjacent_technique",
+)
+
+
 def render_search_decision_prompt(
     *,
     key_findings: list[str],
@@ -337,6 +353,7 @@ def render_search_decision_prompt(
     escalation_allowed: bool,
     prior_search_results: list[tuple[str, int]] | None = None,
     prior_escalation_results: list[tuple[str, str, str]] | None = None,
+    dimension_counts: dict[str, int] | None = None,
     task_description: str = SIDERIUS_TASK,
     confidence_rubric: ConfidenceRubric | None = None,
 ) -> tuple[str, str]:
@@ -368,6 +385,16 @@ def render_search_decision_prompt(
             parallel to ``prior_search_results`` so the LLM stops
             re-escalating papers whose last attempt was a no-op or error.
             Omitted on the first round.
+        dimension_counts: per-dimension query coverage tally — keys come
+            from ``DIMENSION_LABELS`` (``bottleneck`` / ``take_home`` /
+            ``architectural_gap`` / ``adjacent_technique``), values are
+            the count of search queries that targeted each dimension so
+            far this run. When non-None and non-empty, a coverage
+            distribution line is rendered inside the
+            ``## Queries already tried this run`` block so the LLM can
+            spread its remaining queries across uncovered dimensions.
+            Trusted self-reporting from the LLM's ``reasoning`` field;
+            no parser-enforced contract. Omitted on the first round.
         confidence_rubric: optional ``ConfidenceRubric`` to render into the
             ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` placeholder. When ``None``
             (default), the default rubric is instantiated. Lets the
@@ -395,6 +422,15 @@ def render_search_decision_prompt(
             if hits == 0:
                 lines.append("  (too specific — try broader terms for the same concept)")
                 any_zero = True
+        # Fix 5 (Commit 6.5b-4): render coverage distribution AFTER the
+        # per-query lines so the LLM sees which dimensions it has and
+        # hasn't targeted. Skipped when dimension_counts is None/empty
+        # (e.g. first round, or all labels unparseable).
+        if dimension_counts:
+            counts_str = ", ".join(
+                f"{label}={dimension_counts.get(label, 0)}" for label in DIMENSION_LABELS
+            )
+            lines.append(f"\nCoverage so far: {counts_str}.")
         if any_zero:
             lines.append(
                 "\nA query that returned 0 hits was too narrow or off-vocabulary — "

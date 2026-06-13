@@ -24,7 +24,11 @@ from agent.schemas.literature_review import (
     RetrievedPaper,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from nodes.ml_literature_review import MLLiteratureReviewAgent, _sanitize_paper_id
+from nodes.ml_literature_review import (
+    MLLiteratureReviewAgent,
+    _parse_dimension,
+    _sanitize_paper_id,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes + builders
@@ -657,6 +661,41 @@ class TestSearchDecisionLog:
         root = out.retrieved_papers[0]
         assert root.discovered_in_round == 0
         assert root.discovered_via_query is None
+
+
+class TestParseDimension:
+    """Fix 5 (Commit 6.5b-4): module-level _parse_dimension helper.
+
+    The helper scans the LLM's `reasoning` string for the first
+    DIMENSION_LABELS token (case-insensitive, leftmost-mention) and
+    returns it. Returns None when no label appears — diagnostic signal
+    that the LLM didn't follow the dimension-labelling rule in
+    search_decision_system.md.
+    """
+
+    def test_parse_dimension_first_label_heuristic(self):
+        # Single label, exact match.
+        assert _parse_dimension("targets the bottleneck dimension") == "bottleneck"
+
+        # Case-insensitive matching (lowered before substring scan).
+        assert _parse_dimension("addresses BOTTLENECK now") == "bottleneck"
+        assert _parse_dimension("the Adjacent_Technique angle") == "adjacent_technique"
+
+        # Multi-label — leftmost mention wins per the docstring.
+        assert _parse_dimension("targets bottleneck AND adjacent_technique") == "bottleneck"
+        assert (
+            _parse_dimension("the adjacent_technique angle on the bottleneck")
+            == "adjacent_technique"
+        )
+
+        # All 4 labels are recognised.
+        assert _parse_dimension("take_home priority") == "take_home"
+        assert _parse_dimension("an architectural_gap in the model space") == "architectural_gap"
+
+        # No label → None (diagnostic signal that Fix 5 labelling rule
+        # wasn't followed).
+        assert _parse_dimension("targets the model directly without naming a dimension") is None
+        assert _parse_dimension("") is None
 
 
 class TestStorageDump:

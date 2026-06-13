@@ -40,6 +40,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.literature_review import (
+    DIMENSION_LABELS,
     render_paper_extract_prompt,
     render_search_decision_prompt,
     render_synthesis_prompt,
@@ -236,6 +237,30 @@ def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict
         extract.year = str(year)
 
 
+def _parse_dimension(reasoning: str) -> str | None:
+    """Scan ``reasoning`` for the first ``DIMENSION_LABELS`` token (case-
+    insensitive, substring match) and return it. Returns None when none of
+    the four labels appears — a diagnostic signal that the LLM did not
+    follow the dimension-labelling rule in search_decision_system.md.
+
+    Multi-label reasoning ("targets bottleneck AND adjacent_technique"):
+    returns the label whose earliest occurrence is leftmost in the string.
+    The dynamic-search rule says "label which dimension the query targets"
+    (singular), so the leftmost-mention heuristic picks the primary one.
+
+    Fix 5 (Commit 6.5b-4).
+    """
+    if not reasoning:
+        return None
+    lowered = reasoning.lower()
+    hits = [(lowered.find(label), label) for label in DIMENSION_LABELS]
+    hits = [(idx, label) for idx, label in hits if idx != -1]
+    if not hits:
+        return None
+    hits.sort()
+    return hits[0][1]
+
+
 class MLLiteratureReviewAgent:
     """Resolve root papers, run the dynamic search loop, synthesise findings.
 
@@ -397,6 +422,34 @@ class MLLiteratureReviewAgent:
             tuple[str, str, str]
         ] = []  # (paper_id, status, reasoning); status ∈ {"ok","noop","error"} — Fix 3 (6.5b-2)
         decisions: list[SearchDecisionRecord] = []  # Fix 4 (6.5b-3): audit trail
+        dimension_counts: dict[str, int] = {
+            label: 0 for label in DIMENSION_LABELS
+        }  # Fix 5 (6.5b-4): per-dim query coverage
+
+        # Fix 4 (6.5b-3): build one SearchDecisionRecord per LLM call.
+        # Defined at method scope (not inside the while loop) so pyright
+        # can resolve its type without circular inference, and takes
+        # `dec` + `current_rounds` as explicit args so there's no B023
+        # loop-variable-capture risk either. Captures `decisions` (the
+        # list — stable identity across iterations) via closure.
+        def _append_decision(
+            action_str: str,
+            outcome: str,
+            dec: dict[str, Any],
+            current_rounds: int,
+        ) -> None:
+            decisions.append(
+                SearchDecisionRecord(
+                    round_index=current_rounds + 1,  # 1-indexed
+                    action=action_str,
+                    query=(dec.get("query") or None) if action_str == "search" else None,
+                    paper_id=(dec.get("paper_id") or None) if action_str == "escalate" else None,
+                    verbosity=dec.get("verbosity") if action_str == "escalate" else None,
+                    reasoning=str(dec.get("reasoning") or ""),
+                    outcome=outcome,
+                )
+            )
+
         # A misbehaving LLM that only ever escalates must still terminate:
         # searches consume the round budget, escalations do not. This hard
         # iteration ceiling is the backstop (searches + capped escalations).
@@ -415,6 +468,7 @@ class MLLiteratureReviewAgent:
                 escalation_allowed=cfg.escalation_allowed,
                 prior_search_results=prior_search_results,
                 prior_escalation_results=prior_escalation_results,  # Fix 3 (6.5b-2)
+                dimension_counts=dimension_counts,  # Fix 5 (6.5b-4)
             )
             # The search-decision is the cheap, templated step — routed through
             # self.search_bridge (a cheaper model when configured; else the main
@@ -435,42 +489,13 @@ class MLLiteratureReviewAgent:
             action = decision.get("action")
             logger.info("[lit_review] round %d decision: %s", rounds, json.dumps(decision)[:500])
 
-            # Fix 4 (6.5b-3): build one SearchDecisionRecord per LLM call.
-            # Defined inside the loop so it captures the current iteration's
-            # `decision` (and the current `rounds` value); used at each branch
-            # below to keep the audit-trail wiring DRY. Loop-vars are locked
-            # via default args (`_rounds=rounds`, `_decision=decision`) per
-            # ruff B023 — the helper is called synchronously within the same
-            # iteration so lazy binding would be safe, but default-arg
-            # locking is the canonical fix and silences the lint cleanly.
-            def _append_decision(
-                action_str: str,
-                outcome: str,
-                _rounds: int = rounds,
-                _decision: dict = decision,
-            ) -> None:
-                decisions.append(
-                    SearchDecisionRecord(
-                        round_index=_rounds
-                        + 1,  # 1-indexed; decision belongs to next-to-execute round
-                        action=action_str,
-                        query=(_decision.get("query") or None) if action_str == "search" else None,
-                        paper_id=(_decision.get("paper_id") or None)
-                        if action_str == "escalate"
-                        else None,
-                        verbosity=_decision.get("verbosity") if action_str == "escalate" else None,
-                        reasoning=str(_decision.get("reasoning") or ""),
-                        outcome=outcome,
-                    )
-                )
-
             if action == "done":
-                _append_decision("done", "done")
+                _append_decision("done", "done", decision, rounds)
                 break
             if action == "search":
                 query = (decision.get("query") or "").strip()
                 if not query:
-                    _append_decision("search", "empty_query")
+                    _append_decision("search", "empty_query", decision, rounds)
                     logger.warning(
                         "search action with empty query at round %d; ending loop", rounds
                     )
@@ -484,7 +509,13 @@ class MLLiteratureReviewAgent:
                     round_index=rounds + 1,  # Fix 4.E: tag new papers with their discovery round
                 )
                 prior_search_results.append((query, n_hits))
-                _append_decision("search", f"n_hits={n_hits}")
+                _append_decision("search", f"n_hits={n_hits}", decision, rounds)
+                # Fix 5 (6.5b-4): parse the dimension label from the LLM's
+                # reasoning and tally it. None means the LLM didn't follow
+                # the labelling rule — diagnostic signal, no tally.
+                dim = _parse_dimension(str(decision.get("reasoning") or ""))
+                if dim is not None:
+                    dimension_counts[dim] = dimension_counts.get(dim, 0) + 1
                 rounds += 1
                 escalations_this_round = 0  # fresh escalation budget for the new round
             elif action == "escalate" and cfg.escalation_allowed:
@@ -494,7 +525,7 @@ class MLLiteratureReviewAgent:
                         cfg.max_escalations_per_round,
                         decision.get("paper_id"),
                     )
-                    _append_decision("escalate", "budget_exceeded")
+                    _append_decision("escalate", "budget_exceeded", decision, rounds)
                 else:
                     pid = decision.get("paper_id")
                     target = index.get(pid) if isinstance(pid, str) else None
@@ -507,23 +538,28 @@ class MLLiteratureReviewAgent:
                         prior_escalation_results.append(
                             (pid, status, str(decision.get("reasoning") or ""))
                         )
-                        _append_decision("escalate", status)
+                        _append_decision("escalate", status, decision, rounds)
                         escalations_this_round += (
                             1  # charges budget on every outcome (Decision 2, 2026-06-12)
                         )
                     else:
                         logger.warning("escalate target %r not found at round %d", pid, rounds)
-                        _append_decision("escalate", "target_not_found")
+                        _append_decision("escalate", "target_not_found", decision, rounds)
             else:
                 # Catch-all: escalate-while-disabled is distinguished from
                 # truly-unknown action so the audit trail captures the config
                 # mismatch separately from LLM hallucinations.
                 if action == "escalate" and not cfg.escalation_allowed:
                     logger.warning("escalate action at round %d but escalation is disabled", rounds)
-                    _append_decision("escalate", "escalation_disabled")
+                    _append_decision("escalate", "escalation_disabled", decision, rounds)
                 else:
                     logger.warning("unhandled action %r at round %d", action, rounds)
-                    _append_decision(str(action) if action is not None else "", "unknown_action")
+                    _append_decision(
+                        str(action) if action is not None else "",
+                        "unknown_action",
+                        decision,
+                        rounds,
+                    )
                 rounds += 1
 
         return rounds, decisions

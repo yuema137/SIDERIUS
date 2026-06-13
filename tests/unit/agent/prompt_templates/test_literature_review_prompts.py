@@ -682,6 +682,93 @@ class TestSearchDecisionPrompt:
         assert "## Escalations already attempted this run" not in user_empty
         assert "Do NOT re-escalate" not in user_empty
 
+    def test_dimension_coverage_line_renders_inside_prior_block(self):
+        # Fix 5 (Commit 6.5b-4): when prior_search_results AND
+        # dimension_counts are both non-empty, the coverage distribution
+        # line renders INSIDE the "## Queries already tried this run"
+        # block, AFTER the per-query lines and BEFORE the broaden-on-0-hit
+        # nudge. Cites all four dimensions with their counts.
+        _, user = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[
+                ("spectral gating denoising", 5),
+                ("perceptual loss audio", 0),
+            ],
+            dimension_counts={
+                "bottleneck": 2,
+                "take_home": 0,
+                "architectural_gap": 1,
+                "adjacent_technique": 0,
+            },
+        )
+        # The "Queries already tried" block header is present.
+        assert "## Queries already tried this run" in user
+        # All 4 labels appear with their counts.
+        assert "bottleneck=2" in user
+        assert "take_home=0" in user
+        assert "architectural_gap=1" in user
+        assert "adjacent_technique=0" in user
+        # Coverage line starts with the expected prefix.
+        assert "Coverage so far:" in user
+        # The 0-hit broaden nudge IS also present (one query had 0 hits).
+        assert "do NOT repeat a 0-hit query" in user
+        # Ordering: per-query lines BEFORE coverage line BEFORE broaden nudge.
+        queries_idx = user.find('"spectral gating denoising"')
+        coverage_idx = user.find("Coverage so far:")
+        broaden_idx = user.find("do NOT repeat a 0-hit query")
+        assert queries_idx < coverage_idx < broaden_idx
+
+    def test_dimension_coverage_omitted_when_no_counts_or_no_prior(self):
+        # Fix 5 (Commit 6.5b-4): the coverage line is rendered ONLY when
+        # both prior_search_results and dimension_counts are non-empty.
+        # All omission paths must skip the line cleanly.
+
+        # Case 1: dimension_counts is None (no Fix 5 wiring from caller).
+        _, user_none = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[("spectral gating denoising", 5)],
+            dimension_counts=None,
+        )
+        assert "Coverage so far:" not in user_none
+
+        # Case 2: dimension_counts is empty dict.
+        _, user_empty = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[("spectral gating denoising", 5)],
+            dimension_counts={},
+        )
+        assert "Coverage so far:" not in user_empty
+
+        # Case 3: prior_search_results is None — the entire prior_block is
+        # omitted, so coverage is too (it's nested inside prior_block).
+        _, user_no_prior = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=None,
+            dimension_counts={"bottleneck": 5},
+        )
+        assert "Coverage so far:" not in user_no_prior
+        assert "## Queries already tried this run" not in user_no_prior
+
 
 # ---------------------------------------------------------------------------
 # render_review_report — pure Markdown view of a LiteratureReviewOutput.
