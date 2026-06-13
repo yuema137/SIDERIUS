@@ -80,7 +80,7 @@ commit). A commit is not "done" until both its automated test gate is green
   - [x] **6.5b-3** — Fix 4 node wiring: SearchDecisionRecord + provenance + tuple return · committed `cc92443`
   - [x] **6.5b-4** — Fix 5 remainder: dimension_counts + DIMENSION_LABELS + coverage rendering · committed `d3bfbd4`
   - [x] **6.5b-5** — Fix 6: task_description plumbing YAML→workflow→node · committed `e61e1cf`
-  - [ ] **Checkpoint S** — Search-quality re-run (5× same seed); gates Checkpoint D
+  - [x] **Checkpoint S** — Search-quality re-run (5× same seed) · signed off 2026-06-13
 - [x] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b · committed (SHA 5979896)
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + full `tests/unit/` sweep (catches stray `SIDERIUS_TASK` imports)
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit

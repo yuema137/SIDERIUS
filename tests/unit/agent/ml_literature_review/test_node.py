@@ -504,6 +504,199 @@ class TestEscalation:
         assert target_err.error == "HTTP 404 on the PDF URL"
         assert target_err.verbosity_achieved == 0
 
+    def test_escalate_layer2_skips_paywalled_doi_without_arxiv_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        # Layer 2 (post-Checkpoint-S, 2026-06-13): when the resolver would
+        # have no PDF URL to try (empty openAccessPdf.url + no
+        # externalIds.ArXiv), short-circuit to "noop" without calling
+        # run_skill. The TFL paper in Checkpoint S run 1 hit exactly this
+        # case — a paywalled IEEE DOI with no arXiv preprint.
+        bridge = FakeBridge(responses={})  # _compress never gets called
+        # If Layer 2 fires correctly, this lambda is never invoked.
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {"full_text": "should not be reached", "verbosity_achieved": 1},
+                "message": "should not be reached",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # Paywalled IEEE paper: openAccessPdf.url is empty + no ArXiv id.
+        target = RetrievedPaper(
+            paper_id="doi:10.1109/SiPS.2025.111",
+            source=PaperSource(source_type="doi", identifier="10.1109/SiPS.2025.111"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "TFL: A Hybrid Time-Frequency Loss",
+                "openAccessPdf": {"url": "", "status": None},
+                "externalIds": {"DOI": "10.1109/SiPS.2025.111", "DBLP": "conf/x/y"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "noop"
+        # Resolver was NOT called (Layer 2 short-circuit fired).
+        assert len(skill.resolve_calls) == 0
+        # target unchanged — no verbosity rise, no extract populated.
+        assert target.verbosity_achieved == 0
+        assert target.extract is None
+
+    def test_escalate_layer2_proceeds_when_arxiv_fallback_available(self, tmp_path, monkeypatch):
+        # Layer 2 honors the resolver's arxiv-fallback path
+        # (_arxiv_fallback_url builds arxiv.org/pdf/{id}.pdf from
+        # externalIds.ArXiv). A DOI-published paper that ALSO exists on
+        # arXiv must NOT be short-circuited — the resolver can fetch it
+        # via the fallback URL.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "arxiv body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # DOI-published paper that's ALSO on arXiv (common for ML papers
+        # published at IEEE/ACM/etc after an arXiv preprint).
+        target = RetrievedPaper(
+            paper_id="doi:10.1109/dual.2025.999",
+            source=PaperSource(source_type="doi", identifier="10.1109/dual.2025.999"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "Dual-published paper",
+                "openAccessPdf": {"url": "", "status": None},  # empty, but ArXiv id is present
+                "externalIds": {"DOI": "10.1109/dual.2025.999", "ArXiv": "2406.99999"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        # Layer 2 did NOT fire — resolver was called and succeeded.
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+        assert target.extract is not None
+
+    def test_escalate_layer2_exempts_arxiv_source_type(self, tmp_path, monkeypatch):
+        # arxiv sources are exempt from the Layer 2 PDF-URL gate because the
+        # resolver first tries Tier 1 (arxiv.org/src .tex) which doesn't
+        # depend on openAccessPdf or externalIds — short-circuiting would
+        # skip a path that could succeed.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "arxiv tex body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # arxiv source with NO usable openAccessPdf URL — Layer 2 must
+        # still let it through (Tier 1 .tex might succeed).
+        target = RetrievedPaper(
+            paper_id="arxiv:2406.04378",
+            source=PaperSource(source_type="arxiv", identifier="2406.04378"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "TIDMAD",
+                "openAccessPdf": {"url": "", "status": None},
+                "externalIds": {"ArXiv": "2406.04378"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+
+    def test_escalate_layer2_proceeds_for_open_access_doi(self, tmp_path, monkeypatch):
+        # An open-access DOI (PLOS, Nature Communications, etc.) carries a
+        # non-empty openAccessPdf.url and is NOT blocked by Layer 2 — the
+        # resolver can fetch the PDF directly.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "open access body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # Open-access DOI paper (e.g., PLOS) with a usable PDF URL in
+        # openAccessPdf — Layer 2 must let it through.
+        target = RetrievedPaper(
+            paper_id="doi:10.1371/journal.pone.000001",
+            source=PaperSource(source_type="doi", identifier="10.1371/journal.pone.000001"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "Open-access paper",
+                "openAccessPdf": {
+                    "url": "https://journals.plos.org/plosone/article/file?id=...",
+                    "status": "GOLD",
+                },
+                "externalIds": {"DOI": "10.1371/journal.pone.000001"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+
 
 class TestSearchDecisionLog:
     """Fix 4 (Commit 6.5b-3): ``_run_search_loop`` builds a

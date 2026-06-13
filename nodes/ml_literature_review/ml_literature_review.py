@@ -653,6 +653,26 @@ class MLLiteratureReviewAgent:
         target_verbosity: Literal[1, 2] = 2 if verbosity == 2 else 1
         if target.verbosity_achieved >= target_verbosity:
             return "noop"  # already at requested verbosity — skip the API call
+        # Layer 2 PDF-availability gate (post-Checkpoint-S, 2026-06-13).
+        # Mirrors the resolver's PDF URL resolution priority
+        # (agent/skills/paper_resolver_skill/wrapper.py:405-420):
+        #   1. openAccessPdf.url if non-empty
+        #   2. arxiv-fallback URL from externalIds.ArXiv
+        #   3. otherwise: resolver returns "partial" with no full_text → noop
+        # We short-circuit case (3) by checking the same two fields. Arxiv
+        # sources are exempt because the resolver first tries Tier 1
+        # (arxiv.org/src .tex) which doesn't depend on either field —
+        # short-circuiting would skip a path that could succeed.
+        # Behavior to the LLM is identical: it still sees a "noop" outcome
+        # in prior_escalation_results and the do-not-retry nudge tells it
+        # to pick a different paper.
+        if target.source.source_type != "arxiv":
+            s2_meta = target.s2_metadata or {}
+            oa_pdf = s2_meta.get("openAccessPdf") or {}
+            external_ids = s2_meta.get("externalIds") or {}
+            has_pdf_url = bool(oa_pdf.get("url")) or bool(external_ids.get("ArXiv"))
+            if not has_pdf_url:
+                return "noop"
         pre_verbosity = target.verbosity_achieved  # snapshot for post-call detection
         result = run_skill(
             None,
