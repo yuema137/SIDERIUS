@@ -2744,15 +2744,36 @@ regrouping):
 
 #### Checklist — Fix 3: No-op escalation feedback
 
-- [ ] Modify `MLLiteratureReviewAgent._escalate` to return a status
+- [x] Modify `MLLiteratureReviewAgent._escalate` to return a status
       indicating no-op vs real work. The no-op check fires when
       `target.verbosity_achieved >= requested_verbosity` BEFORE running
       the skill call.
-- [ ] Modify `_run_search_loop` to track no-op escalations in a local
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  Implementation: the pre-call check
+  (`if target.verbosity_achieved >= target_verbosity: return "noop"`)
+  fires at the top of `_escalate` per spec — skips the resolve skill
+  when the LLM mis-asks for an already-achieved verbosity, saving one
+  API call. A post-call defense-in-depth check is also present
+  (catches empty `full_text` responses + the verbosity-didn't-rise
+  case after a compress failure) — covers degenerate skill responses
+  the pre-call check can't anticipate. Return type is
+  `Literal["ok", "noop", "error"]`; `target.error` is set on the
+  `"error"` path. Budget charge applies on every outcome
+  (Decision 2, 2026-06-12).
+- [x] Modify `_run_search_loop` to track no-op escalations in a local
       `prior_escalation_results: list[tuple[str, bool, str]]` —
       `(paper_id, was_noop, reasoning)` — passed into
       `render_search_decision_prompt` as a new kwarg.
-- [ ] Extend `render_search_decision_prompt` to accept
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  Implementation deviation: tuple slot 2 is `str` (one of
+  `"ok"` / `"noop"` / `"error"`), not `bool was_noop`. Preserves the
+  3-state signal end-to-end so the LLM distinguishes errors from
+  no-ops (a hard fetch failure should not be re-tried any more than a
+  no-op, but the LLM's reasoning about WHY differs). Approved
+  in-conversation 2026-06-12.
+- [x] Extend `render_search_decision_prompt` to accept
       `prior_escalation_results` and render a sub-block in the user
       prompt (parallel to the existing `## Queries already tried this
       run` block):
@@ -2761,11 +2782,50 @@ regrouping):
   - "arxiv:2503.18162" → no-op (was already v=1); pick a different paper next time
   - "arxiv:2501.04967" → deep-read produced extract (now v=1)
   ```
-- [ ] Add a system-prompt nudge alongside the existing
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  Implementation deviation: the rendered format is richer than the
+  spec sample. Each row carries the status's user-facing label
+  (`"success — paper now deep-read"` / `"no-change — paper was already
+  at the requested verbosity OR fetch returned no new content"` /
+  `"error — resolve call failed; do not retry this paper"`) plus the
+  LLM's original reasoning excerpt (truncated to 200 chars with `…`
+  ellipsis). The richer format is what the new test
+  `test_prior_escalation_results_renders_three_statuses` locks in.
+- [x] Add a system-prompt nudge alongside the existing
       broaden-on-0-hit nudge: *"An escalation that returned 'no-op'
       means the paper was already at the requested verbosity —
       escalating it again wastes a round; pick a different on-bottleneck
       paper."*
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA pending).**
+  Implementation deviation: the nudge lives in the **user prompt**
+  (appended to the escalation-history block when non-empty), not in
+  the system prompt. Wording is *"Do NOT re-escalate a paper whose
+  last status was 'no-change' or 'error' — pick a different paper,
+  search for a new one, or stop."* Trade-off chosen: context-aware
+  (appears only when there's escalation history) vs. always-present
+  in system prompt. Context-aware avoids noise on first round when
+  there are no prior escalations.
+
+#### Test gate run — 6.5b-2 (pre-commit, 2026-06-12)
+
+157 passed in 1.03s (153 baseline + 4 net-new). `ruff check` +
+`ruff format --check` + `pyright` all green on the 2 production files
+(`agent/prompt_templates/literature_review/__init__.py`,
+`nodes/ml_literature_review/ml_literature_review.py`).
+
+Tests delivered:
+- `tests/unit/agent/prompt_templates/test_literature_review_prompts.py::TestSearchDecisionPrompt::test_prior_escalation_results_renders_three_statuses`
+  — 3 statuses render their specific labels + paper_ids + do-not-retry
+  nudge + 200-char reasoning truncation with ellipsis.
+- `...::test_prior_escalation_results_omitted_when_none_or_empty`
+  — None and `[]` both omit the entire block.
+- `tests/unit/agent/ml_literature_review/test_node.py::TestEscalation::test_escalate_returns_ok_when_verbosity_raised`
+  — happy path returns `"ok"` and raises `verbosity_achieved`.
+- `...::test_escalate_returns_noop_on_empty_full_text_and_error_on_failure`
+  — two sub-cases: empty full_text → `"noop"` (no mutation); resolve
+  fail → `"error"` (target.error set).
 
 #### Checklist — Fix 4: Persistent search decision log
 

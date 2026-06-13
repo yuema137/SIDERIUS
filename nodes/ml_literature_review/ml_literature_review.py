@@ -388,6 +388,9 @@ class MLLiteratureReviewAgent:
         rounds = 0  # search rounds executed (== search_rounds_used)
         escalations_this_round = 0  # reset on each search; capped per round
         prior_search_results: list[tuple[str, int]] = []  # (query, hit_count) fed back per round
+        prior_escalation_results: list[
+            tuple[str, str, str]
+        ] = []  # (paper_id, status, reasoning); status ∈ {"ok","noop","error"} — Fix 3 (6.5b-2)
         # A misbehaving LLM that only ever escalates must still terminate:
         # searches consume the round budget, escalations do not. This hard
         # iteration ceiling is the backstop (searches + capped escalations).
@@ -405,6 +408,7 @@ class MLLiteratureReviewAgent:
                 papers_seen=papers_seen,
                 escalation_allowed=cfg.escalation_allowed,
                 prior_search_results=prior_search_results,
+                prior_escalation_results=prior_escalation_results,  # Fix 3 (6.5b-2)
             )
             # The search-decision is the cheap, templated step — routed through
             # self.search_bridge (a cheaper model when configured; else the main
@@ -455,8 +459,17 @@ class MLLiteratureReviewAgent:
                     pid = decision.get("paper_id")
                     target = index.get(pid) if isinstance(pid, str) else None
                     if target is not None:
-                        self._escalate(target, decision.get("verbosity", 1))
-                        escalations_this_round += 1
+                        # `target is not None` implies the `isinstance(pid, str)` branch
+                        # of the conditional above fired — i.e. pid is a str. The
+                        # assert restates the invariant for pyright's narrowing.
+                        assert isinstance(pid, str)
+                        status = self._escalate(target, decision.get("verbosity", 1))
+                        prior_escalation_results.append(
+                            (pid, status, str(decision.get("reasoning") or ""))
+                        )
+                        escalations_this_round += (
+                            1  # charges budget on every outcome (Decision 2, 2026-06-12)
+                        )
                     else:
                         logger.warning("escalate target %r not found at round %d", pid, rounds)
             else:
@@ -521,8 +534,23 @@ class MLLiteratureReviewAgent:
             verbosity_achieved=0,
         )
 
-    def _escalate(self, target: RetrievedPaper, verbosity) -> None:
+    def _escalate(self, target: RetrievedPaper, verbosity) -> Literal["ok", "noop", "error"]:
+        """Escalate ``target`` to verbosity 1 or 2; return a 3-state status.
+
+        Returns:
+            ``"ok"``    — verbosity_achieved was raised; new content captured.
+            ``"noop"``  — the call succeeded but produced no new content
+                          (paper already at requested verbosity, or fetch
+                          returned an empty full_text). Charges the budget
+                          regardless — Decision 2, 2026-06-12.
+            ``"error"`` — the resolve call failed (PDF 404, S2 down, etc).
+                          ``target.error`` is set; the LLM should not retry
+                          this paper.
+        """
         target_verbosity: Literal[1, 2] = 2 if verbosity == 2 else 1
+        if target.verbosity_achieved >= target_verbosity:
+            return "noop"  # already at requested verbosity — skip the API call
+        pre_verbosity = target.verbosity_achieved  # snapshot for post-call detection
         result = run_skill(
             None,
             mode="resolve",
@@ -532,13 +560,13 @@ class MLLiteratureReviewAgent:
         )
         if result.get("status") not in ("ok", "partial"):
             target.error = result.get("message")
-            return
+            return "error"
         data = result.get("data") or {}
         if data.get("s2_metadata"):
             target.s2_metadata = data["s2_metadata"]
         full_text = data.get("full_text")
         if not full_text:
-            return
+            return "noop"  # call succeeded, but no new full text -> no content gain
         extraction_method = data.get("extraction_method") or "pdfplumber_llm"
         extract = self._compress(full_text, extraction_method=extraction_method)
         if extract is not None:
@@ -550,6 +578,7 @@ class MLLiteratureReviewAgent:
             # Compression failed but we still hold the full text.
             target.full_text = full_text
             target.verbosity_achieved = 2
+        return "ok" if target.verbosity_achieved > pre_verbosity else "noop"
 
     # ------------------------------------------------------------------
     # LLM compression (verbosity-1 extract)

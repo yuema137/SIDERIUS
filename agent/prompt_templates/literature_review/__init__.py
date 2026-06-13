@@ -336,6 +336,7 @@ def render_search_decision_prompt(
     papers_seen: list[dict],
     escalation_allowed: bool,
     prior_search_results: list[tuple[str, int]] | None = None,
+    prior_escalation_results: list[tuple[str, str, str]] | None = None,
     task_description: str = SIDERIUS_TASK,
     confidence_rubric: ConfidenceRubric | None = None,
 ) -> tuple[str, str]:
@@ -359,6 +360,14 @@ def render_search_decision_prompt(
             this run. Fed back so the LLM self-corrects — a 0-hit query is
             flagged "too specific" and the LLM is nudged to broaden. Omitted on
             the first round.
+        prior_escalation_results: ``(paper_id, status, reasoning)`` for each
+            escalation attempted so far this run. ``status`` is one of ``"ok"``
+            (deep-read succeeded), ``"noop"`` (paper was already at the
+            requested verbosity, or the fetch returned no new content), or
+            ``"error"`` (resolve call failed). Rendered as a sub-block
+            parallel to ``prior_search_results`` so the LLM stops
+            re-escalating papers whose last attempt was a no-op or error.
+            Omitted on the first round.
         confidence_rubric: optional ``ConfidenceRubric`` to render into the
             ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` placeholder. When ``None``
             (default), the default rubric is instantiated. Lets the
@@ -393,6 +402,30 @@ def render_search_decision_prompt(
             )
         prior_block = "\n".join(lines) + "\n\n"
 
+    # Fix 3 (Commit 6.5b-2): render prior-escalation feedback as a top-level
+    # sub-block parallel to "## Queries already tried this run". Placed just
+    # above the papers block so the LLM sees recent escalation outcomes in
+    # the context of which papers they apply to.
+    escalation_history_block = ""
+    if prior_escalation_results:
+        _STATUS_LABEL = {
+            "ok": "success — paper now deep-read",
+            "noop": "no-change — paper was already at the requested verbosity OR fetch returned no new content",
+            "error": "error — resolve call failed; do not retry this paper",
+        }
+        lines = ["## Escalations already attempted this run"]
+        for pid, status, reasoning in prior_escalation_results:
+            label = _STATUS_LABEL.get(status, f"unknown status: {status}")
+            excerpt = (reasoning or "").strip().replace("\n", " ")
+            if len(excerpt) > 200:
+                excerpt = excerpt[:200] + "…"
+            lines.append(f'- [{pid}] {label} (your reasoning: "{excerpt}")')
+        lines.append(
+            "\nDo NOT re-escalate a paper whose last status was 'no-change' or "
+            "'error' — pick a different paper, search for a new one, or stop."
+        )
+        escalation_history_block = "\n".join(lines) + "\n\n"
+
     if papers_seen:
         lines = []
         for p in papers_seen:
@@ -419,6 +452,7 @@ def render_search_decision_prompt(
         f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
         f"{prior_block}"
+        f"{escalation_history_block}"
         "## Papers retrieved so far this run\n"
         f"{papers_block}\n"
         f"{escalation_note}\n"

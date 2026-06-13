@@ -620,6 +620,68 @@ class TestSearchDecisionPrompt:
         assert "too specific" not in user  # no 0-hit annotation
         assert "do NOT repeat a 0-hit query" not in user  # no broaden nudge
 
+    def test_prior_escalation_results_renders_three_statuses(self):
+        # Fix 3 (Commit 6.5b-2): when prior_escalation_results is non-empty,
+        # render a "## Escalations already attempted this run" sub-block in
+        # the user prompt parallel to the existing "## Queries already tried
+        # this run" block. Each of the three canonical statuses (ok / noop /
+        # error) must render its specific user-facing label, the closing
+        # do-not-retry nudge must appear, and reasoning excerpts longer than
+        # 200 chars must be truncated with an ellipsis.
+        long_reasoning = "x" * 250  # exercises the 200-char truncation
+        _, user = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_escalation_results=[
+                ("arxiv:ok-paper", "ok", "this paper was on-bottleneck"),
+                ("arxiv:noop-paper", "noop", long_reasoning),
+                ("arxiv:err-paper", "error", "tried to deep-read"),
+            ],
+        )
+        # Block header present.
+        assert "## Escalations already attempted this run" in user
+        # All three paper_ids appear.
+        assert "arxiv:ok-paper" in user
+        assert "arxiv:noop-paper" in user
+        assert "arxiv:err-paper" in user
+        # Each status renders its specific user-facing label.
+        assert "success — paper now deep-read" in user
+        assert "no-change — paper was already at the requested verbosity" in user
+        assert "error — resolve call failed; do not retry this paper" in user
+        # Short reasoning appears verbatim.
+        assert "this paper was on-bottleneck" in user
+        # The closing do-not-retry nudge appears.
+        assert "Do NOT re-escalate a paper whose last status was" in user
+        # 200-char truncation fires on the long reasoning (250 'x' chars →
+        # exactly 200 + "…"; the full 250-char form must not survive).
+        assert ("x" * 200 + "…") in user
+        assert ("x" * 250) not in user
+
+    def test_prior_escalation_results_omitted_when_none_or_empty(self):
+        # When prior_escalation_results is None (default) OR an empty list,
+        # the entire "## Escalations already attempted this run" block is
+        # omitted — the LLM should not see a phantom block header.
+        # Case 1: None (the default in _render()).
+        _, user_none = self._render()
+        assert "## Escalations already attempted this run" not in user_none
+        assert "Do NOT re-escalate" not in user_none
+        # Case 2: explicit empty list.
+        _, user_empty = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_escalation_results=[],
+        )
+        assert "## Escalations already attempted this run" not in user_empty
+        assert "Do NOT re-escalate" not in user_empty
+
 
 # ---------------------------------------------------------------------------
 # render_review_report — pure Markdown view of a LiteratureReviewOutput.

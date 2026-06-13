@@ -385,6 +385,118 @@ class TestEscalation:
         assert hit.verbosity_achieved == 1
         assert hit.extract is not None
 
+    def test_escalate_returns_ok_when_verbosity_raised(self, tmp_path, monkeypatch):
+        # Fix 3 (Commit 6.5b-2): _escalate now returns a 3-state status.
+        # When run_skill resolves with new full_text AND _compress produces
+        # an extract, verbosity_achieved is raised → status "ok". The
+        # test calls _escalate directly (skipping agent.run()) so it
+        # exercises only the per-escalation contract, not the search-loop
+        # bookkeeping.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "real body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # Set self.bridge manually since we're not going through run() —
+        # it's what _compress (called inside _escalate) reads.
+        agent.bridge = bridge
+
+        target = RetrievedPaper(
+            paper_id="arxiv:1",
+            source=PaperSource(source_type="arxiv", identifier="1"),
+            verbosity_achieved=0,
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert target.verbosity_achieved == 1
+        assert target.extract is not None
+
+    def test_escalate_returns_noop_on_empty_full_text_and_error_on_failure(
+        self, tmp_path, monkeypatch
+    ):
+        # Fix 3 (Commit 6.5b-2): _escalate's 3-state status covers two
+        # degenerate outcomes besides "ok":
+        #   (a) "noop"  — the resolve call succeeded but returned no new
+        #                 full_text (paper already at requested verbosity,
+        #                 or the fetcher dropped the body). verbosity_achieved
+        #                 stays at its pre-call value.
+        #   (b) "error" — the resolve call failed outright (PDF 404, S2
+        #                 down, etc.). target.error is set; the LLM should
+        #                 not retry this paper.
+        # Both share the budget-charge semantics (Decision 2); the
+        # _run_search_loop side of that contract lands as the 6.5b-3 test
+        # gate. Here we exercise only _escalate's return + mutation
+        # contract.
+        bridge = FakeBridge(responses={})  # _compress never gets called
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+
+        # --- Sub-case (a): noop — resolve ok but no full_text ---
+        monkeypatch.setattr(
+            node_mod,
+            "run_skill",
+            FakeSkill(
+                resolve=lambda kw: {
+                    "status": "ok",
+                    "data": {
+                        "s2_metadata": {"title": "T", "year": 2023},
+                        "verbosity_achieved": 1,
+                        # full_text deliberately omitted (None / empty)
+                    },
+                    "message": "ok-no-body",
+                }
+            ),
+        )
+        target_noop = RetrievedPaper(
+            paper_id="arxiv:noop",
+            source=PaperSource(source_type="arxiv", identifier="noop"),
+            verbosity_achieved=0,
+        )
+        assert agent._escalate(target_noop, 1) == "noop"
+        assert target_noop.verbosity_achieved == 0  # unchanged
+        assert target_noop.extract is None  # _compress never ran
+
+        # --- Sub-case (b): error — resolve failed ---
+        monkeypatch.setattr(
+            node_mod,
+            "run_skill",
+            FakeSkill(
+                resolve=lambda kw: {
+                    "status": "error",
+                    "data": None,
+                    "message": "HTTP 404 on the PDF URL",
+                }
+            ),
+        )
+        target_err = RetrievedPaper(
+            paper_id="arxiv:err",
+            source=PaperSource(source_type="arxiv", identifier="err"),
+            verbosity_achieved=0,
+        )
+        assert agent._escalate(target_err, 1) == "error"
+        assert target_err.error == "HTTP 404 on the PDF URL"
+        assert target_err.verbosity_achieved == 0
+
 
 class TestStorageDump:
     def test_output_written_and_roundtrips(self, tmp_path, monkeypatch):
