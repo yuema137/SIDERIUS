@@ -71,6 +71,13 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
+- [ ] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` (5 prompt-content tests) + `tests/unit/agent/schemas/test_literature_review_schemas.py` (1 test on `ConfidenceRubric.render_for_searcher()` single-source-of-truth)
+- [ ] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
+  · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` (2 schema tests: `SearchDecisionRecord` + `LiteratureReviewInput.task_description`) + `tests/unit/agent/ml_literature_review/test_node.py` (5 node tests: Fix 3 no-op feedback + Fix 4 decision log + Fix 6 task threading) + `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` (2 workflow tests: empty-task warning + non-empty no-warning)
+  - [ ] **Checkpoint S** — Search-quality re-run (5× same seed); gates Checkpoint D
+- [ ] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + full `tests/unit/` sweep (catches stray `SIDERIUS_TASK` imports)
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit
   · gate full `tests/unit/` + `tests/integration/` green
 - [ ] **§10 End-to-end validation suite** — permanent acceptance gate
@@ -2408,6 +2415,643 @@ and traceable.
 - Tier-0 dual-mode coverage: does any existing dual-mode test exercise the
   interpretation → proposal handoff? If yes, extend it; if no, the wiring
   smoke test in this commit is the only gate at this layer.
+
+---
+
+## Commit 6.5 — Search-quality fixes (post-audit, 2026-06-12)
+
+**Trigger**: two read-only investigations on 2026-06-12 — (a) the code audit
+of `agent/prompt_templates/literature_review/search_decision_system.md` +
+`nodes/ml_literature_review/ml_literature_review.py:_run_search_loop` +
+`agent/schemas/literature_review.py` against the canonical-trace artifact
+(`docs/dynamic_search_pilot.md`); and (b) a direct S2 API check running 11
+queries (3 LLM-generated + 8 manually crafted) against live Semantic Scholar.
+Together they surfaced six search-quality gaps that compound across
+Checkpoint D's A/B comparison runs.
+
+### Audit findings (shared across 6.5a + 6.5b)
+
+1. **No confidence-band framing in the search-decision prompt.** The LLM
+   has no instruction tying escalation (v=0 → v=1) to confidence bands.
+   `ConfidenceRubric._default_confidence_bands()` defines v=0 capping at
+   0.40-0.59, v=1 enabling 0.60-0.79, and v=1 + on-domain + bottleneck
+   enabling 0.80+ — but the search-decision LLM has never been told this.
+   **Evidence**: canonical trace produced 3 findings at v=0 with
+   confidences 0.45 / 0.50 / 0.45 — entirely in the abstract-only band
+   ceiling (§5 of `docs/dynamic_search_pilot.md`).
+2. **Binary `Mandatory assessment` block** (lines 93-106 of
+   `search_decision_system.md`). The block asks "does *any* paper qualify?"
+   and tells the LLM "ESCALATE *that* paper" (singular pronoun + qualifier).
+   After round 1's escalate of SNRAware (no-op, already a v=1 root), the
+   LLM had no instruction to re-evaluate the menu for newcomers — TADA
+   (`arxiv:2501.04967`) and FreLE (`arxiv:2510.25800`) became findings at
+   v=0 despite arriving in later rounds and being on-bottleneck.
+3. **No-op escalations are silent.** `MLLiteratureReviewAgent._escalate`
+   accepts calls on papers already at v≥requested without telling the
+   LLM. From the LLM's perspective in rounds 2-4 of the canonical trace,
+   its round-1 escalate "succeeded"; nothing nudged it to pick a different
+   paper. **Evidence**: `_escalate` returns nothing observable; the loop
+   at line 458 of the node increments `escalations_this_round`
+   regardless of whether the call did real work.
+4. **Per-round decisions are not persisted.** The only output artifact
+   (`LiteratureReviewOutput.{retrieved_papers, search_rounds_used,
+   findings}`) carries no `reasoning`, no per-paper provenance, and no
+   per-decision audit trail. The `reasoning` field IS emitted by the LLM
+   per the Output contract, but is captured only via
+   `logger.info(..., json.dumps(decision)[:500])` at line 426 of the node
+   — truncated to 500 chars, INFO-level only.
+5. **Query coverage is single-dimensional in real runs.** Direct S2 API
+   check (2026-06-12, 11 queries × top-5 results = 55 results) showed the
+   LLM's 3 canonical-trace queries (`"SNR maximization loss denoising"`,
+   `"sample reweighting loss time series denoising"`, `"spectral loss
+   denoising time series"`) all anchored on bottleneck 2 (loss-metric
+   mismatch). **Zero LLM queries** targeted bottleneck 1 (file-17 /
+   hard-segment recovery) or bottleneck 3 (tiny-data robustness). Zero
+   LLM queries included on-domain anchors (`"1D"`, `"broadband"`,
+   `"SQUID"`). Manually crafted queries returned **3 papers more directly
+   on-domain than the canonical findings** — `arxiv:2001.04460`
+   (differentiable perceptual audio loss, 2020), `arxiv:2403.04350` (GW
+   self-supervised denoising, 2024), and a cluster of 1D broadband
+   denoising autoencoder papers — none seen by the LLM. The gap is ~80%
+   query-quality, ~20% S2 coverage.
+6. **No `task_description` threading.** All three lit-review render
+   functions accept `task_description: str = SIDERIUS_TASK` but the node
+   never passes one. Every run uses the SIDERIUS-specific default text
+   regardless of `LiteratureReviewInput`. There is no
+   `LiteratureReviewInput.task_description` schema field; no YAML key;
+   no node call-site plumbing. The synthesis prompt's `{TASK_DESCRIPTION}`
+   placeholder + the search prompt's are both already wired in the .md
+   files and the render functions — but only the constant flows through.
+
+### Goal
+
+Close these six gaps so (a) the search-decision LLM is informed enough
+to escalate strategically AND cover all three bottleneck dimensions,
+(b) the no-op feedback channel exists, (c) Checkpoint D's A/B
+comparison runs produce diagnosable + comparable artifacts that survive
+past the INFO log, and (d) the task description is operator-controlled
+rather than hardcoded.
+
+### Commit-split rationale (resolved 2026-06-12, was Open Q3)
+
+Commit 6.5 splits into two atomic commits to minimise blast radius:
+
+- **6.5a** = prompt-only changes (Fixes 1, 2, 5). Smaller surface; fast
+  test cycle; can be reverted independently if Checkpoint S reveals a
+  prompt-side regression.
+- **6.5b** = code + schema + YAML changes (Fixes 3, 4, 6). Adds the
+  observability and feedback channels the search prompt needs.
+
+**Checkpoint S runs after 6.5b lands** — it needs Fix 4's
+`search_decisions` field to compute coverage metrics and Fix 6's task
+injection to validate query anchoring. Both 6.5a and 6.5b must be on
+disk for Checkpoint S to be meaningful.
+
+---
+
+### Commit 6.5a — Prompt-only fixes (Fixes 1, 2, 5)
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/search_decision_system.md`
+  — goal-statement rewrite (Fix 5), Mandatory-assessment rewrite (Fix 2),
+  new confidence-band section + new query-generation-dimensions section
+  (Fixes 1 + 5).
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — `render_search_decision_prompt` only: wire the new
+  `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder; extend the
+  `prior_search_results` block to render coverage distribution (Fix 5).
+- Edit: `agent/schemas/literature_review.py`
+  — small addition only: the new `ConfidenceRubric.render_for_searcher()`
+  method. **No field additions** — `SearchDecisionRecord` +
+  `LiteratureReviewOutput.search_decisions` +
+  `RetrievedPaper.discovered_in_round` + `discovered_via_query` +
+  `LiteratureReviewInput.task_description` all land in 6.5b.
+- Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
+  — Fixes 1, 2, 5 prompt-content tests.
+- Edit: `tests/unit/agent/schemas/test_literature_review_schemas.py`
+  — `ConfidenceRubric.render_for_searcher()` single-source-of-truth test.
+
+#### Checklist — Fix 1: Confidence-band framing in `search_decision_system.md`
+
+- [ ] Add `ConfidenceRubric.render_for_searcher() -> str` method to
+      `agent/schemas/literature_review.py`. Renders the three default
+      bands keyed to the verbosity → confidence-band → escalation-value
+      framing (distinct from `.render()` for synthesis omission and
+      `.render_for_consumer()` for AgentCard trust legend).
+- [ ] Add a new section to `search_decision_system.md` (positioned above
+      "## When to escalate vs. search vs. stop", current line 108)
+      titled **"## Why escalation matters for finding confidence"**
+      carrying:
+  - The rendered `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder (single
+    source of truth — bands come from `ConfidenceRubric`, not hardcoded
+    in the .md).
+  - The strategic framing: *"A paper cited from its abstract alone (v=0)
+    caps the finding's confidence at the 0.40-0.59 band. Escalating to
+    v=1 lets the synthesis LLM cite the same paper at confidence ≥0.60
+    — strategically valuable when the paper is on-domain AND addresses
+    one of the listed bottlenecks. The proposer reads each finding's
+    confidence and weights its trust accordingly; a 0.65 finding lands
+    more influence than a 0.45 one. Escalating an on-domain
+    on-bottleneck paper is worth one round because it unlocks a
+    higher-confidence finding that the proposer weights more heavily."*
+- [ ] Wire the `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder in
+      `render_search_decision_prompt` via the same `.replace(...)`
+      pattern the existing `{TASK_DESCRIPTION}` placeholder uses.
+
+#### Checklist — Fix 2: Enumerative `Mandatory assessment` block
+
+- [ ] Rewrite lines 93-106 of `search_decision_system.md` from binary
+      to enumerative. The new block must:
+  - Tell the LLM to mentally rank **ALL retrieved papers** (not just one)
+    against the current bottlenecks.
+  - Tell the LLM to **list qualifying paper_ids in its `reasoning`
+    field**.
+  - Tell the LLM to **escalate the highest-ranked paper that has not
+    been deep-read yet** (verbosity_achieved < 1).
+  - Only choose SEARCH when the qualifying list is empty.
+  - Acknowledge that the escalation budget allows multiple escalations
+    between searches (referencing `max_escalations_per_round`).
+
+#### Checklist — Fix 5: Goal rewrite + query generation guidance + coverage diversity
+
+- [ ] Rewrite lines 1-4 (the goal statement) of
+      `search_decision_system.md`. New text:
+  ```
+  You are the search strategist for an automated ML denoising research
+  agent. Each round you decide the single most valuable next action to
+  build a literature picture that helps the proposer design a better
+  architecture. Bottlenecks are the highest priority, but adjacent
+  techniques, novel training strategies, and domain-specific tricks are
+  ALL in scope — a paper that addresses a bottleneck obliquely (e.g.
+  perceptual loss for audio when our bottleneck is loss-metric mismatch
+  on 1D signals) can be just as valuable as a direct hit.
+  ```
+- [ ] Add a new section **"## Query generation — four dimensions to
+      cover"** below the "## Translating the experiment state into a
+      query" section. Lists 4 dimensions:
+  1. **Bottlenecks** (highest priority) — every bottleneck in the list
+     should be touched by at least one query across the run.
+  2. **Take-home message direction** — the operator's literal directive
+     (top of the user prompt). If it says "target file 17 recovery", at
+     least one query must target hard-segment recovery.
+  3. **Architectural gaps in `key_findings`** — gaps the experiment has
+     not yet covered (e.g. if findings show all explored models are
+     spectral, search for non-spectral alternatives).
+  4. **Adjacent techniques not covered by `explored model_types`** —
+     audio/speech/biomedical denoising mechanisms, augmentation
+     strategies, regularisation tricks; cross-domain mechanism transfer
+     is welcome.
+- [ ] Add a coverage diversity rule to the Output contract: *"In your
+      `reasoning` field for a `search` action, label which dimension the
+      query targets — one of `bottleneck`, `take_home`,
+      `architectural_gap`, `adjacent_technique`. Across the run, you
+      MUST cover ≥ 2 distinct dimensions."*
+- [ ] Extend `prior_search_results` rendering in
+      `render_search_decision_prompt` to show **coverage distribution**:
+      e.g. *"Coverage so far: bottleneck=2, take_home=0,
+      architectural_gap=0, adjacent_technique=0 — you have not yet
+      addressed the take_home priority; consider it next round."*
+- [ ] **Trusted dimension labels** (resolved 2026-06-12, was Open Q1):
+      labels in the `reasoning` field are TRUSTED — the node counts
+      what the LLM self-reports, no parser-enforced contract. A missing
+      label is itself a diagnostic signal that Fix 5 is incomplete
+      (visible in the captured `search_decisions[].reasoning` for
+      post-hoc inspection). No node-side validation of the label
+      vocabulary.
+
+#### Test gate — 6.5a
+
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py \
+  tests/unit/agent/schemas/test_literature_review_schemas.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py \
+  agent/schemas/literature_review.py
+```
+
+Test floor — **6 new tests** + 0 modifications:
+
+- **Fix 1**: 2 tests. (a) Rendered search-decision system prompt
+  contains the three band criteria + the "escalating an on-domain
+  on-bottleneck paper unlocks a higher-confidence finding" sentence
+  (`tests/unit/agent/prompt_templates/...`). (b) Regression:
+  `ConfidenceRubric.render_for_searcher()`, `.render()`, and
+  `.render_for_consumer()` all render the same band bounds for the
+  default rubric (single source of truth)
+  (`tests/unit/agent/schemas/...`).
+- **Fix 2**: 2 prompt-content tests. (a) The rewritten block contains
+  "rank", "list every paper that qualifies", "highest-ranked".
+  (b) Anti-regression: the binary phrasing "does any retrieved paper
+  directly address" is no longer present.
+- **Fix 5**: 2 prompt-content tests. (a) Rewritten goal statement
+  contains "adjacent techniques" + "in scope"; the four-dimension list
+  is present. (b) `render_search_decision_prompt` test: with mocked
+  `prior_search_results` carrying 3 labelled queries (counts:
+  bottleneck=2, adjacent_technique=1, take_home=0,
+  architectural_gap=0), the rendered block contains the coverage
+  distribution line citing all four dimensions with those counts.
+
+---
+
+### Commit 6.5b — Code + schema + YAML fixes (Fixes 3, 4, 6)
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — `render_search_decision_prompt` extended with
+  `prior_escalation_results` kwarg + the no-op-feedback sub-block
+  (Fix 3).
+- Edit: `agent/schemas/literature_review.py`
+  — new `SearchDecisionRecord` class (Fix 4); new `search_decisions`
+  field on `LiteratureReviewOutput` (Fix 4); new `discovered_in_round`
+  + `discovered_via_query` fields on `RetrievedPaper` (Fix 4); new
+  `task_description: str = ""` field on `LiteratureReviewInput` (Fix 6).
+- Edit: `nodes/ml_literature_review/ml_literature_review.py`
+  — `_run_search_loop` records decisions; `_escalate` returns/signals
+  no-op status; per-paper provenance written when papers arrive via
+  `_do_search` + `_retrieved_from_search_result`;
+  `MLLiteratureReviewAgent.run` populates `search_decisions`; all three
+  render-function call sites pass `inp.task_description`
+  (Fixes 3 + 4 + 6).
+- Edit: `workflows/model_exploration.py`
+  — `_build_lit_review_input` reads `task_description` from YAML; logs
+  an INFO warning when empty (Fix 6).
+- Edit: `configs/lit_review_config.yaml`
+  — new `task_description:` top-level key with multi-line comment +
+  SIDERIUS-default example (Fix 6).
+- Edit: `tests/unit/agent/schemas/test_literature_review_schemas.py`
+  — Fix 4 + Fix 6 schema tests.
+- Edit: `tests/unit/agent/ml_literature_review/test_node.py`
+  — Fixes 3, 4, 6 node tests.
+- Edit: `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
+  — Fix 6 workflow-level tests (warn on empty, no warn on non-empty).
+
+#### Checklist — Fix 3: No-op escalation feedback
+
+- [ ] Modify `MLLiteratureReviewAgent._escalate` to return a status
+      indicating no-op vs real work. The no-op check fires when
+      `target.verbosity_achieved >= requested_verbosity` BEFORE running
+      the skill call.
+- [ ] Modify `_run_search_loop` to track no-op escalations in a local
+      `prior_escalation_results: list[tuple[str, bool, str]]` —
+      `(paper_id, was_noop, reasoning)` — passed into
+      `render_search_decision_prompt` as a new kwarg.
+- [ ] Extend `render_search_decision_prompt` to accept
+      `prior_escalation_results` and render a sub-block in the user
+      prompt (parallel to the existing `## Queries already tried this
+      run` block):
+  ```
+  ## Escalations already attempted this run
+  - "arxiv:2503.18162" → no-op (was already v=1); pick a different paper next time
+  - "arxiv:2501.04967" → deep-read produced extract (now v=1)
+  ```
+- [ ] Add a system-prompt nudge alongside the existing
+      broaden-on-0-hit nudge: *"An escalation that returned 'no-op'
+      means the paper was already at the requested verbosity —
+      escalating it again wastes a round; pick a different on-bottleneck
+      paper."*
+
+#### Checklist — Fix 4: Persistent search decision log
+
+- [ ] Add `SearchDecisionRecord` Pydantic class in
+      `agent/schemas/literature_review.py`:
+  ```python
+  class SearchDecisionRecord(BaseModel):
+      round_idx: int = Field(
+          description="0-indexed loop iteration when this decision was made.",
+      )
+      action: Literal["search", "escalate", "done"]
+      query: str | None = Field(default=None,
+          description="The S2 query string, set when action='search'.")
+      paper_id: str | None = Field(default=None,
+          description="The escalation target's paper_id, set when action='escalate'.")
+      reasoning: str = Field(
+          description="The LLM's `reasoning` field, untruncated. May contain "
+          "the LLM's mental ranking from Fix 2's enumerative block and the "
+          "Fix 5 dimension label.")
+      hits: int | None = Field(default=None,
+          description="S2 result count for action='search'; None otherwise.")
+      noop: bool = Field(default=False,
+          description="True when action='escalate' and target was already at requested verbosity.")
+      cap_hit: bool = Field(default=False,
+          description="True when action='escalate' silently dropped because "
+          "escalations_this_round >= max_escalations_per_round.")
+  ```
+- [ ] Add `search_decisions: list[SearchDecisionRecord] =
+      Field(default_factory=list)` to `LiteratureReviewOutput`.
+      Backward-compat: existing serialised outputs default to `[]`; no
+      migration needed.
+- [ ] Add provenance fields to `RetrievedPaper`:
+  ```python
+  discovered_in_round: int | None = Field(
+      default=None,
+      description="0 = root paper (pre-loop); 1..max_rounds = the search "
+      "round that surfaced this paper. None for legacy/cached entries.",
+  )
+  discovered_via_query: str | None = Field(
+      default=None,
+      description="The S2 query string that returned this paper. None for "
+      "root papers and for legacy/cached entries.",
+  )
+  ```
+- [ ] Modify `_run_search_loop` to build a `SearchDecisionRecord` after
+      every LLM call (search, escalate-success, escalate-noop,
+      escalate-cap-hit, done) into a local `decisions` list.
+- [ ] Pass `round_idx` + current query string down into `_do_search` +
+      `_retrieved_from_search_result` so new papers carry provenance.
+- [ ] Populate `LiteratureReviewOutput.search_decisions` from the
+      accumulated records in `MLLiteratureReviewAgent.run`.
+
+#### Checklist — Fix 6: `task_description` config field + node threading
+
+- [ ] Add `task_description: str = ""` to `LiteratureReviewInput` in
+      `agent/schemas/literature_review.py`. `Field` description must
+      strongly recommend operators fill it in: *"Concrete downstream
+      task description shown to all three lit-review LLM calls
+      (compression, search-decision, synthesis). Drives search-query
+      anchor words and synthesis relevance framing. Default empty
+      string means 'task block omitted from prompts'; operators SHOULD
+      set this via configs/lit_review_config.yaml's `task_description:`
+      key so the LLM has a concrete domain to anchor its queries on."*
+- [ ] Add `task_description:` to `configs/lit_review_config.yaml` with
+      a multi-line comment + a SIDERIUS-default example. Place it
+      immediately under `enabled:` so operators see it first when
+      editing. Example block:
+  ```yaml
+  # Concrete downstream task this lit-review run is supporting. Injected
+  # into all three lit-review LLM calls (compression, search-decision,
+  # synthesis) via the {TASK_DESCRIPTION} placeholder. Drives the search
+  # LLM's query anchor words (e.g. "1D", "broadband", "SQUID") and the
+  # synthesis LLM's relevance framing.
+  #
+  # Strongly recommended — an empty value omits the task block from
+  # prompts and forces the LLM to guess the domain from key_findings +
+  # bottlenecks alone (the canonical-trace failure mode).
+  task_description: |
+    Full-spectrum 1-D time-series denoising of SQUID dark-matter detector
+    data: map a noisy [B, T] integer signal to a clean [B, 256, T]
+    reconstruction, trained across the whole frequency spectrum at once
+    (not split into per-band models).
+  ```
+- [ ] Modify `_build_lit_review_input` (in
+      `workflows/model_exploration.py`) to read
+      `config.get("task_description", "")` from the YAML dict and pass
+      it into the `LiteratureReviewInput` constructor.
+- [ ] **Log an INFO-level warning in `_build_lit_review_input`** (in
+      `workflows/model_exploration.py`) when `task_description == ""`
+      — wording: *"`task_description` is empty in lit_review_config.yaml;
+      lit-review LLM calls will receive no task-domain anchor and may
+      produce off-domain queries. Strongly recommended: set
+      `task_description:` in the YAML."* (Resolved 2026-06-12, was
+      Open Q2.) The warning fires at YAML-load time, NOT at render time
+      — render-time warnings would fire 3+ times per run and clutter
+      logs.
+- [ ] Modify `MLLiteratureReviewAgent` call sites in
+      `nodes/ml_literature_review/ml_literature_review.py` to pass
+      `inp.task_description` to all three render functions
+      (`render_paper_extract_prompt`, `render_search_decision_prompt`,
+      `render_synthesis_prompt`).
+- [ ] **No `.md` file changes** — all three prompts already have the
+      `{TASK_DESCRIPTION}` placeholder (confirmed 2026-06-12); this fix
+      only wires the data source from the YAML through to the
+      placeholder substitution.
+- [ ] **Commit-F dependency**: this fix REPLACES the `SIDERIUS_TASK`
+      default usage in node call sites but leaves the constant defined
+      in `__init__.py`. Commit F follows up by deleting the constant +
+      changing the render defaults from `SIDERIUS_TASK` to `""`. Order
+      matters — Commit F must NOT land before Commit 6.5b.
+
+#### Test gate — 6.5b
+
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/schemas/test_literature_review_schemas.py \
+  tests/unit/agent/ml_literature_review/test_node.py \
+  tests/unit/workflows/test_model_exploration_lit_review_wiring.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py \
+  configs/lit_review_config.yaml
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py
+```
+
+Test floor — **9 new tests** + 0 modifications:
+
+- **Fix 3** (2 tests, `tests/unit/agent/ml_literature_review/test_node.py`):
+  (a) `FakeBridge` returns escalate→search; the first escalate targets
+  an already-v=1 paper; assert the second round's user prompt contains
+  the rendered no-op feedback line + the broaden-on-noop nudge.
+  (b) Assert `LiteratureReviewOutput.search_decisions[0].noop is True`.
+- **Fix 4** (3 tests): (a) Schema
+  (`tests/unit/agent/schemas/test_literature_review_schemas.py`):
+  `SearchDecisionRecord` validates with each of search-with-hits,
+  escalate-success, escalate-noop, escalate-cap-hit, done shapes.
+  (b) Node: a canned full loop produces a `search_decisions` list
+  matching the canned LLM responses 1-for-1. (c) Node: every
+  `retrieved_papers[i]` from a search-loop addition carries
+  `discovered_in_round` = the round it was added in and
+  `discovered_via_query` = the query that surfaced it; root papers
+  carry `discovered_in_round=0` and `discovered_via_query=None`.
+- **Fix 6** (4 tests): (a) Schema: `LiteratureReviewInput` accepts
+  `task_description=""` (default) AND a non-empty string. (b) Node:
+  with a non-empty `task_description` on the input, all three render
+  functions receive it (verifiable via FakeBridge prompt captures).
+  (c) Workflow
+  (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`):
+  `_build_lit_review_input` logs an INFO warning when YAML omits
+  `task_description:` (captured via caplog). (d) Workflow:
+  `_build_lit_review_input` does NOT warn when YAML provides a
+  non-empty `task_description:`.
+
+#### 🔍 Behavioral Checkpoint S — Search-quality re-run (5× same seed)
+
+**Trigger**: after BOTH 6.5a and 6.5b land + their respective test
+gates are green. Checkpoint S validates the combined effect of all six
+fixes — it cannot run after 6.5a alone (no `search_decisions` to
+inspect) and would not be conclusive after 6.5b alone (no
+prompt-level behavioral changes).
+
+**How to run**: re-run `MLLiteratureReviewAgent` **5 times** on the same
+`InterpretationOutput` seed used in the canonical trace
+(`/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/iter_014/iteration_014/interpretation_iter_014.json`).
+Same configuration as the canonical trace: `deepseek-v4-pro` for all
+three sub-calls, `findings_verbosity=1`,
+`synthesis_config.transfer_tolerance="moderate"`, `max_rounds=3`,
+`escalation_allowed=True`, `max_escalations_per_round=2`. Set
+`task_description:` in the YAML to the SIDERIUS-default text (per the
+Fix 6 example). Capture each run's `LiteratureReviewOutput` to disk
+under `reference_data/lit_review_pilot_cache/post_6_5_audit_runs/run_{N}.json`.
+
+**Pass criteria (all must hold)**:
+
+| # | Criterion | Pre-fix baseline (canonical trace) |
+|---|---|---|
+| 1 | **≥ 4 of 5 runs produce ≥ 1 non-no-op escalation** | 0/1 runs (SNRAware escalate was a no-op) |
+| 2 | **≥ 3 of 5 runs produce ≥ 1 finding cited at v=1** | 0/1 runs (all 3 findings at v=0) |
+| 3 | **≥ 2 of 5 runs produce a finding with confidence ≥ 0.60** | 0/1 runs (confidences 0.45 / 0.50 / 0.45) |
+| 4 | **All 5 runs cover ≥ 2 distinct dimensions** (verifiable from `search_decisions[].reasoning`) | 1/1 covered 1 dimension only (all queries on loss-metric mismatch) |
+| 5 | **`search_decisions` populated in all 5 runs** with complete per-round records | N/A pre-fix (field didn't exist) |
+
+**Diagnostics to inspect** (per-run):
+
+- Round-1 decision: enumerative ranking in `reasoning` (Fix 2 working)
+  — should cite ≥ 2 paper_ids when the menu has more than one
+  candidate.
+- Any subsequent round received a no-op feedback line in its rendered
+  user prompt (Fix 3 working) — verifiable from a captured prompt
+  snapshot per run.
+- Coverage distribution rendered in `prior_search_results` block
+  (Fix 5 working) — verifiable from a captured prompt snapshot.
+- For each finding, walk the chain:
+  `finding.source_ref → retrieved_papers[ref].verbosity_achieved →
+  discovered_in_round → search_decisions[round]`. Broken chains
+  indicate Fix 4 incomplete.
+
+**What this decides**: whether Checkpoint D can run on Commit 6.5's
+surface. If any pass criterion fails, the failure mode is logged into
+the artifact and Commit 6.5 stays open until a follow-up fix iteration
+closes it. **Checkpoint D is gated until Checkpoint S passes.**
+
+**Artifact**: `docs/search_quality_validation.md` containing the 5
+runs' aggregated metrics table, per-run round-by-round decision
+walkthroughs (condensed to the diagnostic essentials), captured prompt
+snapshots proving Fixes 3 + 5 fired, and the human verdict.
+
+### Resolved open questions (2026-06-12)
+
+- **Q1** (Fix 5 dimension labels): **trusted** — node counts what the
+  LLM self-reports; no parser-enforced label contract; missing labels
+  are diagnostic signals visible in `search_decisions[].reasoning`.
+- **Q2** (Fix 6 default behavior): **log an INFO warning in
+  `_build_lit_review_input`** when `task_description == ""`; do NOT
+  warn at render time (would fire 3+ times per run).
+- **Q3** (Commit split): **split into 6.5a (prompt-only) + 6.5b (code +
+  schema + YAML)**; Checkpoint S runs after 6.5b lands (needs Fix 4's
+  `search_decisions` field + Fix 6's task injection).
+
+---
+
+## Commit F — `task_description` cleanup (remove SIDERIUS_TASK constant)
+
+**Trigger**: follow-up to Commit 6.5b Fix 6. Once
+`LiteratureReviewInput.task_description` exists + the node passes
+`inp.task_description` to all three render functions + the YAML carries
+the operator-set value, the `SIDERIUS_TASK` constant + its use as
+render-function default becomes dead code.
+
+**Goal**: remove the hardcoded `SIDERIUS_TASK` constant from
+`agent/prompt_templates/literature_review/__init__.py` and unify all
+three lit-review prompts (compression, search-decision, synthesis) to
+read their task description exclusively from
+`LiteratureReviewInput.task_description`. After Commit F, the only
+place the SIDERIUS-specific task text lives is the
+`configs/lit_review_config.yaml` (the canonical operator default,
+landed in Commit 6.5b Fix 6).
+
+**Strict ordering**: Commit F MUST land after Commit 6.5b. If Commit F
+landed first, the render defaults would silently switch from the
+SIDERIUS-specific text to `""`, leaving prompts with empty task blocks
+until the YAML and node call-sites caught up — exactly the
+canonical-trace failure mode the audit flagged.
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — remove `SIDERIUS_TASK` constant + the 2-line prose comment above
+  it; change the `task_description: str = SIDERIUS_TASK` default to
+  `task_description: str = ""` on all three render functions
+  (`render_paper_extract_prompt`, `render_search_decision_prompt`,
+  `render_synthesis_prompt`); update docstrings to reflect the new
+  default + point operators at `LiteratureReviewInput.task_description`.
+- `agent/prompt_templates/literature_review/paper_extract_system.md`,
+  `search_decision_system.md`, `synthesis_system.md` — **no change**.
+  All three already carry the `{TASK_DESCRIPTION}` placeholder; the
+  empty-string substitution just replaces the placeholder with an
+  empty line under the heading. Confirmed by grep (1 placeholder each,
+  2026-06-12).
+- Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
+  — update any test that previously expected the SIDERIUS-specific
+  default text. Add one new test for the empty-default behavior + one
+  for the non-empty round-trip.
+
+**Checklist**:
+- [ ] Remove `SIDERIUS_TASK` constant + its 2-line prose comment from
+      `agent/prompt_templates/literature_review/__init__.py`.
+- [ ] Update `render_paper_extract_prompt` signature: change
+      `task_description: str = SIDERIUS_TASK` → `task_description: str = ""`.
+- [ ] Update `render_search_decision_prompt` signature: same change.
+- [ ] Update `render_synthesis_prompt` signature: same change.
+- [ ] Confirm the three .md files still have `{TASK_DESCRIPTION}`
+      placeholders — no .md edits required (re-verify with grep).
+- [ ] Confirm `nodes/ml_literature_review/ml_literature_review.py` call
+      sites still pass `inp.task_description` (landed in 6.5b Fix 6 —
+      Commit F just confirms the wiring is correct after the defaults
+      flip).
+- [ ] Update any existing prompt-content unit tests that hardcoded the
+      `SIDERIUS_TASK` text. Most assertions are structural and should
+      keep passing; the few that quoted the SIDERIUS text need to be
+      re-pointed at operator-supplied test fixtures.
+
+**Test gate**:
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py \
+  tests/unit/agent/ml_literature_review/test_node.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/__init__.py \
+  nodes/ml_literature_review/ml_literature_review.py
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/__init__.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py
+.venv/bin/python -m pytest tests/unit/ -q   # full unit sweep — no other module imports SIDERIUS_TASK
+```
+
+Test floor — **2 new tests** + ≤ 3 modified:
+
+- **New test 1**: `render_paper_extract_prompt(raw_text="foo")` (no
+  `task_description`) produces a rendered prompt where the
+  `{TASK_DESCRIPTION}` placeholder has been replaced with `""` (the
+  heading `## The task...` is still present, the body under it is
+  empty). Same structural assertion for `render_search_decision_prompt`
+  and `render_synthesis_prompt` at their empty defaults.
+- **New test 2**: a non-empty `task_description="custom task X"` passed
+  to each of the three render functions appears verbatim in the
+  rendered system prompt body.
+- **Modified test(s)**: any existing prompt-content test that hardcoded
+  `"full-spectrum 1-D time-series denoising of SQUID..."` is updated to
+  either (a) pass an explicit `task_description` and assert on it, or
+  (b) assert on structural placeholder presence rather than the
+  SIDERIUS-specific text. Expected count: ≤ 3 tests touched.
+
+**Sanity check (cross-repo grep)**:
+- `grep -rn "SIDERIUS_TASK" --include="*.py"` after the edit must
+  return zero hits — no other module should import the constant.
+- `grep -rn "SIDERIUS_TASK" --include="*.md"` must return zero hits —
+  no docs reference the constant either.
+
+### Resolved open questions (2026-06-12)
+
+- **Commit F Q1** (warn at render time?): **no** — the warning is
+  already covered by Commit 6.5b Fix 6's `_build_lit_review_input`
+  INFO warning (Q2 of 6.5). A render-time warning would fire 3+ times
+  per run and clutter logs.
 
 ---
 
