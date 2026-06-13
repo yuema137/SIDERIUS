@@ -357,6 +357,34 @@ class ConfidenceRubric(BaseModel):
             lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
         return "\n".join(lines)
 
+    def render_for_searcher(self) -> str:
+        """Render the rubric as the ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` prompt block.
+
+        Same bands as ``render()`` and ``render_for_consumer()``, but framed
+        for the SEARCH-DECISION LLM — the surrounding prose in
+        ``search_decision_system.md`` (the "## Why escalation matters for
+        finding confidence" section) explains the strategic framing
+        (verbosity → confidence band → escalation payoff); this method only
+        surfaces the band list itself, so a custom rubric flows through
+        consistently. Single source of truth: bands come from ``self.bands``,
+        the same list ``render()`` and ``render_for_consumer()`` read.
+
+        Distinct from:
+          * ``render()`` — the SYNTHESIS-producer framing ("assign
+            confidence"), injected into synthesis_system.md's
+            ``{CONFIDENCE_RUBRIC}``.
+          * ``render_for_consumer()`` — the CONSUMER (proposer) legend
+            ("interpret confidence values"), injected into
+            ``AgentCard.trust_guidance``.
+        """
+        lines = [
+            "Confidence bands (the synthesis LLM assigns one of these to each "
+            "finding based on the cited paper's verbosity and domain):"
+        ]
+        for b in self.bands:
+            lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
+        return "\n".join(lines)
+
 
 class SynthesisConfig(BaseModel):
     """Controls the omission threshold / transfer tolerance for synthesis.

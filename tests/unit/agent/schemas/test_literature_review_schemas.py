@@ -539,3 +539,46 @@ class TestConfidenceRubric:
         # finding, so render_for_consumer must not carry the omit instruction.
         text = ConfidenceRubric().render_for_consumer()
         assert "do NOT generate a finding" not in text
+
+    def test_render_for_searcher_has_all_default_bands(self):
+        text = ConfidenceRubric().render_for_searcher()
+        # Default 3 bands appear in the same "L.LL-U.UU" formatting as render()
+        # / render_for_consumer() — single source of truth is self.bands.
+        assert "0.80-1.00" in text
+        assert "0.60-0.79" in text
+        assert "0.40-0.59" in text
+        # Band criteria carried over verbatim from _default_confidence_bands()
+        assert "deep-read" in text
+        assert "abstract-only evidence" in text
+
+    def test_render_for_searcher_has_search_leadin_not_producer_or_consumer(self):
+        text = ConfidenceRubric().render_for_searcher()
+        # Search-decision framing: tell the searcher how the synthesis LLM
+        # assigns confidence, so it can reason about verbosity → band →
+        # escalation payoff. The leadin must explicitly name the synthesis LLM.
+        assert text.startswith("Confidence bands (the synthesis LLM assigns one")
+        # Producer framing ("Assign each finding's confidence") must NOT leak
+        # in — the searcher is not assigning anything itself.
+        assert "Assign each finding's `confidence`" not in text
+        assert "Assign each finding's confidence" not in text
+        # Consumer framing ("Confidence scores in findings from this agent
+        # follow this rubric") also must NOT leak in — the searcher is not a
+        # downstream consumer of findings.
+        assert "Confidence scores in findings from this agent follow" not in text
+        # The omit-below instruction is producer-only (the searcher cannot
+        # omit anything); render_for_searcher must not carry it.
+        assert "do NOT generate a finding" not in text
+
+    def test_render_for_searcher_with_custom_rubric(self):
+        # Custom bands must flow through render_for_searcher() — exercises the
+        # "single source of truth = self.bands" guarantee for the third
+        # renderer, matching test_custom_rubric_render for render().
+        r = ConfidenceRubric(
+            bands=[ConfidenceBand(lower=0.7, upper=1.0, criteria="replicated only")],
+            omit_below=0.7,
+        )
+        text = r.render_for_searcher()
+        assert "0.70-1.00" in text
+        assert "replicated only" in text
+        # Default-rubric bands must NOT appear when a custom rubric is supplied.
+        assert "0.40-0.59" not in text

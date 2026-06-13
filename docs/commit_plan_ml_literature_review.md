@@ -2533,15 +2533,16 @@ disk for Checkpoint S to be meaningful.
 
 #### Checklist — Fix 1: Confidence-band framing in `search_decision_system.md`
 
-- [ ] Add `ConfidenceRubric.render_for_searcher() -> str` method to
+- [x] Add `ConfidenceRubric.render_for_searcher() -> str` method to
       `agent/schemas/literature_review.py`. Renders the three default
       bands keyed to the verbosity → confidence-band → escalation-value
       framing (distinct from `.render()` for synthesis omission and
-      `.render_for_consumer()` for AgentCard trust legend).
-- [ ] Add a new section to `search_decision_system.md` (positioned above
-      "## When to escalate vs. search vs. stop", current line 108)
-      titled **"## Why escalation matters for finding confidence"**
-      carrying:
+      `.render_for_consumer()` for AgentCard trust legend). · landed
+      (pre-commit, files on disk 2026-06-12)
+- [x] Add a new section to `search_decision_system.md` (positioned above
+      "## When to escalate vs. search vs. stop", former line 108, now
+      line 177 after Edits B/C/D shifted line numbers) titled
+      **"## Why escalation matters for finding confidence"** carrying:
   - The rendered `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder (single
     source of truth — bands come from `ConfidenceRubric`, not hardcoded
     in the .md).
@@ -2554,14 +2555,19 @@ disk for Checkpoint S to be meaningful.
     more influence than a 0.45 one. Escalating an on-domain
     on-bottleneck paper is worth one round because it unlocks a
     higher-confidence finding that the proposer weights more heavily."*
-- [ ] Wire the `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder in
+- [x] Wire the `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder in
       `render_search_decision_prompt` via the same `.replace(...)`
       pattern the existing `{TASK_DESCRIPTION}` placeholder uses.
+      Implementation also adds a `confidence_rubric: ConfidenceRubric |
+      None = None` kwarg mirroring `render_synthesis_prompt`, so a
+      custom rubric flows through the whole agent (synthesis +
+      consumer + searcher) from a single source.
 
 #### Checklist — Fix 2: Enumerative `Mandatory assessment` block
 
-- [ ] Rewrite lines 93-106 of `search_decision_system.md` from binary
-      to enumerative. The new block must:
+- [x] Rewrite the Mandatory-assessment block of
+      `search_decision_system.md` (was lines 93-106 pre-edit; now lines
+      127-150 post-edit) from binary to enumerative. The new block:
   - Tell the LLM to mentally rank **ALL retrieved papers** (not just one)
     against the current bottlenecks.
   - Tell the LLM to **list qualifying paper_ids in its `reasoning`
@@ -2574,8 +2580,9 @@ disk for Checkpoint S to be meaningful.
 
 #### Checklist — Fix 5: Goal rewrite + query generation guidance + coverage diversity
 
-- [ ] Rewrite lines 1-4 (the goal statement) of
-      `search_decision_system.md`. New text:
+- [x] Rewrite lines 1-4 (the goal statement) of
+      `search_decision_system.md`. New text (slightly expanded from the
+      spec — adds "You output ONE JSON object" closing for clarity):
   ```
   You are the search strategist for an automated ML denoising research
   agent. Each round you decide the single most valuable next action to
@@ -2586,7 +2593,7 @@ disk for Checkpoint S to be meaningful.
   perceptual loss for audio when our bottleneck is loss-metric mismatch
   on 1D signals) can be just as valuable as a direct hit.
   ```
-- [ ] Add a new section **"## Query generation — four dimensions to
+- [x] Add a new section **"## Query generation — four dimensions to
       cover"** below the "## Translating the experiment state into a
       query" section. Lists 4 dimensions:
   1. **Bottlenecks** (highest priority) — every bottleneck in the list
@@ -2601,17 +2608,20 @@ disk for Checkpoint S to be meaningful.
      audio/speech/biomedical denoising mechanisms, augmentation
      strategies, regularisation tricks; cross-domain mechanism transfer
      is welcome.
-- [ ] Add a coverage diversity rule to the Output contract: *"In your
+- [x] Add a coverage diversity rule to the Output contract: *"In your
       `reasoning` field for a `search` action, label which dimension the
       query targets — one of `bottleneck`, `take_home`,
       `architectural_gap`, `adjacent_technique`. Across the run, you
       MUST cover ≥ 2 distinct dimensions."*
-- [ ] Extend `prior_search_results` rendering in
+- [ ] **DEFERRED to 6.5b** — Extend `prior_search_results` rendering in
       `render_search_decision_prompt` to show **coverage distribution**:
       e.g. *"Coverage so far: bottleneck=2, take_home=0,
       architectural_gap=0, adjacent_technique=0 — you have not yet
       addressed the take_home priority; consider it next round."*
-- [ ] **Trusted dimension labels** (resolved 2026-06-12, was Open Q1):
+      Rationale: coverage distribution rendering needs the
+      `search_decisions[].reasoning` capture from Fix 4 to compute the
+      counts; Fix 4 lands in 6.5b, so this rendering deferred there.
+- [x] **Trusted dimension labels** (resolved 2026-06-12, was Open Q1):
       labels in the `reasoning` field are TRUSTED — the node counts
       what the LLM self-reports, no parser-enforced contract. A missing
       label is itself a diagnostic signal that Fix 5 is incomplete
@@ -2657,6 +2667,46 @@ Test floor — **6 new tests** + 0 modifications:
   bottleneck=2, adjacent_technique=1, take_home=0,
   architectural_gap=0), the rendered block contains the coverage
   distribution line citing all four dimensions with those counts.
+
+**Test gate run — 2026-06-12 (pre-commit)**: 152 passed in 0.84s
+(147 baseline + 5 net-new = 152; test 5 below is an in-place rewrite of
+the Commit 6 `test_mandatory_escalation_assessment_block_present` and
+so doesn't add a row). `ruff check` + `ruff format --check` + `pyright`
+all green on the 3 production files.
+
+Test-floor mapping (3 schema + 2 prompt + 1 rewrite delivered vs. the
+spec's 2+2+2 along Fix-1/2/5 lines — same total volume, structural
+regrouping):
+
+- Fix 1 covered by: schema-side `test_render_for_searcher_has_all_default_bands`
+  + `test_render_for_searcher_has_search_leadin_not_producer_or_consumer`
+  + `test_render_for_searcher_with_custom_rubric` (single-source-of-
+  truth across the three render methods); prompt-side
+  `test_confidence_rubric_for_search_placeholder_filled` (the
+  `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder is filled, the
+  "Why escalation matters for finding confidence" section header is
+  present, all three default-band bounds appear, the strategic-framing
+  sentence "Escalating an on-domain on-bottleneck paper... unlocks a
+  higher-confidence finding" is verified as an explicit substring
+  match — spec Fix 1 (a) — and a custom rubric flows through via the
+  new `confidence_rubric` kwarg).
+- Fix 2 covered by: rewritten in-place
+  `test_mandatory_escalation_assessment_block_present` — asserts the
+  new enumerative-ranking language ("scan ALL papers retrieved",
+  "list (by paper_id) EVERY paper that qualifies",
+  "verbosity_achieved < 1", "Only choose SEARCH when NO retrieved
+  paper qualifies", "defaulting to" + "SEARCH is not acceptable").
+  Spec's Fix 2 (b) anti-regression ("does any retrieved paper directly
+  address" must be absent) is covered by construction — the .md has
+  exactly one assessment block and it was rewritten to contain the
+  new phrasing.
+- Fix 5 covered by: prompt-side
+  `test_four_dimensions_section_and_label_rule_present` — the new
+  "## Query generation — four dimensions to cover" section header is
+  present, all four dimension names appear, the "label which dimension
+  the query targets" + "cover ≥ 2 distinct dimensions" Output-contract
+  rule appears. Spec's Fix 5 (b) coverage-distribution rendering test
+  is deferred along with the feature itself to 6.5b (Fix 4 dependency).
 
 ---
 

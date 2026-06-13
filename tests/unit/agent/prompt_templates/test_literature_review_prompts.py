@@ -487,16 +487,102 @@ class TestSearchDecisionPrompt:
         assert "hard sample reweighting loss" in system  # GOOD example
 
     def test_mandatory_escalation_assessment_block_present(self):
-        # Diagnostic finding (2026-05-27): the search-decision LLM never evaluated
-        # retrieved papers for escalation — it defaulted to SEARCH every round and
-        # its reasoning referenced no retrieved paper. This block forces a
-        # pre-decision escalate-vs-search assessment. Pure addition: Fix A/B/C
-        # (jargon translation, freq-split guard, keyword-phrase form) are untouched.
+        # 6.5a Edit D rewrote the binary YES/ESCALATE assessment into an
+        # enumerative ranking: the LLM must list EVERY qualifying paper in
+        # its `reasoning` field, then escalate the highest-ranked one that
+        # has NOT been deep-read yet. Replaces the Commit 6 binary-form
+        # version of this test.
         system, _ = self._render()
+        # Section header preserved (the only assertion carried over from the
+        # Commit 6 version of this test).
         assert "Mandatory assessment before deciding" in system
-        assert "scan the papers already" in system
-        assert "choose ESCALATE for that paper" in system
-        assert "defaulting to SEARCH" in system
+        # New enumerative-ranking language
+        assert "scan ALL papers retrieved" in system
+        assert "list (by paper_id) EVERY paper that qualifies" in system
+        # Tie-break instruction: the highest-ranked NOT-yet-deep-read paper
+        # wins. The literal token "verbosity_achieved < 1" must be present so
+        # the LLM knows which field to consult.
+        assert "verbosity_achieved < 1" in system
+        # SEARCH only when nothing qualifies — preserves the original intent.
+        assert "Only choose SEARCH when NO retrieved paper qualifies" in system
+        # Closing "defaulting to SEARCH is not acceptable" line still present
+        # (last line of the section). The .md wraps after "to" so the two
+        # halves are asserted separately rather than as one substring.
+        assert "defaulting to" in system
+        assert "SEARCH is not acceptable" in system
+
+    def test_four_dimensions_section_and_label_rule_present(self):
+        # 6.5a Edit C added a dedicated section instructing the searcher to
+        # cover four dimensions across the run (bottleneck / take_home /
+        # architectural_gap / adjacent_technique), not anchor every query on
+        # the same bottleneck. Edit B added a paired Output-contract rule
+        # that the `reasoning` field must label each query's dimension and
+        # ≥ 2 distinct dimensions must appear across the run.
+        system, _ = self._render()
+        # The new dedicated section is present.
+        assert "Query generation — four dimensions to cover" in system
+        # All four dimension names appear (the labels referenced in the rule).
+        assert "bottleneck" in system
+        assert "take_home" in system
+        assert "architectural_gap" in system
+        assert "adjacent_technique" in system
+        # The labelling + 2-dimension-minimum rule lives in the Output contract
+        # section.
+        assert "label which dimension the query targets" in system
+        assert "cover ≥ 2 distinct dimensions" in system
+
+    def test_confidence_rubric_for_search_placeholder_filled(self):
+        # 6.5a Edit E added a "## Why escalation matters for finding
+        # confidence" section that references {CONFIDENCE_RUBRIC_FOR_SEARCH}.
+        # The renderer must fill that placeholder with
+        # ConfidenceRubric().render_for_searcher() when no rubric is passed
+        # (default-instantiation fallback), mirroring render_synthesis_prompt's
+        # confidence_rubric handling. A custom rubric supplied via the
+        # confidence_rubric kwarg must flow through.
+        system, _ = self._render()
+        # The placeholder must NOT survive into the final prompt.
+        assert "{CONFIDENCE_RUBRIC_FOR_SEARCH}" not in system
+        # The new section header is present.
+        assert "Why escalation matters for finding confidence" in system
+        # The default rubric's bands appear inside the rendered prompt.
+        assert "0.80-1.00" in system
+        assert "0.60-0.79" in system
+        assert "0.40-0.59" in system
+        # Spec Fix 1 (a): the explainer prose around the rubric block must
+        # carry the strategic-framing sentence verbatim — this is what
+        # teaches the search-decision LLM that escalating an on-domain
+        # on-bottleneck paper has a measurable payoff (higher proposer
+        # weight via a higher-band finding).
+        assert "Escalating an on-domain on-bottleneck paper" in system
+        assert "unlocks a higher-confidence finding" in system
+        # Custom rubric must flow through the new confidence_rubric kwarg.
+        custom = ConfidenceRubric(
+            bands=[ConfidenceBand(lower=0.55, upper=0.99, criteria="custom-band-marker")],
+            omit_below=0.55,
+        )
+        system2, _ = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            confidence_rubric=custom,
+        )
+        assert "0.55-0.99" in system2
+        assert "custom-band-marker" in system2
+        # The default rubric's CRITERIA strings ("abstract-only evidence",
+        # "deep-read (verbosity >= 1 extract)") must NOT leak when a custom
+        # rubric is supplied — they only enter via render_for_searcher() so
+        # their absence proves the custom rubric replaced the rubric block.
+        # NOTE: we deliberately do NOT assert `"0.40-0.59" not in system2`
+        # — the "## Why escalation matters" prose section hardcodes literal
+        # references to the default band ranges ("at the 0.40-0.59 band",
+        # "≥ 0.60", "0.80+ band") as explainer text, independent of the
+        # rubric block, so those tokens survive a custom-rubric substitution
+        # by design.
+        assert "abstract-only evidence" not in system2
+        assert "deep-read (verbosity >= 1 extract)" not in system2
 
     def test_no_prior_results_no_feedback_block(self):
         _, user = self._render()  # papers_seen=[] and prior_search_results defaults None

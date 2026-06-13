@@ -337,6 +337,7 @@ def render_search_decision_prompt(
     escalation_allowed: bool,
     prior_search_results: list[tuple[str, int]] | None = None,
     task_description: str = SIDERIUS_TASK,
+    confidence_rubric: ConfidenceRubric | None = None,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for one dynamic-search-loop decision.
 
@@ -358,9 +359,20 @@ def render_search_decision_prompt(
             this run. Fed back so the LLM self-corrects — a 0-hit query is
             flagged "too specific" and the LLM is nudged to broaden. Omitted on
             the first round.
+        confidence_rubric: optional ``ConfidenceRubric`` to render into the
+            ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` placeholder. When ``None``
+            (default), the default rubric is instantiated. Lets the
+            search-decision LLM reason about verbosity → confidence-band →
+            escalation payoff — see ``search_decision_system.md``'s
+            "## Why escalation matters for finding confidence" section.
     """
-    system_prompt = load_prompt("search_decision_system.md").replace(
-        "{TASK_DESCRIPTION}", task_description
+    system_prompt = (
+        load_prompt("search_decision_system.md")
+        .replace("{TASK_DESCRIPTION}", task_description)
+        .replace(
+            "{CONFIDENCE_RUBRIC_FOR_SEARCH}",
+            (confidence_rubric or ConfidenceRubric()).render_for_searcher(),
+        )
     )
 
     explored = ", ".join(m for m in (explored_models or []) if m) or "(none recorded)"
