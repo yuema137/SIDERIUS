@@ -73,8 +73,13 @@ commit). A commit is not "done" until both its automated test gate is green
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
 - [ ] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` (5 prompt-content tests) + `tests/unit/agent/schemas/test_literature_review_schemas.py` (1 test on `ConfidenceRubric.render_for_searcher()` single-source-of-truth)
-- [ ] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
+- [x] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` (2 schema tests: `SearchDecisionRecord` + `LiteratureReviewInput.task_description`) + `tests/unit/agent/ml_literature_review/test_node.py` (5 node tests: Fix 3 no-op feedback + Fix 4 decision log + Fix 6 task threading) + `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` (2 workflow tests: empty-task warning + non-empty no-warning)
+  - [x] **6.5b-1** — Schemas + provenance + task_description field (Fix 4 schemas + Fix 6 field) · committed `faaeed7`
+  - [x] **6.5b-2** — Fix 3: no-op escalation feedback · committed `e0e5f55`
+  - [x] **6.5b-3** — Fix 4 node wiring: SearchDecisionRecord + provenance + tuple return · committed `cc92443`
+  - [x] **6.5b-4** — Fix 5 remainder: dimension_counts + DIMENSION_LABELS + coverage rendering · committed `d3bfbd4`
+  - [x] **6.5b-5** — Fix 6: task_description plumbing YAML→workflow→node · committed `e61e1cf`
   - [ ] **Checkpoint S** — Search-quality re-run (5× same seed); gates Checkpoint D
 - [ ] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + full `tests/unit/` sweep (catches stray `SIDERIUS_TASK` imports)
@@ -3098,7 +3103,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
     (not split into per-band models).
   ```
 
-  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
   Implementation landed with slightly different framing in the YAML
   comment block — references "the SIDERIUS_TASK default constant"
   explicitly and notes the workflow prints a Warning at YAML-load time.
@@ -3109,7 +3114,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
       `config.get("task_description", "")` from the YAML dict and pass
       it into the `LiteratureReviewInput` constructor.
 
-  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
   Implementation: `str(config.get("task_description", "") or "").strip()`
   collapses missing key, None value, empty string, and whitespace-only
   — all into "" before the `if not task_description:` warning check.
@@ -3125,7 +3130,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
       — render-time warnings would fire 3+ times per run and clutter
       logs.
 
-  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
   Implementation deviation: uses `print("Warning: ...")` rather than
   `logger.info(...)`. Reason: `workflows/model_exploration.py` has no
   logger setup — file convention is `print("Warning: ...")` for
@@ -3142,7 +3147,7 @@ Tests delivered (all in new `TestSearchDecisionLog` class in
       (`render_paper_extract_prompt`, `render_search_decision_prompt`,
       `render_synthesis_prompt`).
 
-  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA pending).**
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
   Implementation: `run()` computes `self._task_description =
   inp.task_description or SIDERIUS_TASK` once after bridge setup, then
   all three render call sites pass `task_description=self._task_description`.
