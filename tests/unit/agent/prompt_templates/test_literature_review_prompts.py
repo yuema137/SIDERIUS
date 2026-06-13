@@ -19,7 +19,6 @@ from pydantic import ValidationError
 
 from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
-    SIDERIUS_TASK,
     render_paper_extract_prompt,
     render_review_report,
     render_search_decision_prompt,
@@ -155,16 +154,18 @@ class TestExtractionInstructions:
 
 
 class TestTaskInjection:
-    def test_default_task_injected_and_placeholder_gone(self):
+    def test_default_empty_task_placeholder_gone(self):
+        # Post-Commit-F: default task_description is "" — the
+        # {TASK_DESCRIPTION} placeholder is still substituted (with empty
+        # string), so the placeholder literal must NOT survive into the
+        # rendered prompt.
         system, _ = render_paper_extract_prompt("text")
-        assert SIDERIUS_TASK in system
         assert "{TASK_DESCRIPTION}" not in system
 
     def test_custom_task_overrides_default(self):
         custom = "denoise audio recordings of whale song"
         system, _ = render_paper_extract_prompt("text", task_description=custom)
         assert custom in system
-        assert SIDERIUS_TASK not in system
         assert "{TASK_DESCRIPTION}" not in system
 
 
@@ -274,8 +275,7 @@ class TestSynthesisPrompt:
         assert "no plausible mechanism transfer exists" in system
         # (e) source_ref-matching instruction
         assert "source_ref" in system and "paper_id" in system
-        # task-description injection
-        assert SIDERIUS_TASK in system
+        # task-description placeholder filled (Post-Commit-F: default is "")
         assert "{TASK_DESCRIPTION}" not in system
 
     def test_user_prompt_fronts_bottlenecks(self):

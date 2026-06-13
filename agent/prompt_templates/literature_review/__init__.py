@@ -19,9 +19,12 @@ docs/paper_resolver_pilot.md findings F1-F4):
     this guardrail lives here. 120k chars is ~30k tokens — roughly 1.6x the
     73.6k-char TIDMAD paper (F2) and well inside a 128k-token context window,
     leaving ample room for the system prompt and completion.
-  - ``task_description`` is an optional parameter defaulting to ``SIDERIUS_TASK``
-    so the same prompt generalises to other downstream tasks without a rewrite,
-    while today's (raw_text)-only call site keeps working.
+  - ``task_description`` is an optional parameter defaulting to ``""``.
+    The lit-review node always passes its resolved task description
+    (from ``LiteratureReviewInput.task_description``, sourced from
+    ``configs/lit_review_config.yaml``); the default only fires for test
+    callers that omit the kwarg, in which case the ``{TASK_DESCRIPTION}``
+    placeholder is filled with empty string.
 """
 
 import os
@@ -183,15 +186,6 @@ MAX_RAW_TEXT_CHARS = 120_000
 _TRUNCATION_MARKER = "\n\n[...TRUNCATED...]"
 
 # Default downstream task injected into the compression prompt's
-# {TASK_DESCRIPTION} placeholder. Task-agnostic by parameter so the framework
-# generalises beyond SQUID; this default describes the SIDERIUS denoising task.
-SIDERIUS_TASK = (
-    "full-spectrum 1-D time-series denoising of SQUID dark-matter\n"
-    "detector data: map a noisy [B, T] integer signal to a clean\n"
-    "[B, 256, T] reconstruction, trained across the whole frequency\n"
-    "spectrum at once (not split into per-band models)."
-)
-
 _USER_PROMPT_TEMPLATE = (
     "Here is the full extracted text of one paper. Compress it into the JSON "
     "object described in the system instructions.\n\n"
@@ -279,7 +273,7 @@ def render_paper_extract_prompt(
     extraction_method: Literal[
         "arxiv_source", "pdfplumber_llm", "abstract_only"
     ] = "pdfplumber_llm",
-    task_description: str = SIDERIUS_TASK,
+    task_description: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair for compressing one paper.
 
@@ -294,8 +288,9 @@ def render_paper_extract_prompt(
                            callers (the lit-review node) pass the actual tier
                            explicitly based on the skill's ``extraction_method``.
         task_description:  Concrete downstream task the proposer works on, used
-                           to ground ``relevance_to_task``. Defaults to
-                           ``SIDERIUS_TASK``.
+                           to ground ``relevance_to_task``. Defaults to ``""``;
+                           the lit-review node passes its resolved value from
+                           ``inp.task_description``.
 
     Returns:
         ``(system_prompt, user_prompt)``. The system prompt instructs the LLM to
@@ -354,7 +349,7 @@ def render_search_decision_prompt(
     prior_search_results: list[tuple[str, int]] | None = None,
     prior_escalation_results: list[tuple[str, str, str]] | None = None,
     dimension_counts: dict[str, int] | None = None,
-    task_description: str = SIDERIUS_TASK,
+    task_description: str = "",
     confidence_rubric: ConfidenceRubric | None = None,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for one dynamic-search-loop decision.
@@ -596,7 +591,7 @@ def render_synthesis_prompt(
     confidence_rubric: ConfidenceRubric | None = None,
     findings_verbosity: Literal[0, 1] = 1,
     synthesis_config: SynthesisConfig | None = None,
-    task_description: str = SIDERIUS_TASK,
+    task_description: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for the final findings synthesis.
 

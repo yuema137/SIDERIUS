@@ -541,19 +541,22 @@ def _build_lit_review_input(
     # the lit-review schema types (which form a long import chain).
     from agent.schemas.literature_review import LiteratureReviewInput
 
-    # Fix 6 (Commit 6.5b-5): read task_description from YAML and warn when
-    # empty so operators know the lit-review LLM calls will fall back to
-    # the SIDERIUS_TASK default constant. Workflow uses print() for
-    # warnings (no logger in this module — convention matches existing
-    # call sites e.g. line 136's "Warning: failed to load vocab seed").
+    # Fix 6 (Commit 6.5b-5) + Commit F: read task_description from YAML and
+    # warn when empty. Post-Commit-F: there is no SIDERIUS_TASK fallback —
+    # an empty value flows through as "" to the {TASK_DESCRIPTION} prompt
+    # placeholder, leaving the prompt section bare (no task-domain anchor
+    # for the LLM). Workflow uses print() for warnings (no logger in this
+    # module — convention matches existing call sites e.g. line 136's
+    # "Warning: failed to load vocab seed").
     task_description = str(config.get("task_description", "") or "").strip()
     if not task_description:
         print(
-            "Warning: lit_review config has no `task_description` — the "
-            "lit-review agent will fall back to the SIDERIUS_TASK default "
-            "constant. Set `task_description:` in "
-            "configs/lit_review_config.yaml to specialize the agent's "
-            "search/synthesis behavior for your problem."
+            "Warning: lit_review config has no `task_description` — "
+            "lit-review LLM calls will receive no task-domain anchor and "
+            "may produce off-domain queries. Strongly recommended: set "
+            "`task_description:` in configs/lit_review_config.yaml to "
+            "specialize the agent's search/synthesis behavior for your "
+            "problem."
         )
 
     return LiteratureReviewInput.model_validate(

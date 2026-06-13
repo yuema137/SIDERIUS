@@ -212,11 +212,12 @@ class TestBuildLitReviewInput:
         assert inp.findings_verbosity == 1
 
     def test_warns_on_empty_task_description(self, tmp_path, capsys):
-        # Fix 6 (Commit 6.5b-5): when the YAML config has no
+        # Fix 6 (Commit 6.5b-5) + Commit F: when the YAML config has no
         # task_description key (or an empty/whitespace-only value),
         # _build_lit_review_input prints a Warning so operators know the
-        # lit-review LLM calls will fall back to the SIDERIUS_TASK default
-        # constant. All three "no usable value" inputs trigger the warning.
+        # lit-review LLM calls will receive no task-domain anchor (the
+        # {TASK_DESCRIPTION} placeholder is filled with empty string).
+        # All three "no usable value" inputs trigger the warning.
 
         # Case 1: key missing entirely.
         _build_lit_review_input(
@@ -228,7 +229,7 @@ class TestBuildLitReviewInput:
         )
         captured = capsys.readouterr()
         assert "Warning: lit_review config has no `task_description`" in captured.out
-        assert "SIDERIUS_TASK default constant" in captured.out
+        assert "no task-domain anchor" in captured.out
 
         # Case 2: key present but empty string.
         _build_lit_review_input(

@@ -41,7 +41,6 @@ from pydantic import ValidationError
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
-    SIDERIUS_TASK,
     render_paper_extract_prompt,
     render_search_decision_prompt,
     render_synthesis_prompt,
@@ -303,12 +302,12 @@ class MLLiteratureReviewAgent:
             )
         else:
             self.search_bridge = self.bridge
-        # Fix 6 (6.5b-5): the task description threaded into all three render
-        # call sites (compression / search-decision / synthesis). When the
-        # input field is empty, fall back to the SIDERIUS_TASK default. Commit
-        # F follows up by deleting SIDERIUS_TASK and changing render defaults
-        # from SIDERIUS_TASK to "".
-        self._task_description = inp.task_description or SIDERIUS_TASK
+        # Fix 6 (6.5b-5) + Commit F: the task description threaded into all
+        # three render call sites (compression / search-decision / synthesis).
+        # When the input field is empty (the workflow warns at YAML-load time),
+        # the empty string flows through to the {TASK_DESCRIPTION} placeholder
+        # — operator should fill the YAML's task_description: key.
+        self._task_description = inp.task_description
         cache_dir = Path(self._root_cache_dir)
 
         retrieved: list[RetrievedPaper] = []

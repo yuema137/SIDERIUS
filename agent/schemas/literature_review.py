@@ -498,10 +498,10 @@ class LiteratureReviewInput(BaseModel):
         "lit-review prompt (paper-extract, search-decision, synthesis). "
         "Operators should set this in configs/lit_review_config.yaml to "
         "specialize the agent for their problem domain. When empty, the "
-        "node falls back to ``SIDERIUS_TASK`` (the lit-review module's "
-        "default constant) — this is a temporary bridge; Commit F flips "
-        "the default to the empty string and removes ``SIDERIUS_TASK`` "
-        "entirely. Workflow logs a warning when this field is empty.",
+        "{TASK_DESCRIPTION} placeholder is filled with the empty string, "
+        "leaving the prompt section bare — the LLM gets no task-domain "
+        "anchor. Workflow logs a warning when this field is empty so "
+        "operators see the misconfiguration.",
     )
 
 

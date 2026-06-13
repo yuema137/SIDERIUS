@@ -81,7 +81,7 @@ commit). A commit is not "done" until both its automated test gate is green
   - [x] **6.5b-4** — Fix 5 remainder: dimension_counts + DIMENSION_LABELS + coverage rendering · committed `d3bfbd4`
   - [x] **6.5b-5** — Fix 6: task_description plumbing YAML→workflow→node · committed `e61e1cf`
   - [ ] **Checkpoint S** — Search-quality re-run (5× same seed); gates Checkpoint D
-- [ ] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b
+- [x] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b · committed (SHA pending)
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + full `tests/unit/` sweep (catches stray `SIDERIUS_TASK` imports)
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit
   · gate full `tests/unit/` + `tests/integration/` green
@@ -3358,22 +3358,62 @@ canonical-trace failure mode the audit flagged.
   for the non-empty round-trip.
 
 **Checklist**:
-- [ ] Remove `SIDERIUS_TASK` constant + its 2-line prose comment from
+- [x] Remove `SIDERIUS_TASK` constant + its 2-line prose comment from
       `agent/prompt_templates/literature_review/__init__.py`.
-- [ ] Update `render_paper_extract_prompt` signature: change
+- [x] Update `render_paper_extract_prompt` signature: change
       `task_description: str = SIDERIUS_TASK` → `task_description: str = ""`.
-- [ ] Update `render_search_decision_prompt` signature: same change.
-- [ ] Update `render_synthesis_prompt` signature: same change.
-- [ ] Confirm the three .md files still have `{TASK_DESCRIPTION}`
+- [x] Update `render_search_decision_prompt` signature: same change.
+- [x] Update `render_synthesis_prompt` signature: same change.
+- [x] Confirm the three .md files still have `{TASK_DESCRIPTION}`
       placeholders — no .md edits required (re-verify with grep).
-- [ ] Confirm `nodes/ml_literature_review/ml_literature_review.py` call
+- [x] Confirm `nodes/ml_literature_review/ml_literature_review.py` call
       sites still pass `inp.task_description` (landed in 6.5b Fix 6 —
       Commit F just confirms the wiring is correct after the defaults
       flip).
-- [ ] Update any existing prompt-content unit tests that hardcoded the
+- [x] Update any existing prompt-content unit tests that hardcoded the
       `SIDERIUS_TASK` text. Most assertions are structural and should
       keep passing; the few that quoted the SIDERIUS text need to be
       re-pointed at operator-supplied test fixtures.
+
+**Landed 2026-06-12 in Commit F (SHA pending).** Implementation per
+spec with these notes:
+- Also touched `agent/schemas/literature_review.py` —
+  `LiteratureReviewInput.task_description` field description rewritten
+  to remove the "Commit F flips the default to '' and removes
+  SIDERIUS_TASK" bridge wording (the description now describes the
+  post-Commit-F reality directly).
+- Also touched `workflows/model_exploration.py` —
+  `_build_lit_review_input` warning text rewritten. New wording:
+  *"Warning: lit_review config has no `task_description` — lit-review
+  LLM calls will receive no task-domain anchor and may produce
+  off-domain queries. Strongly recommended: set `task_description:`
+  in configs/lit_review_config.yaml ..."*
+- Also touched `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
+  — assertion text updated from `"SIDERIUS_TASK default constant"` to
+  `"no task-domain anchor"` to match the new warning wording.
+- Test deviation from the spec's "2 new + ≤ 3 modified" floor:
+  delivered 3 modified, 0 new. Rationale: the existing
+  `TestTaskInjection::test_default_empty_task_placeholder_gone`
+  (renamed from `test_default_task_injected_and_placeholder_gone`)
+  and `::test_custom_task_overrides_default` cover both empty-default
+  and custom-task surfaces for `render_paper_extract_prompt`. The
+  other 2 render functions (`render_search_decision_prompt` and
+  `render_synthesis_prompt`) are implicitly tested at their empty
+  defaults via the existing `TestSearchDecisionPrompt._render()` and
+  `TestSynthesisPrompt._render()` helpers (both use kwargs that now
+  resolve to `""`).
+- One residual `SIDERIUS_TASK` mention remains in
+  `workflows/model_exploration.py:545` — but it's a comment explaining
+  "post-Commit-F there is no SIDERIUS_TASK fallback", which is the
+  intended documentation of the cleanup, not a code reference.
+
+**Test gate run — Commit F (pre-commit, 2026-06-12)**: 303 passed in
+4.11s (sweep of `tests/unit/agent/prompt_templates/` +
+`tests/unit/workflows/` + `tests/unit/agent/ml_literature_review/test_node.py`).
+`ruff check` + `ruff format --check` + `pyright` all green on the 4
+production files. Sanity grep: `grep -rn "SIDERIUS_TASK" --include="*.py" .`
+returns exactly 1 hit (`workflows/model_exploration.py:545`, the
+comment), down from 18+ hits pre-Commit-F.
 
 **Test gate**:
 ```
