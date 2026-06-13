@@ -51,6 +51,7 @@ from agent.schemas.literature_review import (
     PaperExtract,
     PaperSource,
     RetrievedPaper,
+    SearchDecisionRecord,
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
@@ -289,8 +290,9 @@ class MLLiteratureReviewAgent:
 
         # 2. Dynamic search loop.
         rounds_used = 0
+        search_decisions: list[SearchDecisionRecord] = []  # Fix 4 (6.5b-3)
         if inp.dynamic_search.enabled:
-            rounds_used = self._run_search_loop(inp, retrieved, index)
+            rounds_used, search_decisions = self._run_search_loop(inp, retrieved, index)
 
         # 3. Synthesis -> findings.
         findings = self._synthesize(inp, retrieved)
@@ -302,6 +304,7 @@ class MLLiteratureReviewAgent:
             suggested_mindset=None,  # v1: deliberately empty
             retrieved_papers=retrieved,
             search_rounds_used=rounds_used,
+            search_decisions=search_decisions,  # Fix 4 (6.5b-3)
             run_name=inp.run_name,
             started_at=started_at,
             finished_at=_utc_now(),
@@ -372,6 +375,8 @@ class MLLiteratureReviewAgent:
             full_text=stored_full_text,
             verbosity_achieved=achieved,
             error=error,
+            discovered_in_round=0,  # Fix 4.D (6.5b-3): root paper marker
+            discovered_via_query=None,  # explicit None for forward-clarity
         )
 
     # ------------------------------------------------------------------
@@ -382,7 +387,7 @@ class MLLiteratureReviewAgent:
         inp: LiteratureReviewInput,
         retrieved: list[RetrievedPaper],
         index: dict[str, RetrievedPaper],
-    ) -> int:
+    ) -> tuple[int, list[SearchDecisionRecord]]:
         cfg = inp.dynamic_search
         hist = inp.experiment_history
         rounds = 0  # search rounds executed (== search_rounds_used)
@@ -391,6 +396,7 @@ class MLLiteratureReviewAgent:
         prior_escalation_results: list[
             tuple[str, str, str]
         ] = []  # (paper_id, status, reasoning); status ∈ {"ok","noop","error"} — Fix 3 (6.5b-2)
+        decisions: list[SearchDecisionRecord] = []  # Fix 4 (6.5b-3): audit trail
         # A misbehaving LLM that only ever escalates must still terminate:
         # searches consume the round budget, escalations do not. This hard
         # iteration ceiling is the backstop (searches + capped escalations).
@@ -429,11 +435,42 @@ class MLLiteratureReviewAgent:
             action = decision.get("action")
             logger.info("[lit_review] round %d decision: %s", rounds, json.dumps(decision)[:500])
 
+            # Fix 4 (6.5b-3): build one SearchDecisionRecord per LLM call.
+            # Defined inside the loop so it captures the current iteration's
+            # `decision` (and the current `rounds` value); used at each branch
+            # below to keep the audit-trail wiring DRY. Loop-vars are locked
+            # via default args (`_rounds=rounds`, `_decision=decision`) per
+            # ruff B023 — the helper is called synchronously within the same
+            # iteration so lazy binding would be safe, but default-arg
+            # locking is the canonical fix and silences the lint cleanly.
+            def _append_decision(
+                action_str: str,
+                outcome: str,
+                _rounds: int = rounds,
+                _decision: dict = decision,
+            ) -> None:
+                decisions.append(
+                    SearchDecisionRecord(
+                        round_index=_rounds
+                        + 1,  # 1-indexed; decision belongs to next-to-execute round
+                        action=action_str,
+                        query=(_decision.get("query") or None) if action_str == "search" else None,
+                        paper_id=(_decision.get("paper_id") or None)
+                        if action_str == "escalate"
+                        else None,
+                        verbosity=_decision.get("verbosity") if action_str == "escalate" else None,
+                        reasoning=str(_decision.get("reasoning") or ""),
+                        outcome=outcome,
+                    )
+                )
+
             if action == "done":
+                _append_decision("done", "done")
                 break
             if action == "search":
                 query = (decision.get("query") or "").strip()
                 if not query:
+                    _append_decision("search", "empty_query")
                     logger.warning(
                         "search action with empty query at round %d; ending loop", rounds
                     )
@@ -444,8 +481,10 @@ class MLLiteratureReviewAgent:
                     index,
                     cfg.results_per_query,
                     cfg.initial_verbosity,
+                    round_index=rounds + 1,  # Fix 4.E: tag new papers with their discovery round
                 )
                 prior_search_results.append((query, n_hits))
+                _append_decision("search", f"n_hits={n_hits}")
                 rounds += 1
                 escalations_this_round = 0  # fresh escalation budget for the new round
             elif action == "escalate" and cfg.escalation_allowed:
@@ -455,6 +494,7 @@ class MLLiteratureReviewAgent:
                         cfg.max_escalations_per_round,
                         decision.get("paper_id"),
                     )
+                    _append_decision("escalate", "budget_exceeded")
                 else:
                     pid = decision.get("paper_id")
                     target = index.get(pid) if isinstance(pid, str) else None
@@ -467,18 +507,26 @@ class MLLiteratureReviewAgent:
                         prior_escalation_results.append(
                             (pid, status, str(decision.get("reasoning") or ""))
                         )
+                        _append_decision("escalate", status)
                         escalations_this_round += (
                             1  # charges budget on every outcome (Decision 2, 2026-06-12)
                         )
                     else:
                         logger.warning("escalate target %r not found at round %d", pid, rounds)
+                        _append_decision("escalate", "target_not_found")
             else:
-                # Unknown action (or escalate while disabled). Consume a round so
-                # a misbehaving LLM cannot spin forever — max_rounds is the net.
-                logger.warning("unhandled action %r at round %d", action, rounds)
+                # Catch-all: escalate-while-disabled is distinguished from
+                # truly-unknown action so the audit trail captures the config
+                # mismatch separately from LLM hallucinations.
+                if action == "escalate" and not cfg.escalation_allowed:
+                    logger.warning("escalate action at round %d but escalation is disabled", rounds)
+                    _append_decision("escalate", "escalation_disabled")
+                else:
+                    logger.warning("unhandled action %r at round %d", action, rounds)
+                    _append_decision(str(action) if action is not None else "", "unknown_action")
                 rounds += 1
 
-        return rounds
+        return rounds, decisions
 
     def _do_search(
         self,
@@ -487,6 +535,8 @@ class MLLiteratureReviewAgent:
         index: dict[str, RetrievedPaper],
         limit: int,
         initial_verbosity: Literal[0, 1, 2] = 0,
+        *,
+        round_index: int,
     ) -> int:
         """Run one S2 search; append new papers; return the number of hits S2
         returned for ``query`` (fed back to the next round for self-correction).
@@ -504,14 +554,21 @@ class MLLiteratureReviewAgent:
             return 0
         results = (result.get("data") or {}).get("results", [])
         for r in results:
-            rp = self._retrieved_from_search_result(r, initial_verbosity)
+            rp = self._retrieved_from_search_result(
+                r, initial_verbosity, round_index=round_index, query=query
+            )
             if rp is not None and rp.paper_id not in index:
                 retrieved.append(rp)
                 index[rp.paper_id] = rp
         return len(results)
 
     def _retrieved_from_search_result(
-        self, r: dict, initial_verbosity: Literal[0, 1, 2] = 0
+        self,
+        r: dict,
+        initial_verbosity: Literal[0, 1, 2] = 0,
+        *,
+        round_index: int,
+        query: str,
     ) -> RetrievedPaper | None:
         source_type, identifier = _source_type_from_external_ids(r.get("externalIds") or {})
         if source_type is None or identifier is None:
@@ -532,6 +589,8 @@ class MLLiteratureReviewAgent:
             ),
             s2_metadata=r,
             verbosity_achieved=0,
+            discovered_in_round=round_index,  # Fix 4.E (6.5b-3)
+            discovered_via_query=query,
         )
 
     def _escalate(self, target: RetrievedPaper, verbosity) -> Literal["ok", "noop", "error"]:

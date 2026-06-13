@@ -498,6 +498,167 @@ class TestEscalation:
         assert target_err.verbosity_achieved == 0
 
 
+class TestSearchDecisionLog:
+    """Fix 4 (Commit 6.5b-3): ``_run_search_loop`` builds a
+    SearchDecisionRecord for each LLM call and accumulates them into
+    LiteratureReviewOutput.search_decisions. Each RetrievedPaper carries
+    ``discovered_in_round`` + ``discovered_via_query`` provenance fields."""
+
+    def test_search_decisions_records_all_action_types(self, tmp_path, monkeypatch):
+        # Exercise 3 action types in sequence (search → escalate → done)
+        # and assert every record's contract: action / outcome /
+        # round_index / per-action fields (query for search, paper_id +
+        # verbosity for escalate). Locks the round_index 1-indexed
+        # semantic (search consumes the round; the next decision —
+        # whether escalate or done — falls in the next round's window).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {
+                        "action": "search",
+                        "query": "dilated conv denoising",
+                        "reasoning": "bottleneck dim — fill the gap",
+                    },
+                    {
+                        "action": "escalate",
+                        "paper_id": "arxiv:2301.00001",
+                        "verbosity": 1,
+                        "reasoning": "on-bottleneck paper worth deep-reading",
+                    },
+                    {"action": "done", "reasoning": "have enough"},
+                ],
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def _resolve(kw):
+            assert kw["identifier"] == "2301.00001"
+            return {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "Dilated Conv Denoiser", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "dilated causal convolution body text",
+                },
+                "message": "ok",
+            }
+
+        skill = FakeSkill(resolve=_resolve, search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(
+            _input(
+                tmp_path,
+                root_papers=[],  # focus on dynamic-loop decisions only
+                dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=True),
+            )
+        )
+
+        # 3 records — one per LLM decision.
+        assert len(out.search_decisions) == 3
+
+        # Record 0: search action in round 1.
+        rec0 = out.search_decisions[0]
+        assert rec0.action == "search"
+        assert rec0.round_index == 1
+        assert rec0.query == "dilated conv denoising"
+        assert rec0.paper_id is None
+        assert rec0.verbosity is None
+        assert rec0.outcome == "n_hits=1"
+        assert "bottleneck dim" in rec0.reasoning
+
+        # Record 1: escalate action — after search consumes round 1, the
+        # next decision belongs to round 2's budget window (round_index=2).
+        rec1 = out.search_decisions[1]
+        assert rec1.action == "escalate"
+        assert rec1.round_index == 2
+        assert rec1.paper_id == "arxiv:2301.00001"
+        assert rec1.verbosity == 1
+        assert rec1.query is None
+        assert rec1.outcome == "ok"  # escalate succeeded (verbosity raised)
+
+        # Record 2: done action — also tagged in round 2 (decided to stop
+        # before round 2's search ever happened).
+        rec2 = out.search_decisions[2]
+        assert rec2.action == "done"
+        assert rec2.round_index == 2
+        assert rec2.outcome == "done"
+        assert rec2.query is None
+        assert rec2.paper_id is None
+
+    def test_search_hit_provenance_tags_round_index_and_query(self, tmp_path, monkeypatch):
+        # Fix 4.E: every RetrievedPaper surfaced via the dynamic search
+        # loop must carry `discovered_in_round` (1-indexed; matches the
+        # round the search ran in) and `discovered_via_query` (the literal
+        # LLM-emitted query string). Tests _do_search +
+        # _retrieved_from_search_result threading end-to-end.
+        QUERY = "dilated conv denoising"
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": QUERY, "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(
+            _input(
+                tmp_path,
+                root_papers=[],
+                dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=False),
+            )
+        )
+
+        # _search_ok returns 1 hit at arxiv:2301.00001.
+        hits = [p for p in out.retrieved_papers if p.paper_id == "arxiv:2301.00001"]
+        assert len(hits) == 1
+        hit = hits[0]
+        # The hit was surfaced by the first (and only) search round = 1.
+        # Provenance fields must match what the loop tagged.
+        assert hit.discovered_in_round == 1
+        assert hit.discovered_via_query == QUERY
+
+    def test_root_paper_provenance_tagged_zero(self, tmp_path, monkeypatch):
+        # Fix 4.D: root papers resolved at agent start carry
+        # discovered_in_round=0 (the "pre-loop" marker) and
+        # discovered_via_query=None (no query surfaced them). Dynamic
+        # search is disabled here so the test exercises only the
+        # root-paper path through _build_retrieved_from_resolve.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # _input() default: 1 root paper at arxiv:2406.04378, dynamic disabled.
+        out = agent.run(_input(tmp_path))
+
+        assert len(out.retrieved_papers) == 1
+        root = out.retrieved_papers[0]
+        assert root.discovered_in_round == 0
+        assert root.discovered_via_query is None
+
+
 class TestStorageDump:
     def test_output_written_and_roundtrips(self, tmp_path, monkeypatch):
         bridge = FakeBridge(

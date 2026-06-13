@@ -2918,13 +2918,82 @@ Tests delivered:
   pre-6.5b cached JSON" claim, which is what the new schema-side test
   `test_provenance_fields_default_and_legacy_cache_backward_compat`
   proves end-to-end via `RetrievedPaper.model_validate_json`.
-- [ ] Modify `_run_search_loop` to build a `SearchDecisionRecord` after
+- [x] Modify `_run_search_loop` to build a `SearchDecisionRecord` after
       every LLM call (search, escalate-success, escalate-noop,
       escalate-cap-hit, done) into a local `decisions` list.
-- [ ] Pass `round_idx` + current query string down into `_do_search` +
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  Implementation: closure-style helper `_append_decision(action_str,
+  outcome)` defined inside the while loop, captures `decision` and
+  `rounds` via default-arg locking per `feedback_ruff_fix_patterns`
+  (`_rounds=rounds, _decision=decision`). Called from 7 outcome sites
+  covering every action path:
+    * `done` → `outcome="done"` (terminal)
+    * `search` empty query → `outcome="empty_query"` (terminal)
+    * `search` success → `outcome=f"n_hits={n_hits}"`
+    * `escalate` budget-exceeded → `outcome="budget_exceeded"`
+    * `escalate` executed → `outcome=status` ("ok" / "noop" / "error" from Fix 3)
+    * `escalate` target-not-found → `outcome="target_not_found"`
+    * catch-all `escalate-while-disabled` → `outcome="escalation_disabled"`
+    * catch-all truly-unknown action → `outcome="unknown_action"`
+
+  Method return type changed `int → tuple[int, list[SearchDecisionRecord]]`.
+  Round-index semantic: `round_index = rounds + 1` (1-indexed; decision
+  belongs to next-to-execute round). The escalate-while-disabled split
+  is a small enhancement over the original spec — the audit trail now
+  distinguishes a config mismatch from a true LLM hallucination
+  (approved in-conversation 2026-06-12).
+- [x] Pass `round_idx` + current query string down into `_do_search` +
       `_retrieved_from_search_result` so new papers carry provenance.
-- [ ] Populate `LiteratureReviewOutput.search_decisions` from the
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  Implementation: `_do_search` gained `round_index: int` keyword-only
+  parameter; threads it + the `query` string down to
+  `_retrieved_from_search_result` (which also gained both as
+  keyword-only). Each new `RetrievedPaper` constructed with
+  `discovered_in_round=round_index` + `discovered_via_query=query`.
+  Internal naming `round_idx` was renamed to `round_index` for
+  consistency with `SearchDecisionRecord.round_index` (single
+  vocabulary across the codebase).
+
+  Implementation extends beyond the spec: `_build_retrieved_from_resolve`
+  is ALSO patched to explicitly set `discovered_in_round=0` +
+  `discovered_via_query=None` on root papers. Per Decision 3 from the
+  2026-06-12 design conversation: root papers get 0 (not None) to
+  match "search hits = 1+" symmetrically. This is 4.D in this commit's
+  internal numbering — landed alongside 4.E because both touch
+  `RetrievedPaper` construction.
+- [x] Populate `LiteratureReviewOutput.search_decisions` from the
       accumulated records in `MLLiteratureReviewAgent.run`.
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA pending).**
+  Implementation: `run()` unpacks `_run_search_loop`'s new tuple
+  return — `rounds_used, search_decisions = self._run_search_loop(...)` —
+  then passes `search_decisions` to the `LiteratureReviewOutput`
+  construction. When `dynamic_search.enabled=False` the loop never
+  runs and `search_decisions` defaults to `[]` (initialized at the
+  top of `run()` so the type hint flows even on the disabled path).
+
+#### Test gate run — 6.5b-3 (pre-commit, 2026-06-12)
+
+57 passed in 1.08s (54 baseline + 3 net-new). `ruff check` +
+`ruff format --check` + `pyright` all green on the single production
+file (`nodes/ml_literature_review/ml_literature_review.py`).
+
+Tests delivered (all in new `TestSearchDecisionLog` class in
+`tests/unit/agent/ml_literature_review/test_node.py`):
+- `test_search_decisions_records_all_action_types` — exercises a
+  search → escalate → done sequence; asserts every record's `action`,
+  `outcome`, `round_index`, per-action fields (`query` for search,
+  `paper_id` + `verbosity` for escalate), and `reasoning` excerpt.
+  Locks in the 1-indexed `round_index = rounds + 1` semantic.
+- `test_search_hit_provenance_tags_round_index_and_query` —
+  `discovered_in_round=1` and `discovered_via_query=<the query>` reach
+  the new `RetrievedPaper` end-to-end through `_do_search` +
+  `_retrieved_from_search_result`.
+- `test_root_paper_provenance_tagged_zero` — root paper resolved at
+  agent start carries `discovered_in_round=0` and
+  `discovered_via_query=None`.
 
 #### Checklist — Fix 6: `task_description` config field + node threading
 
