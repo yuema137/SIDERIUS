@@ -38,6 +38,7 @@ import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 
 from agent.schemas.telemetry import LLMBridgeContextError
@@ -770,6 +771,40 @@ def build_parser() -> argparse.ArgumentParser:
         "'no_records' is never counted as a failure. On halt, writes "
         "{workspace}/.chain_halted and exits 3.",
     )
+    # External agents (Commit 6 — 2026-06-12, Design Decisions 1 + 2):
+    # two CLI flags for the ml_literature_review external agent — (1)
+    # enable/disable toggle (BooleanOptionalAction), (2) YAML config
+    # path. No other lit-review parameters are exposed at the CLI —
+    # root_papers / dynamic_search / synthesis / confidence_rubric live
+    # in the YAML; LLM routing lives in WorkflowLLMConfig.lit_review.
+    # See docs/commit_plan_ml_literature_review.md Commit 6.
+    parser.add_argument(
+        "--ml_lit_review_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable / disable the ml_literature_review external agent. "
+            "When set, overrides the YAML's top-level 'enabled' flag. "
+            "When neither --ml_lit_review_enabled nor "
+            "--no-ml_lit_review_enabled is passed (default None), the "
+            "YAML's 'enabled' value drives the decision. The 'ml_' "
+            "prefix establishes a naming convention for future external "
+            "agents (e.g. --ml_physics_agent_enabled)."
+        ),
+    )
+    parser.add_argument(
+        "--ml_lit_review_config",
+        type=str,
+        default="configs/lit_review_config.yaml",
+        help=(
+            "Path to the lit-review YAML config (default: "
+            "configs/lit_review_config.yaml). Resolved relative to "
+            "SIDERIUS_ROOT inside the workflow. Pass an absolute path "
+            "or a different relative path to use a non-default config "
+            "without editing the default file (Design Decision 2, "
+            "2026-06-11)."
+        ),
+    )
     return parser
 
 
@@ -1069,6 +1104,25 @@ def main():
             reflect_model_id=reflect_model_id,
         )
 
+    # Resolve lit-review enable flag per Design Decisions 1 + 2 (2026-06-11).
+    # Priority: CLI flag (when explicitly set) > YAML 'enabled' key >
+    # default False. The workflow opens + parses the YAML internally
+    # (only when lit_review_enabled=True); we peek at the 'enabled'
+    # key here only for the CLI-fallback case. Missing YAML or
+    # malformed YAML → False (fail-safe: do not run lit-review).
+    if args.ml_lit_review_enabled is not None:
+        ml_lit_review_enabled_resolved = args.ml_lit_review_enabled
+    else:
+        _yaml_path = args.ml_lit_review_config
+        if not os.path.isabs(_yaml_path):
+            _yaml_path = os.path.join(SIDERIUS_ROOT, _yaml_path)
+        try:
+            with open(_yaml_path, encoding="utf-8") as _f:
+                _yaml_data = yaml.safe_load(_f) or {}
+            ml_lit_review_enabled_resolved = bool(_yaml_data.get("enabled", False))
+        except (FileNotFoundError, yaml.YAMLError):
+            ml_lit_review_enabled_resolved = False
+
     try:
         results = run_workflow(
             source_paths=resolved_paths,
@@ -1135,6 +1189,13 @@ def main():
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
+            # External agents (Commit 6) — see Design Decisions 1 + 2 in
+            # docs/commit_plan_ml_literature_review.md. The enable flag is
+            # resolved above (CLI > YAML > False); the config path
+            # passes through unchanged (workflow resolves relative paths
+            # against SIDERIUS_ROOT internally).
+            lit_review_enabled=ml_lit_review_enabled_resolved,
+            lit_review_config_path=args.ml_lit_review_config,
             # Pseudo-mode factories (Stage 3 / Commit 4.5). None preserves the
             # production code path; non-None swaps the bridge / sandbox class
             # for every agent constructed inside ``run_workflow``.

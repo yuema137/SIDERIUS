@@ -21,7 +21,10 @@ reports/
 
 # Root-paper resolution cache written at runtime by the ml_literature_review
 # node (reference_data/ is otherwise tracked; these JSONs are not source).
-reference_data/root_papers_cache/
+# README.md is tracked so future operators see the cache contract;
+# everything else in this directory is the production cache content.
+reference_data/root_papers_cache/*
+!reference_data/root_papers_cache/README.md
 
 # §10 Phase-1 pilot cache (Commit 2c-c.2). Committed reports live under
 # docs/validation_suite_runs.md once promoted; the cache holds raw arXiv

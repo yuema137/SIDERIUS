@@ -24,7 +24,7 @@ Usage:
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -162,6 +162,54 @@ class ProposalLLMConfig(BaseModel):
     )
 
 
+class LitReviewLLMConfig(BaseModel):
+    """
+    LLM config for the ml_literature_review node.
+
+    The lit-review node makes three LLM calls per run (compression,
+    search-decision, synthesis) but uses two distinct bridges:
+
+      - main   → compression + synthesis (reasoning-heavy paper digestion)
+      - search → search-decision (cheap, templated query/escalate/done step)
+
+    Each sub-call is a complete ``NodeLLMConfig``. They can independently
+    use different providers and different models — typically the search
+    bridge runs on a cheaper model while the main bridge runs on a stronger
+    one for the synthesis step. When operators don't need the split, set
+    both sub-slots to the same NodeLLMConfig.
+
+    See docs/external_agents_for_proposer.md §6 for the receiving end:
+    the lit-review node reads ``llm_provider`` / ``llm_model_id`` for the
+    main bridge and ``search_llm_provider`` / ``search_llm_model_id`` for
+    the search bridge (the latter pair is optional in the schema; when
+    None the search bridge falls back to the main bridge).
+    """
+
+    main: NodeLLMConfig = Field(
+        default_factory=lambda: NodeLLMConfig(
+            provider="deepseek",
+            model_id="deepseek-v4-pro",
+        ),
+        description=(
+            "Sub-agent config for the lit-review node's compression + "
+            "synthesis calls. Reasoning-heavy — recommend a strong model. "
+            "Maps to LiteratureReviewInput.llm_provider / llm_model_id."
+        ),
+    )
+    search: NodeLLMConfig = Field(
+        default_factory=lambda: NodeLLMConfig(
+            provider="deepseek",
+            model_id="deepseek-v4-pro",
+        ),
+        description=(
+            "Sub-agent config for the lit-review node's search-decision "
+            "call. Templated query/escalate/done step — can use a cheaper "
+            "model. Maps to LiteratureReviewInput.search_llm_provider / "
+            "search_llm_model_id."
+        ),
+    )
+
+
 class WorkflowLLMConfig(BaseModel):
     """
     Per-node LLM configuration for a workflow.
@@ -172,6 +220,7 @@ class WorkflowLLMConfig(BaseModel):
     Agents with multiple sub-calls use nested config classes:
       - The tuner uses `TunerLLMConfig` (planner + reflector).
       - The proposal agent uses `ProposalLLMConfig` (comparison + reasoning + proposing).
+      - The lit-review node uses `LitReviewLLMConfig` (main + search).
       - Single-sub-call agents (interpret, implement, validate) use plain `NodeLLMConfig`.
 
     Future agents that grow sub-call needs define their own typed config
@@ -207,6 +256,20 @@ class WorkflowLLMConfig(BaseModel):
             "can use different providers and/or different models."
         ),
     )
+    lit_review: LitReviewLLMConfig | None = Field(
+        default=None,
+        description=(
+            "LLM config for the ml_literature_review node (Commit 6+). "
+            "Has nested main/search slots (each a full NodeLLMConfig) so "
+            "the node's three LLM sub-calls split into two bridges: main "
+            "drives compression + synthesis, search drives the cheap "
+            "search-decision step. When None (default), .get('lit_review') "
+            "falls back to the `interpret` slot's main-bridge config (no "
+            "search override) — pre-Commit-6 JSON configs leave this key "
+            "absent and the fallback path preserves backward-compat "
+            "behavior. Design Decision 3, 2026-06-11."
+        ),
+    )
 
     def get(self, node_name: str) -> dict:
         """
@@ -226,9 +289,24 @@ class WorkflowLLMConfig(BaseModel):
                 "reflect_model_id": <reflector.model_id>,
             }
 
+        For the lit-review node (main + search sub-calls per Design
+        Decision 3, 2026-06-11), the dict flattens to the four fields
+        ``LiteratureReviewInput`` consumes:
+            {
+                "llm_provider":         <main.provider>,
+                "llm_model_id":         <main.model_id>,
+                "search_llm_provider":  <search.provider>,
+                "search_llm_model_id":  <search.model_id>,
+            }
+        When ``lit_review`` is not configured, falls back to the
+        ``interpret`` slot's main-bridge config (with key translation:
+        ``provider`` → ``llm_provider``, ``model_id`` → ``llm_model_id``);
+        ``search_llm_*`` fields stay absent so the lit-review node uses
+        the main bridge for the search-decision call.
+
         Args:
             node_name: One of "interpret", "propose", "implement",
-                       "validate", "tune".
+                       "validate", "tune", "lit_review".
 
         Returns:
             Flat dict of LLM kwargs, or `{}` if the node is not configured.
@@ -236,12 +314,33 @@ class WorkflowLLMConfig(BaseModel):
         # Handle "validate" alias → stored as validate_model
         attr = "validate_model" if node_name == "validate" else node_name
         config = getattr(self, attr, None)
+
+        # Lit-review fallback (Commit 6, Design Decision 3, 2026-06-11):
+        # when not explicitly configured, inherit the main-bridge config
+        # from the interpret slot and translate the keys (provider →
+        # llm_provider, model_id → llm_model_id). search_llm_* fields stay
+        # absent so the lit-review node falls back per-field to the main
+        # bridge for the search-decision call. Keeps cost predictable for
+        # operators who haven't tuned lit_review yet; pre-Commit-6 JSON
+        # configs (which omit the lit_review key) work unchanged.
+        if node_name == "lit_review" and config is None:
+            if self.interpret is None:
+                return {}
+            return {
+                "llm_provider": self.interpret.provider,
+                "llm_model_id": self.interpret.model_id,
+            }
+
         if config is None:
             return {}
         if isinstance(config, TunerLLMConfig):
             # Flatten the nested TunerLLMConfig into the legacy flat keys
             # that HyperparamTuningInput / LLMBridge expect.
-            result = {
+            # ``dict[str, Any]`` because the optional ``max_retries`` value is
+            # an ``int`` while everything else is a ``str``; the consumer
+            # (LLMBridge) reads each key by name, so a heterogeneous-value
+            # dict is the honest type here.
+            result: dict[str, Any] = {
                 "provider": config.planner.provider,
                 "model_id": config.planner.model_id,
                 "reflect_provider": config.reflector.provider,
@@ -254,7 +353,9 @@ class WorkflowLLMConfig(BaseModel):
         if isinstance(config, ProposalLLMConfig):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
             # The proposal agent reads these to construct per-stage bridges.
-            result = {
+            # ``dict[str, Any]`` for the same reason as the tuner branch:
+            # ``max_retries`` is an ``int`` mixed with string-valued keys.
+            result: dict[str, Any] = {
                 "comparison_provider": config.comparison.provider,
                 "comparison_model_id": config.comparison.model_id,
                 "reasoning_provider": config.reasoning.provider,
@@ -269,6 +370,19 @@ class WorkflowLLMConfig(BaseModel):
             if config.reasoning.max_retries is not None:
                 result["max_retries"] = config.reasoning.max_retries
             return result
+        if isinstance(config, LitReviewLLMConfig):
+            # Flatten the nested LitReviewLLMConfig into the 4-field shape
+            # ``LiteratureReviewInput`` consumes. Always emit all 4 fields
+            # explicitly; the node itself falls back per-field to main when
+            # a search field is None at runtime, so emitting both pairs is
+            # safe and matches Design Decision 3's operator-visible source-
+            # of-truth principle.
+            return {
+                "llm_provider": config.main.provider,
+                "llm_model_id": config.main.model_id,
+                "search_llm_provider": config.search.provider,
+                "search_llm_model_id": config.search.model_id,
+            }
         # Plain NodeLLMConfig — single-sub-call agent
         result = {"provider": config.provider, "model_id": config.model_id}
         if config.max_retries is not None:
@@ -302,6 +416,11 @@ class WorkflowLLMConfig(BaseModel):
                             reflect_provider or provider,
                             reflect_model_id or model_id,
                         )
+        - The lit-review node gets a `LitReviewLLMConfig` where both
+          main and search sub-slots use the same NodeLLMConfig(provider,
+          model_id). Operators wanting a cheaper search bridge override
+          construct `LitReviewLLMConfig` explicitly instead of using
+          `.uniform()`. (Design Decision 3, 2026-06-11.)
 
         When called with no reflector overrides, the tuner uses the same
         provider/model for both sub-calls (legacy behavior).
@@ -328,10 +447,20 @@ class WorkflowLLMConfig(BaseModel):
                 model_id=reflect_model_id or model_id,
             ),
         )
+        lit_review_cfg = LitReviewLLMConfig(
+            main=base_cfg,
+            search=base_cfg,
+        )
         return cls(
             interpret=base_cfg,
             propose=propose_cfg,
             implement=base_cfg,
-            validate_model=base_cfg,
+            # ``validate`` is the public alias of the ``validate_model``
+            # field (set via ``Field(alias="validate")`` + ``populate_by_name=True``).
+            # The pyright Pydantic plugin keys construction kwargs off the
+            # alias, not the underlying attribute name — using the alias
+            # here is the canonical form.
+            validate=base_cfg,
             tune=tune_cfg,
+            lit_review=lit_review_cfg,
         )

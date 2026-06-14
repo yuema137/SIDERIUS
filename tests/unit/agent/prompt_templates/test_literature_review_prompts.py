@@ -19,7 +19,6 @@ from pydantic import ValidationError
 
 from agent.prompt_templates.literature_review import (
     MAX_RAW_TEXT_CHARS,
-    SIDERIUS_TASK,
     render_paper_extract_prompt,
     render_review_report,
     render_search_decision_prompt,
@@ -155,16 +154,18 @@ class TestExtractionInstructions:
 
 
 class TestTaskInjection:
-    def test_default_task_injected_and_placeholder_gone(self):
+    def test_default_empty_task_placeholder_gone(self):
+        # Post-Commit-F: default task_description is "" — the
+        # {TASK_DESCRIPTION} placeholder is still substituted (with empty
+        # string), so the placeholder literal must NOT survive into the
+        # rendered prompt.
         system, _ = render_paper_extract_prompt("text")
-        assert SIDERIUS_TASK in system
         assert "{TASK_DESCRIPTION}" not in system
 
     def test_custom_task_overrides_default(self):
         custom = "denoise audio recordings of whale song"
         system, _ = render_paper_extract_prompt("text", task_description=custom)
         assert custom in system
-        assert SIDERIUS_TASK not in system
         assert "{TASK_DESCRIPTION}" not in system
 
 
@@ -274,8 +275,7 @@ class TestSynthesisPrompt:
         assert "no plausible mechanism transfer exists" in system
         # (e) source_ref-matching instruction
         assert "source_ref" in system and "paper_id" in system
-        # task-description injection
-        assert SIDERIUS_TASK in system
+        # task-description placeholder filled (Post-Commit-F: default is "")
         assert "{TASK_DESCRIPTION}" not in system
 
     def test_user_prompt_fronts_bottlenecks(self):
@@ -487,16 +487,102 @@ class TestSearchDecisionPrompt:
         assert "hard sample reweighting loss" in system  # GOOD example
 
     def test_mandatory_escalation_assessment_block_present(self):
-        # Diagnostic finding (2026-05-27): the search-decision LLM never evaluated
-        # retrieved papers for escalation — it defaulted to SEARCH every round and
-        # its reasoning referenced no retrieved paper. This block forces a
-        # pre-decision escalate-vs-search assessment. Pure addition: Fix A/B/C
-        # (jargon translation, freq-split guard, keyword-phrase form) are untouched.
+        # 6.5a Edit D rewrote the binary YES/ESCALATE assessment into an
+        # enumerative ranking: the LLM must list EVERY qualifying paper in
+        # its `reasoning` field, then escalate the highest-ranked one that
+        # has NOT been deep-read yet. Replaces the Commit 6 binary-form
+        # version of this test.
         system, _ = self._render()
+        # Section header preserved (the only assertion carried over from the
+        # Commit 6 version of this test).
         assert "Mandatory assessment before deciding" in system
-        assert "scan the papers already" in system
-        assert "choose ESCALATE for that paper" in system
-        assert "defaulting to SEARCH" in system
+        # New enumerative-ranking language
+        assert "scan ALL papers retrieved" in system
+        assert "list (by paper_id) EVERY paper that qualifies" in system
+        # Tie-break instruction: the highest-ranked NOT-yet-deep-read paper
+        # wins. The literal token "verbosity_achieved < 1" must be present so
+        # the LLM knows which field to consult.
+        assert "verbosity_achieved < 1" in system
+        # SEARCH only when nothing qualifies — preserves the original intent.
+        assert "Only choose SEARCH when NO retrieved paper qualifies" in system
+        # Closing "defaulting to SEARCH is not acceptable" line still present
+        # (last line of the section). The .md wraps after "to" so the two
+        # halves are asserted separately rather than as one substring.
+        assert "defaulting to" in system
+        assert "SEARCH is not acceptable" in system
+
+    def test_four_dimensions_section_and_label_rule_present(self):
+        # 6.5a Edit C added a dedicated section instructing the searcher to
+        # cover four dimensions across the run (bottleneck / take_home /
+        # architectural_gap / adjacent_technique), not anchor every query on
+        # the same bottleneck. Edit B added a paired Output-contract rule
+        # that the `reasoning` field must label each query's dimension and
+        # ≥ 2 distinct dimensions must appear across the run.
+        system, _ = self._render()
+        # The new dedicated section is present.
+        assert "Query generation — four dimensions to cover" in system
+        # All four dimension names appear (the labels referenced in the rule).
+        assert "bottleneck" in system
+        assert "take_home" in system
+        assert "architectural_gap" in system
+        assert "adjacent_technique" in system
+        # The labelling + 2-dimension-minimum rule lives in the Output contract
+        # section.
+        assert "label which dimension the query targets" in system
+        assert "cover ≥ 2 distinct dimensions" in system
+
+    def test_confidence_rubric_for_search_placeholder_filled(self):
+        # 6.5a Edit E added a "## Why escalation matters for finding
+        # confidence" section that references {CONFIDENCE_RUBRIC_FOR_SEARCH}.
+        # The renderer must fill that placeholder with
+        # ConfidenceRubric().render_for_searcher() when no rubric is passed
+        # (default-instantiation fallback), mirroring render_synthesis_prompt's
+        # confidence_rubric handling. A custom rubric supplied via the
+        # confidence_rubric kwarg must flow through.
+        system, _ = self._render()
+        # The placeholder must NOT survive into the final prompt.
+        assert "{CONFIDENCE_RUBRIC_FOR_SEARCH}" not in system
+        # The new section header is present.
+        assert "Why escalation matters for finding confidence" in system
+        # The default rubric's bands appear inside the rendered prompt.
+        assert "0.80-1.00" in system
+        assert "0.60-0.79" in system
+        assert "0.40-0.59" in system
+        # Spec Fix 1 (a): the explainer prose around the rubric block must
+        # carry the strategic-framing sentence verbatim — this is what
+        # teaches the search-decision LLM that escalating an on-domain
+        # on-bottleneck paper has a measurable payoff (higher proposer
+        # weight via a higher-band finding).
+        assert "Escalating an on-domain on-bottleneck paper" in system
+        assert "unlocks a higher-confidence finding" in system
+        # Custom rubric must flow through the new confidence_rubric kwarg.
+        custom = ConfidenceRubric(
+            bands=[ConfidenceBand(lower=0.55, upper=0.99, criteria="custom-band-marker")],
+            omit_below=0.55,
+        )
+        system2, _ = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            confidence_rubric=custom,
+        )
+        assert "0.55-0.99" in system2
+        assert "custom-band-marker" in system2
+        # The default rubric's CRITERIA strings ("abstract-only evidence",
+        # "deep-read (verbosity >= 1 extract)") must NOT leak when a custom
+        # rubric is supplied — they only enter via render_for_searcher() so
+        # their absence proves the custom rubric replaced the rubric block.
+        # NOTE: we deliberately do NOT assert `"0.40-0.59" not in system2`
+        # — the "## Why escalation matters" prose section hardcodes literal
+        # references to the default band ranges ("at the 0.40-0.59 band",
+        # "≥ 0.60", "0.80+ band") as explainer text, independent of the
+        # rubric block, so those tokens survive a custom-rubric substitution
+        # by design.
+        assert "abstract-only evidence" not in system2
+        assert "deep-read (verbosity >= 1 extract)" not in system2
 
     def test_no_prior_results_no_feedback_block(self):
         _, user = self._render()  # papers_seen=[] and prior_search_results defaults None
@@ -533,6 +619,155 @@ class TestSearchDecisionPrompt:
         assert '"spectral gating denoising" → 5 hits' in user
         assert "too specific" not in user  # no 0-hit annotation
         assert "do NOT repeat a 0-hit query" not in user  # no broaden nudge
+
+    def test_prior_escalation_results_renders_three_statuses(self):
+        # Fix 3 (Commit 6.5b-2): when prior_escalation_results is non-empty,
+        # render a "## Escalations already attempted this run" sub-block in
+        # the user prompt parallel to the existing "## Queries already tried
+        # this run" block. Each of the three canonical statuses (ok / noop /
+        # error) must render its specific user-facing label, the closing
+        # do-not-retry nudge must appear, and reasoning excerpts longer than
+        # 200 chars must be truncated with an ellipsis.
+        long_reasoning = "x" * 250  # exercises the 200-char truncation
+        _, user = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_escalation_results=[
+                ("arxiv:ok-paper", "ok", "this paper was on-bottleneck"),
+                ("arxiv:noop-paper", "noop", long_reasoning),
+                ("arxiv:err-paper", "error", "tried to deep-read"),
+            ],
+        )
+        # Block header present.
+        assert "## Escalations already attempted this run" in user
+        # All three paper_ids appear.
+        assert "arxiv:ok-paper" in user
+        assert "arxiv:noop-paper" in user
+        assert "arxiv:err-paper" in user
+        # Each status renders its specific user-facing label.
+        assert "success — paper now deep-read" in user
+        assert "no-change — paper was already at the requested verbosity" in user
+        assert "error — resolve call failed; do not retry this paper" in user
+        # Short reasoning appears verbatim.
+        assert "this paper was on-bottleneck" in user
+        # The closing do-not-retry nudge appears.
+        assert "Do NOT re-escalate a paper whose last status was" in user
+        # 200-char truncation fires on the long reasoning (250 'x' chars →
+        # exactly 200 + "…"; the full 250-char form must not survive).
+        assert ("x" * 200 + "…") in user
+        assert ("x" * 250) not in user
+
+    def test_prior_escalation_results_omitted_when_none_or_empty(self):
+        # When prior_escalation_results is None (default) OR an empty list,
+        # the entire "## Escalations already attempted this run" block is
+        # omitted — the LLM should not see a phantom block header.
+        # Case 1: None (the default in _render()).
+        _, user_none = self._render()
+        assert "## Escalations already attempted this run" not in user_none
+        assert "Do NOT re-escalate" not in user_none
+        # Case 2: explicit empty list.
+        _, user_empty = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_escalation_results=[],
+        )
+        assert "## Escalations already attempted this run" not in user_empty
+        assert "Do NOT re-escalate" not in user_empty
+
+    def test_dimension_coverage_line_renders_inside_prior_block(self):
+        # Fix 5 (Commit 6.5b-4): when prior_search_results AND
+        # dimension_counts are both non-empty, the coverage distribution
+        # line renders INSIDE the "## Queries already tried this run"
+        # block, AFTER the per-query lines and BEFORE the broaden-on-0-hit
+        # nudge. Cites all four dimensions with their counts.
+        _, user = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[
+                ("spectral gating denoising", 5),
+                ("perceptual loss audio", 0),
+            ],
+            dimension_counts={
+                "bottleneck": 2,
+                "take_home": 0,
+                "architectural_gap": 1,
+                "adjacent_technique": 0,
+            },
+        )
+        # The "Queries already tried" block header is present.
+        assert "## Queries already tried this run" in user
+        # All 4 labels appear with their counts.
+        assert "bottleneck=2" in user
+        assert "take_home=0" in user
+        assert "architectural_gap=1" in user
+        assert "adjacent_technique=0" in user
+        # Coverage line starts with the expected prefix.
+        assert "Coverage so far:" in user
+        # The 0-hit broaden nudge IS also present (one query had 0 hits).
+        assert "do NOT repeat a 0-hit query" in user
+        # Ordering: per-query lines BEFORE coverage line BEFORE broaden nudge.
+        queries_idx = user.find('"spectral gating denoising"')
+        coverage_idx = user.find("Coverage so far:")
+        broaden_idx = user.find("do NOT repeat a 0-hit query")
+        assert queries_idx < coverage_idx < broaden_idx
+
+    def test_dimension_coverage_omitted_when_no_counts_or_no_prior(self):
+        # Fix 5 (Commit 6.5b-4): the coverage line is rendered ONLY when
+        # both prior_search_results and dimension_counts are non-empty.
+        # All omission paths must skip the line cleanly.
+
+        # Case 1: dimension_counts is None (no Fix 5 wiring from caller).
+        _, user_none = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[("spectral gating denoising", 5)],
+            dimension_counts=None,
+        )
+        assert "Coverage so far:" not in user_none
+
+        # Case 2: dimension_counts is empty dict.
+        _, user_empty = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=[("spectral gating denoising", 5)],
+            dimension_counts={},
+        )
+        assert "Coverage so far:" not in user_empty
+
+        # Case 3: prior_search_results is None — the entire prior_block is
+        # omitted, so coverage is too (it's nested inside prior_block).
+        _, user_no_prior = render_search_decision_prompt(
+            key_findings=["k"],
+            bottlenecks=["b"],
+            take_home_message="t",
+            explored_models=["m"],
+            papers_seen=[],
+            escalation_allowed=True,
+            prior_search_results=None,
+            dimension_counts={"bottleneck": 5},
+        )
+        assert "Coverage so far:" not in user_no_prior
+        assert "## Queries already tried this run" not in user_no_prior
 
 
 # ---------------------------------------------------------------------------

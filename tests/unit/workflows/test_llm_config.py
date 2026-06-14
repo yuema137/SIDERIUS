@@ -124,13 +124,14 @@ class TestTunerLLMConfig:
 
 class TestWorkflowLLMConfig:
     def test_default_all_slots_none(self):
-        """Default WorkflowLLMConfig has all 5 slots set to None."""
+        """Default WorkflowLLMConfig has all 6 slots set to None."""
         cfg = WorkflowLLMConfig()
         assert cfg.interpret is None
         assert cfg.propose is None
         assert cfg.implement is None
         assert cfg.validate_model is None
         assert cfg.tune is None
+        assert cfg.lit_review is None  # Commit 6 addition (Design Decision 3)
 
     def test_tune_slot_is_typed_TunerLLMConfig(self):
         """The tune slot must be typed as TunerLLMConfig (not the base
@@ -323,3 +324,131 @@ class TestWorkflowLLMConfigJSON:
         loaded = WorkflowLLMConfig.model_validate(dumped)
         assert loaded.tune.planner.model_id == "gemini-3.1-pro-preview"
         assert loaded.tune.reflector.model_id == "gemini-2.5-flash"
+
+
+# ---------------------------------------------------------------------------
+# LitReviewLLMConfig — nested per-bridge config (Commit 6, Design Decision 3)
+# ---------------------------------------------------------------------------
+
+
+class TestLitReviewLLMConfig:
+    def test_defaults(self):
+        """No args → both main and search use deepseek / deepseek-v4-pro
+        (matches the JSON-level defaults landing in llm_configs/*.json)."""
+        from workflows.llm_config import LitReviewLLMConfig
+
+        c = LitReviewLLMConfig()
+        assert c.main.provider == "deepseek"
+        assert c.main.model_id == "deepseek-v4-pro"
+        assert c.search.provider == "deepseek"
+        assert c.search.model_id == "deepseek-v4-pro"
+
+    def test_main_and_search_are_independent_objects(self):
+        from workflows.llm_config import LitReviewLLMConfig
+
+        c = LitReviewLLMConfig()
+        assert c.main is not c.search
+
+    def test_cross_routing_main_strong_search_cheap(self):
+        """The intended split: stronger model for compression/synthesis,
+        cheaper model for the templated search-decision call."""
+        from workflows.llm_config import LitReviewLLMConfig
+
+        c = LitReviewLLMConfig(
+            main=NodeLLMConfig(provider="openai", model_id="gpt-4o"),
+            search=NodeLLMConfig(provider="openai", model_id="gpt-4o-mini"),
+        )
+        assert c.main.model_id == "gpt-4o"
+        assert c.search.model_id == "gpt-4o-mini"
+
+
+# ---------------------------------------------------------------------------
+# WorkflowLLMConfig.get("lit_review") — flatten + fallback semantics
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowLLMConfigLitReview:
+    """Commit 6 Design Decision 3 (2026-06-11) — .get('lit_review')
+    flattens the nested LitReviewLLMConfig into the 4-field shape
+    LiteratureReviewInput consumes, and falls back to a translated
+    interpret-slot dict when lit_review is None."""
+
+    def test_get_lit_review_configured_returns_4_field_flatten(self):
+        from workflows.llm_config import LitReviewLLMConfig
+
+        cfg = WorkflowLLMConfig(
+            lit_review=LitReviewLLMConfig(
+                main=NodeLLMConfig(provider="openai", model_id="gpt-4o"),
+                search=NodeLLMConfig(provider="openai", model_id="gpt-4o-mini"),
+            )
+        )
+        assert cfg.get("lit_review") == {
+            "llm_provider": "openai",
+            "llm_model_id": "gpt-4o",
+            "search_llm_provider": "openai",
+            "search_llm_model_id": "gpt-4o-mini",
+        }
+
+    def test_get_lit_review_unconfigured_falls_back_to_translated_interpret(self):
+        """When lit_review is None and interpret is set, .get('lit_review')
+        translates interpret's provider/model_id → llm_provider/llm_model_id;
+        search_llm_* fields stay absent so the lit-review node falls back to
+        the main bridge for the search-decision call."""
+        cfg = WorkflowLLMConfig(
+            interpret=NodeLLMConfig(provider="openai", model_id="gpt-4o-mini"),
+        )
+        assert cfg.get("lit_review") == {
+            "llm_provider": "openai",
+            "llm_model_id": "gpt-4o-mini",
+        }
+
+    def test_get_lit_review_no_fallback_returns_empty_dict(self):
+        """When neither lit_review nor interpret is configured, the
+        fallback chain returns an empty dict — no LLM routing is asserted."""
+        cfg = WorkflowLLMConfig()
+        assert cfg.get("lit_review") == {}
+
+    def test_uniform_populates_lit_review_with_both_subslots(self):
+        cfg = WorkflowLLMConfig.uniform("openai", "gpt-4o-mini")
+        assert cfg.lit_review is not None
+        assert cfg.lit_review.main.provider == "openai"
+        assert cfg.lit_review.main.model_id == "gpt-4o-mini"
+        assert cfg.lit_review.search.provider == "openai"
+        assert cfg.lit_review.search.model_id == "gpt-4o-mini"
+        # End-to-end: .uniform() → .get('lit_review') → 4-field flatten.
+        assert cfg.get("lit_review") == {
+            "llm_provider": "openai",
+            "llm_model_id": "gpt-4o-mini",
+            "search_llm_provider": "openai",
+            "search_llm_model_id": "gpt-4o-mini",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Regression — all 4 shipped llm_configs/*.json parse against the schema
+# ---------------------------------------------------------------------------
+
+
+class TestShippedJsonConfigsParse:
+    """Regression guard against the Step-3 update being incomplete.
+    Every JSON config in llm_configs/ must (a) parse, (b) carry a
+    lit_review block, (c) yield the expected 4-field flatten from
+    .get('lit_review')."""
+
+    def test_all_4_llm_configs_parse_with_lit_review_block(self):
+        import pathlib
+
+        paths = sorted(pathlib.Path("llm_configs").glob("*.json"))
+        assert len(paths) == 4, f"Expected 4 configs in llm_configs/, found {len(paths)}"
+        for path in paths:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            cfg = WorkflowLLMConfig.model_validate(data)
+            assert cfg.lit_review is not None, f"{path.name}: lit_review block missing"
+            got = cfg.get("lit_review")
+            assert set(got.keys()) == {
+                "llm_provider",
+                "llm_model_id",
+                "search_llm_provider",
+                "search_llm_model_id",
+            }, f"{path.name}: .get('lit_review') missing one or more keys"

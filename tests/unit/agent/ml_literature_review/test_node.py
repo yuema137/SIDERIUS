@@ -24,7 +24,11 @@ from agent.schemas.literature_review import (
     RetrievedPaper,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from nodes.ml_literature_review import MLLiteratureReviewAgent, _sanitize_paper_id
+from nodes.ml_literature_review import (
+    MLLiteratureReviewAgent,
+    _parse_dimension,
+    _sanitize_paper_id,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes + builders
@@ -384,6 +388,572 @@ class TestEscalation:
         hit = next(p for p in out.retrieved_papers if p.paper_id == "arxiv:2301.00001")
         assert hit.verbosity_achieved == 1
         assert hit.extract is not None
+
+    def test_escalate_returns_ok_when_verbosity_raised(self, tmp_path, monkeypatch):
+        # Fix 3 (Commit 6.5b-2): _escalate now returns a 3-state status.
+        # When run_skill resolves with new full_text AND _compress produces
+        # an extract, verbosity_achieved is raised → status "ok". The
+        # test calls _escalate directly (skipping agent.run()) so it
+        # exercises only the per-escalation contract, not the search-loop
+        # bookkeeping.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "real body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # Set self.bridge AND self._task_description manually since we're
+        # not going through run() — both are read by _compress (called
+        # inside _escalate). Fix 6 (6.5b-5) added _task_description as a
+        # run()-set attribute.
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        target = RetrievedPaper(
+            paper_id="arxiv:1",
+            source=PaperSource(source_type="arxiv", identifier="1"),
+            verbosity_achieved=0,
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert target.verbosity_achieved == 1
+        assert target.extract is not None
+
+    def test_escalate_returns_noop_on_empty_full_text_and_error_on_failure(
+        self, tmp_path, monkeypatch
+    ):
+        # Fix 3 (Commit 6.5b-2): _escalate's 3-state status covers two
+        # degenerate outcomes besides "ok":
+        #   (a) "noop"  — the resolve call succeeded but returned no new
+        #                 full_text (paper already at requested verbosity,
+        #                 or the fetcher dropped the body). verbosity_achieved
+        #                 stays at its pre-call value.
+        #   (b) "error" — the resolve call failed outright (PDF 404, S2
+        #                 down, etc.). target.error is set; the LLM should
+        #                 not retry this paper.
+        # Both share the budget-charge semantics (Decision 2); the
+        # _run_search_loop side of that contract lands as the 6.5b-3 test
+        # gate. Here we exercise only _escalate's return + mutation
+        # contract.
+        bridge = FakeBridge(responses={})  # _compress never gets called
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+
+        # --- Sub-case (a): noop — resolve ok but no full_text ---
+        monkeypatch.setattr(
+            node_mod,
+            "run_skill",
+            FakeSkill(
+                resolve=lambda kw: {
+                    "status": "ok",
+                    "data": {
+                        "s2_metadata": {"title": "T", "year": 2023},
+                        "verbosity_achieved": 1,
+                        # full_text deliberately omitted (None / empty)
+                    },
+                    "message": "ok-no-body",
+                }
+            ),
+        )
+        target_noop = RetrievedPaper(
+            paper_id="arxiv:noop",
+            source=PaperSource(source_type="arxiv", identifier="noop"),
+            verbosity_achieved=0,
+        )
+        assert agent._escalate(target_noop, 1) == "noop"
+        assert target_noop.verbosity_achieved == 0  # unchanged
+        assert target_noop.extract is None  # _compress never ran
+
+        # --- Sub-case (b): error — resolve failed ---
+        monkeypatch.setattr(
+            node_mod,
+            "run_skill",
+            FakeSkill(
+                resolve=lambda kw: {
+                    "status": "error",
+                    "data": None,
+                    "message": "HTTP 404 on the PDF URL",
+                }
+            ),
+        )
+        target_err = RetrievedPaper(
+            paper_id="arxiv:err",
+            source=PaperSource(source_type="arxiv", identifier="err"),
+            verbosity_achieved=0,
+        )
+        assert agent._escalate(target_err, 1) == "error"
+        assert target_err.error == "HTTP 404 on the PDF URL"
+        assert target_err.verbosity_achieved == 0
+
+    def test_escalate_layer2_skips_paywalled_doi_without_arxiv_fallback(
+        self, tmp_path, monkeypatch
+    ):
+        # Layer 2 (post-Checkpoint-S, 2026-06-13): when the resolver would
+        # have no PDF URL to try (empty openAccessPdf.url + no
+        # externalIds.ArXiv), short-circuit to "noop" without calling
+        # run_skill. The TFL paper in Checkpoint S run 1 hit exactly this
+        # case — a paywalled IEEE DOI with no arXiv preprint.
+        bridge = FakeBridge(responses={})  # _compress never gets called
+        # If Layer 2 fires correctly, this lambda is never invoked.
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {"full_text": "should not be reached", "verbosity_achieved": 1},
+                "message": "should not be reached",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # Paywalled IEEE paper: openAccessPdf.url is empty + no ArXiv id.
+        target = RetrievedPaper(
+            paper_id="doi:10.1109/SiPS.2025.111",
+            source=PaperSource(source_type="doi", identifier="10.1109/SiPS.2025.111"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "TFL: A Hybrid Time-Frequency Loss",
+                "openAccessPdf": {"url": "", "status": None},
+                "externalIds": {"DOI": "10.1109/SiPS.2025.111", "DBLP": "conf/x/y"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "noop"
+        # Resolver was NOT called (Layer 2 short-circuit fired).
+        assert len(skill.resolve_calls) == 0
+        # target unchanged — no verbosity rise, no extract populated.
+        assert target.verbosity_achieved == 0
+        assert target.extract is None
+
+    def test_escalate_layer2_proceeds_when_arxiv_fallback_available(self, tmp_path, monkeypatch):
+        # Layer 2 honors the resolver's arxiv-fallback path
+        # (_arxiv_fallback_url builds arxiv.org/pdf/{id}.pdf from
+        # externalIds.ArXiv). A DOI-published paper that ALSO exists on
+        # arXiv must NOT be short-circuited — the resolver can fetch it
+        # via the fallback URL.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "arxiv body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # DOI-published paper that's ALSO on arXiv (common for ML papers
+        # published at IEEE/ACM/etc after an arXiv preprint).
+        target = RetrievedPaper(
+            paper_id="doi:10.1109/dual.2025.999",
+            source=PaperSource(source_type="doi", identifier="10.1109/dual.2025.999"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "Dual-published paper",
+                "openAccessPdf": {"url": "", "status": None},  # empty, but ArXiv id is present
+                "externalIds": {"DOI": "10.1109/dual.2025.999", "ArXiv": "2406.99999"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        # Layer 2 did NOT fire — resolver was called and succeeded.
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+        assert target.extract is not None
+
+    def test_escalate_layer2_exempts_arxiv_source_type(self, tmp_path, monkeypatch):
+        # arxiv sources are exempt from the Layer 2 PDF-URL gate because the
+        # resolver first tries Tier 1 (arxiv.org/src .tex) which doesn't
+        # depend on openAccessPdf or externalIds — short-circuiting would
+        # skip a path that could succeed.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "arxiv tex body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # arxiv source with NO usable openAccessPdf URL — Layer 2 must
+        # still let it through (Tier 1 .tex might succeed).
+        target = RetrievedPaper(
+            paper_id="arxiv:2406.04378",
+            source=PaperSource(source_type="arxiv", identifier="2406.04378"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "TIDMAD",
+                "openAccessPdf": {"url": "", "status": None},
+                "externalIds": {"ArXiv": "2406.04378"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+
+    def test_escalate_layer2_proceeds_for_open_access_doi(self, tmp_path, monkeypatch):
+        # An open-access DOI (PLOS, Nature Communications, etc.) carries a
+        # non-empty openAccessPdf.url and is NOT blocked by Layer 2 — the
+        # resolver can fetch the PDF directly.
+        bridge = FakeBridge(
+            responses={"lit_review.paper_extract": dict(_VALID_EXTRACT)},
+        )
+        skill = FakeSkill(
+            resolve=lambda kw: {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "T", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "open access body text",
+                },
+                "message": "ok",
+            }
+        )
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        agent.bridge = bridge
+        agent._task_description = "test task"
+
+        # Open-access DOI paper (e.g., PLOS) with a usable PDF URL in
+        # openAccessPdf — Layer 2 must let it through.
+        target = RetrievedPaper(
+            paper_id="doi:10.1371/journal.pone.000001",
+            source=PaperSource(source_type="doi", identifier="10.1371/journal.pone.000001"),
+            verbosity_achieved=0,
+            s2_metadata={
+                "title": "Open-access paper",
+                "openAccessPdf": {
+                    "url": "https://journals.plos.org/plosone/article/file?id=...",
+                    "status": "GOLD",
+                },
+                "externalIds": {"DOI": "10.1371/journal.pone.000001"},
+            },
+        )
+
+        status = agent._escalate(target, 1)
+
+        assert status == "ok"
+        assert len(skill.resolve_calls) == 1
+        assert target.verbosity_achieved == 1
+
+
+class TestSearchDecisionLog:
+    """Fix 4 (Commit 6.5b-3): ``_run_search_loop`` builds a
+    SearchDecisionRecord for each LLM call and accumulates them into
+    LiteratureReviewOutput.search_decisions. Each RetrievedPaper carries
+    ``discovered_in_round`` + ``discovered_via_query`` provenance fields."""
+
+    def test_search_decisions_records_all_action_types(self, tmp_path, monkeypatch):
+        # Exercise 3 action types in sequence (search → escalate → done)
+        # and assert every record's contract: action / outcome /
+        # round_index / per-action fields (query for search, paper_id +
+        # verbosity for escalate). Locks the round_index 1-indexed
+        # semantic (search consumes the round; the next decision —
+        # whether escalate or done — falls in the next round's window).
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {
+                        "action": "search",
+                        "query": "dilated conv denoising",
+                        "reasoning": "bottleneck dim — fill the gap",
+                    },
+                    {
+                        "action": "escalate",
+                        "paper_id": "arxiv:2301.00001",
+                        "verbosity": 1,
+                        "reasoning": "on-bottleneck paper worth deep-reading",
+                    },
+                    {"action": "done", "reasoning": "have enough"},
+                ],
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+
+        def _resolve(kw):
+            assert kw["identifier"] == "2301.00001"
+            return {
+                "status": "ok",
+                "data": {
+                    "s2_metadata": {"title": "Dilated Conv Denoiser", "year": 2023},
+                    "verbosity_achieved": 1,
+                    "full_text": "dilated causal convolution body text",
+                },
+                "message": "ok",
+            }
+
+        skill = FakeSkill(resolve=_resolve, search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(
+            _input(
+                tmp_path,
+                root_papers=[],  # focus on dynamic-loop decisions only
+                dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=True),
+            )
+        )
+
+        # 3 records — one per LLM decision.
+        assert len(out.search_decisions) == 3
+
+        # Record 0: search action in round 1.
+        rec0 = out.search_decisions[0]
+        assert rec0.action == "search"
+        assert rec0.round_index == 1
+        assert rec0.query == "dilated conv denoising"
+        assert rec0.paper_id is None
+        assert rec0.verbosity is None
+        assert rec0.outcome == "n_hits=1"
+        assert "bottleneck dim" in rec0.reasoning
+
+        # Record 1: escalate action — after search consumes round 1, the
+        # next decision belongs to round 2's budget window (round_index=2).
+        rec1 = out.search_decisions[1]
+        assert rec1.action == "escalate"
+        assert rec1.round_index == 2
+        assert rec1.paper_id == "arxiv:2301.00001"
+        assert rec1.verbosity == 1
+        assert rec1.query is None
+        assert rec1.outcome == "ok"  # escalate succeeded (verbosity raised)
+
+        # Record 2: done action — also tagged in round 2 (decided to stop
+        # before round 2's search ever happened).
+        rec2 = out.search_decisions[2]
+        assert rec2.action == "done"
+        assert rec2.round_index == 2
+        assert rec2.outcome == "done"
+        assert rec2.query is None
+        assert rec2.paper_id is None
+
+    def test_search_hit_provenance_tags_round_index_and_query(self, tmp_path, monkeypatch):
+        # Fix 4.E: every RetrievedPaper surfaced via the dynamic search
+        # loop must carry `discovered_in_round` (1-indexed; matches the
+        # round the search ran in) and `discovered_via_query` (the literal
+        # LLM-emitted query string). Tests _do_search +
+        # _retrieved_from_search_result threading end-to-end.
+        QUERY = "dilated conv denoising"
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": QUERY, "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(
+            _input(
+                tmp_path,
+                root_papers=[],
+                dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=False),
+            )
+        )
+
+        # _search_ok returns 1 hit at arxiv:2301.00001.
+        hits = [p for p in out.retrieved_papers if p.paper_id == "arxiv:2301.00001"]
+        assert len(hits) == 1
+        hit = hits[0]
+        # The hit was surfaced by the first (and only) search round = 1.
+        # Provenance fields must match what the loop tagged.
+        assert hit.discovered_in_round == 1
+        assert hit.discovered_via_query == QUERY
+
+    def test_root_paper_provenance_tagged_zero(self, tmp_path, monkeypatch):
+        # Fix 4.D: root papers resolved at agent start carry
+        # discovered_in_round=0 (the "pre-loop" marker) and
+        # discovered_via_query=None (no query surfaced them). Dynamic
+        # search is disabled here so the test exercises only the
+        # root-paper path through _build_retrieved_from_resolve.
+        bridge = FakeBridge(
+            responses={
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok())
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # _input() default: 1 root paper at arxiv:2406.04378, dynamic disabled.
+        out = agent.run(_input(tmp_path))
+
+        assert len(out.retrieved_papers) == 1
+        root = out.retrieved_papers[0]
+        assert root.discovered_in_round == 0
+        assert root.discovered_via_query is None
+
+
+class TestParseDimension:
+    """Fix 5 (Commit 6.5b-4): module-level _parse_dimension helper.
+
+    The helper scans the LLM's `reasoning` string for the first
+    DIMENSION_LABELS token (case-insensitive, leftmost-mention) and
+    returns it. Returns None when no label appears — diagnostic signal
+    that the LLM didn't follow the dimension-labelling rule in
+    search_decision_system.md.
+    """
+
+    def test_parse_dimension_first_label_heuristic(self):
+        # Single label, exact match.
+        assert _parse_dimension("targets the bottleneck dimension") == "bottleneck"
+
+        # Case-insensitive matching (lowered before substring scan).
+        assert _parse_dimension("addresses BOTTLENECK now") == "bottleneck"
+        assert _parse_dimension("the Adjacent_Technique angle") == "adjacent_technique"
+
+        # Multi-label — leftmost mention wins per the docstring.
+        assert _parse_dimension("targets bottleneck AND adjacent_technique") == "bottleneck"
+        assert (
+            _parse_dimension("the adjacent_technique angle on the bottleneck")
+            == "adjacent_technique"
+        )
+
+        # All 4 labels are recognised.
+        assert _parse_dimension("take_home priority") == "take_home"
+        assert _parse_dimension("an architectural_gap in the model space") == "architectural_gap"
+
+        # No label → None (diagnostic signal that Fix 5 labelling rule
+        # wasn't followed).
+        assert _parse_dimension("targets the model directly without naming a dimension") is None
+        assert _parse_dimension("") is None
+
+
+class TestTaskDescriptionPlumbing:
+    """Fix 6 (Commit 6.5b-5): the `task_description` from
+    LiteratureReviewInput must reach all three LLM-facing render calls
+    (paper-extract, search-decision, synthesis) via the
+    {TASK_DESCRIPTION} prompt placeholder. The node stores
+    inp.task_description as self._task_description in run() and passes
+    it explicitly to each render call site.
+    """
+
+    def test_task_description_reaches_all_three_render_calls(self, tmp_path, monkeypatch):
+        TASK = "denoise audio recordings of whale song at 48 kHz sample rate"
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "audio denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.paper_extract": dict(_VALID_EXTRACT),
+                "lit_review.synthesis": {"findings": []},
+            }
+        )
+        skill = FakeSkill(resolve=lambda kw: _resolve_ok(), search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        # _input default sets 1 root paper at verbosity=1, which triggers
+        # _compress → paper_extract render call. Override the
+        # task_description on the validated input.
+        inp = _input(
+            tmp_path,
+            dynamic=DynamicSearchConfig(enabled=True, max_rounds=5, escalation_allowed=False),
+        )
+        inp.task_description = TASK
+        agent.run(inp)
+
+        # Group the captured system prompts by their bridge call label.
+        prompts_by_label: dict[str, list[str]] = {}
+        for label, system, _user in bridge.prompts:
+            prompts_by_label.setdefault(label, []).append(system)
+
+        # All 3 labels must have been called at least once.
+        assert "lit_review.paper_extract" in prompts_by_label
+        assert "lit_review.search_decision" in prompts_by_label
+        assert "lit_review.synthesis" in prompts_by_label
+
+        # The custom TASK string must appear in EVERY system prompt
+        # captured under each of the 3 labels (injected at the
+        # {TASK_DESCRIPTION} placeholder).
+        for label in (
+            "lit_review.paper_extract",
+            "lit_review.search_decision",
+            "lit_review.synthesis",
+        ):
+            for system in prompts_by_label[label]:
+                assert TASK in system, (
+                    f"task_description '{TASK}' not found in {label} system prompt"
+                )
 
 
 class TestStorageDump:
@@ -1518,3 +2088,107 @@ class TestContentPaperIdHookInSynthesize:
             "content_paper_id" in record.message and "arxiv:2510.25800" in record.message
             for record in caplog.records
         )
+
+
+class TestInitialVerbosity:
+    """Pre-flight B regression (commit 6c493ee, 2026-06-11) —
+    ``DynamicSearchConfig.initial_verbosity`` is wired through
+    ``_run_search_loop`` → ``_do_search`` → ``_retrieved_from_search_result``
+    so it lands on ``PaperSource.verbosity`` for every new search hit.
+    Before the fix this knob was schema-defined but never read."""
+
+    def test_initial_verbosity_threaded_to_paper_source(self, tmp_path, monkeypatch):
+        """initial_verbosity=2 → RetrievedPaper.source.verbosity == 2."""
+        bridge = FakeBridge(
+            responses={
+                # One search round, then done. No escalations.
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                # Synthesis returns no findings — we only inspect retrieved_papers.
+                "lit_review.synthesis": {"findings": []},
+            },
+        )
+        skill = FakeSkill(search=_search_ok)  # no root papers, only search
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        inp = LiteratureReviewInput(
+            experiment_history=_interp(),
+            root_papers=[],
+            dynamic_search=DynamicSearchConfig(
+                enabled=True,
+                max_rounds=1,
+                initial_verbosity=2,  # the Pre-flight B knob
+                escalation_allowed=False,
+                results_per_query=10,
+                max_escalations_per_round=0,
+            ),
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="iv_test"),
+            ),
+            run_name="iv_test",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(inp)
+
+        assert len(out.retrieved_papers) == 1
+        rp = out.retrieved_papers[0]
+        # Operator's REQUESTED verbosity (2) is recorded on source.verbosity.
+        # verbosity_achieved stays at 0 because the S2 search itself is
+        # metadata-only — escalation (disabled here) is what would actually
+        # produce a deep-read. See nodes/ml_literature_review/ml_literature_review.py
+        # _do_search docstring for the full semantic.
+        assert rp.source.verbosity == 2, (
+            f"initial_verbosity=2 should propagate to PaperSource.verbosity; "
+            f"got {rp.source.verbosity}"
+        )
+        assert rp.verbosity_achieved == 0  # search retrieved metadata only
+
+    def test_initial_verbosity_default_zero_preserves_pre_fix_behaviour(
+        self, tmp_path, monkeypatch
+    ):
+        """When initial_verbosity is left at the schema default 0, the
+        search hit's source.verbosity must remain 0 — guards against any
+        accidental knob-flip from the Pre-flight B fix."""
+        bridge = FakeBridge(
+            responses={
+                "lit_review.search_decision": [
+                    {"action": "search", "query": "denoising", "reasoning": "gap"},
+                    {"action": "done", "reasoning": "enough"},
+                ],
+                "lit_review.synthesis": {"findings": []},
+            },
+        )
+        skill = FakeSkill(search=_search_ok)
+        monkeypatch.setattr(node_mod, "run_skill", skill)
+
+        inp = LiteratureReviewInput(
+            experiment_history=_interp(),
+            root_papers=[],
+            dynamic_search=DynamicSearchConfig(enabled=True, max_rounds=1),
+            # initial_verbosity NOT passed → schema default 0
+            storage=StorageConfig(
+                backend="local",
+                local=LocalStorageConfig(workspace=str(tmp_path), run_name="default_iv_test"),
+            ),
+            run_name="default_iv_test",
+            llm_provider="openai",
+            llm_model_id="gpt-4o-mini",
+        )
+
+        agent = MLLiteratureReviewAgent(
+            bridge_factory=_bridge_factory(bridge),
+            root_cache_dir=str(tmp_path / "cache"),
+        )
+        out = agent.run(inp)
+
+        assert len(out.retrieved_papers) == 1
+        assert out.retrieved_papers[0].source.verbosity == 0

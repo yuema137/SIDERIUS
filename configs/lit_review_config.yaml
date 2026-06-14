@@ -1,11 +1,110 @@
 # configs/lit_review_config.yaml
 #
-# STUB (created 2026-05-28 alongside SynthesisConfig). Config-file LOADING is a
-# Commit 7 deliverable — nothing reads this file yet; today the node is driven
-# by the programmatically-constructed LiteratureReviewInput and its schema
-# defaults. Commit 7 will flesh out root_papers, dynamic_search, llm routing,
-# etc. and wire the loader. The synthesis block below documents the new
-# transfer_tolerance knob (default mirrors SynthesisConfig.transfer_tolerance).
+# Operator-visible config for the ml_literature_review node — fleshed
+# out in Commit 6 (2026-06-11) per the design plan in
+# docs/commit_plan_ml_literature_review.md. Loaded by the workflow
+# (workflows/model_exploration.py) when the lit-review CLI gate is
+# enabled, via `run_workflow(lit_review_config_path=...)`.
+#
+# Per Design Decision 3 (2026-06-11), every operator-visible knob is
+# written explicitly even when it matches the schema default —
+# operators see all available knobs in one place without reading the
+# schema source.
+#
+# Knobs NOT in this file:
+#   * LLM routing (llm_provider / llm_model_id / search_llm_provider /
+#     search_llm_model_id) lives in WorkflowLLMConfig.lit_review — see
+#     workflows/llm_config.py + llm_configs/*.json.
+#   * Workflow-filled internal fields (experiment_history / storage /
+#     run_name) come from the chain-scoped state per iteration.
+#
+# To use a different config for a single run, copy this file and pass
+# its path via --ml_lit_review_config /path/to/other.yaml — this file
+# is the default but operators are not bound to it.
 
+# Top-level enable/disable flag — Risk 4 two-layer gate. Operators
+# may also override at the CLI via --no-ml_lit_review_enabled /
+# --ml_lit_review_enabled without editing this file. The CLI flag's
+# `ml_` prefix establishes a naming convention for future external
+# agents (Design Decision 1, 2026-06-11).
+enabled: true
+
+# ---------------------------------------------------------------------------
+# Task description — what research task this lit-review run is supporting.
+# Injected into all three lit-review LLM calls (paper-extract,
+# search-decision, synthesis) via the {TASK_DESCRIPTION} placeholder.
+# Drives the search LLM's query anchor words (e.g. "1D", "broadband",
+# "SQUID") and the synthesis LLM's relevance framing.
+#
+# Strongly recommended — an empty value falls back to the SIDERIUS_TASK
+# default constant defined in agent/prompt_templates/literature_review/
+# __init__.py. The workflow prints a Warning at YAML-load time when
+# this field is empty so operators see the fallback is happening.
+# ---------------------------------------------------------------------------
+task_description: |
+  full-spectrum 1-D time-series denoising of SQUID dark-matter
+  detector data: map a noisy [B, T] integer signal to a clean
+  [B, 256, T] reconstruction, trained across the whole frequency
+  spectrum at once (not split into per-band models).
+
+# ---------------------------------------------------------------------------
+# Root papers — curated foundational papers always resolved at agent start.
+# Per-paper extracts cached on disk under reference_data/root_papers_cache/.
+# ---------------------------------------------------------------------------
+root_papers:
+  - source_type: arxiv
+    identifier: "2406.04378"          # TIDMAD primary paper
+    verbosity: 1                      # 0=metadata only / 1=PaperExtract / 2=full text
+
+# ---------------------------------------------------------------------------
+# Dynamic S2 search loop — runs after root-paper resolution, finds related
+# papers, lets the LLM escalate selected hits to deeper verbosity.
+# ---------------------------------------------------------------------------
+dynamic_search:
+  enabled: true                       # master switch for the search loop
+  max_rounds: 3                       # hard cap on search iterations
+  initial_verbosity: 0                # starting verbosity for new search results (wired through to PaperSource per Pre-flight B fix, commit 6c493ee)
+  escalation_allowed: true            # whether the LLM may upgrade specific papers mid-loop
+  results_per_query: 10               # S2 hits per query (>10 mostly adds noise)
+  max_escalations_per_round: 2        # cap on deep-reads per round; 0 disables escalation entirely
+
+# ---------------------------------------------------------------------------
+# Output detail — 1 = three-part Implication/Mechanism/Adaptation format
+# (proposer-facing); 0 = single paragraph (backward-compat).
+# ---------------------------------------------------------------------------
+findings_verbosity: 1
+
+# ---------------------------------------------------------------------------
+# Synthesis — controls cross-domain transfer permissiveness for findings.
+# ---------------------------------------------------------------------------
 synthesis:
-  transfer_tolerance: moderate  # strict / moderate / liberal
+  transfer_tolerance: moderate        # strict / moderate / liberal
+
+# ---------------------------------------------------------------------------
+# Confidence rubric — single source of truth for what a finding's
+# confidence number means. Injected into the synthesis prompt; the
+# lit-review node clamps abstract-only-cited findings at
+# `abstract_only_ceiling`.
+#
+# Note: overriding bands here affects the SYNTHESIS PROMPT only. The
+# lit-review node's emitted `AgentCard.trust_guidance` is built from
+# the SCHEMA DEFAULTS at module-load time (see
+# nodes/ml_literature_review/ml_literature_review.py:83-86) and does
+# not see a per-run override. Known limitation, not blocking — the
+# synthesis behaviour (what the LLM is told and what gets emitted)
+# follows the override; only the proposer-facing trust legend stays
+# on defaults.
+# ---------------------------------------------------------------------------
+confidence_rubric:
+  omit_below: 0.40
+  abstract_only_ceiling: 0.79
+  bands:
+    - lower: 0.80
+      upper: 1.00
+      criteria: "deep-read (verbosity >= 1 extract) AND on-domain (1D / broadband signal denoising) AND directly addresses a current bottleneck"
+    - lower: 0.60
+      upper: 0.79
+      criteria: "deep-read with a clear mechanism transfer, OR an on-domain abstract with a strong specific signal"
+    - lower: 0.40
+      upper: 0.59
+      criteria: "abstract-only evidence, OR cross-domain with a plausible (unvalidated) transfer rationale"

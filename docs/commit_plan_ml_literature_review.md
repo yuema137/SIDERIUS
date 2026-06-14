@@ -71,6 +71,18 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
+- [ ] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` (5 prompt-content tests) + `tests/unit/agent/schemas/test_literature_review_schemas.py` (1 test on `ConfidenceRubric.render_for_searcher()` single-source-of-truth)
+- [x] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
+  · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` (2 schema tests: `SearchDecisionRecord` + `LiteratureReviewInput.task_description`) + `tests/unit/agent/ml_literature_review/test_node.py` (5 node tests: Fix 3 no-op feedback + Fix 4 decision log + Fix 6 task threading) + `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` (2 workflow tests: empty-task warning + non-empty no-warning)
+  - [x] **6.5b-1** — Schemas + provenance + task_description field (Fix 4 schemas + Fix 6 field) · committed `faaeed7`
+  - [x] **6.5b-2** — Fix 3: no-op escalation feedback · committed `e0e5f55`
+  - [x] **6.5b-3** — Fix 4 node wiring: SearchDecisionRecord + provenance + tuple return · committed `cc92443`
+  - [x] **6.5b-4** — Fix 5 remainder: dimension_counts + DIMENSION_LABELS + coverage rendering · committed `d3bfbd4`
+  - [x] **6.5b-5** — Fix 6: task_description plumbing YAML→workflow→node · committed `e61e1cf`
+  - [x] **Checkpoint S** — Search-quality re-run (5× same seed) · signed off 2026-06-13
+- [x] **Commit F** — `task_description` cleanup (remove `SIDERIUS_TASK` constant); depends on Commit 6.5b · committed (SHA 5979896)
+  · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` + full `tests/unit/` sweep (catches stray `SIDERIUS_TASK` imports)
 - [ ] **Commit 7** — Configs, cache dir README, full connection audit
   · gate full `tests/unit/` + `tests/integration/` green
 - [ ] **§10 End-to-end validation suite** — permanent acceptance gate
@@ -1740,6 +1752,70 @@ between interpretation and proposal, with `merge_external_agent_outputs` as
 the (currently single-input) aggregator and `should_run_literature_review`
 as the always-true trigger.
 
+### Implementation log (sub-step progress within Commit 6)
+
+| Sub-step | Status | Notes |
+|---|---|---|
+| Pre-flight A — `workflows/` added to `pyrightconfig.json` + 11 errors / 8 warnings fixed | ✅ done | `pyrightconfig.json` adds `workflows` to the `include` list; pre-existing pyright issues in `workflows/llm_config.py` + `workflows/model_exploration.py` cleaned to **0/0** without any `# type: ignore`. Two pre-existing `# type: ignore[arg-type]` lines at `llm_config.py:341,350` (in `.uniform()`) intentionally left alone — fixing them would propagate Literal types to external callers and is out of scope for Commit 6. |
+| Pre-flight B — Fix `dynamic_search.initial_verbosity` dormant-field bug (Step 1 of 2026-06-11 implementation order) | ✅ done | Committed `6c493ee` (2026-06-11). `_run_search_loop` reads `cfg.initial_verbosity` and passes it to `_do_search`; `_do_search` accepts the new kwarg and forwards to `_retrieved_from_search_result`; `_retrieved_from_search_result` uses it on the `PaperSource(verbosity=...)` construction. Default-value path is bit-identical (50/50 existing tests pass unchanged). Interpretation chosen (minimal — interpretation `a` per the design review): set the operator's REQUESTED verbosity on `RetrievedPaper.source.verbosity` but leave `verbosity_achieved` at 0; the S2 search itself stays metadata-only and actual deep-reads continue via the LLM's escalation decisions. Verification: ruff + pyright (file + whole-repo) clean; 50/50 lit-review unit tests pass. |
+| 6a — Read insertion point | ✅ done | Insertion point: between `interpretation = _interp_agent.run(...)` at `model_exploration.py:1080-1083` and `proposal = None` at line 1086. The cross-iter failure seeding (1086-1137) runs after lit-review so the proposer's `previous_failures` history is unaffected. |
+| 6b Part 1 — `LitReviewLLMConfig` nested config on `WorkflowLLMConfig` (Step 2 of 2026-06-11 implementation order) | ✅ done | Committed `592ec6a` (2026-06-11). New `LitReviewLLMConfig(main, search)` class added; `WorkflowLLMConfig.lit_review: LitReviewLLMConfig \| None` slot added; `.get("lit_review")` flattens to the 4-field shape `{llm_provider, llm_model_id, search_llm_provider, search_llm_model_id}` when configured, and falls back to a translated 2-field dict from `interpret` when not. `.uniform()` populates lit_review with both sub-slots = `base_cfg`. Schema-level defaults: `deepseek` / `deepseek-v4-pro` for both sub-slots (matches Step 3's JSON defaults). Verification: ruff + pyright (file + whole-repo) clean; 10/10 smoke tests pass — including a backward-compat check that all 4 existing `llm_configs/*.json` still parse against the new schema. |
+| 6b Part 2 — `should_run_literature_review` + `merge_external_agent_outputs` | ✅ done | Committed `65bc50e` (2026-06-12). `should_run_literature_review(interp_output, *, enabled)` returns `enabled` verbatim in v1; `interp_output` reserved for future content-based gating (marked unused via `del`). `merge_external_agent_outputs(outputs)` handles N=0 (4-channel empty default), N=1 with `LiteratureReviewOutput` delegating to the Commit-5 protocol `local_all_channels`, and N≥2 generic concat-then-last-non-None-mindset for future agents. Verification: ruff + pyright (file + whole-repo) clean; 5/5 smoke tests pass (enabled True/False + N=0/N=1/N=2 merge cases). |
+| 6b Part 3 — Update existing `llm_configs/*.json` (Step 3 of 2026-06-11 implementation order) | ✅ done | Committed `8764e46` (2026-06-11). All 4 configs got the same `lit_review` block (both sub-slots = `deepseek`/`deepseek-v4-pro`), uniformly across both the OpenAI-routed (`openai_tiered_*.json`, `certify_minimal.json`) and the deepseek-routed (`deepseek_tiered_pro.json`) configs — lit-review-specific routing isolated from main-pipeline routing. Verification: JSON parse + `WorkflowLLMConfig.model_validate` + `.get('lit_review')` returns the expected 4-field dict on all 4 files. +40/-0 lines total. |
+| 6c — Two `run_workflow` signature additions: `lit_review_enabled: bool = False` + `lit_review_config_path: str = "configs/lit_review_config.yaml"` | ✅ done (folded) | Committed as part of `59cc76e` (2026-06-12, sub-step 6e). Both params landed atop `run_workflow`'s signature between `run_id` and the pseudo-mode factories group, with a doc-comment explaining the resolution chain and the operator-configurable path semantics. |
+| 6d — Flesh out `configs/lit_review_config.yaml` (Step 4 of 2026-06-11 implementation order) | ✅ done | Committed `546ce72` (2026-06-11). Replaced the 4b-final stub with the full operator-visible knob set per Design Decision 3 — every knob explicit (6 top-level keys: `enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`, `synthesis`, `confidence_rubric`), all values match schema defaults verbatim so the file is a self-documenting tunable surface. Verification: `yaml.safe_load` parses cleanly; per-block `DynamicSearchConfig.model_validate` / `SynthesisConfig.model_validate` / `ConfidenceRubric.model_validate` / `PaperSource.model_validate` all pass. +88/-7 lines. |
+| 6e — Wire per-iteration insertion point | ✅ done | Committed `59cc76e` (2026-06-12). New `_build_lit_review_input` helper; `run_workflow` opens + parses YAML at `lit_review_config_path` internally (relative paths resolved against `SIDERIUS_ROOT`); conditional `MLLiteratureReviewAgent.run` once per iter; `merge_external_agent_outputs` produces `external_channels` which extends `expert_context` + `vocab_seed` and supplies `agent_cards` + `mindset` to every per-attempt `local_full_context` call. Also landed the two signature additions deferred from 6c. Bit-identical behaviour when `lit_review_enabled=False` — protocol's existing `list(x or [])` and `if mindset is not None` guards collapse empty channels to "no contributor block". Verification: ruff + pyright (file + whole-repo) clean; 3/3 smoke tests pass (symbols importable, signature defaults correct, `_build_lit_review_input` round-trips every operator-visible knob from the canonical YAML). |
+| 6f — `sdsc_submission_scripts/run_one_iteration.py` CLI flags + path threading | ✅ done | Committed `596b206` (2026-06-12). Two CLI flags landed at the end of `build_parser` per Design Decision 1: (1) `argparse.BooleanOptionalAction` for `--ml_lit_review_enabled`/`--no-ml_lit_review_enabled` (default `None` = "fall through to YAML"); (2) `--ml_lit_review_config <path>` (default `"configs/lit_review_config.yaml"`). Resolution logic in `main()` peeks at the YAML's `enabled` key only when neither CLI flag was passed; fail-safe behaviour (FileNotFoundError / yaml.YAMLError → False) prevents a misconfigured YAML from silently enabling the gate. Resolved boolean + raw path threaded into `run_workflow` right before the pseudo-mode factories. Verification: ruff clean; 6/6 smoke tests pass — including the regression check that argparse REJECTS the pre-rename name `--lit_review_enabled` (proves the `ml_` prefix is enforced, not just documented). |
+| 6g — `reference_data/root_papers_cache/README.md` | ✅ done | Committed `4019849` (2026-06-12). README documents the cache contract (one JSON per `RetrievedPaper`, filename via `_sanitize_paper_id`, paper_id is the cache key, manual deletion to invalidate) + the `DEFAULT_ROOT_CACHE_DIR` node contract. `.gitignore` tightened to `reference_data/root_papers_cache/*` + an explicit `!README.md` negation so only the README is tracked — JSON cache files stay gitignored per Risk 5. Verification: `git check-ignore -v` matches the negation rule on README and the wildcard rule on a phantom `*.json`; `git add --dry-run` accepts the README and rejects the phantom. |
+| 6h — Tests | ✅ done | Landed across two commits — Files 1-4 (helper unit tests + LitReviewLLMConfig + JSON regression + initial_verbosity regression + CLI flag naming) in `35c1f21` (2026-06-12, 24 tests + 1 modified across 4 files); File 5 (workflow-level dual-mode integration — operator-YAML passthrough, absence-tolerance, channels-reach-proposer smoke) in `82bbf94` (2026-06-12, 2 tests). Total: **26 new tests** + 1 modified. All tests pass under ruff + pytest (2/2 on the new dual-mode file in 1.10s; 135/135 on the 4 unit-test files combined). |
+
+### Design decisions log (2026-06-11)
+
+Three decisions confirmed after the schema audit:
+
+1. **CLI flag naming convention** — every external-agent CLI gate uses an `--ml_*` (or future `--phys_*` etc.) prefix. Lit-review's flags are `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` (not the earlier-drafted `--lit_review_enabled`). Establishes a forward-compatible pattern for when a second external agent lands.
+2. **Lit-review config path is operator-configurable** — `run_workflow` receives `lit_review_config_path: str = "configs/lit_review_config.yaml"`; the runner exposes `--ml_lit_review_config <path>` so different experiments can use different configs without editing the default file. The workflow opens + parses the YAML internally (the runner does not pre-parse).
+3. **LLM routing architecture** — the lit-review node has two bridges (main + search-decision). The original 6b Part 1 sketched a single `NodeLLMConfig` lit_review slot; that's replaced with a nested `LitReviewLLMConfig(main: NodeLLMConfig, search: NodeLLMConfig)`. Operators set LLM routing in `WorkflowLLMConfig` (not the lit-review YAML) — matches the existing precedent of tuner planner/reflector + proposer comparison/reasoning/proposing nested configs.
+
+**Pre-flight verification** (after pyright cleanup landed):
+- `.venv/bin/python -m ruff check workflows/` → All checks passed
+- `.venv/bin/python -m ruff format --check workflows/` → 2 files already formatted
+- `.venv/bin/python -m pyright workflows/` → 0 errors, 0 warnings, 0 informations
+- `.venv/bin/python -m pyright` (whole-repo CI gate) → 0 errors, 0 warnings, 0 informations
+
+### Pre-flight B — Fix `dynamic_search.initial_verbosity` dormant-field bug
+
+**Trigger**: schema audit on 2026-06-11 (response to Design Decision 3
+investigation). `DynamicSearchConfig.initial_verbosity` is defined on
+the schema with default `0` and a docstring describing it as the
+starting verbosity floor for newly retrieved search results — but the
+node never reads it. `_retrieved_from_search_result` at
+`nodes/ml_literature_review/ml_literature_review.py:494` hardcodes
+`PaperSource(..., verbosity=0)` on every search hit, so any non-default
+value an operator sets in the YAML would be silently ignored.
+
+**Fix**: thread `inp.dynamic_search.initial_verbosity` from `run()` →
+`_run_search_loop` → `_do_search` → `_retrieved_from_search_result`,
+replacing the hardcoded `verbosity=0`. The default behaviour stays
+identical (the schema default is `0`), so this is a non-breaking change.
+
+**Why pre-flight, not 6d**: it's a node-level bug, orthogonal to the
+workflow integration. Lands before any Commit 6 sub-step so 6d can ship
+a YAML that promises a working knob.
+
+**Files**:
+- Edit: `nodes/ml_literature_review/ml_literature_review.py` —
+  `_retrieved_from_search_result` accepts and uses
+  `initial_verbosity`; `_do_search` accepts and threads it;
+  `_run_search_loop` reads `cfg.initial_verbosity` and passes it down.
+
+**Test gate**:
+- Existing tests in `tests/unit/agent/ml_literature_review/` keep
+  passing (the default-value path is unchanged).
+- One new regression test: with `initial_verbosity=2`, a mocked search
+  hit produces a `RetrievedPaper.source.verbosity == 2`. Covered as
+  part of 6h.
+
 **Files**:
 - Edit: `workflows/model_exploration.py`
 - Edit: `configs/lit_review_config.yaml` (stub created in 4b-final; Commit 6 fills
@@ -1750,13 +1826,17 @@ as the always-true trigger.
   insertion point (depending on test design — confirm before editing).
 
 **Checklist**:
-- [ ] Read `workflows/model_exploration.py` end-to-end and **show the user
+- [x] Read `workflows/model_exploration.py` end-to-end and **show the user
       the insertion point** (post-interpretation, pre-proposal loop) with
-      surrounding line numbers before patching.
-- [ ] Add `merge_external_agent_outputs(outputs: list[ExternalAgentOutput]) -> dict[str, Any]`
+      surrounding line numbers before patching. **Insertion point**: between
+      line 1083 (interpretation print) and line 1086 (`proposal = None`),
+      before the cross-iter failure seeding at 1086-1137.
+- [x] Add `merge_external_agent_outputs(outputs: list[ExternalAgentOutput]) -> dict[str, Any]`
       as a module-level function in `workflows/model_exploration.py` (or a
       sibling helper file if that's the convention; check the file's
-      existing helper placement). Behaviour:
+      existing helper placement). **Module-level placement** chosen — one
+      call site, one external agent in v1. **Done — committed `65bc50e`
+      (2026-06-12).** Behaviour:
   - **N=1 case**: equivalent to calling the per-agent protocol's
     `local_all_channels(outputs[0])` directly — the Commit 5 protocol at
     `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py`
@@ -1780,41 +1860,137 @@ as the always-true trigger.
     The earlier-planned 5th `reference_library` kwarg was cancelled in the
     2d revision — equations now travel inline inside finding `content`, so
     the merge has nothing extra to concatenate beyond the four channels.
-- [ ] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
-      reads the resolved `enabled` flag (CLI → YAML → default True). For v1
-      the gate is just `return enabled` — `interp_output` is reserved for
-      future content-based gating (e.g. "skip lit-review when interpretation
-      confidence > 0.9"). Docstring includes the cost-tradeoff note from
-      spec §6.
+- [x] Add `should_run_literature_review(interp_output: InterpretationOutput, *, enabled: bool) -> bool`:
+      reads the resolved `enabled` flag (CLI → YAML → default `False`,
+      see Two-layer gate below). For v1 the gate is just `return enabled`
+      — `interp_output` is reserved for future content-based gating
+      (e.g. "skip lit-review when interpretation confidence > 0.9").
+      Docstring includes the cost-tradeoff note from spec §6.
+      **Done — committed `65bc50e` (2026-06-12).** Docstring also
+      names the locked CLI flags `--ml_lit_review_enabled` /
+      `--no-ml_lit_review_enabled` per Design Decision 1.
 
-  **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09):
-  - **YAML layer** (`configs/lit_review_config.yaml`): top-level
-    `enabled: bool` defaulting to `True`. Operators edit the YAML to
-    disable lit-review for an entire experiment chain.
-  - **CLI layer** (`run_one_iteration.py` / `run_chain.sh`): add a
-    `--lit_review_enabled` / `--no-lit_review_enabled` pair via
-    `argparse.BooleanOptionalAction`. Overrides the YAML default for a
-    single run without editing the config file.
+  **Two-layer enable/disable gate** (Risk 4 resolution, P-design 2026-06-09;
+  CLI flag naming locked to the `--ml_*` prefix and the config path made
+  operator-configurable per Design Decisions 1 + 2, 2026-06-11):
+  - **YAML layer** (default file `configs/lit_review_config.yaml`, but
+    the path is parameterised — see "Configurable config path" below):
+    top-level `enabled: bool` defaulting to `true`. Operators edit the
+    YAML to disable lit-review for an entire experiment chain.
+  - **CLI layer** (`run_one_iteration.py` / `run_chain.sh`): exactly
+    **two** flags for lit-review — no more.
+    1. **`--ml_lit_review_enabled` / `--no-ml_lit_review_enabled`** via
+       `argparse.BooleanOptionalAction`. Overrides the YAML default for
+       a single run without editing the config file. The `ml_` prefix
+       (Design Decision 1, 2026-06-11) establishes a naming convention
+       for future external agents — e.g. `--ml_physics_agent_enabled` /
+       `--no-ml_physics_agent_enabled` when the physics agent lands.
+       Earlier drafts of this doc used `--lit_review_enabled` without
+       the prefix; that name is **not** what ships and the tests
+       enforce a parser error on the pre-rename name (see Tests block
+       below).
+    2. **`--ml_lit_review_config`** (Design Decision 2, 2026-06-11)
+       with default `"configs/lit_review_config.yaml"`. Threaded
+       straight through to `run_workflow(lit_review_config_path=...)`
+       so the workflow opens + parses the YAML at the operator-supplied
+       path. Lets different experiments use different lit-review
+       configs without editing the default file.
   - **Resolution priority**: CLI flag (when explicitly set) >
-    YAML `enabled` > default `True`. The workflow resolves this in one
-    place before calling `should_run_literature_review`, then passes the
-    resolved boolean as a kwarg.
-  - **Scope**: the CLI flag controls **enable/disable only**, not the
-    lit-review parameters. `root_papers`, `dynamic_search`, `synthesis`,
+    YAML `enabled` > default `False`. The workflow resolves this in one
+    place before calling `should_run_literature_review`, then passes
+    the resolved boolean as a kwarg. *(Default changed from the earlier
+    draft's `True` to `False` so the production default is off until
+    operators opt in.)*
+  - **Scope (Design Decision 1, 2026-06-11)**: the CLI surface for
+    lit-review contains **exactly** these two flags — the enable/disable
+    toggle and the config path. **No other lit-review parameter is
+    exposed at the CLI.** `root_papers`, `dynamic_search`, `synthesis`,
     `confidence_rubric`, etc. all stay in the YAML — config-file-only.
-    This keeps the CLI surface manageable; operators wanting parameter
-    tweaks edit the YAML.
-- [ ] Load `configs/lit_review_config.yaml` at workflow startup (path resolved
-      relative to project root via the same mechanism the workflow already
-      uses for other configs — grep for `yaml.safe_load` to confirm). Convert
-      the parsed dict into `LiteratureReviewInput` minus the
-      `experiment_history` field (filled in per-iter from interp output).
-- [ ] At the per-iteration insertion point:
-  ```
+    LLM routing (`llm_provider` / `llm_model_id` /
+    `search_llm_provider` / `search_llm_model_id`) lives separately in
+    `WorkflowLLMConfig.lit_review` (Design Decision 3, 2026-06-11 —
+    see "LLM routing architecture" below) and is **not** in the
+    lit-review YAML either.
+
+  **LLM routing architecture** (Design Decision 3, 2026-06-11):
+  Lit-review makes three LLM calls (compression, search-decision,
+  synthesis). The original 6b Part 1 sketched a single
+  `lit_review: NodeLLMConfig | None` slot on `WorkflowLLMConfig`
+  driving all three calls through one bridge. That's replaced with
+  a nested `LitReviewLLMConfig` carrying two sub-slots — `main`
+  (compression + synthesis) and `search` (search-decision). The node
+  already reads four fields off `LiteratureReviewInput` for this split:
+  `llm_provider` + `llm_model_id` build the main bridge unconditionally
+  (`nodes/ml_literature_review/ml_literature_review.py:267`); the
+  optional `search_llm_provider` + `search_llm_model_id` build a
+  separate search-bridge when either is set, falling back per-field to
+  the main bridge otherwise (`:271-277`). `WorkflowLLMConfig.get("lit_review")`
+  flattens its two sub-slots into the matching 4-field shape so the
+  workflow can splat into `LiteratureReviewInput`. The earlier draft's
+  plan to expose `search_llm_provider` / `search_llm_model_id` in the
+  lit-review YAML is cancelled — all LLM routing lives in
+  `WorkflowLLMConfig` (mirrors the tuner planner/reflector + proposer
+  comparison/reasoning/proposing nested-config precedent).
+- [x] Load the lit-review YAML at workflow startup via the new
+      `lit_review_config_path: str = "configs/lit_review_config.yaml"`
+      kwarg on `run_workflow` (Design Decision 2, 2026-06-11). The path
+      is resolved relative to project root via the same mechanism the
+      workflow already uses for other configs (grep for `yaml.safe_load`
+      to confirm). **The workflow opens + parses the YAML internally —
+      it does NOT receive a pre-parsed dict from the caller**, so the
+      runner stays focused on argument passing and the workflow owns
+      the config schema's interpretation. Open + parse the file only
+      when `lit_review_enabled=True` (an unused path never hits the
+      filesystem). Convert the parsed dict into the non-LLM fields of
+      `LiteratureReviewInput`; the four LLM-routing fields come from
+      `llm_config.get("lit_review")` (Design Decision 3, 2026-06-11),
+      `experiment_history` comes from the per-iter `InterpretationOutput`,
+      `storage` + `run_name` come from the workflow's run-scoped state.
+      **Done — committed `59cc76e` (2026-06-12).** Relative paths
+      resolve to `SIDERIUS_ROOT` via `os.path.isabs` check;
+      `_build_lit_review_input` uses `LiteratureReviewInput.model_validate`
+      to drive Pydantic's nested-schema validation in one shot.
+- [x] At the per-iteration insertion point: **Done — committed
+      `59cc76e` (2026-06-12).** Implementation matches the pseudo-code
+      example below; the proposal-loop's `local_full_context` call now
+      receives `expert_context = expert_context_for_propose +
+      external_channels["expert_context"]`, `vocab_seed = vocab_seed +
+      external_channels["vocab_seed"]`, `agent_cards =
+      external_channels["agent_cards"]`, `mindset =
+      external_channels["mindset"]` — bit-identical to pre-Commit-6
+      behaviour when `lit_review_enabled=False`.
+  ```python
+  # ----- In run_one_iteration.py — resolved ONCE per chain process,
+  # then passed as two separate kwargs into run_workflow.
+  # ml_lit_review_enabled is None when neither --ml_lit_review_enabled
+  # nor --no-ml_lit_review_enabled was passed (BooleanOptionalAction
+  # signals "fall through to YAML" with None). When non-None, the CLI
+  # overrides the YAML.
+  if args.ml_lit_review_enabled is not None:
+      ml_lit_review_enabled = args.ml_lit_review_enabled
+  else:
+      with open(args.ml_lit_review_config) as f:
+          ml_lit_review_enabled = yaml.safe_load(f).get("enabled", False)
+
+  run_workflow(
+      ...,
+      lit_review_enabled=ml_lit_review_enabled,
+      lit_review_config_path=args.ml_lit_review_config,  # default "configs/lit_review_config.yaml"
+  )
+
+  # ----- In run_workflow — opens + parses the YAML internally, only
+  # when actually used (lit_review_enabled=True). An unused path never
+  # hits the filesystem.
   interp_output = result_interpretation_agent.run(...)
-  lit_review_enabled = _resolve_lit_review_enabled(cli_args, lit_review_config)
   if should_run_literature_review(interp_output, enabled=lit_review_enabled):
-      lit_input = build_lit_review_input(lit_review_config, interp_output, ...)
+      with open(lit_review_config_path) as f:
+          lit_review_config = yaml.safe_load(f)
+      lit_input = _build_lit_review_input(
+          lit_review_config,
+          interp_output,
+          llm_kwargs=llm_config.get("lit_review"),  # 4-field flatten from LitReviewLLMConfig
+          ...,
+      )
       lit_output = ml_literature_review.run(lit_input)
       external_outputs = [lit_output]
   else:
@@ -1838,35 +2014,166 @@ as the always-true trigger.
   injecting a synthesized `human` `AgentCard` with
   `trust_level="strong_prior"`. Dropping `human_advice` here would lose
   the only path human directives reach the proposer.
-- [ ] Flesh out `configs/lit_review_config.yaml` (a stub exists from
-      Commit 4b-final containing only the `synthesis.transfer_tolerance`
-      block; the stub's note "Commit 7 will flesh out" is **outdated** —
-      Commit 6 does this, Commit 7 just adds the cache README + audit).
+- [x] **Step 3 — Update existing `llm_configs/*.json`** to add a
+      `lit_review` block matching the new `LitReviewLLMConfig` shape.
+      Four files affected:
+      - `llm_configs/certify_minimal.json`
+      - `llm_configs/deepseek_tiered_pro.json`
+      - `llm_configs/openai_tiered_pro.json`
+      - `llm_configs/openai_tiered_v1.json`
+
+      The new `lit_review` block adds two sub-slots `main` + `search`,
+      both as full `NodeLLMConfig` objects. Default routing per
+      operator instruction (2026-06-11): both sub-slots set to
+      `deepseek` / `deepseek-v4-pro` (the cheap-but-strong synthesis
+      model the §10 Phase-2 work converged on; the search-decision
+      step is the cheap templated call, deepseek is a fine match for
+      both).
+
+      Example block (uniform across all 4 files):
+  ```json
+  "lit_review": {
+    "main": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    },
+    "search": {
+      "provider": "deepseek",
+      "model_id": "deepseek-v4-pro"
+    }
+  }
+  ```
+
+      Without this update, an operator loading any of the 4 existing
+      configs against the new `WorkflowLLMConfig` schema would still
+      validate (the `lit_review` slot is `LitReviewLLMConfig | None`
+      with default `None`) — but `.get("lit_review")` would fall back
+      to `interpret`, producing a 2-field flatten that the lit-review
+      node would treat as "no search-bridge override" and route the
+      search-decision call through the main bridge. That's a correct
+      fallback, not a bug — but the explicit `lit_review` block is
+      the operator-visible source of truth Design Decision 3 calls for.
+
+      **Status (2026-06-11)**: ✅ Done — committed `8764e46`. All 4
+      configs updated with the same `lit_review` block; backward-compat
+      verified by JSON parse + `WorkflowLLMConfig.model_validate` +
+      `.get('lit_review')` → 4-field `{llm_provider, llm_model_id,
+      search_llm_provider, search_llm_model_id}` dict on every file.
+- [x] Flesh out `configs/lit_review_config.yaml` — **the default
+      lit-review config**, at the default path (operators wanting a
+      non-default config copy this and point at it via
+      `--ml_lit_review_config /path/to/other.yaml`, per Design Decision
+      2, 2026-06-11). A stub exists from Commit 4b-final containing
+      only the `synthesis.transfer_tolerance` block; the stub's note
+      "Commit 7 will flesh out" is **outdated** — Commit 6 does this,
+      Commit 7 just adds the cache README + audit.
+
+      **Status (2026-06-11)**: ✅ Done — committed `546ce72`. Replaced
+      the stub with the full 6-key operator-visible knob set
+      (`enabled`, `root_papers`, `dynamic_search`, `findings_verbosity`,
+      `synthesis`, `confidence_rubric`); every value matches the
+      schema default verbatim per the source-of-truth principle.
+      Verification: yaml.safe_load + per-block Pydantic validation
+      all pass.
+
+      Per Design Decision 3 (2026-06-11), **every operator-visible
+      knob is written explicitly even when it matches the schema
+      default** — operators see all available knobs in one place
+      without reading the schema source. The only fields omitted are
+      (a) workflow-filled internal fields (`experiment_history` /
+      `storage` / `run_name`) and (b) LLM routing fields (which live
+      in `WorkflowLLMConfig.lit_review` per Design Decision 3 — NOT
+      in this file).
+
       Replace the stub with:
   ```yaml
-  # Top-level enable/disable flag — Risk 4 two-layer gate. Operators may
-  # also override at the CLI via --no-lit_review_enabled / --lit_review_enabled
-  # without editing this file.
+  # Top-level enable/disable flag — Risk 4 two-layer gate. Operators
+  # may also override at the CLI via --no-ml_lit_review_enabled /
+  # --ml_lit_review_enabled without editing this file. The CLI flag's
+  # `ml_` prefix establishes a naming convention for future external
+  # agents (Design Decision 1, 2026-06-11).
   enabled: true
 
+  # ---------------------------------------------------------------------------
+  # Root papers — curated foundational papers always resolved at agent start.
+  # Per-paper extracts cached on disk under reference_data/root_papers_cache/.
+  # ---------------------------------------------------------------------------
   root_papers:
     - source_type: arxiv
-      identifier: "2406.04378"      # TIDMAD
-      verbosity: 1
+      identifier: "2406.04378"          # TIDMAD primary paper
+      verbosity: 1                      # 0=metadata only / 1=PaperExtract / 2=full text
+
+  # ---------------------------------------------------------------------------
+  # Dynamic S2 search loop — runs after root-paper resolution, finds related
+  # papers, lets the LLM escalate selected hits to deeper verbosity.
+  # ---------------------------------------------------------------------------
   dynamic_search:
-    enabled: true
-    max_rounds: 3
-    initial_verbosity: 0
-    escalation_allowed: true
+    enabled: true                       # master switch for the search loop
+    max_rounds: 3                       # hard cap on search iterations
+    initial_verbosity: 0                # starting verbosity for new search results (wired through after Pre-flight B fix)
+    escalation_allowed: true            # whether the LLM may upgrade specific papers mid-loop
+    results_per_query: 10               # S2 hits per query (>10 mostly adds noise)
+    max_escalations_per_round: 2        # cap on deep-reads per round; 0 disables escalation entirely
+
+  # ---------------------------------------------------------------------------
+  # Output detail — 1 = three-part Implication/Mechanism/Adaptation format
+  # (proposer-facing); 0 = single paragraph (backward-compat).
+  # ---------------------------------------------------------------------------
+  findings_verbosity: 1
+
+  # ---------------------------------------------------------------------------
+  # Synthesis — controls cross-domain transfer permissiveness for findings.
+  # ---------------------------------------------------------------------------
   synthesis:
-    transfer_tolerance: moderate    # preserved from the 4b-final stub
+    transfer_tolerance: moderate        # strict / moderate / liberal
+
+  # ---------------------------------------------------------------------------
+  # Confidence rubric — single source of truth for what a finding's
+  # confidence number means. Injected into the synthesis prompt; the
+  # lit-review node clamps abstract-only-cited findings at
+  # ``abstract_only_ceiling``.
+  #
+  # Note: overriding bands here affects the SYNTHESIS PROMPT only. The
+  # lit-review node's emitted ``AgentCard.trust_guidance`` is built from
+  # the SCHEMA DEFAULTS at module-load time (see
+  # nodes/ml_literature_review/ml_literature_review.py:83-86) and does
+  # not see a per-run override. Known limitation, not blocking — the
+  # synthesis behaviour (what the LLM is told and what gets emitted)
+  # follows the override; only the proposer-facing trust legend stays
+  # on defaults.
+  # ---------------------------------------------------------------------------
+  confidence_rubric:
+    omit_below: 0.40
+    abstract_only_ceiling: 0.79
+    bands:
+      - lower: 0.80
+        upper: 1.00
+        criteria: "deep-read (verbosity >= 1 extract) AND on-domain (1D / broadband signal denoising) AND directly addresses a current bottleneck"
+      - lower: 0.60
+        upper: 0.79
+        criteria: "deep-read with a clear mechanism transfer, OR an on-domain abstract with a strong specific signal"
+      - lower: 0.40
+        upper: 0.59
+        criteria: "abstract-only evidence, OR cross-domain with a plausible (unvalidated) transfer rationale"
   ```
-- [ ] Create `reference_data/root_papers_cache/README.md` explaining: format
+
+  **Knobs NOT in this file** (and why):
+  - `llm_provider` / `llm_model_id` / `search_llm_provider` /
+    `search_llm_model_id` — LLM routing lives in `WorkflowLLMConfig.lit_review`
+    (Design Decision 3, 2026-06-11). The workflow flattens that nested
+    config into the 4 fields the lit-review node reads.
+  - `experiment_history` — workflow fills per-iter from `InterpretationOutput`.
+  - `storage` / `run_name` — workflow fills with chain-scoped state.
+- [x] Create `reference_data/root_papers_cache/README.md` explaining: format
       (one JSON file per paper, named `{paper_id}.json`, content is a
       serialized `RetrievedPaper`), invalidation (delete the file manually
       to force re-fetch + re-compression), and the contract with the
       lit-review node (`DEFAULT_ROOT_CACHE_DIR` constant at
       `nodes/ml_literature_review.py:61` points here by default).
+      **Done — committed `4019849` (2026-06-12).** Also tightened
+      `.gitignore` from a whole-dir ignore to `*` + `!README.md` so
+      only the README escapes the ignore — keeps the "JSONs only,
+      README is documentation" intent visible to future operators.
 
   **Risk 5 resolution (P-design 2026-06-09)**: only the README is
   committed in Commit 6 — NOT the cache files themselves. Production
@@ -1877,20 +2184,108 @@ as the always-true trigger.
   the Phase-1 / Phase-2 / §10 FULL tests use) into
   `reference_data/root_papers_cache/`. We may revisit committing the
   files if reproducibility issues from S2 variability become a problem.
-- [ ] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`):
-  - [ ] `merge_external_agent_outputs([single_output])` returns the four
+- [x] Tests (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`)
+      — **complete** as of `82bbf94` (File 5). Helpers + `_build_lit_review_input`
+      land as unit tests in `35c1f21`; the 3 workflow-level tests
+      (config_path passthrough, absence-tolerance, wiring smoke) live as
+      dual-mode integration tests in
+      `tests/integration/workflows/test_lit_review_wiring_dual_mode.py`
+      (commit `82bbf94`) — splitting the test surface into the
+      lighter-weight unit file and the heavier dual-mode file matches
+      the test-classification rule (unit = mocked helpers; integration =
+      workflow-level wiring with all 5 node agents patched).
+  - [x] `merge_external_agent_outputs([single_output])` returns the four
         channels mapped correctly.
-  - [ ] `merge_external_agent_outputs([])` returns the empty default
+  - [x] `merge_external_agent_outputs([])` returns the empty default
         (`findings=[], new_vocab_candidates=[], agent_cards=[], mindset=None`).
-  - [ ] `merge_external_agent_outputs([a, b])` — concat-then-last-wins for
+  - [x] `merge_external_agent_outputs([a, b])` — concat-then-last-wins for
         mindset; concatenation for the list channels.
-  - [ ] `should_run_literature_review(...)` returns `True` for an arbitrary
-        `InterpretationOutput`.
-  - [ ] Wiring smoke test: with `ml_literature_review.run` mocked to return
-        a canned `LiteratureReviewOutput`, invoke the per-iter section and
-        assert the `ProposalInput` arriving at the proposer has the expected
-        `agent_cards` and `expert_context` entries.
-- [ ] **Extend an existing dual-mode test to cover the lit-review insertion
+  - [x] `should_run_literature_review(...)` respects the `enabled` kwarg
+        in both directions (True → True, False → False).
+  - [x] **`lit_review_config_path` passthrough** (Design Decision 2,
+        2026-06-11): with a tmp YAML at a non-default path, invoke
+        `run_workflow(lit_review_config_path=tmp_path, lit_review_enabled=True, ...)`
+        and assert the workflow opens + parses *that* file, not the
+        default at `configs/lit_review_config.yaml`. Asserts both
+        (a) the YAML at `tmp_path` is read, and (b) the resulting
+        `LiteratureReviewInput.root_papers` matches the tmp file's
+        contents. **Done — landed in
+        `tests/integration/workflows/test_lit_review_wiring_dual_mode.py::test_lit_review_enabled_threads_operator_yaml_channels_to_proposer`
+        (commit `82bbf94`, 2026-06-12)**. Sentinel arxiv id "9999.99999"
+        in the tmp YAML is asserted on the captured
+        `LiteratureReviewInput.root_papers[0].identifier`.
+  - [x] **`lit_review_config_path` is NOT touched when
+        `lit_review_enabled=False`**: with `lit_review_config_path`
+        pointed at a path that does not exist, the workflow runs
+        without raising — confirms the path is opened only when
+        actually used. **Done — landed in
+        `test_lit_review_wiring_dual_mode.py::test_lit_review_disabled_tolerates_missing_yaml_path`
+        (commit `82bbf94`)**.
+  - [x] Wiring smoke test: with `MLLiteratureReviewAgent.run` mocked to
+        return a canned `LiteratureReviewOutput`, invoke the per-iter
+        section and assert the `ProposalInput` arriving at the proposer
+        has the expected `agent_cards` and `expert_context` entries.
+        **Done — landed in
+        `test_lit_review_wiring_dual_mode.py::test_lit_review_enabled_threads_operator_yaml_channels_to_proposer`
+        (commit `82bbf94`)**, with assertions on
+        `prop_input.agent_cards[0].agent_name == "ml_literature_review"`
+        and the lit-review finding's `source_ref`.
+
+- [x] Tests for `LitReviewLLMConfig` (`tests/unit/workflows/test_llm_config.py`
+      — extend existing file; Design Decision 3, 2026-06-11) — **Done,
+      committed `35c1f21` (2026-06-12)**, 7 new tests + 1 modified
+      (test_default_all_slots_none now asserts cfg.lit_review is None).
+      All 4 sub-bullets pass:
+  - [x] `WorkflowLLMConfig.get("lit_review")` returns a 4-field dict
+        when the slot is configured: `{llm_provider, llm_model_id,
+        search_llm_provider, search_llm_model_id}`.
+  - [x] `WorkflowLLMConfig.get("lit_review")` falls back to
+        `.get("interpret")` semantics when `lit_review is None` (back-compat).
+        Implementation note: the fallback translates key names
+        (`provider` → `llm_provider`, `model_id` → `llm_model_id`);
+        the test asserts the translated shape, not the verbatim
+        `.get("interpret")` dict.
+  - [x] `WorkflowLLMConfig.uniform("openai", "gpt-4o-mini")` populates
+        both `lit_review.main` and `lit_review.search` with the same
+        `NodeLLMConfig`.
+  - [x] All 4 existing `llm_configs/*.json` files parse successfully
+        against the updated schema (regression — guards against the
+        Step 3 update being incomplete).
+
+- [x] Tests for `sdsc_submission_scripts/run_one_iteration.py` CLI flag
+      naming + threading (Design Decision 1, 2026-06-11) — **Done,
+      committed `35c1f21` (2026-06-12)**, 6 new tests in
+      `TestLitReviewCLI` (one extra test splits the True/False
+      `--ml_lit_review_enabled` cases for clarity). All 4 sub-bullets
+      pass:
+  - [x] `argparse` accepts `--ml_lit_review_enabled` (→ `True`) and
+        `--no-ml_lit_review_enabled` (→ `False`); when neither flag is
+        passed, the namespace value is `None` (the BooleanOptionalAction
+        sentinel for "fall through to YAML").
+  - [x] `argparse` rejects the **pre-rename name** `--lit_review_enabled`
+        with a parser error — confirms the `ml_` prefix is enforced,
+        not just documented. Use `pytest.raises(SystemExit)` on
+        `parse_args`.
+  - [x] `--ml_lit_review_config /path/to/other.yaml` is threaded through
+        unchanged to `run_workflow(lit_review_config_path=...)` (mock
+        `run_workflow` and assert the kwarg value). *(Implementation
+        note: argparse-level only — the test asserts
+        `args.ml_lit_review_config == "/path/to/other.yaml"`; the
+        threading-through-to-`run_workflow` part is exercised
+        end-to-end in File 5.)*
+  - [x] Default `--ml_lit_review_config` value is
+        `"configs/lit_review_config.yaml"` when the flag is omitted.
+
+- [x] **`initial_verbosity` regression test** (Pre-flight B,
+      2026-06-11) in `tests/unit/agent/ml_literature_review/`: with
+      `DynamicSearchConfig(initial_verbosity=2)`, a mocked S2 search
+      hit produces a `RetrievedPaper.source.verbosity == 2`. Default
+      (`initial_verbosity=0`) path keeps existing behaviour — guard
+      against silent regression. **Done, committed `35c1f21`
+      (2026-06-12)**, 2 tests in `TestInitialVerbosity` (the explicit
+      `initial_verbosity=2` test + a default-zero regression that
+      guards against accidental knob-flip from the Pre-flight B fix).
+- [x] **Extend an existing dual-mode test to cover the lit-review insertion
       point** (Risk 6 resolution, P-design 2026-06-09 — do NOT just rely
       on the wiring smoke test). Candidates from
       `tests/integration/workflows/`: `test_k9_invented_model_dual_mode.py`
@@ -1899,7 +2294,16 @@ as the always-true trigger.
       `LiteratureReviewOutput` and asserts the per-iteration
       `ProposalInput` carries the expected `agent_cards` + `expert_context`.
       Catches workflow-level wiring regressions for free on every
-      dual-mode CI run.
+      dual-mode CI run. **Done — committed `82bbf94` (2026-06-12).**
+      Deviation from the spec: rather than extending one of the
+      existing files (both of which test `agent.run()` directly,
+      not `run_workflow`), a NEW dedicated file
+      `tests/integration/workflows/test_lit_review_wiring_dual_mode.py`
+      was created — same dual-mode `pytestmark`, same mocking pattern,
+      cleaner separation of concerns (the existing files focus on
+      tuner-state and gate-exhaustion propagation; this one focuses
+      on lit-review insertion). 2 tests cover both the enabled and
+      disabled paths.
 
 **Test gate**:
 ```
@@ -2016,6 +2420,1045 @@ and traceable.
 - Tier-0 dual-mode coverage: does any existing dual-mode test exercise the
   interpretation → proposal handoff? If yes, extend it; if no, the wiring
   smoke test in this commit is the only gate at this layer.
+
+---
+
+## Commit 6.5 — Search-quality fixes (post-audit, 2026-06-12)
+
+**Trigger**: two read-only investigations on 2026-06-12 — (a) the code audit
+of `agent/prompt_templates/literature_review/search_decision_system.md` +
+`nodes/ml_literature_review/ml_literature_review.py:_run_search_loop` +
+`agent/schemas/literature_review.py` against the canonical-trace artifact
+(`docs/dynamic_search_pilot.md`); and (b) a direct S2 API check running 11
+queries (3 LLM-generated + 8 manually crafted) against live Semantic Scholar.
+Together they surfaced six search-quality gaps that compound across
+Checkpoint D's A/B comparison runs.
+
+### Audit findings (shared across 6.5a + 6.5b)
+
+1. **No confidence-band framing in the search-decision prompt.** The LLM
+   has no instruction tying escalation (v=0 → v=1) to confidence bands.
+   `ConfidenceRubric._default_confidence_bands()` defines v=0 capping at
+   0.40-0.59, v=1 enabling 0.60-0.79, and v=1 + on-domain + bottleneck
+   enabling 0.80+ — but the search-decision LLM has never been told this.
+   **Evidence**: canonical trace produced 3 findings at v=0 with
+   confidences 0.45 / 0.50 / 0.45 — entirely in the abstract-only band
+   ceiling (§5 of `docs/dynamic_search_pilot.md`).
+2. **Binary `Mandatory assessment` block** (lines 93-106 of
+   `search_decision_system.md`). The block asks "does *any* paper qualify?"
+   and tells the LLM "ESCALATE *that* paper" (singular pronoun + qualifier).
+   After round 1's escalate of SNRAware (no-op, already a v=1 root), the
+   LLM had no instruction to re-evaluate the menu for newcomers — TADA
+   (`arxiv:2501.04967`) and FreLE (`arxiv:2510.25800`) became findings at
+   v=0 despite arriving in later rounds and being on-bottleneck.
+3. **No-op escalations are silent.** `MLLiteratureReviewAgent._escalate`
+   accepts calls on papers already at v≥requested without telling the
+   LLM. From the LLM's perspective in rounds 2-4 of the canonical trace,
+   its round-1 escalate "succeeded"; nothing nudged it to pick a different
+   paper. **Evidence**: `_escalate` returns nothing observable; the loop
+   at line 458 of the node increments `escalations_this_round`
+   regardless of whether the call did real work.
+4. **Per-round decisions are not persisted.** The only output artifact
+   (`LiteratureReviewOutput.{retrieved_papers, search_rounds_used,
+   findings}`) carries no `reasoning`, no per-paper provenance, and no
+   per-decision audit trail. The `reasoning` field IS emitted by the LLM
+   per the Output contract, but is captured only via
+   `logger.info(..., json.dumps(decision)[:500])` at line 426 of the node
+   — truncated to 500 chars, INFO-level only.
+5. **Query coverage is single-dimensional in real runs.** Direct S2 API
+   check (2026-06-12, 11 queries × top-5 results = 55 results) showed the
+   LLM's 3 canonical-trace queries (`"SNR maximization loss denoising"`,
+   `"sample reweighting loss time series denoising"`, `"spectral loss
+   denoising time series"`) all anchored on bottleneck 2 (loss-metric
+   mismatch). **Zero LLM queries** targeted bottleneck 1 (file-17 /
+   hard-segment recovery) or bottleneck 3 (tiny-data robustness). Zero
+   LLM queries included on-domain anchors (`"1D"`, `"broadband"`,
+   `"SQUID"`). Manually crafted queries returned **3 papers more directly
+   on-domain than the canonical findings** — `arxiv:2001.04460`
+   (differentiable perceptual audio loss, 2020), `arxiv:2403.04350` (GW
+   self-supervised denoising, 2024), and a cluster of 1D broadband
+   denoising autoencoder papers — none seen by the LLM. The gap is ~80%
+   query-quality, ~20% S2 coverage.
+6. **No `task_description` threading.** All three lit-review render
+   functions accept `task_description: str = SIDERIUS_TASK` but the node
+   never passes one. Every run uses the SIDERIUS-specific default text
+   regardless of `LiteratureReviewInput`. There is no
+   `LiteratureReviewInput.task_description` schema field; no YAML key;
+   no node call-site plumbing. The synthesis prompt's `{TASK_DESCRIPTION}`
+   placeholder + the search prompt's are both already wired in the .md
+   files and the render functions — but only the constant flows through.
+
+### Goal
+
+Close these six gaps so (a) the search-decision LLM is informed enough
+to escalate strategically AND cover all three bottleneck dimensions,
+(b) the no-op feedback channel exists, (c) Checkpoint D's A/B
+comparison runs produce diagnosable + comparable artifacts that survive
+past the INFO log, and (d) the task description is operator-controlled
+rather than hardcoded.
+
+### Commit-split rationale (resolved 2026-06-12, was Open Q3)
+
+Commit 6.5 splits into two atomic commits to minimise blast radius:
+
+- **6.5a** = prompt-only changes (Fixes 1, 2, 5). Smaller surface; fast
+  test cycle; can be reverted independently if Checkpoint S reveals a
+  prompt-side regression.
+- **6.5b** = code + schema + YAML changes (Fixes 3, 4, 6). Adds the
+  observability and feedback channels the search prompt needs.
+
+**Checkpoint S runs after 6.5b lands** — it needs Fix 4's
+`search_decisions` field to compute coverage metrics and Fix 6's task
+injection to validate query anchoring. Both 6.5a and 6.5b must be on
+disk for Checkpoint S to be meaningful.
+
+---
+
+### Commit 6.5a — Prompt-only fixes (Fixes 1, 2, 5)
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/search_decision_system.md`
+  — goal-statement rewrite (Fix 5), Mandatory-assessment rewrite (Fix 2),
+  new confidence-band section + new query-generation-dimensions section
+  (Fixes 1 + 5).
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — `render_search_decision_prompt` only: wire the new
+  `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder; extend the
+  `prior_search_results` block to render coverage distribution (Fix 5).
+- Edit: `agent/schemas/literature_review.py`
+  — small addition only: the new `ConfidenceRubric.render_for_searcher()`
+  method. **No field additions** — `SearchDecisionRecord` +
+  `LiteratureReviewOutput.search_decisions` +
+  `RetrievedPaper.discovered_in_round` + `discovered_via_query` +
+  `LiteratureReviewInput.task_description` all land in 6.5b.
+- Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
+  — Fixes 1, 2, 5 prompt-content tests.
+- Edit: `tests/unit/agent/schemas/test_literature_review_schemas.py`
+  — `ConfidenceRubric.render_for_searcher()` single-source-of-truth test.
+
+#### Checklist — Fix 1: Confidence-band framing in `search_decision_system.md`
+
+- [x] Add `ConfidenceRubric.render_for_searcher() -> str` method to
+      `agent/schemas/literature_review.py`. Renders the three default
+      bands keyed to the verbosity → confidence-band → escalation-value
+      framing (distinct from `.render()` for synthesis omission and
+      `.render_for_consumer()` for AgentCard trust legend). · landed
+      (pre-commit, files on disk 2026-06-12)
+- [x] Add a new section to `search_decision_system.md` (positioned above
+      "## When to escalate vs. search vs. stop", former line 108, now
+      line 177 after Edits B/C/D shifted line numbers) titled
+      **"## Why escalation matters for finding confidence"** carrying:
+  - The rendered `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder (single
+    source of truth — bands come from `ConfidenceRubric`, not hardcoded
+    in the .md).
+  - The strategic framing: *"A paper cited from its abstract alone (v=0)
+    caps the finding's confidence at the 0.40-0.59 band. Escalating to
+    v=1 lets the synthesis LLM cite the same paper at confidence ≥0.60
+    — strategically valuable when the paper is on-domain AND addresses
+    one of the listed bottlenecks. The proposer reads each finding's
+    confidence and weights its trust accordingly; a 0.65 finding lands
+    more influence than a 0.45 one. Escalating an on-domain
+    on-bottleneck paper is worth one round because it unlocks a
+    higher-confidence finding that the proposer weights more heavily."*
+- [x] Wire the `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder in
+      `render_search_decision_prompt` via the same `.replace(...)`
+      pattern the existing `{TASK_DESCRIPTION}` placeholder uses.
+      Implementation also adds a `confidence_rubric: ConfidenceRubric |
+      None = None` kwarg mirroring `render_synthesis_prompt`, so a
+      custom rubric flows through the whole agent (synthesis +
+      consumer + searcher) from a single source.
+
+#### Checklist — Fix 2: Enumerative `Mandatory assessment` block
+
+- [x] Rewrite the Mandatory-assessment block of
+      `search_decision_system.md` (was lines 93-106 pre-edit; now lines
+      127-150 post-edit) from binary to enumerative. The new block:
+  - Tell the LLM to mentally rank **ALL retrieved papers** (not just one)
+    against the current bottlenecks.
+  - Tell the LLM to **list qualifying paper_ids in its `reasoning`
+    field**.
+  - Tell the LLM to **escalate the highest-ranked paper that has not
+    been deep-read yet** (verbosity_achieved < 1).
+  - Only choose SEARCH when the qualifying list is empty.
+  - Acknowledge that the escalation budget allows multiple escalations
+    between searches (referencing `max_escalations_per_round`).
+
+#### Checklist — Fix 5: Goal rewrite + query generation guidance + coverage diversity
+
+- [x] Rewrite lines 1-4 (the goal statement) of
+      `search_decision_system.md`. New text (slightly expanded from the
+      spec — adds "You output ONE JSON object" closing for clarity):
+  ```
+  You are the search strategist for an automated ML denoising research
+  agent. Each round you decide the single most valuable next action to
+  build a literature picture that helps the proposer design a better
+  architecture. Bottlenecks are the highest priority, but adjacent
+  techniques, novel training strategies, and domain-specific tricks are
+  ALL in scope — a paper that addresses a bottleneck obliquely (e.g.
+  perceptual loss for audio when our bottleneck is loss-metric mismatch
+  on 1D signals) can be just as valuable as a direct hit.
+  ```
+- [x] Add a new section **"## Query generation — four dimensions to
+      cover"** below the "## Translating the experiment state into a
+      query" section. Lists 4 dimensions:
+  1. **Bottlenecks** (highest priority) — every bottleneck in the list
+     should be touched by at least one query across the run.
+  2. **Take-home message direction** — the operator's literal directive
+     (top of the user prompt). If it says "target file 17 recovery", at
+     least one query must target hard-segment recovery.
+  3. **Architectural gaps in `key_findings`** — gaps the experiment has
+     not yet covered (e.g. if findings show all explored models are
+     spectral, search for non-spectral alternatives).
+  4. **Adjacent techniques not covered by `explored model_types`** —
+     audio/speech/biomedical denoising mechanisms, augmentation
+     strategies, regularisation tricks; cross-domain mechanism transfer
+     is welcome.
+- [x] Add a coverage diversity rule to the Output contract: *"In your
+      `reasoning` field for a `search` action, label which dimension the
+      query targets — one of `bottleneck`, `take_home`,
+      `architectural_gap`, `adjacent_technique`. Across the run, you
+      MUST cover ≥ 2 distinct dimensions."*
+- [x] Extend `prior_search_results` rendering in
+      `render_search_decision_prompt` to show **coverage distribution**:
+      e.g. *"Coverage so far: bottleneck=2, take_home=0,
+      architectural_gap=0, adjacent_technique=0."*
+
+  **Landed 2026-06-12 in 6.5b-4 sub-commit (SHA d3bfbd4).**
+  Implementation across two files:
+  * `agent/prompt_templates/literature_review/__init__.py`:
+    - New `DIMENSION_LABELS: tuple[str, ...]` constant (single source
+      of truth for the 4 dimension vocabulary).
+    - `render_search_decision_prompt` gained
+      `dimension_counts: dict[str, int] | None = None` kwarg.
+    - Coverage line rendered INSIDE the `## Queries already tried this
+      run` block, AFTER the per-query lines and BEFORE the 0-hit
+      broaden nudge. Format: `Coverage so far: bottleneck=N,
+      take_home=N, architectural_gap=N, adjacent_technique=N.` (no
+      interpretive suffix — LLM reads the counts and decides). Omitted
+      when `dimension_counts` is None/empty, or when
+      `prior_search_results` is None.
+  * `nodes/ml_literature_review/ml_literature_review.py`:
+    - `DIMENSION_LABELS` added to the existing import.
+    - New module-level helper `_parse_dimension(reasoning: str) -> str
+      | None`: case-insensitive substring scan returning the
+      LEFTMOST-mention label; None when no label appears (diagnostic
+      signal that the LLM didn't follow the labelling rule).
+    - `_run_search_loop` initializes `dimension_counts: dict[str, int]`
+      with all 4 labels at 0; after each successful search action,
+      parses the dimension label from `decision.get("reasoning")` and
+      increments. Threaded through to `render_search_decision_prompt`
+      every round.
+    - Pyright-required refactor: `_append_decision` was moved OUT of
+      the while loop (was inside per 6.5b-3) and now takes
+      `dec: dict[str, Any]` + `current_rounds: int` as explicit args.
+      The in-loop closure-with-default-args pattern triggered a
+      `reportGeneralTypeIssues` self-reference error from pyright
+      after adding the dimension_counts mutation in the same loop
+      body; the function-scope helper resolves it cleanly while
+      preserving the DRY benefit and eliminating any B023 lint risk.
+      All 7 call sites updated to pass `decision, rounds` explicitly.
+      Audit-trail output is byte-identical to 6.5b-3.
+
+  Implementation deviation from the spec sample: NO interpretive
+  suffix (the spec wrote *"...you have not yet addressed the take_home
+  priority; consider it next round."*). Bare counts let the LLM
+  reason about coverage based on the system prompt's four-dimensions
+  section; adding a directive suffix would duplicate that guidance.
+
+  Source-of-counts deviation: spec said "needs the
+  `search_decisions[].reasoning` capture from Fix 4 to compute the
+  counts." Implementation reads from `decision.get("reasoning")`
+  directly in `_run_search_loop` at decision time — same string,
+  accessed earlier in the data flow. The `search_decisions` audit
+  trail still captures the reasoning for post-hoc inspection.
+
+  **Test gate run — 6.5b-4 (pre-commit, 2026-06-12)**: 163 passed in
+  1.19s (160 baseline + 3 net-new). `ruff check` + `ruff format
+  --check` + `pyright` all green on the 2 production files.
+
+  Tests delivered:
+  - `tests/unit/agent/ml_literature_review/test_node.py::TestParseDimension::test_parse_dimension_first_label_heuristic`
+    — case-insensitive leftmost-match for all 4 labels; None for
+    no-match and empty.
+  - `tests/unit/agent/prompt_templates/test_literature_review_prompts.py::TestSearchDecisionPrompt::test_dimension_coverage_line_renders_inside_prior_block`
+    — coverage line renders with all 4 labels in correct ordering
+    (queries → coverage → broaden nudge).
+  - `...::test_dimension_coverage_omitted_when_no_counts_or_no_prior`
+    — None / empty dict / None prior_search_results all skip the line.
+- [x] **Trusted dimension labels** (resolved 2026-06-12, was Open Q1):
+      labels in the `reasoning` field are TRUSTED — the node counts
+      what the LLM self-reports, no parser-enforced contract. A missing
+      label is itself a diagnostic signal that Fix 5 is incomplete
+      (visible in the captured `search_decisions[].reasoning` for
+      post-hoc inspection). No node-side validation of the label
+      vocabulary.
+
+#### Test gate — 6.5a
+
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py \
+  tests/unit/agent/schemas/test_literature_review_schemas.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py \
+  agent/schemas/literature_review.py
+```
+
+Test floor — **6 new tests** + 0 modifications:
+
+- **Fix 1**: 2 tests. (a) Rendered search-decision system prompt
+  contains the three band criteria + the "escalating an on-domain
+  on-bottleneck paper unlocks a higher-confidence finding" sentence
+  (`tests/unit/agent/prompt_templates/...`). (b) Regression:
+  `ConfidenceRubric.render_for_searcher()`, `.render()`, and
+  `.render_for_consumer()` all render the same band bounds for the
+  default rubric (single source of truth)
+  (`tests/unit/agent/schemas/...`).
+- **Fix 2**: 2 prompt-content tests. (a) The rewritten block contains
+  "rank", "list every paper that qualifies", "highest-ranked".
+  (b) Anti-regression: the binary phrasing "does any retrieved paper
+  directly address" is no longer present.
+- **Fix 5**: 2 prompt-content tests. (a) Rewritten goal statement
+  contains "adjacent techniques" + "in scope"; the four-dimension list
+  is present. (b) `render_search_decision_prompt` test: with mocked
+  `prior_search_results` carrying 3 labelled queries (counts:
+  bottleneck=2, adjacent_technique=1, take_home=0,
+  architectural_gap=0), the rendered block contains the coverage
+  distribution line citing all four dimensions with those counts.
+
+**Test gate run — 2026-06-12 (pre-commit)**: 152 passed in 0.84s
+(147 baseline + 5 net-new = 152; test 5 below is an in-place rewrite of
+the Commit 6 `test_mandatory_escalation_assessment_block_present` and
+so doesn't add a row). `ruff check` + `ruff format --check` + `pyright`
+all green on the 3 production files.
+
+Test-floor mapping (3 schema + 2 prompt + 1 rewrite delivered vs. the
+spec's 2+2+2 along Fix-1/2/5 lines — same total volume, structural
+regrouping):
+
+- Fix 1 covered by: schema-side `test_render_for_searcher_has_all_default_bands`
+  + `test_render_for_searcher_has_search_leadin_not_producer_or_consumer`
+  + `test_render_for_searcher_with_custom_rubric` (single-source-of-
+  truth across the three render methods); prompt-side
+  `test_confidence_rubric_for_search_placeholder_filled` (the
+  `{CONFIDENCE_RUBRIC_FOR_SEARCH}` placeholder is filled, the
+  "Why escalation matters for finding confidence" section header is
+  present, all three default-band bounds appear, the strategic-framing
+  sentence "Escalating an on-domain on-bottleneck paper... unlocks a
+  higher-confidence finding" is verified as an explicit substring
+  match — spec Fix 1 (a) — and a custom rubric flows through via the
+  new `confidence_rubric` kwarg).
+- Fix 2 covered by: rewritten in-place
+  `test_mandatory_escalation_assessment_block_present` — asserts the
+  new enumerative-ranking language ("scan ALL papers retrieved",
+  "list (by paper_id) EVERY paper that qualifies",
+  "verbosity_achieved < 1", "Only choose SEARCH when NO retrieved
+  paper qualifies", "defaulting to" + "SEARCH is not acceptable").
+  Spec's Fix 2 (b) anti-regression ("does any retrieved paper directly
+  address" must be absent) is covered by construction — the .md has
+  exactly one assessment block and it was rewritten to contain the
+  new phrasing.
+- Fix 5 covered by: prompt-side
+  `test_four_dimensions_section_and_label_rule_present` — the new
+  "## Query generation — four dimensions to cover" section header is
+  present, all four dimension names appear, the "label which dimension
+  the query targets" + "cover ≥ 2 distinct dimensions" Output-contract
+  rule appears. Spec's Fix 5 (b) coverage-distribution rendering test
+  is deferred along with the feature itself to 6.5b (Fix 4 dependency).
+
+---
+
+### Commit 6.5b — Code + schema + YAML fixes (Fixes 3, 4, 6)
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — `render_search_decision_prompt` extended with
+  `prior_escalation_results` kwarg + the no-op-feedback sub-block
+  (Fix 3).
+- Edit: `agent/schemas/literature_review.py`
+  — new `SearchDecisionRecord` class (Fix 4); new `search_decisions`
+  field on `LiteratureReviewOutput` (Fix 4); new `discovered_in_round`
+  + `discovered_via_query` fields on `RetrievedPaper` (Fix 4); new
+  `task_description: str = ""` field on `LiteratureReviewInput` (Fix 6).
+- Edit: `nodes/ml_literature_review/ml_literature_review.py`
+  — `_run_search_loop` records decisions; `_escalate` returns/signals
+  no-op status; per-paper provenance written when papers arrive via
+  `_do_search` + `_retrieved_from_search_result`;
+  `MLLiteratureReviewAgent.run` populates `search_decisions`; all three
+  render-function call sites pass `inp.task_description`
+  (Fixes 3 + 4 + 6).
+- Edit: `workflows/model_exploration.py`
+  — `_build_lit_review_input` reads `task_description` from YAML; logs
+  an INFO warning when empty (Fix 6).
+- Edit: `configs/lit_review_config.yaml`
+  — new `task_description:` top-level key with multi-line comment +
+  SIDERIUS-default example (Fix 6).
+- Edit: `tests/unit/agent/schemas/test_literature_review_schemas.py`
+  — Fix 4 + Fix 6 schema tests.
+- Edit: `tests/unit/agent/ml_literature_review/test_node.py`
+  — Fixes 3, 4, 6 node tests.
+- Edit: `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
+  — Fix 6 workflow-level tests (warn on empty, no warn on non-empty).
+
+#### Checklist — Fix 3: No-op escalation feedback
+
+- [x] Modify `MLLiteratureReviewAgent._escalate` to return a status
+      indicating no-op vs real work. The no-op check fires when
+      `target.verbosity_achieved >= requested_verbosity` BEFORE running
+      the skill call.
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
+  Implementation: the pre-call check
+  (`if target.verbosity_achieved >= target_verbosity: return "noop"`)
+  fires at the top of `_escalate` per spec — skips the resolve skill
+  when the LLM mis-asks for an already-achieved verbosity, saving one
+  API call. A post-call defense-in-depth check is also present
+  (catches empty `full_text` responses + the verbosity-didn't-rise
+  case after a compress failure) — covers degenerate skill responses
+  the pre-call check can't anticipate. Return type is
+  `Literal["ok", "noop", "error"]`; `target.error` is set on the
+  `"error"` path. Budget charge applies on every outcome
+  (Decision 2, 2026-06-12).
+- [x] Modify `_run_search_loop` to track no-op escalations in a local
+      `prior_escalation_results: list[tuple[str, bool, str]]` —
+      `(paper_id, was_noop, reasoning)` — passed into
+      `render_search_decision_prompt` as a new kwarg.
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
+  Implementation deviation: tuple slot 2 is `str` (one of
+  `"ok"` / `"noop"` / `"error"`), not `bool was_noop`. Preserves the
+  3-state signal end-to-end so the LLM distinguishes errors from
+  no-ops (a hard fetch failure should not be re-tried any more than a
+  no-op, but the LLM's reasoning about WHY differs). Approved
+  in-conversation 2026-06-12.
+- [x] Extend `render_search_decision_prompt` to accept
+      `prior_escalation_results` and render a sub-block in the user
+      prompt (parallel to the existing `## Queries already tried this
+      run` block):
+  ```
+  ## Escalations already attempted this run
+  - "arxiv:2503.18162" → no-op (was already v=1); pick a different paper next time
+  - "arxiv:2501.04967" → deep-read produced extract (now v=1)
+  ```
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
+  Implementation deviation: the rendered format is richer than the
+  spec sample. Each row carries the status's user-facing label
+  (`"success — paper now deep-read"` / `"no-change — paper was already
+  at the requested verbosity OR fetch returned no new content"` /
+  `"error — resolve call failed; do not retry this paper"`) plus the
+  LLM's original reasoning excerpt (truncated to 200 chars with `…`
+  ellipsis). The richer format is what the new test
+  `test_prior_escalation_results_renders_three_statuses` locks in.
+- [x] Add a system-prompt nudge alongside the existing
+      broaden-on-0-hit nudge: *"An escalation that returned 'no-op'
+      means the paper was already at the requested verbosity —
+      escalating it again wastes a round; pick a different on-bottleneck
+      paper."*
+
+  **Landed 2026-06-12 in 6.5b-2 sub-commit (SHA e0e5f55).**
+  Implementation deviation: the nudge lives in the **user prompt**
+  (appended to the escalation-history block when non-empty), not in
+  the system prompt. Wording is *"Do NOT re-escalate a paper whose
+  last status was 'no-change' or 'error' — pick a different paper,
+  search for a new one, or stop."* Trade-off chosen: context-aware
+  (appears only when there's escalation history) vs. always-present
+  in system prompt. Context-aware avoids noise on first round when
+  there are no prior escalations.
+
+#### Test gate run — 6.5b-2 (pre-commit, 2026-06-12)
+
+157 passed in 1.03s (153 baseline + 4 net-new). `ruff check` +
+`ruff format --check` + `pyright` all green on the 2 production files
+(`agent/prompt_templates/literature_review/__init__.py`,
+`nodes/ml_literature_review/ml_literature_review.py`).
+
+Tests delivered:
+- `tests/unit/agent/prompt_templates/test_literature_review_prompts.py::TestSearchDecisionPrompt::test_prior_escalation_results_renders_three_statuses`
+  — 3 statuses render their specific labels + paper_ids + do-not-retry
+  nudge + 200-char reasoning truncation with ellipsis.
+- `...::test_prior_escalation_results_omitted_when_none_or_empty`
+  — None and `[]` both omit the entire block.
+- `tests/unit/agent/ml_literature_review/test_node.py::TestEscalation::test_escalate_returns_ok_when_verbosity_raised`
+  — happy path returns `"ok"` and raises `verbosity_achieved`.
+- `...::test_escalate_returns_noop_on_empty_full_text_and_error_on_failure`
+  — two sub-cases: empty full_text → `"noop"` (no mutation); resolve
+  fail → `"error"` (target.error set).
+
+#### Checklist — Fix 4: Persistent search decision log
+
+- [x] Add `SearchDecisionRecord` Pydantic class in
+      `agent/schemas/literature_review.py`:
+  ```python
+  class SearchDecisionRecord(BaseModel):
+      round_index: int = Field(
+          ge=1,
+          description="1-indexed round the decision belongs to. Search "
+          "actions consume this round; escalate / done actions occur "
+          "within it.",
+      )
+      action: str = Field(
+          description="Action the LLM returned. Expected: 'search' | "
+          "'escalate' | 'done', but typed as ``str`` (not ``Literal``) so "
+          "anomalous responses surface in the audit trail instead of "
+          "raising ValidationError and crashing the loop "
+          "(Decision 4, 2026-06-12).",
+      )
+      query: str | None = Field(default=None,
+          description="The S2 query string, set when action='search'.")
+      paper_id: str | None = Field(default=None,
+          description="The escalation target's paper_id, set when action='escalate'.")
+      verbosity: int | None = Field(default=None,
+          description="Requested verbosity tier for the escalation "
+          "(typically 1 or 2).")
+      reasoning: str = Field(default="",
+          description="The LLM's free-text justification, captured "
+          "verbatim. The dynamic-search rule requires the LLM to label "
+          "which of {bottleneck, take_home, architectural_gap, "
+          "adjacent_technique} the query targets; the node trusts the "
+          "label (no parser-enforced contract).")
+      outcome: str = Field(
+          description="Post-execution result. Canonical values: 'ok' / "
+          "'noop' / 'error' (escalate); 'n_hits=N' (search); "
+          "'budget_exceeded' / 'target_not_found' / 'unknown_action' "
+          "(degenerate); 'done' (stop).")
+  ```
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
+  **Implementation deviations from the spec draft above** (all resolved
+  in this conversation):
+  * `round_idx` → `round_index` (more readable; Decision 3 reaffirmed
+    1-indexing means search-only, so `ge=1` rejects 0/negative).
+  * `action: Literal[...]` → `action: str` — Decision 4 (type-permissive
+    so anomalous LLM responses surface in the audit trail instead of
+    crashing the loop with `ValidationError`).
+  * The three outcome flags (`hits: int | None`, `noop: bool`,
+    `cap_hit: bool`) are collapsed into a single `outcome: str` field
+    with canonical values listed above. Rationale: one string field
+    extends to new outcome categories (e.g. `"empty_query"`,
+    `"target_not_found"`) without schema changes; the typed-triple
+    would have needed a parallel bool added per category.
+  * New `verbosity: int | None` field — captures the LLM's requested
+    escalation tier (1 or 2) so the audit log is self-describing
+    without re-reading the live log.
+  * `reasoning` made optional (`default=""`) — a malformed LLM
+    response that omits `reasoning` still records.
+- [x] Add `search_decisions: list[SearchDecisionRecord] =
+      Field(default_factory=list)` to `LiteratureReviewOutput`.
+      Backward-compat: existing serialised outputs default to `[]`; no
+      migration needed. **Landed 2026-06-12 in 6.5b-1 schema sub-commit
+      (SHA faaeed7).** Field description landed slightly expanded:
+      *"Audit trail of LLM decisions inside the dynamic-search loop —
+      one record per LLM call. Empty when the search loop did not run
+      (dynamic_search.enabled=False) or the LLM call raised before any
+      decision was logged. See SearchDecisionRecord."*
+- [x] Add provenance fields to `RetrievedPaper`:
+  ```python
+  discovered_in_round: int | None = Field(
+      default=None,
+      ge=0,
+      description="0 = root paper (pre-loop); 1..max_rounds = the search "
+      "round that surfaced this paper. None for legacy/cached entries.",
+  )
+  discovered_via_query: str | None = Field(
+      default=None,
+      description="The S2 query string that returned this paper. None for "
+      "root papers and for legacy/cached entries.",
+  )
+  ```
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
+  Implementation deviation: `ge=0` constraint added on
+  `discovered_in_round` to reject negative values explicitly (the
+  semantics — 0 for roots, 1+ for search hits — make negatives
+  meaningless). Field descriptions also expanded to spell out the
+  "Pydantic default fires when key is absent → backward-compat with
+  pre-6.5b cached JSON" claim, which is what the new schema-side test
+  `test_provenance_fields_default_and_legacy_cache_backward_compat`
+  proves end-to-end via `RetrievedPaper.model_validate_json`.
+- [x] Modify `_run_search_loop` to build a `SearchDecisionRecord` after
+      every LLM call (search, escalate-success, escalate-noop,
+      escalate-cap-hit, done) into a local `decisions` list.
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
+  Implementation: closure-style helper `_append_decision(action_str,
+  outcome)` defined inside the while loop, captures `decision` and
+  `rounds` via default-arg locking per `feedback_ruff_fix_patterns`
+  (`_rounds=rounds, _decision=decision`). Called from 7 outcome sites
+  covering every action path:
+    * `done` → `outcome="done"` (terminal)
+    * `search` empty query → `outcome="empty_query"` (terminal)
+    * `search` success → `outcome=f"n_hits={n_hits}"`
+    * `escalate` budget-exceeded → `outcome="budget_exceeded"`
+    * `escalate` executed → `outcome=status` ("ok" / "noop" / "error" from Fix 3)
+    * `escalate` target-not-found → `outcome="target_not_found"`
+    * catch-all `escalate-while-disabled` → `outcome="escalation_disabled"`
+    * catch-all truly-unknown action → `outcome="unknown_action"`
+
+  Method return type changed `int → tuple[int, list[SearchDecisionRecord]]`.
+  Round-index semantic: `round_index = rounds + 1` (1-indexed; decision
+  belongs to next-to-execute round). The escalate-while-disabled split
+  is a small enhancement over the original spec — the audit trail now
+  distinguishes a config mismatch from a true LLM hallucination
+  (approved in-conversation 2026-06-12).
+- [x] Pass `round_idx` + current query string down into `_do_search` +
+      `_retrieved_from_search_result` so new papers carry provenance.
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
+  Implementation: `_do_search` gained `round_index: int` keyword-only
+  parameter; threads it + the `query` string down to
+  `_retrieved_from_search_result` (which also gained both as
+  keyword-only). Each new `RetrievedPaper` constructed with
+  `discovered_in_round=round_index` + `discovered_via_query=query`.
+  Internal naming `round_idx` was renamed to `round_index` for
+  consistency with `SearchDecisionRecord.round_index` (single
+  vocabulary across the codebase).
+
+  Implementation extends beyond the spec: `_build_retrieved_from_resolve`
+  is ALSO patched to explicitly set `discovered_in_round=0` +
+  `discovered_via_query=None` on root papers. Per Decision 3 from the
+  2026-06-12 design conversation: root papers get 0 (not None) to
+  match "search hits = 1+" symmetrically. This is 4.D in this commit's
+  internal numbering — landed alongside 4.E because both touch
+  `RetrievedPaper` construction.
+- [x] Populate `LiteratureReviewOutput.search_decisions` from the
+      accumulated records in `MLLiteratureReviewAgent.run`.
+
+  **Landed 2026-06-12 in 6.5b-3 sub-commit (SHA cc92443).**
+  Implementation: `run()` unpacks `_run_search_loop`'s new tuple
+  return — `rounds_used, search_decisions = self._run_search_loop(...)` —
+  then passes `search_decisions` to the `LiteratureReviewOutput`
+  construction. When `dynamic_search.enabled=False` the loop never
+  runs and `search_decisions` defaults to `[]` (initialized at the
+  top of `run()` so the type hint flows even on the disabled path).
+
+#### Test gate run — 6.5b-3 (pre-commit, 2026-06-12)
+
+57 passed in 1.08s (54 baseline + 3 net-new). `ruff check` +
+`ruff format --check` + `pyright` all green on the single production
+file (`nodes/ml_literature_review/ml_literature_review.py`).
+
+Tests delivered (all in new `TestSearchDecisionLog` class in
+`tests/unit/agent/ml_literature_review/test_node.py`):
+- `test_search_decisions_records_all_action_types` — exercises a
+  search → escalate → done sequence; asserts every record's `action`,
+  `outcome`, `round_index`, per-action fields (`query` for search,
+  `paper_id` + `verbosity` for escalate), and `reasoning` excerpt.
+  Locks in the 1-indexed `round_index = rounds + 1` semantic.
+- `test_search_hit_provenance_tags_round_index_and_query` —
+  `discovered_in_round=1` and `discovered_via_query=<the query>` reach
+  the new `RetrievedPaper` end-to-end through `_do_search` +
+  `_retrieved_from_search_result`.
+- `test_root_paper_provenance_tagged_zero` — root paper resolved at
+  agent start carries `discovered_in_round=0` and
+  `discovered_via_query=None`.
+
+#### Checklist — Fix 6: `task_description` config field + node threading
+
+- [x] Add `task_description: str = ""` to `LiteratureReviewInput` in
+      `agent/schemas/literature_review.py`. `Field` description must
+      strongly recommend operators fill it in: *"Concrete downstream
+      task description shown to all three lit-review LLM calls
+      (compression, search-decision, synthesis). Drives search-query
+      anchor words and synthesis relevance framing. Default empty
+      string means 'task block omitted from prompts'; operators SHOULD
+      set this via configs/lit_review_config.yaml's `task_description:`
+      key so the LLM has a concrete domain to anchor its queries on."*
+
+  **Landed 2026-06-12 in 6.5b-1 schema sub-commit (SHA faaeed7).**
+  Landed wording reframes the recommendation around the Commit F
+  bridge explicitly: *"...When empty, the node falls back to
+  ``SIDERIUS_TASK`` (the lit-review module's default constant) — this
+  is a temporary bridge; Commit F flips the default to the empty
+  string and removes ``SIDERIUS_TASK`` entirely. Workflow logs a
+  warning when this field is empty."* Operationally identical (the
+  Field's default value is still `""` and the recommendation to set
+  it in YAML is still present); the wording change makes the
+  Commit-F dependency more discoverable from the field docstring
+  itself.
+- [x] Add `task_description:` to `configs/lit_review_config.yaml` with
+      a multi-line comment + a SIDERIUS-default example. Place it
+      immediately under `enabled:` so operators see it first when
+      editing. Example block:
+  ```yaml
+  # Concrete downstream task this lit-review run is supporting. Injected
+  # into all three lit-review LLM calls (compression, search-decision,
+  # synthesis) via the {TASK_DESCRIPTION} placeholder. Drives the search
+  # LLM's query anchor words (e.g. "1D", "broadband", "SQUID") and the
+  # synthesis LLM's relevance framing.
+  #
+  # Strongly recommended — an empty value omits the task block from
+  # prompts and forces the LLM to guess the domain from key_findings +
+  # bottlenecks alone (the canonical-trace failure mode).
+  task_description: |
+    Full-spectrum 1-D time-series denoising of SQUID dark-matter detector
+    data: map a noisy [B, T] integer signal to a clean [B, 256, T]
+    reconstruction, trained across the whole frequency spectrum at once
+    (not split into per-band models).
+  ```
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
+  Implementation landed with slightly different framing in the YAML
+  comment block — references "the SIDERIUS_TASK default constant"
+  explicitly and notes the workflow prints a Warning at YAML-load time.
+  Default value lower-cased to match the prompt-module SIDERIUS_TASK
+  constant verbatim.
+- [x] Modify `_build_lit_review_input` (in
+      `workflows/model_exploration.py`) to read
+      `config.get("task_description", "")` from the YAML dict and pass
+      it into the `LiteratureReviewInput` constructor.
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
+  Implementation: `str(config.get("task_description", "") or "").strip()`
+  collapses missing key, None value, empty string, and whitespace-only
+  — all into "" before the `if not task_description:` warning check.
+  Then included in the `model_validate` dict so the validated input
+  carries it through to the node.
+- [x] **Log an INFO-level warning in `_build_lit_review_input`** (in
+      `workflows/model_exploration.py`) when `task_description == ""`
+      — wording: *"`task_description` is empty in lit_review_config.yaml;
+      lit-review LLM calls will receive no task-domain anchor and may
+      produce off-domain queries. Strongly recommended: set
+      `task_description:` in the YAML."* (Resolved 2026-06-12, was
+      Open Q2.) The warning fires at YAML-load time, NOT at render time
+      — render-time warnings would fire 3+ times per run and clutter
+      logs.
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
+  Implementation deviation: uses `print("Warning: ...")` rather than
+  `logger.info(...)`. Reason: `workflows/model_exploration.py` has no
+  logger setup — file convention is `print("Warning: ...")` for
+  operator-visible warnings (matches existing pattern at line 136 for
+  vocab seed load failure). Operator approval received in-conversation
+  2026-06-12 (Fix 6.C revision). Wording landed slightly expanded:
+  *"Warning: lit_review config has no `task_description` — the
+  lit-review agent will fall back to the SIDERIUS_TASK default constant.
+  Set `task_description:` in configs/lit_review_config.yaml to
+  specialize the agent's search/synthesis behavior for your problem."*
+- [x] Modify `MLLiteratureReviewAgent` call sites in
+      `nodes/ml_literature_review/ml_literature_review.py` to pass
+      `inp.task_description` to all three render functions
+      (`render_paper_extract_prompt`, `render_search_decision_prompt`,
+      `render_synthesis_prompt`).
+
+  **Landed 2026-06-12 in 6.5b-5 sub-commit (SHA e61e1cf).**
+  Implementation: `run()` computes `self._task_description =
+  inp.task_description or SIDERIUS_TASK` once after bridge setup, then
+  all three render call sites pass `task_description=self._task_description`.
+  Storing on `self` (rather than threading `inp.task_description`
+  through `_compress`'s signature) keeps `_compress` callable from
+  `_escalate` without a parameter chain.
+
+  Pre-existing test fix: `test_escalate_returns_ok_when_verbosity_raised`
+  (from 6.5b-2) bypassed `agent.run()` and called `_escalate` directly,
+  which now indirectly requires `self._task_description`. The test was
+  updated to set `agent._task_description = "test task"` manually
+  alongside the existing `agent.bridge = bridge` setup.
+- [x] **No `.md` file changes** — all three prompts already have the
+      `{TASK_DESCRIPTION}` placeholder (confirmed 2026-06-12); this fix
+      only wires the data source from the YAML through to the
+      placeholder substitution. Confirmed during 6.5b-5 implementation:
+      no `.md` files were touched.
+- [x] **Commit-F dependency**: this fix REPLACES the `SIDERIUS_TASK`
+      default usage in node call sites but leaves the constant defined
+      in `__init__.py`. Commit F follows up by deleting the constant +
+      changing the render defaults from `SIDERIUS_TASK` to `""`. Order
+      matters — Commit F must NOT land before Commit 6.5b.
+      Dependency now unblocked — 6.5b-5 is the last sub-commit of
+      6.5b, so Commit F can land next once the operator approves.
+
+#### Test gate run — 6.5b-5 (pre-commit, 2026-06-12)
+
+198 passed in 4.08s (195 baseline + 3 net-new). `ruff check` + `ruff
+format --check` + `pyright` all green on the 2 production files
+(`nodes/ml_literature_review/ml_literature_review.py`,
+`workflows/model_exploration.py`).
+
+Tests delivered:
+- `tests/unit/workflows/test_model_exploration_lit_review_wiring.py::TestBuildLitReviewInput::test_warns_on_empty_task_description`
+  — 3 sub-cases (missing key / empty string / whitespace-only) all
+  trigger the warning via capsys.
+- `...::test_no_warning_when_task_description_set` — non-empty value
+  → no warning + flows to `inp.task_description`.
+- `tests/unit/agent/ml_literature_review/test_node.py::TestTaskDescriptionPlumbing::test_task_description_reaches_all_three_render_calls`
+  — custom value reaches all 3 LLM-facing system prompts (paper_extract
+  / search_decision / synthesis) captured by FakeBridge.
+
+Bonus: pre-existing `test_escalate_returns_ok_when_verbosity_raised`
+(from 6.5b-2) updated with one-line setup expansion to set
+`agent._task_description` since it bypasses `agent.run()`.
+
+#### Test gate — 6.5b
+
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/schemas/test_literature_review_schemas.py \
+  tests/unit/agent/ml_literature_review/test_node.py \
+  tests/unit/workflows/test_model_exploration_lit_review_wiring.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py \
+  configs/lit_review_config.yaml
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/ \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py \
+  agent/schemas/literature_review.py \
+  nodes/ml_literature_review/ml_literature_review.py \
+  workflows/model_exploration.py
+```
+
+Test floor — **9 new tests** + 0 modifications:
+
+- **Fix 3** (2 tests, `tests/unit/agent/ml_literature_review/test_node.py`):
+  (a) `FakeBridge` returns escalate→search; the first escalate targets
+  an already-v=1 paper; assert the second round's user prompt contains
+  the rendered no-op feedback line + the broaden-on-noop nudge.
+  (b) Assert `LiteratureReviewOutput.search_decisions[0].noop is True`.
+- **Fix 4** (3 tests): (a) Schema
+  (`tests/unit/agent/schemas/test_literature_review_schemas.py`):
+  `SearchDecisionRecord` validates with each of search-with-hits,
+  escalate-success, escalate-noop, escalate-cap-hit, done shapes.
+  (b) Node: a canned full loop produces a `search_decisions` list
+  matching the canned LLM responses 1-for-1. (c) Node: every
+  `retrieved_papers[i]` from a search-loop addition carries
+  `discovered_in_round` = the round it was added in and
+  `discovered_via_query` = the query that surfaced it; root papers
+  carry `discovered_in_round=0` and `discovered_via_query=None`.
+- **Fix 6** (4 tests): (a) Schema: `LiteratureReviewInput` accepts
+  `task_description=""` (default) AND a non-empty string. (b) Node:
+  with a non-empty `task_description` on the input, all three render
+  functions receive it (verifiable via FakeBridge prompt captures).
+  (c) Workflow
+  (`tests/unit/workflows/test_model_exploration_lit_review_wiring.py`):
+  `_build_lit_review_input` logs an INFO warning when YAML omits
+  `task_description:` (captured via caplog). (d) Workflow:
+  `_build_lit_review_input` does NOT warn when YAML provides a
+  non-empty `task_description:`.
+
+#### 🔍 Behavioral Checkpoint S — Search-quality re-run (5× same seed)
+
+**Trigger**: after BOTH 6.5a and 6.5b land + their respective test
+gates are green. Checkpoint S validates the combined effect of all six
+fixes — it cannot run after 6.5a alone (no `search_decisions` to
+inspect) and would not be conclusive after 6.5b alone (no
+prompt-level behavioral changes).
+
+**How to run**: re-run `MLLiteratureReviewAgent` **5 times** on the same
+`InterpretationOutput` seed used in the canonical trace
+(`/home/klz/Data/SIDEREIS_DATA/exploration_explore_novel_v12_0504/iter_014/iteration_014/interpretation_iter_014.json`).
+Same configuration as the canonical trace: `deepseek-v4-pro` for all
+three sub-calls, `findings_verbosity=1`,
+`synthesis_config.transfer_tolerance="moderate"`, `max_rounds=3`,
+`escalation_allowed=True`, `max_escalations_per_round=2`. Set
+`task_description:` in the YAML to the SIDERIUS-default text (per the
+Fix 6 example). Capture each run's `LiteratureReviewOutput` to disk
+under `reference_data/lit_review_pilot_cache/post_6_5_audit_runs/run_{N}.json`.
+
+**Pass criteria (all must hold)**:
+
+| # | Criterion | Pre-fix baseline (canonical trace) |
+|---|---|---|
+| 1 | **≥ 4 of 5 runs produce ≥ 1 non-no-op escalation** | 0/1 runs (SNRAware escalate was a no-op) |
+| 2 | **≥ 3 of 5 runs produce ≥ 1 finding cited at v=1** | 0/1 runs (all 3 findings at v=0) |
+| 3 | **≥ 2 of 5 runs produce a finding with confidence ≥ 0.60** | 0/1 runs (confidences 0.45 / 0.50 / 0.45) |
+| 4 | **All 5 runs cover ≥ 2 distinct dimensions** (verifiable from `search_decisions[].reasoning`) | 1/1 covered 1 dimension only (all queries on loss-metric mismatch) |
+| 5 | **`search_decisions` populated in all 5 runs** with complete per-round records | N/A pre-fix (field didn't exist) |
+
+**Diagnostics to inspect** (per-run):
+
+- Round-1 decision: enumerative ranking in `reasoning` (Fix 2 working)
+  — should cite ≥ 2 paper_ids when the menu has more than one
+  candidate.
+- Any subsequent round received a no-op feedback line in its rendered
+  user prompt (Fix 3 working) — verifiable from a captured prompt
+  snapshot per run.
+- Coverage distribution rendered in `prior_search_results` block
+  (Fix 5 working) — verifiable from a captured prompt snapshot.
+- For each finding, walk the chain:
+  `finding.source_ref → retrieved_papers[ref].verbosity_achieved →
+  discovered_in_round → search_decisions[round]`. Broken chains
+  indicate Fix 4 incomplete.
+
+**What this decides**: whether Checkpoint D can run on Commit 6.5's
+surface. If any pass criterion fails, the failure mode is logged into
+the artifact and Commit 6.5 stays open until a follow-up fix iteration
+closes it. **Checkpoint D is gated until Checkpoint S passes.**
+
+**Artifact**: `docs/search_quality_validation.md` containing the 5
+runs' aggregated metrics table, per-run round-by-round decision
+walkthroughs (condensed to the diagnostic essentials), captured prompt
+snapshots proving Fixes 3 + 5 fired, and the human verdict.
+
+### Resolved open questions (2026-06-12)
+
+- **Q1** (Fix 5 dimension labels): **trusted** — node counts what the
+  LLM self-reports; no parser-enforced label contract; missing labels
+  are diagnostic signals visible in `search_decisions[].reasoning`.
+- **Q2** (Fix 6 default behavior): **log an INFO warning in
+  `_build_lit_review_input`** when `task_description == ""`; do NOT
+  warn at render time (would fire 3+ times per run).
+- **Q3** (Commit split): **split into 6.5a (prompt-only) + 6.5b (code +
+  schema + YAML)**; Checkpoint S runs after 6.5b lands (needs Fix 4's
+  `search_decisions` field + Fix 6's task injection).
+
+---
+
+## Commit F — `task_description` cleanup (remove SIDERIUS_TASK constant)
+
+**Trigger**: follow-up to Commit 6.5b Fix 6. Once
+`LiteratureReviewInput.task_description` exists + the node passes
+`inp.task_description` to all three render functions + the YAML carries
+the operator-set value, the `SIDERIUS_TASK` constant + its use as
+render-function default becomes dead code.
+
+**Goal**: remove the hardcoded `SIDERIUS_TASK` constant from
+`agent/prompt_templates/literature_review/__init__.py` and unify all
+three lit-review prompts (compression, search-decision, synthesis) to
+read their task description exclusively from
+`LiteratureReviewInput.task_description`. After Commit F, the only
+place the SIDERIUS-specific task text lives is the
+`configs/lit_review_config.yaml` (the canonical operator default,
+landed in Commit 6.5b Fix 6).
+
+**Strict ordering**: Commit F MUST land after Commit 6.5b. If Commit F
+landed first, the render defaults would silently switch from the
+SIDERIUS-specific text to `""`, leaving prompts with empty task blocks
+until the YAML and node call-sites caught up — exactly the
+canonical-trace failure mode the audit flagged.
+
+**Files**:
+- Edit: `agent/prompt_templates/literature_review/__init__.py`
+  — remove `SIDERIUS_TASK` constant + the 2-line prose comment above
+  it; change the `task_description: str = SIDERIUS_TASK` default to
+  `task_description: str = ""` on all three render functions
+  (`render_paper_extract_prompt`, `render_search_decision_prompt`,
+  `render_synthesis_prompt`); update docstrings to reflect the new
+  default + point operators at `LiteratureReviewInput.task_description`.
+- `agent/prompt_templates/literature_review/paper_extract_system.md`,
+  `search_decision_system.md`, `synthesis_system.md` — **no change**.
+  All three already carry the `{TASK_DESCRIPTION}` placeholder; the
+  empty-string substitution just replaces the placeholder with an
+  empty line under the heading. Confirmed by grep (1 placeholder each,
+  2026-06-12).
+- Edit: `tests/unit/agent/prompt_templates/test_literature_review_prompts.py`
+  — update any test that previously expected the SIDERIUS-specific
+  default text. Add one new test for the empty-default behavior + one
+  for the non-empty round-trip.
+
+**Checklist**:
+- [x] Remove `SIDERIUS_TASK` constant + its 2-line prose comment from
+      `agent/prompt_templates/literature_review/__init__.py`.
+- [x] Update `render_paper_extract_prompt` signature: change
+      `task_description: str = SIDERIUS_TASK` → `task_description: str = ""`.
+- [x] Update `render_search_decision_prompt` signature: same change.
+- [x] Update `render_synthesis_prompt` signature: same change.
+- [x] Confirm the three .md files still have `{TASK_DESCRIPTION}`
+      placeholders — no .md edits required (re-verify with grep).
+- [x] Confirm `nodes/ml_literature_review/ml_literature_review.py` call
+      sites still pass `inp.task_description` (landed in 6.5b Fix 6 —
+      Commit F just confirms the wiring is correct after the defaults
+      flip).
+- [x] Update any existing prompt-content unit tests that hardcoded the
+      `SIDERIUS_TASK` text. Most assertions are structural and should
+      keep passing; the few that quoted the SIDERIUS text need to be
+      re-pointed at operator-supplied test fixtures.
+
+**Landed 2026-06-12 in Commit F (SHA 5979896).** Implementation per
+spec with these notes:
+- Also touched `agent/schemas/literature_review.py` —
+  `LiteratureReviewInput.task_description` field description rewritten
+  to remove the "Commit F flips the default to '' and removes
+  SIDERIUS_TASK" bridge wording (the description now describes the
+  post-Commit-F reality directly).
+- Also touched `workflows/model_exploration.py` —
+  `_build_lit_review_input` warning text rewritten. New wording:
+  *"Warning: lit_review config has no `task_description` — lit-review
+  LLM calls will receive no task-domain anchor and may produce
+  off-domain queries. Strongly recommended: set `task_description:`
+  in configs/lit_review_config.yaml ..."*
+- Also touched `tests/unit/workflows/test_model_exploration_lit_review_wiring.py`
+  — assertion text updated from `"SIDERIUS_TASK default constant"` to
+  `"no task-domain anchor"` to match the new warning wording.
+- Test deviation from the spec's "2 new + ≤ 3 modified" floor:
+  delivered 3 modified, 0 new. Rationale: the existing
+  `TestTaskInjection::test_default_empty_task_placeholder_gone`
+  (renamed from `test_default_task_injected_and_placeholder_gone`)
+  and `::test_custom_task_overrides_default` cover both empty-default
+  and custom-task surfaces for `render_paper_extract_prompt`. The
+  other 2 render functions (`render_search_decision_prompt` and
+  `render_synthesis_prompt`) are implicitly tested at their empty
+  defaults via the existing `TestSearchDecisionPrompt._render()` and
+  `TestSynthesisPrompt._render()` helpers (both use kwargs that now
+  resolve to `""`).
+- One residual `SIDERIUS_TASK` mention remains in
+  `workflows/model_exploration.py:545` — but it's a comment explaining
+  "post-Commit-F there is no SIDERIUS_TASK fallback", which is the
+  intended documentation of the cleanup, not a code reference.
+
+**Test gate run — Commit F (pre-commit, 2026-06-12)**: 303 passed in
+4.11s (sweep of `tests/unit/agent/prompt_templates/` +
+`tests/unit/workflows/` + `tests/unit/agent/ml_literature_review/test_node.py`).
+`ruff check` + `ruff format --check` + `pyright` all green on the 4
+production files. Sanity grep: `grep -rn "SIDERIUS_TASK" --include="*.py" .`
+returns exactly 1 hit (`workflows/model_exploration.py:545`, the
+comment), down from 18+ hits pre-Commit-F.
+
+**Test gate**:
+```
+.venv/bin/python -m pytest \
+  tests/unit/agent/prompt_templates/test_literature_review_prompts.py \
+  tests/unit/agent/ml_literature_review/test_node.py -q
+.venv/bin/python -m ruff check \
+  agent/prompt_templates/literature_review/__init__.py \
+  nodes/ml_literature_review/ml_literature_review.py
+.venv/bin/python -m ruff format --check \
+  agent/prompt_templates/literature_review/__init__.py
+.venv/bin/python -m pyright \
+  agent/prompt_templates/literature_review/__init__.py
+.venv/bin/python -m pytest tests/unit/ -q   # full unit sweep — no other module imports SIDERIUS_TASK
+```
+
+Test floor — **2 new tests** + ≤ 3 modified:
+
+- **New test 1**: `render_paper_extract_prompt(raw_text="foo")` (no
+  `task_description`) produces a rendered prompt where the
+  `{TASK_DESCRIPTION}` placeholder has been replaced with `""` (the
+  heading `## The task...` is still present, the body under it is
+  empty). Same structural assertion for `render_search_decision_prompt`
+  and `render_synthesis_prompt` at their empty defaults.
+- **New test 2**: a non-empty `task_description="custom task X"` passed
+  to each of the three render functions appears verbatim in the
+  rendered system prompt body.
+- **Modified test(s)**: any existing prompt-content test that hardcoded
+  `"full-spectrum 1-D time-series denoising of SQUID..."` is updated to
+  either (a) pass an explicit `task_description` and assert on it, or
+  (b) assert on structural placeholder presence rather than the
+  SIDERIUS-specific text. Expected count: ≤ 3 tests touched.
+
+**Sanity check (cross-repo grep)**:
+- `grep -rn "SIDERIUS_TASK" --include="*.py"` after the edit must
+  return zero hits — no other module should import the constant.
+- `grep -rn "SIDERIUS_TASK" --include="*.md"` must return zero hits —
+  no docs reference the constant either.
+
+### Resolved open questions (2026-06-12)
+
+- **Commit F Q1** (warn at render time?): **no** — the warning is
+  already covered by Commit 6.5b Fix 6's `_build_lit_review_input`
+  INFO warning (Q2 of 6.5). A render-time warning would fire 3+ times
+  per run and clutter logs.
 
 ---
 

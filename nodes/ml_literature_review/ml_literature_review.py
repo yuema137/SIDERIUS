@@ -40,6 +40,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.literature_review import (
+    DIMENSION_LABELS,
     render_paper_extract_prompt,
     render_search_decision_prompt,
     render_synthesis_prompt,
@@ -51,6 +52,7 @@ from agent.schemas.literature_review import (
     PaperExtract,
     PaperSource,
     RetrievedPaper,
+    SearchDecisionRecord,
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
@@ -235,6 +237,30 @@ def _override_year_from_metadata(extract: PaperExtract | None, s2_metadata: dict
         extract.year = str(year)
 
 
+def _parse_dimension(reasoning: str) -> str | None:
+    """Scan ``reasoning`` for the first ``DIMENSION_LABELS`` token (case-
+    insensitive, substring match) and return it. Returns None when none of
+    the four labels appears — a diagnostic signal that the LLM did not
+    follow the dimension-labelling rule in search_decision_system.md.
+
+    Multi-label reasoning ("targets bottleneck AND adjacent_technique"):
+    returns the label whose earliest occurrence is leftmost in the string.
+    The dynamic-search rule says "label which dimension the query targets"
+    (singular), so the leftmost-mention heuristic picks the primary one.
+
+    Fix 5 (Commit 6.5b-4).
+    """
+    if not reasoning:
+        return None
+    lowered = reasoning.lower()
+    hits = [(lowered.find(label), label) for label in DIMENSION_LABELS]
+    hits = [(idx, label) for idx, label in hits if idx != -1]
+    if not hits:
+        return None
+    hits.sort()
+    return hits[0][1]
+
+
 class MLLiteratureReviewAgent:
     """Resolve root papers, run the dynamic search loop, synthesise findings.
 
@@ -253,6 +279,7 @@ class MLLiteratureReviewAgent:
     # cheaper model than the main reasoning bridge); falls back to ``bridge``.
     bridge: LLMBridge
     search_bridge: LLMBridge
+    _task_description: str  # Fix 6 (6.5b-5): set in run() from inp.task_description
 
     def __init__(self, bridge_factory=None, root_cache_dir: str = DEFAULT_ROOT_CACHE_DIR):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -275,6 +302,12 @@ class MLLiteratureReviewAgent:
             )
         else:
             self.search_bridge = self.bridge
+        # Fix 6 (6.5b-5) + Commit F: the task description threaded into all
+        # three render call sites (compression / search-decision / synthesis).
+        # When the input field is empty (the workflow warns at YAML-load time),
+        # the empty string flows through to the {TASK_DESCRIPTION} placeholder
+        # — operator should fill the YAML's task_description: key.
+        self._task_description = inp.task_description
         cache_dir = Path(self._root_cache_dir)
 
         retrieved: list[RetrievedPaper] = []
@@ -289,8 +322,9 @@ class MLLiteratureReviewAgent:
 
         # 2. Dynamic search loop.
         rounds_used = 0
+        search_decisions: list[SearchDecisionRecord] = []  # Fix 4 (6.5b-3)
         if inp.dynamic_search.enabled:
-            rounds_used = self._run_search_loop(inp, retrieved, index)
+            rounds_used, search_decisions = self._run_search_loop(inp, retrieved, index)
 
         # 3. Synthesis -> findings.
         findings = self._synthesize(inp, retrieved)
@@ -302,6 +336,7 @@ class MLLiteratureReviewAgent:
             suggested_mindset=None,  # v1: deliberately empty
             retrieved_papers=retrieved,
             search_rounds_used=rounds_used,
+            search_decisions=search_decisions,  # Fix 4 (6.5b-3)
             run_name=inp.run_name,
             started_at=started_at,
             finished_at=_utc_now(),
@@ -372,6 +407,8 @@ class MLLiteratureReviewAgent:
             full_text=stored_full_text,
             verbosity_achieved=achieved,
             error=error,
+            discovered_in_round=0,  # Fix 4.D (6.5b-3): root paper marker
+            discovered_via_query=None,  # explicit None for forward-clarity
         )
 
     # ------------------------------------------------------------------
@@ -382,12 +419,44 @@ class MLLiteratureReviewAgent:
         inp: LiteratureReviewInput,
         retrieved: list[RetrievedPaper],
         index: dict[str, RetrievedPaper],
-    ) -> int:
+    ) -> tuple[int, list[SearchDecisionRecord]]:
         cfg = inp.dynamic_search
         hist = inp.experiment_history
         rounds = 0  # search rounds executed (== search_rounds_used)
         escalations_this_round = 0  # reset on each search; capped per round
         prior_search_results: list[tuple[str, int]] = []  # (query, hit_count) fed back per round
+        prior_escalation_results: list[
+            tuple[str, str, str]
+        ] = []  # (paper_id, status, reasoning); status ∈ {"ok","noop","error"} — Fix 3 (6.5b-2)
+        decisions: list[SearchDecisionRecord] = []  # Fix 4 (6.5b-3): audit trail
+        dimension_counts: dict[str, int] = {
+            label: 0 for label in DIMENSION_LABELS
+        }  # Fix 5 (6.5b-4): per-dim query coverage
+
+        # Fix 4 (6.5b-3): build one SearchDecisionRecord per LLM call.
+        # Defined at method scope (not inside the while loop) so pyright
+        # can resolve its type without circular inference, and takes
+        # `dec` + `current_rounds` as explicit args so there's no B023
+        # loop-variable-capture risk either. Captures `decisions` (the
+        # list — stable identity across iterations) via closure.
+        def _append_decision(
+            action_str: str,
+            outcome: str,
+            dec: dict[str, Any],
+            current_rounds: int,
+        ) -> None:
+            decisions.append(
+                SearchDecisionRecord(
+                    round_index=current_rounds + 1,  # 1-indexed
+                    action=action_str,
+                    query=(dec.get("query") or None) if action_str == "search" else None,
+                    paper_id=(dec.get("paper_id") or None) if action_str == "escalate" else None,
+                    verbosity=dec.get("verbosity") if action_str == "escalate" else None,
+                    reasoning=str(dec.get("reasoning") or ""),
+                    outcome=outcome,
+                )
+            )
+
         # A misbehaving LLM that only ever escalates must still terminate:
         # searches consume the round budget, escalations do not. This hard
         # iteration ceiling is the backstop (searches + capped escalations).
@@ -405,6 +474,9 @@ class MLLiteratureReviewAgent:
                 papers_seen=papers_seen,
                 escalation_allowed=cfg.escalation_allowed,
                 prior_search_results=prior_search_results,
+                prior_escalation_results=prior_escalation_results,  # Fix 3 (6.5b-2)
+                dimension_counts=dimension_counts,  # Fix 5 (6.5b-4)
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             # The search-decision is the cheap, templated step — routed through
             # self.search_bridge (a cheaper model when configured; else the main
@@ -426,16 +498,32 @@ class MLLiteratureReviewAgent:
             logger.info("[lit_review] round %d decision: %s", rounds, json.dumps(decision)[:500])
 
             if action == "done":
+                _append_decision("done", "done", decision, rounds)
                 break
             if action == "search":
                 query = (decision.get("query") or "").strip()
                 if not query:
+                    _append_decision("search", "empty_query", decision, rounds)
                     logger.warning(
                         "search action with empty query at round %d; ending loop", rounds
                     )
                     break
-                n_hits = self._do_search(query, retrieved, index, cfg.results_per_query)
+                n_hits = self._do_search(
+                    query,
+                    retrieved,
+                    index,
+                    cfg.results_per_query,
+                    cfg.initial_verbosity,
+                    round_index=rounds + 1,  # Fix 4.E: tag new papers with their discovery round
+                )
                 prior_search_results.append((query, n_hits))
+                _append_decision("search", f"n_hits={n_hits}", decision, rounds)
+                # Fix 5 (6.5b-4): parse the dimension label from the LLM's
+                # reasoning and tally it. None means the LLM didn't follow
+                # the labelling rule — diagnostic signal, no tally.
+                dim = _parse_dimension(str(decision.get("reasoning") or ""))
+                if dim is not None:
+                    dimension_counts[dim] = dimension_counts.get(dim, 0) + 1
                 rounds += 1
                 escalations_this_round = 0  # fresh escalation budget for the new round
             elif action == "escalate" and cfg.escalation_allowed:
@@ -445,21 +533,44 @@ class MLLiteratureReviewAgent:
                         cfg.max_escalations_per_round,
                         decision.get("paper_id"),
                     )
+                    _append_decision("escalate", "budget_exceeded", decision, rounds)
                 else:
                     pid = decision.get("paper_id")
                     target = index.get(pid) if isinstance(pid, str) else None
                     if target is not None:
-                        self._escalate(target, decision.get("verbosity", 1))
-                        escalations_this_round += 1
+                        # `target is not None` implies the `isinstance(pid, str)` branch
+                        # of the conditional above fired — i.e. pid is a str. The
+                        # assert restates the invariant for pyright's narrowing.
+                        assert isinstance(pid, str)
+                        status = self._escalate(target, decision.get("verbosity", 1))
+                        prior_escalation_results.append(
+                            (pid, status, str(decision.get("reasoning") or ""))
+                        )
+                        _append_decision("escalate", status, decision, rounds)
+                        escalations_this_round += (
+                            1  # charges budget on every outcome (Decision 2, 2026-06-12)
+                        )
                     else:
                         logger.warning("escalate target %r not found at round %d", pid, rounds)
+                        _append_decision("escalate", "target_not_found", decision, rounds)
             else:
-                # Unknown action (or escalate while disabled). Consume a round so
-                # a misbehaving LLM cannot spin forever — max_rounds is the net.
-                logger.warning("unhandled action %r at round %d", action, rounds)
+                # Catch-all: escalate-while-disabled is distinguished from
+                # truly-unknown action so the audit trail captures the config
+                # mismatch separately from LLM hallucinations.
+                if action == "escalate" and not cfg.escalation_allowed:
+                    logger.warning("escalate action at round %d but escalation is disabled", rounds)
+                    _append_decision("escalate", "escalation_disabled", decision, rounds)
+                else:
+                    logger.warning("unhandled action %r at round %d", action, rounds)
+                    _append_decision(
+                        str(action) if action is not None else "",
+                        "unknown_action",
+                        decision,
+                        rounds,
+                    )
                 rounds += 1
 
-        return rounds
+        return rounds, decisions
 
     def _do_search(
         self,
@@ -467,37 +578,102 @@ class MLLiteratureReviewAgent:
         retrieved: list[RetrievedPaper],
         index: dict[str, RetrievedPaper],
         limit: int,
+        initial_verbosity: Literal[0, 1, 2] = 0,
+        *,
+        round_index: int,
     ) -> int:
         """Run one S2 search; append new papers; return the number of hits S2
-        returned for ``query`` (fed back to the next round for self-correction)."""
+        returned for ``query`` (fed back to the next round for self-correction).
+
+        ``initial_verbosity`` is recorded on each new ``RetrievedPaper.source``
+        as the operator's requested resolve depth (``DynamicSearchConfig.initial_verbosity``,
+        2026-06-11 Pre-flight B fix). The S2 search itself stays at metadata-only
+        (verbosity=0 in ``run_skill``); ``verbosity_achieved`` therefore also
+        stays at 0 — actual deep-reads happen via the LLM's escalation decisions
+        in ``_run_search_loop``.
+        """
         result = run_skill(None, mode="search", query=query, limit=limit, verbosity=0)
         if result.get("status") not in ("ok", "partial"):
             logger.warning("search failed for query %r: %s", query, result.get("message"))
             return 0
         results = (result.get("data") or {}).get("results", [])
         for r in results:
-            rp = self._retrieved_from_search_result(r)
+            rp = self._retrieved_from_search_result(
+                r, initial_verbosity, round_index=round_index, query=query
+            )
             if rp is not None and rp.paper_id not in index:
                 retrieved.append(rp)
                 index[rp.paper_id] = rp
         return len(results)
 
-    def _retrieved_from_search_result(self, r: dict) -> RetrievedPaper | None:
+    def _retrieved_from_search_result(
+        self,
+        r: dict,
+        initial_verbosity: Literal[0, 1, 2] = 0,
+        *,
+        round_index: int,
+        query: str,
+    ) -> RetrievedPaper | None:
         source_type, identifier = _source_type_from_external_ids(r.get("externalIds") or {})
         if source_type is None or identifier is None:
             # No resolvable id → cannot be escalated; skip the audit entry.
             logger.debug("skipping search hit with no arxiv/doi id: %s", r.get("title"))
             return None
         paper_id = f"{source_type}:{identifier}"
+        # ``source.verbosity`` records the operator's requested resolve depth
+        # (``DynamicSearchConfig.initial_verbosity``, default 0). ``verbosity_achieved``
+        # stays at 0 because the S2 search call itself is metadata-only; subsequent
+        # LLM-driven escalation calls in ``_run_search_loop`` raise the achieved
+        # value when they fetch + compress the full text. 2026-06-11 Pre-flight B —
+        # the field was dormant before this fix.
         return RetrievedPaper(
             paper_id=paper_id,
-            source=PaperSource(source_type=source_type, identifier=identifier, verbosity=0),
+            source=PaperSource(
+                source_type=source_type, identifier=identifier, verbosity=initial_verbosity
+            ),
             s2_metadata=r,
             verbosity_achieved=0,
+            discovered_in_round=round_index,  # Fix 4.E (6.5b-3)
+            discovered_via_query=query,
         )
 
-    def _escalate(self, target: RetrievedPaper, verbosity) -> None:
+    def _escalate(self, target: RetrievedPaper, verbosity) -> Literal["ok", "noop", "error"]:
+        """Escalate ``target`` to verbosity 1 or 2; return a 3-state status.
+
+        Returns:
+            ``"ok"``    — verbosity_achieved was raised; new content captured.
+            ``"noop"``  — the call succeeded but produced no new content
+                          (paper already at requested verbosity, or fetch
+                          returned an empty full_text). Charges the budget
+                          regardless — Decision 2, 2026-06-12.
+            ``"error"`` — the resolve call failed (PDF 404, S2 down, etc).
+                          ``target.error`` is set; the LLM should not retry
+                          this paper.
+        """
         target_verbosity: Literal[1, 2] = 2 if verbosity == 2 else 1
+        if target.verbosity_achieved >= target_verbosity:
+            return "noop"  # already at requested verbosity — skip the API call
+        # Layer 2 PDF-availability gate (post-Checkpoint-S, 2026-06-13).
+        # Mirrors the resolver's PDF URL resolution priority
+        # (agent/skills/paper_resolver_skill/wrapper.py:405-420):
+        #   1. openAccessPdf.url if non-empty
+        #   2. arxiv-fallback URL from externalIds.ArXiv
+        #   3. otherwise: resolver returns "partial" with no full_text → noop
+        # We short-circuit case (3) by checking the same two fields. Arxiv
+        # sources are exempt because the resolver first tries Tier 1
+        # (arxiv.org/src .tex) which doesn't depend on either field —
+        # short-circuiting would skip a path that could succeed.
+        # Behavior to the LLM is identical: it still sees a "noop" outcome
+        # in prior_escalation_results and the do-not-retry nudge tells it
+        # to pick a different paper.
+        if target.source.source_type != "arxiv":
+            s2_meta = target.s2_metadata or {}
+            oa_pdf = s2_meta.get("openAccessPdf") or {}
+            external_ids = s2_meta.get("externalIds") or {}
+            has_pdf_url = bool(oa_pdf.get("url")) or bool(external_ids.get("ArXiv"))
+            if not has_pdf_url:
+                return "noop"
+        pre_verbosity = target.verbosity_achieved  # snapshot for post-call detection
         result = run_skill(
             None,
             mode="resolve",
@@ -507,13 +683,13 @@ class MLLiteratureReviewAgent:
         )
         if result.get("status") not in ("ok", "partial"):
             target.error = result.get("message")
-            return
+            return "error"
         data = result.get("data") or {}
         if data.get("s2_metadata"):
             target.s2_metadata = data["s2_metadata"]
         full_text = data.get("full_text")
         if not full_text:
-            return
+            return "noop"  # call succeeded, but no new full text -> no content gain
         extraction_method = data.get("extraction_method") or "pdfplumber_llm"
         extract = self._compress(full_text, extraction_method=extraction_method)
         if extract is not None:
@@ -525,6 +701,7 @@ class MLLiteratureReviewAgent:
             # Compression failed but we still hold the full text.
             target.full_text = full_text
             target.verbosity_achieved = 2
+        return "ok" if target.verbosity_achieved > pre_verbosity else "noop"
 
     # ------------------------------------------------------------------
     # LLM compression (verbosity-1 extract)
@@ -547,7 +724,9 @@ class MLLiteratureReviewAgent:
         """
         try:
             sys_prompt, user_prompt = render_paper_extract_prompt(
-                full_text, extraction_method=extraction_method
+                full_text,
+                extraction_method=extraction_method,
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.paper_extract")
             extract = PaperExtract.model_validate(raw)
@@ -576,6 +755,7 @@ class MLLiteratureReviewAgent:
                 confidence_rubric=inp.confidence_rubric,
                 findings_verbosity=inp.findings_verbosity,
                 synthesis_config=inp.synthesis_config,
+                task_description=self._task_description,  # Fix 6 (6.5b-5)
             )
             raw = self.bridge.generate(sys_prompt, user_prompt, label="lit_review.synthesis")
         except Exception as e:  # resilience boundary

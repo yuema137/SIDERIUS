@@ -240,6 +240,20 @@ class RetrievedPaper(BaseModel):
         description="Error message when the paper could not be fully resolved. "
         "None when everything succeeded.",
     )
+    discovered_in_round: int | None = Field(
+        default=None,
+        ge=0,
+        description="When this paper entered the retrieved set. 0 = root paper "
+        "resolved at agent start. 1+ = dynamic-search round number "
+        "(1-indexed). None = legacy field on pre-6.5b cached JSON (Pydantic "
+        "default fires when the key is absent); never set by post-6.5b code.",
+    )
+    discovered_via_query: str | None = Field(
+        default=None,
+        description="The S2 query string that surfaced this paper. None for "
+        "root papers (no query) and for legacy pre-6.5b cached JSON. Always "
+        "set for dynamic-search hits.",
+    )
 
 
 class ConfidenceBand(BaseModel):
@@ -357,6 +371,34 @@ class ConfidenceRubric(BaseModel):
             lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
         return "\n".join(lines)
 
+    def render_for_searcher(self) -> str:
+        """Render the rubric as the ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` prompt block.
+
+        Same bands as ``render()`` and ``render_for_consumer()``, but framed
+        for the SEARCH-DECISION LLM — the surrounding prose in
+        ``search_decision_system.md`` (the "## Why escalation matters for
+        finding confidence" section) explains the strategic framing
+        (verbosity → confidence band → escalation payoff); this method only
+        surfaces the band list itself, so a custom rubric flows through
+        consistently. Single source of truth: bands come from ``self.bands``,
+        the same list ``render()`` and ``render_for_consumer()`` read.
+
+        Distinct from:
+          * ``render()`` — the SYNTHESIS-producer framing ("assign
+            confidence"), injected into synthesis_system.md's
+            ``{CONFIDENCE_RUBRIC}``.
+          * ``render_for_consumer()`` — the CONSUMER (proposer) legend
+            ("interpret confidence values"), injected into
+            ``AgentCard.trust_guidance``.
+        """
+        lines = [
+            "Confidence bands (the synthesis LLM assigns one of these to each "
+            "finding based on the cited paper's verbosity and domain):"
+        ]
+        for b in self.bands:
+            lines.append(f"- {b.lower:.2f}-{b.upper:.2f}: {b.criteria}")
+        return "\n".join(lines)
+
 
 class SynthesisConfig(BaseModel):
     """Controls the omission threshold / transfer tolerance for synthesis.
@@ -449,6 +491,66 @@ class LiteratureReviewInput(BaseModel):
         "mechanism yield a finding carrying an explicit Adaptation transfer caveat, "
         "rather than being omitted. See SynthesisConfig.",
     )
+    task_description: str = Field(
+        default="",
+        description="The research task this lit-review run is supporting. "
+        "Injected into the {TASK_DESCRIPTION} placeholder of every "
+        "lit-review prompt (paper-extract, search-decision, synthesis). "
+        "Operators should set this in configs/lit_review_config.yaml to "
+        "specialize the agent for their problem domain. When empty, the "
+        "{TASK_DESCRIPTION} placeholder is filled with the empty string, "
+        "leaving the prompt section bare — the LLM gets no task-domain "
+        "anchor. Workflow logs a warning when this field is empty so "
+        "operators see the misconfiguration.",
+    )
+
+
+class SearchDecisionRecord(BaseModel):
+    """One row in the dynamic-search-loop audit trail — captures the LLM's
+    decision + the node-side outcome of executing it.
+
+    The loop appends one record per LLM call. The list is exposed on
+    ``LiteratureReviewOutput.search_decisions`` for post-hoc inspection
+    (which dimensions did the LLM cover; how often did escalations no-op;
+    where did the loop terminate).
+    """
+
+    round_index: int = Field(
+        ge=1,
+        description="1-indexed round the decision belongs to. Search actions "
+        "consume this round; escalate / done actions occur within it.",
+    )
+    action: str = Field(
+        description="Action the LLM returned. Expected: 'search' | 'escalate' "
+        "| 'done', but typed as ``str`` (not ``Literal``) so anomalous "
+        "responses surface in the audit trail instead of raising "
+        "ValidationError and crashing the loop (Decision 4, 2026-06-12).",
+    )
+    query: str | None = Field(
+        default=None,
+        description="Search query string (set when action == 'search').",
+    )
+    paper_id: str | None = Field(
+        default=None,
+        description="Target paper_id (set when action == 'escalate').",
+    )
+    verbosity: int | None = Field(
+        default=None,
+        description="Requested verbosity tier for the escalation (typically 1 or 2).",
+    )
+    reasoning: str = Field(
+        default="",
+        description="The LLM's free-text justification, captured verbatim. The "
+        "dynamic-search rule requires the LLM to label which of "
+        "{bottleneck, take_home, architectural_gap, adjacent_technique} "
+        "the query targets; the node trusts the label (no parser-enforced "
+        "contract).",
+    )
+    outcome: str = Field(
+        description="Post-execution result. Canonical values: 'ok' / 'noop' / "
+        "'error' (escalate); 'n_hits=N' (search); 'budget_exceeded' / "
+        "'target_not_found' / 'unknown_action' (degenerate); 'done' (stop).",
+    )
 
 
 class LiteratureReviewOutput(ExternalAgentOutput):
@@ -474,6 +576,13 @@ class LiteratureReviewOutput(ExternalAgentOutput):
         ge=0,
         description="Number of dynamic-search rounds executed. Bounded by "
         "DynamicSearchConfig.max_rounds.",
+    )
+    search_decisions: list[SearchDecisionRecord] = Field(
+        default_factory=list,
+        description="Audit trail of LLM decisions inside the dynamic-search "
+        "loop — one record per LLM call. Empty when the search loop did not "
+        "run (dynamic_search.enabled=False) or the LLM call raised before any "
+        "decision was logged. See SearchDecisionRecord.",
     )
     run_name: str
     started_at: str = Field(description="ISO-8601 UTC timestamp.")

@@ -19,9 +19,12 @@ docs/paper_resolver_pilot.md findings F1-F4):
     this guardrail lives here. 120k chars is ~30k tokens — roughly 1.6x the
     73.6k-char TIDMAD paper (F2) and well inside a 128k-token context window,
     leaving ample room for the system prompt and completion.
-  - ``task_description`` is an optional parameter defaulting to ``SIDERIUS_TASK``
-    so the same prompt generalises to other downstream tasks without a rewrite,
-    while today's (raw_text)-only call site keeps working.
+  - ``task_description`` is an optional parameter defaulting to ``""``.
+    The lit-review node always passes its resolved task description
+    (from ``LiteratureReviewInput.task_description``, sourced from
+    ``configs/lit_review_config.yaml``); the default only fires for test
+    callers that omit the kwarg, in which case the ``{TASK_DESCRIPTION}``
+    placeholder is filled with empty string.
 """
 
 import os
@@ -183,15 +186,6 @@ MAX_RAW_TEXT_CHARS = 120_000
 _TRUNCATION_MARKER = "\n\n[...TRUNCATED...]"
 
 # Default downstream task injected into the compression prompt's
-# {TASK_DESCRIPTION} placeholder. Task-agnostic by parameter so the framework
-# generalises beyond SQUID; this default describes the SIDERIUS denoising task.
-SIDERIUS_TASK = (
-    "full-spectrum 1-D time-series denoising of SQUID dark-matter\n"
-    "detector data: map a noisy [B, T] integer signal to a clean\n"
-    "[B, 256, T] reconstruction, trained across the whole frequency\n"
-    "spectrum at once (not split into per-band models)."
-)
-
 _USER_PROMPT_TEMPLATE = (
     "Here is the full extracted text of one paper. Compress it into the JSON "
     "object described in the system instructions.\n\n"
@@ -279,7 +273,7 @@ def render_paper_extract_prompt(
     extraction_method: Literal[
         "arxiv_source", "pdfplumber_llm", "abstract_only"
     ] = "pdfplumber_llm",
-    task_description: str = SIDERIUS_TASK,
+    task_description: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt pair for compressing one paper.
 
@@ -294,8 +288,9 @@ def render_paper_extract_prompt(
                            callers (the lit-review node) pass the actual tier
                            explicitly based on the skill's ``extraction_method``.
         task_description:  Concrete downstream task the proposer works on, used
-                           to ground ``relevance_to_task``. Defaults to
-                           ``SIDERIUS_TASK``.
+                           to ground ``relevance_to_task``. Defaults to ``""``;
+                           the lit-review node passes its resolved value from
+                           ``inp.task_description``.
 
     Returns:
         ``(system_prompt, user_prompt)``. The system prompt instructs the LLM to
@@ -327,6 +322,22 @@ def _bullets(items: list[str]) -> str:
     return "\n".join(f"- {s}" for s in cleaned)
 
 
+# Fix 5 (Commit 6.5b-4): the four query-generation dimensions the
+# search-decision LLM must cover across a run (see
+# search_decision_system.md's "## Query generation — four dimensions to
+# cover"). Exported so the node can parse the LLM's self-reported
+# dimension label out of `reasoning` and surface a coverage-distribution
+# line back to the LLM next round. Trusted labels (no parser-enforced
+# contract — Open Q1 resolution, 2026-06-12); a missing label is itself
+# a diagnostic signal that Fix 5 is incomplete.
+DIMENSION_LABELS: tuple[str, ...] = (
+    "bottleneck",
+    "take_home",
+    "architectural_gap",
+    "adjacent_technique",
+)
+
+
 def render_search_decision_prompt(
     *,
     key_findings: list[str],
@@ -336,7 +347,10 @@ def render_search_decision_prompt(
     papers_seen: list[dict],
     escalation_allowed: bool,
     prior_search_results: list[tuple[str, int]] | None = None,
-    task_description: str = SIDERIUS_TASK,
+    prior_escalation_results: list[tuple[str, str, str]] | None = None,
+    dimension_counts: dict[str, int] | None = None,
+    task_description: str = "",
+    confidence_rubric: ConfidenceRubric | None = None,
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for one dynamic-search-loop decision.
 
@@ -358,9 +372,38 @@ def render_search_decision_prompt(
             this run. Fed back so the LLM self-corrects — a 0-hit query is
             flagged "too specific" and the LLM is nudged to broaden. Omitted on
             the first round.
+        prior_escalation_results: ``(paper_id, status, reasoning)`` for each
+            escalation attempted so far this run. ``status`` is one of ``"ok"``
+            (deep-read succeeded), ``"noop"`` (paper was already at the
+            requested verbosity, or the fetch returned no new content), or
+            ``"error"`` (resolve call failed). Rendered as a sub-block
+            parallel to ``prior_search_results`` so the LLM stops
+            re-escalating papers whose last attempt was a no-op or error.
+            Omitted on the first round.
+        dimension_counts: per-dimension query coverage tally — keys come
+            from ``DIMENSION_LABELS`` (``bottleneck`` / ``take_home`` /
+            ``architectural_gap`` / ``adjacent_technique``), values are
+            the count of search queries that targeted each dimension so
+            far this run. When non-None and non-empty, a coverage
+            distribution line is rendered inside the
+            ``## Queries already tried this run`` block so the LLM can
+            spread its remaining queries across uncovered dimensions.
+            Trusted self-reporting from the LLM's ``reasoning`` field;
+            no parser-enforced contract. Omitted on the first round.
+        confidence_rubric: optional ``ConfidenceRubric`` to render into the
+            ``{CONFIDENCE_RUBRIC_FOR_SEARCH}`` placeholder. When ``None``
+            (default), the default rubric is instantiated. Lets the
+            search-decision LLM reason about verbosity → confidence-band →
+            escalation payoff — see ``search_decision_system.md``'s
+            "## Why escalation matters for finding confidence" section.
     """
-    system_prompt = load_prompt("search_decision_system.md").replace(
-        "{TASK_DESCRIPTION}", task_description
+    system_prompt = (
+        load_prompt("search_decision_system.md")
+        .replace("{TASK_DESCRIPTION}", task_description)
+        .replace(
+            "{CONFIDENCE_RUBRIC_FOR_SEARCH}",
+            (confidence_rubric or ConfidenceRubric()).render_for_searcher(),
+        )
     )
 
     explored = ", ".join(m for m in (explored_models or []) if m) or "(none recorded)"
@@ -374,12 +417,45 @@ def render_search_decision_prompt(
             if hits == 0:
                 lines.append("  (too specific — try broader terms for the same concept)")
                 any_zero = True
+        # Fix 5 (Commit 6.5b-4): render coverage distribution AFTER the
+        # per-query lines so the LLM sees which dimensions it has and
+        # hasn't targeted. Skipped when dimension_counts is None/empty
+        # (e.g. first round, or all labels unparseable).
+        if dimension_counts:
+            counts_str = ", ".join(
+                f"{label}={dimension_counts.get(label, 0)}" for label in DIMENSION_LABELS
+            )
+            lines.append(f"\nCoverage so far: {counts_str}.")
         if any_zero:
             lines.append(
                 "\nA query that returned 0 hits was too narrow or off-vocabulary — "
                 "broaden it or try different keywords; do NOT repeat a 0-hit query."
             )
         prior_block = "\n".join(lines) + "\n\n"
+
+    # Fix 3 (Commit 6.5b-2): render prior-escalation feedback as a top-level
+    # sub-block parallel to "## Queries already tried this run". Placed just
+    # above the papers block so the LLM sees recent escalation outcomes in
+    # the context of which papers they apply to.
+    escalation_history_block = ""
+    if prior_escalation_results:
+        _STATUS_LABEL = {
+            "ok": "success — paper now deep-read",
+            "noop": "no-change — paper was already at the requested verbosity OR fetch returned no new content",
+            "error": "error — resolve call failed; do not retry this paper",
+        }
+        lines = ["## Escalations already attempted this run"]
+        for pid, status, reasoning in prior_escalation_results:
+            label = _STATUS_LABEL.get(status, f"unknown status: {status}")
+            excerpt = (reasoning or "").strip().replace("\n", " ")
+            if len(excerpt) > 200:
+                excerpt = excerpt[:200] + "…"
+            lines.append(f'- [{pid}] {label} (your reasoning: "{excerpt}")')
+        lines.append(
+            "\nDo NOT re-escalate a paper whose last status was 'no-change' or "
+            "'error' — pick a different paper, search for a new one, or stop."
+        )
+        escalation_history_block = "\n".join(lines) + "\n\n"
 
     if papers_seen:
         lines = []
@@ -407,6 +483,7 @@ def render_search_decision_prompt(
         f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
         f"{prior_block}"
+        f"{escalation_history_block}"
         "## Papers retrieved so far this run\n"
         f"{papers_block}\n"
         f"{escalation_note}\n"
@@ -514,7 +591,7 @@ def render_synthesis_prompt(
     confidence_rubric: ConfidenceRubric | None = None,
     findings_verbosity: Literal[0, 1] = 1,
     synthesis_config: SynthesisConfig | None = None,
-    task_description: str = SIDERIUS_TASK,
+    task_description: str = "",
 ) -> tuple[str, str]:
     """Build the (system, user) prompt for the final findings synthesis.
 

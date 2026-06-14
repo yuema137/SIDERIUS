@@ -8,7 +8,8 @@
     "dashboard",
     "env_validation",
     "tools",
-    "scripts"
+    "scripts",
+    "workflows"
   ],
   "exclude": [
     "**/__pycache__",
