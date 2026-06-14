@@ -18,6 +18,7 @@ via the package path automatically.
 from nodes.ml_literature_review.ml_literature_review import (
     MLLiteratureReviewAgent,
     _normalize_finding_content_headings,
+    _parse_dimension,
     _sanitize_paper_id,
     _validate_content_paper_id,
 )
@@ -25,6 +26,7 @@ from nodes.ml_literature_review.ml_literature_review import (
 __all__ = [
     "MLLiteratureReviewAgent",
     "_normalize_finding_content_headings",
+    "_parse_dimension",
     "_sanitize_paper_id",
     "_validate_content_paper_id",
 ]
