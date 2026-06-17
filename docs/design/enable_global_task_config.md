@@ -200,21 +200,22 @@ into the run's workspace as `task_config_snapshot.yaml`. This snapshot is
 written once, never modified, and serves as the ground truth for replay.
 
 ```
-{workspace}/
+{workspace}/{run_name}/
   task_config_snapshot.yaml   ← NEW: copy of task_config.yaml at run start
-  run_output_*.json
-  evolution_log.jsonl
+  workflow_{run_name}.json
+  iteration_001/
+  iteration_002/
   ...
 ```
 
-This is added in **Commit T1** alongside the loader — one line in
-`workflows/model_exploration.py` at the point where the workspace is
-initialized (CHECK exact location from code before implementing).
+This is added in **Commit T1b** — one `shutil.copy2(...)` call in
+`workflows/model_exploration.py` immediately after the workspace-init
+`os.makedirs(run_dir, exist_ok=True)` at line 953 in `run_workflow`.
 
-**Replay procedure for runs after T1 landing:**
+**Replay procedure for runs after T1b landing:**
 ```bash
-# To replay run at /path/to/workspace/:
-cp /path/to/workspace/task_config_snapshot.yaml configs/task_config.yaml
+# To replay run at /path/to/workspace/{run_name}/:
+cp /path/to/workspace/{run_name}/task_config_snapshot.yaml configs/task_config.yaml
 # Then replay normally
 ```
 
@@ -232,54 +233,147 @@ snapshot is only for human reference and replay.
 
 ## Commit plan
 
-### Commit T1 — `configs/task_config.yaml` + loader + renderer
+### Commit T1a — config files + schema + loader
 
-**Goal**: the config file and its loading/rendering infrastructure exist.
-No prompt files touched yet. After this commit, `task_config.yaml` is
-readable and `render_forward_contract()` works.
+**Goal**: stand up `configs/task_config.yaml`, the `ForwardContract`
+Pydantic schema, and the `workflows/task_config.py` loader/renderer
+module. Self-contained: no workflow modification, no node code touched.
+After this commit, `task_config.yaml` is readable, validates on load,
+and `render_forward_contract()` works — but no agent has yet been wired
+to use it.
 
 **Code**:
-- [ ] `configs/task_config.yaml` — new file with `task_description` and
+- [x] `configs/task_config.yaml` — new file with `task_description` and
   `forward_contract` blocks as shown above (committed to repo with SQUID defaults)
-- [ ] `configs/task_config.example.yaml` — same content as `task_config.yaml`,
+- [x] `configs/task_config.example.yaml` — same content as `task_config.yaml`,
   also committed; serves as the copy-from template for operators setting up a new task
-- [ ] `workflows/task_config.py` — new module:
-  - [ ] `load_task_config(path: str | None = None) -> dict` — reads
+- [x] `agent/schemas/task_config.py` (new file) — define `ForwardContract`:
+  ```python
+  class ForwardContract(BaseModel):
+      input_shape: str = ""
+      input_description: str = ""
+      output_shape: str = ""
+      output_description: str = ""
+      num_classes: int = 0
+      embedding_note: str = ""
+      output_head_note: str = ""
+      task_type: str = ""
+      task_note: str = ""
+  ```
+  Defaults are empty strings only so that a bare `ForwardContract()` is
+  constructible for testing. Production callers always populate via
+  `ForwardContract(**yaml_dict)` after `load_task_config()`, where a typo in
+  the YAML key name produces a Pydantic `ValidationError` rather than silent
+  empty rendering.
+- [x] `workflows/task_config.py` — new module:
+  - [x] `load_task_config(path: str | None = None) -> dict` — reads
     `configs/task_config.yaml` (or the provided path). **Raises `FileNotFoundError`**
     when the file is missing, with the remediation message shown in the
     *Backward compatibility* section. **Raises `ValueError`** when
     `task_description` is empty or the `forward_contract` block is missing
     a required field. Uses `yaml.safe_load`. Module-level cache (load once per process).
-  - [ ] `render_forward_contract(fc: ForwardContract) -> str` — takes a
-    `ForwardContract` Pydantic instance (see T2 schema bullet), returns
-    the formatted multi-line string shown above. Returns `""` on a
-    ForwardContract whose fields are all empty (only happens if a caller
-    bypasses `load_task_config` and constructs a default `ForwardContract()`
-    directly).
-  - [ ] `get_task_description(config: dict) -> str` — extracts and strips
+  - [x] `render_forward_contract(fc: ForwardContract) -> str` — takes a
+    `ForwardContract` Pydantic instance, returns the formatted multi-line
+    string shown above. Returns `""` on a `ForwardContract` whose fields are
+    all empty (only happens if a caller bypasses `load_task_config` and
+    constructs a default `ForwardContract()` directly).
+  - [x] `get_task_description(config: dict) -> str` — extracts and strips
     `config["task_description"]`. Returns `""` only if caller bypasses
     `load_task_config` (which itself rejects empty).
-- [ ] `workflows/__init__.py` — already exists (0 bytes); no changes needed.
+- [x] `workflows/__init__.py` — already exists (0 bytes); no changes needed.
 
 **Tests** (pure Python, no LLM — run freely):
-- [ ] `tests/unit/workflows/test_task_config.py` (new file)
-  - [ ] `load_task_config` with valid YAML → returns dict with correct keys
-  - [ ] `load_task_config` with missing file → raises `FileNotFoundError` with the
+- [x] `tests/unit/workflows/test_task_config.py` (new file) — **20 tests, all pass in 0.07s**
+  - [x] `load_task_config` with valid YAML → returns dict with correct keys
+  - [x] `load_task_config` with missing file → raises `FileNotFoundError` with the
     remediation message text
-  - [ ] `load_task_config` with empty YAML → raises `ValueError`
-  - [ ] `load_task_config` with empty `task_description` → raises `ValueError`
-  - [ ] `load_task_config` with `forward_contract` block missing a required key
+  - [x] `load_task_config` with empty YAML → raises `ValueError`
+  - [x] `load_task_config` with empty `task_description` → raises `ValueError`
+  - [x] `load_task_config` with `forward_contract` block missing a required key
     (e.g. `input_shape`) → raises Pydantic `ValidationError` from `ForwardContract`
-  - [ ] `render_forward_contract` with full ForwardContract → rendered string contains
+    *(implemented as `extra="forbid"` rejecting the typo'd key, not a "missing"
+    error — net effect is the same: a typo'd YAML key surfaces as ValidationError,
+    not silent empty rendering.)*
+  - [x] `render_forward_contract` with full ForwardContract → rendered string contains
     input_shape, output_shape, embedding_note, task_type
-  - [ ] `render_forward_contract` with default `ForwardContract()` → returns `""`
-  - [ ] `get_task_description` happy path
+  - [x] `render_forward_contract` with default `ForwardContract()` → returns `""`
+  - [x] `get_task_description` happy path
 
 **Test gate**: unit only — no LLM, no GPU. All tests in `test_task_config.py` run freely.
 
-**Out of scope**: no prompt files touched, no workflow wiring yet.
+**Out of scope**: no workflow modification, no prompt files touched, no node code touched.
 
 **Implementation notes** (filled in as work lands):
+- **Schema (`agent/schemas/task_config.py`)**: `ForwardContract` uses
+  `ConfigDict(extra="forbid")` — a typo in a YAML key (e.g. `input_shapes`
+  plural) raises `ValidationError` instead of being silently dropped.
+  `is_empty()` helper added so `render_forward_contract` can short-circuit
+  on default-constructed instances without re-checking every field at the
+  call site.
+- **Loader (`workflows/task_config.py`)**:
+  - Module-level dict cache keyed by **absolute resolved path** — distinct
+    fixtures don't collide and a test calling `load_task_config(tmp_path_A)`
+    twice gets the same dict object (verified by
+    `test_cache_returns_same_object_on_second_call`).
+  - `_clear_cache_for_tests()` helper added (underscore-prefixed; not part
+    of the public API) for the autouse pytest fixture that drops the cache
+    between tests.
+  - Validation order: file-exists → YAML-parses-to-mapping → `task_description`
+    non-empty → `forward_contract` block present → `forward_contract` is a
+    mapping → `ForwardContract(**fc_raw)` succeeds. Each step has a dedicated
+    error type and message; tests cover all six.
+  - Returned dict preserves the raw `forward_contract` sub-dict so downstream
+    callers can rebuild `ForwardContract(**cfg["forward_contract"])` without
+    the loader holding the only Pydantic instance.
+- **Renderer (`workflows/task_config.py`)**: rendered shape matches the
+  example block in this doc's *Rendered forward contract format* section —
+  verified by `test_full_forward_contract_contains_expected_anchors`.
+  Optional notes (`embedding_note`, `output_head_note`, `task_note`) are
+  conditionally appended; when absent, no blank-line-separated paragraph
+  appears (verified by `test_optional_notes_omitted_when_empty`).
+- **Regression guard**: `TestCommittedConfigLoads::test_repo_task_config_loads`
+  loads the actual repo's `configs/task_config.yaml` through the loader —
+  fails CI if the committed config ever drifts from the schema.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 20/20 pass, 0.07 s wall.
+
+### Commit T1b — Workflow snapshot wiring
+
+**Goal**: at workflow run start, copy `configs/task_config.yaml` into
+`{workspace}/{run_name}/task_config_snapshot.yaml` for replay provenance.
+One `shutil.copy2` call; one regression test.
+
+**Code**:
+- [ ] `workflows/model_exploration.py` — immediately after the workspace-init
+  `os.makedirs(run_dir, exist_ok=True)` at line 953 in `run_workflow`, add:
+  ```python
+  snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
+  if not os.path.exists(snapshot_path):
+      shutil.copy2("configs/task_config.yaml", snapshot_path)
+  ```
+  **Chain-mode policy**: the `if not os.path.exists(...)` guard means iter 1
+  writes the snapshot; iter 2+ in the same chain skip it. The snapshot reflects
+  the config that was active when the run was initialized — not whatever the
+  operator may have edited mid-chain. This matches the "snapshot is read-only
+  metadata" framing earlier in this doc.
+- [ ] `shutil` is already imported at line 63 — no new import needed.
+- [ ] No need to import `load_task_config` — the snapshot is a raw byte copy,
+  not a re-render of the parsed dict.
+
+**Tests** (pure Python, no LLM — run freely):
+- [ ] `tests/unit/workflows/test_task_config_snapshot.py` (new file)
+  - [ ] `run_workflow` writes `task_config_snapshot.yaml` to `{run_dir}` on first
+    invocation with a clean workspace
+  - [ ] `run_workflow` does NOT overwrite an existing snapshot (iter 2+ behaviour
+    — pre-populate the snapshot with sentinel content, call `run_workflow` again,
+    assert snapshot unchanged)
+  - [ ] Snapshot content is byte-identical to `configs/task_config.yaml` on first iter
+
+**Test gate**: unit only — no LLM, no GPU.
+
+**Out of scope**: no schema changes, no loader changes, no node changes.
+
+**Implementation notes**:
 - _none yet_
 
 ### Commit T2 — Implementor prompt de-hardcoding
@@ -306,6 +400,7 @@ hardcoded task/contract block with `{TASK_DESCRIPTION}` and
 
 **Code**:
 - [ ] `nodes/ml_model_implementor/ml_model_implementor.py`
+  - [ ] Import `ForwardContract` from `agent.schemas.task_config` (already defined in T1a)
   - [ ] Replace lines 306-322 (`IMPLEMENTOR_REASONING_PROMPT` task block)
     with `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` placeholders
   - [ ] `_build_reasoning_prompt(inp)`: substitute placeholders from
@@ -314,24 +409,6 @@ hardcoded task/contract block with `{TASK_DESCRIPTION}` and
     No in-code fallback — `load_task_config()` already rejected empty values
     upstream, so by the time the implementor is invoked `inp.task_description`
     is non-empty and `inp.forward_contract` is a fully-populated `ForwardContract`.
-- [ ] `agent/schemas/task_config.py` (new file) — define:
-  ```python
-  class ForwardContract(BaseModel):
-      input_shape: str = ""
-      input_description: str = ""
-      output_shape: str = ""
-      output_description: str = ""
-      num_classes: int = 0
-      embedding_note: str = ""
-      output_head_note: str = ""
-      task_type: str = ""
-      task_note: str = ""
-  ```
-  Defaults are empty strings only so that a bare `ForwardContract()` is
-  constructible for testing. Production callers always populate via
-  `ForwardContract(**yaml_dict)` after `load_task_config()`, where a typo in
-  the YAML key name produces a Pydantic `ValidationError` rather than silent
-  empty rendering.
 - [ ] `agent/schemas/implementor.py` — add to `ImplementorInput`:
   - [ ] `task_description: str = Field(default="", description="Task description from task_config.yaml. Injected into {TASK_DESCRIPTION} placeholder in system prompt.")`
   - [ ] `forward_contract: ForwardContract = Field(default_factory=ForwardContract, description="Forward contract from task_config.yaml. Injected into {FORWARD_CONTRACT} placeholder.")`

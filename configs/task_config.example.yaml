@@ -1,0 +1,49 @@
+# configs/task_config.example.yaml
+# Reference template for operators setting up SIDERIUS on a new task.
+# Copy to configs/task_config.yaml and edit the values for your task:
+#     cp configs/task_config.example.yaml configs/task_config.yaml
+#
+# The committed configs/task_config.yaml carries the SQUID/TIDMAD defaults
+# this example mirrors. If you are setting up a new task, you can safely
+# replace every value below — the workflow uses configs/task_config.yaml at
+# runtime, never this example file.
+# ---------------------------------------------------------------------------
+
+# Plain-English description of the research task.
+# Injected into the {TASK_DESCRIPTION} placeholder in all agent system prompts
+# (implementor, proposer, lit-review search/synthesis/extract).
+# Keep this concise — it appears in every LLM call.
+task_description: |
+  full-spectrum 1-D time-series denoising of SQUID dark-matter
+  detector data: map a noisy [B, T] integer signal to a clean
+  [B, 256, T] reconstruction, trained across the whole frequency
+  spectrum at once (not split into per-band models).
+
+# Forward contract for the model plugin interface.
+# Injected into the {FORWARD_CONTRACT} placeholder in implementor and proposer
+# system prompts. Must describe the exact PyTorch tensor shapes and types
+# expected by the training engine and validator.
+forward_contract:
+  input_shape: "[B, T] int64"
+  input_description: "raw signal, integer class indices 0-255"
+  output_shape: "[B, 256, T] float32"
+  output_description: "per-timestep logits over 256 denoising classes"
+  num_classes: 256
+  embedding_note: >
+    Input values are integer class indices — use nn.Embedding(num_classes,
+    embed_dim) to convert [B, T] int64 → [B, T, embed_dim], then transpose
+    to [B, embed_dim, T] for Conv1d layers.
+  output_head_note: >
+    Output must be exactly [output_shape] — use a final
+    Conv1d(channels, num_classes, 1) or Linear + transpose.
+  task_type: "classification"
+  task_note: >
+    Offline denoising — output at position t may depend on all positions.
+    Causal constraints are not required.
+
+# ---------------------------------------------------------------------------
+# Future extensions (out of scope for this feature):
+#   num_files: 20              # currently in execute_tools/dataset_config.py
+#   data_dir: ...              # currently hardcoded as TIDMAD_DATA_DIR
+#   metric_name: denoising_score  # currently hardcoded in schemas
+# ---------------------------------------------------------------------------
