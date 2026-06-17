@@ -21,6 +21,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 
@@ -583,6 +584,25 @@ class ProposalInput(BaseModel):
         default_factory=list,
         description="Model type keys already registered in MODEL_REGISTRY. "
         "The proposal agent must not reuse any of these names.",
+    )
+    task_description: str = Field(
+        default="",
+        description="Plain-English description of the research task, sourced from "
+        "``configs/task_config.yaml``. Injected into the ``{TASK_BACKGROUND}`` "
+        "placeholder in the proposer system prompt and into ``template_vars`` "
+        "for the proposal-stage ``.md`` templates. Default empty string is for "
+        "test fixtures only; production callers (workflow) always populate via "
+        "``get_task_description(load_task_config())`` which rejects empty values "
+        "upstream.",
+    )
+    forward_contract: ForwardContract = Field(
+        default_factory=ForwardContract,
+        description="Typed forward-pass contract from ``configs/task_config.yaml``. "
+        "Rendered into the ``{TASK_BACKGROUND}`` placeholder in the proposer "
+        "system prompt and the ``{FORWARD_CONTRACT}`` placeholder in "
+        "``proposing_stage.md``. Default ``ForwardContract()`` (all fields "
+        "empty) is for test fixtures only; production callers always populate "
+        'via ``ForwardContract(**load_task_config()["forward_contract"])``.',
     )
     per_model_score_tables: dict[str, ScoreComparisonTable] | None = Field(
         default=None,

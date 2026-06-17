@@ -545,72 +545,139 @@ and the two proposal template `.md` files. Lit-review `.md` files reviewed
 for query-example vs parametrizable content.
 
 **Pre-read required** (before writing any code):
-- [ ] Read `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
-  lines 165-195 verbatim (the full system prompt header)
-- [ ] Read `agent/prompt_templates/proposal/proposing_stage.md` lines
-  60-80 verbatim
-- [ ] Read `agent/prompt_templates/proposal/comparison_stage.md` lines
-  1-10 verbatim
-- [ ] Read `agent/prompt_templates/literature_review/search_decision_system.md`
-  lines 1-130 verbatim — identify which hardcodes are query *examples*
-  (illustrative, should stay) vs task *assumptions* (should be
-  parametrized)
+- [x] Read `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
+  lines 165-195 verbatim — `PROPOSAL_REASONING_PROMPT` is a module-level
+  constant; pre-T3 system prompt task block was lines 178-186.
+- [x] Read `agent/prompt_templates/proposal/proposing_stage.md` lines
+  60-80 verbatim — confirmed the "## Forward contract" block at lines 68-71.
+- [x] Read `agent/prompt_templates/proposal/comparison_stage.md` lines
+  1-10 verbatim — confirmed the "on the TIDMAD dataset" phrase at line 4.
+- [x] Read `agent/prompt_templates/literature_review/search_decision_system.md`
+  lines 1-130 verbatim. Found three categories of hardcodes:
+  (a) line 1 persona ("ML denoising research agent") — task-anchored;
+  (b) line 12 `{TASK_DESCRIPTION}` placeholder — already wired in Commit 6.5b-5;
+  (c) query examples + broadband-framing guidance — illustrative, should stay.
+- [x] Confirmed `agent/prompt_templates/proposal/__init__.py:73` already does
+  `.replace(f"{{{key}}}", str(value))` via `template_vars` (resolved open Q3).
+- [x] Decided to add `task_description` + `forward_contract` to `ProposalInput`
+  (option a from open Q4) — mirrors T2's `ImplementorInput` pattern, cleaner
+  than per-call kwarg threading given the proposer's many call sites.
 
 **Code**:
-- [ ] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
-  - [ ] `PROPOSAL_REASONING_PROMPT` at line 171 is a module-level string
-    constant (confirmed by audit). Replace lines 172-186 task block with
-    `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` placeholders in the constant.
-  - [ ] Add `_build_system_prompt(inp) -> str` helper (mirrors the
-    implementor's `_build_reasoning_prompt(inp)` at line 433): performs
-    `.replace()` substitution at call time using `inp.task_description` and
-    `render_forward_contract(inp.forward_contract)`. Update the existing call
-    site that currently passes `PROPOSAL_REASONING_PROMPT` directly to instead
-    pass `self._build_system_prompt(inp)`.
-  - [ ] `ProposalInput` (or wherever the proposer's render context is built):
-    inject `task_description` and `forward_contract` from `load_task_config()`
-    at call time. (Decision in open Q4: ProposalInput field vs render-time kwarg.)
-    No in-code fallback — `load_task_config()` rejects empty values upstream.
-- [ ] `agent/prompt_templates/proposal/proposing_stage.md`
-  - [ ] Lines 69-70: replace `[B, T] int64` / `[B, 256, T] float32`
-    with `{FORWARD_CONTRACT_INPUT}` / `{FORWARD_CONTRACT_OUTPUT}`
-    placeholders (or restructure to use the full rendered block)
-- [ ] `agent/prompt_templates/proposal/comparison_stage.md`
-  - [ ] Line 4: replace "TIDMAD dataset" with `{TASK_DESCRIPTION}` or a
-    shorter `{DATASET_NAME}` placeholder — **decide which** after reading
-    the full context of line 4
-- [ ] `agent/prompt_templates/literature_review/search_decision_system.md`
-  - [ ] **Audit each hardcode**: query examples like "SNR-aware loss time
-    series denoising" are illustrative and should stay; domain framing
-    like "1D broadband signal denoising" in the goal section should be
-    replaced with `{TASK_DESCRIPTION}`
-  - [ ] `render_search_decision_prompt` in
-    `agent/prompt_templates/literature_review/__init__.py` already handles
-    `{TASK_DESCRIPTION}` substitution — verify the `.md` file's remaining
-    hardcodes are examples (not goals) before leaving them
+- [x] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
+  - [x] Import `ForwardContract` from `agent.schemas.task_config` and
+    `render_forward_contract` from `workflows.task_config`.
+  - [x] `PROPOSAL_REASONING_PROMPT`: replaced the 9-line Background-on-the-task
+    block (pre-T3 lines 178-186) with a single `{TASK_BACKGROUND}` placeholder.
+    The trailing VRAM-ceiling guidance (lines 187-189) is preserved as template-
+    resident text.
+  - [x] Added `_render_task_background(td, fc)` + `_build_reasoning_system_prompt(inp)`
+    helpers next to `_render_hardware_context_block`. Identical render contract
+    to T2's implementor helpers — both agents render the task framing the same way.
+  - [x] Legacy-mode call site (now line ~990): `PROPOSAL_REASONING_PROMPT` →
+    `_build_reasoning_system_prompt(inp)`. The pipeline-mode call sites use
+    `.md` templates via `load_stage_prompt`; threaded the task config through
+    the existing `template_vars` dict (current line 1188) — new keys
+    `task_description` and `forward_contract` (rendered) — no call-site
+    changes needed, `load_stage_prompt` does the substitution.
+- [x] `agent/prompt_templates/proposal/proposing_stage.md`
+  - [x] Replaced the 3-line "Forward contract" hardcode at lines 68-71 with the
+    `{forward_contract}` placeholder, substituted at render time from
+    `template_vars["forward_contract"] = render_forward_contract(inp.forward_contract)`.
+    Used a single placeholder (rendered block) rather than the separate
+    `{FORWARD_CONTRACT_INPUT}` / `{FORWARD_CONTRACT_OUTPUT}` the doc hedged
+    about — single block matches the implementor pattern + carries the
+    embedding / output-head guidance too.
+- [x] `agent/prompt_templates/proposal/comparison_stage.md`
+  - [x] Replaced "previously tested denoising models on the TIDMAD dataset"
+    with "previously tested model architectures" (line 4). No placeholder —
+    the task framing already lives upstream in the proposer system prompt;
+    re-anchoring it here is redundant. **Decided** (open Q2): no
+    `{TASK_DESCRIPTION}` / `{DATASET_NAME}` substitution; just drop.
+- [x] `agent/prompt_templates/literature_review/search_decision_system.md`
+  - [x] Line 1 persona: "automated ML denoising research agent" →
+    "automated ML research agent". The `{TASK_DESCRIPTION}` placeholder at
+    line 12 (Commit 6.5b-5) already carries the actual task focus.
+  - [x] Confirmed query-example hardcodes (lines 53, 64-65, 96-99, 108-122)
+    are illustrative and untouched. The broadband / FULL-SPECTRUM guidance
+    at lines 121-122 is **deferred** — it's an operator-domain constraint
+    (full-spectrum vs frequency-split search direction) that should migrate
+    to a separate task_config field eventually, but that's out of T3 scope.
+- [x] `workflows/model_exploration.py` — at the proposer call site
+  (current line ~1392), inject from `load_task_config()`:
+  ```python
+  _task_cfg = load_task_config()
+  propose_input.task_description = get_task_description(_task_cfg)
+  propose_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
+  ```
+  Reuses the T2 imports — no new imports needed at the workflow level.
+- [x] `agent/schemas/proposal.py` — added to `ProposalInput`:
+  - [x] `task_description: str = Field(default="", ...)`
+  - [x] `forward_contract: ForwardContract = Field(default_factory=ForwardContract, ...)`
+  - [x] Import `ForwardContract`.
 
 **Tests** (pure Python, no LLM — run freely):
-- [ ] `tests/unit/agent/ml_model_proposal_agent/test_proposal_prompts.py`
-  (extend existing)
-  - [ ] With `task_description` set to a custom (non-SQUID) value → system prompt
-    contains the value, NOT "TIDMAD SQUID"
-  - [ ] `{TASK_DESCRIPTION}` placeholder never survives into rendered output
-  - [ ] `_build_system_prompt(inp)` is invoked at call time (not at module
-    import) — regression guard against accidentally caching the substituted
-    string at module load
-- [ ] `tests/unit/agent/prompt_templates/test_proposal_prompts.py`
-  (extend existing)
-  - [ ] `proposing_stage.md` rendered with forward contract → contains the
-    injected shapes, not the hardcoded ones
-  - [ ] `comparison_stage.md` rendered with task description → contains
-    the injected text, not "TIDMAD dataset"
+- [x] `tests/unit/agent/ml_model_proposal_agent/test_proposer_task_config.py`
+  (new file) — **17 tests, all pass in 0.89s**. Test classes:
+  - [x] `TestRenderTaskBackground` (3): empty / full-populated / description-only
+  - [x] `TestBuildReasoningSystemPrompt` (6):
+    - [x] Placeholder never survives into rendered output
+    - [x] Custom task_description replaces SQUID hardcode
+    - [x] SQUID input reproduces the original task anchors (byte-equivalent
+      semantic content for production callers)
+    - [x] VRAM-ceiling + parameter_count_estimate guidance preserved
+    - [x] Dropped pre-T3 lines verified gone: `"Loss is cross-entropy or focal loss"`
+      and `"40000"` segment-length
+  - [x] `TestProposingStageMdSubstitution` (2): `{forward_contract}` substituted
+    via `load_stage_prompt(template_vars=...)`; custom contract replaces SQUID
+    default, not just supplements it
+  - [x] `TestComparisonStageMdContent` (2): "TIDMAD" gone; new wording is
+    "previously tested model architectures"
+  - [x] `TestLitReviewSearchDecisionPersona` (2): persona is generic;
+    `{TASK_DESCRIPTION}` placeholder still wired
+  - [x] `TestProposalInputTaskConfigFields` (2): defaults are empty;
+    Pydantic round-trip preserves both fields
 
 **Test gate**: **Gate 1 — real LLM + pseudo training**. Real proposer LLM call →
 real implementor LLM call → dummy-tensor check, with `task_config.yaml` present.
-Needs user approval.
+Not blocking T3 commit — the unit-level substitution is fully covered by the
+17 tests above. Gate 1 deferred to amortize after T4 lands.
 
 **Implementation notes**:
-- _none yet_
+- **Dropped pre-T3 hardcodes** (not substituted, just removed): the proposer
+  system prompt previously asserted (i) "Loss is cross-entropy or focal loss:
+  per-timestep 256-class classification" and (ii) "signal length up to 40000
+  timesteps per segment". Both are task-specific and not part of the canonical
+  forward contract:
+  - The loss claim was over-prescriptive — the proposer chooses a loss type
+    and the `ExperimentConfig.validate_architecture_loss_match` validator
+    catches incompatible model/loss combos. Verified by
+    `test_dropped_loss_line_is_gone`.
+  - The "40000 timesteps" claim is redundant — `baseline_config.train_config.segmentation_size`
+    is already injected into the user prompt at line 451 of `_build_reasoning_prompt`.
+    Verified by `test_dropped_segment_length_is_gone`.
+- **Two call paths in the proposer**: legacy mode passes
+  `PROPOSAL_REASONING_PROMPT` as a constant; pipeline mode uses
+  `load_stage_prompt(...)` with `template_vars`. T3 covers both — the legacy
+  path through the new `_build_reasoning_system_prompt(inp)` helper, the
+  pipeline path through two new `template_vars` keys (`task_description`
+  and `forward_contract`).
+- **Persona line touch-up not needed**: unlike T2, the proposer's persona
+  line ("specialising in deep learning for signal denoising") was already in
+  the more-generic form (T2 changed the implementor to match this).
+- **`comparison_stage.md` no placeholder**: decided against substituting in
+  `{TASK_DESCRIPTION}` because the task framing already lives upstream in
+  the proposer system prompt (which the LLM sees first). Re-anchoring it at
+  every stage prompt would bloat the prompt without adding signal.
+- **`search_decision_system.md` deferred items**: the broadband-framing
+  guidance at lines 121-122 is operator-domain (full-spectrum vs frequency-
+  split search direction). Migrating it to a separate task_config field
+  (e.g. `search_guidance:`) is a follow-up — out of T3 scope.
+- **Regression**: 1033/1033 tests pass across `tests/unit/agent/{ml_model_proposal_agent,
+  ml_model_implementor, prompt_templates, schemas, ml_literature_review}/`
+  and `tests/unit/workflows/`. No prior tests broke.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 17/17 new tests pass, 0.89s wall.
 
 ### Commit T4 — Tuner, interpreter, and lit-review AgentCard de-hardcoding
 

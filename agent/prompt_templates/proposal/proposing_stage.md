@@ -66,8 +66,9 @@ A JSON object with these fields:
    digits, and underscores only.
 
 4. **Forward contract.** The model MUST satisfy:
-   - Input: `[B, T] int64` — raw signal, integer class indices 0-255
-   - Output: `[B, 256, T] float32` — per-timestep logits over 256 classes
+
+{forward_contract}
+
    This is non-negotiable.
 
 5. **Conservative baseline.** The `baseline_config` must fit in <10 GB VRAM.

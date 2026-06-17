@@ -1390,6 +1390,13 @@ def run_workflow(
                     recent_tune_outputs=list(recent_tune_outputs),
                 )
                 propose_input.existing_model_types = list(all_model_types)
+                # Task config injection (T3) — same pattern as T2's implementor
+                # injection. The loader is cached per-process so this is a dict
+                # lookup after the first iter. See
+                # docs/design/enable_global_task_config.md § Commit T3.
+                _task_cfg = load_task_config()
+                propose_input.task_description = get_task_description(_task_cfg)
+                propose_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
                 if human_advice_mindset is not None:
