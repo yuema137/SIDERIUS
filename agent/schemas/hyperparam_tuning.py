@@ -667,6 +667,18 @@ class HyperparamTuningInput(BaseModel):
     model_type: str = Field(
         description="Architecture to tune. One of the registered model keys, or 'auto' to let the agent decide.",
     )
+    task_description: str = Field(
+        default="",
+        description="Plain-English description of the research task, sourced from "
+        "``configs/task_config.yaml``. Injected into the ``{TASK_DESCRIPTION}`` "
+        "placeholder in ``PLANNER_PROMPT`` at call time. Default empty string is "
+        "for test fixtures only; production callers (workflow) always populate "
+        "via ``get_task_description(load_task_config())`` which rejects empty "
+        "values upstream. The tuner only needs the description (not the full "
+        "forward contract) because hyperparameter optimization happens within "
+        "an existing model architecture — the contract is already fixed by the "
+        "implementor.",
+    )
     seed_plugin_path: str | None = Field(
         default=None,
         description=(

@@ -1293,6 +1293,10 @@ class HyperparamTuningAgent:
                         last_batch_size=last_batch_size,
                         last_mode=last_mode,
                         score_table_md=best_score_table_md,
+                        # T4a — task config injection. Substituted into the
+                        # {TASK_DESCRIPTION} placeholder in PLANNER_PROMPT.
+                        # See docs/design/enable_global_task_config.md § T4a.
+                        task_description=agent_input.task_description,
                     )
 
                     # Validate LLM output into ExperimentPlan (with fallback)

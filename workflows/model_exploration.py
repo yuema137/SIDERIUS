@@ -1628,6 +1628,10 @@ def run_workflow(
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
+        # Task config injection (T4a) — substituted into the {TASK_DESCRIPTION}
+        # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
+        # See docs/design/enable_global_task_config.md § Commit T4a.
+        tune_input.task_description = get_task_description(load_task_config())
 
         _tune_agent = HyperparamTuningAgent(
             bridge_factory=bridge_factory,

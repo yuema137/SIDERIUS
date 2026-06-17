@@ -703,20 +703,38 @@ Every change is a placeholder substitution only. The rendered output
 when `task_config.yaml` contains the SQUID defaults must be byte-identical
 to the current hardcoded output. This is verified by unit tests.
 
-**Code**:
-- [ ] `agent/prompts.py`
-  - [ ] PLANNER_PROMPT header: replace "Senior Signal Processing Researcher
-    specialized in deep learning for signal denoising" with
-    `{TASK_DESCRIPTION}` in the persona line; replace "optimize the
-    'Denoising Score' for the TIDMAD dataset" with a task-agnostic phrase
-    referencing `{TASK_DESCRIPTION}`
-  - [ ] REFLECTOR_PROMPT: same persona line replacement
-  - [ ] The substitution happens at the call site where PLANNER_PROMPT is
-    used — **CHECK** where `agent/prompts.py` constants are rendered into
-    actual prompt strings before deciding substitution mechanism
-  - [ ] DO NOT touch: scoring sections, file_vector references, Impact_Score
-    content, denoising_score field references (these are metric names, not
-    task framing)
+**Split into 3 git commits at clean seams** (per development principle 4):
+**T4a** (tuner) → **T4b** (interpreter) → **T4c** (lit-review AgentCard). Each
+subsystem is independently committable with its own test surface.
+
+**Code — T4a (tuner)** ✅ landed:
+- [x] `agent/prompts.py`
+  - [x] PLANNER_PROMPT header: persona "Senior Signal Processing Researcher
+    specialized in deep learning for signal denoising" → "Senior ML Research
+    Analyst specializing in hyperparameter optimization for deep learning
+    models"; goal "optimize the 'Denoising Score' for the TIDMAD dataset" →
+    "maximize the `denoising_score` metric across hyperparameter configurations
+    for the following task:\n\n{TASK_DESCRIPTION}"
+  - [x] REFLECTOR_PROMPT: **no change needed** — persona is already generic
+    ("You are a Research Analyst"); all `denoising_score` references in the
+    GAP ANALYSIS section are field-name references (Phase 8 — DO NOT touch).
+    Pre-read audit confirms zero task-anchored persona text in REFLECTOR.
+  - [x] Substitution wired at `agent/llm_bridge.py:843-847`. Added
+    `task_description: str = ""` parameter to `LLMBridge.plan()`; substitution
+    chains a second `.replace("{TASK_DESCRIPTION}", task_description)` after
+    the existing `{SCORE_COMPARISON_TABLE}` replacement.
+  - [x] DO NOT touch: scoring sections, file_vector references, Impact_Score
+    content, `denoising_score` field references — preserved verbatim.
+- [x] `agent/schemas/hyperparam_tuning.py` — add `task_description: str = Field(default="", ...)`
+  to `HyperparamTuningInput`. The tuner doesn't need `forward_contract`
+  because hyperparameter optimization happens within an existing model
+  architecture; the contract is fixed by the implementor upstream.
+- [x] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
+  — pass `task_description=agent_input.task_description` to `brain.plan(...)`
+  at the per-round call site (current line 1296-1300).
+- [x] `workflows/model_exploration.py` — at the tuner call site (current
+  line 1631-1634), inject `tune_input.task_description = get_task_description(load_task_config())`.
+  Reuses T2/T3 imports — no new imports needed.
 - [ ] `nodes/result_interpretation_agent/result_interpretation_agent.py`
   - [ ] PER_MODEL_SYSTEM_PROMPT (line 47): replace "senior ML research
     analyst specialising in deep learning for signal denoising" with
@@ -740,15 +758,25 @@ to the current hardcoded output. This is verified by unit tests.
   - [ ] The AgentCard is constructed in `MLLiteratureReviewAgent.__init__`
     or `run()` — **CHECK** exact construction site before editing
 
-**Tests** (pure Python, no LLM — run freely):
-- [ ] `tests/unit/agent/test_prompts_task_config.py` (new file)
-  - [ ] PLANNER_PROMPT rendered with SQUID task_config → output contains
-    "SQUID" from YAML, not from hardcode
-  - [ ] PLANNER_PROMPT rendered with custom task_description → output
-    contains custom text
-  - [ ] `{TASK_DESCRIPTION}` placeholder never survives into rendered output
-  - [ ] Phase 8 content (Impact_Score, Linear_Weight) still present after
-    substitution (regression guard — these must not be touched)
+**Tests — T4a (tuner)** ✅ landed (pure Python, no LLM — run freely):
+- [x] `tests/unit/agent/test_planner_prompt_task_config.py` (new file) — **16 tests, all pass in 0.07s**
+  - [x] PLANNER_PROMPT rendered with SQUID task_config → output contains
+    "SQUID" from YAML, not from hardcode *(test_squid_input_reproduces_squid_anchors)*
+  - [x] PLANNER_PROMPT rendered with custom task_description → output
+    contains custom text *(test_custom_task_description_replaces_squid)*
+  - [x] `{TASK_DESCRIPTION}` placeholder never survives into rendered output
+    *(test_placeholder_never_survives_with_non_empty_input + collapses_to_empty_with_empty_input)*
+  - [x] Phase 8 content (`{SCORE_COMPARISON_TABLE}` substitution) still wired
+    after T4a *(test_score_table_substitution_still_works)*
+  - [x] `denoising_score` field-name reference preserved
+    *(test_denoising_score_field_name_preserved)*
+  - [x] `HyperparamTuningInput.task_description` defaults to `""` and
+    round-trips through Pydantic
+- [x] **T4a regression sweep**: `tests/unit/agent/tune_ml_hyperparam_agent/`,
+  `tests/unit/agent/schemas/`, `tests/unit/workflows/` — **749/749 pass in 224.6s**.
+  (Long wall is the existing tuner-suite cost, not new.) No prior tests broke.
+
+**Tests — T4b/T4c** (still pending):
 - [ ] `tests/unit/nodes/test_interpretation_agent_task_config.py` (new)
   - [ ] PER_MODEL_SYSTEM_PROMPT and SYNTHESIS_SYSTEM_PROMPT both render
     with YAML task_description; neither contains hardcoded "signal
@@ -769,7 +797,24 @@ of the standard unit suite.
 task_config into existing call sites.
 
 **Implementation notes**:
-- _none yet_
+- **T4a deviation from literal design**: the design doc proposed substituting
+  `{TASK_DESCRIPTION}` *inline* into the persona/goal phrases at lines 10-11.
+  Pre-read showed the task_description is a multi-sentence paragraph (per
+  `configs/task_config.yaml:44-47`), not a phrase — substituting it inline
+  produces an unreadable run-on. Restructured instead: the persona/goal
+  becomes task-agnostic ("Senior ML Research Analyst … hyperparameter
+  optimization") and the `{TASK_DESCRIPTION}` placeholder is positioned as a
+  separate block after "for the following task:". This matches the T2/T3
+  pattern of carving task framing into its own renderable section.
+- **REFLECTOR_PROMPT untouched**: the design doc said "REFLECTOR_PROMPT: same
+  persona line replacement", but pre-read confirmed REFLECTOR's persona
+  ("You are a Research Analyst") is already task-agnostic. The only
+  `denoising_score` mentions in REFLECTOR are field-name references in the
+  GAP ANALYSIS section — Phase 8 / not in scope. No change to REFLECTOR.
+- **Tuner takes only `task_description`, not `forward_contract`**: the
+  planner tunes hyperparameters within an existing model architecture; the
+  forward contract is already fixed by the implementor. Adding
+  `forward_contract` to the tuner schema would be dead weight.
 
 ### Checkpoint T — Smoke validation
 
