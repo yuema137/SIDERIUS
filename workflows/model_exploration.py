@@ -86,6 +86,7 @@ from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -97,6 +98,7 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1461,6 +1463,13 @@ def run_workflow(
                     impl_input = local_full_spec(proposal, attempt_storage)
                     impl_input.plugin_dir = os.path.join(attempt_dir, "models")
                     impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    # Task config injection (T2) — load + thread into the
+                    # implementor input. The loader is cached per-process so
+                    # this is a dict lookup after the first iter. See
+                    # docs/design/enable_global_task_config.md § Commit T2.
+                    _task_cfg = load_task_config()
+                    impl_input.task_description = get_task_description(_task_cfg)
+                    impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
                     if human_advice_implement is not None:
                         impl_input.human_advice = human_advice_implement
                     if ref_code:

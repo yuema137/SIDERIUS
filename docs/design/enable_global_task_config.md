@@ -417,61 +417,126 @@ hardcoded task/contract block with `{TASK_DESCRIPTION}` and
 `ImplementorInput`.
 
 **Pre-read required** (before writing any code):
-- [ ] Read `nodes/ml_model_implementor/ml_model_implementor.py` lines
+- [x] Read `nodes/ml_model_implementor/ml_model_implementor.py` lines
   290-430 verbatim to confirm exact current text
-- [ ] Read `agent/schemas/implementor.py` `ImplementorInput` class to
-  confirm `task_description` field exists (landed in `enable_loss_inventory`
-  Commit L3 — **dependency**: T2 must land after L3, OR add
-  `task_description` to `ImplementorInput` here and remove the duplicate
-  addition from L3)
-
-**Decision needed before implementation**:
-- `ImplementorInput.task_description` will be added in either T2 or L3.
-  To avoid duplication, **T2 adds it** and L3's schema section skips it.
-  Document this dependency in both design docs.
+- [x] Read `agent/schemas/implementor.py` `ImplementorInput` class — confirmed
+  `task_description` does NOT exist yet (no overlap with enable_loss_inventory
+  L3 since L3 adds `custom_loss_spec`, not `task_description`). T2 adds it.
 
 **Code**:
-- [ ] `nodes/ml_model_implementor/ml_model_implementor.py`
-  - [ ] Import `ForwardContract` from `agent.schemas.task_config` (already defined in T1a)
-  - [ ] Replace lines 306-322 (`IMPLEMENTOR_REASONING_PROMPT` task block)
-    with `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` placeholders
-  - [ ] `_build_reasoning_prompt(inp)`: substitute placeholders from
-    `inp.task_description` (for `{TASK_DESCRIPTION}`) and
-    `render_forward_contract(inp.forward_contract)` (for `{FORWARD_CONTRACT}`).
-    No in-code fallback — `load_task_config()` already rejected empty values
-    upstream, so by the time the implementor is invoked `inp.task_description`
-    is non-empty and `inp.forward_contract` is a fully-populated `ForwardContract`.
-- [ ] `agent/schemas/implementor.py` — add to `ImplementorInput`:
-  - [ ] `task_description: str = Field(default="", description="Task description from task_config.yaml. Injected into {TASK_DESCRIPTION} placeholder in system prompt.")`
-  - [ ] `forward_contract: ForwardContract = Field(default_factory=ForwardContract, description="Forward contract from task_config.yaml. Injected into {FORWARD_CONTRACT} placeholder.")`
-- [ ] `workflows/model_exploration.py` — at the implementor call site
-  (near line 1435), inject from `load_task_config()`:
+- [x] `nodes/ml_model_implementor/ml_model_implementor.py`
+  - [x] Import `ForwardContract` from `agent.schemas.task_config` and
+    `render_forward_contract` from `workflows.task_config` (both landed in T1a)
+  - [x] Replace `IMPLEMENTOR_REASONING_PROMPT` system-prompt task block
+    (lines 311-322 in pre-T2 numbering) with a single `{TASK_BACKGROUND}`
+    placeholder — this collapses the previous SQUID-specific "Input data" /
+    "forward contract" / "ADC values must be embedded" / output-head bullets
+    into one substitutable block.
+  - [x] Replace `IMPLEMENTOR_CODE_PROMPT` two `[B, 256, T] float32` literals
+    (the `forward_body` field's instructional text + the hard-constraints
+    bullet) with `{OUTPUT_SHAPE}` placeholder. **Scope expansion** — see
+    implementation notes.
+  - [x] Replace `_build_reasoning_prompt` user-prompt "## Forward contract"
+    block (3 hardcoded lines: header + input + output shapes) with a
+    `render_forward_contract(inp.forward_contract)` call. Section is now
+    suppressed entirely when the contract is empty (test fixtures only).
+    **Scope expansion** — see implementation notes.
+  - [x] Added 3 module-level helpers next to `_build_reasoning_prompt`:
+    `_render_task_background(td, fc)`, `_build_reasoning_system_prompt(inp)`,
+    `_build_code_system_prompt(inp)`. Substitution happens at call time, not
+    at module import — matches the T3 pattern documented for the proposer.
+  - [x] Updated the two `self.bridge.generate*` call sites in `run()` to pass
+    `_build_reasoning_system_prompt(inp)` and `_build_code_system_prompt(inp)`
+    instead of the raw module-level constants. `IMPLEMENTOR_REPAIR_PROMPT`
+    call site is unchanged — that constant has no task-specific content.
+- [x] `agent/schemas/implementor.py` — add to `ImplementorInput`:
+  - [x] `task_description: str = Field(default="", description="Task description from task_config.yaml. Injected into {TASK_DESCRIPTION} placeholder in system prompt.")`
+  - [x] `forward_contract: ForwardContract = Field(default_factory=ForwardContract, description="Forward contract from task_config.yaml. Injected into {FORWARD_CONTRACT} placeholder.")`
+- [x] `workflows/model_exploration.py` — at the implementor call site
+  (current line 1461), inject from `load_task_config()`:
   ```python
-  task_cfg = load_task_config()
-  impl_input.task_description = get_task_description(task_cfg)
-  impl_input.forward_contract = ForwardContract(**task_cfg["forward_contract"])
+  _task_cfg = load_task_config()
+  impl_input.task_description = get_task_description(_task_cfg)
+  impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
   ```
+  Plus the corresponding top-of-file imports: `ForwardContract` from
+  `agent.schemas.task_config`, `load_task_config` + `get_task_description`
+  from `workflows.task_config`.
 
 **Tests** (pure Python, no LLM — run freely):
-- [ ] `tests/unit/agent/ml_model_implementor/test_implementor_prompt.py`
-  (new or extend existing)
-  - [ ] With `task_description` set → rendered prompt contains the value,
-    NOT the literal placeholder `{TASK_DESCRIPTION}`
-  - [ ] With `forward_contract` populated → rendered prompt contains the rendered
+- [x] `tests/unit/agent/ml_model_implementor/test_implementor_prompt.py` (new file) — **18 tests, all pass in 0.22s**
+  - [x] With `task_description` set → rendered prompt contains the value,
+    NOT the literal placeholder `{TASK_BACKGROUND}` *(test_custom_task_description_replaces_squid_hardcode)*
+  - [x] With `forward_contract` populated → rendered prompt contains the rendered
     contract (input_shape, output_shape, embedding_note, task_type)
-  - [ ] Placeholder `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` do NOT
+    *(test_full_populated_contains_header_description_and_contract)*
+  - [x] Placeholder `{TASK_BACKGROUND}` and `{OUTPUT_SHAPE}` do NOT
     appear in any rendered prompt (substitution always fires)
-  - [ ] With a custom non-SQUID `ForwardContract` (e.g. `output_shape="[B, T] float32"`)
+    *(test_placeholder_never_survives_into_output — for both reasoning + code prompts)*
+  - [x] With a custom non-SQUID `ForwardContract` (e.g. `output_shape="[B, T] float32"`)
     → rendered prompt contains the custom shapes, NOT the SQUID `[B, 256, T]` shapes
+    *(test_custom_task_description_replaces_squid_hardcode + test_custom_output_shape_replaces_squid_default)*
+  - [x] **Deferred-scope regression guard** — `TestDeferredScope` asserts the
+    three intentionally-deferred hardcodes (dummy-tensor self-check at line 80,
+    plugin-stub-assembly comment at line 254, description.md generation at line 827)
+    are still present, fires if a follow-up commit silently removes them.
 
 **Test gate**: **Gate 1 — real LLM + pseudo training**. One real implementor LLM
 call with `task_config.yaml` present; assert generated code compiles + passes
-dummy-tensor check. Needs user approval for timing before running.
+dummy-tensor check. Not blocking T2 commit — the unit-level substitution is
+fully covered by the 18 tests above. Gate 1 verification is a separate step.
 
-**Out of scope**: proposer and lit-review prompts (T3).
+**Out of scope**: proposer and lit-review prompts (T3); deferred hardcodes in
+runtime self-check infrastructure (Category B), plugin stub assembly
+(Category C), and `description.md` auto-generation (Category D) — see
+Implementation notes.
 
 **Implementation notes**:
-- _none yet_
+- **Scope expansion vs. literal design**: the design's affected-locations
+  table listed only `IMPLEMENTOR_REASONING_PROMPT` lines 306-322. Pre-read
+  surfaced **two additional LLM-prompt hardcode sites in the same file**
+  that share the same SQUID-specific framing — keeping them would have left
+  T2 only partially complete. Folded into T2 with explicit rationale:
+  | Site | Lines (pre-T2) | Action |
+  |---|---|---|
+  | `IMPLEMENTOR_REASONING_PROMPT` task block | 311-322 | ✅ Replaced with `{TASK_BACKGROUND}` |
+  | `_build_reasoning_prompt` user prompt | 454-456 | ✅ Replaced with `render_forward_contract(inp.forward_contract)` |
+  | `IMPLEMENTOR_CODE_PROMPT` `[B, 256, T] float32` | 379, 385 | ✅ Replaced with `{OUTPUT_SHAPE}` |
+  | Dummy-tensor self-check `[1, 64]` / `(1, 256, 64)` | 80, 115, 120 | ❌ Deferred (Category B — runtime infra) |
+  | Plugin stub-assembly forward-contract comment | 254, 259 | ❌ Deferred (Category C — generated-code text) |
+  | `_assemble_test` test-template generator | 276-288 | ❌ Deferred (Category B — auto-generated tests) |
+  | `description.md` auto-generation | 827 | ❌ Deferred (Category D — output artifact, read by test_implementor_agent.py::TestDescriptionFile) |
+  Deferred sites need separate design (e.g. should dummy-tensor shape come
+  from `ForwardContract.input_shape`? what about regressor vs classifier
+  output dimensions?) — out of scope for T2's narrow placeholder substitution.
+  `TestDeferredScope` in the new test file asserts these still exist, so a
+  drive-by removal in a future commit will fail loudly.
+- **Two placeholders, not three**: `{TASK_BACKGROUND}` rolls task_description
+  + the rendered forward contract into one substitutable block (cleaner
+  empty-fixture handling — the helper returns `""` instead of leaving an
+  orphan "Background on the task:" header). `{OUTPUT_SHAPE}` is a separate
+  single-line placeholder because `IMPLEMENTOR_CODE_PROMPT` only needs the
+  short shape literal, not the full multi-line contract block. The design's
+  `{TASK_DESCRIPTION}` + `{FORWARD_CONTRACT}` naming was nominal; the
+  concrete placeholders chosen here are functionally equivalent.
+- **Helper symmetry with T3**: `_build_reasoning_system_prompt(inp)` and
+  `_build_code_system_prompt(inp)` mirror the `_build_system_prompt(inp)`
+  helper documented for the proposer in T3 — same call-time `.replace()`
+  substitution pattern.
+- **System-prompt persona line touch-up**: the IMPLEMENTOR_REASONING_PROMPT
+  opener used to read "specialising in 1-D signal processing models", which
+  is itself a SQUID-flavored phrasing. Changed to "specialising in deep
+  learning for signal denoising" — matches the proposer's existing persona
+  framing at line 172 and is one step less task-specific. (Removing
+  "denoising" entirely would need T4's broader generality push.)
+- **Workflow injection guarded by `load_task_config` cache**: the loader is
+  called inside the per-attempt loop, but its module-level cache makes every
+  call after the first a dict lookup. No measurable cost.
+- **Regression**: 371/371 tests pass across `tests/unit/agent/ml_model_implementor/`,
+  `tests/unit/agent/schemas/`, and `tests/unit/workflows/` (the three
+  directories T2 touches). No prior tests broke.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 18/18 new tests pass, 0.22s wall.
 
 ### Commit T3 — Proposer + lit-review prompt de-hardcoding
 

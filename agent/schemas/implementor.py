@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
 # proposer (dataset-level, global, knowable at proposal time). A violation
@@ -129,6 +130,24 @@ class ImplementorInput(BaseModel):
     baseline_config: dict[str, Any] = Field(
         description="Safe starting configuration from the proposal agent. "
         "Used to derive sensible default values for the Pydantic config fields.",
+    )
+    task_description: str = Field(
+        default="",
+        description="Plain-English description of the research task, sourced from "
+        "``configs/task_config.yaml``. Injected into the ``{TASK_DESCRIPTION}`` "
+        "placeholder in the implementor system prompt at call time. "
+        "Default empty string is for test fixtures only; production callers "
+        "(workflow) always populate via ``get_task_description(load_task_config())`` "
+        "which rejects empty values upstream.",
+    )
+    forward_contract: ForwardContract = Field(
+        default_factory=ForwardContract,
+        description="Typed forward-pass contract from ``configs/task_config.yaml``. "
+        "Rendered into the ``{TASK_BACKGROUND}`` placeholder in the implementor "
+        "system prompt and the user-prompt contract section. Default "
+        "``ForwardContract()`` (all fields empty) is for test fixtures only; "
+        "production callers always populate via "
+        '``ForwardContract(**load_task_config()["forward_contract"])``.',
     )
     plugin_dir: str = Field(
         default="agent_generated/models",
