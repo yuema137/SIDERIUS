@@ -344,37 +344,69 @@ to use it.
 One `shutil.copy2` call; one regression test.
 
 **Code**:
-- [ ] `workflows/model_exploration.py` — immediately after the workspace-init
-  `os.makedirs(run_dir, exist_ok=True)` at line 953 in `run_workflow`, add:
+- [x] `workflows/model_exploration.py` — extracted snapshot logic to a private
+  module-level helper `_snapshot_task_config(run_dir)` placed next to
+  `_make_storage` (both are run-init helpers). The helper is the testable unit;
+  `run_workflow` calls it on a single line immediately after the workspace-init
+  `os.makedirs(run_dir, exist_ok=True)` at line 953:
   ```python
-  snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
-  if not os.path.exists(snapshot_path):
-      shutil.copy2("configs/task_config.yaml", snapshot_path)
+  os.makedirs(run_dir, exist_ok=True)
+  _snapshot_task_config(run_dir)
+  ```
+  Helper body:
+  ```python
+  def _snapshot_task_config(run_dir: str) -> None:
+      snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
+      if not os.path.exists(snapshot_path):
+          shutil.copy2(os.path.join(SIDERIUS_ROOT, "configs", "task_config.yaml"), snapshot_path)
   ```
   **Chain-mode policy**: the `if not os.path.exists(...)` guard means iter 1
   writes the snapshot; iter 2+ in the same chain skip it. The snapshot reflects
   the config that was active when the run was initialized — not whatever the
   operator may have edited mid-chain. This matches the "snapshot is read-only
   metadata" framing earlier in this doc.
-- [ ] `shutil` is already imported at line 63 — no new import needed.
-- [ ] No need to import `load_task_config` — the snapshot is a raw byte copy,
+  **Source path anchored on `SIDERIUS_ROOT`** (not cwd) — integration tests that
+  pass a tmp workspace without `chdir`'ing to the repo root still pick up the
+  committed config.
+- [x] `shutil` is already imported at line 63 — no new import needed.
+- [x] No need to import `load_task_config` — the snapshot is a raw byte copy,
   not a re-render of the parsed dict.
 
 **Tests** (pure Python, no LLM — run freely):
-- [ ] `tests/unit/workflows/test_task_config_snapshot.py` (new file)
-  - [ ] `run_workflow` writes `task_config_snapshot.yaml` to `{run_dir}` on first
-    invocation with a clean workspace
-  - [ ] `run_workflow` does NOT overwrite an existing snapshot (iter 2+ behaviour
-    — pre-populate the snapshot with sentinel content, call `run_workflow` again,
-    assert snapshot unchanged)
-  - [ ] Snapshot content is byte-identical to `configs/task_config.yaml` on first iter
+- [x] `tests/unit/workflows/test_task_config_snapshot.py` (new file) — **4 tests, all pass in 1.02s**
+  - [x] `_snapshot_task_config` writes `task_config_snapshot.yaml` to `{run_dir}` on first
+    invocation with a clean workspace *(test_clean_run_dir_writes_snapshot)*
+  - [x] `_snapshot_task_config` does NOT overwrite an existing snapshot (iter 2+
+    behaviour — pre-populate the snapshot with sentinel content, call helper again,
+    assert snapshot unchanged) *(test_existing_snapshot_is_not_overwritten)*
+  - [x] Snapshot content is byte-identical to `configs/task_config.yaml` on first iter
+    *(test_snapshot_is_byte_identical_to_source)*
+  - [x] **Bonus regression guard** — `test_source_path_is_resolved_relative_to_repo_root_not_cwd`
+    chdir's into a foreign tmp cwd (with no `configs/` subtree) and confirms the helper
+    still finds the repo's committed YAML via `SIDERIUS_ROOT`.
 
 **Test gate**: unit only — no LLM, no GPU.
 
 **Out of scope**: no schema changes, no loader changes, no node changes.
 
 **Implementation notes**:
-- _none yet_
+- **Refactor for testability**: the design originally called for the 3-line
+  snippet inlined at line 953 in `run_workflow`. The 800-line `run_workflow`
+  function is impractical to unit-test directly without mocking every LLM call
+  and subprocess. Extracted to a private `_snapshot_task_config(run_dir)` helper
+  beside `_make_storage` — `run_workflow` calls it on one line; the test file
+  exercises the helper without involving the rest of the workflow loop. The
+  helper is private (`_` prefix) to signal it's not part of the public workflow
+  API.
+- **Source-path anchoring**: `shutil.copy2(os.path.join(SIDERIUS_ROOT, "configs",
+  "task_config.yaml"), snapshot_path)` — the `SIDERIUS_ROOT` constant already
+  exists at line 101 (`os.path.dirname(os.path.dirname(os.path.abspath(__file__)))`).
+  Using it here avoids a class of bugs where a test or chain-runner with a
+  non-root cwd would silently fail to find the YAML.
+- **Regression**: full `tests/unit/workflows/` suite (163 tests, including this
+  new file's 4) passes in 2.99s. No prior tests broke.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 4/4 new tests pass, 1.02s wall. Full workflows/ suite: 163/163.
 
 ### Commit T2 — Implementor prompt de-hardcoding
 

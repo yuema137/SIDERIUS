@@ -291,6 +291,31 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
     )
 
 
+def _snapshot_task_config(run_dir: str) -> None:
+    """Copy ``configs/task_config.yaml`` into ``run_dir`` as
+    ``task_config_snapshot.yaml`` for replay provenance.
+
+    Called once during ``run_workflow`` setup, immediately after
+    ``os.makedirs(run_dir, exist_ok=True)``. The "copy only if absent"
+    guard means the snapshot is written on the first invocation that
+    initializes a clean ``run_dir`` and skipped on every subsequent call —
+    chain mode (iter 2+ in the same chain) therefore preserves the
+    config that was active when iter 1 ran, even if the operator edits
+    ``configs/task_config.yaml`` mid-chain.
+
+    The source path is anchored on :data:`SIDERIUS_ROOT` (not the
+    process cwd) so integration tests that pass a tmp workspace without
+    ``chdir``'ing into the repo root still pick up the committed config.
+
+    See ``docs/design/enable_global_task_config.md`` § "Run provenance —
+    task config snapshot" + § Commit T1b for the design + chain-mode
+    rationale.
+    """
+    snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
+    if not os.path.exists(snapshot_path):
+        shutil.copy2(os.path.join(SIDERIUS_ROOT, "configs", "task_config.yaml"), snapshot_path)
+
+
 # ---------------------------------------------------------------------------
 # Phase 6.6 WS-B B.3 Hop 4 — worst-offender aggregation + [PHYSICAL
 # REJECTION] renderer. One entry per (prior-iteration tuning output,
@@ -951,6 +976,7 @@ def run_workflow(
     # All workflow output goes under {workspace}/{run_name}/
     run_dir = os.path.join(workspace, run_name)
     os.makedirs(run_dir, exist_ok=True)
+    _snapshot_task_config(run_dir)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
     # Anchor SIDERIUS_CHAIN_WORKSPACE for in-process / single-iteration
