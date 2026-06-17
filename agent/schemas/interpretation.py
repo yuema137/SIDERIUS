@@ -183,6 +183,18 @@ class InterpretationInput(BaseModel):
         "When None, model types are derived from summaries. "
         "Cannot be an empty list — use None to derive from summaries.",
     )
+    task_description: str = Field(
+        default="",
+        description="Plain-English description of the research task, sourced from "
+        "``configs/task_config.yaml``. Injected into the ``{TASK_DESCRIPTION}`` "
+        "placeholder in both ``PER_MODEL_SYSTEM_PROMPT`` and "
+        "``SYNTHESIS_SYSTEM_PROMPT`` at call time. Default empty string is for "
+        "test fixtures only; production callers (workflow) always populate via "
+        "``get_task_description(load_task_config())`` which rejects empty values "
+        "upstream. The interpreter only needs the description (not the full "
+        "forward contract) — its job is reading run summaries and synthesizing "
+        "findings, not designing models.",
+    )
     expert_advice: ExpertAdviceInput = Field(
         default="",
         description="Structured guidance from upstream agents or orchestrators. "

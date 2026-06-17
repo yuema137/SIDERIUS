@@ -43,11 +43,13 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 PER_MODEL_SYSTEM_PROMPT = """\
-You are a senior ML research analyst specialising in deep learning for signal denoising.
+You are a senior ML research analyst.
 
 Your task: analyse the tuning run summary for ONE model architecture and produce a
 structured analysis covering performance, per-file behaviour, data sensitivity,
-training dynamics, efficiency, and strategy assessment.
+training dynamics, efficiency, and strategy assessment. The research context is:
+
+{TASK_DESCRIPTION}
 
 You will receive:
 - The model's architectural description (markdown + math)
@@ -123,6 +125,20 @@ Rules:
 - strategy_assessment: comment on whether the agent's exploration strategy was effective
 - Output only the JSON object — no preamble, no commentary, no markdown
 """
+
+
+def _build_per_model_system_prompt(inp: "InterpretationInput") -> str:
+    """Substitute the ``{TASK_DESCRIPTION}`` placeholder in
+    ``PER_MODEL_SYSTEM_PROMPT`` from ``inp.task_description``.
+
+    Production callers always populate ``inp.task_description`` via the
+    workflow (T4b — see docs/design/enable_global_task_config.md § Commit T4);
+    test fixtures may leave it at the default ``""``, in which case the
+    placeholder collapses to ``""`` and the prompt's "The research context
+    is:" preamble has no payload (acceptable for tests, never reached in
+    production).
+    """
+    return PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
 
 
 def _build_per_model_prompt(
@@ -236,11 +252,13 @@ def _build_per_model_prompt(
 # ---------------------------------------------------------------------------
 
 SYNTHESIS_SYSTEM_PROMPT = """\
-You are a senior ML research analyst specialising in deep learning for signal denoising.
+You are a senior ML research analyst.
 
 Your task: read structured summaries of multiple model architectures and produce a
 cross-model interpretation that identifies the overall state of the research and
-motivates the next step.
+motivates the next step. The research context is:
+
+{TASK_DESCRIPTION}
 
 You will receive:
 - Per-model summaries (key findings, bottlenecks, config analysis, score trends,
@@ -358,6 +376,17 @@ def _flatten_entry_for_prompt(entry: dict[str, Any]) -> dict[str, Any]:
         else:
             flat[k] = v
     return flat
+
+
+def _build_synthesis_system_prompt(inp: "InterpretationInput") -> str:
+    """Substitute the ``{TASK_DESCRIPTION}`` placeholder in
+    ``SYNTHESIS_SYSTEM_PROMPT`` from ``inp.task_description``.
+
+    Mirrors :func:`_build_per_model_system_prompt` for the cross-model
+    synthesis call site. See docs/design/enable_global_task_config.md
+    § Commit T4 for the substitution contract.
+    """
+    return SYNTHESIS_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
 
 
 def _build_synthesis_prompt(
@@ -885,8 +914,11 @@ class ResultInterpretationAgent:
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
                 )
+                # T4b — system prompt has {TASK_DESCRIPTION} placeholder
+                # substituted at call time from inp.task_description; see
+                # docs/design/enable_global_task_config.md § Commit T4.
                 llm_response = self.bridge.generate(
-                    PER_MODEL_SYSTEM_PROMPT,
+                    _build_per_model_system_prompt(inp),
                     per_model_prompt,
                     label="interpretation.per_model",
                 )
@@ -1087,8 +1119,10 @@ class ResultInterpretationAgent:
                     # invariant as a runtime guard.
                     workspace=cast(LocalStorageConfig, inp.storage.local).workspace,
                 )
+                # T4b — system prompt has {TASK_DESCRIPTION} placeholder
+                # substituted at call time from inp.task_description.
                 synthesis_response = self.bridge.generate(
-                    SYNTHESIS_SYSTEM_PROMPT,
+                    _build_synthesis_system_prompt(inp),
                     synthesis_prompt,
                     label="interpretation.synthesis",
                 )

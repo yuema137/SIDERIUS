@@ -1218,6 +1218,11 @@ def run_workflow(
             previous_proposal=previous_proposal_data,
             storage=interp_storage,
             iteration=iteration,
+            # T4b — task config injection. Substituted into the
+            # {TASK_DESCRIPTION} placeholder in PER_MODEL_SYSTEM_PROMPT +
+            # SYNTHESIS_SYSTEM_PROMPT at call time.
+            # See docs/design/enable_global_task_config.md § Commit T4.
+            task_description=get_task_description(load_task_config()),
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")

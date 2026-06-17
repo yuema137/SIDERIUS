@@ -735,16 +735,33 @@ subsystem is independently committable with its own test surface.
 - [x] `workflows/model_exploration.py` — at the tuner call site (current
   line 1631-1634), inject `tune_input.task_description = get_task_description(load_task_config())`.
   Reuses T2/T3 imports — no new imports needed.
-- [ ] `nodes/result_interpretation_agent/result_interpretation_agent.py`
-  - [ ] PER_MODEL_SYSTEM_PROMPT (line 47): replace "senior ML research
-    analyst specialising in deep learning for signal denoising" with
-    `{TASK_DESCRIPTION}` in the persona line
-  - [ ] SYNTHESIS_SYSTEM_PROMPT (line 239): same persona line replacement
-  - [ ] DO NOT touch: Impact_Score content, per_file_analysis field,
-    Linear_Weight content, Log-of-Mean trap section (all Phase 8)
-  - [ ] Substitution at call time via the existing prompt-building helpers
-    in this file — **CHECK** which helper functions build the final prompt
-    string sent to the LLM
+**Code — T4b (interpreter)** ✅ landed:
+- [x] `nodes/result_interpretation_agent/result_interpretation_agent.py`
+  - [x] PER_MODEL_SYSTEM_PROMPT (line 47): restructured persona
+    "specialising in deep learning for signal denoising" → "You are a senior
+    ML research analyst." (task-agnostic) + added `{TASK_DESCRIPTION}`
+    placeholder block after "The research context is:" (same multi-sentence-
+    paragraph rationale as T4a).
+  - [x] SYNTHESIS_SYSTEM_PROMPT (line 239): same restructure pattern.
+  - [x] DO NOT touch: Impact_Score content, per_file_analysis field,
+    Linear_Weight content, Log-of-Mean trap section (all Phase 8) — preserved
+    verbatim. Verified by `test_phase8_*_preserved` and
+    `test_phase8_content_present_after_substitution` regression guards.
+  - [x] Two new helpers `_build_per_model_system_prompt(inp)` and
+    `_build_synthesis_system_prompt(inp)` at module level (near
+    `_build_per_model_prompt` / `_build_synthesis_prompt` user-prompt builders).
+    Substitution happens at call time — both `bridge.generate(...)` call sites
+    now pass `_build_*_system_prompt(inp)` instead of the raw constants.
+- [x] `agent/schemas/interpretation.py` — add `task_description: str = Field(default="", ...)`
+  to `InterpretationInput`. The interpreter only needs the description —
+  no forward_contract field needed (its job is reading summaries, not
+  designing models).
+- [x] `workflows/model_exploration.py` — at the interpreter call site
+  (line 1213-1223), inject `task_description=get_task_description(load_task_config())`
+  directly into the `InterpretationInput(...)` constructor. (Cleaner than
+  post-hoc mutation because `InterpretationInput` is constructed all at once,
+  unlike T2/T3 where the protocol returns it and the workflow mutates fields.)
+  Reuses T2/T3 imports — no new imports.
 - [ ] `nodes/ml_literature_review/ml_literature_review.py`
   - [ ] `AgentCard.role`: replace "Surface ML denoising literature
     relevant to the current iteration." with a template that incorporates
@@ -777,12 +794,20 @@ subsystem is independently committable with its own test surface.
   (Long wall is the existing tuner-suite cost, not new.) No prior tests broke.
 
 **Tests — T4b/T4c** (still pending):
-- [ ] `tests/unit/nodes/test_interpretation_agent_task_config.py` (new)
-  - [ ] PER_MODEL_SYSTEM_PROMPT and SYNTHESIS_SYSTEM_PROMPT both render
-    with YAML task_description; neither contains hardcoded "signal
-    denoising" persona framing
-  - [ ] Phase 8 sections still intact (per_file_analysis field,
-    Impact_Score ranking instruction)
+- [x] `tests/unit/agent/result_interpretation_agent/test_interpreter_prompt_task_config.py`
+  (new file) — **21 tests, all pass in 0.88s**
+  - [x] PER_MODEL_SYSTEM_PROMPT and SYNTHESIS_SYSTEM_PROMPT both render
+    with custom task_description; neither contains hardcoded "specialising
+    in deep learning for signal denoising" persona framing
+  - [x] Phase 8 sections still intact — `Log-of-Mean trap`, `Linear_Weight`,
+    `Impact_Score` content survives substitution in both templates
+    *(test_phase8_*_preserved + test_phase8_content_present_after_substitution
+    in both helper test classes)*
+  - [x] `InterpretationInput.task_description` defaults to `""`, round-trips
+    through Pydantic, and accepts arbitrary strings (4 parametrized cases)
+- [x] **T4b regression sweep**: `tests/unit/agent/result_interpretation_agent/`,
+  `tests/unit/agent/schemas/`, `tests/unit/workflows/` — **431/431 pass in 3.66s**.
+  No prior tests broke.
 - [ ] `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
   (new or extend existing)
   - [ ] AgentCard role/expertise_domain/limitations populated from
