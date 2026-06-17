@@ -1,0 +1,602 @@
+# Design: Enable Global Task Config (`enable_global_task_config`)
+
+**Status**: Draft  
+**Author**: Yue Ma  
+**Created**: 2026-06-13  
+**Branch**: (new branch, to be created)  
+**Depends on**: nothing (can land independently)  
+**Unblocks**: `enable_loss_inventory` (loss generation prompt needs task_description + forward_contract)
+
+---
+
+## Development principles
+
+Same four rules as all SIDERIUS design docs:
+
+1. **Check, don't guess.** Read source before making claims. If the answer isn't in the code, ask the user.
+2. **Keep design doc and code in lock-step.** Tick `[ ] → [x]` as work lands; record test results inline.
+3. **Stop before each commit.** Show progress + implementation details; wait for explicit approval before `git commit`. Tests run freely except real-LLM + real-training combos.
+4. **Split logical commits at clean seams.** Each `Commit T*` is the logical unit; split further if the actual diff is too large.
+
+---
+
+## Motivation
+
+Task-specific information is currently hardcoded in at least five production
+files. This means applying SIDERIUS to a new task requires grep-and-replace
+across Python files and Markdown templates — error-prone and invisible to
+operators.
+
+The immediate trigger is `enable_loss_inventory`: the loss generation prompt
+(Commit L4) needs to know the forward contract (`[B, T] int64 → [B, 256, T]
+float32`) and the task description to generate correct loss functions. Without
+a canonical source for these values, the loss prompt would be the sixth place
+to hardcode SQUID-specific information.
+
+---
+
+## Scope
+
+**In scope:**
+- New `configs/task_config.yaml` as the single canonical source for task
+  description and forward contract
+- Remove task-specific hardcodes from the **eight affected locations** listed
+  below (T1–T4 covers all eight), replacing them with `{TASK_DESCRIPTION}` and
+  `{FORWARD_CONTRACT}` placeholders injected at render time
+- Workflow reads `task_config.yaml` and threads values into all affected nodes
+
+**Explicitly out of scope (tracked as future work, do not touch):**
+- `TIDMAD_DATA_DIR` / `nodes/scoring_reference.py` reference data coupling
+- `denoising_score` field naming in schemas
+- `NUM_FILES = 20` parameterization (already partially done via
+  `execute_tools/dataset_config.py`)
+- `ScoreComparisonTable` and `aggregated_score_table_awareness` system
+  (already task-agnostic — no changes needed)
+- `from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG`
+  import in proposer/tuner nodes
+
+---
+
+## Affected locations (confirmed by audit 2026-06-13)
+
+| # | File | Lines | Hardcoded content |
+|---|------|-------|-------------------|
+| 1 | `nodes/ml_model_implementor/ml_model_implementor.py` | 306-322 | "TIDMAD SQUID magnetometry", "integer ADC values 0-255", `[B, T] int64`, `[B, 256, T] float32`, "256 denoising classes", `nn.Embedding(256, embed_dim)`, "Conv1d(channels, 256, 1)" |
+| 2 | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` | 172-186 | "TIDMAD SQUID magnetometry", "integer ADC values 0-255", `[B, T] int64`, `[B, 256, T] float32`, "256 denoising classes", "cross-entropy or focal loss: per-timestep 256-class classification" |
+| 3 | `agent/prompt_templates/proposal/proposing_stage.md` | 69-70 | `[B, T] int64`, `[B, 256, T] float32`, "per-timestep logits over 256 classes" |
+| 4 | `agent/prompt_templates/proposal/comparison_stage.md` | 4 | "previously tested denoising models on the TIDMAD dataset" |
+| 5 | `agent/prompt_templates/literature_review/search_decision_system.md` | multiple | "1D signals", "broadband", "SQUID", "denoising", "1D time series" (query examples vs task framing — reviewed in T3) |
+| 6 | `agent/prompts.py` | 10-11, multiple | "Senior Signal Processing Researcher specialized in deep learning for signal denoising", "optimize the 'Denoising Score' for the TIDMAD dataset" — 20 task-specific hits in tuner planner + reflector prompts |
+| 7 | `nodes/result_interpretation_agent/result_interpretation_agent.py` | 47, 239 | "senior ML research analyst specialising in deep learning for signal denoising" — two system prompts; "The aggregate denoising scalar is the log of a sum…" |
+| 8 | `nodes/ml_literature_review/ml_literature_review.py` | 70-75 | `AgentCard` role, expertise_domain, limitations — "Surface ML denoising literature", "ML denoising architectures", "SQUID-specific applicability" |
+
+**Locations 6 and 7** are in files recently touched by Phase 8
+(score_table awareness + Impact_Score rewrites). Changes must be
+additive only — do NOT touch Phase 8 content (Impact_Score, Linear_Weight,
+per_file_analysis, SYNTHESIS_SYSTEM_PROMPT reasoning frame). Only the
+role/persona header lines and explicit TIDMAD/denoising framing are in scope.
+
+**Location 8** (AgentCard) is small and self-contained — the role and
+expertise_domain strings are read by the proposer when evaluating
+lit-review finding credibility. They should reflect the actual task, not
+hardcode "denoising".
+
+---
+
+## `configs/task_config.yaml` — canonical config file
+
+```yaml
+# configs/task_config.yaml
+# Single source of truth for task-level configuration.
+# All agents read task_description and forward_contract from here.
+# ---------------------------------------------------------------------------
+
+# Plain-English description of the research task.
+# Injected into the {TASK_DESCRIPTION} placeholder in all agent system prompts
+# (implementor, proposer, lit-review search/synthesis/extract).
+# Keep this concise — it appears in every LLM call.
+task_description: |
+  full-spectrum 1-D time-series denoising of SQUID dark-matter
+  detector data: map a noisy [B, T] integer signal to a clean
+  [B, 256, T] reconstruction, trained across the whole frequency
+  spectrum at once (not split into per-band models).
+
+# Forward contract for the model plugin interface.
+# Injected into the {FORWARD_CONTRACT} placeholder in implementor and proposer
+# system prompts. Must describe the exact PyTorch tensor shapes and types
+# expected by the training engine and validator.
+forward_contract:
+  input_shape: "[B, T] int64"
+  input_description: "raw signal, integer class indices 0-255"
+  output_shape: "[B, 256, T] float32"
+  output_description: "per-timestep logits over 256 denoising classes"
+  num_classes: 256
+  embedding_note: >
+    Input values are integer class indices — use nn.Embedding(num_classes,
+    embed_dim) to convert [B, T] int64 → [B, T, embed_dim], then transpose
+    to [B, embed_dim, T] for Conv1d layers.
+  output_head_note: >
+    Output must be exactly [output_shape] — use a final
+    Conv1d(channels, num_classes, 1) or Linear + transpose.
+  task_type: "classification"
+  task_note: >
+    Offline denoising — output at position t may depend on all positions.
+    Causal constraints are not required.
+
+# ---------------------------------------------------------------------------
+# Future extensions (out of scope for this doc):
+#   num_files: 20              # currently in execute_tools/dataset_config.py
+#   data_dir: ...              # currently hardcoded as TIDMAD_DATA_DIR
+#   metric_name: denoising_score  # currently hardcoded in schemas
+# ---------------------------------------------------------------------------
+```
+
+---
+
+## Rendered forward contract format
+
+The `{FORWARD_CONTRACT}` placeholder is rendered from the YAML by a helper
+function `render_forward_contract(fc: dict) -> str` in
+`workflows/task_config.py` (new file). The rendered string is injected
+verbatim into system prompts.
+
+Example rendered output:
+
+```
+The model must satisfy this forward contract (non-negotiable):
+    input:  [B, T]       int64   — raw signal, integer class indices 0-255
+    output: [B, 256, T]  float32 — per-timestep logits over 256 denoising classes
+
+Input values are integer class indices — use nn.Embedding(256, embed_dim)
+to convert [B, T] int64 → [B, T, embed_dim], then transpose to
+[B, embed_dim, T] for Conv1d layers.
+Output must be exactly [B, 256, T] — use a final Conv1d(channels, 256, 1)
+or Linear + transpose.
+Offline denoising — output at position t may depend on all positions.
+Causal constraints are not required.
+Task type: classification (per-timestep 256-class).
+```
+
+---
+
+## Backward compatibility
+
+`configs/task_config.yaml` is committed to the repo with SQUID defaults
+(same pattern as `configs/lit_review_config.yaml`). There is NO in-code
+fallback. If the file is missing or a required field is empty,
+`load_task_config()` raises a `FileNotFoundError` or `ValueError` with
+a clear remediation message:
+
+```
+FileNotFoundError: configs/task_config.yaml not found.
+  This file is required for all SIDERIUS agent runs.
+  If you deleted it accidentally, restore from git:
+      git checkout configs/task_config.yaml
+  If you are setting up a new task, copy and edit:
+      cp configs/task_config.example.yaml configs/task_config.yaml
+```
+
+`configs/task_config.example.yaml` is also committed alongside
+`task_config.yaml` as a reference template for operators setting up a
+new task.
+
+**Already-completed run outputs** (`run_output_*.json`,
+`evolution_log.jsonl`, `agent_data_stream.jsonl`) are not affected —
+they contain experiment results and LLM reasoning outputs, not task
+config. Re-reading old results does not require `task_config.yaml`.
+
+---
+
+## Run provenance — task config snapshot
+
+**Problem**: before this feature, task description was hardcoded in Python
+files and had no audit trail. After this feature, task description lives in
+`configs/task_config.yaml`. If someone wants to replay an old run on a new
+task config, they must know what task config was active when the original run
+happened.
+
+**Solution**: at the start of every workflow run, copy `task_config.yaml`
+into the run's workspace as `task_config_snapshot.yaml`. This snapshot is
+written once, never modified, and serves as the ground truth for replay.
+
+```
+{workspace}/
+  task_config_snapshot.yaml   ← NEW: copy of task_config.yaml at run start
+  run_output_*.json
+  evolution_log.jsonl
+  ...
+```
+
+This is added in **Commit T1** alongside the loader — one line in
+`workflows/model_exploration.py` at the point where the workspace is
+initialized (CHECK exact location from code before implementing).
+
+**Replay procedure for runs after T1 landing:**
+```bash
+# To replay run at /path/to/workspace/:
+cp /path/to/workspace/task_config_snapshot.yaml configs/task_config.yaml
+# Then replay normally
+```
+
+**Replay procedure for runs BEFORE T1 landing (no snapshot exists):**
+These runs used the hardcoded SQUID defaults. The current
+`configs/task_config.yaml` (committed with SQUID defaults) is the correct
+config to use for replay. No action needed — the defaults match what was
+used.
+
+**Important**: the snapshot is read-only metadata. The workflow always reads
+from `configs/task_config.yaml` at runtime, never from the snapshot. The
+snapshot is only for human reference and replay.
+
+---
+
+## Commit plan
+
+### Commit T1 — `configs/task_config.yaml` + loader + renderer
+
+**Goal**: the config file and its loading/rendering infrastructure exist.
+No prompt files touched yet. After this commit, `task_config.yaml` is
+readable and `render_forward_contract()` works.
+
+**Code**:
+- [ ] `configs/task_config.yaml` — new file with `task_description` and
+  `forward_contract` blocks as shown above (committed to repo with SQUID defaults)
+- [ ] `configs/task_config.example.yaml` — same content as `task_config.yaml`,
+  also committed; serves as the copy-from template for operators setting up a new task
+- [ ] `workflows/task_config.py` — new module:
+  - [ ] `load_task_config(path: str | None = None) -> dict` — reads
+    `configs/task_config.yaml` (or the provided path). **Raises `FileNotFoundError`**
+    when the file is missing, with the remediation message shown in the
+    *Backward compatibility* section. **Raises `ValueError`** when
+    `task_description` is empty or the `forward_contract` block is missing
+    a required field. Uses `yaml.safe_load`. Module-level cache (load once per process).
+  - [ ] `render_forward_contract(fc: ForwardContract) -> str` — takes a
+    `ForwardContract` Pydantic instance (see T2 schema bullet), returns
+    the formatted multi-line string shown above. Returns `""` on a
+    ForwardContract whose fields are all empty (only happens if a caller
+    bypasses `load_task_config` and constructs a default `ForwardContract()`
+    directly).
+  - [ ] `get_task_description(config: dict) -> str` — extracts and strips
+    `config["task_description"]`. Returns `""` only if caller bypasses
+    `load_task_config` (which itself rejects empty).
+- [ ] `workflows/__init__.py` — already exists (0 bytes); no changes needed.
+
+**Tests** (pure Python, no LLM — run freely):
+- [ ] `tests/unit/workflows/test_task_config.py` (new file)
+  - [ ] `load_task_config` with valid YAML → returns dict with correct keys
+  - [ ] `load_task_config` with missing file → raises `FileNotFoundError` with the
+    remediation message text
+  - [ ] `load_task_config` with empty YAML → raises `ValueError`
+  - [ ] `load_task_config` with empty `task_description` → raises `ValueError`
+  - [ ] `load_task_config` with `forward_contract` block missing a required key
+    (e.g. `input_shape`) → raises Pydantic `ValidationError` from `ForwardContract`
+  - [ ] `render_forward_contract` with full ForwardContract → rendered string contains
+    input_shape, output_shape, embedding_note, task_type
+  - [ ] `render_forward_contract` with default `ForwardContract()` → returns `""`
+  - [ ] `get_task_description` happy path
+
+**Test gate**: unit only — no LLM, no GPU. All tests in `test_task_config.py` run freely.
+
+**Out of scope**: no prompt files touched, no workflow wiring yet.
+
+**Implementation notes** (filled in as work lands):
+- _none yet_
+
+### Commit T2 — Implementor prompt de-hardcoding
+
+**Goal**: `IMPLEMENTOR_REASONING_PROMPT` in
+`nodes/ml_model_implementor/ml_model_implementor.py` replaces the
+hardcoded task/contract block with `{TASK_DESCRIPTION}` and
+`{FORWARD_CONTRACT}` placeholders, substituted at build time from
+`ImplementorInput`.
+
+**Pre-read required** (before writing any code):
+- [ ] Read `nodes/ml_model_implementor/ml_model_implementor.py` lines
+  290-430 verbatim to confirm exact current text
+- [ ] Read `agent/schemas/implementor.py` `ImplementorInput` class to
+  confirm `task_description` field exists (landed in `enable_loss_inventory`
+  Commit L3 — **dependency**: T2 must land after L3, OR add
+  `task_description` to `ImplementorInput` here and remove the duplicate
+  addition from L3)
+
+**Decision needed before implementation**:
+- `ImplementorInput.task_description` will be added in either T2 or L3.
+  To avoid duplication, **T2 adds it** and L3's schema section skips it.
+  Document this dependency in both design docs.
+
+**Code**:
+- [ ] `nodes/ml_model_implementor/ml_model_implementor.py`
+  - [ ] Replace lines 306-322 (`IMPLEMENTOR_REASONING_PROMPT` task block)
+    with `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` placeholders
+  - [ ] `_build_reasoning_prompt(inp)`: substitute placeholders from
+    `inp.task_description` (for `{TASK_DESCRIPTION}`) and
+    `render_forward_contract(inp.forward_contract)` (for `{FORWARD_CONTRACT}`).
+    No in-code fallback — `load_task_config()` already rejected empty values
+    upstream, so by the time the implementor is invoked `inp.task_description`
+    is non-empty and `inp.forward_contract` is a fully-populated `ForwardContract`.
+- [ ] `agent/schemas/task_config.py` (new file) — define:
+  ```python
+  class ForwardContract(BaseModel):
+      input_shape: str = ""
+      input_description: str = ""
+      output_shape: str = ""
+      output_description: str = ""
+      num_classes: int = 0
+      embedding_note: str = ""
+      output_head_note: str = ""
+      task_type: str = ""
+      task_note: str = ""
+  ```
+  Defaults are empty strings only so that a bare `ForwardContract()` is
+  constructible for testing. Production callers always populate via
+  `ForwardContract(**yaml_dict)` after `load_task_config()`, where a typo in
+  the YAML key name produces a Pydantic `ValidationError` rather than silent
+  empty rendering.
+- [ ] `agent/schemas/implementor.py` — add to `ImplementorInput`:
+  - [ ] `task_description: str = Field(default="", description="Task description from task_config.yaml. Injected into {TASK_DESCRIPTION} placeholder in system prompt.")`
+  - [ ] `forward_contract: ForwardContract = Field(default_factory=ForwardContract, description="Forward contract from task_config.yaml. Injected into {FORWARD_CONTRACT} placeholder.")`
+- [ ] `workflows/model_exploration.py` — at the implementor call site
+  (near line 1435), inject from `load_task_config()`:
+  ```python
+  task_cfg = load_task_config()
+  impl_input.task_description = get_task_description(task_cfg)
+  impl_input.forward_contract = ForwardContract(**task_cfg["forward_contract"])
+  ```
+
+**Tests** (pure Python, no LLM — run freely):
+- [ ] `tests/unit/agent/ml_model_implementor/test_implementor_prompt.py`
+  (new or extend existing)
+  - [ ] With `task_description` set → rendered prompt contains the value,
+    NOT the literal placeholder `{TASK_DESCRIPTION}`
+  - [ ] With `forward_contract` populated → rendered prompt contains the rendered
+    contract (input_shape, output_shape, embedding_note, task_type)
+  - [ ] Placeholder `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` do NOT
+    appear in any rendered prompt (substitution always fires)
+  - [ ] With a custom non-SQUID `ForwardContract` (e.g. `output_shape="[B, T] float32"`)
+    → rendered prompt contains the custom shapes, NOT the SQUID `[B, 256, T]` shapes
+
+**Test gate**: **Gate 1 — real LLM + pseudo training**. One real implementor LLM
+call with `task_config.yaml` present; assert generated code compiles + passes
+dummy-tensor check. Needs user approval for timing before running.
+
+**Out of scope**: proposer and lit-review prompts (T3).
+
+**Implementation notes**:
+- _none yet_
+
+### Commit T3 — Proposer + lit-review prompt de-hardcoding
+
+**Goal**: remove task-specific hardcodes from the proposer system prompt
+and the two proposal template `.md` files. Lit-review `.md` files reviewed
+for query-example vs parametrizable content.
+
+**Pre-read required** (before writing any code):
+- [ ] Read `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
+  lines 165-195 verbatim (the full system prompt header)
+- [ ] Read `agent/prompt_templates/proposal/proposing_stage.md` lines
+  60-80 verbatim
+- [ ] Read `agent/prompt_templates/proposal/comparison_stage.md` lines
+  1-10 verbatim
+- [ ] Read `agent/prompt_templates/literature_review/search_decision_system.md`
+  lines 1-130 verbatim — identify which hardcodes are query *examples*
+  (illustrative, should stay) vs task *assumptions* (should be
+  parametrized)
+
+**Code**:
+- [ ] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
+  - [ ] `PROPOSAL_REASONING_PROMPT` at line 171 is a module-level string
+    constant (confirmed by audit). Replace lines 172-186 task block with
+    `{TASK_DESCRIPTION}` and `{FORWARD_CONTRACT}` placeholders in the constant.
+  - [ ] Add `_build_system_prompt(inp) -> str` helper (mirrors the
+    implementor's `_build_reasoning_prompt(inp)` at line 433): performs
+    `.replace()` substitution at call time using `inp.task_description` and
+    `render_forward_contract(inp.forward_contract)`. Update the existing call
+    site that currently passes `PROPOSAL_REASONING_PROMPT` directly to instead
+    pass `self._build_system_prompt(inp)`.
+  - [ ] `ProposalInput` (or wherever the proposer's render context is built):
+    inject `task_description` and `forward_contract` from `load_task_config()`
+    at call time. (Decision in open Q4: ProposalInput field vs render-time kwarg.)
+    No in-code fallback — `load_task_config()` rejects empty values upstream.
+- [ ] `agent/prompt_templates/proposal/proposing_stage.md`
+  - [ ] Lines 69-70: replace `[B, T] int64` / `[B, 256, T] float32`
+    with `{FORWARD_CONTRACT_INPUT}` / `{FORWARD_CONTRACT_OUTPUT}`
+    placeholders (or restructure to use the full rendered block)
+- [ ] `agent/prompt_templates/proposal/comparison_stage.md`
+  - [ ] Line 4: replace "TIDMAD dataset" with `{TASK_DESCRIPTION}` or a
+    shorter `{DATASET_NAME}` placeholder — **decide which** after reading
+    the full context of line 4
+- [ ] `agent/prompt_templates/literature_review/search_decision_system.md`
+  - [ ] **Audit each hardcode**: query examples like "SNR-aware loss time
+    series denoising" are illustrative and should stay; domain framing
+    like "1D broadband signal denoising" in the goal section should be
+    replaced with `{TASK_DESCRIPTION}`
+  - [ ] `render_search_decision_prompt` in
+    `agent/prompt_templates/literature_review/__init__.py` already handles
+    `{TASK_DESCRIPTION}` substitution — verify the `.md` file's remaining
+    hardcodes are examples (not goals) before leaving them
+
+**Tests** (pure Python, no LLM — run freely):
+- [ ] `tests/unit/agent/ml_model_proposal_agent/test_proposal_prompts.py`
+  (extend existing)
+  - [ ] With `task_description` set to a custom (non-SQUID) value → system prompt
+    contains the value, NOT "TIDMAD SQUID"
+  - [ ] `{TASK_DESCRIPTION}` placeholder never survives into rendered output
+  - [ ] `_build_system_prompt(inp)` is invoked at call time (not at module
+    import) — regression guard against accidentally caching the substituted
+    string at module load
+- [ ] `tests/unit/agent/prompt_templates/test_proposal_prompts.py`
+  (extend existing)
+  - [ ] `proposing_stage.md` rendered with forward contract → contains the
+    injected shapes, not the hardcoded ones
+  - [ ] `comparison_stage.md` rendered with task description → contains
+    the injected text, not "TIDMAD dataset"
+
+**Test gate**: **Gate 1 — real LLM + pseudo training**. Real proposer LLM call →
+real implementor LLM call → dummy-tensor check, with `task_config.yaml` present.
+Needs user approval.
+
+**Implementation notes**:
+- _none yet_
+
+### Commit T4 — Tuner, interpreter, and lit-review AgentCard de-hardcoding
+
+**Goal**: remove task-specific hardcodes from the three remaining locations
+(tuner planner/reflector prompts, interpreter system prompts, lit-review
+AgentCard). Backward compatible — these are all additive placeholder
+substitutions, not structural changes. Phase 8 content (Impact_Score,
+Linear_Weight, per_file_analysis, SYNTHESIS_SYSTEM_PROMPT reasoning frame)
+is NOT touched.
+
+**Pre-read required** (before writing any code):
+- [ ] Read `agent/prompts.py` lines 1-15 and lines 185-205 verbatim —
+  confirm exact current text of PLANNER_PROMPT header and REFLECTOR_PROMPT
+- [ ] Read `nodes/result_interpretation_agent/result_interpretation_agent.py`
+  lines 40-80 (PER_MODEL_SYSTEM_PROMPT) and lines 230-270
+  (SYNTHESIS_SYSTEM_PROMPT) verbatim — confirm which lines are Phase 8
+  content (DO NOT TOUCH) vs persona/task framing (in scope)
+- [ ] Read `nodes/ml_literature_review/ml_literature_review.py` lines
+  65-80 — confirm AgentCard field values
+
+**Backward compat rule for this commit:**
+Every change is a placeholder substitution only. The rendered output
+when `task_config.yaml` contains the SQUID defaults must be byte-identical
+to the current hardcoded output. This is verified by unit tests.
+
+**Code**:
+- [ ] `agent/prompts.py`
+  - [ ] PLANNER_PROMPT header: replace "Senior Signal Processing Researcher
+    specialized in deep learning for signal denoising" with
+    `{TASK_DESCRIPTION}` in the persona line; replace "optimize the
+    'Denoising Score' for the TIDMAD dataset" with a task-agnostic phrase
+    referencing `{TASK_DESCRIPTION}`
+  - [ ] REFLECTOR_PROMPT: same persona line replacement
+  - [ ] The substitution happens at the call site where PLANNER_PROMPT is
+    used — **CHECK** where `agent/prompts.py` constants are rendered into
+    actual prompt strings before deciding substitution mechanism
+  - [ ] DO NOT touch: scoring sections, file_vector references, Impact_Score
+    content, denoising_score field references (these are metric names, not
+    task framing)
+- [ ] `nodes/result_interpretation_agent/result_interpretation_agent.py`
+  - [ ] PER_MODEL_SYSTEM_PROMPT (line 47): replace "senior ML research
+    analyst specialising in deep learning for signal denoising" with
+    `{TASK_DESCRIPTION}` in the persona line
+  - [ ] SYNTHESIS_SYSTEM_PROMPT (line 239): same persona line replacement
+  - [ ] DO NOT touch: Impact_Score content, per_file_analysis field,
+    Linear_Weight content, Log-of-Mean trap section (all Phase 8)
+  - [ ] Substitution at call time via the existing prompt-building helpers
+    in this file — **CHECK** which helper functions build the final prompt
+    string sent to the LLM
+- [ ] `nodes/ml_literature_review/ml_literature_review.py`
+  - [ ] `AgentCard.role`: replace "Surface ML denoising literature
+    relevant to the current iteration." with a template that incorporates
+    `{TASK_DESCRIPTION}` — e.g. render at agent construction time from
+    `inp.task_description`
+  - [ ] `AgentCard.expertise_domain`: replace "ML denoising architectures;
+    Semantic Scholar corpus." with task-agnostic phrasing sourced from
+    `task_config.yaml`
+  - [ ] `AgentCard.limitations`: remove "SQUID-specific" hardcode; replace
+    with generic "task-specific" language
+  - [ ] The AgentCard is constructed in `MLLiteratureReviewAgent.__init__`
+    or `run()` — **CHECK** exact construction site before editing
+
+**Tests** (pure Python, no LLM — run freely):
+- [ ] `tests/unit/agent/test_prompts_task_config.py` (new file)
+  - [ ] PLANNER_PROMPT rendered with SQUID task_config → output contains
+    "SQUID" from YAML, not from hardcode
+  - [ ] PLANNER_PROMPT rendered with custom task_description → output
+    contains custom text
+  - [ ] `{TASK_DESCRIPTION}` placeholder never survives into rendered output
+  - [ ] Phase 8 content (Impact_Score, Linear_Weight) still present after
+    substitution (regression guard — these must not be touched)
+- [ ] `tests/unit/nodes/test_interpretation_agent_task_config.py` (new)
+  - [ ] PER_MODEL_SYSTEM_PROMPT and SYNTHESIS_SYSTEM_PROMPT both render
+    with YAML task_description; neither contains hardcoded "signal
+    denoising" persona framing
+  - [ ] Phase 8 sections still intact (per_file_analysis field,
+    Impact_Score ranking instruction)
+- [ ] `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
+  (new or extend existing)
+  - [ ] AgentCard role/expertise_domain/limitations populated from
+    task_config, not hardcoded strings
+  - [ ] When `inp.task_description` set → AgentCard reflects it
+
+**Test gate**: unit only — prompt substitution is pure string replacement,
+no LLM needed to verify correctness. Phase 8 regression guards run as part
+of the standard unit suite.
+
+**Out of scope**: no schema changes, no workflow changes beyond injecting
+task_config into existing call sites.
+
+**Implementation notes**:
+- _none yet_
+
+### Checkpoint T — Smoke validation
+
+**Goal**: confirm that with `configs/task_config.yaml` present, all agent
+system prompts contain the task description and forward contract from the
+YAML, not the hardcoded values.
+
+**Pre-flight** (run freely):
+- [ ] Full unit suite green: `uv run pytest tests/unit/ -q`
+- [ ] `grep -rn "TIDMAD\|SQUID\|magnetometry" agent/prompt_templates/ nodes/ml_model_implementor/ nodes/ml_model_proposal_agent/ agent/prompts.py nodes/result_interpretation_agent/ nodes/ml_literature_review/` returns zero hits in any Python or `.md` source file (the only remaining hits are in `configs/task_config.yaml` itself + `configs/task_config.example.yaml`, which are the canonical sources)
+
+**Validation**:
+- [ ] Run `scripts/render_proposer_prompts_for_audit.py` (already exists)
+  with `task_config.yaml` present; verify rendered output contains
+  `task_description` from YAML, not the hardcoded SQUID text.
+  Zero LLM calls — runs in ~1 second. Run freely.
+- [ ] Run the implementor with a stub proposal; verify `IMPLEMENTOR_REASONING_PROMPT`
+  contains the YAML's `forward_contract`, not the hardcoded shapes
+  (covered by the Gate 2 dual-mode test described below)
+
+**Test gate**: **Gate 2 — real LLM + ~5 min real training**. One trial-mode
+iteration, punet baseline, real LLM, real training. Binary signal: did the
+iteration complete with a non-error `denoising_score`? Needs user approval
+before running.
+
+**Sign-off**:
+- [ ] `docs/checkpoint_t_sign_off.md` written with:
+  - [ ] grep evidence of zero remaining hardcodes in affected files
+  - [ ] Sample rendered prompt excerpt showing YAML injection
+  - [ ] Verdict: ready to merge / blocked on X
+
+---
+
+## Open questions
+
+1. **Proposer prompt build path** — resolved. See Commit T3 notes: requires
+   adding `_build_system_prompt(inp)` helper. Documented above.
+
+2. **`comparison_stage.md` line 4 substitution** — the full line is:
+   "you are a senior ML research scientist conducting a systematic review
+   of all previously tested denoising models on the TIDMAD dataset."
+   `{TASK_DESCRIPTION}` would be too verbose here. A shorter
+   `{DATASET_NAME}` or `{TASK_DOMAIN}` placeholder fits the syntactic slot
+   better. **Decide in T3** after reading the full context: what is the
+   minimal substitution that removes "TIDMAD dataset" without changing the
+   sentence structure?
+
+3. **`proposing_stage.md` substitution mechanism** — the proposer's
+   `agent/prompt_templates/proposal/__init__.py` must be read in T3 to
+   confirm whether it performs `.replace()` substitution (like the
+   lit-review `__init__.py` does at lines 305/402/627). If not, T3 must
+   add the substitution logic before adding placeholders to the `.md`
+   files.
+
+4. **ProposalInput vs render-time injection for T3** — two options:
+   (a) add `task_description` + `forward_contract` fields to `ProposalInput`
+   Pydantic schema (mirrors T2's ImplementorInput addition — clean but more
+   schema churn), or (b) inject as kwargs at render time without schema
+   change (less invasive but less explicit). **Decide in T3** after reading
+   how the proposer node constructs its prompt context.
+
+---
+
+## Non-goals (explicit out of scope)
+
+- `TIDMAD_DATA_DIR` / reference data coupling — separate feature
+- `denoising_score` schema field rename — separate feature
+- `ScoreComparisonTable` changes — already task-agnostic
+- `from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG` — separate feature
+- Proposer system prompt genericity beyond task_description/forward_contract
+  (e.g. the `[B, 256, T]` validator shapes in `ml_code_validator_agent`) — separate feature
