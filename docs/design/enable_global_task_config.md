@@ -959,6 +959,20 @@ Key constraints:
 - `--num_iterations 1 --max_rounds 1` is sufficient for end-to-end plumbing verification
 - Without `--trial_time_budget_minutes`, training runs without a time ceiling and Gate 2 can take 60-90+ min
 
+**`--trial_portion 0.02` is preferred even when disk has headroom** (2026-06-18
+decision). With `--cleanup_denoised` auto-enabled the per-attempt footprint
+falls from ~76 GB (at `0.05`) to ~15 GB (at `0.02`), giving a safety margin
+against:
+- Failed-attempt cleanup misses (SIGSEGV, OOM, or other non-graceful exit
+  paths that skip the post-experiment cleanup)
+- Parallel runs on the same machine sharing the disk
+- Operator-data accumulation in `/home/klz/Data/` (currently 2.0 TB on a
+  1.8 TB filesystem — the user-owned data, not in our control to clean)
+
+Trading 2.5× smaller training data for ~5× smaller per-attempt disk
+footprint is a clear win when the goal is plumbing verification, not
+statistical signal quality.
+
 **Test gate**: **Gate 2 — real LLM + real training**. The 2-iteration +
 2-round smoke verifies plumbing for all four agents whose system prompts
 were touched by T-series (implementor, proposer, tuner, interpreter) plus
