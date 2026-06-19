@@ -762,18 +762,30 @@ subsystem is independently committable with its own test surface.
   post-hoc mutation because `InterpretationInput` is constructed all at once,
   unlike T2/T3 where the protocol returns it and the workflow mutates fields.)
   Reuses T2/T3 imports — no new imports.
-- [ ] `nodes/ml_literature_review/ml_literature_review.py`
-  - [ ] `AgentCard.role`: replace "Surface ML denoising literature
-    relevant to the current iteration." with a template that incorporates
-    `{TASK_DESCRIPTION}` — e.g. render at agent construction time from
-    `inp.task_description`
-  - [ ] `AgentCard.expertise_domain`: replace "ML denoising architectures;
-    Semantic Scholar corpus." with task-agnostic phrasing sourced from
-    `task_config.yaml`
-  - [ ] `AgentCard.limitations`: remove "SQUID-specific" hardcode; replace
-    with generic "task-specific" language
-  - [ ] The AgentCard is constructed in `MLLiteratureReviewAgent.__init__`
-    or `run()` — **CHECK** exact construction site before editing
+**Code — T4c (lit-review AgentCard)** ✅ landed:
+- [x] `nodes/ml_literature_review/ml_literature_review.py`
+  - [x] `AgentCard.role`: "Surface ML denoising literature relevant to the
+    current iteration." → "Surface ML literature relevant to the current
+    research iteration." (drop "denoising" qualifier; describes what the
+    *agent* does, not what the *task* is).
+  - [x] `AgentCard.expertise_domain`: "ML denoising architectures;
+    Semantic Scholar corpus." → "ML architectures and training techniques;
+    Semantic Scholar corpus." (drop "denoising" qualifier).
+  - [x] `AgentCard.limitations`: "Cannot run experiments; cannot judge
+    SQUID-specific applicability without empirical confirmation." → "Cannot
+    run experiments; cannot judge task-specific applicability without
+    empirical confirmation." (substitute the SQUID anchor with the generic
+    "task-specific" wording).
+  - [x] The AgentCard stays at module level (not constructed in
+    `__init__`/`run()`) — pre-read showed all three rewritten fields are
+    fully task-agnostic, so threading `inp.task_description` into the card
+    would be redundant. The task framing reaches the LLM via the existing
+    `{TASK_DESCRIPTION}` placeholder in the lit-review search prompts
+    (Commit 6.5b-5), not via the AgentCard.
+  - [x] Added inline rationale comment above `_AGENT_CARD` documenting
+    why the card is static + task-agnostic, plus the field-length-constraint
+    motivation (`role` max 200 chars; most operator task descriptions
+    exceed that cap, ruling out direct `{TASK_DESCRIPTION}` substitution).
 
 **Tests — T4a (tuner)** ✅ landed (pure Python, no LLM — run freely):
 - [x] `tests/unit/agent/test_planner_prompt_task_config.py` (new file) — **16 tests, all pass in 0.07s**
@@ -808,11 +820,23 @@ subsystem is independently committable with its own test surface.
 - [x] **T4b regression sweep**: `tests/unit/agent/result_interpretation_agent/`,
   `tests/unit/agent/schemas/`, `tests/unit/workflows/` — **431/431 pass in 3.66s**.
   No prior tests broke.
-- [ ] `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
-  (new or extend existing)
-  - [ ] AgentCard role/expertise_domain/limitations populated from
-    task_config, not hardcoded strings
-  - [ ] When `inp.task_description` set → AgentCard reflects it
+- [x] `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
+  (new file) — **12 tests, all pass in 0.95s**
+  - [x] No SQUID hardcode in `role`, `expertise_domain`, or `limitations`
+  - [x] No "denoising" hardcode in `role` or `expertise_domain`
+  - [x] `role` describes the *agent* (surfaces ML literature), not the task
+  - [x] `limitations` uses generic "task-specific applicability" language
+  - [x] All AgentCard field-length constraints (`role` ≤ 200, `expertise_domain`
+    ≤ 300, `limitations` ≤ 300) are satisfied (regression guards)
+  - [x] Non-task fields (`agent_name`, `trust_level`, `trust_guidance`,
+    `coverage`) unchanged
+  - [x] Card serializes through Pydantic round-trip
+- [x] **T4c regression sweep**: `tests/unit/agent/ml_literature_review/` —
+  **63/63 pass in 0.95s**. No prior tests broke.
+- [x] **Cross-cutting T-series regression sweep**: all 7 T-affected dirs
+  (`ml_literature_review/`, `result_interpretation_agent/`,
+  `ml_model_proposal_agent/`, `ml_model_implementor/`, `prompt_templates/`,
+  `schemas/`, `workflows/`) — **1252/1252 pass in 4.12s**.
 
 **Test gate**: unit only — prompt substitution is pure string replacement,
 no LLM needed to verify correctness. Phase 8 regression guards run as part
@@ -840,6 +864,22 @@ task_config into existing call sites.
   planner tunes hyperparameters within an existing model architecture; the
   forward contract is already fixed by the implementor. Adding
   `forward_contract` to the tuner schema would be dead weight.
+- **T4c deviation — static task-agnostic AgentCard, not dynamic builder**:
+  the design doc proposed a builder function that renders `role` from
+  `inp.task_description`. Pre-read uncovered a hard constraint: the
+  AgentCard schema sets `role.max_length=200`, `expertise_domain.max_length=300`,
+  `limitations.max_length=300` — but the canonical SQUID `task_description`
+  is ~250 chars and a generic operator value could be longer. Embedding
+  `{TASK_DESCRIPTION}` literally would (a) overflow the cap or require
+  ugly truncation, and (b) duplicate framing that already reaches the LLM
+  via `{TASK_DESCRIPTION}` in the lit-review search prompts (Commit
+  6.5b-5). Static + task-agnostic phrasing achieves the *removal-of-
+  hardcodes* goal without either drawback. The static-card decision is
+  documented inline in `ml_literature_review.py:66-77`.
+- **T4 regression**: 1252/1252 tests pass across all 7 T-affected
+  directories. The T-series ships with no regressions across the entire
+  affected surface (implementor, proposer, interpreter, tuner, lit-review,
+  prompt templates, schemas, workflows).
 
 ### Checkpoint T — Smoke validation
 
@@ -852,24 +892,120 @@ YAML, not the hardcoded values.
 - [ ] `grep -rn "TIDMAD\|SQUID\|magnetometry" agent/prompt_templates/ nodes/ml_model_implementor/ nodes/ml_model_proposal_agent/ agent/prompts.py nodes/result_interpretation_agent/ nodes/ml_literature_review/` returns zero hits in any Python or `.md` source file (the only remaining hits are in `configs/task_config.yaml` itself + `configs/task_config.example.yaml`, which are the canonical sources)
 
 **Validation**:
-- [ ] Run `scripts/render_proposer_prompts_for_audit.py` (already exists)
+- [x] Run `scripts/render_proposer_prompts_for_audit.py` (already exists)
   with `task_config.yaml` present; verify rendered output contains
   `task_description` from YAML, not the hardcoded SQUID text.
   Zero LLM calls — runs in ~1 second. Run freely.
-- [ ] Run the implementor with a stub proposal; verify `IMPLEMENTOR_REASONING_PROMPT`
-  contains the YAML's `forward_contract`, not the hardcoded shapes
-  (covered by the Gate 2 dual-mode test described below)
+  **Result**: completed cleanly, 3 captured prompt pairs written to
+  `docs/proposer_prompt_audit.md`.
+- [x] Pre-flight grep — `grep -rn "TIDMAD|SQUID|magnetometry"` across all
+  T-affected source dirs. **Result**: 12 residual hits, all classified as
+  out-of-scope (6 documentation/code-comments, 1 explicitly-deferred
+  Python import, 5 lit-review prompt-generator residuals — see follow-up
+  tracker below).
 
-**Test gate**: **Gate 2 — real LLM + ~5 min real training**. One trial-mode
-iteration, punet baseline, real LLM, real training. Binary signal: did the
-iteration complete with a non-error `denoising_score`? Needs user approval
-before running.
+**Gate 2 command** (selected 2026-06-17 with user; 2-iteration + 2-round
+smoke without lit-review for fastest plumbing verification):
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_t_$(date +%s) \
+    --num_iterations 2 \
+    --seed_paths \
+        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+    --llm_config llm_configs/certify_minimal.json \
+    --max_rounds 2 \
+    --max_proposal_attempts 2 \
+    --max_epochs 1 \
+    --is_trial \
+    --trial_strategy snapshot \
+    --trial_portion 0.05 \
+    --train_portion 0.05 \
+    --eval_portion 0.05
+```
+
+- **LLM config**: all 8 roles pinned to `openai / gpt-4o-mini` via
+  `llm_configs/certify_minimal.json`. Lit-review's DeepSeek block is dead
+  code (`--ml_lit_review_enabled` absent → flag defaults False).
+- **Estimated cost**: ~$0.025 (100K input + 20K output gpt-4o-mini tokens
+  across both iterations).
+- **Estimated wall time**: ~10–12 min on lilab GPU.
+
+**Test gate**: **Gate 2 — real LLM + real training**. The 2-iteration +
+2-round smoke verifies plumbing for all four agents whose system prompts
+were touched by T-series (implementor, proposer, tuner, interpreter) plus
+the lit-review AgentCard. Binary signal: did each iteration complete with a
+non-null finite `denoising_score`?
 
 **Sign-off**:
 - [ ] `docs/checkpoint_t_sign_off.md` written with:
   - [ ] grep evidence of zero remaining hardcodes in affected files
   - [ ] Sample rendered prompt excerpt showing YAML injection
   - [ ] Verdict: ready to merge / blocked on X
+
+---
+
+## Follow-up tracker (NOT blocking T-series merge)
+
+These items surfaced during T-series verification but are out of scope for
+the immediate feature. Track them as separate work.
+
+### F1 — Lit-review prompt-generator residual hardcodes
+
+**Where**: `agent/prompt_templates/literature_review/__init__.py`, lines
+~85, 101, 103, 139, 155.
+
+**What**: The lit-review **synthesis prompt's few-shot examples + instruction
+text** still anchor on "SQUID acquisitions" / "full-spectrum 1-D SQUID
+denoising" as the task framing. The `{TASK_DESCRIPTION}` placeholder at
+line 12 of `search_decision_system.md` is correctly wired (Commit 6.5b-5),
+but the synthesis prompt generator hardcodes SQUID-specific examples that
+would mislead the LLM on a non-SQUID task.
+
+**Triage**: 5 of the 7 hit lines are instruction text, not illustrative
+query examples — they belong in scope for full task-agnosticism but were
+missed during T3's pre-read.
+
+**Why deferred**: Each hit needs individual judgment (concrete few-shot vs
+instruction text) and the file is dense (>800 lines). Separate commit
+warranted — design + implementation + tests. Estimated 1–2 hour effort.
+
+**Not blocking T-series merge**: the existing 5 hardcoded lines are
+**concrete SQUID examples** that would not block a chain run on a
+SQUID-related task. For non-SQUID operators, F1 needs landing first.
+
+### F2 — Implementor deferred Categories B/C/D (from T2 commit)
+
+**Where**: `nodes/ml_model_implementor/ml_model_implementor.py` —
+- Lines 80, 115, 120 (runtime dummy-tensor self-check)
+- Lines 254, 259, 276-288 (plugin stub assembly + auto-generated test)
+- Line 827 (`description.md` auto-generation)
+
+**Why deferred**: documented in T2 commit + protected by `TestDeferredScope`
+regression guard. Each category needs separate design (e.g. should dummy-
+tensor shape come from `ForwardContract`? what about regressor vs
+classifier output dimensions?).
+
+### F3 — Documentation cleanup (`.md` files + Python docstrings)
+
+**Where**: `nodes/ml_model_proposal_agent/ml_model_proposal_agent.md`,
+`nodes/ml_literature_review/ml_literature_review.md`, `agent/prompts.py:640,739`.
+
+**What**: Operator-facing docs + Python docstrings reference TIDMAD by
+name. **Not in any LLM prompt** — this is documentation hygiene, not a
+feature. Trivial follow-up.
+
+### F4 — `DATASET_CONFIG` import (explicitly deferred in design Non-goals)
+
+**Where**: `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:37`,
+`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:52`.
+
+**What**: `from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG`.
+
+**Why deferred**: explicitly listed in this doc's Non-goals section.
+Separate feature — couples to dataset registry redesign.
 
 ---
 

@@ -65,13 +65,23 @@ DEFAULT_ROOT_CACHE_DIR = "reference_data/root_papers_cache"
 
 # Static self-description emitted on every run — tells the proposal LLM how to
 # weight this agent's findings (see AgentCard / docs/external_agents_for_proposer.md).
+#
+# T4c — task-agnostic phrasing: this card describes what the lit-review AGENT
+# does (surfaces ML literature, reads S2 / arxiv, etc.), not what the
+# operator's TASK is. The task framing reaches the LLM via the
+# {TASK_DESCRIPTION} placeholder in the lit-review search prompts (already
+# wired in Commit 6.5b-5 from inp.task_description). Embedding the task here
+# would be (a) redundant with that channel and (b) field-length-constrained
+# (role max=200, expertise_domain max=300, limitations max=300) — most
+# operator task descriptions exceed those caps. See
+# docs/design/enable_global_task_config.md § Commit T4 for the rationale.
 _AGENT_CARD = AgentCard(
     agent_name="ml_literature_review",
-    role="Surface ML denoising literature relevant to the current iteration.",
-    expertise_domain="ML denoising architectures; Semantic Scholar corpus.",
+    role="Surface ML literature relevant to the current research iteration.",
+    expertise_domain="ML architectures and training techniques; Semantic Scholar corpus.",
     coverage="ArXiv/S2 results any year; local PDFs in reference_data/.",
     limitations=(
-        "Cannot run experiments; cannot judge SQUID-specific applicability "
+        "Cannot run experiments; cannot judge task-specific applicability "
         "without empirical confirmation."
     ),
     # Survey-style source: literature findings are inspirational priors. The
