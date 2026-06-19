@@ -933,6 +933,32 @@ bash sdsc_submission_scripts/run_chain.sh \
   across both iterations).
 - **Estimated wall time**: ~10–12 min on lilab GPU.
 
+**Lesson learned (2026-06-18 Gate 2 Run 2)**: correct parameters for a
+~10-15 min smoke test:
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_t_$(date +%s) \
+    --run_name checkpoint_t_smoke \
+    --num_iterations 1 \
+    --max_rounds 1 \
+    --max_proposal_attempts 2 \
+    --max_epochs 1 \
+    --trial_portion 0.02 \
+    --train_portion 0.02 \
+    --eval_portion 0.02 \
+    --trial_time_budget_minutes 5 \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --seed_paths  
+```
+
+Key constraints:
+- `--trial_time_budget_minutes 5` is mandatory — engages the time-risk gate so training runs that would exceed 5 min are killed automatically. Validated to work correctly in prior Checkpoint S runs.
+- `--trial_portion 0.02` keeps each training epoch under 5 min on lilab GPU
+- `--num_iterations 1 --max_rounds 1` is sufficient for end-to-end plumbing verification
+- Without `--trial_time_budget_minutes`, training runs without a time ceiling and Gate 2 can take 60-90+ min
+
 **Test gate**: **Gate 2 — real LLM + real training**. The 2-iteration +
 2-round smoke verifies plumbing for all four agents whose system prompts
 were touched by T-series (implementor, proposer, tuner, interpreter) plus
