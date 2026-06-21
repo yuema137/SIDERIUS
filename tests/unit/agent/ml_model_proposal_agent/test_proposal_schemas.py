@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, GateExhaustionInfo
-from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.proposal import CustomLossSpec, ProposalInput, ProposalOutput
 
 
 class TestProposalInput:
@@ -265,3 +265,186 @@ class TestProposalOutput:
                 baseline_config={},
             )
         assert "mathematical_definition" in str(exc.value)
+
+
+# ==========================================
+# L3 — CustomLossSpec + ProposalOutput.custom_loss_spec consistency
+# ==========================================
+#
+# Verifies the schema-only loss-spec channel added by L3. See
+# ``docs/design/enable_loss_inventory.md`` § Commit L3.
+
+
+class TestCustomLossSpec:
+    """Standalone CustomLossSpec schema enforcement (not tied to ProposalOutput)."""
+
+    def test_valid_minimal_with_defaults(self):
+        spec = CustomLossSpec(
+            loss_name="snr_weighted_mse",
+            description="MSE weighted by per-segment SNR.",
+            mathematical_definition="L = mean(w_i * (y_i - y_hat_i)^2) where w_i = SNR_i.",
+        )
+        assert spec.loss_name == "snr_weighted_mse"
+        assert spec.config_fields == {}  # default empty dict
+
+    def test_valid_with_config_fields(self):
+        spec = CustomLossSpec(
+            loss_name="snr_weighted_mse",
+            description="x",
+            mathematical_definition="x",
+            config_fields={"snr_threshold": {"type": "float", "default": 0.5}},
+        )
+        assert "snr_threshold" in spec.config_fields
+
+    def test_empty_loss_name_raises(self):
+        with pytest.raises(ValidationError, match="loss_name"):
+            CustomLossSpec(
+                loss_name="",
+                description="x",
+                mathematical_definition="x",
+            )
+
+    def test_empty_description_raises(self):
+        with pytest.raises(ValidationError, match="description"):
+            CustomLossSpec(
+                loss_name="x",
+                description="",
+                mathematical_definition="x",
+            )
+
+    def test_empty_mathematical_definition_raises(self):
+        with pytest.raises(ValidationError, match="mathematical_definition"):
+            CustomLossSpec(
+                loss_name="x",
+                description="x",
+                mathematical_definition="",
+            )
+
+
+class TestProposalOutputCustomLossSpec:
+    """End-to-end consistency between ProposalOutput.custom_loss_spec and
+    ``baseline_config['loss_config']``."""
+
+    @pytest.fixture
+    def valid_expert_advice(self):
+        return ExpertAdvice(
+            focus_areas=["x"],
+            constraints=["x"],
+            known_failures=["x"],
+            suggested_directions=["x"],
+            rationale="x",
+        )
+
+    @pytest.fixture
+    def custom_spec(self):
+        return CustomLossSpec(
+            loss_name="snr_weighted_mse",
+            description="SNR-weighted MSE for noisy waveform regression.",
+            mathematical_definition="L = mean(snr_i * (y - y_hat)^2)",
+        )
+
+    def test_none_is_back_compat(self, valid_expert_advice):
+        """custom_loss_spec defaults to None — every pre-L3 ProposalOutput
+        round-trip remains valid without modification."""
+        out = ProposalOutput(
+            model_name="m",
+            model_description="x",
+            mathematical_definition="x",
+            motivation="x",
+            expert_advice=valid_expert_advice,
+            baseline_config={
+                "model_config": {},
+                "train_config": {},
+                "loss_config": {"loss_type": "focal", "gamma": 2.0},
+            },
+        )
+        assert out.custom_loss_spec is None
+
+    def test_valid_custom_round_trip(self, valid_expert_advice, custom_spec):
+        out = ProposalOutput(
+            model_name="m",
+            model_description="x",
+            mathematical_definition="x",
+            motivation="x",
+            expert_advice=valid_expert_advice,
+            baseline_config={
+                "model_config": {},
+                "train_config": {},
+                "loss_config": {
+                    "loss_type": "custom",
+                    "loss_name": "snr_weighted_mse",
+                },
+            },
+            custom_loss_spec=custom_spec,
+        )
+        assert out.custom_loss_spec is not None
+        assert out.custom_loss_spec.loss_name == "snr_weighted_mse"
+
+    def test_spec_set_but_loss_type_not_custom_raises(self, valid_expert_advice, custom_spec):
+        with pytest.raises(ValidationError, match="must be 'custom'"):
+            ProposalOutput(
+                model_name="m",
+                model_description="x",
+                mathematical_definition="x",
+                motivation="x",
+                expert_advice=valid_expert_advice,
+                baseline_config={
+                    "loss_config": {
+                        "loss_type": "focal",
+                        "loss_name": "snr_weighted_mse",
+                    },
+                },
+                custom_loss_spec=custom_spec,
+            )
+
+    def test_spec_set_but_loss_name_mismatch_raises(self, valid_expert_advice, custom_spec):
+        with pytest.raises(ValidationError, match="does not match"):
+            ProposalOutput(
+                model_name="m",
+                model_description="x",
+                mathematical_definition="x",
+                motivation="x",
+                expert_advice=valid_expert_advice,
+                baseline_config={
+                    "loss_config": {
+                        "loss_type": "custom",
+                        "loss_name": "different_loss",
+                    },
+                },
+                custom_loss_spec=custom_spec,
+            )
+
+    def test_spec_set_but_no_loss_config_raises(self, valid_expert_advice, custom_spec):
+        with pytest.raises(ValidationError, match="missing"):
+            ProposalOutput(
+                model_name="m",
+                model_description="x",
+                mathematical_definition="x",
+                motivation="x",
+                expert_advice=valid_expert_advice,
+                baseline_config={"model_config": {}, "train_config": {}},
+                custom_loss_spec=custom_spec,
+            )
+
+    def test_spec_none_with_custom_loss_type_does_not_raise(self, valid_expert_advice):
+        """Asymmetry: the validator only fires when custom_loss_spec is set.
+        A ProposalOutput with loss_type='custom' but no custom_loss_spec is
+        accepted at the schema layer — this is the 'reuse an existing
+        registered loss' path (no new generation needed). The implementor
+        node at L4 will look up the registered plugin by loss_name and skip
+        the LLM call. The schema is intentionally permissive here so the
+        reuse path is open."""
+        out = ProposalOutput(
+            model_name="m",
+            model_description="x",
+            mathematical_definition="x",
+            motivation="x",
+            expert_advice=valid_expert_advice,
+            baseline_config={
+                "loss_config": {
+                    "loss_type": "custom",
+                    "loss_name": "previously_registered_loss",
+                },
+            },
+        )
+        assert out.custom_loss_spec is None
