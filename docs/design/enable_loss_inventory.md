@@ -22,6 +22,9 @@ This doc and the implementation follow four working rules. Respect them at every
 1. **Check, don't guess.** When uncertain about how existing code behaves, grep / read the source. If the answer isn't in the code, **ask the user**. Never extrapolate from memory or a summary.
 2. **Keep the design doc and code in lock-step.** Update this file as work lands — tick each `[ ] → [x]` as soon as a sub-bullet is verified, record test results inline next to the relevant checklist item, and add an "Implementation notes" line under the commit when a non-obvious decision is made. Don't wait for the full commit to be done before updating.
 3. **Stop before each commit.** Surface the progress and the main implementation details, then wait for explicit approval before running `git commit`. Tests run freely without permission **except** the real-LLM + real-training combo — that needs a time estimate and approval first. Real-LLM + pseudo-training, pseudo-LLM + real-training, and pure unit tests run freely.
+
+   See `docs/gates/gate_testing_standard.md` for canonical gate definitions, parameters, and pass criteria.
+
 4. **Split logical commits at clean seams.** Every "Commit L\*" entry below is the *logical* unit. When the actual git commit would be too large, split it into multiple smaller commits at natural boundaries (e.g. `-schemas`, `-impl`, `-tests`, `-docs`). The L\* heading stays as the logical anchor; the split appears in git history.
 
 ---
@@ -570,14 +573,17 @@ The proposer's prompt template needs two additions:
   - [ ] Anti-patterns (don't use `torch.no_grad()` in `forward`, don't return non-scalar, don't import outside torch/pydantic/stdlib)
 - [ ] `agent/prompt_templates/implementor/__init__.py` (or wherever existing prompts are exported) — register the new template
 
-**Tests** (mostly pure-Python; real LLM optional):
+**Tests**:
 - [ ] `tests/unit/agent/ml_model_implementor/test_loss_generation.py` (mocked bridge — runs freely)
   - [ ] Registry hit → no LLM call; `loss_provenance` populated with `action="reused"`; no file written
   - [ ] Registry miss → mocked LLM returns valid loss code; dummy-tensor passes; file written; `CapabilityRegistry.register` called once; `loss_provenance.action == "generated"`
   - [ ] First mocked LLM response fails the scalar-shape assertion → retry triggered; second response succeeds → file written
   - [ ] All retries fail → `ValueError` raised with last assertion error
   - [ ] `custom_loss_spec=None` → existing behaviour unchanged (regression guard)
-- [ ] **Optional Tier-1 integration** — `tests/integration/nodes/test_ml_model_implementor_custom_loss.py` with `@real_run` marker; one real LLM call generating SNR-weighted MSE from a hand-crafted `CustomLossSpec`. Skipped in CI; **needs user approval to run** (real LLM only, no training).
+
+**Test gate**: Gate 1 — Real LLM + pseudo training (see `docs/gates/gate_testing_standard.md`).
+One real implementor LLM call generating a custom loss from a `CustomLossSpec`; assert generated
+code compiles + passes dummy-tensor check. Needs user approval before running.
 
 **Out of scope**: proposer awareness (L5). CLI is out of scope for this whole design doc (see Scope section).
 
@@ -638,24 +644,16 @@ The proposer's prompt template needs two additions:
 
 **Goal**: end-to-end real-LLM evidence that the feature works in the closed loop. **Real-LLM + real-training combo — requires user approval before running** (per development principle 3).
 
-**Pre-flight** (run freely):
-- [ ] Full unit suite green: `uv run pytest tests/unit/ -q`
-- [ ] Tier-0 dual-mode integration suite green: `uv run pytest tests/integration/ -q`
-- [ ] L4 optional Tier-1 (real LLM, no training) ran successfully at least once
+**Test gate**: Gate 2 — Real LLM + real training. Use the canonical command from
+`docs/gates/gate_testing_standard.md` with `--run_name checkpoint_l_smoke`.
 
-**Validation runs** (need user approval — estimated cost / wall-time to be filled in below):
-- [ ] **Run A — new loss generation**: 1 chain iteration, `--ml_lit_review_enabled`, target a finding that recommends a novel loss
-  - [ ] Proposer output contains non-null `custom_loss_spec`
-  - [ ] `baseline_config.loss_config.loss_type == "custom"` and `loss_name` matches
-  - [ ] Implementor writes `agent_generated/losses/{loss_name}.py` (or run-scoped equivalent)
-  - [ ] `_capability_index.json` has a new entry with `capability_type="loss"`, correct `source_iteration`
-  - [ ] Validator passes — the loss runs in the real training loop
-  - [ ] Tuner runs ≥ 1 round successfully using the custom loss
-- [ ] **Run B — reuse path**: 1 more iteration after Run A; force the proposer to reuse Run A's loss
-  - [ ] Proposer emits `loss_name=<Run A's loss>`, `custom_loss_spec=None`
-  - [ ] Implementor short-circuits (no second LLM call for loss code; log line `[LossLoader] Reusing existing loss plugin: ...`)
-  - [ ] `_capability_index.json` unchanged (no duplicate entry)
-  - [ ] Validator passes again
+Pass criteria:
+- [ ] Chain exits 0
+- [ ] `run_output_*.json` written per iteration with non-null finite `denoising_score`
+- [ ] At least one iteration proposed and trained a custom loss (verify via
+  `LossProvenance.action == "generated"` in the run output)
+- [ ] `agent_generated/_capability_index.json` updated with the new loss entry
+- [ ] `agent_generated/losses/` contains the generated loss file
 
 **Sign-off artifact**:
 - [ ] `docs/checkpoint_l_sign_off.md` written with:
