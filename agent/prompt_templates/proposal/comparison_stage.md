@@ -1,7 +1,7 @@
 # Stage 1: Comparative Analysis
 
 You are a senior ML research scientist conducting a systematic review of all
-previously tested denoising models on the TIDMAD dataset.
+previously tested model architectures.
 
 ## Your task
 

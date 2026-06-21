@@ -31,6 +31,8 @@ from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
+from workflows.task_config import render_forward_contract
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -303,23 +305,12 @@ def test_config_instantiation():
 # ---------------------------------------------------------------------------
 
 IMPLEMENTOR_REASONING_PROMPT = """\
-You are a senior PyTorch engineer specialising in 1-D signal processing models.
+You are a senior PyTorch engineer specialising in deep learning for signal denoising.
 
 Your task: given a mathematical description of a new neural architecture and its
 baseline configuration, plan the PyTorch implementation in detail before writing code.
 
-Background on the task:
-- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0-255.
-- The model must satisfy this forward contract (non-negotiable):
-    input:  [B, T]       int64   — raw signal, integer class indices (0-255)
-    output: [B, 256, T]  float32 — per-timestep logits over 256 denoising classes
-- ADC values must be embedded: the model receives integer indices, not floats.
-  Use nn.Embedding(256, embed_dim) to convert [B, T] int64 → [B, T, embed_dim],
-  then transpose to [B, embed_dim, T] for Conv1d layers (or keep as [B, T, embed_dim]
-  for transformer-style layers).
-- The output must be exactly [B, 256, T] — use a final Conv1d(channels, 256, 1)
-  or Linear + transpose to achieve this.
-- GPU budget: <10 GB VRAM, <100M parameters for initial exploration.
+{TASK_BACKGROUND}- GPU budget: <10 GB VRAM, <100M parameters for initial exploration.
 
 ## Allowed imports — STRICT ALLOW-LIST
 
@@ -376,13 +367,13 @@ Output a JSON object with exactly these fields:
   "config_validators_code": "a @model_validator(mode='after') method enforcing divisibility constraints, indented with 4 spaces — or empty string if no constraints needed. Example:\\n    @model_validator(mode='after')\\n    def check_constraints(self) -> Self:\\n        if self.gate_channels % 2 != 0:\\n            raise ValueError(f'gate_channels must be even, got {self.gate_channels}')\\n        if self.skip_channels % self.nhead != 0:\\n            raise ValueError(f'skip_channels ({self.skip_channels}) must be divisible by nhead ({self.nhead})')\\n        return self",
   "config_fields": {"field_name": default_value, ...},
   "init_body": "the __init__ body after super().__init__(). Each line indented with 8 spaces.",
-  "forward_body": "the forward body. Each line indented with 8 spaces. Must return [B, 256, T] float32."
+  "forward_body": "the forward body. Each line indented with 8 spaces. Must return {OUTPUT_SHAPE}."
 }
 
 Hard constraints — violating any of these makes the code invalid:
 - The forward method signature is: def forward(self, x: torch.Tensor) -> torch.Tensor:
   The input argument is named x. Use x everywhere in forward_body — NEVER use 'input' (that is a Python builtin).
-- forward_body MUST end with a statement that returns a tensor of shape [B, 256, T] float32.
+- forward_body MUST end with a statement that returns a tensor of shape {OUTPUT_SHAPE}.
 - init_body must define ALL modules referenced in forward_body.
 - If forward_body needs any config value (e.g. a size, a count), store it as a plain attribute
   in init_body (e.g. `self.window_size = config.window_size`). Do NOT access `config` inside
@@ -430,6 +421,58 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # ---------------------------------------------------------------------------
 
 
+def _render_task_background(task_description: str, fc: ForwardContract) -> str:
+    """Render the ``{TASK_BACKGROUND}`` placeholder block for the reasoning
+    system prompt.
+
+    Returns the multi-line block ``Background on the task:`` header + a
+    bullet for the task description + the rendered forward contract, with
+    a trailing newline so the template's next line (``- GPU budget: ...``)
+    follows naturally. Returns ``""`` when both ``task_description`` and
+    ``fc`` are empty — only reachable from test fixtures that don't go
+    through ``load_task_config`` (production callers always populate both).
+    """
+    if not task_description and fc.is_empty():
+        return ""
+    parts = ["Background on the task:"]
+    if task_description:
+        parts.append(f"- {task_description}")
+    fc_block = render_forward_contract(fc)
+    if fc_block:
+        parts.append(fc_block)
+    # Trailing empty string → final "\n" so the next template line (the
+    # GPU-budget bullet) starts on a fresh line.
+    parts.append("")
+    return "\n".join(parts)
+
+
+def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
+    """Substitute the ``{TASK_BACKGROUND}`` placeholder in
+    ``IMPLEMENTOR_REASONING_PROMPT`` from ``inp``.
+
+    Production callers always have ``inp.task_description`` non-empty and
+    ``inp.forward_contract`` fully populated (workflow injects from
+    ``load_task_config()``); test fixtures may leave both at defaults, in
+    which case the placeholder collapses to ``""``.
+    """
+    return IMPLEMENTOR_REASONING_PROMPT.replace(
+        "{TASK_BACKGROUND}",
+        _render_task_background(inp.task_description, inp.forward_contract),
+    )
+
+
+def _build_code_system_prompt(inp: ImplementorInput) -> str:
+    """Substitute the ``{OUTPUT_SHAPE}`` placeholder in
+    ``IMPLEMENTOR_CODE_PROMPT`` from ``inp.forward_contract.output_shape``.
+
+    Falls back to a generic ``[B, C, T] float32`` only when the contract is
+    empty (test fixtures); production callers always provide a concrete
+    output shape via ``load_task_config()``.
+    """
+    output_shape = inp.forward_contract.output_shape or "[B, C, T] float32"
+    return IMPLEMENTOR_CODE_PROMPT.replace("{OUTPUT_SHAPE}", output_shape)
+
+
 def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
     train_cfg = inp.baseline_config.get("train_config", {})
@@ -450,11 +493,14 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         "train_config (for context only — do not implement training logic):",
         f"  segmentation_size: {train_cfg.get('segmentation_size', 40000)} (if present)",
         f"  batch_size: {train_cfg.get('batch_size', 1)}",
-        "",
-        "## Forward contract (non-negotiable)",
-        "  input:  [B, T]       int64   — raw ADC signal",
-        "  output: [B, 256, T]  float32 — per-timestep logits",
     ]
+
+    # --- Forward contract (rendered from inp.forward_contract; suppressed
+    # when the contract is empty — only happens in test fixtures that don't
+    # populate it). ---
+    fc_block = render_forward_contract(inp.forward_contract)
+    if fc_block:
+        lines += ["", "## Forward contract (non-negotiable)", fc_block]
 
     # --- Expert advice (from upstream agents) ---
     expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
@@ -758,18 +804,25 @@ class MLModelImplementor:
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
         # --- Call 1: reasoning (free text, runs once) ---
+        # System prompt has its {TASK_BACKGROUND} placeholder substituted at
+        # call time from inp.task_description + inp.forward_contract; see
+        # docs/design/enable_global_task_config.md § Commit T2.
+        reasoning_system_prompt = _build_reasoning_system_prompt(inp)
         reasoning_prompt = _build_reasoning_prompt(inp)
         reasoning = self.bridge.generate_text(
-            IMPLEMENTOR_REASONING_PROMPT,
+            reasoning_system_prompt,
             reasoning_prompt,
             label="implementor.reasoning",
         )
         print(f"   Reasoning complete ({len(reasoning)} chars).")
 
         # --- Call 2: code commit (strict JSON) ---
+        # System prompt has its {OUTPUT_SHAPE} placeholder substituted from
+        # inp.forward_contract.output_shape (T2).
+        code_system_prompt = _build_code_system_prompt(inp)
         code_prompt = _build_code_prompt(reasoning, inp)
         code = self.bridge.generate(
-            IMPLEMENTOR_CODE_PROMPT,
+            code_system_prompt,
             code_prompt,
             label="implementor.code",
         )

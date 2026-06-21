@@ -1,4 +1,4 @@
-# Checkpoint P — Proposer pipeline-mode prompt audit (2026-06-05)
+# Checkpoint P — Proposer pipeline-mode prompt audit (2026-06-18)
 
 Self-contained artifact produced by `scripts/render_proposer_prompts_for_audit.py`. The rendered prompts below are the exact strings the proposer's LLM would see in a production pipeline-mode run, captured with the LLM bridge mocked (zero LLM calls). See `docs/commit_plan_ml_literature_review.md` § "Behavioral Checkpoint P" for the 9 sub-criteria.
 
@@ -46,13 +46,13 @@ Self-contained artifact produced by `scripts/render_proposer_prompts_for_audit.p
 
 ### Call 1 — `proposer.comparison`
 
-**System prompt** (7511 chars):
+**System prompt** (7492 chars):
 
 ```
 # Stage 1: Comparative Analysis
 
 You are a senior ML research scientist conducting a systematic review of all
-previously tested denoising models on the TIDMAD dataset.
+previously tested model architectures.
 
 ## Your task
 
@@ -1535,7 +1535,7 @@ class PositionalEncoding(nn.Module):
 
 ### Call 3 — `proposer.proposing`
 
-**System prompt** (7382 chars):
+**System prompt** (7242 chars):
 
 ```
 # Stage 3: Architecture Design
@@ -1618,8 +1618,9 @@ of your retry attempts. Pick valid values now.
    digits, and underscores only.
 
 4. **Forward contract.** The model MUST satisfy:
-   - Input: `[B, T] int64` — raw signal, integer class indices 0-255
-   - Output: `[B, 256, T] float32` — per-timestep logits over 256 classes
+
+
+
    This is non-negotiable.
 
 5. **Conservative baseline.** The `baseline_config` must fit in <10 GB VRAM.
@@ -2289,14 +2290,14 @@ Reviewer reads the rendered prompts above and confirms each of the 9 sub-criteri
 
 | # | Criterion (short) | Verdict | Notes |
 |---|---|---|---|
-| S1 | `[HARDWARE CONTEXT]` block at the top of every stage's user prompt | ✅ PASS | Confirmed in all 3 captured user prompts (Call 1 line 172, Call 2 line 969, Call 3 line 1697). |
-| S2 | `## Constraints` block right below | ✅ PASS | Confirmed: Constraints block follows hardware on every stage (Call 1 line 181). |
-| S3 | `## External Contributors` block next, both Trust Level values visible | ✅ PASS | Confirmed: Contributors block at Call 1 line 186 contains both `Trust Level: soft_prior` (lit-review) and `Trust Level: strong_prior` (synthesized human). |
-| S4 | `## Expert Context` block next, lit-review + wrapped-human items present | ✅ PASS | Confirmed: Expert Context at Call 1 line 207 carries the lit-review finding (`source_ref=arxiv:2312.00752`) AND the wrapped human directive (`source_ref=human:human_advice`). |
-| S5 | Candidate markdown + accumulated JSON renders below all of the above | ✅ PASS | Confirmed: Candidate Models begin at Call 1 line 220, Accumulated context at line 636 — both well below the four top blocks. |
-| S6 | causal_reasoning_stage.md system prompt is post-P-c (rule 1 + MANDATORY synthesis; no hardcoded hierarchy) | ✅ PASS | Automated pre-check verified: MANDATORY block present, Rule 1 is Evidence-backed with both ModelComparison + ExpertContextItem + trust_level gate, no hardcoded `Literature agents:` / `Physics agents:` / `Human directives: always take precedence` strings. |
-| S7 | no `expert_advice` field-name in user prompts; no `cite_id` anywhere | ✅ PASS | Automated pre-check verified: zero `inp.expert_advice` references in any captured user prompt (P-d hard-removed the field); zero `cite_id` literals across all captured strings (P-a rename complete). |
-| S8 | comparison_stage.md weakened Rule 4 + 6 mode files clean of hardcoded hierarchy / Advice JSON | ✅ PASS | Automated pre-check verified: Rule 4 carries the no-promotion-on-external-evidence guard + provenance language + `arxiv:` example. All 6 mode files contain `trust_level` references, zero `Advice JSON` references, zero hardcoded trust-hierarchy strings. |
-| S9 | rendered Contributors block contains literal `Trust Level: soft_prior` AND `Trust Level: strong_prior` | ✅ PASS | Automated pre-check verified: both literal substrings present in the captured user prompts (lit-review card + synthesized human card respectively). |
+| S1 | `[HARDWARE CONTEXT]` block at the top of every stage's user prompt | _ | _ |
+| S2 | `## Constraints` block right below | _ | _ |
+| S3 | `## External Contributors` block next, both Trust Level values visible | _ | _ |
+| S4 | `## Expert Context` block next, lit-review + wrapped-human items present | _ | _ |
+| S5 | Candidate markdown + accumulated JSON renders below all of the above | _ | _ |
+| S6 | causal_reasoning_stage.md system prompt is post-P-c (rule 1 + MANDATORY synthesis; no hardcoded hierarchy) | _ | _ |
+| S7 | no `expert_advice` field-name in user prompts; no `cite_id` anywhere | _ | _ |
+| S8 | comparison_stage.md weakened Rule 4 + 6 mode files clean of hardcoded hierarchy / Advice JSON | _ | _ |
+| S9 | rendered Contributors block contains literal `Trust Level: soft_prior` AND `Trust Level: strong_prior` | _ | _ |
 
-**Sign-off**: ✅ All 9 sub-criteria PASS. Checkpoint P signed off 2026-06-05. Commit P phase is structurally complete; Commit 6 (workflow integration) is now unblocked.
+**Sign-off**: a human reviewer fills the Verdict column above (`PASS`/`FAIL`/`N/A`) and commits the artifact alongside ticking Checkpoint P + closing P-e in `docs/commit_plan_ml_literature_review.md`.

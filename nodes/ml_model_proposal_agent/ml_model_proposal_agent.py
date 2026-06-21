@@ -30,10 +30,12 @@ from agent.llm_bridge import LLMBridge
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
+from agent.schemas.task_config import ForwardContract
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from workflows.task_config import render_forward_contract
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
@@ -175,16 +177,7 @@ Your task: given a structured analysis of past hyperparameter tuning experiments
 across one or more model architectures, reason deeply about what new neural
 architecture could best overcome the identified bottlenecks.
 
-Background on the task:
-- Input data: TIDMAD SQUID magnetometry time-series, integer ADC values 0-255,
-  signal length up to 40000 timesteps per segment.
-- The model must satisfy this forward contract (non-negotiable):
-    input:  [B, T]       int64   — raw signal, integer class indices
-    output: [B, 256, T]  float32 — per-timestep logits over 256 denoising classes
-- This is offline denoising — the output at position t may depend on all positions.
-  Causal constraints are not required.
-- Loss is cross-entropy or focal loss: per-timestep 256-class classification.
-- The VRAM ceiling is published in the [HARDWARE CONTEXT] block at the top of
+{TASK_BACKGROUND}- The VRAM ceiling is published in the [HARDWARE CONTEXT] block at the top of
   the user message — treat that block's "Effective cap" as the hard limit,
   and keep `parameter_count_estimate` under ~100M for initial exploration.
 
@@ -280,6 +273,52 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 # ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
+
+
+def _render_task_background(task_description: str, fc: ForwardContract) -> str:
+    """Render the ``{TASK_BACKGROUND}`` placeholder block for
+    ``PROPOSAL_REASONING_PROMPT`` and the proposing-stage ``.md``
+    templates.
+
+    Returns the multi-line block ``Background on the task:`` header + a
+    bullet for the task description + the rendered forward contract, with
+    a trailing newline so the template's next line (``- The VRAM
+    ceiling...``) follows naturally. Returns ``""`` when both
+    ``task_description`` and ``fc`` are empty — only reachable from test
+    fixtures that don't go through ``load_task_config`` (production
+    callers always populate both).
+
+    Mirrors the helper of the same name in
+    ``nodes/ml_model_implementor/ml_model_implementor.py`` (T2) so that
+    both agents render the task framing identically.
+    """
+    if not task_description and fc.is_empty():
+        return ""
+    parts = ["Background on the task:"]
+    if task_description:
+        parts.append(f"- {task_description}")
+    fc_block = render_forward_contract(fc)
+    if fc_block:
+        parts.append(fc_block)
+    # Trailing empty string → final "\n" so the next template line (the
+    # VRAM-ceiling bullet) starts on a fresh line.
+    parts.append("")
+    return "\n".join(parts)
+
+
+def _build_reasoning_system_prompt(inp: ProposalInput) -> str:
+    """Substitute the ``{TASK_BACKGROUND}`` placeholder in
+    ``PROPOSAL_REASONING_PROMPT`` from ``inp``.
+
+    Production callers always have ``inp.task_description`` non-empty and
+    ``inp.forward_contract`` fully populated (workflow injects from
+    ``load_task_config()``); test fixtures may leave both at defaults, in
+    which case the placeholder collapses to ``""``.
+    """
+    return PROPOSAL_REASONING_PROMPT.replace(
+        "{TASK_BACKGROUND}",
+        _render_task_background(inp.task_description, inp.forward_contract),
+    )
 
 
 def _render_hardware_context_block(
@@ -941,8 +980,12 @@ class MLModelProposalAgent:
         """
         reasoning_prompt = _build_reasoning_prompt(inp)
         print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
+        # System prompt has its {TASK_BACKGROUND} placeholder substituted at
+        # call time from inp.task_description + inp.forward_contract; see
+        # docs/design/enable_global_task_config.md § Commit T3.
+        reasoning_system_prompt = _build_reasoning_system_prompt(inp)
         reasoning = self.bridge.generate_text(
-            PROPOSAL_REASONING_PROMPT,
+            reasoning_system_prompt,
             reasoning_prompt,
             label="proposer.legacy_reasoning",
         )
@@ -1180,6 +1223,13 @@ class MLModelProposalAgent:
             "recent_gate_exhaustions_block": _format_recent_gate_exhaustions_block(
                 inp.recent_gate_exhaustions
             ),
+            # T3 — task config injection. {FORWARD_CONTRACT} is rendered into
+            # proposing_stage.md (line 68 area); {TASK_DESCRIPTION} is rendered
+            # into any future template that wants the bare task string. Both
+            # placeholders are no-ops in stages that don't reference them.
+            # See docs/design/enable_global_task_config.md § Commit T3.
+            "task_description": inp.task_description,
+            "forward_contract": render_forward_contract(inp.forward_contract),
         }
 
         for stage in pipeline.stages:

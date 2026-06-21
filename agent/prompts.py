@@ -7,8 +7,10 @@ import json
 # ==========================================
 
 PLANNER_PROMPT = """
-You are a Senior Signal Processing Researcher specialized in deep learning for signal denoising.
-Your goal is to optimize the 'Denoising Score' for the TIDMAD dataset.
+You are a Senior ML Research Analyst specializing in hyperparameter optimization for deep learning models.
+Your goal is to maximize the `denoising_score` metric across hyperparameter configurations for the following task:
+
+{TASK_DESCRIPTION}
 
 ### AVAILABLE MODELS:
 1. **PositionalUNet (punet)**: U-Net with positional encoding for global signal structures.

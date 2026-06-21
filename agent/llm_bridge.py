@@ -787,6 +787,7 @@ class LLMBridge:
         last_batch_size: int | None = None,
         last_mode: str | None = None,
         score_table_md: str | None = None,
+        task_description: str = "",
     ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
@@ -839,11 +840,19 @@ class LLMBridge:
                 (see docs/aggregated_score_table_awareness.md §9.1). ``None``
                 on iteration 1 (no prior records) renders the "no prior round
                 yet" fallback.
+            task_description:
+                Plain-English description of the research task, sourced from
+                ``configs/task_config.yaml`` via the workflow. Substituted
+                into the ``{TASK_DESCRIPTION}`` placeholder in
+                ``PLANNER_PROMPT`` (T4a — see
+                ``docs/design/enable_global_task_config.md`` § Commit T4a).
+                Empty string is the test-fixture default; production callers
+                always pass a non-empty value.
         """
         system_prompt = PLANNER_PROMPT.replace(
             "{SCORE_COMPARISON_TABLE}",
             score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
-        )
+        ).replace("{TASK_DESCRIPTION}", task_description)
 
         # --- 2. Inject model description + config manual ---
         manual_context = ""

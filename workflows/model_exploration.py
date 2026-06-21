@@ -86,6 +86,7 @@ from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -97,6 +98,7 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -289,6 +291,31 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
         backend="local",
         local=LocalStorageConfig(workspace=workspace, run_name=run_name),
     )
+
+
+def _snapshot_task_config(run_dir: str) -> None:
+    """Copy ``configs/task_config.yaml`` into ``run_dir`` as
+    ``task_config_snapshot.yaml`` for replay provenance.
+
+    Called once during ``run_workflow`` setup, immediately after
+    ``os.makedirs(run_dir, exist_ok=True)``. The "copy only if absent"
+    guard means the snapshot is written on the first invocation that
+    initializes a clean ``run_dir`` and skipped on every subsequent call —
+    chain mode (iter 2+ in the same chain) therefore preserves the
+    config that was active when iter 1 ran, even if the operator edits
+    ``configs/task_config.yaml`` mid-chain.
+
+    The source path is anchored on :data:`SIDERIUS_ROOT` (not the
+    process cwd) so integration tests that pass a tmp workspace without
+    ``chdir``'ing into the repo root still pick up the committed config.
+
+    See ``docs/design/enable_global_task_config.md`` § "Run provenance —
+    task config snapshot" + § Commit T1b for the design + chain-mode
+    rationale.
+    """
+    snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
+    if not os.path.exists(snapshot_path):
+        shutil.copy2(os.path.join(SIDERIUS_ROOT, "configs", "task_config.yaml"), snapshot_path)
 
 
 # ---------------------------------------------------------------------------
@@ -951,6 +978,7 @@ def run_workflow(
     # All workflow output goes under {workspace}/{run_name}/
     run_dir = os.path.join(workspace, run_name)
     os.makedirs(run_dir, exist_ok=True)
+    _snapshot_task_config(run_dir)
     started_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
     # Anchor SIDERIUS_CHAIN_WORKSPACE for in-process / single-iteration
@@ -1190,6 +1218,11 @@ def run_workflow(
             previous_proposal=previous_proposal_data,
             storage=interp_storage,
             iteration=iteration,
+            # T4b — task config injection. Substituted into the
+            # {TASK_DESCRIPTION} placeholder in PER_MODEL_SYSTEM_PROMPT +
+            # SYNTHESIS_SYSTEM_PROMPT at call time.
+            # See docs/design/enable_global_task_config.md § Commit T4.
+            task_description=get_task_description(load_task_config()),
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")
@@ -1362,6 +1395,13 @@ def run_workflow(
                     recent_tune_outputs=list(recent_tune_outputs),
                 )
                 propose_input.existing_model_types = list(all_model_types)
+                # Task config injection (T3) — same pattern as T2's implementor
+                # injection. The loader is cached per-process so this is a dict
+                # lookup after the first iter. See
+                # docs/design/enable_global_task_config.md § Commit T3.
+                _task_cfg = load_task_config()
+                propose_input.task_description = get_task_description(_task_cfg)
+                propose_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
                 if human_advice_mindset is not None:
@@ -1435,6 +1475,13 @@ def run_workflow(
                     impl_input = local_full_spec(proposal, attempt_storage)
                     impl_input.plugin_dir = os.path.join(attempt_dir, "models")
                     impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    # Task config injection (T2) — load + thread into the
+                    # implementor input. The loader is cached per-process so
+                    # this is a dict lookup after the first iter. See
+                    # docs/design/enable_global_task_config.md § Commit T2.
+                    _task_cfg = load_task_config()
+                    impl_input.task_description = get_task_description(_task_cfg)
+                    impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
                     if human_advice_implement is not None:
                         impl_input.human_advice = human_advice_implement
                     if ref_code:
@@ -1586,6 +1633,10 @@ def run_workflow(
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
+        # Task config injection (T4a) — substituted into the {TASK_DESCRIPTION}
+        # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
+        # See docs/design/enable_global_task_config.md § Commit T4a.
+        tune_input.task_description = get_task_description(load_task_config())
 
         _tune_agent = HyperparamTuningAgent(
             bridge_factory=bridge_factory,
