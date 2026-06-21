@@ -507,13 +507,13 @@ The proposer's prompt template needs two additions:
   - [ ] Add `CustomLossSpec` BaseModel with 4 fields (loss_name, description, mathematical_definition, config_fields)
   - [ ] Add `ProposalOutput.custom_loss_spec: CustomLossSpec | None = None`
   - [ ] Add `@model_validator(mode="after")` on `ProposalOutput`: if `custom_loss_spec` is set, `baseline_config["loss_config"]["loss_type"]` MUST be `"custom"` AND `baseline_config["loss_config"]["loss_name"]` MUST match `custom_loss_spec.loss_name` — emit clear ValidationError on mismatch
-- [ ] `agent/schemas/implementor.py`
-  - [ ] Add `ImplementorOutput.loss_provenance: LossProvenance | None = None` (full audit trail; supersedes the earlier standalone `loss_file_path` proposal)
-  - [ ] Add `ImplementorInput.custom_loss_spec: CustomLossSpec | None = None`
-    (the implementor needs this field to know what to generate; default None preserves back-compat)
-  - [ ] Add `ImplementorInput.loss_dir: str = "agent_generated/losses"`
-    mirroring the existing `plugin_dir: str = "agent_generated/models"` field (line 133-137).
-    Workflow will override this at call time, same pattern as `plugin_dir`.
+- [ ] `agent/schemas/implementor.py` — add loss-specific fields to `ImplementorInput`:
+  - NOTE: `task_description` and `forward_contract` fields already exist on
+    `ImplementorInput` (added by `enable_global_task_config` T2, commit 8ac113d).
+    L3 adds ONLY the loss-specific fields below — do NOT re-add task_description.
+  - [ ] `custom_loss_spec: CustomLossSpec | None = None`
+  - [ ] `loss_dir: str = "agent_generated/losses"`
+  - [ ] Also add `ImplementorOutput.loss_provenance: LossProvenance | None = None` (full audit trail; supersedes the earlier standalone `loss_file_path` proposal)
   - [ ] No `loss_test_dir` field needed — loss plugins do NOT get a stub test file.
     Rationale: two validation layers already exist (dummy-tensor check in implementor +
     real training loop in validator). A third stub test would be redundant overhead.
