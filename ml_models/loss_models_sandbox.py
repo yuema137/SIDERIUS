@@ -1,3 +1,14 @@
+"""Loss function sandbox for SIDERIUS model training.
+
+Provides ``get_criterion(cfg)`` which routes ``LossConfig`` instances to the
+appropriate loss class.  Built-in types (``focal``, ``focal_cw``, ``ce``,
+``smooth_l1``) are imported directly.  Custom agent-generated losses
+(``loss_type="custom"``) are loaded at call time from the loss-plugin
+directory (``agent_generated/losses/`` by default, overridden via
+``SIDERIUS_LOSS_DIRS`` env var).  See ``docs/design/enable_loss_inventory.md``
+§ Commit L2 for the two-config design rationale.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -88,11 +99,60 @@ class FocalLoss1DCW(nn.Module):
             return loss
 
 
+def _load_custom_loss(loss_name: str) -> nn.Module:
+    """Load a plugin loss from ``agent_generated/losses/{loss_name}.py``.
+
+    LossConfig is the routing layer only — it carries ``loss_type="custom"``
+    and ``loss_name``. The plugin's own ``PLUGIN_LOSS_CONFIG_CLASS`` is a
+    completely separate Pydantic model with the plugin's own hyperparameters
+    (e.g. ``snr_threshold``, ``stft_window_size``). The two configs are
+    independent; ``LossConfig.alpha``/``gamma``/``beta`` are irrelevant for
+    custom losses and have already been nullified by
+    ``enforce_parameter_consistency`` upstream.
+
+    Args:
+        loss_name: The ``PLUGIN_LOSS_TYPE`` key of the plugin to load.
+
+    Returns:
+        Instantiated loss ``nn.Module`` ready for use as a training criterion.
+
+    Raises:
+        ValueError: When no plugin with this ``loss_name`` is found in any
+            ``SIDERIUS_LOSS_DIRS`` directory (or the legacy
+            ``agent_generated/losses/`` fallback when the env var is unset).
+    """
+    # Lazy import keeps ml_models loadable without agent_generated/ on the
+    # Python path (e.g. in older tests that exercise loss_models_sandbox
+    # in isolation). Agent_generated/ has no torch dependency at import time.
+    from agent_generated._loss_loader import load_loss_plugin
+
+    plugin = load_loss_plugin(loss_name)
+    if plugin is None:
+        raise ValueError(
+            f"Custom loss '{loss_name}' not found in agent_generated/losses/. "
+            f"Run the implementor first to generate the loss plugin, or check "
+            f"that SIDERIUS_LOSS_DIRS points to the correct directory."
+        )
+    # Construct the plugin's own config with its own defaults. Do NOT pass
+    # loss_type/loss_name here — those belong to LossConfig (the router),
+    # not to the plugin's config class. The plugin's hyperparameters
+    # (e.g. snr_threshold) come from the proposer's CustomLossSpec at L4,
+    # which is plumbed via a separate channel TBD.
+    loss_cfg = plugin["config_class"]()
+    return plugin["loss_class"](loss_cfg)
+
+
 def get_criterion(config: LossConfig, class_weights: torch.Tensor | None = None):
     """
     Helper function to instantiate the correct loss based on the Agent's LossConfig.
     """
-    if config.loss_type == "focal":
+    if config.loss_type == "custom":
+        # ``loss_name`` is validated non-None upstream by LossConfig's
+        # ``enforce_custom_loss_name``; the assert below is for pyright
+        # narrowing only and never fires at runtime.
+        assert config.loss_name is not None
+        return _load_custom_loss(config.loss_name)
+    elif config.loss_type == "focal":
         return FocalLoss1D(config)
     elif config.loss_type == "focal_cw":
         return FocalLoss1DCW(config, class_weights)

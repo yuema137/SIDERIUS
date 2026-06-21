@@ -5,8 +5,13 @@ Verifies that all loss functions compute correctly on synthetic tensors
 and that get_criterion instantiates the right class for each loss_type.
 """
 
+import shutil
+import sys
+from pathlib import Path
+
 import pytest
 import torch
+from pydantic import ValidationError
 
 from ml_models.loss_models_sandbox import FocalLoss1D, FocalLoss1DCW, get_criterion
 from ml_models.models_format_sandbox import LossConfig
@@ -166,6 +171,182 @@ class TestGetCriterion:
         assert loss.item() >= 0.0
 
     def test_smooth_l1_computes_on_synthetic_data(self, regression_inputs, regression_targets):
+        cfg = LossConfig(loss_type="smooth_l1")
+        criterion = get_criterion(cfg)
+        loss = criterion(regression_inputs, regression_targets)
+        assert loss.item() >= 0.0
+
+
+# ==========================================
+# L2 — LossConfig.loss_type="custom" + loss_name + get_criterion routing
+# ==========================================
+#
+# Verifies the custom-loss routing path added by L2. See
+# ``docs/design/enable_loss_inventory.md`` § Commit L2.
+
+# Stub template lives in agent_generated/_stub_loss_template.py (committed in L1a).
+# Tests copy it (without the leading ``_``) into a tmp loss dir and point
+# SIDERIUS_LOSS_DIRS at that dir.
+_STUB_TEMPLATE = Path(__file__).resolve().parents[3] / "agent_generated" / "_stub_loss_template.py"
+
+
+@pytest.fixture
+def loss_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Set up a fresh tmp loss directory containing the stub plugin (loadable
+    as ``stub_ce``) and point ``SIDERIUS_LOSS_DIRS`` at it.
+
+    Also clears any pre-existing ``siderius_loss_plugin_*`` entries from
+    ``sys.modules`` so a previous test run's stub doesn't shadow this one.
+    """
+    d = tmp_path / "losses"
+    d.mkdir()
+    shutil.copy2(_STUB_TEMPLATE, d / "stub_ce.py")
+    monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(d))
+    for k in list(sys.modules):
+        if k.startswith("siderius_loss_plugin_"):
+            sys.modules.pop(k, None)
+    return d
+
+
+# ---------------------------------------------------------------------------
+# Schema: loss_type="custom" requires loss_name; non-custom forbids it
+# ---------------------------------------------------------------------------
+
+
+class TestLossConfigCustomValidation:
+    def test_custom_without_loss_name_raises(self):
+        with pytest.raises(ValidationError, match="loss_name is required"):
+            LossConfig(loss_type="custom")
+
+    def test_custom_with_explicit_none_loss_name_raises(self):
+        with pytest.raises(ValidationError, match="loss_name is required"):
+            LossConfig(loss_type="custom", loss_name=None)
+
+    def test_custom_with_empty_loss_name_raises(self):
+        with pytest.raises(ValidationError, match="loss_name is required"):
+            LossConfig(loss_type="custom", loss_name="")
+
+    def test_custom_with_loss_name_succeeds(self):
+        cfg = LossConfig(loss_type="custom", loss_name="snr_weighted_mse")
+        assert cfg.loss_type == "custom"
+        assert cfg.loss_name == "snr_weighted_mse"
+
+    @pytest.mark.parametrize("lt", ["focal", "focal_cw", "ce", "smooth_l1"])
+    def test_non_custom_with_loss_name_raises(self, lt: str):
+        with pytest.raises(ValidationError, match="loss_name must be None"):
+            LossConfig(loss_type=lt, loss_name="something")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("lt", ["focal", "focal_cw", "ce", "smooth_l1"])
+    def test_non_custom_without_loss_name_succeeds(self, lt: str):
+        cfg = LossConfig(loss_type=lt)  # type: ignore[arg-type]
+        assert cfg.loss_name is None
+
+
+# ---------------------------------------------------------------------------
+# Schema: enforce_parameter_consistency nullifies alpha/gamma/beta for custom
+# ---------------------------------------------------------------------------
+
+
+class TestEnforceParameterConsistencyCustom:
+    def test_custom_nullifies_alpha_gamma_beta(self):
+        cfg = LossConfig(
+            loss_type="custom",
+            loss_name="snr_weighted_mse",
+            alpha=0.7,
+            gamma=3.0,
+            beta=2.0,
+        )
+        # The router-vs-plugin two-config design means LossConfig's
+        # alpha/gamma/beta are dead weight for custom; the validator
+        # nullifies them so the agent can't accidentally pass them through.
+        assert cfg.alpha is None
+        assert cfg.gamma is None
+        assert cfg.beta is None
+
+
+# ---------------------------------------------------------------------------
+# Schema: check_compatibility is a no-op for custom (defers to plugin)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckCompatibilityCustom:
+    @pytest.mark.parametrize("model_type", ["punet", "fcnet", "wavenet", "any_plugin_model"])
+    def test_custom_is_compatible_with_any_model(self, model_type: str):
+        """``check_compatibility`` should not raise for ``loss_type='custom'``
+        regardless of model_type — the plugin's own forward pass will raise
+        at training time if the shape contract is violated."""
+        cfg = LossConfig(loss_type="custom", loss_name="anything")
+        cfg.check_compatibility(model_type)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# get_criterion routing for loss_type="custom"
+# ---------------------------------------------------------------------------
+
+
+class TestGetCriterionCustom:
+    def test_custom_loads_plugin(self, loss_dir: Path):
+        """Happy path: with a valid plugin in SIDERIUS_LOSS_DIRS, get_criterion
+        returns an instance of the plugin's PLUGIN_LOSS_CLASS."""
+        cfg = LossConfig(loss_type="custom", loss_name="stub_ce")
+        criterion = get_criterion(cfg)
+        # The stub_ce plugin's PLUGIN_LOSS_CLASS is named StubCE.
+        assert criterion.__class__.__name__ == "StubCE"
+
+    def test_custom_plugin_forward_pass_runs(
+        self, loss_dir: Path, classification_inputs, classification_targets
+    ):
+        """Sanity check: the loaded plugin actually runs its forward pass
+        on classifier-shaped tensors and returns a scalar with grad. We
+        explicitly enable ``requires_grad`` on the inputs to mimic the real
+        training path (model outputs always have grad)."""
+        cfg = LossConfig(loss_type="custom", loss_name="stub_ce")
+        criterion = get_criterion(cfg)
+        inputs = classification_inputs.detach().clone().requires_grad_(True)
+        loss = criterion(inputs, classification_targets)
+        assert loss.dim() == 0  # scalar
+        assert loss.requires_grad
+        assert loss.item() >= 0.0
+
+    def test_missing_plugin_raises_value_error(self, loss_dir: Path):
+        """When the loss_name doesn't match any plugin in SIDERIUS_LOSS_DIRS,
+        get_criterion raises ValueError with the documented remediation text."""
+        cfg = LossConfig(loss_type="custom", loss_name="nonexistent_loss")
+        with pytest.raises(ValueError, match="not found in agent_generated/losses/"):
+            get_criterion(cfg)
+
+    def test_missing_plugin_error_mentions_implementor_and_env_var(self, loss_dir: Path):
+        """Verify both remediation paths are in the error message — operator
+        running into this manually needs to know about both implementor
+        generation AND SIDERIUS_LOSS_DIRS configuration."""
+        cfg = LossConfig(loss_type="custom", loss_name="nonexistent_loss")
+        try:
+            get_criterion(cfg)
+        except ValueError as e:
+            msg = str(e)
+            assert "Run the implementor first" in msg
+            assert "SIDERIUS_LOSS_DIRS" in msg
+        else:
+            pytest.fail("Expected ValueError")
+
+
+# ---------------------------------------------------------------------------
+# Regression guard: the 4 built-in loss types still work after the
+# custom-branch addition at the top of the if/elif chain.
+# ---------------------------------------------------------------------------
+
+
+class TestBuiltinsStillWorkAfterCustomBranch:
+    @pytest.mark.parametrize("lt", ["focal", "focal_cw", "ce"])
+    def test_classifier_branches_still_route_correctly(
+        self, lt: str, classification_inputs, classification_targets
+    ):
+        cfg = LossConfig(loss_type=lt)  # type: ignore[arg-type]
+        criterion = get_criterion(cfg)
+        loss = criterion(classification_inputs, classification_targets)
+        assert loss.item() >= 0.0
+
+    def test_smooth_l1_branch_still_routes_correctly(self, regression_inputs, regression_targets):
         cfg = LossConfig(loss_type="smooth_l1")
         criterion = get_criterion(cfg)
         loss = criterion(regression_inputs, regression_targets)

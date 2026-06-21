@@ -546,41 +546,92 @@ seam (per development principle 4):
 **Goal**: route `loss_type="custom"` through `_loss_loader.py`. After this commit, training and the two evaluate-* skills automatically pick up any plugin loss without further changes.
 
 **Code**:
-- [ ] `ml_models/models_format_sandbox.py` — modify `LossConfig`
-  - [ ] Add `"custom"` to the `loss_type` `Literal[...]`
-  - [ ] Add `loss_name: str | None` field (default `None`, description per design doc above)
-  - [ ] Add `enforce_custom_loss_name` `@model_validator(mode="after")`
-  - [ ] Update existing `enforce_parameter_consistency` validator: add `loss_type == "custom"` branch
+- [x] `ml_models/models_format_sandbox.py` — modify `LossConfig`
+  - [x] Add `"custom"` to the `loss_type` `Literal[...]`
+  - [x] Add `loss_name: str | None` field (default `None`, description per design doc above)
+  - [x] Add `enforce_custom_loss_name` `@model_validator(mode="after")`
+  - [x] Update existing `enforce_parameter_consistency` validator: add `loss_type == "custom"` branch
     that nullifies alpha, gamma, and beta unconditionally. This is safe: LossConfig and the
     plugin's PLUGIN_LOSS_CONFIG_CLASS are completely separate objects. The plugin config is
     constructed independently in `_load_custom_loss()` with no reference to LossConfig's
     alpha/gamma/beta. Nullifying them in LossConfig has zero effect on plugin behaviour.
     Remove the "unless the plugin's config schema reuses them" hedge — it is a non-concern.
-  - [ ] Update `check_compatibility(model_type)` — for `"custom"`, defer compatibility to the plugin (no built-in vs model_type check)
-- [ ] `ml_models/loss_models_sandbox.py` — extend `get_criterion`
-  - [ ] Add `"custom"` branch at the top of the if/elif chain
-  - [ ] Write `_load_custom_loss(loss_name, config)` helper
-  - [ ] On lookup miss, raise `ValueError` with the exact remediation message ("Run the implementor first…")
-- [ ] Update the module docstring at the top of `loss_models_sandbox.py` to mention the plugin path
+  - [x] Update `check_compatibility(model_type)` — for `"custom"`, defer compatibility to the plugin (no built-in vs model_type check)
+- [x] `ml_models/loss_models_sandbox.py` — extend `get_criterion`
+  - [x] Add `"custom"` branch at the top of the if/elif chain
+  - [x] Write `_load_custom_loss(loss_name)` helper (signature corrected from the
+    earlier `_load_custom_loss(loss_name, config)` plan — `config` param dropped,
+    plugin constructs its own `PLUGIN_LOSS_CONFIG_CLASS()` per the two-config design)
+  - [x] On lookup miss, raise `ValueError` with the exact remediation message ("Run the implementor first…")
+- [x] Update the module docstring at the top of `loss_models_sandbox.py` to mention the plugin path
 
 **Tests** (pure-Python, no LLM, no GPU — run freely):
-- [ ] `tests/unit/ml_models/test_loss_config.py` (extend existing file)
-  - [ ] `loss_type="custom"` with `loss_name=None` → `ValidationError`
-  - [ ] `loss_type="focal"` with `loss_name="x"` → `ValidationError`
-  - [ ] `loss_type="custom"` with `loss_name="snr_weighted_mse"` → valid round-trip
-  - [ ] `check_compatibility("any_model_type")` is a no-op when `loss_type="custom"`
-- [ ] `tests/unit/ml_models/test_get_criterion.py` (extend existing file)
-  - [ ] `"custom"` branch: temp-dir loss plugin, `get_criterion` returns the plugin's `PLUGIN_LOSS_CLASS` instance
-  - [ ] `"custom"` branch: missing plugin raises `ValueError` with implementor-pointer text
-  - [ ] All 4 existing branches still pass unchanged (regression guard)
-- [ ] Existing `evaluate_vram_skill` + `evaluate_time_skill` unit tests still pass (they call `get_criterion` indirectly)
+- [x] `tests/unit/ml_models/test_loss_functions.py` (extend existing file — the
+  consolidated home for all loss-related unit tests; `test_loss_config.py` and
+  `test_get_criterion.py` from the original plan never existed as separate files
+  in the repo, so the test additions were appended to the actual file)
+  - [x] `loss_type="custom"` with `loss_name=None` → `ValidationError`
+  - [x] `loss_type="focal"` with `loss_name="x"` → `ValidationError`
+  - [x] `loss_type="custom"` with `loss_name="snr_weighted_mse"` → valid round-trip
+  - [x] `check_compatibility("any_model_type")` is a no-op when `loss_type="custom"`
+  - [x] `"custom"` branch: temp-dir loss plugin, `get_criterion` returns the plugin's `PLUGIN_LOSS_CLASS` instance
+  - [x] `"custom"` branch: missing plugin raises `ValueError` with implementor-pointer text
+  - [x] All 4 existing branches still pass unchanged (regression guard)
+- [x] Existing `evaluate_vram_skill` + `evaluate_time_skill` unit tests still pass (they call `get_criterion` indirectly)
 
 **Out of scope**: no schema changes (those live in L3); no implementor or proposer changes.
 
 **Dependency**: L1 must land first (this commit imports `agent_generated._loss_loader`).
 
 **Implementation notes**:
-- _none yet_
+- **Helper signature deviation** — the original plan said `_load_custom_loss(loss_name, config)`.
+  Implementation dropped the `config` parameter: the plugin's
+  `PLUGIN_LOSS_CONFIG_CLASS` is a separate Pydantic model with its own
+  hyperparameters (e.g. `snr_threshold`, `stft_window_size`) constructed
+  independently inside `_load_custom_loss()`. `LossConfig` is only the *router*
+  (carries `loss_type="custom"` + `loss_name`); passing it to the plugin would
+  break the two-config separation of concerns documented in § "Two-config
+  design". The hyperparameters from the proposer's `CustomLossSpec` will arrive
+  via a separate channel at L4 (TBD), not through `LossConfig`.
+- **Test-file consolidation deviation** — the plan listed
+  `tests/unit/ml_models/test_loss_config.py` and `test_get_criterion.py` as
+  separate "extend existing file" targets. Neither exists in the repo; the
+  consolidated home is `tests/unit/ml_models/test_loss_functions.py` (14 prior
+  tests covered both schema and routing). The 25 new L2 tests were appended
+  to that single file in 5 classes (`TestLossConfigCustomValidation` × 7,
+  `TestEnforceParameterConsistencyCustom` × 1, `TestCheckCompatibilityCustom`
+  × 4 parametrized, `TestGetCriterionCustom` × 4, `TestBuiltinsStillWorkAfterCustomBranch`
+  × 4 parametrized).
+- **`check_compatibility` is implicit no-op, not an explicit branch** — the
+  pre-existing function only raised when `loss_type == "smooth_l1"` and
+  `model_type != "fcnet"`. Since `"custom"` never enters that branch, the
+  no-op behaviour is automatic; the implementation added a clarifying comment
+  rather than an explicit `if self.loss_type == "custom": return` line. Four
+  parametrized tests in `TestCheckCompatibilityCustom` pin the behaviour
+  regardless.
+- **`enforce_custom_loss_name` ordering matters** — runs *before*
+  `enforce_parameter_consistency` so an invalid `(loss_type, loss_name)` pair
+  is caught at the first validator, not after parameter nullification masks
+  the intent. Pydantic preserves declaration order for `@model_validator(mode="after")`.
+- **Empty-string `loss_name` rejected as well as `None`** — the validator uses
+  `if not self.loss_name` rather than `is None`, so `loss_type="custom",
+  loss_name=""` also raises (verified by `test_custom_with_empty_loss_name_raises`).
+  Empty strings would otherwise propagate to `load_loss_plugin("")` and surface
+  as a confusing "plugin not found" error instead of the actionable validation
+  message.
+- **Live plugin sanity check** — `test_custom_plugin_forward_pass_runs` copies
+  the `_stub_loss_template.py` (committed in L1a) into a tmp dir, points
+  `SIDERIUS_LOSS_DIRS` at it, and runs the full `get_criterion → _load_custom_loss
+  → load_loss_plugin → StubCE.forward` chain on classifier-shaped tensors with
+  `requires_grad=True`. This exercises the same code path production training
+  will hit at L4.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 25 new L2 tests + 14 pre-existing = 39/39 pass in
+  `tests/unit/ml_models/test_loss_functions.py` in 0.76 s. Broader regression
+  sweep: `tests/unit/ml_models/` + `tests/unit/core/` = **364/364 pass in 3.28 s**.
+  Targeted evaluate-skill sweep (`-k "evaluate_vram or evaluate_time or skill"`)
+  = **280/280 pass** — confirms the L2 routing change did not break any skill
+  that calls `get_criterion` indirectly.
 
 ### Commit L3 — Schema changes (`ProposalOutput` + `ImplementorOutput`)
 
