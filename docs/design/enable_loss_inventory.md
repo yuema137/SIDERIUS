@@ -432,11 +432,29 @@ seam (per development principle 4):
     - [x] `SIDERIUS_LOSS_DIRS` follows identical priority semantics to `SIDERIUS_PLUGIN_DIRS`:
       when set, scans only those directories; when unset, falls back to
       `agent_generated/losses/` (the global default).
-    - [ ] **(L1b)** `core/sandbox_executor.py` — add `_loss_subprocess_env(loss_dir)` helper mirroring
-      `_subprocess_env(plugin_dir)`, injecting `SIDERIUS_LOSS_DIRS` into the subprocess env.
-    - [ ] **(L1b)** `workflows/model_exploration.py` — add `get_loss_dir(workspace, run_name)` helper
-      mirroring `get_plugin_dir`; wire `SIDERIUS_LOSS_DIRS` at the same point where
-      `SIDERIUS_PLUGIN_DIRS` is wired (near line 1535).
+    - [x] **(L1b)** `core/sandbox_executor.py` — extended existing `_subprocess_env(plugin_dir=None)`
+      to `_subprocess_env(plugin_dir=None, loss_dir=None)` rather than adding a separate
+      `_loss_subprocess_env` helper. Rationale: subprocesses always need both env vars,
+      so a single function avoids duplicate `PYTHONPATH` construction + env-merge logic
+      at every call site. Backward-compatible — existing callers passing only `plugin_dir`
+      get identical behavior. **Verified by `TestSubprocessEnvLossDir` (6 tests):
+      independence of the two env vars, both-populated, PYTHONPATH preservation.**
+    - [x] **(L1b)** `core/sandbox_executor.py` — `get_loss_dir(workspace, run_name)` helper added
+      next to `get_plugin_dir` (NOT in `workflows/model_exploration.py` as the doc originally
+      said — that was a doc imprecision; the existing `get_plugin_dir` lives in
+      `core/sandbox_executor.py:214` and the workflow imports it, so symmetry dictates
+      `get_loss_dir` lives next to it). Returns `<workspace>/losses/<run_name>/`
+      absolutised. **Verified by `TestGetLossDir` (3 tests).**
+    - [x] **(L1b)** `TidmadSandbox.__init__` — added `self.loss_dir = get_loss_dir(...)` + eager
+      `_ensure_dir(self.loss_dir)` directly after the existing `plugin_dir` setup at line 423-424.
+      All 3 `_subprocess_env(plugin_dir=self.plugin_dir)` call sites in the file (lines 577, 745, 864)
+      updated to also pass `loss_dir=self.loss_dir`. **Verified by `TestSandboxLossDir` (4 tests):
+      dir is created under workspace, two sandboxes get distinct dirs, plugin_dir and loss_dir
+      are distinct siblings, training subprocess receives both env vars.**
+    - [x] **(L1b)** No `workflows/model_exploration.py` changes needed. The sandbox-level wiring
+      is sufficient at L1b — there's no loss to stage into the per-run dir until L4 generates one.
+      Workflow-side staging (a `_register_loss` analog of `_register_plugin`) will land with L4
+      when there's actually content to stage.
 - [x] `agent_generated/_capability_index.json` — seed file with literal `[]`
 - [x] `agent_generated/_loss_loader.py` — mirrors `ml_models/plugin_loader.py::_load_plugin`
   - [x] `_load_loss_plugin(path)` returns dict or None
@@ -502,6 +520,26 @@ seam (per development principle 4):
 - **Test results**: 39 new tests pass in 0.77 s. Full `tests/unit/agent_generated/`
   suite (44 tests including the pre-existing `test_stub_plugin_template_loads`)
   pass in 0.71 s. No prior tests broke.
+- **L1b — `_subprocess_env` extended, not duplicated**: the original L1 design said to
+  add a separate `_loss_subprocess_env(loss_dir)` helper. Implementation chose instead
+  to extend the existing `_subprocess_env(plugin_dir=None)` with a `loss_dir=None`
+  kwarg. Rationale: subprocesses always need both env vars, so a single function
+  avoids duplicate `PYTHONPATH` construction + env-merge logic at every call site.
+  Backward-compatible — existing callers passing only `plugin_dir` get identical
+  behavior (verified by all 36 pre-existing `core/sandbox_executor` tests staying green).
+- **L1b — `get_loss_dir` lives in `core/sandbox_executor.py`, not `workflows/model_exploration.py`**:
+  the design doc said the latter, but pre-read showed `get_plugin_dir` lives in
+  `core/sandbox_executor.py:214` (the workflow only *imports* it). Symmetry dictates
+  `get_loss_dir` lives next to it. The doc bullet has been corrected to reflect this.
+- **L1b — no workflow-side staging at this commit**: a `_register_loss` analog of
+  `_register_plugin` is not needed until L4 actually generates a loss to stage.
+  At L1b, the empty per-run `<workspace>/losses/<run_name>/` is sufficient — the
+  loss loader scans it, finds nothing, and the existing `loss_type="ce"` /
+  `loss_type="focal"` paths continue unaffected.
+- **L1b test results**: 13 new tests in `tests/unit/core/test_sandbox_executor.py`
+  (`TestSubprocessEnvLossDir` × 6, `TestSandboxLossDir` × 4, `TestGetLossDir` × 3).
+  Full `tests/unit/core/` + `tests/unit/agent_generated/` regression sweep: **267/267
+  pass in 1.29 s**. Ruff + pyright clean.
 
 ### Commit L2 — `LossConfig` + `get_criterion()` extension
 

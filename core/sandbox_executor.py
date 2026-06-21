@@ -228,7 +228,26 @@ def get_plugin_dir(workspace: str, run_name: str) -> str:
     return os.path.join(os.path.abspath(workspace), "plugins", run_name)
 
 
-def _subprocess_env(plugin_dir: str | None = None) -> dict:
+def get_loss_dir(workspace: str, run_name: str) -> str:
+    """Compute the run-scoped loss-plugin directory for a given workspace + run_name.
+
+    Mirror of :func:`get_plugin_dir` for the loss-plugin surface (L1b — see
+    ``docs/design/enable_loss_inventory.md`` § Commit L1). Single source of
+    truth for the layout ``<workspace>/losses/<run_name>/`` so both
+    ``TidmadSandbox`` (producer) and any future workflow-side staging helper
+    cannot drift apart.
+
+    The path is absolutised for the same reason as :func:`get_plugin_dir`:
+    the sandbox stores `os.path.abspath(workspace)` internally, so we
+    pre-compute the absolute form here to keep string equality usable.
+    """
+    return os.path.join(os.path.abspath(workspace), "losses", run_name)
+
+
+def _subprocess_env(
+    plugin_dir: str | None = None,
+    loss_dir: str | None = None,
+) -> dict:
     """
     Returns an env dict for subprocesses with ml_models and execute_tools
     added to PYTHONPATH, so flat imports in those scripts resolve correctly
@@ -243,6 +262,17 @@ def _subprocess_env(plugin_dir: str | None = None) -> dict:
             is not set and the subprocess falls back to the legacy global
             dir — this preserves back-compat for any caller outside the
             tuner sandbox flow.
+        loss_dir: Optional run-scoped loss-plugin directory. When provided,
+            sets ``SIDERIUS_LOSS_DIRS=<loss_dir>`` so the subprocess's
+            ``agent_generated/_loss_loader.py`` scans only this directory
+            instead of the legacy global ``agent_generated/losses/``. Mirror
+            of the ``plugin_dir`` semantics. L1b — see
+            ``docs/design/enable_loss_inventory.md`` § Commit L1.
+            **`SIDERIUS_LOSS_DIRS` is distinct from `SIDERIUS_PLUGIN_DIRS`**
+            on purpose: sharing would silently mask globally-registered
+            losses when only a model-plugin dir is set, and would log-spam
+            on model `.py` files failing the loss required-attr check. See
+            the L1 design's "Rationale" block.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
@@ -255,6 +285,8 @@ def _subprocess_env(plugin_dir: str | None = None) -> dict:
     env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
     if plugin_dir:
         env["SIDERIUS_PLUGIN_DIRS"] = plugin_dir
+    if loss_dir:
+        env["SIDERIUS_LOSS_DIRS"] = loss_dir
     return env
 
 
@@ -390,6 +422,15 @@ class TidmadSandbox:
         # sandbox itself share one path formula.
         self.plugin_dir = get_plugin_dir(workspace, run_name)
         _ensure_dir(self.plugin_dir)
+
+        # Run-scoped loss-plugin directory (L1b — enable_loss_inventory).
+        # Mirror of ``plugin_dir`` for the loss surface: lives under
+        # ``self.base_dir`` so test workspaces are self-contained, created
+        # eagerly so the subprocess can scan it (empty until L4 actually
+        # generates a loss into it). Threaded into every subprocess env
+        # below via ``_subprocess_env(..., loss_dir=self.loss_dir)``.
+        self.loss_dir = get_loss_dir(workspace, run_name)
+        _ensure_dir(self.loss_dir)
 
         self.run_name = run_name
         self.progress_bar = progress_bar
@@ -533,7 +574,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir),
+                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("training")),
             )
 
@@ -701,7 +742,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir),
+                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("inference")),
             )
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
@@ -820,7 +861,7 @@ class TidmadSandbox:
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir),
+                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
                 preexec_fn=_limited_preexec(_subprocess_rss_gb("scoring")),
             )
 
