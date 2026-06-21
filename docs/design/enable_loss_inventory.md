@@ -638,46 +638,113 @@ seam (per development principle 4):
 **Goal**: open the proposer → implementor → validator channel for loss specs without yet wiring any node logic. Safe to land before L4/L5 because `custom_loss_spec` defaults to `None` (back-compat).
 
 **Code**:
-- [ ] `agent/schemas/proposal.py`
-  - [ ] Add `CustomLossSpec` BaseModel with 4 fields (loss_name, description, mathematical_definition, config_fields)
-  - [ ] Add `ProposalOutput.custom_loss_spec: CustomLossSpec | None = None`
-  - [ ] Add `@model_validator(mode="after")` on `ProposalOutput`: if `custom_loss_spec` is set, `baseline_config["loss_config"]["loss_type"]` MUST be `"custom"` AND `baseline_config["loss_config"]["loss_name"]` MUST match `custom_loss_spec.loss_name` — emit clear ValidationError on mismatch
-- [ ] `agent/schemas/implementor.py` — add loss-specific fields to `ImplementorInput`:
+- [x] `agent/schemas/proposal.py`
+  - [x] Add `CustomLossSpec` BaseModel with 4 fields (loss_name, description, mathematical_definition, config_fields)
+  - [x] Add `ProposalOutput.custom_loss_spec: CustomLossSpec | None = None`
+  - [x] Add `@model_validator(mode="after")` on `ProposalOutput`: if `custom_loss_spec` is set, `baseline_config["loss_config"]["loss_type"]` MUST be `"custom"` AND `baseline_config["loss_config"]["loss_name"]` MUST match `custom_loss_spec.loss_name` — emit clear ValidationError on mismatch (validator named `_validate_custom_loss_spec_consistency`)
+- [x] `agent/schemas/implementor.py` — add loss-specific fields to `ImplementorInput`:
   - NOTE: `task_description` and `forward_contract` fields already exist on
     `ImplementorInput` (added by `enable_global_task_config` T2, commit 8ac113d).
     L3 adds ONLY the loss-specific fields below — do NOT re-add task_description.
-  - [ ] `custom_loss_spec: CustomLossSpec | None = None`
-  - [ ] `loss_dir: str = "agent_generated/losses"`
-  - [ ] Also add `ImplementorOutput.loss_provenance: LossProvenance | None = None` (full audit trail; supersedes the earlier standalone `loss_file_path` proposal)
-  - [ ] No `loss_test_dir` field needed — loss plugins do NOT get a stub test file.
+  - [x] `custom_loss_spec: CustomLossSpec | None = None`
+  - [x] `loss_dir: str = "agent_generated/losses"`
+  - [x] Also add `ImplementorOutput.loss_provenance: LossProvenance | None = None` (full audit trail; supersedes the earlier standalone `loss_file_path` proposal)
+  - [x] No `loss_test_dir` field needed — loss plugins do NOT get a stub test file.
     Rationale: two validation layers already exist (dummy-tensor check in implementor +
     real training loop in validator). A third stub test would be redundant overhead.
-- [ ] `agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py` — in `local_full_spec()`,
+- [x] `agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py` — in `local_full_spec()`,
   add `custom_loss_spec=output.custom_loss_spec` to the `ImplementorInput(...)` constructor call.
-  (Protocol currently forwards only 4 fields; this adds the 5th.)
-- [ ] Update `ProposalOutput` and `ImplementorOutput` docstrings + the description.md generation in the implementor's existing path to note the new optional fields
+  (Protocol previously forwarded 5 fields — doc said "4" but actual was 5 incl. storage; this adds the 6th.)
+- [x] Update `ProposalOutput` and `ImplementorOutput` docstrings (loss-spec / loss_provenance field descriptions). description.md generation at the implementor node is deferred to L4 — at L3 there is no implementor logic change, only schema and protocol; the description.md template will be extended at L4 when the implementor actually writes the loss plugin.
 
 **Tests** (pure-Python — run freely):
-- [ ] `tests/unit/agent/schemas/test_proposal_schemas.py` (extend)
-  - [ ] `custom_loss_spec=None` → no validation error (back-compat)
-  - [ ] `custom_loss_spec` set but `baseline_config.loss_config.loss_type != "custom"` → ValidationError
-  - [ ] `custom_loss_spec.loss_name != baseline_config.loss_config.loss_name` → ValidationError
-  - [ ] Happy path round-trip
-- [ ] `tests/unit/agent/schemas/test_implementor_schemas.py` (extend)
-  - [ ] `loss_provenance=None` round-trip (back-compat)
-  - [ ] `loss_provenance=LossProvenance(action="generated", ...)` round-trip
-  - [ ] `loss_provenance=LossProvenance(action="reused", ...)` round-trip
-  - [ ] `ImplementorInput.custom_loss_spec=None` round-trip (back-compat)
-  - [ ] `ImplementorInput.loss_dir` default value matches schema (`"agent_generated/losses"`)
-- [ ] `tests/unit/agent/protocols/test_ml_model_propose_to_ml_model_impl.py` (extend)
-  - [ ] `local_full_spec` forwards `custom_loss_spec` end-to-end
+- [x] `tests/unit/agent/ml_model_proposal_agent/test_proposal_schemas.py` (extend — actual location; doc previously said `tests/unit/agent/schemas/...` which does not exist)
+  - [x] `custom_loss_spec=None` → no validation error (back-compat)
+  - [x] `custom_loss_spec` set but `baseline_config.loss_config.loss_type != "custom"` → ValidationError
+  - [x] `custom_loss_spec.loss_name != baseline_config.loss_config.loss_name` → ValidationError
+  - [x] Happy path round-trip
+  - [x] **Bonus**: empty `loss_name` / `description` / `mathematical_definition` raise (min_length=1 on each)
+  - [x] **Bonus**: `loss_type="custom"` + `custom_loss_spec=None` accepted (reuse-existing-loss path; schema is permissive here intentionally)
+- [x] `tests/unit/agent/ml_model_implementor/test_implementor_schemas.py` (extend — actual location; doc previously said `tests/unit/agent/schemas/...` which does not exist)
+  - [x] `loss_provenance=None` round-trip (back-compat)
+  - [x] `loss_provenance=LossProvenance(action="generated", ...)` round-trip
+  - [x] `loss_provenance=LossProvenance(action="reused", ...)` round-trip
+  - [x] `ImplementorInput.custom_loss_spec=None` round-trip (back-compat)
+  - [x] `ImplementorInput.loss_dir` default value matches schema (`"agent_generated/losses"`)
+  - [x] **Bonus**: `loss_dir` override accepted (`"/custom/losses"`)
+  - [x] **Bonus**: JSON model-dump round-trip preserves `loss_provenance` (required for `implementor_output_{run_name}.json` persistence)
+  - [x] **Bonus**: `LossProvenance` schema enforcement: invalid `action`, empty `loss_name` / `loss_file_path`, `source_iteration=None` accepted for hand-curated registry entries
+- [x] `tests/unit/agent/protocols/test_ml_model_propose_to_ml_model_impl.py` (extend)
+  - [x] `local_full_spec` forwards `custom_loss_spec` end-to-end
+  - [x] **Bonus**: `custom_loss_spec=None` forwards as `None` (built-in-loss path)
+  - [x] **Bonus**: `loss_dir` falls back to schema default in the protocol output
 
 **Out of scope**: no implementor logic, no proposer prompt changes, no CLI.
 
 **Dependency**: independent of L1 / L2 — can land in parallel.
 
 **Implementation notes**:
-- _none yet_
+- **`CustomLossSpec` location** — placed in `agent/schemas/proposal.py` (right
+  after `FalsifiablePrediction`, alongside the other leaf spec classes that
+  feed into `ProposalOutput`) rather than in a new module. Rationale: it is
+  produced exclusively by the proposer and consumed by `ProposalOutput` +
+  `ImplementorInput`; promoting it to its own file would add an indirection
+  without buying isolation. `implementor.py` imports it via
+  `from agent.schemas.proposal import CustomLossSpec` — no circular-import
+  risk (proposal.py does not import from implementor.py).
+- **Consistency-validator name** — `_validate_custom_loss_spec_consistency`
+  on `ProposalOutput`, matching the leading-underscore convention used by
+  the existing `_validate_baseline_segmentation_size` validator. Runs after
+  segmentation-size validation; declaration order matters because pydantic
+  preserves it for `mode="after"` validators. No edge cases require a
+  specific order between these two.
+- **Permissive `loss_type='custom' + custom_loss_spec=None`** — the
+  consistency validator only fires when `custom_loss_spec is not None`. A
+  proposal that says "use loss_type='custom' with loss_name='snr_weighted_mse'"
+  but omits the spec is **accepted** at the schema layer. This is the
+  reuse-existing-registered-loss path: L4 will look up `loss_name` in the
+  registry and skip the LLM generation call if a matching plugin exists.
+  Surfacing this as a ValidationError would block the reuse path. The
+  registry-lookup logic itself lives at L4; here we just keep the channel
+  open.
+- **`LossProvenance` placement** — in `agent/schemas/implementor.py`, before
+  `ImplementorInput`. Rationale: provenance is produced by the implementor
+  node and consumed via `ImplementorOutput` — co-locating it with the
+  schemas that reference it avoids a third module. The class is also
+  exported (the test file imports it directly: `from
+  agent.schemas.implementor import LossProvenance`).
+- **Protocol field count discrepancy** — the design doc said "Protocol
+  currently forwards only 4 fields; this adds the 5th." Pre-read showed it
+  was actually forwarding 5 (model_name, model_description,
+  mathematical_definition, baseline_config, storage). Adding
+  `custom_loss_spec` makes it 6. The doc bullet has been corrected.
+  `loss_dir` is **not** forwarded by the protocol — it stays at the schema
+  default ("agent_generated/losses"); the workflow overrides it directly
+  at the call site to a per-run path (L4 wiring).
+- **Test-file path discrepancy** — the design doc listed schema test files
+  under `tests/unit/agent/schemas/`. Reality: proposal/implementor tests
+  live under `tests/unit/agent/ml_model_proposal_agent/` and
+  `tests/unit/agent/ml_model_implementor/` respectively. Only the protocol
+  test path matched. The doc bullets have been corrected.
+- **`description.md` template change deferred to L4** — the original L3
+  bullet said "update description.md generation in the implementor's
+  existing path to note the new optional fields." At L3 there is no
+  implementor node logic change; the description.md template lives in the
+  implementor agent module and will be extended at L4 when the loss
+  plugin is actually written. Doc bullet annotated to reflect this.
+- **Lint**: ruff check + format clean across all 4 modified source files
+  + 3 modified test files. Pyright clean (0 errors, 0 warnings) on
+  proposal.py, implementor.py, protocol file.
+- **Test results**:
+  - `test_proposal_schemas.py`: 30/30 (11 new + 19 pre-existing) in 0.74 s
+  - `test_implementor_schemas.py`: 26/26 (16 new + 10 pre-existing) in 0.73 s
+  - `test_ml_model_propose_to_ml_model_impl.py`: 4/4 (2 new + 2 pre-existing) in 0.88 s
+  - **Broader regression sweep** across `tests/unit/agent/`: **2376/2376
+    pass in 228.89 s**. No prior tests broke.
+- **Planned git commit split** (per development principle 4 — L3 has clean
+  seams): L3a (proposal.py schema + proposal tests) → L3b (implementor.py
+  schema + implementor tests) → L3c (protocol forwarding + protocol test).
+  Each commit is independently lint-clean and test-passing.
 
 ### Commit L4 — Implementor loss code generation
 
