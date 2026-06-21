@@ -407,58 +407,101 @@ The proposer's prompt template needs two additions:
 
 **Goal**: stand up the discovery + registry plumbing so L2's `get_criterion()` extension has something to call into. No schema or node changes yet.
 
+**Split decision (2026-06-19)**: L1 is split into two git commits at a clean
+seam (per development principle 4):
+
+- **L1a** (this checklist, items below marked `[x]`) — self-contained registry
+  + loader + stub template + tests. Importable + unit-tested without any
+  workflow wiring.
+- **L1b** (deferred) — workflow + subprocess wiring (`_loss_subprocess_env`,
+  `get_loss_dir`). Not needed until L4 actually invokes the loader from a
+  per-run scoped directory. Marked with **(L1b)** tags below.
+
 **Code**:
-- [ ] `agent_generated/_registry.py`
-  - [ ] `CapabilityMetadata` Pydantic model (6 fields per architecture overview)
-  - [ ] `CapabilityRegistry.list(capability_type=None)` reads `_capability_index.json`
-  - [ ] `CapabilityRegistry.exists(name, capability_type)` membership lookup
-  - [ ] `CapabilityRegistry.register(metadata)` — atomic append (tmp-file rename, not in-place rewrite)
-  - [ ] Path resolution uses a NEW `SIDERIUS_LOSS_DIRS` env var (NOT `SIDERIUS_PLUGIN_DIRS`).
+- [x] `agent_generated/_registry.py`
+  - [x] `CapabilityMetadata` Pydantic model (6 fields per architecture overview)
+  - [x] `CapabilityRegistry.list(capability_type=None)` reads `_capability_index.json`
+  - [x] `CapabilityRegistry.exists(name, capability_type)` membership lookup
+  - [x] `CapabilityRegistry.register(metadata)` — atomic append (tmp-file rename, not in-place rewrite)
+  - [x] Path resolution uses a NEW `SIDERIUS_LOSS_DIRS` env var (NOT `SIDERIUS_PLUGIN_DIRS`).
     Rationale: sharing `SIDERIUS_PLUGIN_DIRS` is unsafe — when that env var is set to a
     run-scoped model directory, the loss loader would (a) silently skip all globally-registered
     losses (the env-var override is exclusive, no fallback to `AGENT_GENERATED_DIR`), and
     (b) produce log spam by attempting to load every model `.py` file as a loss plugin and
     failing the required-attr check. Clean separation requires a dedicated env var.
-    - [ ] `SIDERIUS_LOSS_DIRS` follows identical priority semantics to `SIDERIUS_PLUGIN_DIRS`:
+    - [x] `SIDERIUS_LOSS_DIRS` follows identical priority semantics to `SIDERIUS_PLUGIN_DIRS`:
       when set, scans only those directories; when unset, falls back to
       `agent_generated/losses/` (the global default).
-    - [ ] `core/sandbox_executor.py` — add `_loss_subprocess_env(loss_dir)` helper mirroring
+    - [ ] **(L1b)** `core/sandbox_executor.py` — add `_loss_subprocess_env(loss_dir)` helper mirroring
       `_subprocess_env(plugin_dir)`, injecting `SIDERIUS_LOSS_DIRS` into the subprocess env.
-    - [ ] `workflows/model_exploration.py` — add `get_loss_dir(workspace, run_name)` helper
+    - [ ] **(L1b)** `workflows/model_exploration.py` — add `get_loss_dir(workspace, run_name)` helper
       mirroring `get_plugin_dir`; wire `SIDERIUS_LOSS_DIRS` at the same point where
       `SIDERIUS_PLUGIN_DIRS` is wired (near line 1535).
-- [ ] `agent_generated/_capability_index.json` — seed file with literal `[]`
-- [ ] `agent_generated/_loss_loader.py` — mirrors `ml_models/plugin_loader.py::_load_plugin`
-  - [ ] `_load_loss_plugin(path)` returns dict or None
-  - [ ] `importlib.util.spec_from_file_location` + `exec_module`
-  - [ ] `sys.modules` rebind under prefix `siderius_loss_plugin_` (parallel to existing `siderius_plugin_` for models)
-  - [ ] Required-attr check: `PLUGIN_LOSS_TYPE`, `PLUGIN_LOSS_CONFIG_CLASS`, `PLUGIN_LOSS_CLASS`
-  - [ ] Files starting with `_` are skipped (same convention as models)
-  - [ ] `load_loss_plugin(loss_name)` convenience wrapper used by `_load_custom_loss` (L2)
-- [ ] `agent_generated/losses/` directory + `.gitkeep`
-- [ ] `agent_generated/_stub_loss_template.py` — minimal valid loss plugin for tests. Leading `_` keeps the loader from picking it up in production.
+- [x] `agent_generated/_capability_index.json` — seed file with literal `[]`
+- [x] `agent_generated/_loss_loader.py` — mirrors `ml_models/plugin_loader.py::_load_plugin`
+  - [x] `_load_loss_plugin(path)` returns dict or None
+  - [x] `importlib.util.spec_from_file_location` + `exec_module`
+  - [x] `sys.modules` rebind under prefix `siderius_loss_plugin_` (parallel to existing `siderius_plugin_` for models)
+  - [x] Required-attr check: `PLUGIN_LOSS_TYPE`, `PLUGIN_LOSS_CONFIG_CLASS`, `PLUGIN_LOSS_CLASS`
+  - [x] Files starting with `_` are skipped (same convention as models)
+  - [x] `load_loss_plugin(loss_name)` convenience wrapper used by `_load_custom_loss` (L2)
+- [x] `agent_generated/losses/` directory + `.gitkeep`
+- [x] `agent_generated/_stub_loss_template.py` — minimal valid loss plugin for tests. Leading `_` keeps the loader from picking it up in production.
 
-**Tests** (all pure-Python, no LLM, no GPU — run freely):
-- [ ] `tests/unit/agent_generated/test_capability_registry.py`
-  - [ ] empty index → `list()` returns `[]`
-  - [ ] `register()` → `list()` round-trip
-  - [ ] `list(capability_type="loss")` filters correctly
-  - [ ] `exists(name, type)` true/false branches
-  - [ ] atomic-rename: concurrent `register()` from two processes doesn't corrupt JSON
-- [ ] `tests/unit/agent_generated/test_loss_loader.py`
-  - [ ] stub template loads cleanly when copied (without `_` prefix) to `losses/`
-  - [ ] missing each of the 3 required attrs → loader rejects with explicit message
-  - [ ] `_`-prefixed files are skipped (the template itself stays dormant)
-  - [ ] `sys.modules` rebind allows `inspect.getsource(PLUGIN_LOSS_CLASS)` to resolve the file
-  - [ ] `SIDERIUS_LOSS_DIRS` env var: when set to a dir with a valid
+**Tests** (all pure-Python, no LLM, no GPU — run freely) — **39 new tests, all pass in 0.77 s; full `agent_generated/` regression: 44/44 pass in 0.71 s**:
+- [x] `tests/unit/agent_generated/test_capability_registry.py` — 22 tests
+  - [x] empty index → `list()` returns `[]` (5 tests: missing file, type filter, exists branch, explicit `[]`, `null` content)
+  - [x] `register()` → `list()` round-trip (3 tests: single, multiple insertion order, valid-JSON-array on-disk)
+  - [x] `list(capability_type="loss")` filters correctly (3 tests: type filter, no-match, no-filter)
+  - [x] `exists(name, type)` true/false branches (3 tests: match, wrong name, wrong type)
+  - [x] atomic-rename: concurrent `register()` from two processes doesn't corrupt JSON
+  - [x] Bonus: duplicate-registration rejection + schema-validation edge cases
+- [x] `tests/unit/agent_generated/test_loss_loader.py` — 17 tests
+  - [x] stub template loads cleanly when copied (without `_` prefix) to `losses/`
+  - [x] missing each of the 3 required attrs → loader rejects with explicit message (parametrized over all 3 attrs)
+  - [x] `_`-prefixed files are skipped (the template itself stays dormant)
+  - [x] `sys.modules` rebind allows `inspect.getsource(PLUGIN_LOSS_CLASS)` to resolve the file
+  - [x] `SIDERIUS_LOSS_DIRS` env var: when set to a dir with a valid
     loss plugin, loader finds it; when set to a dir with only model `.py` files, loader
-    skips cleanly with zero log spam (missing-attr lines are suppressed or clearly labeled,
-    not mistaken for failures).
+    skips cleanly with one `Skipping ... missing 'PLUGIN_LOSS_TYPE'` line per misnamed
+    file — clearly labeled, not mistaken for catastrophic failure
+    *(`test_loader_isolates_model_dir_misuse`)*
+  - [x] Bonus: `load_loss_plugin(name)` name-lookup hit/miss + path-resolution edge cases
 
 **Out of scope for this commit**: no `get_criterion` changes, no schema changes, no implementor changes.
 
-**Implementation notes** (filled in as work lands):
-- _none yet_
+**Implementation notes**:
+- **Stub loss = cross-entropy with label-smoothing**. The L1 spec doesn't
+  prescribe the stub's exact loss formula — only that it must satisfy the
+  `[B, C, T] float32` × `[B, T] int64` → scalar contract with
+  `requires_grad=True`. Cross-entropy was chosen because (a) it's the same
+  family used by every classifier model in `MODEL_REGISTRY`, so the stub
+  exercises the same gradient path the production losses do, and (b)
+  `F.cross_entropy` accepts `[B, C, *]` logits + `[B, *]` indices natively,
+  so the stub stays small (one `torch.nn.functional` call) without any
+  shape-juggling boilerplate.
+- **Registry vs Loader separation of concerns**: the registry (`_registry.py`)
+  is a pure JSON read/write layer that has no Python-import dependency on
+  the actual plugin modules. This is deliberate — a future CLI reader (out
+  of scope per the Scope section) can iterate the registry without ever
+  importing torch/pydantic. The loader (`_loss_loader.py`) handles the
+  Python-import path and is the only module that needs torch at all.
+- **Atomic write via tmp-file-then-rename**: matches the T1b
+  `_snapshot_task_config` pattern. The test `test_concurrent_register_does_not_corrupt_json`
+  spawns two `multiprocessing.Process` workers that interleave writes —
+  the file is always valid JSON afterwards (no half-written-file
+  corruption), even though some individual `register()` calls may lose
+  their write due to read-modify-write contention. This is the correct
+  guarantee for L1: the index file remains parseable; concurrent writers
+  are not in scope (production has one `register()` per chain run).
+- **Schema validation surfaces corruption early**: `list()` calls
+  `CapabilityMetadata.model_validate(row)` on every row, so a hand-edited
+  index with a malformed entry raises at list time, not at row-access
+  time downstream. The `test_list_raises_on_corrupted_row` test pins this.
+- **Lint**: ruff (check + format) clean. Pyright clean (0 errors, 0 warnings).
+- **Test results**: 39 new tests pass in 0.77 s. Full `tests/unit/agent_generated/`
+  suite (44 tests including the pre-existing `test_stub_plugin_template_loads`)
+  pass in 0.71 s. No prior tests broke.
 
 ### Commit L2 — `LossConfig` + `get_criterion()` extension
 
