@@ -979,11 +979,36 @@ were touched by T-series (implementor, proposer, tuner, interpreter) plus
 the lit-review AgentCard. Binary signal: did each iteration complete with a
 non-null finite `denoising_score`?
 
-**Sign-off**:
-- [ ] `docs/checkpoint_t_sign_off.md` written with:
-  - [ ] grep evidence of zero remaining hardcodes in affected files
-  - [ ] Sample rendered prompt excerpt showing YAML injection
-  - [ ] Verdict: ready to merge / blocked on X
+**Sign-off** ✅ **PASS (2026-06-19)** — see `docs/checkpoint_t_sign_off.md`:
+- [x] `docs/checkpoint_t_sign_off.md` written with:
+  - [x] grep evidence of zero remaining hardcodes in affected files
+    (12 residual hits all classified as out-of-scope; tracked in F1–F4 below)
+  - [x] Sample rendered prompt excerpt showing YAML injection
+    (`task_config_snapshot.yaml` per iteration + 2 SQUID hits in each
+    `interpretation_iter_*.json` + AgentCard rendering verified)
+  - [x] Verdict: **ready to merge**
+
+### Gate 2 Run 3 results (2026-06-18 → 2026-06-19)
+
+| Criterion | Result |
+|---|---|
+| Chain exit 0 | ✅ |
+| `denoising_score` non-null + finite — iter_001 | ✅ 5.5371 (`bidilated_hardmine_tcn`) |
+| `denoising_score` non-null + finite — iter_002 | ✅ 5.5903 (`gated_hybrid_sep_tcn`) |
+| `task_config_snapshot.yaml` per iteration (T1b) | ✅ written to both `iter_001/` and `iter_002/` |
+| SQUID in `interpretation_iter_*.json` (T4b) | ✅ 2 hits in each file |
+| Token usage | 32 calls / 306,088 tokens / ~$1.79 (gpt-5.4 dominant) |
+| Wall time | 2h 24m (training stayed within the 5-min trial-time cap) |
+
+**Three Gate 2 attempts** preceded the pass:
+- Run 1 (`certify_minimal.json` / gpt-4o-mini): plumbing PASS, content FAIL
+  (validator rejected all 4 proposals; no `denoising_score` produced).
+- Run 2 (`openai_tiered_v1.json` / gpt-5.4): killed at 98 min after SIGSEGV
+  during inference. The Lesson Learned section above documents the
+  `--trial_time_budget_minutes 5` + `--trial_portion 0.02` parameters that
+  made Run 3 succeed.
+- Run 3 (post-lesson parameters): **PASS** — full evidence in
+  `docs/checkpoint_t_sign_off.md`.
 
 ---
 
