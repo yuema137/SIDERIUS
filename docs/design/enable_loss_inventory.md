@@ -942,31 +942,105 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
 
 ### Checkpoint L — Behavioral validation
 
-**Goal**: end-to-end real-LLM evidence that the feature works in the closed loop. **Real-LLM + real-training combo — requires user approval before running** (per development principle 3).
+**Goal**: end-to-end real-LLM evidence that the L1–L5 implementation works in the closed loop. Both gates require real LLM calls and Gate 2 requires real training — **requires user approval before running** (per development principle 3).
 
-**Test gate**: Gate 2 — Real LLM + real training. Use the canonical command from
-`docs/gates/gate_testing_standard.md` with `--run_name checkpoint_l_smoke`.
+---
 
-Pass criteria:
+#### Gate 1 — Real LLM + pseudo training
+
+**Purpose**: prove the implementor can generate a syntactically and semantically valid loss plugin from a hand-crafted `CustomLossSpec`, *before* spending Gate 2's training budget.
+
+**Command**:
+```bash
+.venv/bin/python scripts/checkpoint_l_gate1.py \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --workspace /tmp/checkpoint_l_gate1_$(date +%s)
+```
+
+The script constructs a `CustomLossSpec` for the **`expected_value_mse`** loss — a fully-differentiable ordinal-aware loss for [0, 256) ADC-bin classification (softmax-weighted expected bin index, squared distance to target, mean over [B, T]). Chosen for Gate 1 because it has no `argmax` / `.detach()` pitfalls, so the dummy-tensor check should pass on the first attempt with high probability.
+
+The script then calls `MLModelImplementor._generate_loss(inp)` with the spec and asserts:
+1. LLM completes without raising
+2. Generated source compiles + `_dummy_tensor_validate_loss` returns `None` — scalar + finite forward output, **plus `loss.backward()` runs cleanly and produces a finite `inputs.grad` (Fix B, commit `5f6c918`)**. The backward()-based check catches `.detach()` bugs that the older `requires_grad`-only check would have missed.
+3. `LossProvenance.action == "generated"` and `dummy_tensor_validated is True`
+4. File written to `inp.loss_dir` and registered in the run-scoped `_capability_index.json`
+
+**Estimated wall time**: ~2–5 min (1 reasoning + 1 code call; possibly 1 repair call if the first attempt fails).
+**Estimated cost**: ~$0.05–0.20 (gpt-5.4 dominant).
+
+**Pass criteria**:
+- [ ] Script exits 0
+- [ ] Generated loss file at `{workspace}/losses/expected_value_mse.py` exists and parses
+- [ ] `{workspace}/_capability_index.json` contains the new entry with `capability_type="loss"`, `dummy_tensor_validated=True`
+- [ ] Generated source visually inspected and pasted into `docs/checkpoint_l_sign_off.md`
+
+---
+
+#### Gate 2 — Real LLM + real training (full chain)
+
+**Purpose**: prove the closed loop — proposer reads the registry, picks Branch C (generate new), emits a `CustomLossSpec`; implementor generates the loss + model; training routes through the custom loss; the next iteration's proposer sees the registered loss in `{available_losses_block}`.
+
+**Canonical command** (from `docs/gates/gate_testing_standard.md`, extended with the loss-advice file):
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_l_$(date +%s) \
+    --run_name checkpoint_l_smoke \
+    --num_iterations 2 \
+    --max_rounds 2 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --trial_portion 0.02 \
+    --train_portion 0.02 \
+    --eval_portion 0.02 \
+    --trial_time_budget_minutes 5 \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --advice advice/workflow/checkpoint_l_loss_advice.json \
+    --seed_paths \
+        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
+```
+
+**Critical parameters** (lesson learned, do NOT omit — see `gate_testing_standard.md` Gate 2 section):
+- `--trial_portion 0.02` — keeps each training epoch under 5 min
+- `--trial_time_budget_minutes 5` — engages the time-risk gate
+- `--llm_config openai_tiered_v1.json` — gpt-4o-mini cannot reliably generate proposals that pass the validator
+- `--advice advice/workflow/checkpoint_l_loss_advice.json` — directs the proposer toward Branch C with `expected_value_mse` as the primary recommendation
+
+**Estimated wall time**: ~30–60 min (2 iters × 2 rounds × up to 3 proposal attempts × up to 5 min per training run).
+**Estimated cost**: ~$1.50–2.50 (gpt-5.4 dominant role).
+
+**Pass criteria**:
 - [ ] Chain exits 0
 - [ ] `run_output_*.json` written per iteration with non-null finite `denoising_score`
-- [ ] At least one iteration proposed and trained a custom loss (verify via
-  `LossProvenance.action == "generated"` in the run output)
-- [ ] `agent_generated/_capability_index.json` updated with the new loss entry
-- [ ] `agent_generated/losses/` contains the generated loss file
+- [ ] At least one iteration's `implementor_*.json` has `loss_provenance.action == "generated"` (Branch C exercised)
+- [ ] `agent_generated/_capability_index.json` (or the workspace-scoped index if `capability_index_path` is overridden) contains the new loss entry with `capability_type="loss"` after iter_001
+- [ ] `agent_generated/losses/{loss_name}.py` (or workspace equivalent) exists and was loaded by the training subprocess (verify via `SIDERIUS_LOSS_DIRS` env in the per-attempt log)
+- [ ] **Iter_002 proposer saw the iter_001 loss in `{available_losses_block}`** — verify by either:
+  - **(Method A — preferred)** Inspect `{workspace}/iter002_attempt*/debug/iter002_attempt001_proposing_system_prompt.md` (when `--debug_dump_prompts` is on) and grep for the iter_001 `loss_name`. The block renders as a markdown table row; presence confirms registry visibility.
+  - **(Method B — fallback when debug dumps are off)** Compare `proposer_<run_name>.json` token_usage `system_prompt_chars` between iter_001 (empty registry → fallback message ~150 chars) and iter_002 (1 loss → table row ~250–400 chars). A delta of ~200–400 chars in the system prompt is the expected fingerprint of the rendered `{available_losses_block}`.
 
-**Sign-off artifact**:
-- [ ] `docs/checkpoint_l_sign_off.md` written with:
-  - [ ] Wall-time + token cost for both runs
-  - [ ] Excerpt of generated loss source
-  - [ ] Validator log showing training-loop usage
+**Failure handling** (see `docs/gates/gate_testing_standard.md` Gate 2 sub-section for the general checklist). Loss-specific additions:
+- If `_generate_loss` raises `ValueError` after 2 retries → check the validator error message in the chain log; this is an LLM-quality issue, not an implementation bug. Confirm `--llm_config openai_tiered_v1.json` is used (not `certify_minimal.json`).
+- If iter_002 proposer ignores the registered loss → check that `{available_losses_block}` rendered non-empty in the iter_002 system prompt; if empty, check that `MLModelProposalAgent` was constructed without an iteration-scoped `capability_index_path` (workflow currently uses the canonical default — verified in the L5b audit).
+
+---
+
+#### Sign-off artifact
+
+- [ ] `docs/checkpoint_l_sign_off.md` written after Gate 2 passes, with:
+  - [ ] Gate 1 wall-time + token cost (from the script's output)
+  - [ ] Gate 2 wall-time + token cost (from the chain manifest)
+  - [ ] Excerpt of the iter_001-generated loss source (first 30 lines)
+  - [ ] Excerpt of the iter_002 proposer prompt's `{available_losses_block}` rendering — proof the registry was visible
+  - [ ] Either: iter_002 picked Branch B (reuse) — desired ✓, OR iter_002 picked Branch C again with a different `loss_name` — acceptable, both prove the loop works
+  - [ ] Final `denoising_score` per iteration
   - [ ] Decision: ready to merge / blocked on X
 
-**Estimated cost / time** (filled in once L1–L5 are done):
-- _TBD_
+---
 
 **Implementation notes**:
-- _none yet_
+- _Pending Gate 1 + Gate 2 execution; will be populated after each run._
 
 ---
 

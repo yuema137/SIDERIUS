@@ -1,0 +1,62 @@
+{
+  "mindset": [
+    "# Checkpoint L — Custom Loss Proof-of-Loop",
+    "",
+    "You are validating the agent-generated loss inventory. The dataset's output domain is the **ADC bin index** in [0, 256) — these classes are **ordinal** (bin 137 is closer to bin 140 than to bin 12), not categorical. The four built-in losses (focal, focal_cw, ce, smooth_l1) all treat the 256 outputs as independent categories, throwing away the ordinal structure.",
+    "",
+    "**THE DIRECTIVE:** This iteration MUST propose a NEW custom loss (Branch C of Rule 9 in the proposing-stage prompt). Built-in losses (Branch A) are forbidden for iter_001. If iter_002 sees the iter_001 loss already registered, it MAY reuse it (Branch B) OR propose a refinement (Branch C with a different `loss_name`)."
+  ],
+  "propose": [
+    "GOAL: Propose an ordinal-aware loss for the [0, 256) ADC-bin classification task. The proposal MUST set:",
+    "  - `baseline_config.loss_config.loss_type = \"custom\"`",
+    "  - `baseline_config.loss_config.loss_name = <snake_case key>`",
+    "  - `custom_loss_spec.loss_name = <same key>`",
+    "  - `custom_loss_spec.description = <one paragraph: what the loss computes, why it improves on built-in ce/focal for ADC-bin denoising>`",
+    "  - `custom_loss_spec.mathematical_definition = <precise formula in terms of inputs ([B, 256, T] float logits) and targets ([B, T] int64 class indices)>`",
+    "",
+    "**PRIMARY RECOMMENDATION — `expected_value_mse`:**",
+    "Compute the model's softmax-weighted expected bin index and penalise its squared distance from the true bin. Fully differentiable end-to-end (no `argmax`, no `.detach()`) — implementor's dummy-tensor check is highly likely to pass on the first attempt.",
+    "",
+    "Mathematical definition (verbatim — paste into `custom_loss_spec.mathematical_definition`):",
+    "  Let logits = inputs [B, 256, T] float32 (requires_grad=True), y = targets [B, T] int64.",
+    "  Let idx = torch.arange(256, dtype=logits.dtype, device=logits.device).view(1, 256, 1).",
+    "  Compute probs = F.softmax(logits, dim=1) [B, 256, T].",
+    "  Compute soft_pred = (probs * idx).sum(dim=1) [B, T] (the expected bin index under the model's distribution).",
+    "  Compute se = (soft_pred - y.float()) ** 2 [B, T].",
+    "  Return loss = se.mean() (scalar).",
+    "",
+    "**ALTERNATIVES — only if you have a specific reason to prefer one of these over `expected_value_mse`:**",
+    "- `ordinal_ce`: Cross-entropy multiplied by (1 + distance_weight * |argmax(inputs) - targets| / 256). Argmax is non-differentiable but the CE term still carries gradient; small risk the LLM defensively inserts `.detach()` and triggers a repair attempt.",
+    "- `emd_ordinal`: Earth-mover loss = `mean(|cumsum(softmax(inputs), dim=1) - cumsum(one_hot(targets), dim=1)|)`. Captures the full ordinal mismatch, not just the expected value. Slightly more expensive computationally.",
+    "",
+    "STRATEGY:",
+    "1. Default to `expected_value_mse` unless you have a specific reason to prefer an alternative. Do NOT combine candidates — keep the first proof-of-loop iteration mechanically simple so the dummy-tensor check passes on the first attempt.",
+    "2. Architecture choice (`model_config`) is unconstrained — wavenet-style or punet-style baselines both work. The loss is the load-bearing change, not the model.",
+    "3. `falsifiable_prediction`: predict `denoising_score >= 5.50` on the trial-portion smoke. A pass at this threshold confirms the plumbing; absolute SOTA is NOT the goal of this checkpoint.",
+    "4. Name the loss something specific and reusable — e.g. `expected_value_mse`. This name will be visible to iter_002's proposer in the registry table."
+  ],
+  "implement": [
+    "CRITICAL: This iteration includes a `custom_loss_spec` — the implementor will generate a LOSS plugin BEFORE the model plugin.",
+    "",
+    "LOSS-PLUGIN RULES:",
+    "1. The forward signature is FIXED: `def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor`. Do NOT rename arguments.",
+    "2. `inputs` is `[B, 256, T] float32` (model logits, with `requires_grad=True`). `targets` is `[B, T] int64` (class indices in [0, 256)).",
+    "3. Return MUST be a SCALAR tensor (`.dim() == 0`) with gradient through `inputs`. No `torch.no_grad()`. No `.detach()` on `inputs` or anything derived from it.",
+    "4. Allowed imports: torch, nn, F, BaseModel, Field, model_validator, typing, math, dataclasses. NO project-internal paths.",
+    "5. Keep the config class minimal — at most one or two scalar hyperparameters. The `expected_value_mse` recommendation has NO tunable hyperparameters (`config_fields = {}`). The plugin's config is independent of `LossConfig` (the router).",
+    "6. For `expected_value_mse` specifically: construct the class-index vector `torch.arange(256, dtype=inputs.dtype, device=inputs.device).view(1, 256, 1)` ONCE inside the forward (do not cache as a buffer — keeps the implementation simple and device-safe). Use `F.softmax(inputs, dim=1)`. The `.float()` cast on targets is required because targets are int64.",
+    "",
+    "MODEL-PLUGIN RULES (unchanged from prior iterations):",
+    "1. Use the reference code as a TEMPLATE. Wavenet or punet baseline is fine.",
+    "2. The proposal's `baseline_config.model_config` is the source of truth — implement at the proposed scale."
+  ],
+  "tune": [
+    "Focus on ONE learning rate (1e-4 to 3e-4). The recommended `expected_value_mse` loss has no tunable hyperparameters — the loss is fixed; the model and optimiser are what you tune.",
+    "",
+    "TRIAL → FORMAL PROMOTION: max_rounds=2 means 1 trial round + 1 formal round (or the configured split). Goal is exactly `denoising_score` non-null and finite — not SOTA.",
+    "",
+    "CRITICAL CONSTRAINT — segmentation_size: Must exactly divide psd_segment_length=10000000. Valid values: [100, 125, 128, 160, 200, 250, 320, 400, 500, 625, 640, 800, 1000, 1250, 1600, 2000, 2500, 3125, 3200, 4000, 5000, 6250, 8000, 10000, 12500, 16000, 20000, 25000, 40000, 50000].",
+    "",
+    "TIME BUDGET: trial_time_budget_minutes=5 is the hard ceiling. trial_portion=0.02 is enforced by the system. Reduce model complexity, NOT segmentation_size, if over budget."
+  ]
+}
