@@ -1475,6 +1475,13 @@ def run_workflow(
                     impl_input = local_full_spec(proposal, attempt_storage)
                     impl_input.plugin_dir = os.path.join(attempt_dir, "models")
                     impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    # L4b — loss-plugin staging directory. Mirrors plugin_dir
+                    # for run-scoped isolation. Concurrent iterations write
+                    # to disjoint dirs so no clobbering occurs. The sandbox
+                    # executor adds this to SIDERIUS_LOSS_DIRS at training
+                    # time so load_loss_plugin can find the freshly-written
+                    # plugin. See docs/design/enable_loss_inventory.md § L4.
+                    impl_input.loss_dir = os.path.join(attempt_dir, "losses")
                     # Task config injection (T2) — load + thread into the
                     # implementor input. The loader is cached per-process so
                     # this is a dict lookup after the first iter. See

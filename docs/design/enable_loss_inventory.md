@@ -751,19 +751,19 @@ seam (per development principle 4):
 **Goal**: implementor reads `custom_loss_spec` and writes a valid loss plugin to disk + registers it. Depends on L1, L2, L3.
 
 **Code**:
-- [ ] `nodes/ml_model_implementor/ml_model_implementor.py`
-  - [ ] New private method `_generate_loss(inp)` triggered when `inp.custom_loss_spec` is set *(L4b)*
-    - [ ] **Registry hit short-circuit** — call `CapabilityRegistry.exists(loss_name, "loss")`; on hit, log `[LossLoader] Reusing existing loss plugin: '{loss_name}'`, populate `loss_provenance` with `action="reused"` + `source_iteration` from the registry entry + `loss_file_path` from the registry entry + `dummy_tensor_validated=True`, return early *(L4b)*
+- [x] `nodes/ml_model_implementor/ml_model_implementor.py`
+  - [x] New private method `_generate_loss(inp)` triggered when `inp.custom_loss_spec` is set *(L4b)*
+    - [x] **Registry hit short-circuit** — iterates `self._registry.list(capability_type="loss")` and matches by `loss_name`; on hit, prints reuse log, returns `LossProvenance(action="reused", source_iteration=existing.source_iteration, loss_file_path=existing.file_path, dummy_tensor_validated=True)`. No LLM call, no file write. *(L4b)*
     - [x] **LLM call shape** — separate from model-code call; use the same `self.bridge`. Two-call pattern (reasoning + code), mirroring the model-code flow. Labels: `implementor.loss.reasoning` and `implementor.loss.code` (and `implementor.loss.repair` for retries). *(L4a — prompts only; L4b wires the call)*
     - [x] **Source assembly** — `_assemble_loss_plugin(loss_name, description, code)` helper mirroring `_assemble_plugin`. Signature: takes `loss_name` + one-line `description` (collapsed into the assembled class docstring) + LLM-returned code dict; returns assembled `.py` source. *(L4a)*
     - [x] **Dummy-tensor validation** — `_dummy_tensor_validate_loss(plugin_src, loss_name)`: instantiate, run forward with `inputs=randn(2,256,100, requires_grad=True)` + `targets=randint(0,256,(2,100), dtype=int64)`, assert scalar shape + `requires_grad` + finite. Returns `None` on success or an error string consumable by the repair prompt. *(L4a)*
-    - [ ] **Retry loop** — up to `max_retries=2` on validation failure, feeding the validator error back into `IMPLEMENTOR_LOSS_REPAIR_PROMPT`. Mirrors model-code repair-loop semantics. *(L4b)*
-    - [ ] **Write** — to `inp.loss_dir` (default `"agent_generated/losses"`; workflow overrides for run-scoped isolation — see workflow sub-bullet below). The implementor uses `inp.loss_dir` as the destination, same caller-sets-path / node-uses-path pattern as `inp.plugin_dir` for model plugins. *(L4b)*
-    - [ ] **Register** — `CapabilityRegistry.register(CapabilityMetadata(...))` with `source_iteration=inp.storage.local.run_name`. Caller computes `created_at` via `datetime.now(UTC).isoformat()` — the registry does not auto-populate it. *(L4b)*
-    - [ ] Populate `loss_provenance` on the output with `action="generated"`, `source_iteration=inp.storage.local.run_name`, the absolute `loss_file_path`, and `dummy_tensor_validated=True` *(L4b)*
-  - [ ] Order in `run()`: generate loss BEFORE model (so if model code references the custom loss class, it can — but only if shape compatibility check passes; this is a soft optimisation) *(L4b)*
-- [ ] `workflows/model_exploration.py` — override `impl_input.loss_dir` at the same
-  point where `impl_input.plugin_dir` is overridden (current line 1476-1477):
+    - [x] **Retry loop** — up to `inp.max_retries` repair attempts on validation failure, each feeding the validator error back into `IMPLEMENTOR_LOSS_REPAIR_PROMPT` + maintaining an `error_history` list so a fix doesn't reintroduce a prior mistake. Mirrors model-code repair-loop semantics. *(L4b)*
+    - [x] **Write** — to `inp.loss_dir` (default `"agent_generated/losses"`; workflow overrides for run-scoped isolation — see workflow sub-bullet below). `os.makedirs(inp.loss_dir, exist_ok=True)` then write the assembled source to `{inp.loss_dir}/{loss_name}.py`. *(L4b)*
+    - [x] **Register** — `self._registry.register(CapabilityMetadata(...))` with `source_iteration=inp.storage.local.run_name` (or `None` if non-local backend). `created_at` computed via `datetime.now(UTC).isoformat()`. Description normalised by `" ".join(spec.description.split())` to collapse newlines so the proposer's `{AVAILABLE_LOSSES}` rendering at L5 stays one-line. *(L4b)*
+    - [x] Populate `loss_provenance` on the output with `action="generated"`, `source_iteration=inp.storage.local.run_name`, the absolute `loss_file_path`, and `dummy_tensor_validated=True` *(L4b)*
+  - [x] Order in `run()`: generate loss BEFORE model. `loss_provenance` initialised to `None`; populated by `_generate_loss(inp)` when `inp.custom_loss_spec is not None`. Threaded into `ImplementorOutput(..., loss_provenance=loss_provenance)`. *(L4b)*
+  - [x] `MLModelImplementor.__init__` gains a `capability_index_path: str | None = None` kwarg. When provided, `self._registry = CapabilityRegistry(index_path=capability_index_path)`; otherwise uses the canonical `agent_generated/_capability_index.json`. Lets unit tests pass a `tmp_path`-derived index without monkey-patching. *(L4b)*
+- [x] `workflows/model_exploration.py` — override `impl_input.loss_dir` immediately after the `plugin_dir` / `test_dir` overrides:
   `impl_input.loss_dir = os.path.join(attempt_dir, "losses")`
   This mirrors the caller-sets-path, node-uses-path pattern used for model plugins. *(L4b)*
 - [x] **Prompts live as inline string constants** in `nodes/ml_model_implementor/ml_model_implementor.py`,
@@ -784,12 +784,16 @@ seam (per development principle 4):
   so the LLM cannot omit them. *(L4a)*
 
 **Tests**:
-- [ ] `tests/unit/agent/ml_model_implementor/test_loss_generation.py` (mocked bridge — runs freely)
-  - [ ] Registry hit → no LLM call; `loss_provenance` populated with `action="reused"`; no file written
-  - [ ] Registry miss → mocked LLM returns valid loss code; dummy-tensor passes; file written; `CapabilityRegistry.register` called once; `loss_provenance.action == "generated"`
-  - [ ] First mocked LLM response fails the scalar-shape assertion → retry triggered; second response succeeds → file written
-  - [ ] All retries fail → `ValueError` raised with last assertion error
-  - [ ] `custom_loss_spec=None` → existing behaviour unchanged (regression guard)
+- [x] `tests/unit/agent/ml_model_implementor/test_loss_generation_helpers.py` *(L4a — pure-Python helpers)*
+  - [x] 30 tests across `_loss_class_name` × 4, `_assemble_loss_plugin` × 12, `_dummy_tensor_validate_loss` × 7, prompt constants × 5, template-placeholder × 2
+- [x] `tests/unit/agent/ml_model_implementor/test_loss_generation_e2e.py` (mocked bridge — runs freely) *(L4b)*
+  - [x] Registry hit → no LLM call; `loss_provenance.action == "reused"`; no file written by us this iteration
+  - [x] Registry miss → mocked LLM returns valid loss code; dummy-tensor passes; file written; `CapabilityRegistry.register` called once; `loss_provenance.action == "generated"`
+  - [x] First mocked LLM response fails the scalar-shape assertion → retry triggered; second response succeeds → file written
+  - [x] All retries fail → `ValueError` raised with last assertion error; registry remains empty
+  - [x] `custom_loss_spec=None` → `_generate_loss` not invoked; `loss_provenance` on output is `None` (regression guard)
+  - [x] **Bonus**: full `run()` integration test verifying loss generated BEFORE model and `loss_provenance` threaded into `ImplementorOutput`
+  - [x] **Bonus**: full `run()` integration test verifying registry-hit + model-only LLM call (loss reused, no `implementor.loss.*` labels in bridge call list)
 
 **Test gate**: Gate 1 — Real LLM + pseudo training (see `docs/gates/gate_testing_standard.md`).
 One real implementor LLM call generating a custom loss from a `CustomLossSpec`; assert generated
@@ -798,7 +802,76 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
 **Out of scope**: proposer awareness (L5). CLI is out of scope for this whole design doc (see Scope section).
 
 **Implementation notes**:
-- _none yet_
+- **L4a — Pure-Python groundwork (committed at `57029ea`)**:
+  - `LOSS_PLUGIN_TEMPLATE` + 3 inline prompt constants + `_loss_class_name` + `_assemble_loss_plugin` + `_dummy_tensor_validate_loss`
+  - Deviation from design doc: prompts live as inline string constants
+    (not `agent/prompt_templates/implementor/*.md`) because the implementor
+    has no markdown-template loading infra. Recorded in code.
+  - `_dummy_tensor_validate_loss` uses the same `tempfile.mkdtemp` + manual
+    cleanup pattern as `_smoke_test_plugin` (lint-clean, consistent style).
+  - 30/30 tests pass; 142/142 pre-existing implementor tests still pass.
+- **L4b — `_generate_loss` orchestration + run() integration + workflow override**:
+  - Method signature: `_generate_loss(self, inp: ImplementorInput) -> LossProvenance`.
+    Returns the provenance object; `run()` attaches it to the output.
+  - **Registry-DI**: `MLModelImplementor.__init__` accepts
+    `capability_index_path: str | None = None`. The constructor builds
+    `self._registry = CapabilityRegistry(index_path=capability_index_path)`.
+    Tests inject `tmp_path`-derived paths without monkey-patching.
+  - **Source iteration**: derived from `inp.storage.local.run_name` when
+    `storage.backend == "local"`; falls back to `None` for non-local
+    backends (matches `LossProvenance.source_iteration: str | None`).
+  - **Registry-hit lookup**: uses `self._registry.list(capability_type="loss")`
+    + `next((m for m in ... if m.name == loss_name), None)` rather than
+    `CapabilityRegistry.exists(...)`. The reason: reuse needs the actual
+    metadata (file_path + source_iteration), not just a hit/miss bool;
+    fetching the metadata in one pass is simpler than `exists` + a second
+    fetch.
+  - **Run order**: loss generated BEFORE model. A loss-generation failure
+    short-circuits before any model LLM spend. The "model can reference
+    the custom loss class" soft optimisation mentioned in the design doc
+    is not yet exercised by any code path; if it ever is, the order is
+    already correct.
+  - **Workflow override**: added at `workflows/model_exploration.py:1478`,
+    immediately after the `plugin_dir`/`test_dir` overrides. The per-run
+    `attempt_dir` ensures concurrent iterations write to disjoint dirs;
+    the sandbox executor (committed at L1b) injects this dir into
+    `SIDERIUS_LOSS_DIRS` at training time so `load_loss_plugin` can find
+    the freshly-written plugin.
+  - **Bridge labels** (for telemetry / cost attribution):
+    `implementor.loss.reasoning`, `implementor.loss.code`,
+    `implementor.loss.repair`. Distinct from `implementor.reasoning` /
+    `implementor.code` / `implementor.repair` for the model path.
+  - **Failure semantics**: `ValueError` from `_generate_loss` propagates
+    out of `run()` and aborts the implementor attempt. The workflow's
+    existing `max_impl_attempts` retry loop will then re-invoke the
+    implementor with a fresh proposal — the validation failure becomes
+    `previous_validation_failure` on the next attempt.
+  - **No registry pollution on failure**: the registry write is the last
+    step of the success path. A retry-exhaustion `ValueError` raises before
+    the registry call, so a failed run leaves the registry untouched
+    (verified by `test_no_registry_entry_on_failure`).
+- **Test results**:
+  - `test_loss_generation_e2e.py`: 13/13 in 0.90 s
+  - `test_loss_generation_helpers.py`: 30/30 in 0.78 s
+  - Full `tests/unit/agent/ml_model_implementor/` regression: 185/185 in 1.20 s
+  - Broader regression: `tests/unit/agent/` + `tests/unit/agent_generated/`
+    + `tests/unit/ml_models/` + `tests/unit/core/` = **593/593 pass in 3.59 s**
+  - Full `tests/unit/agent/` suite: **2419/2419 pass in 228.97 s**
+  - Ruff (check + format) clean; Pyright clean (0 errors, 0 warnings)
+- **Gate 1 not run yet** — the design doc specifies a single real LLM call
+  validating that a generated loss from a `CustomLossSpec` compiles + passes
+  dummy-tensor check. This needs the operator's go-ahead before invoking
+  the bridge. Recommended command (drafted, not run):
+  ```
+  .venv/bin/python -m nodes.ml_model_implementor.ml_model_implementor \
+      --workspace /tmp/loss_gate1_$(date +%s) \
+      --run_name gate1_smoke \
+      --provider openai \
+      --model_id gpt-4o-mini  # (or gpt-5-mini per L4 needs)
+  ```
+  (a small wrapper script + minimal `CustomLossSpec` fixture would be
+  added before invocation; this is a TODO for the Checkpoint L sign-off,
+  not blocking L4b commit).
 
 ### Commit L5 — Proposer prompt + registry query
 

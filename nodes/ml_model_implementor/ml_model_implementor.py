@@ -26,12 +26,15 @@ import os
 import re
 import tempfile
 import textwrap
+from datetime import UTC, datetime
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
-from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
+from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
 from workflows.task_config import render_forward_contract
 
 # ---------------------------------------------------------------------------
@@ -991,6 +994,83 @@ def _build_repair_prompt(
 
 
 # ---------------------------------------------------------------------------
+# L4b — Loss user-prompt builders
+# ---------------------------------------------------------------------------
+
+
+def _build_loss_reasoning_prompt(spec: CustomLossSpec) -> str:
+    """Render the user-prompt for the loss-reasoning LLM call.
+
+    Provides the LLM with the spec's loss_name, description, mathematical
+    definition, and any pre-specified config_fields hints. Mirrors
+    ``_build_reasoning_prompt`` in shape (sectioned markdown), but the
+    content is loss-specific (no model_config / train_config sections).
+    """
+    lines = [
+        f"## Loss to implement: `{spec.loss_name}`",
+        "",
+        "## Description",
+        spec.description,
+        "",
+        "## Mathematical definition",
+        spec.mathematical_definition,
+    ]
+    if spec.config_fields:
+        lines += [
+            "",
+            "## Pre-specified config fields (from proposer)",
+            json.dumps(spec.config_fields, indent=2),
+            "",
+            "These are hints — keep, drop, or adjust ranges as needed. The plugin's "
+            "config class is independent of LossConfig and carries only this loss's "
+            "own hyperparameters.",
+        ]
+    return "\n".join(lines)
+
+
+def _build_loss_code_prompt(reasoning: str, spec: CustomLossSpec) -> str:
+    """Render the user-prompt for the loss-code LLM call. Includes the
+    reasoning output verbatim, then restates the loss name and class name
+    so the strict-JSON response is anchored."""
+    return (
+        f"## Your Reasoning\n\n{reasoning}\n\n"
+        f"---\n\n"
+        f"## Loss name: `{spec.loss_name}`\n"
+        f"## Class name: `{_loss_class_name(spec.loss_name)}`\n\n"
+        "Now output the JSON code sections."
+    )
+
+
+def _build_loss_repair_prompt(
+    code: dict,
+    error: str,
+    spec: CustomLossSpec,
+    error_history: list[tuple[int, str]] | None = None,
+) -> str:
+    """Render the user-prompt for the loss-code repair call. Mirrors
+    ``_build_repair_prompt`` shape (history block + previous JSON + current
+    error + name anchor)."""
+    history_section = ""
+    if error_history:
+        history_lines = ["## Error History (do NOT reintroduce these mistakes)\n"]
+        for attempt_num, past_error in error_history:
+            history_lines.append(f"Attempt {attempt_num}: {past_error}")
+        history_section = "\n".join(history_lines) + "\n\n"
+
+    return (
+        f"## Previous code (failed)\n\n"
+        f"```json\n{json.dumps(code, indent=2)}\n```\n\n"
+        f"## Current Error (fix this)\n\n{error}\n\n"
+        f"{history_section}"
+        f"---\n\n"
+        f"## Loss name: `{spec.loss_name}`\n"
+        f"## Class name: `{_loss_class_name(spec.loss_name)}`\n\n"
+        "Fix the current error without reintroducing any error from the history. "
+        "Output the corrected JSON code sections."
+    )
+
+
+# ---------------------------------------------------------------------------
 # File assembly
 # ---------------------------------------------------------------------------
 
@@ -1068,12 +1148,18 @@ class MLModelImplementor:
         model_id: str = "gemini-3.1-pro-preview",
         max_retries: int | None = None,
         bridge_factory=None,
+        capability_index_path: str | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
         self.bridge = self._bridge_factory(
             provider=provider, model_id=model_id, max_retries=max_retries
         )
+        # L4b — registry handle for custom-loss provenance writes. Tests pass
+        # ``capability_index_path=str(tmp_path / "_capability_index.json")``
+        # to avoid contaminating the canonical index; production callers
+        # leave it None to use ``agent_generated/_capability_index.json``.
+        self._registry = CapabilityRegistry(index_path=capability_index_path)
 
     # ------------------------------------------------------------------
     # Validation helpers (used in the generate-validate-repair loop)
@@ -1157,10 +1243,158 @@ class MLModelImplementor:
         return None  # all good
 
     # ------------------------------------------------------------------
+    # L4b — Custom-loss generation (registry-hit short-circuit + LLM path)
+    # ------------------------------------------------------------------
+
+    def _generate_loss(self, inp: ImplementorInput) -> LossProvenance:
+        """Generate (or reuse) a custom loss plugin and return the provenance.
+
+        Preconditions:
+          - ``inp.custom_loss_spec`` is not None — the caller (``run``) is
+            responsible for this guard.
+
+        Flow:
+          1. **Registry hit short-circuit** — if ``CapabilityRegistry``
+             already has an entry for ``(spec.loss_name, "loss")``, log a
+             reuse message, return a ``LossProvenance(action="reused", …)``
+             pointing at the registered file. No LLM call is made.
+          2. **Reasoning + code LLM calls** — two ``bridge`` calls
+             (``implementor.loss.reasoning`` then ``implementor.loss.code``)
+             producing the strict-JSON sections consumed by
+             ``_assemble_loss_plugin``.
+          3. **Dummy-tensor validate → repair loop** — up to
+             ``inp.max_retries`` repair attempts, each feeding the validator
+             error back into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT``.
+          4. **Write** the assembled source to
+             ``{inp.loss_dir}/{spec.loss_name}.py``.
+          5. **Register** in the capability index with
+             ``capability_type="loss"`` and ``source_iteration`` from
+             ``inp.storage.local.run_name``.
+          6. Return ``LossProvenance(action="generated", …)``.
+
+        Raises:
+            ValueError: When all retries fail. The error message includes
+                the final assembled source and the full error history so
+                the caller (workflow + operator) can diagnose.
+        """
+        spec = inp.custom_loss_spec
+        # Caller guarantees this is not None; assert is a pyright hint.
+        assert spec is not None
+        loss_name = spec.loss_name
+
+        # Source iteration label for registry + provenance. ``storage.local``
+        # may be absent for non-local backends; degrade gracefully.
+        source_iteration: str | None = None
+        if inp.storage.backend == "local" and inp.storage.local:
+            source_iteration = inp.storage.local.run_name
+
+        # ---- 1. Registry-hit short-circuit ------------------------------
+        existing = next(
+            (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
+            None,
+        )
+        if existing is not None:
+            print(
+                f"🔁 Reusing existing loss plugin: '{loss_name}' (from {existing.source_iteration})"
+            )
+            print(f"   Loss file → {existing.file_path}")
+            return LossProvenance(
+                loss_name=loss_name,
+                action="reused",
+                source_iteration=existing.source_iteration,
+                loss_file_path=existing.file_path,
+                # Registry entries are only written after dummy-tensor passed
+                # at original generation time. Reuse therefore inherits that
+                # validation result.
+                dummy_tensor_validated=True,
+            )
+
+        # ---- 2. LLM calls (reasoning + code) ----------------------------
+        print(f"🧪 Generating custom loss '{loss_name}' ...")
+        reasoning = self.bridge.generate_text(
+            IMPLEMENTOR_LOSS_REASONING_PROMPT,
+            _build_loss_reasoning_prompt(spec),
+            label="implementor.loss.reasoning",
+        )
+        print(f"   Loss reasoning complete ({len(reasoning)} chars).")
+
+        code = self.bridge.generate(
+            IMPLEMENTOR_LOSS_CODE_PROMPT,
+            _build_loss_code_prompt(reasoning, spec),
+            label="implementor.loss.code",
+        )
+
+        # ---- 3. Validate → repair loop ----------------------------------
+        max_retries = inp.max_retries
+        plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+        error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+        attempt = 0
+        error_history: list[tuple[int, str]] = []
+        while error is not None and attempt < max_retries:
+            attempt += 1
+            print(f"   ⚠ Loss attempt {attempt + 1}/{max_retries + 1}: {error}")
+            repair_prompt = _build_loss_repair_prompt(code, error, spec, error_history)
+            error_history.append((attempt, error))
+            code = self.bridge.generate(
+                IMPLEMENTOR_LOSS_REPAIR_PROMPT,
+                repair_prompt,
+                label="implementor.loss.repair",
+            )
+            plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+            error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+
+        if error is not None:
+            raise ValueError(
+                f"Loss generation failed after {max_retries + 1} attempts for "
+                f"'{loss_name}': {error}\n\n"
+                f"The assembled loss source:\n{plugin_src}"
+            )
+        if attempt > 0:
+            print(f"   ✅ Loss self-correction succeeded on attempt {attempt + 1}.")
+
+        # ---- 4. Write the loss plugin -----------------------------------
+        os.makedirs(inp.loss_dir, exist_ok=True)
+        loss_file_path = os.path.abspath(os.path.join(inp.loss_dir, f"{loss_name}.py"))
+        with open(loss_file_path, "w", encoding="utf-8") as f:
+            f.write(plugin_src)
+        print(f"✅ Loss written  → {loss_file_path}")
+
+        # ---- 5. Register in the capability index ------------------------
+        registry_description = " ".join(spec.description.split())
+        self._registry.register(
+            CapabilityMetadata(
+                name=loss_name,
+                capability_type="loss",
+                file_path=loss_file_path,
+                created_at=datetime.now(UTC).isoformat(),
+                source_iteration=source_iteration,
+                description=registry_description,
+            )
+        )
+        print(f"✅ Registered    → loss '{loss_name}' (source={source_iteration})")
+
+        # ---- 6. Return provenance ---------------------------------------
+        return LossProvenance(
+            loss_name=loss_name,
+            action="generated",
+            source_iteration=source_iteration,
+            loss_file_path=loss_file_path,
+            dummy_tensor_validated=True,
+        )
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
     def run(self, inp: ImplementorInput) -> ImplementorOutput:
+        # L4b — generate the custom loss BEFORE the model. Sequential order
+        # so a loss-generation failure short-circuits before any model LLM
+        # spend. ``loss_provenance`` is None when the proposer used a
+        # built-in loss type (``inp.custom_loss_spec is None``).
+        loss_provenance: LossProvenance | None = None
+        if inp.custom_loss_spec is not None:
+            loss_provenance = self._generate_loss(inp)
+
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
         # --- Call 1: reasoning (free text, runs once) ---
@@ -1263,6 +1497,7 @@ class MLModelImplementor:
             config_fields=config_fields,
             model_description=inp.model_description,
             mathematical_definition=inp.mathematical_definition,
+            loss_provenance=loss_provenance,
         )
 
         # --- Persist output record ---
