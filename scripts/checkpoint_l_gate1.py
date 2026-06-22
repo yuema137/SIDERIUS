@@ -99,7 +99,56 @@ def _parse_args() -> argparse.Namespace:
         "written here so the canonical agent_generated/_capability_index.json "
         "is not polluted.",
     )
+    # Optional CustomLossSpec override — all 3 must be supplied together
+    # (any non-empty trio replaces the hardcoded EXPECTED_VALUE_MSE_SPEC).
+    # Used to exercise multiple loss-pattern variants in one script.
+    parser.add_argument(
+        "--loss_name",
+        default=None,
+        help="Override the hardcoded loss_name. When set, --description and "
+        "--mathematical_definition must also be set.",
+    )
+    parser.add_argument(
+        "--description",
+        default=None,
+        help="Override the hardcoded description. Requires --loss_name and "
+        "--mathematical_definition to be set as well.",
+    )
+    parser.add_argument(
+        "--mathematical_definition",
+        default=None,
+        help="Override the hardcoded mathematical_definition. Requires "
+        "--loss_name and --description to be set as well.",
+    )
     return parser.parse_args()
+
+
+def _resolve_spec(args: argparse.Namespace) -> CustomLossSpec:
+    """Pick the CustomLossSpec to use for this Gate 1 invocation.
+
+    Returns the hardcoded ``EXPECTED_VALUE_MSE_SPEC`` when none of the three
+    CLI overrides are supplied; otherwise requires the full trio and builds
+    a fresh ``CustomLossSpec``. Refuses partial overrides (e.g. only
+    ``--loss_name`` without the other two) because the L3 schema requires
+    all three fields to be non-empty.
+    """
+    overrides = (args.loss_name, args.description, args.mathematical_definition)
+    if all(o is None for o in overrides):
+        return EXPECTED_VALUE_MSE_SPEC
+    if not all(o for o in overrides):
+        raise ValueError(
+            "Partial CLI override of CustomLossSpec. When any of --loss_name "
+            "/ --description / --mathematical_definition is set, ALL three "
+            "must be set with non-empty values. Got: "
+            f"loss_name={args.loss_name!r}, description={args.description!r}, "
+            f"mathematical_definition={args.mathematical_definition!r}."
+        )
+    return CustomLossSpec(
+        loss_name=args.loss_name,
+        description=args.description,
+        mathematical_definition=args.mathematical_definition,
+        config_fields={},
+    )
 
 
 def _load_implementor_llm_cfg(llm_config_path: str) -> tuple[str, str]:
@@ -128,6 +177,7 @@ def _load_implementor_llm_cfg(llm_config_path: str) -> tuple[str, str]:
 
 def main() -> int:
     args = _parse_args()
+    spec = _resolve_spec(args)
 
     workspace = Path(args.workspace).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
@@ -142,7 +192,11 @@ def main() -> int:
 
     provider, model_id = _load_implementor_llm_cfg(args.llm_config)
 
-    print(f"=== Gate 1: generating loss '{EXPECTED_VALUE_MSE_SPEC.loss_name}' ===")
+    spec_source = (
+        "hardcoded EXPECTED_VALUE_MSE_SPEC" if spec is EXPECTED_VALUE_MSE_SPEC else "CLI override"
+    )
+    print(f"=== Gate 1: generating loss '{spec.loss_name}' ===")
+    print(f"  Spec source          : {spec_source}")
     print(f"  Workspace            : {workspace}")
     print(f"  Loss output dir      : {loss_dir}")
     print(f"  Capability index     : {capability_index_path}")
@@ -164,14 +218,14 @@ def main() -> int:
             "train_config": {},
             "loss_config": {
                 "loss_type": "custom",
-                "loss_name": EXPECTED_VALUE_MSE_SPEC.loss_name,
+                "loss_name": spec.loss_name,
             },
         },
         task_description=task_description,
         forward_contract=forward_contract,
         loss_dir=str(loss_dir),
         max_retries=2,
-        custom_loss_spec=EXPECTED_VALUE_MSE_SPEC,
+        custom_loss_spec=spec,
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=str(workspace), run_name="gate1"),
@@ -217,8 +271,8 @@ def main() -> int:
         f"Expected action='generated', got {prov.action!r}. "
         f"A 'reused' result here means the capability_index_path was wrong."
     )
-    assert prov.loss_name == EXPECTED_VALUE_MSE_SPEC.loss_name, (
-        f"Expected loss_name={EXPECTED_VALUE_MSE_SPEC.loss_name!r}, got {prov.loss_name!r}."
+    assert prov.loss_name == spec.loss_name, (
+        f"Expected loss_name={spec.loss_name!r}, got {prov.loss_name!r}."
     )
     assert prov.dummy_tensor_validated is True, (
         "Expected dummy_tensor_validated=True; got False. The L4b validator "
@@ -235,7 +289,7 @@ def main() -> int:
         f"Pre-existing entries indicate the capability_index_path was wrong."
     )
     entry = entries[0]
-    assert entry.name == EXPECTED_VALUE_MSE_SPEC.loss_name
+    assert entry.name == spec.loss_name
     assert entry.capability_type == "loss"
     assert entry.source_iteration == "gate1"
     assert entry.file_path == prov.loss_file_path
