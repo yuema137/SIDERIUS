@@ -1026,6 +1026,130 @@ bash sdsc_submission_scripts/run_chain.sh \
 
 ---
 
+#### Gate 3 — Real LLM + real training + literature review (full closed loop)
+
+**Purpose**: validate that lit-review findings actually shape the proposer's `CustomLossSpec`. Specifically: does the proposer ground its loss description / mathematical definition / loss_name in a finding cited from the literature, or are findings decorative? This is the loss-inventory-specific instance of the lit-review feature's Checkpoint D (see `docs/commit_plan_ml_literature_review.md` § Checkpoint D), narrowed to the loss-generation surface.
+
+**Prerequisites** (do NOT skip):
+1. Gate 2 has already passed and been signed off — Gate 3 is an *extension*, not a substitute.
+2. §10 validation suite has a recent green entry in `docs/validation_suite_runs.md`. If any lit-review prompt / `ConfidenceRubric` / `transfer_tolerance` default has changed since the most recent §10 FULL sign-off, re-run §10 first.
+3. Lit-review Commit 6 has landed (already true on master since `82bbf94`).
+
+**Canonical command** (Gate 2 + lit-review enabled):
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_l_gate3_$(date +%s) \
+    --run_name checkpoint_l_gate3 \
+    --num_iterations 2 \
+    --max_rounds 2 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --trial_portion 0.02 \
+    --train_portion 0.02 \
+    --eval_portion 0.02 \
+    --trial_time_budget_minutes 5 \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --advice advice/workflow/checkpoint_l_loss_advice.json \
+    --ml_lit_review_enabled \
+    --ml_lit_review_config configs/lit_review_config.yaml \
+    --seed_paths \
+        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
+```
+
+The only diff vs Gate 2 is `--ml_lit_review_enabled` + the explicit `--ml_lit_review_config` path. The lit-review YAML controls root-paper loading, dynamic-search behavior, and synthesis prompts. The LLM routing for lit-review (`main` + `search` sub-bridges) is taken from the `llm_config`'s `lit_review` block — `openai_tiered_v1.json` ships with `deepseek-v4-pro` for both, isolating lit-review cost from the proposer/implementor/interpreter tier.
+
+**Estimated wall time**: Gate 2 (~30–60 min) + lit-review overhead (~2–5 min per iter × 2 = ~4–10 min) = **~35–70 min total**.
+**Estimated cost**: Gate 2 (~$1.50–2.50) + lit-review (~$0.50–2 per iter × 2 iters ≈ $1–4) = **~$2.50–6.50 total**. Lit-review uses DeepSeek by default — cheaper than the OpenAI proposer tier.
+
+**Pass criteria** (all 6 Gate 2 criteria + 5 new lit-review-specific):
+
+Gate 2 criteria (unchanged — re-verify):
+- [ ] Chain exits 0
+- [ ] `run_output_*.json` per iter with non-null finite `denoising_score`
+- [ ] At least one iter's `implementor_*.json` has `loss_provenance.action == "generated"`
+- [ ] `agent_generated/_capability_index.json` (or workspace-scoped index) contains the iter_001 loss entry after iter_001
+- [ ] `agent_generated/losses/{loss_name}.py` exists and was loaded by training
+- [ ] Iter_002 proposer saw the iter_001 loss in `{available_losses_block}`
+
+Lit-review-specific criteria (new):
+- [ ] `{workspace}/iter_001/iteration_001/ml_literature_review_iter_001.json` exists with **non-empty `findings`** (at least 1 `ExpertContextItem`)
+- [ ] Per iter, the proposer's *user* prompt (debug dump or reconstructed) contains a `## External Contributors` block with at least one `AgentCard` whose `Trust Level: soft_prior` matches the lit-review emission
+- [ ] **Iter_001's `ProposalOutput.custom_loss_spec.description` OR `mathematical_definition` cites a real `source_ref` value that appears verbatim in the iter's lit-review `findings[*].source_ref`** — i.e. literature influence is *traceable*, not just present
+- [ ] **No hallucinated `source_ref`s**: every `source_ref` string in the proposal's `motivation`, `custom_loss_spec.description`, or `custom_loss_spec.mathematical_definition` must match some real lit-review-emitted `source_ref`. Implemented via a Python audit script (no LLM):
+      ```python
+      proposed_refs = re.findall(r"source_ref=([^\s,)]+)", proposal_text)
+      real_refs = {f.source_ref for f in lit_review_output.findings}
+      hallucinated = set(proposed_refs) - real_refs
+      assert not hallucinated, f"Hallucinated source_refs: {hallucinated}"
+      ```
+- [ ] Iter_002's loss-related decision (Branch B reuse / Branch C new) is *not contradicted* by iter_002's lit-review findings — e.g. if iter_002's lit-review surfaces a paper that explicitly evaluates against the iter_001 loss type, iter_002 should either reuse (Branch B) or refine (Branch C) rather than ignore. Subjective — verified by human review.
+
+**Failure handling** (Gate 2 cases unchanged + lit-review additions):
+- If lit-review finds nothing relevant → corpus/search-decision LLM problem, not a loss-inventory bug. Inspect `ml_literature_review_iter_001.json` `search_decisions` to see what queries fired. Consider amending `configs/lit_review_config.yaml` `root_papers` to seed loss-relevant papers (TIDMAD itself, focal-loss Lin et al. 2017, EMD/Wasserstein loss papers).
+- If lit-review runs but proposal ignores the findings → the proposer's user-prompt rendering or the lit-review compression prompt is at fault. Re-run Checkpoint P audit on the captured iter_001 proposer prompt to verify the `## External Contributors` + `## Expert Context` blocks rendered correctly.
+- If proposal hallucinates `source_ref`s → tighten the proposer's `causal_reasoning_stage.md` MANDATORY synthesis section to forbid citing source_refs not in the provided context.
+
+#### Post-Gate-3 audit (human review — answers two open concerns)
+
+Run after Gate 3 passes. Zero LLM cost — pure artifact reading. Results recorded in `docs/checkpoint_l_gate3_sign_off.md`.
+
+**Concern 1 audit — proposer reasoning transparency**
+
+Read `iter_001/iteration_001/proposal_iter_001.json`:
+- [ ] Does `motivation` or the causal_reasoning output contain any `source_ref` string that appears verbatim in `ml_literature_review_iter_001.json → findings[*].source_ref`?
+- [ ] If yes: quote the source_ref + the finding's content snippet + the proposal text that references it. Is the connection substantive (proposer adapted the finding's mechanism) or decorative (proposer mentioned the source_ref but the loss design is identical to what it would have proposed without lit-review)?
+- [ ] If no source_refs appear anywhere in the proposal: state this explicitly — proposer ignored expert_context entirely. This is the strongest motivation for a facilitator layer that pre-digests findings into a single actionable directive before the proposer sees them.
+
+Verdict options:
+  - ✅ SUBSTANTIVE: proposer's CustomLossSpec.mathematical_definition or description directly adapts a mechanism from a cited finding
+  - ⚠️ DECORATIVE: source_refs appear but loss design is unchanged from what the advice file alone would have produced
+  - ❌ IGNORED: no source_refs appear; lit-review had no visible effect
+
+**Concern 2 audit — findings volume vs single-proposal constraint**
+
+Read `ml_literature_review_iter_001.json → findings`:
+- [ ] How many ExpertContextItems were emitted?
+- [ ] Do the findings point in the same direction (e.g. all suggest ordinal-aware losses) or in conflicting directions (e.g. one suggests EMD loss, another suggests SNR-weighted loss)?
+- [ ] Which finding (if any) is most closely reflected in iter_001's `custom_loss_spec`? Quote the finding content + the spec text side by side.
+- [ ] Were any findings completely ignored? If so, were they lower-confidence (< 0.60) or conflicting with higher-confidence findings?
+- [ ] Did iter_002 reuse the iter_001 loss (Branch B) or propose a different loss (Branch C)? If Branch C, did the new loss reflect a finding that iter_001 ignored?
+
+Verdict options:
+  - ✅ COHERENT: proposer made a clear selection among findings; the selection is traceable to confidence scores or bottleneck relevance
+  - ⚠️ ARBITRARY: proposer selected one finding but the selection logic is not visible in the output
+  - ❌ OVERLOADED: proposer appeared to ignore all findings despite them being present in the prompt (see Concern 1 audit)
+
+**Facilitator layer decision gate**
+
+Based on both audits, record one of:
+- FACILITATOR NOT NEEDED: Concern 1 = SUBSTANTIVE and Concern 2 = COHERENT → lit-review findings are being used well; no architectural change needed now
+- FACILITATOR RECOMMENDED: any ⚠️ verdict → findings are present but underutilized; a facilitator layer would improve quality but is not blocking
+- FACILITATOR REQUIRED: any ❌ verdict → proposer is ignoring findings; lit-review adds cost with no benefit until a facilitator layer pre-digests findings into actionable directives
+
+#### Sign-off artifact for Gate 3
+
+- [ ] `docs/checkpoint_l_gate3_sign_off.md` written after the run passes, with:
+  - [ ] Gate 2 criteria pass/fail table (re-asserted for the Gate 3 run)
+  - [ ] Lit-review summary per iter: emitted `AgentCard`, top 3 `findings` (source_ref + content snippet)
+  - [ ] Full `iter_001.proposal.custom_loss_spec.{description, mathematical_definition}` text
+  - [ ] Full `iter_002.proposal.custom_loss_spec.{description, mathematical_definition}` text (or note Branch B reuse with the iter_001 loss_name)
+  - [ ] Cross-reference table: each `source_ref` cited by the proposal → does it match a lit-review-emitted finding? (yes/no)
+  - [ ] Hallucination-check Python script output (zero hallucinations required)
+  - [ ] Concern 1 + Concern 2 audit verdicts (from the Post-Gate-3 audit subsection above)
+  - [ ] Facilitator layer decision gate verdict
+  - [ ] Human judgment paragraph: "Did the literature actually shape the loss design? Cite specific examples." Either:
+        ✅ "Yes — iter_001's `mathematical_definition` adapts equation (3) from `arxiv:1812.01187` verbatim …" OR
+        ❌ "No — iter_001's `mathematical_definition` is identical in substance to the `expected_value_mse` example from the advice file; lit-review findings appear only as decorative `source_ref` mentions in `motivation`."
+  - [ ] Decision: ready to merge / blocked on X / facilitator layer needed before merge
+
+#### Why three gates instead of two
+
+Gate 1 isolates the implementor's loss-generation path (one LLM call, no chain machinery). Gate 2 validates the closed loop without external findings (single-feature integration). Gate 3 layers in lit-review without changing the loss-inventory contract — a clean separation lets you tell *which* feature broke if Gate 3 fails despite Gate 2 passing. Each gate's failure mode is diagnostically distinct.
+
+---
+
 #### Sign-off artifact
 
 - [ ] `docs/checkpoint_l_sign_off.md` written after Gate 2 passes, with:
