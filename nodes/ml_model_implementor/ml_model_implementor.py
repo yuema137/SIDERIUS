@@ -512,14 +512,33 @@ ANY other import will fail at plugin load time. In particular:
 
 ## Anti-patterns to avoid
 
-  - Do NOT wrap any compute path in ``torch.no_grad()`` — that detaches the graph
-    and the loss will not be trainable.
-  - Do NOT call ``.detach()`` on ``inputs`` or any tensor derived from it (you may
-    detach ``targets`` if needed — targets carry no gradient anyway).
   - Do NOT return a non-scalar tensor (any reduction over the leading and time
     dims is fine: ``.mean()``, ``.sum()`` / batch_size, etc.).
   - Do NOT compute the loss on ``targets.float()`` without checking shape — if the
     loss uses ``F.cross_entropy`` or similar, pass the int64 targets directly.
+
+## Gradient-flow requirement
+
+The final scalar loss MUST have gradient flowing back to ``inputs``. The
+implementor's validator runs ``loss.backward()`` on dummy tensors and rejects
+the plugin if ``inputs.grad is None``.
+
+You MAY use ``.detach()`` or ``torch.no_grad()`` on **weighting or masking
+terms** (treating them as constants is legitimate and sometimes necessary for
+non-differentiable operations like ``argmax``-based weights). However, NEVER
+call ``.detach()`` on ``inputs`` directly, and never sever the main
+computational path from ``inputs`` → loss.
+
+Safe pattern — weight is detached; gradient still flows via ``F.cross_entropy``:
+
+    with torch.no_grad():
+        weight = compute_weight(inputs, targets)   # treated as constant
+    per_elem = F.cross_entropy(inputs, targets, reduction='none')  # flows grad
+    loss = (per_elem * weight).mean()
+
+Unsafe pattern — severs gradient entirely (validator will reject):
+
+    loss = F.cross_entropy(inputs.detach(), targets)  # inputs.grad will be None
 
 In your reasoning, cover all of the following:
 1. How will you reduce the per-element loss to a scalar (mean? sum? weighted mean?).
