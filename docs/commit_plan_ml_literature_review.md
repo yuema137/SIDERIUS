@@ -71,7 +71,7 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
-- [ ] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
+- [x] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` (5 prompt-content tests) + `tests/unit/agent/schemas/test_literature_review_schemas.py` (1 test on `ConfidenceRubric.render_for_searcher()` single-source-of-truth)
 - [x] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` (2 schema tests: `SearchDecisionRecord` + `LiteratureReviewInput.task_description`) + `tests/unit/agent/ml_literature_review/test_node.py` (5 node tests: Fix 3 no-op feedback + Fix 4 decision log + Fix 6 task threading) + `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` (2 workflow tests: empty-task warning + non-empty no-warning)
