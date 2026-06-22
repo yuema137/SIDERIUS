@@ -878,31 +878,21 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
 **Goal**: proposer becomes aware of the loss registry and emits a `custom_loss_spec` when proposing a novel loss (or chooses to reuse an existing one). Depends on L1, L3 — does NOT depend on L4 (the implementor will be ready when this lands).
 
 **Code**:
-- [ ] Inject `{AVAILABLE_LOSSES}` into BOTH the causal-reasoning stage AND the proposing stage:
-  - `causal_reasoning_stage.md`, `causal_reasoning_stage_exploit.md`,
-    `causal_reasoning_stage_explore.md` — inject early in the reasoning context so the
-    LLM knows which losses exist BEFORE deciding what to propose. This is where the
-    proposer reasons about what to build; awareness of available losses at this stage
-    produces better proposals than injecting only at the output-formatting stage.
-  - `proposing_stage.md`, `proposing_stage_exploit.md`, `proposing_stage_explore.md` —
-    inject in the JSON output contract section with the 3-branch decision rule:
-      * Reuse existing: `loss_config.loss_type="custom"`, `loss_config.loss_name=<existing>`,
-        `custom_loss_spec=None`
-      * Generate new: `loss_config.loss_type="custom"`, `loss_config.loss_name=<new>`,
-        `custom_loss_spec` populated
-      * Use built-in: `loss_config.loss_type` ∈ {focal, focal_cw, ce, smooth_l1},
-        `custom_loss_spec=None`
-- [ ] `agent/prompt_templates/proposal/__init__.py` — add `render_available_losses(registry)`
-  helper. When registry is empty, renders: "No custom losses registered yet — propose a
-  new one grounded in lit-review findings, or use a built-in loss."
-  When non-empty, renders a markdown table: `loss_name | source_iteration | description`,
-  sorted by `created_at` descending (most recent first).
-  Rationale: most recently generated loss was produced under the closest prior
-  experiment state and is most likely relevant to the current bottleneck.
+- [x] Inject `{available_losses_block}` into the causal-reasoning + proposing stage **base** templates *(L5a)*:
+  - `causal_reasoning_stage.md` — block injected in the "What you receive" section so the LLM knows which losses exist BEFORE the MANDATORY synthesis block kicks in. The mode-variant files (`_explore.md` / `_exploit.md`) inherit the rendered block via the `{# EXPLORATION_MODE_BLOCK #}` injection mechanism — no need to edit them directly. Deviation from doc bullet (which listed 6 files): only the 2 base files take `template_vars`; editing the 4 mode files would be a no-op for substitution and risk drift.
+  - `proposing_stage.md` — block injected in the "What you receive" section + **Rule 9** added in "## Rules" with the 3-branch decision rule:
+    * Branch A — Use a built-in loss: `loss_config.loss_type` ∈ {focal, focal_cw, ce, smooth_l1}, no `loss_name`, `custom_loss_spec: null`
+    * Branch B — Reuse existing: `loss_config.loss_type="custom"`, `loss_config.loss_name=<from table>`, `custom_loss_spec: null`
+    * Branch C — Generate new: `loss_config.loss_type="custom"`, fresh `loss_config.loss_name`, `custom_loss_spec` populated (must match `loss_name`)
+  - Plus extended the JSON contract example: `loss_type` Literal lists all 5 values; `custom_loss_spec: null` added as a top-level field.
+- [x] `agent/prompt_templates/proposal/__init__.py` — `render_available_losses(registry)` helper added. Empty registry → fallback message: "No custom losses registered yet — propose a new one grounded in lit-review findings, or use a built-in loss." Non-empty → markdown table `loss_name | source_iteration | description`, sorted by `created_at` descending (ISO-8601 string sort is chronologically correct). *(L5a)*
+  - Duck-typed `registry` argument: any object with `list(capability_type=...)` returning meta-shaped items works. Lets tests pass a small stub without standing up a tmp index file.
+  - Defensive normalisation: descriptions get newlines collapsed + `|` escaped so a hand-edited registry entry can't break the markdown table.
+  - `None` source_iteration renders as em-dash `—` (hand-curated registry entries have no run_name).
 - [ ] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` — query
   `CapabilityRegistry.list(capability_type="loss")` before each proposing-stage call
   and pass the rendered list into the prompt context for ALL 6 prompt variants
-  (causal_reasoning × 3 + proposing × 3).
+  (causal_reasoning × 3 + proposing × 3). *(L5b)*
 
 **Tests** (mocked LLM — run freely):
 - [ ] `tests/unit/agent/ml_model_proposal_agent/test_loss_awareness.py`
@@ -915,8 +905,18 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
   - [ ] Proposer mocked to emit `custom_loss_spec` → output validates against schema
   - [ ] Proposer mocked to emit `loss_config.loss_type="custom"` + matching `loss_name` but `custom_loss_spec=None` (reuse path) → output validates
   - [ ] Proposer mocked to emit mismatched `custom_loss_spec.loss_name` vs `loss_config.loss_name` → ValidationError surfaced
-- [ ] `tests/unit/agent/prompt_templates/test_proposal_prompts.py` (extend)
-  - [ ] `render_available_losses` golden output
+- [x] `tests/unit/agent/prompt_templates/test_proposal_prompts.py` (extend) *(L5a)*
+  - [x] `render_available_losses` empty-registry fallback
+  - [x] `render_available_losses` single-entry table row
+  - [x] `render_available_losses` multi-entry sorted most-recent first (created_at DESC)
+  - [x] `render_available_losses` stable across calls (deterministic ordering)
+  - [x] **Bonus**: `source_iteration=None` renders as em-dash (hand-curated entries)
+  - [x] **Bonus**: pipe in description escaped to `\|` (table robustness)
+  - [x] **Bonus**: newlines in description collapsed to one line (table robustness)
+  - [x] `{available_losses_block}` placeholder present in `proposing_stage.md` + `causal_reasoning_stage.md`
+  - [x] `load_stage_prompt` substitutes the placeholder via `template_vars` (for both stages)
+  - [x] Rule 9 (3-branch decision rule) present with all 3 branches named + `MUST match` constraint
+  - [x] `proposing_stage.md` lists all 5 `loss_type` values (`focal`, `focal_cw`, `ce`, `smooth_l1`, `custom`)
 
 **Out of scope**: implementor LLM call (L4). CLI is out of scope for this whole design doc (see Scope section).
 
@@ -984,3 +984,11 @@ Pass criteria:
 - Perceptual loss requiring a separate encoder model — separate feature  
 - Loss ensembling (combining multiple loss functions) — separate feature
 - Automatic loss architecture search — separate feature
+
+### Future: MLLossImplementor split (out of scope)
+
+The implementor currently handles two artifact types (model code + loss code).
+A future refactor could split this into MLModelImplementor + MLLossImplementor
+with a dedicated protocol edge and symmetric MLLossValidatorAgent. Deferred —
+the current dual-role design is architecturally complete and the split requires
+a new design doc.

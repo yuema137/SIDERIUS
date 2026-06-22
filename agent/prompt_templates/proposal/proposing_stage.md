@@ -17,6 +17,11 @@ architectural choice must trace back to the comparisons and reasoning.
 - **Vocabulary**: features/capabilities with confirmed links.
 - **Expert context**: upstream findings, human directives.
 - **Existing model types**: names you must NOT reuse.
+- **Available custom losses**: a registry of previously-generated loss
+  functions (see the block below). You may reuse one, propose a new one,
+  or use a built-in loss — see Rule 9.
+
+{available_losses_block}
 
 ## What you produce
 
@@ -41,9 +46,15 @@ A JSON object with these fields:
     "loss_config": {"loss_type": "focal", "alpha": 0.5, "gamma": 2.0, "reduction": "mean"}
   },
   "parameter_count_estimate": 1234567,
-  "memo_consistency_notes": []
+  "memo_consistency_notes": [],
+  "custom_loss_spec": null
 }
 ```
+
+The `loss_config` slot accepts five `loss_type` values: `focal`, `focal_cw`, `ce`,
+`smooth_l1`, or `custom`. When `loss_type="custom"`, add a `loss_name` field
+(snake_case key matching a registered loss OR a new one you are proposing).
+`custom_loss_spec` is populated ONLY when proposing a NEW custom loss — see Rule 9.
 
 {recent_gate_exhaustions_block}
 
@@ -95,6 +106,40 @@ A JSON object with these fields:
    bidirectional layers. If your estimate exceeds the active time budget,
    the gate will reject the draft and ask you to revise toward a simpler
    or lighter architectural class.
+
+9. **Loss selection — 3-branch decision rule.** Exactly one of these three
+   branches MUST hold; the schema validator rejects any other combination.
+
+   - **Branch A — Use a built-in loss** (default when no custom loss is
+     warranted): set `loss_config.loss_type` to one of
+     `focal`, `focal_cw`, `ce`, or `smooth_l1`. Do NOT set `loss_name`.
+     Set `custom_loss_spec: null`.
+
+   - **Branch B — Reuse an existing custom loss** from the registry above:
+     set `loss_config.loss_type = "custom"`, `loss_config.loss_name =
+     "<name from the table>"`. Set `custom_loss_spec: null` — the
+     implementor will skip the LLM call and reuse the registered plugin.
+
+   - **Branch C — Propose a NEW custom loss** (not in the registry): set
+     `loss_config.loss_type = "custom"`, pick a fresh snake_case
+     `loss_config.loss_name`, AND populate the top-level `custom_loss_spec`
+     object with these fields:
+
+     ```json
+     "custom_loss_spec": {
+       "loss_name": "<same as loss_config.loss_name — they MUST match>",
+       "description": "<one paragraph: what the loss computes, why it improves on built-in alternatives for this DiscoveryMemo's hypothesis>",
+       "mathematical_definition": "<precise formula in terms of model outputs and targets; concrete enough for the implementor to code directly>",
+       "config_fields": {}
+     }
+     ```
+
+   **Prefer Branch A** unless the DiscoveryMemo's `proposed_change` or
+   `causal_hypothesis` explicitly motivates a novel loss. **Prefer Branch B
+   over Branch C** when a registered loss matches the hypothesis — reuse
+   avoids redundant implementor work and concentrates evidence on one loss.
+   Branch C is for genuinely new mechanisms (e.g. a spectral-weighted
+   variant when no prior iteration tried one).
 
 {# EXPLORATION_MODE_BLOCK #}
 
