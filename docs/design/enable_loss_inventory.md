@@ -752,25 +752,36 @@ seam (per development principle 4):
 
 **Code**:
 - [ ] `nodes/ml_model_implementor/ml_model_implementor.py`
-  - [ ] New private method `_generate_loss(inp)` triggered when `inp.custom_loss_spec` is set
-    - [ ] **Registry hit short-circuit** — call `CapabilityRegistry.exists(loss_name, "loss")`; on hit, log `[LossLoader] Reusing existing loss plugin: '{loss_name}'`, populate `loss_provenance` with `action="reused"` + `source_iteration` from the registry entry + `loss_file_path` from the registry entry + `dummy_tensor_validated=True`, return early
-    - [ ] **LLM call** — separate from model-code call; use the same `self.bridge` with a new label `implementor.loss`
-    - [ ] **Source assembly** — `_assemble_loss_plugin(spec, code)` helper mirroring `_assemble_plugin`
-    - [ ] **Dummy-tensor validation** — instantiate, run forward with `pred=randn(2,256,100, requires_grad=True)` + `target=randint(0,256,(2,100))`, assert scalar shape + `requires_grad`
-    - [ ] **Retry loop** — up to `max_retries=2` on validation failure, feeding the assertion error back into a repair prompt
-    - [ ] **Write** — to `inp.loss_dir` (default `"agent_generated/losses"`; workflow overrides for run-scoped isolation — see workflow sub-bullet below). The implementor uses `inp.loss_dir` as the destination, same caller-sets-path / node-uses-path pattern as `inp.plugin_dir` for model plugins.
-    - [ ] **Register** — `CapabilityRegistry.register(CapabilityMetadata(...))` with `source_iteration=inp.storage.local.run_name`
-    - [ ] Populate `loss_provenance` on the output with `action="generated"`, `source_iteration=inp.storage.local.run_name`, the absolute `loss_file_path`, and `dummy_tensor_validated=True`
-  - [ ] Order in `run()`: generate loss BEFORE model (so if model code references the custom loss class, it can — but only if shape compatibility check passes; this is a soft optimisation)
+  - [ ] New private method `_generate_loss(inp)` triggered when `inp.custom_loss_spec` is set *(L4b)*
+    - [ ] **Registry hit short-circuit** — call `CapabilityRegistry.exists(loss_name, "loss")`; on hit, log `[LossLoader] Reusing existing loss plugin: '{loss_name}'`, populate `loss_provenance` with `action="reused"` + `source_iteration` from the registry entry + `loss_file_path` from the registry entry + `dummy_tensor_validated=True`, return early *(L4b)*
+    - [x] **LLM call shape** — separate from model-code call; use the same `self.bridge`. Two-call pattern (reasoning + code), mirroring the model-code flow. Labels: `implementor.loss.reasoning` and `implementor.loss.code` (and `implementor.loss.repair` for retries). *(L4a — prompts only; L4b wires the call)*
+    - [x] **Source assembly** — `_assemble_loss_plugin(loss_name, description, code)` helper mirroring `_assemble_plugin`. Signature: takes `loss_name` + one-line `description` (collapsed into the assembled class docstring) + LLM-returned code dict; returns assembled `.py` source. *(L4a)*
+    - [x] **Dummy-tensor validation** — `_dummy_tensor_validate_loss(plugin_src, loss_name)`: instantiate, run forward with `inputs=randn(2,256,100, requires_grad=True)` + `targets=randint(0,256,(2,100), dtype=int64)`, assert scalar shape + `requires_grad` + finite. Returns `None` on success or an error string consumable by the repair prompt. *(L4a)*
+    - [ ] **Retry loop** — up to `max_retries=2` on validation failure, feeding the validator error back into `IMPLEMENTOR_LOSS_REPAIR_PROMPT`. Mirrors model-code repair-loop semantics. *(L4b)*
+    - [ ] **Write** — to `inp.loss_dir` (default `"agent_generated/losses"`; workflow overrides for run-scoped isolation — see workflow sub-bullet below). The implementor uses `inp.loss_dir` as the destination, same caller-sets-path / node-uses-path pattern as `inp.plugin_dir` for model plugins. *(L4b)*
+    - [ ] **Register** — `CapabilityRegistry.register(CapabilityMetadata(...))` with `source_iteration=inp.storage.local.run_name`. Caller computes `created_at` via `datetime.now(UTC).isoformat()` — the registry does not auto-populate it. *(L4b)*
+    - [ ] Populate `loss_provenance` on the output with `action="generated"`, `source_iteration=inp.storage.local.run_name`, the absolute `loss_file_path`, and `dummy_tensor_validated=True` *(L4b)*
+  - [ ] Order in `run()`: generate loss BEFORE model (so if model code references the custom loss class, it can — but only if shape compatibility check passes; this is a soft optimisation) *(L4b)*
 - [ ] `workflows/model_exploration.py` — override `impl_input.loss_dir` at the same
-  point where `impl_input.plugin_dir` is overridden (near line 1436):
+  point where `impl_input.plugin_dir` is overridden (current line 1476-1477):
   `impl_input.loss_dir = os.path.join(attempt_dir, "losses")`
-  This mirrors the caller-sets-path, node-uses-path pattern used for model plugins.
-- [ ] `agent/prompt_templates/implementor/loss_generation_system.md` (new)
-  - [ ] Forward contract block (inputs `[B, 256, T] float32`, targets `[B, T] int64`, scalar output, `requires_grad=True`)
-  - [ ] Plugin interface contract (the 3 PLUGIN_LOSS_* symbols)
-  - [ ] Anti-patterns (don't use `torch.no_grad()` in `forward`, don't return non-scalar, don't import outside torch/pydantic/stdlib)
-- [ ] `agent/prompt_templates/implementor/__init__.py` (or wherever existing prompts are exported) — register the new template
+  This mirrors the caller-sets-path, node-uses-path pattern used for model plugins. *(L4b)*
+- [x] **Prompts live as inline string constants** in `nodes/ml_model_implementor/ml_model_implementor.py`,
+  matching the existing convention for `IMPLEMENTOR_REASONING_PROMPT` /
+  `IMPLEMENTOR_CODE_PROMPT` / `IMPLEMENTOR_REPAIR_PROMPT`. The original design
+  doc proposed `agent/prompt_templates/implementor/*.md`, but the implementor
+  module has no markdown-template loading infrastructure today (only
+  `proposal/` and `literature_review/` have those folders); introducing one
+  for L4 would add a loader without a parallel call site. The 3 inline
+  constants added: *(L4a)*
+  - `IMPLEMENTOR_LOSS_REASONING_PROMPT` — forward contract (`[B, 256, T]` × `[B, T]` → scalar), allowed-import allow-list, anti-patterns (no `torch.no_grad()`, no `.detach()`, scalar return required)
+  - `IMPLEMENTOR_LOSS_CODE_PROMPT` — strict JSON schema (6 fields), fixed forward signature, scalar-return requirement
+  - `IMPLEMENTOR_LOSS_REPAIR_PROMPT` — repeats the signature + scalar/`requires_grad` constraints so a wrong sig from attempt N doesn't survive into attempt N+1
+- [x] `LOSS_PLUGIN_TEMPLATE` — fixed boilerplate with 8 named slots
+  (`loss_name`, `LossClass`, `description`, `extra_imports`, `config_fields_code`,
+  `config_validators_code`, `init_body`, `forward_body`). The 3 required
+  PLUGIN_LOSS_* constants and the fixed forward signature are template-owned
+  so the LLM cannot omit them. *(L4a)*
 
 **Tests**:
 - [ ] `tests/unit/agent/ml_model_implementor/test_loss_generation.py` (mocked bridge — runs freely)
