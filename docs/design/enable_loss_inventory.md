@@ -889,22 +889,21 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
   - Duck-typed `registry` argument: any object with `list(capability_type=...)` returning meta-shaped items works. Lets tests pass a small stub without standing up a tmp index file.
   - Defensive normalisation: descriptions get newlines collapsed + `|` escaped so a hand-edited registry entry can't break the markdown table.
   - `None` source_iteration renders as em-dash `—` (hand-curated registry entries have no run_name).
-- [ ] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` — query
-  `CapabilityRegistry.list(capability_type="loss")` before each proposing-stage call
-  and pass the rendered list into the prompt context for ALL 6 prompt variants
-  (causal_reasoning × 3 + proposing × 3). *(L5b)*
+- [x] `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` — registry queried once per `_run_pipeline` call; rendered block threaded through `template_vars["available_losses_block"]` which `load_stage_prompt` substitutes into every stage that references the placeholder (causal_reasoning + proposing). Mode-variant files inherit the substituted base. *(L5b)*
+  - `__init__` gained `capability_index_path: str | None = None` kwarg; `self._registry = CapabilityRegistry(index_path=capability_index_path)`. Mirrors L4b implementor DI pattern.
+  - `_run_pipeline` imports `render_available_losses` (lazy import alongside `load_stage_prompt`, `render_agent_cards`, `render_expert_context`); `template_vars["available_losses_block"]` populated from `render_available_losses(self._registry)`.
+  - Single registry snapshot per `run()`: rendered once before the stage loop so all stages see a consistent view of the registry (a concurrent implementor write during `run()` would not retroactively change earlier stages' context).
+  - `_run_legacy` (pre-pipeline mode) unchanged — it doesn't use `load_stage_prompt`/`template_vars` so it doesn't need the wiring. Production callers always use pipeline mode; legacy mode is for back-compat fallback only.
 
 **Tests** (mocked LLM — run freely):
-- [ ] `tests/unit/agent/ml_model_proposal_agent/test_loss_awareness.py`
-  - [ ] Empty registry → prompt renders the "no custom losses" fallback message
-  - [ ] Registry with 3 losses → prompt renders all 3 sorted by `created_at` descending
-    (most recently generated loss first). Rationale: the most recently generated loss was
-    created under the closest prior experiment state and is most likely relevant to the
-    current bottleneck. Test must verify the order is stable across calls (same input →
-    same output).
-  - [ ] Proposer mocked to emit `custom_loss_spec` → output validates against schema
-  - [ ] Proposer mocked to emit `loss_config.loss_type="custom"` + matching `loss_name` but `custom_loss_spec=None` (reuse path) → output validates
-  - [ ] Proposer mocked to emit mismatched `custom_loss_spec.loss_name` vs `loss_config.loss_name` → ValidationError surfaced
+- [x] `tests/unit/agent/ml_model_proposal_agent/test_loss_awareness.py` *(L5b)*
+  - [x] **TestConstructorDI** × 3: `capability_index_path` accepted; default falls back to canonical `agent_generated/_capability_index.json`; register-then-list round-trip works on the custom-path registry
+  - [x] **TestPipelineTemplateVarsWiring** × 2: pre-populated registry → `template_vars["available_losses_block"]` contains both loss names with correct sort order (most recent first); empty registry → fallback message lands in `template_vars`
+  - [x] **TestThreeBranchOutputs** × 4 (regression guards for the 3-branch decision rule from L5a):
+    - Branch A — built-in loss (no `loss_name`, no `custom_loss_spec`)
+    - Branch B — reuse existing (`loss_type="custom"` + `loss_name`, `custom_loss_spec=None`)
+    - Branch C — generate new (`custom_loss_spec` populated, `loss_name` matches)
+    - Branch C mismatched names → `ValidationError` from L3's `_validate_custom_loss_spec_consistency`
 - [x] `tests/unit/agent/prompt_templates/test_proposal_prompts.py` (extend) *(L5a)*
   - [x] `render_available_losses` empty-registry fallback
   - [x] `render_available_losses` single-entry table row
@@ -921,7 +920,25 @@ code compiles + passes dummy-tensor check. Needs user approval before running.
 **Out of scope**: implementor LLM call (L4). CLI is out of scope for this whole design doc (see Scope section).
 
 **Implementation notes**:
-- _none yet_
+- **L5a — Prompt-template additions (committed at `d00bf22`)**:
+  - `render_available_losses(registry)` helper in `agent/prompt_templates/proposal/__init__.py` — duck-typed registry arg; defensive table-cell rendering (pipe escape, newline collapse, em-dash for `None` source_iteration); sort by `created_at` descending (ISO-8601 strings sort chronologically).
+  - `{available_losses_block}` placeholder added to the 2 base templates (`causal_reasoning_stage.md`, `proposing_stage.md`). Mode-variant files (`_explore.md` / `_exploit.md`) inherit via `{# EXPLORATION_MODE_BLOCK #}` — no separate edits needed.
+  - `proposing_stage.md` extended: JSON schema example now lists 5 `loss_type` values + `custom_loss_spec: null`; Rule 9 added with the 3-branch (A/B/C) decision rule.
+  - 14 new tests pass; 56/56 in the prompt-template suite.
+- **L5b — Proposer node integration**:
+  - `MLModelProposalAgent.__init__` gains `capability_index_path: str | None = None` kwarg → `self._registry = CapabilityRegistry(index_path=capability_index_path)`. Symmetric with the L4b implementor DI pattern.
+  - `_run_pipeline`'s lazy-import block (line 1090) gains `render_available_losses`; the `template_vars` dict (line 1219 area) gains `"available_losses_block": render_available_losses(self._registry)`.
+  - **One registry snapshot per `run()`**: the rendering happens once before the stage loop. A concurrent implementor write during the proposer's `run()` would NOT retroactively change earlier stages' context. This matches the intuition that a single proposal is built against a single registry snapshot.
+  - **Lazy import** keeps the import-time cost off non-pipeline callers (legacy mode never imports `render_available_losses`).
+  - **Legacy mode unchanged**: `_run_legacy` doesn't use `load_stage_prompt`/`template_vars`. Production callers always use pipeline mode; legacy mode is back-compat only and not used by any current workflow.
+  - **Tests strategy**: rather than driving full `_run_pipeline` end-to-end (which would require building a substantial `ProposalInput` fixture and mocking the bridge), the wiring tests patch `load_stage_prompt` to capture the `template_vars` dict at the seam and assert. This isolates the L5b change cleanly and is fast (0.87 s for 9 tests).
+- **Test results**:
+  - `test_loss_awareness.py`: 9/9 (3 + 2 + 4) in 0.87 s
+  - `test_proposal_prompts.py` (L5a): 56/56 still pass
+  - `tests/unit/agent/ml_model_proposal_agent/`: 471/471 pass (462 pre-existing + 9 new)
+  - **Broader regression sweep**: `agent/ml_model_proposal_agent/` + `agent/prompt_templates/` + `agent/ml_model_implementor/` + `agent_generated/` + `agent/schemas/` = **943/943 pass in 1.57 s**
+  - Ruff + pyright clean
+- **Gate 1 not run** — still recommended at Checkpoint L (alongside Gate 2) to amortise the real-LLM cost. A focused Gate 1 for L5 would verify the proposer LLM, given a registry with 2-3 entries, correctly picks one of the 3 branches when proposing.
 
 ### Checkpoint L — Behavioral validation
 
