@@ -698,8 +698,15 @@ def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
       4. Instantiate ``PLUGIN_LOSS_CLASS(cfg)`` and run forward with:
          - ``inputs``  = ``torch.randn(2, 256, 100, requires_grad=True)``
          - ``targets`` = ``torch.randint(0, 256, (2, 100), dtype=torch.int64)``
-      5. Assert ``loss.dim() == 0``, ``loss.requires_grad``, and
-         ``math.isfinite(loss.item())``.
+      5. Assert ``loss.dim() == 0`` and ``math.isfinite(loss.item())``.
+      6. **Run ``loss.backward()``** and assert ``inputs.grad is not None``
+         and ``torch.isfinite(inputs.grad).all()``. ``requires_grad=True`` on
+         the loss output does NOT guarantee gradient actually flows back to
+         ``inputs`` — a ``.detach()`` on inputs or mid-computation can leave
+         ``requires_grad=True`` on the final tensor while severing the graph.
+         The backward() check is the only reliable detector for this class
+         of bug, and it also surfaces NaN/Inf gradient instabilities the
+         scalar finite check cannot.
 
     Args:
         plugin_src: The assembled loss-plugin source code.
@@ -777,19 +784,44 @@ def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
                 f"expected a SCALAR (dim()==0). Reduce per-element loss to a "
                 f"scalar before returning (e.g. .mean() or .sum())."
             )
-        if not loss.requires_grad:
-            return (
-                "forward returned a tensor with requires_grad=False. The loss "
-                "must carry gradient through `inputs` so training can backprop. "
-                "Check that no torch.no_grad() block wraps the forward pass and "
-                "that `inputs` is not .detach()'d."
-            )
         try:
             value = loss.item()
         except Exception as e:
             return f"loss.item() raised: {type(e).__name__}: {e}."
         if not math.isfinite(value):
             return f"forward returned a non-finite scalar (got {value!r})."
+
+        # Run backward pass to confirm gradient actually flows back to inputs.
+        # requires_grad=True on the loss output does not guarantee this —
+        # a .detach() on inputs or mid-computation can leave requires_grad=True
+        # on the final tensor while severing the gradient graph. See
+        # IMPLEMENTOR_LOSS_REASONING_PROMPT § Gradient-flow requirement for
+        # the safe-vs-unsafe pattern distinction the LLM is shown.
+        try:
+            loss.backward()
+        except Exception as e:
+            return (
+                f"loss.backward() raised: {type(e).__name__}: {e}. "
+                "The loss graph is malformed — check for in-place ops on "
+                "leaf tensors or operations that produce non-differentiable "
+                "outputs on the main path from inputs."
+            )
+        if inputs.grad is None:
+            return (
+                f"Loss '{loss_name}': backward() ran but inputs.grad is None — "
+                "gradient does not flow back to inputs. Check for .detach() on "
+                "inputs (or on any tensor derived from inputs on the main path "
+                "to loss), or for a torch.no_grad() block wrapping the main "
+                "computational path. .detach() on weighting/masking terms is "
+                "OK; .detach() on inputs is not."
+            )
+        if not torch.isfinite(inputs.grad).all():
+            return (
+                f"Loss '{loss_name}': inputs.grad contains NaN or Inf after "
+                "backward(). Loss may be numerically unstable — check for "
+                "log(0), division by small quantities, or unbounded "
+                "exponentials in the forward pass."
+            )
 
         return None
     finally:

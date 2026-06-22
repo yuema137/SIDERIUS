@@ -208,8 +208,11 @@ class TestDummyTensorValidateLoss:
         assert "SCALAR" in err
 
     def test_no_grad_block_is_rejected(self):
-        """Wrapping the forward in torch.no_grad() detaches the graph; the
-        validator must catch this via the requires_grad check."""
+        """Wrapping the entire forward in torch.no_grad() severs the graph;
+        the validator's loss.backward() call surfaces this with a RuntimeError
+        about ``does not require grad``. (Pre-Fix-B this was caught by the
+        explicit ``loss.requires_grad`` assertion; the backward()-based
+        validator catches it via the autograd engine itself.)"""
         code = dict(GOOD_CODE)
         code["forward_body"] = (
             "        with torch.no_grad():\n            return F.cross_entropy(inputs, targets)"
@@ -217,7 +220,55 @@ class TestDummyTensorValidateLoss:
         src = _assemble_loss_plugin("ce_nograd", "x", code)
         err = _dummy_tensor_validate_loss(src, "ce_nograd")
         assert err is not None
-        assert "requires_grad" in err
+        # The RuntimeError comes from autograd: "element 0 of tensors does
+        # not require grad and does not have a grad_fn". Match on the
+        # stable substring.
+        assert "does not require grad" in err
+        assert "backward" in err.lower()
+
+    def test_inputs_detached_with_grad_carried_by_param_is_rejected(self):
+        """The precise bug Fix B was introduced to catch.
+
+        A loss that carries a learnable Parameter (so ``loss.requires_grad``
+        is True via that path) but detaches ``inputs`` from the main
+        computational path: the pre-Fix-B ``requires_grad``-only check
+        would have let this through. ``backward()`` succeeds (gradient
+        flows to the Parameter), but ``inputs.grad is None`` because the
+        graph from ``inputs`` to ``loss`` was severed by ``.detach()``.
+
+        We construct this plugin source by hand rather than via
+        ``_assemble_loss_plugin`` because the template doesn't expose a
+        slot for ``nn.Parameter`` declarations — this scenario is purely
+        a validator-regression guard, not something the LLM should be
+        able to produce."""
+        plugin_src = (
+            "import torch\n"
+            "import torch.nn as nn\n"
+            "import torch.nn.functional as F\n"
+            "from pydantic import BaseModel\n"
+            "PLUGIN_LOSS_TYPE = 'detached_with_param'\n"
+            "class _Cfg(BaseModel):\n"
+            "    pass\n"
+            "PLUGIN_LOSS_CONFIG_CLASS = _Cfg\n"
+            "class _Loss(nn.Module):\n"
+            "    def __init__(self, config):\n"
+            "        super().__init__()\n"
+            "        # Parameter forces loss.requires_grad=True via this path...\n"
+            "        self.bias = nn.Parameter(torch.zeros(1))\n"
+            "    def forward(self, inputs, targets):\n"
+            "        # ...but the CE uses inputs.detach() — bug Fix B catches.\n"
+            "        ce = F.cross_entropy(inputs.detach(), targets)\n"
+            "        return ce + 0.0 * self.bias.sum()\n"
+            "PLUGIN_LOSS_CLASS = _Loss\n"
+        )
+        err = _dummy_tensor_validate_loss(plugin_src, "detached_with_param")
+        assert err is not None
+        # The error must hit the inputs.grad is None branch (not the
+        # backward()-raised branch — backward succeeds because the bias
+        # Parameter still has a grad path).
+        assert "inputs.grad is None" in err
+        # Error message must steer the LLM toward the right fix.
+        assert ".detach()" in err
 
     def test_nan_return_is_rejected(self):
         """A loss that returns NaN must be caught (final isfinite check)."""
