@@ -1191,6 +1191,168 @@ Gate 1 isolates the implementor's loss-generation path (one LLM call, no chain m
   - Detached screens survive harness disconnects and terminal closes — verification runs against the workspace JSON artifacts when both chains exit. Monitor via `screen -r checkpoint_l_gate2` / `screen -r checkpoint_l_gate3`.
 - _Sign-off docs (`docs/checkpoint_l_sign_off.md` and `docs/checkpoint_l_gate3_sign_off.md`) pending Gate 2 + Gate 3 completion._
 
+### Issues discovered during Checkpoint L execution (2026-06-22/23)
+
+The following issues were found during Gate 1/2/3 execution and fixed before
+the final Gate 2/3 re-run. Each issue is recorded with root cause, fix, and
+commit SHA for traceability.
+
+#### I1 — Harness tmpfs exhaustion from `tee` (Gate 2 first attempt)
+**Root cause**: `tee /tmp/checkpoint_l_gate2.log` wrote a duplicate of the
+chain's verbose stdout to `/tmp`. Two parallel chains filled the harness
+task-output tmpfs in ~50 min.
+**Fix**: Removed `tee` from all gate commands. Harness capture file is
+sufficient. Added to `gate_testing_standard.md` as a mandatory rule.
+**Commit**: `b7fb000`
+
+#### I2 — HDF5 cleanup not in `try/finally` (leak on inference OOM)
+**Root cause**: `cleanup_denoised` block was in normal control flow after
+scoring. On inference OOM or scoring crash, ~80 GB (formal) / ~1.6 GB (trial)
+of denoised HDF5 files were leaked per failed attempt.
+**Fix**: Wrapped inference + scoring + result-extraction in `try:` and moved
+cleanup into a paired `finally:`. Fires on success, on `continue` from error
+handlers, and on uncaught exceptions.
+**Commit**: `a13778a`
+
+#### I3 — Formal round had no time budget (Gate 3 first run iter_002 took 2h 02m)
+**Root cause**: `force_formal_round=True` by default forces the last round to
+use the full training dataset. `--trial_time_budget_minutes 5` only caps trial
+rounds. No `--formal_time_budget_minutes` was set. Result: iter_002 round 2
+ran for 2 hours instead of the expected ~5 min.
+**Fix**: Added `--no-force_formal_round` and `--formal_time_budget_minutes 20`
+to the bash wrapper (`_chain_common.sh`) and to the canonical Gate 2/3
+commands in `gate_testing_standard.md` and this design doc.
+**Commits**: `2c9e375` (`--no-force_formal_round` wrapper), `a59cd45`
+(`--formal_time_budget_minutes` as mandatory in gate standard)
+
+#### I4 — `--ml_lit_review_enabled` not forwarded by bash wrapper
+**Root cause**: Same bash-wrapper gap pattern as I3. The flag existed in
+`run_one_iteration.py` (added in lit-review Commit 6) but `_chain_common.sh`
+never forwarded it. Gate 3's lit-review was silently disabled because the
+wrapper rejected the unknown flag.
+**Fix**: Added `--ml_lit_review_enabled` and `--no-ml_lit_review_enabled` to
+`_chain_common.sh` arg parser with default `=0` (matching the YAML default
+after I5). Forwards to `run_one_iteration.py` only when `=1`.
+**Commit**: `d96a6e5`
+
+#### I5 — `lit_review_config.yaml` default `enabled: true` silently activated lit-review for Gate 2
+**Root cause**: The default `enabled: true` in `configs/lit_review_config.yaml`
+silently activated lit-review for any chain that did not explicitly disable
+it. Gate 2 was intended as a no-lit-review baseline, so this defeated the
+"isolate the loss-inventory feature" purpose.
+**Fix**: Changed default to `enabled: false`. Operators must explicitly
+opt-in via `--ml_lit_review_enabled` (the wrapper flag from I4) or by editing
+the YAML.
+**Commit**: `7f29351`
+
+#### I6 — Rule 9 in proposer prompt did not forbid Branch B with empty registry (phantom Branch B, prompt side)
+**Root cause**: The proposer's `proposing_stage.md` Rule 9 described Branch B
+(reuse a registered custom loss) as a legal choice but did not state that it
+is illegal when the registry is empty. Combined with strong advice-file
+direction toward `loss_name="expected_value_mse"`, every proposer attempt in
+the first Gate 3 run emitted `loss_type="custom" + loss_name="expected_value_mse"
++ custom_loss_spec=None` — a phantom Branch B referencing a loss the registry
+did not contain.
+**Fix**: Added `⚠ BRANCH B CONSTRAINT` block to `proposing_stage.md`
+immediately after the Branch B description, stating that Branch B is FORBIDDEN
+when `{available_losses_block}` shows "No custom losses registered yet".
+**Commit**: `ac35b07`
+
+#### I7 — Implementor did not validate Branch B `loss_name` exists in registry (phantom Branch B, runtime side)
+**Root cause**: When `custom_loss_spec=None`, the implementor silently skipped
+loss generation. The downstream tuner planner then rewrote `loss_type="custom"`
+to `loss_type="ce"` (the silent rewrite was a SEPARATE bug, surfaced later
+during the Bug A audit — see I9). Training proceeded under cross-entropy with
+a valid-looking `denoising_score`, producing a false-positive PASS. Branch B
+happy path also never recorded `loss_provenance` (hidden defect).
+**Fix**: Implementor `run()` now raises `ValueError` if `loss_type="custom"`
+and `loss_name` is not in the registry. Also records
+`LossProvenance(action="reused")` on the happy path so downstream consumers
+have a credit-assignment trail.
+**Commit**: `ac35b07`
+
+#### I8 — Proposer agent silently dropped `custom_loss_spec` from LLM raw output (the L3 regression)
+**Root cause**: When L3 (`a2ea559`) added the `CustomLossSpec` schema to
+`ProposalOutput`, neither of the two `ProposalOutput.model_validate(...)` call
+sites in `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` was
+updated to extract `custom_loss_spec` from the LLM `raw` dict. Result: even
+when the LLM correctly emitted a fully populated `custom_loss_spec` object,
+the agent code dropped it before validation. Every Branch C intent became a
+phantom Branch B at runtime. This was the root cause of the
+"12/12 attempts emit phantom Branch B" pattern observed in the Gate 2/3 re-run.
+**Fix**: Three-layer defense — (a) add
+`"custom_loss_spec": raw.get("custom_loss_spec")` to both `model_validate`
+dicts in the proposer agent; (b) add a `model_validator` to `ProposalOutput`
+that uses `info.context` to reject phantom Branch B at schema-validation time
+when the caller provides `loss_registry_names`; (c) clarify
+`proposing_stage.md` with an explicit "Loss field shapes" table and a
+"⚠ SHAPE-CRITICAL" annotation on the JSON skeleton's `"custom_loss_spec": null`
+line.
+**Commit**: `a421192`
+
+#### I9 — Tuner planner had no registry awareness (Bug A from the Gate 2/3 re-run audit)
+**Root cause**: `PLANNER_PROMPT` in `agent/prompts.py` hardcoded
+`{ce, focal, focal_cw, smooth_l1}` as the only valid loss types via the four
+`loss_note` branches in `get_planner_user_prompt`. The LLM had no knowledge
+that `loss_type="custom"` was legal or that any custom losses existed. Result
+verified by post-Gate audit: 0/6 saved `loss_config_*.json` files used
+`loss_type="custom"` across both Gate 2 and Gate 3 in the first successful
+re-run. The custom loss plugin was generated, validated, and registered but
+never trained on — the proof-of-loop never closed.
+**Fix (L6b)**: Added `{available_losses_block}` placeholder to
+`PLANNER_PROMPT` (mirrors L5a for the proposer). Threaded
+`CapabilityRegistry` through `LLMBridge.plan` and
+`get_planner_user_prompt`. Appended a custom-loss callout to each of the
+four `loss_note` branches when the registry has entries. Tuner constructor
+now takes `capability_index_path`. When the registry is empty, the prompt is
+byte-identical to pre-L6b — preserves all snapshot tests.
+**Commit**: `cb5222b`
+
+#### I10 — `_register_plugin` did not propagate the loss plugin file (Bug B from the Gate 2/3 re-run audit)
+**Root cause**: `_register_plugin` in `workflows/model_exploration.py` copied
+the model file + description but not the loss plugin file. The implementor
+wrote the loss to `{attempt_dir}/losses/{loss_name}.py` and no subsequent
+code copied it anywhere. The sandbox set
+`SIDERIUS_LOSS_DIRS = get_loss_dir(tuning_dir, run_name) = {tuning_dir}/losses/{run_name}/`
+— a directory the workflow never populated. Per `_loss_loader.py`, the env
+var is exclusive when set (no fallback to the global default), so the
+training subprocess could never load any custom loss. This bug was hidden
+behind I9 (planner never picked custom) until the first Gate 3 iter_001
+forced custom via the BASELINE REFERENCE RULE and all 9 attempts failed
+pre-training (`aborted_fail_rounds`).
+**Fix (L6a)**: Extended `_register_plugin` with a `dest_loss_dirs` kwarg.
+When `loss_provenance.action == "generated"`, copies
+`loss_provenance.loss_file_path` to each dest as `{dest}/{loss_name}.py`.
+Call site at the workflow now passes BOTH `get_loss_dir(tuning_dir, run_name)`
+(so the sandbox finds it) AND `get_loss_dir(workspace, run_name)` (so
+resume / cross-iter Branch B reuse finds it). Mirror of the existing
+dual-dest model-plugin pattern. `action="reused"` is a no-op since the
+chain-canonical copy from the originating iter is expected to persist.
+**Commit**: `6837020`
+
+#### I11 — Advice config did not handle concurrent-run registry pollution (Finding 1 from the Gate 2/3 re-run audit)
+**Root cause**: Gate 2 and Gate 3 share the global
+`agent_generated/_capability_index.json`. In a parallel launch, Gate 2's
+iter_001 registers `expected_value_mse` first. Gate 3's iter_001 implementor
+then sees the loss already in the registry → `action="reused"` →
+`loss_file_path` points to Gate 2's workspace. Gate 3 ends up trained on
+a Gate-2-generated plugin, defeating Gate 3's purpose of validating that
+lit-review findings shape the loss design.
+
+Registry sharing itself is a deliberate feature ("don't reinvent the wheel"
+across the long-running chain), so the fix is scoped to the gate-testing
+context only.
+
+**Fix**: Added `LIT-REVIEW-DRIVEN MODE` block to
+`advice/workflow/checkpoint_l_loss_advice.json` that activates only when the
+proposer-side `## External Contributors` block contains lit-review findings
+(Gate 3 only). The block forbids Branch B reuse of `expected_value_mse` from
+the registry and requires iter_001 to emit Branch C with a fresh `loss_name`
+grounded in a finding's mechanism, citing a `source_ref` verbatim in
+`custom_loss_spec.description`. Gate 2 behavior is byte-identical to before
+the advice update.
+**Commit**: `84a3caf`
+
 ---
 
 ## Open questions
