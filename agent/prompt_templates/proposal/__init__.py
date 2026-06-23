@@ -256,15 +256,34 @@ def render_available_losses(registry) -> str:
         "by name OR **propose** a new one OR **use a built-in** loss type — "
         "see the 3-branch rule in the Rules section below.",
         "",
-        "| loss_name | source_iteration | description |",
-        "|---|---|---|",
+        "**Branch B vs Branch C judgment**: compare the formula below against "
+        "the mechanism you want to introduce. If the existing loss already "
+        "implements your intended mechanism, prefer Branch B (reuse) — adding "
+        "a near-duplicate under a new name only fragments the evidence. "
+        "Branch C is for genuinely novel mechanisms not captured below.",
+        "",
     ]
+    # L6c — subsection format (one ### block per loss). Safer than a markdown
+    # table for multi-line mathematical definitions. Description stays on a
+    # prose line (already normalised one-line by L4b); the formula gets its
+    # own fenced code block so the LLM reads it as code, not flowing prose.
     for m in metas_sorted:
-        # Collapse newlines + pipes in description so the markdown table
-        # row stays on one line. Registered descriptions are already
-        # one-line by L4b's normalisation, but defensive here.
-        desc = " ".join((m.description or "").split()).replace("|", "\\|")
+        desc = " ".join((m.description or "").split())
         source = m.source_iteration if m.source_iteration else "—"
-        lines.append(f"| `{m.name}` | {source} | {desc} |")
-    lines.append("")
+        lines.append(f"### `{m.name}` (source: {source})")
+        lines.append("")
+        lines.append(f"**Description**: {desc}")
+        # Back-compat: pre-L6c registry entries have mathematical_definition=""
+        # — render the description only and skip the Formula block. When
+        # non-empty, render the formula so the proposer can judge similarity
+        # directly against a candidate Branch C without inferring the math.
+        formula = (getattr(m, "mathematical_definition", "") or "").strip()
+        if formula:
+            lines.append("")
+            lines.append("**Formula**:")
+            lines.append("")
+            lines.append("```")
+            lines.append(formula)
+            lines.append("```")
+        lines.append("")
     return "\n".join(lines)

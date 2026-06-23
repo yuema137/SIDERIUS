@@ -775,6 +775,16 @@ def _register_plugin(
                 dest_loss = os.path.join(d, f"{loss_prov.loss_name}.py")
                 shutil.copy2(loss_prov.loss_file_path, dest_loss)
                 print(f"    Loss plugin registered → {dest_loss}")
+            # L6c — also register in-memory so in-process pre-flight
+            # (evaluate_vram_skill, evaluate_time_skill) resolves the plugin
+            # without depending on SIDERIUS_LOSS_DIRS. First dest is
+            # sufficient — same file regardless of dest. See
+            # docs/design/enable_loss_inventory.md § L6c.
+            from ml_models.loss_models_sandbox import register_loss_in_memory
+
+            _registered_loss = register_loss_in_memory(loss_dest_list[0])
+            if _registered_loss is not None:
+                print(f"    Loss '{_registered_loss}' added to in-memory LOSS_REGISTRY")
 
     if primary_plugin is None:
         # ``dest_plugin_dirs`` was empty after normalization — the copy loop
@@ -789,6 +799,146 @@ def _register_plugin(
             print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
         print(f"    Warning: could not extend registries: {e}")
+
+
+# ---------------------------------------------------------------------------
+# L6c — Loss promotion to the global library
+# ---------------------------------------------------------------------------
+
+
+def _promote_loss_to_global(impl_output) -> None:
+    """Promote a generated loss plugin to the global ``agent_generated/losses/``.
+
+    L6c — called after the iteration's tuner completes so the loss is
+    accessible to:
+
+      * Future chain iterations whose workspace may differ from this one
+        (workspaces are scratch; the global library persists across runs).
+      * Parallel chain workflows that share the global capability registry.
+      * Cross-process Branch B reuse after a chain resume from disk.
+
+    Trigger condition: ``impl_output.loss_provenance.action == "generated"``.
+    Per the design discussion (2026-06-23 L6c review), promotion fires
+    REGARDLESS of training outcome — even if the round aborted before any
+    record was scored, the implementor still produced a validated plugin
+    (dummy-tensor check passed), and keeping it accessible avoids leaking
+    the I12 failure mode to future runs. The proposer/tuner self-correct
+    via the advice file's lit-review-driven mode and the existing 3-branch
+    Rule 9 constraints.
+
+    Content-hash deduplication: before copying, compares SHA256 of the
+    source against every ``.py`` already in ``agent_generated/losses/``.
+    On match, skips promotion and logs which existing entry is the
+    duplicate. Catches the case where two iterations generate plugins
+    with different ``loss_name``s but byte-identical contents (e.g. an
+    LLM regenerating the same canonical loss).
+
+    Registry update: after promotion, the capability registry entry's
+    ``file_path`` is rewritten to the global path via
+    ``CapabilityRegistry.replace()`` so subsequent Branch B reuse and
+    cross-process resume resolve to the stable location.
+
+    Idempotency: if the destination file already exists at the exact name
+    (e.g. a parallel chain promoted first), promotion skips silently —
+    first writer wins, registry update still fires so this chain's index
+    entry points at the global path too.
+
+    No-op when ``loss_provenance is None`` (built-in loss path) or
+    ``action == "reused"`` (already promoted by the originating iteration).
+    """
+    loss_prov = getattr(impl_output, "loss_provenance", None)
+    if loss_prov is None or loss_prov.action != "generated":
+        return
+
+    from agent_generated._loss_loader import LOSSES_DIR
+    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+
+    src = loss_prov.loss_file_path
+    if not src or not os.path.isfile(src):
+        print(
+            f"  Warning: cannot promote loss '{loss_prov.loss_name}' — "
+            f"source file not found at {src}"
+        )
+        return
+
+    os.makedirs(LOSSES_DIR, exist_ok=True)
+    global_dest = os.path.join(LOSSES_DIR, f"{loss_prov.loss_name}.py")
+
+    # Content-hash dedup: scan existing global plugins for byte-identical
+    # content under a different name. Caches src hash to avoid re-reading.
+    src_hash = _sha256_file(src)
+    for fname in os.listdir(LOSSES_DIR):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        existing_path = os.path.join(LOSSES_DIR, fname)
+        if existing_path == global_dest:
+            continue  # same-name match handled by the idempotency check below
+        if _sha256_file(existing_path) == src_hash:
+            existing_name = fname[:-3]  # strip .py
+            print(
+                f"  Loss '{loss_prov.loss_name}' not promoted — identical "
+                f"content already exists as '{existing_name}' "
+                f"({global_dest} skipped)."
+            )
+            return
+
+    if os.path.exists(global_dest):
+        print(
+            f"  Loss '{loss_prov.loss_name}' already at global path "
+            f"{global_dest} (idempotent skip)."
+        )
+    else:
+        shutil.copy2(src, global_dest)
+        print(f"  Promoted loss '{loss_prov.loss_name}' → {global_dest}")
+
+    # Update the capability registry entry to point at the stable global path
+    # so future chain runs and parallel workflows resolve the loss even after
+    # this run's workspace is cleaned. Uses the default index location —
+    # callers that override capability_index_path on agents do so for tests
+    # only; production runs share the canonical index.
+    try:
+        registry = CapabilityRegistry()
+        existing = next(
+            (m for m in registry.list(capability_type="loss") if m.name == loss_prov.loss_name),
+            None,
+        )
+        if existing is None:
+            print(
+                f"  Warning: loss '{loss_prov.loss_name}' is not in the "
+                f"capability index — registry not updated. Promotion file "
+                f"copy is preserved at {global_dest}."
+            )
+            return
+        promoted_meta = CapabilityMetadata(
+            name=existing.name,
+            capability_type=existing.capability_type,
+            file_path=global_dest,
+            created_at=existing.created_at,
+            source_iteration=existing.source_iteration,
+            description=existing.description,
+        )
+        registry.replace(promoted_meta)
+        print(f"  Updated registry entry '{loss_prov.loss_name}' file_path → {global_dest}")
+    except Exception as e:
+        # Registry update failure is non-fatal — the global copy is still
+        # discoverable via _resolve_loss_dirs() union mode, just not via the
+        # registry's file_path field. Log and continue.
+        print(f"  Warning: could not update registry for '{loss_prov.loss_name}': {e}")
+
+
+def _sha256_file(path: str) -> str:
+    """Return SHA256 hex digest of a file's contents.
+
+    Used by ``_promote_loss_to_global`` for content-based dedup of byte-
+    identical loss plugins generated under different names.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1179,16 @@ def run_workflow(
 
     print(f"\n{'=' * 60}")
     print("  SIDERIUS Model Exploration Workflow")
+    # L6c — preload promoted losses into the in-memory LOSS_REGISTRY so
+    # cross-process Branch B reuse (chain resume after restart) resolves
+    # without depending on SIDERIUS_LOSS_DIRS. Safe to call when
+    # agent_generated/losses/ is empty (returns []). See
+    # docs/design/enable_loss_inventory.md § L6c.
+    from ml_models.loss_models_sandbox import preload_global_losses
+
+    _preloaded = preload_global_losses()
+    if _preloaded:
+        print(f"  Preloaded {len(_preloaded)} global loss plugin(s): {sorted(_preloaded)}")
     print(f"  Started       : {started_at}")
     if source_paths is not None:
         print(f"  Source paths  : {len(source_paths)} files")
@@ -1698,6 +1858,15 @@ def run_workflow(
         _bind_iter_context(_tune_agent)
         tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
+
+        # L6c — promote the iter's generated loss (if any) to the global
+        # agent_generated/losses/ library. Fires once per iter, regardless
+        # of training outcome — the implementor produced a validated plugin
+        # even when the tuner failed to score it, and promoting makes the
+        # plugin reachable for future Branch B reuse + cross-process resume.
+        # No-op for built-in / reused losses (handled inside the helper).
+        # See docs/design/enable_loss_inventory.md § L6c.
+        _promote_loss_to_global(impl_output)
         # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
         # auto-evicts the oldest entry so the next iteration's
         # local_full_context call sees only the most recent 3.

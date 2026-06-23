@@ -275,3 +275,99 @@ class TestAtomicWrite:
         # Still: at least some writes must have landed (otherwise the
         # test isn't actually exercising the write path).
         assert len(raw) >= 1
+
+
+# ---------------------------------------------------------------------------
+# L6c — CapabilityRegistry.replace
+# ---------------------------------------------------------------------------
+
+
+class TestCapabilityRegistryReplace:
+    def _make_loss_metadata(self, name: str, file_path: str):
+        from agent_generated._registry import CapabilityMetadata
+
+        return CapabilityMetadata(
+            name=name,
+            capability_type="loss",
+            file_path=file_path,
+            created_at="2026-06-23T00:00:00+00:00",
+            source_iteration="iter_001",
+            description="placeholder",
+        )
+
+    def test_replace_overwrites_file_path(self, tmp_path):
+        """L6c — replace() updates an existing row's file_path in place."""
+        from agent_generated._registry import CapabilityRegistry
+
+        registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
+        original = self._make_loss_metadata("foo", "/tmp/old/foo.py")
+        registry.register(original)
+
+        updated = self._make_loss_metadata("foo", "/global/agent_generated/losses/foo.py")
+        registry.replace(updated)
+
+        entries = registry.list(capability_type="loss")
+        assert len(entries) == 1
+        assert entries[0].file_path == "/global/agent_generated/losses/foo.py"
+        assert entries[0].name == "foo"
+        assert entries[0].source_iteration == "iter_001"  # preserved
+
+    def test_replace_missing_raises(self, tmp_path):
+        """L6c — replace() on a non-existent (name, type) pair raises
+        ValueError instead of silently inserting."""
+        from agent_generated._registry import CapabilityRegistry
+
+        registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
+        ghost = self._make_loss_metadata("ghost", "/nowhere.py")
+        with pytest.raises(ValueError, match="Cannot replace"):
+            registry.replace(ghost)
+
+    def test_replace_does_not_touch_other_rows(self, tmp_path):
+        """L6c — replace() preserves siblings; only the (name, type) match
+        is rewritten."""
+        from agent_generated._registry import CapabilityRegistry
+
+        registry = CapabilityRegistry(index_path=str(tmp_path / "_capability_index.json"))
+        a = self._make_loss_metadata("a", "/old/a.py")
+        b = self._make_loss_metadata("b", "/old/b.py")
+        registry.register(a)
+        registry.register(b)
+
+        updated_a = self._make_loss_metadata("a", "/global/a.py")
+        registry.replace(updated_a)
+
+        entries = {m.name: m.file_path for m in registry.list(capability_type="loss")}
+        assert entries == {"a": "/global/a.py", "b": "/old/b.py"}
+
+
+class TestCapabilityMetadataMathematicalDefinition:
+    def test_capability_metadata_mathematical_definition_default_empty(self):
+        """L6c — ``mathematical_definition`` is optional with default empty
+        string so pre-L6c registry rows (no such field) still validate."""
+        from agent_generated._registry import CapabilityMetadata
+
+        meta = CapabilityMetadata(
+            name="x",
+            capability_type="loss",
+            file_path="/tmp/x.py",
+            created_at="2026-06-23T00:00:00+00:00",
+        )
+        assert meta.mathematical_definition == ""
+
+    def test_capability_metadata_mathematical_definition_round_trip(self):
+        """L6c — when set explicitly, the formula round-trips through
+        model_dump/model_validate without loss."""
+        from agent_generated._registry import CapabilityMetadata
+
+        formula = "loss = mean((soft_pred - y)^2)"
+        meta = CapabilityMetadata(
+            name="x",
+            capability_type="loss",
+            file_path="/tmp/x.py",
+            created_at="2026-06-23T00:00:00+00:00",
+            mathematical_definition=formula,
+        )
+        raw = meta.model_dump()
+        assert raw["mathematical_definition"] == formula
+        rebuilt = CapabilityMetadata.model_validate(raw)
+        assert rebuilt.mathematical_definition == formula

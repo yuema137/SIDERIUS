@@ -191,14 +191,23 @@ class TestLoadLossPluginByName:
 
 
 class TestEnvVarResolution:
-    def test_env_var_set_overrides_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_env_var_set_unions_with_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """L6c — union mode. Env-var dirs come FIRST followed by the global
+        LOSSES_DIR. Pre-L6c this was an EXCLUSIVE override (env-only). The
+        union ensures in-process pre-flight and subprocesses both see
+        promoted losses, while workspace dirs still win for in-flight
+        Branch C generated this run."""
         target = tmp_path / "alt_losses"
         target.mkdir()
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(target))
         dirs = _resolve_loss_dirs()
-        assert dirs == [str(target)]
-        # Verify the default LOSSES_DIR is NOT in the list (env var is exclusive).
-        assert _loss_loader.LOSSES_DIR not in dirs
+        assert dirs == [str(target), _loss_loader.LOSSES_DIR]
+        # Env-var dir is first (highest priority for in-flight losses).
+        assert dirs[0] == str(target)
+        # Global LOSSES_DIR is appended for cross-process Branch B reuse.
+        assert dirs[-1] == _loss_loader.LOSSES_DIR
 
     def test_env_var_unset_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
@@ -211,14 +220,16 @@ class TestEnvVarResolution:
         assert dirs == [_loss_loader.LOSSES_DIR]
 
     def test_env_var_pathsep_separated_list_parses_correctly(self, monkeypatch: pytest.MonkeyPatch):
+        """L6c union mode: env-var dirs (parsed) FIRST, global LOSSES_DIR LAST."""
         joined = os.pathsep.join(["/a", "/b", "/c"])
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", joined)
-        assert _resolve_loss_dirs() == ["/a", "/b", "/c"]
+        assert _resolve_loss_dirs() == ["/a", "/b", "/c", _loss_loader.LOSSES_DIR]
 
     def test_env_var_with_empty_entries_filters_them(self, monkeypatch: pytest.MonkeyPatch):
-        # Shell-composed paths like ``:/a:/b:`` should produce ["/a", "/b"].
+        """Shell-composed paths like ``:/a:/b:`` produce ["/a", "/b"] for the
+        env portion, then the global LOSSES_DIR is appended (L6c union)."""
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", os.pathsep.join(["", "/a", "", "/b", ""]))
-        assert _resolve_loss_dirs() == ["/a", "/b"]
+        assert _resolve_loss_dirs() == ["/a", "/b", _loss_loader.LOSSES_DIR]
 
     def test_loader_isolates_model_dir_misuse(self, loss_dir: Path, capsys: pytest.CaptureFixture):
         """When SIDERIUS_LOSS_DIRS points at a dir containing MODEL ``.py``

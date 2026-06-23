@@ -111,12 +111,20 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
 def _resolve_loss_dirs() -> list[str]:
     """Return the ordered list of directories to scan for loss plugins.
 
+    L6c — **union mode**. When ``SIDERIUS_LOSS_DIRS`` is set, returns the
+    env-var dirs FIRST followed by the global ``LOSSES_DIR`` as a union.
+    Workspace dirs (set only for training subprocesses) win for in-flight
+    Branch C generated this run; the global default catches promoted
+    losses from prior runs for cross-process Branch B reuse.
+
     Priority:
-      1. ``SIDERIUS_LOSS_DIRS`` env var — ``os.pathsep``-separated list of
-         directory paths. Per-run mode: scans exactly those directories,
-         does NOT fall back to ``LOSSES_DIR``.
-      2. ``[LOSSES_DIR]`` — legacy global-dir mode. Back-compat default when
-         the env var is unset or empty.
+      1. ``SIDERIUS_LOSS_DIRS`` env var entries (workspace-scoped), in order
+      2. ``LOSSES_DIR`` (``agent_generated/losses/``) — global library of
+         promoted losses, scanned regardless of the env var
+
+    When the env var is unset / empty, returns just ``[LOSSES_DIR]`` — the
+    pre-L6c default behavior for callers that never set the env (e.g. unit
+    tests, in-process pre-flight before any L6a copy has fired).
 
     Whitespace-only or empty entries in the env var are filtered out so
     ``SIDERIUS_LOSS_DIRS=":dir_a::dir_b:"`` resolves to ``["dir_a", "dir_b"]``,
@@ -124,8 +132,31 @@ def _resolve_loss_dirs() -> list[str]:
     """
     env = os.environ.get(_LOSS_DIRS_ENV_VAR, "").strip()
     if env:
-        return [p for p in env.split(os.pathsep) if p.strip()]
+        env_dirs = [p for p in env.split(os.pathsep) if p.strip()]
+        # L6c union: workspace dirs first, global last. Global is appended
+        # even when env_dirs is non-empty so promoted losses remain visible
+        # to subprocess callers.
+        return [*env_dirs, LOSSES_DIR]
     return [LOSSES_DIR]
+
+
+def load_loss_plugin_from_path(plugin_path: str) -> dict[str, Any] | None:
+    """Load a loss plugin from an explicit file path (no name search).
+
+    Thin public wrapper around :func:`_load_loss_plugin`, exposed as a
+    helper for L6c's ``register_loss_in_memory`` and ``preload_global_losses``
+    which need to register specific files into the in-memory ``LOSS_REGISTRY``
+    without scanning directories.
+
+    Args:
+        plugin_path: Absolute path to the loss plugin ``.py`` file.
+
+    Returns:
+        Dict with keys ``"loss_type"``, ``"config_class"``, ``"loss_class"``
+        on success. ``None`` when the file can't be loaded or fails the
+        required-attribute check (errors are logged by ``_load_loss_plugin``).
+    """
+    return _load_loss_plugin(plugin_path)
 
 
 def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:

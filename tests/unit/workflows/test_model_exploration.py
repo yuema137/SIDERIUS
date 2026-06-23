@@ -1586,3 +1586,180 @@ class TestOrchestrationParamForwarding:
             degenerate_penalty_score=-2.5,
         )
         assert tune_input.degenerate_penalty_score == -2.5
+
+
+# ---------------------------------------------------------------------------
+# L6c — _promote_loss_to_global
+# ---------------------------------------------------------------------------
+#
+# Verifies the promotion helper added in L6c: copy from workspace to
+# agent_generated/losses/, content-hash dedup, registry file_path update,
+# idempotency, and the action="reused" / built-in / missing-source no-op
+# paths. The autouse fixture patches LOSSES_DIR to a tmp dir + clears the
+# in-memory LOSS_REGISTRY so tests don't pollute the canonical library.
+
+
+_L6C_PROMO_PLUGIN_SRC_A = """
+import torch
+import torch.nn as nn
+from pydantic import BaseModel
+
+
+class _PromoCfg(BaseModel):
+    pass
+
+
+class _PromoLoss(nn.Module):
+    def __init__(self, config: _PromoCfg) -> None:
+        super().__init__()
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return inputs.mean()
+
+
+PLUGIN_LOSS_TYPE = "promo_loss_a"
+PLUGIN_LOSS_CONFIG_CLASS = _PromoCfg
+PLUGIN_LOSS_CLASS = _PromoLoss
+"""
+
+_L6C_PROMO_PLUGIN_SRC_B_DIFF_NAME_SAME_CONTENT = _L6C_PROMO_PLUGIN_SRC_A.replace(
+    "promo_loss_a", "promo_loss_b"
+)
+# Note: replacing the PLUGIN_LOSS_TYPE string changes file content, so
+# byte-identical dedup needs the SAME content under a DIFFERENT FILE NAME.
+# We achieve this by NOT changing the PLUGIN_LOSS_TYPE — same content, just
+# saved under a different .py file name.
+
+
+def _make_impl_output_with_loss_provenance(tmp_path, loss_name="promo_loss_a", action="generated"):
+    """Build a minimal ImplementorOutput-shaped object with a real loss file
+    on disk for _promote_loss_to_global to consume."""
+    from agent.schemas.implementor import ImplementorOutput, LossProvenance
+
+    loss_file = tmp_path / f"{loss_name}.py"
+    loss_file.write_text(_L6C_PROMO_PLUGIN_SRC_A)
+    model_file = tmp_path / "stub_model.py"
+    model_file.write_text(
+        "PLUGIN_MODEL_TYPE='stub'\nclass PLUGIN_CONFIG_CLASS: ...\nclass PLUGIN_MODEL_CLASS: ...\n"
+    )
+    test_file = tmp_path / "test_stub.py"
+    test_file.write_text("def test_noop(): pass\n")
+    desc_dir = tmp_path / "stub"
+    desc_dir.mkdir(exist_ok=True)
+    desc_file = desc_dir / "description.md"
+    desc_file.write_text("# stub\n")
+
+    impl = ImplementorOutput(
+        model_type="stub",
+        model_file_path=str(model_file),
+        test_file_path=str(test_file),
+        description_file_path=str(desc_file),
+        config_fields={},
+        model_description="x",
+        mathematical_definition="x",
+        loss_provenance=LossProvenance(
+            loss_name=loss_name,
+            action=action,
+            source_iteration="iter_001",
+            loss_file_path=str(loss_file),
+            dummy_tensor_validated=True,
+        ),
+    )
+    return impl
+
+
+@pytest.fixture
+def l6c_global_losses_dir(tmp_path, monkeypatch):
+    """Redirect LOSSES_DIR to tmp_path/global_losses for promotion tests."""
+    from agent_generated import _loss_loader
+
+    target = tmp_path / "global_losses"
+    target.mkdir()
+    monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(target))
+    return target
+
+
+class TestL6cPromoteLossToGlobal:
+    def test_promotes_generated_loss(self, tmp_path, l6c_global_losses_dir):
+        """L6c — _promote_loss_to_global copies the loss .py from the
+        workspace-scoped path to the global LOSSES_DIR."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws)
+        _promote_loss_to_global(impl)
+        assert (l6c_global_losses_dir / "promo_loss_a.py").is_file()
+
+    def test_skips_reused(self, tmp_path, l6c_global_losses_dir):
+        """L6c — action='reused' is a no-op (already promoted by the
+        originating iteration)."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws, action="reused")
+        _promote_loss_to_global(impl)
+        # The source file exists in ws but nothing should land in global
+        assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
+
+    def test_skips_when_loss_provenance_none(self, tmp_path, l6c_global_losses_dir):
+        """L6c — None provenance (built-in loss path) is a no-op."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        # Build an impl_output with loss_provenance=None
+        class _FakeImpl:
+            loss_provenance = None
+
+        _promote_loss_to_global(_FakeImpl())  # must not raise
+        assert list(l6c_global_losses_dir.iterdir()) == []
+
+    def test_idempotent_when_dest_exists(self, tmp_path, l6c_global_losses_dir, capsys):
+        """L6c — calling promote twice for the same loss only writes once
+        and the second call logs 'idempotent skip'."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws)
+        _promote_loss_to_global(impl)
+        capsys.readouterr()  # drain
+        _promote_loss_to_global(impl)
+        captured = capsys.readouterr()
+        assert "idempotent skip" in captured.out.lower() or "already at global path" in captured.out
+
+    def test_skips_when_source_missing(self, tmp_path, l6c_global_losses_dir, capsys):
+        """L6c — missing source file is a soft warning, not a raise."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws)
+        # Delete the source after constructing impl
+        os.remove(impl.loss_provenance.loss_file_path)
+        _promote_loss_to_global(impl)
+        captured = capsys.readouterr()
+        assert "source file not found" in captured.out.lower()
+        assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
+
+    def test_promote_skips_identical_content(self, tmp_path, l6c_global_losses_dir, capsys):
+        """L6c — SHA256 content-hash dedup. If a file with the same content
+        already exists under a different name, promotion skips with a
+        warning naming the existing duplicate."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        # Pre-seed the global library with the same content under a different filename
+        global_existing = l6c_global_losses_dir / "promo_loss_b.py"
+        global_existing.write_text(_L6C_PROMO_PLUGIN_SRC_A)
+        # Now try to promote a "new" loss with byte-identical content
+        impl = _make_impl_output_with_loss_provenance(ws, loss_name="promo_loss_a")
+        _promote_loss_to_global(impl)
+        captured = capsys.readouterr()
+        assert "identical content already exists" in captured.out.lower()
+        assert "promo_loss_b" in captured.out
+        # The new-name file MUST NOT have been copied
+        assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
+        # The existing-name file is untouched
+        assert global_existing.read_text() == _L6C_PROMO_PLUGIN_SRC_A

@@ -1420,6 +1420,10 @@ class MLModelImplementor:
                 created_at=datetime.now(UTC).isoformat(),
                 source_iteration=source_iteration,
                 description=registry_description,
+                # L6c — persist the formula so the proposer's
+                # {available_losses_block} can render it for
+                # semantic-similarity judgment (Branch B vs Branch C).
+                mathematical_definition=spec.mathematical_definition,
             )
         )
         print(f"✅ Registered    → loss '{loss_name}' (source={source_iteration})")

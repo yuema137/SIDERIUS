@@ -185,12 +185,17 @@ class TestModeFilesRedirectSynthesis:
 class _StubMeta:
     """Duck-typed CapabilityMetadata-shaped stub for render_available_losses
     tests. Avoids standing up a tmp JSON index when we only want to inspect
-    rendering behaviour."""
+    rendering behaviour.
+
+    L6c — ``mathematical_definition`` added with default empty so existing
+    test constructors that don't set it keep producing description-only
+    rendering (back-compat path)."""
 
     name: str
     description: str
     created_at: str
     source_iteration: str | None = None
+    mathematical_definition: str = ""
 
 
 class _StubRegistry:
@@ -216,7 +221,10 @@ class TestRenderAvailableLosses:
         assert "No custom losses registered" in out
         assert "built-in" in out
 
-    def test_single_entry_renders_table_row(self):
+    def test_single_entry_renders_subsection(self):
+        """L6c — output uses ``### name (source: iter_N)`` subsection format
+        with a ``**Description**:`` line. Replaces the pre-L6c markdown table
+        (broke on multi-line mathematical_definition formulas)."""
         registry = _StubRegistry(
             [
                 _StubMeta(
@@ -229,8 +237,8 @@ class TestRenderAvailableLosses:
         )
         out = render_available_losses(registry)
         assert "## Available custom losses" in out
-        assert "| loss_name | source_iteration | description |" in out
-        assert "| `snr_weighted_mse` | iter_005 | SNR-weighted MSE" in out
+        assert "### `snr_weighted_mse` (source: iter_005)" in out
+        assert "**Description**: SNR-weighted MSE" in out
 
     def test_multi_entries_sorted_most_recent_first(self):
         """Order MUST be descending by created_at — the design doc says the
@@ -285,7 +293,8 @@ class TestRenderAvailableLosses:
     def test_none_source_iteration_renders_as_dash(self):
         """Hand-curated losses seeded into the registry have
         source_iteration=None per CapabilityMetadata. The rendering must
-        not show 'None' as a table cell — use an em-dash placeholder."""
+        not show 'None' — use an em-dash placeholder in the subsection
+        header instead."""
         registry = _StubRegistry(
             [
                 _StubMeta(
@@ -297,32 +306,14 @@ class TestRenderAvailableLosses:
             ]
         )
         out = render_available_losses(registry)
-        assert "| `hand_curated` | — |" in out
+        assert "### `hand_curated` (source: —)" in out
         assert "None" not in out
-
-    def test_pipe_in_description_escaped(self):
-        """A pipe in the description would break the markdown table row;
-        the renderer must escape it."""
-        registry = _StubRegistry(
-            [
-                _StubMeta(
-                    name="x",
-                    description="alpha | beta",
-                    created_at="2026-06-22T00:00:00+00:00",
-                    source_iteration="iter_001",
-                )
-            ]
-        )
-        out = render_available_losses(registry)
-        # The literal "alpha | beta" must NOT appear (would break the row);
-        # the escaped form does.
-        assert "alpha | beta" not in out
-        assert "alpha \\| beta" in out
 
     def test_newlines_in_description_collapsed(self):
         """A multi-line description in the registry must collapse to one
-        line in the table row (defensive — L4b also collapses at register
-        time, but a hand-edited index could slip multi-line content in)."""
+        line in the rendered output (defensive — L4b also collapses at
+        register time, but a hand-edited index could slip multi-line
+        content in)."""
         registry = _StubRegistry(
             [
                 _StubMeta(
@@ -335,6 +326,54 @@ class TestRenderAvailableLosses:
         )
         out = render_available_losses(registry)
         assert "line one line two line three" in out
+
+    def test_render_available_losses_shows_formula(self):
+        """L6c — when a registry entry has a non-empty
+        mathematical_definition, render it inside a fenced code block under
+        a **Formula**: heading so the proposer can judge semantic similarity."""
+        registry = _StubRegistry(
+            [
+                _StubMeta(
+                    name="expected_value_mse",
+                    description="Soft-expected-value MSE for ordinal classes.",
+                    created_at="2026-06-22T00:00:00+00:00",
+                    source_iteration="iter_001",
+                    mathematical_definition=(
+                        "soft_pred = sum_c c * softmax(inputs)[:, c, :]; "
+                        "loss = mean((soft_pred - y)^2)"
+                    ),
+                )
+            ]
+        )
+        out = render_available_losses(registry)
+        assert "**Formula**:" in out
+        assert "soft_pred = sum_c c * softmax(inputs)" in out
+        assert "loss = mean((soft_pred - y)^2)" in out
+        # Formula is fenced as a code block so the LLM reads it as code, not prose.
+        assert "```" in out
+
+    def test_render_available_losses_skips_formula_when_empty(self):
+        """L6c back-compat — pre-L6c registry entries have
+        mathematical_definition="" and must render as description-only
+        (no **Formula**: section, no empty code fence) so existing
+        registries don't degrade."""
+        registry = _StubRegistry(
+            [
+                _StubMeta(
+                    name="legacy_loss",
+                    description="Pre-L6c entry without a stored formula.",
+                    created_at="2026-06-22T00:00:00+00:00",
+                    source_iteration="iter_001",
+                    mathematical_definition="",
+                )
+            ]
+        )
+        out = render_available_losses(registry)
+        assert "### `legacy_loss`" in out
+        assert "**Description**: Pre-L6c entry" in out
+        assert "**Formula**:" not in out
+        # No empty code-fence pair either.
+        assert "```\n\n```" not in out
 
 
 # ---------------------------------------------------------------------------

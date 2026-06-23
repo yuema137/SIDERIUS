@@ -309,10 +309,14 @@ class TestGetCriterionCustom:
         assert loss.item() >= 0.0
 
     def test_missing_plugin_raises_value_error(self, loss_dir: Path):
-        """When the loss_name doesn't match any plugin in SIDERIUS_LOSS_DIRS,
-        get_criterion raises ValueError with the documented remediation text."""
+        """When the loss_name doesn't match any plugin in LOSS_REGISTRY OR
+        SIDERIUS_LOSS_DIRS, get_criterion raises ValueError with the
+        documented remediation text. L6c — message references both surfaces."""
         cfg = LossConfig(loss_type="custom", loss_name="nonexistent_loss")
-        with pytest.raises(ValueError, match="not found in agent_generated/losses/"):
+        with pytest.raises(
+            ValueError,
+            match=r"not found in LOSS_REGISTRY or agent_generated/losses/",
+        ):
             get_criterion(cfg)
 
     def test_missing_plugin_error_mentions_implementor_and_env_var(self, loss_dir: Path):
@@ -351,3 +355,232 @@ class TestBuiltinsStillWorkAfterCustomBranch:
         criterion = get_criterion(cfg)
         loss = criterion(regression_inputs, regression_targets)
         assert loss.item() >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# L6c — In-memory LOSS_REGISTRY + filesystem fallback + preload
+# ---------------------------------------------------------------------------
+#
+# These tests verify the two-tier lookup added in L6c:
+#   1. LOSS_REGISTRY (populated by workflow._register_plugin + preload_global_losses)
+#   2. Filesystem fallback via _resolve_loss_dirs union mode
+# plus register_loss_in_memory, preload_global_losses, and the idempotency
+# warning when re-registering a different class under the same loss_type.
+
+
+_L6C_PLUGIN_SRC_FOR_FOO = """
+import torch
+import torch.nn as nn
+from pydantic import BaseModel
+
+
+class _FooLossConfig(BaseModel):
+    pass
+
+
+class _FooLoss(nn.Module):
+    def __init__(self, config: _FooLossConfig) -> None:
+        super().__init__()
+        self.config = config
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        return inputs.mean()
+
+
+PLUGIN_LOSS_TYPE = "foo_loss_l6c"
+PLUGIN_LOSS_CONFIG_CLASS = _FooLossConfig
+PLUGIN_LOSS_CLASS = _FooLoss
+"""
+
+_L6C_PLUGIN_SRC_FOR_BAR = (
+    _L6C_PLUGIN_SRC_FOR_FOO.replace("foo_loss_l6c", "bar_loss_l6c")
+    .replace("_FooLoss", "_BarLoss")
+    .replace("_FooLossConfig", "_BarLossConfig")
+)
+
+
+@pytest.fixture(autouse=True)
+def _l6c_clear_loss_registry():
+    """Autouse fixture (L6c) — clear LOSS_REGISTRY between tests so module-
+    level state doesn't pollute downstream tests. Restores any pre-existing
+    entries on teardown for safety, though in practice the registry should
+    be empty at unit-test boot."""
+    from ml_models.loss_models_sandbox import LOSS_CONFIG_REGISTRY, LOSS_REGISTRY
+
+    saved_loss = dict(LOSS_REGISTRY)
+    saved_cfg = dict(LOSS_CONFIG_REGISTRY)
+    LOSS_REGISTRY.clear()
+    LOSS_CONFIG_REGISTRY.clear()
+    yield
+    LOSS_REGISTRY.clear()
+    LOSS_CONFIG_REGISTRY.clear()
+    LOSS_REGISTRY.update(saved_loss)
+    LOSS_CONFIG_REGISTRY.update(saved_cfg)
+
+
+class TestL6cResolveLossDirsUnion:
+    def test_union_mode_with_env_var(self, tmp_path, monkeypatch):
+        """With SIDERIUS_LOSS_DIRS set, _resolve_loss_dirs returns env-var
+        dirs FIRST followed by the global LOSSES_DIR as a union."""
+        from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
+
+        ws_dir = tmp_path / "ws_losses"
+        ws_dir.mkdir()
+        monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(ws_dir))
+        result = _resolve_loss_dirs()
+        assert result == [str(ws_dir), LOSSES_DIR]
+
+    def test_no_env_returns_only_global(self, monkeypatch):
+        """With SIDERIUS_LOSS_DIRS unset, _resolve_loss_dirs returns just
+        [LOSSES_DIR] — unchanged pre-L6c behavior for that branch."""
+        from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
+
+        monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
+        result = _resolve_loss_dirs()
+        assert result == [LOSSES_DIR]
+
+
+class TestL6cRegisterLossInMemory:
+    def test_register_populates_registry(self, tmp_path):
+        """register_loss_in_memory loads a real plugin .py and inserts the
+        loss_class + config_class into LOSS_REGISTRY / LOSS_CONFIG_REGISTRY."""
+        from ml_models.loss_models_sandbox import (
+            LOSS_CONFIG_REGISTRY,
+            LOSS_REGISTRY,
+            register_loss_in_memory,
+        )
+
+        plugin_path = tmp_path / "foo_loss_l6c.py"
+        plugin_path.write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        loss_type = register_loss_in_memory(str(plugin_path))
+        assert loss_type == "foo_loss_l6c"
+        assert "foo_loss_l6c" in LOSS_REGISTRY
+        assert "foo_loss_l6c" in LOSS_CONFIG_REGISTRY
+
+    def test_register_unloadable_returns_none(self, tmp_path):
+        """A .py with missing PLUGIN_* attributes is rejected by the loader
+        and register_loss_in_memory returns None without raising."""
+        from ml_models.loss_models_sandbox import LOSS_REGISTRY, register_loss_in_memory
+
+        plugin_path = tmp_path / "broken.py"
+        plugin_path.write_text("# no PLUGIN_LOSS_TYPE here\n")
+        result = register_loss_in_memory(str(plugin_path))
+        assert result is None
+        assert "broken" not in LOSS_REGISTRY
+
+    def test_idempotency_warning_on_class_mismatch(self, tmp_path, capsys):
+        """Re-registering the same loss_type with a different class
+        identity (different __qualname__) emits a warning to stdout."""
+        from ml_models.loss_models_sandbox import register_loss_in_memory
+
+        # First registration
+        plugin_a = tmp_path / "first.py"
+        plugin_a.write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        register_loss_in_memory(str(plugin_a))
+        capsys.readouterr()  # drain
+
+        # Second registration with same loss_type but a different file path
+        # (different module → different class identity). Build a variant by
+        # renaming the class inside the source.
+        plugin_b = tmp_path / "second.py"
+        plugin_b.write_text(_L6C_PLUGIN_SRC_FOR_FOO.replace("_FooLoss", "_FooLossV2"))
+        register_loss_in_memory(str(plugin_b))
+        captured = capsys.readouterr()
+        assert "re-registering" in captured.out.lower()
+        assert "foo_loss_l6c" in captured.out
+
+
+class TestL6cLoadCustomLossUsesInMemoryFirst:
+    def test_in_memory_hit_skips_filesystem(self):
+        """When LOSS_REGISTRY contains the name, _load_custom_loss uses it
+        and never touches the filesystem."""
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        from ml_models.loss_models_sandbox import (
+            LOSS_CONFIG_REGISTRY,
+            LOSS_REGISTRY,
+            _load_custom_loss,
+        )
+
+        class _StubCfg(BaseModel):
+            pass
+
+        class _StubLoss(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                self.cfg = cfg
+
+            def forward(self, inputs, targets):
+                return inputs.mean()
+
+        LOSS_REGISTRY["stub_l6c"] = _StubLoss
+        LOSS_CONFIG_REGISTRY["stub_l6c"] = _StubCfg
+        loss = _load_custom_loss("stub_l6c")
+        assert isinstance(loss, _StubLoss)
+        # Forward smoke test
+        inputs = torch.randn(2, 256, 4, requires_grad=True)
+        targets = torch.zeros(2, 4, dtype=torch.long)
+        result = loss(inputs, targets)
+        assert result.dim() == 0
+
+    def test_filesystem_fallback_when_not_in_registry(self, tmp_path, monkeypatch):
+        """When LOSS_REGISTRY is empty, _load_custom_loss falls back to
+        the filesystem scan via _resolve_loss_dirs union mode."""
+        from ml_models.loss_models_sandbox import _load_custom_loss
+
+        plugin_path = tmp_path / "bar_loss_l6c.py"
+        plugin_path.write_text(_L6C_PLUGIN_SRC_FOR_BAR)
+        monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(tmp_path))
+        loss = _load_custom_loss("bar_loss_l6c")
+        assert loss is not None
+        assert hasattr(loss, "forward")
+
+    def test_missing_error_lists_registry_contents(self):
+        """The post-L6c ValueError message lists currently-registered
+        names so operators can spot typos at a glance."""
+        from ml_models.loss_models_sandbox import LOSS_REGISTRY, _load_custom_loss
+
+        # Inject one known name so the error message has something to show
+        LOSS_REGISTRY["known_loss"] = object  # type: ignore[assignment]
+        with pytest.raises(ValueError) as exc:
+            _load_custom_loss("typo_loss")
+        msg = str(exc.value)
+        assert "typo_loss" in msg
+        assert "known_loss" in msg
+        assert "LOSS_REGISTRY" in msg
+
+
+class TestL6cPreloadGlobalLosses:
+    def test_preload_loads_all_plugins(self, tmp_path, monkeypatch):
+        """preload_global_losses scans LOSSES_DIR (monkeypatched to a tmp
+        dir for isolation) and registers every valid .py."""
+        from agent_generated import _loss_loader
+        from ml_models import loss_models_sandbox
+        from ml_models.loss_models_sandbox import LOSS_REGISTRY, preload_global_losses
+
+        # Redirect LOSSES_DIR to tmp_path for this test
+        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path))
+        # Also patch the lazy import used inside preload_global_losses
+        monkeypatch.setattr(loss_models_sandbox, "__name__", loss_models_sandbox.__name__)
+
+        # Write two valid plugins + one underscore-prefixed (skipped)
+        (tmp_path / "foo_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        (tmp_path / "bar_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_BAR)
+        (tmp_path / "_template_loss.py").write_text("# should be skipped\n")
+
+        loaded = preload_global_losses()
+        assert sorted(loaded) == ["bar_loss_l6c", "foo_loss_l6c"]
+        assert "foo_loss_l6c" in LOSS_REGISTRY
+        assert "bar_loss_l6c" in LOSS_REGISTRY
+
+    def test_preload_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
+        """preload_global_losses is safe when LOSSES_DIR doesn't exist —
+        first-run / fresh-checkout case."""
+        from agent_generated import _loss_loader
+        from ml_models.loss_models_sandbox import preload_global_losses
+
+        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path / "does_not_exist"))
+        loaded = preload_global_losses()
+        assert loaded == []
