@@ -67,3 +67,7 @@ fm-agent-repo/
 # is ~/.siderius/ so this is defensive — only matters when a developer points
 # SIDERIUS_CALIBRATION_DIR at a path inside the repo tree.
 time_calibration_*.json
+
+# agent_generated runtime artifacts (registry state + generated loss plugins)
+agent_generated/_capability_index.json
+agent_generated/losses/*.py
