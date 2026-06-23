@@ -47,14 +47,29 @@ A JSON object with these fields:
   },
   "parameter_count_estimate": 1234567,
   "memo_consistency_notes": [],
-  "custom_loss_spec": null
+  "custom_loss_spec": null   // ⚠ SHAPE-CRITICAL — see "Loss field shapes" below
 }
 ```
 
-The `loss_config` slot accepts five `loss_type` values: `focal`, `focal_cw`, `ce`,
-`smooth_l1`, or `custom`. When `loss_type="custom"`, add a `loss_name` field
-(snake_case key matching a registered loss OR a new one you are proposing).
-`custom_loss_spec` is populated ONLY when proposing a NEW custom loss — see Rule 9.
+### Loss field shapes — read carefully before emitting
+
+The `loss_config.loss_type` slot accepts five values: `focal`, `focal_cw`, `ce`,
+`smooth_l1` (Branch A — built-in), or `custom` (Branch B/C). Rule 9 below gives
+the full decision tree; the table below shows ONLY the JSON shapes you must emit,
+to prevent the most common shape mistake (intending Branch C but emitting Branch B):
+
+| Branch | `loss_type`                | `loss_name`         | `custom_loss_spec`             |
+|--------|----------------------------|---------------------|--------------------------------|
+| **A**  | `"focal"` / `"focal_cw"` / `"ce"` / `"smooth_l1"` | absent              | `null`                         |
+| **B**  | `"custom"`                 | name FROM the registry table above | `null`              |
+| **C**  | `"custom"`                 | NEW snake_case name | **populated `{loss_name, description, mathematical_definition, config_fields}` object** |
+
+**If you intend Branch C, the JSON skeleton's `"custom_loss_spec": null` line is WRONG —
+you MUST replace it with a populated object whose `loss_name` exactly matches
+`baseline_config.loss_config.loss_name`. Emitting Branch C *in motivation* but
+leaving `custom_loss_spec: null` produces a phantom Branch B that the schema and
+implementor will reject; the workflow will retry but the proposer will keep
+making the same mistake unless the shape is fixed at emission time.**
 
 {recent_gate_exhaustions_block}
 

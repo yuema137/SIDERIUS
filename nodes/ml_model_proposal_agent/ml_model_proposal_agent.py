@@ -1032,7 +1032,13 @@ class MLModelProposalAgent:
                     "expert_advice": raw.get("expert_advice", {}),
                     "baseline_config": raw.get("baseline_config", {}),
                     "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                }
+                    "custom_loss_spec": raw.get("custom_loss_spec"),
+                },
+                context={
+                    "loss_registry_names": [
+                        m.name for m in self._registry.list(capability_type="loss")
+                    ]
+                },
             )
 
             factor = _run_preflight_check(inp, output)
@@ -1536,7 +1542,13 @@ class MLModelProposalAgent:
                             "proposed_discoveries": discoveries,
                             "memo_consistency_notes": raw.get("memo_consistency_notes", []),
                             "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                        }
+                            "custom_loss_spec": raw.get("custom_loss_spec"),
+                        },
+                        context={
+                            "loss_registry_names": [
+                                m.name for m in self._registry.list(capability_type="loss")
+                            ]
+                        },
                     )
                     # Citation discipline — warnings, not hard failures.
                     citation_violations = _check_citation_discipline(

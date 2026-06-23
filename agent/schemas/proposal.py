@@ -1100,3 +1100,71 @@ class ProposalOutput(BaseModel):
                 f"config selects which plugin to load at training time."
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_branch_b_registry_membership(self, info):
+        """Reject phantom Branch B at schema-validation time when caller
+        provides the loss registry as Pydantic context.
+
+        Branch B (reuse a previously-generated custom loss) is the proposer
+        choice when ``loss_type='custom'`` AND ``loss_name`` is set AND
+        ``custom_loss_spec is None``. It is only legal when ``loss_name``
+        appears in the capability registry; otherwise the implementor and
+        downstream training have no plugin to load and will fail.
+
+        Gate 2 + Gate 3 (2026-06-22) both reproduced the same failure mode:
+        the proposer LLM (gpt-5.4) emits Branch C *in intent* (motivation
+        text says "register custom_loss_spec for that loss") but the agent
+        was silently dropping ``custom_loss_spec`` from the LLM raw
+        response. Even after that extraction bug is fixed, this validator
+        catches the regression where the LLM forgets to populate
+        ``custom_loss_spec`` and emits a phantom Branch B — diagnosed *at
+        the same LLM call* so LLMBridge's schema-retry loop re-prompts
+        immediately, rather than waiting for the workflow-level retry one
+        attempt later.
+
+        Activated only when the caller passes ``context={"loss_registry_names":
+        [...]}`` to ``model_validate``. With no context (e.g. unit tests
+        building ``ProposalOutput`` directly), this is a no-op — preserving
+        back-compat with all existing fixtures.
+        """
+        if self.custom_loss_spec is not None:
+            return self  # Branch C — consistency validator above handles this.
+        loss_cfg = self.baseline_config.get("loss_config") if self.baseline_config else None
+        if not isinstance(loss_cfg, dict):
+            return self
+        if loss_cfg.get("loss_type") != "custom":
+            return self  # Branch A — built-in loss, no registry check needed.
+        loss_name = loss_cfg.get("loss_name")
+        if not loss_name:
+            raise ValueError(
+                "baseline_config['loss_config']['loss_type'] is 'custom' but "
+                "loss_name is missing or empty. Branch A (built-in) does not "
+                "use 'custom'; Branch B (reuse) requires loss_name to match a "
+                "registry entry; Branch C (new) requires both loss_name AND a "
+                "populated top-level custom_loss_spec object. Pick one."
+            )
+        ctx = (info.context or {}) if info is not None else {}
+        registry_names = ctx.get("loss_registry_names")
+        if registry_names is None:
+            return self  # No context — schema can't verify Branch B vs phantom.
+        if loss_name in registry_names:
+            return self  # Legitimate Branch B reuse.
+        # Phantom Branch B — name not in the registry.
+        registry_display = (
+            "no losses registered yet" if not registry_names else f"only {sorted(registry_names)!r}"
+        )
+        raise ValueError(
+            f"Phantom Branch B detected: loss_type='custom' + "
+            f"loss_name={loss_name!r} + custom_loss_spec=None implies you "
+            f"intend to REUSE an existing registered loss (Branch B), but "
+            f"the loss registry contains {registry_display}. This is the "
+            f"single most common LLM mistake on the loss-inventory surface — "
+            f"the typical INTENT is Branch C (generate a NEW loss), but the "
+            f"emitted SHAPE is Branch B (reuse). To fix: either (Branch C) "
+            f"populate the top-level custom_loss_spec object with loss_name="
+            f"{loss_name!r}, description, mathematical_definition, and "
+            f"config_fields; OR (Branch A) set loss_type to one of 'focal', "
+            f"'focal_cw', 'ce', 'smooth_l1' and remove loss_name. Do NOT "
+            f"submit Branch B with a loss_name that is not in the registry."
+        )
