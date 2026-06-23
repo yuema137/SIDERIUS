@@ -1164,7 +1164,11 @@ Gate 1 isolates the implementor's loss-generation path (one LLM call, no chain m
 ---
 
 **Implementation notes**:
-- _Pending Gate 1 + Gate 2 execution; will be populated after each run._
+
+- **Gate 1 — three variants PASSED (2026-06-22)**. See in-conversation report; sign-off doc TBD at full Checkpoint L close.
+- **Gate 2 first attempt killed by harness tmpfs exhaustion, not chain failure (2026-06-22)**. The chain itself was healthy (workspace 4.2 MB at end, cleanup_denoised working); the harness's task-output buffer overflowed from verbose chain stdout streaming. **Root cause is unrelated to the loss-inventory feature.**
+- **Tmpfs leak fix (2026-06-22) — `_generate_loss`-adjacent but actually in the TUNER**: post-mortem of the Gate 2 failure surfaced a real Q3-class HDF5 leak in `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`. The denoised-HDF5 cleanup block (formerly at line ~2099) was in the success path of the per-attempt loop, AFTER the inference + scoring blocks but BEFORE their `continue` statements in the error handlers. When inference returned an error or scoring raised an exception, the existing handlers `continue`d the loop and skipped cleanup, leaving ~80 GB (formal) / ~1.6 GB (trial) of denoised HDF5 files per failed attempt. Fix: wrapped the inference + scoring + result-extraction block in `try:` and moved the cleanup into a paired `finally:`. Now fires on success, on `continue` from either error handler, AND on any uncaught exception. Glob remains keyed to `exp_id` so attempts don't clobber each other. Existing tuner unit tests pass unchanged.
+- _Gate 2 re-launch + Gate 3 launch + sign-off doc pending._
 
 ---
 
