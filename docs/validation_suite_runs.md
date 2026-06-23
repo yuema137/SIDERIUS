@@ -326,3 +326,34 @@ per §10.5.a.
 `commit_plan_ml_literature_review.md` §10.5). The next §10 FULL re-run
 is the prerequisite for Checkpoint D (per §10.7) — not before then.
 Step 3 (per-node docs) resumes immediately after this commit chain.
+
+### 2026-06-22 — §10 FULL suite re-run (post-6.5a/6.5b/Commit F/loss-inventory branch)
+
+**Status**: ✅ PASS — signed off.
+
+**Context**: re-run required because most recent prior §10 run (2026-06-10) predated
+Commits 6.5b and F. Run on `feat/enable-loss-inventory` branch (lit-review code
+identical to master; only doc commits differ).
+
+**Results**:
+- Retrieved papers: 37 (7 root + 30 dynamic search, 3 rounds)
+- Findings emitted: 3 (≥2 floor satisfied)
+- Stable attractors: Mamba (0.75) + FreLE (0.90) — present in every FULL run
+- Third slot: DeepDenoiser (0.85) — 4th appearance out of 6 FULL runs to date
+
+**Findings**:
+1. `arxiv:2312.00752` (Mamba) — conf=0.75 — Replace WaveNet dilated convolutions
+   with selective SSM blocks; full-spectrum training on raw audio precedent
+2. `arxiv:1811.02695` (DeepDenoiser) — conf=0.85 — 2D-CNN on STFT with Wiener-like
+   masks; preserves waveform across all bands
+3. `arxiv:2510.25800` (FreLE) — conf=0.90 — Add Fourier-MAE loss + local-maximum
+   amplitude scaling to WaveNet training; no architectural change required
+
+**Structural assertions**: all green — three-section format, Mechanism contains LaTeX,
+Adaptation does NOT contain LaTeX (equation placement rule holds).
+
+**Equation placement**: all 3 findings compliant. Earlier stochastic violation
+(FreLE in pilot run) confirmed as LLM variance, not regression.
+
+**Closes**: §10 prerequisite re-run for lit-review Checkpoint D
+(see `docs/commit_plan_ml_literature_review.md` line 92).

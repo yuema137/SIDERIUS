@@ -89,8 +89,8 @@ commit). A commit is not "done" until both its automated test gate is green
   (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
   commit. Run log: `docs/validation_suite_runs.md`.
   - [x] **First FULL run** — completed across the 2026-06-09 + 2026-06-10 chain; FAILED under the original ≥4 floor, PASSED under the amended ≥2 floor. See `docs/validation_suite_runs.md` 2026-06-09 + 2026-06-10 entries. Floor amendment landed in `5e312ab` (§10.5 floor 4→2 + new §10.5.a stable-attractor calibration); the assertion broadness + V1/V0 example pattern-leak fixes that closed the chain landed in `9f731fe` (Noise2Noise example replacement) + `d652a3b` (equation-vs-shape discriminator).
-  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
-        the post-P proposer)
+  - [x] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
+        the post-P proposer) · signed off 2026-06-22, see `docs/validation_suite_runs.md` 2026-06-22 entry. PASS: 3 findings (Mamba 0.75 / DeepDenoiser 0.85 / FreLE 0.90), all structural assertions green, equation placement rule holds. Closes the §10 prerequisite for Checkpoint D.
 
 ---
 
