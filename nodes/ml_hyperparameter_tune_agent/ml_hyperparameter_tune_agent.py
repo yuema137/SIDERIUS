@@ -936,9 +936,28 @@ class HyperparamTuningAgent:
     work identically. Only tests inject the fakes.
     """
 
-    def __init__(self, bridge_factory=None, sandbox_factory=None):
+    def __init__(
+        self,
+        bridge_factory=None,
+        sandbox_factory=None,
+        capability_index_path: str | None = None,
+    ):
         self._bridge_factory = bridge_factory or LLMBridge
         self._sandbox_factory = sandbox_factory or TidmadSandbox
+        # L6b — loss-registry handle. The planner uses this to (a) render
+        # the AVAILABLE CUSTOM LOSSES block into PLANNER_PROMPT and (b)
+        # know whether to advertise ``loss_type="custom"`` as a legal
+        # choice in the per-architecture loss_note. ``index_path=None``
+        # defaults to ``agent_generated/_capability_index.json`` —
+        # operators can override per-run via the constructor kwarg, same
+        # pattern as MLModelProposalAgent (L5b). Built once at agent
+        # construction so all rounds in this run see a consistent
+        # snapshot; new entries the implementor adds DURING a run are
+        # picked up because ``CapabilityRegistry`` reads the file each
+        # ``list()`` call.
+        from agent_generated._registry import CapabilityRegistry
+
+        self._registry = CapabilityRegistry(index_path=capability_index_path)
         # Token-usage audit plumbing (Phase 1 Commit 4 — design doc §1.4).
         # Unlike interpreter/proposer/implementor/validator, the tuner builds
         # its bridge ("brain") lazily inside ``run()`` after the input has
@@ -1297,6 +1316,12 @@ class HyperparamTuningAgent:
                         # {TASK_DESCRIPTION} placeholder in PLANNER_PROMPT.
                         # See docs/design/enable_global_task_config.md § T4a.
                         task_description=agent_input.task_description,
+                        # L6b — loss-registry awareness. Drives both the
+                        # AVAILABLE CUSTOM LOSSES system-prompt block and
+                        # the per-architecture loss_note advertisement of
+                        # ``loss_type="custom"`` as a legal choice. See
+                        # docs/design/enable_loss_inventory.md § L6b.
+                        registry=self._registry,
                     )
 
                     # Validate LLM output into ExperimentPlan (with fallback)

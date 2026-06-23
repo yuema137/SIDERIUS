@@ -788,6 +788,8 @@ class LLMBridge:
         last_mode: str | None = None,
         score_table_md: str | None = None,
         task_description: str = "",
+        # --- L6b — tuner planner registry awareness ---
+        registry=None,
     ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
@@ -849,10 +851,23 @@ class LLMBridge:
                 Empty string is the test-fixture default; production callers
                 always pass a non-empty value.
         """
-        system_prompt = PLANNER_PROMPT.replace(
-            "{SCORE_COMPARISON_TABLE}",
-            score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
-        ).replace("{TASK_DESCRIPTION}", task_description)
+        # L6b — render the AVAILABLE CUSTOM LOSSES block. Imported lazily to
+        # avoid pulling the proposal-module helper into the bridge's import
+        # chain when registry is None (the back-compat path).
+        if registry is not None:
+            from agent.prompt_templates.proposal import render_available_losses
+
+            available_losses_block = render_available_losses(registry)
+        else:
+            available_losses_block = "No custom losses registered yet.\n"
+        system_prompt = (
+            PLANNER_PROMPT.replace(
+                "{SCORE_COMPARISON_TABLE}",
+                score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
+            )
+            .replace("{TASK_DESCRIPTION}", task_description)
+            .replace("{available_losses_block}", available_losses_block)
+        )
 
         # --- 2. Inject model description + config manual ---
         manual_context = ""
@@ -880,6 +895,8 @@ class LLMBridge:
             last_time_estimate_minutes=last_time_estimate_minutes,
             last_batch_size=last_batch_size,
             last_mode=last_mode,
+            # L6b — registry awareness in the user prompt's loss_note text
+            registry=registry,
         )
 
         # Assemble final prompt: user prompt + plugin source + checklist + description + manual.
