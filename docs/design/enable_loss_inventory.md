@@ -969,9 +969,9 @@ The script then calls `MLModelImplementor._generate_loss(inp)` with the spec and
 **Estimated cost**: ~$0.05–0.20 (gpt-5.4 dominant).
 
 **Pass criteria**:
-- [ ] Script exits 0
-- [ ] Generated loss file at `{workspace}/losses/expected_value_mse.py` exists and parses
-- [ ] `{workspace}/_capability_index.json` contains the new entry with `capability_type="loss"`, `dummy_tensor_validated=True`
+- [x] Script exits 0 — verified 3× on 2026-06-22 (`expected_value_mse`, `ordinal_ce`, `emd_ordinal`)
+- [x] Generated loss file at `{workspace}/losses/expected_value_mse.py` exists and parses — verified for all 3 variants
+- [x] `{workspace}/_capability_index.json` contains the new entry with `capability_type="loss"`, `dummy_tensor_validated=True` — verified for all 3 variants (`source_iteration=gate1`, ISO timestamps captured)
 - [ ] Generated source visually inspected and pasted into `docs/checkpoint_l_sign_off.md`
 
 ---
@@ -1167,8 +1167,14 @@ Gate 1 isolates the implementor's loss-generation path (one LLM call, no chain m
 
 - **Gate 1 — three variants PASSED (2026-06-22)**. See in-conversation report; sign-off doc TBD at full Checkpoint L close.
 - **Gate 2 first attempt killed by harness tmpfs exhaustion, not chain failure (2026-06-22)**. The chain itself was healthy (workspace 4.2 MB at end, cleanup_denoised working); the harness's task-output buffer overflowed from verbose chain stdout streaming. **Root cause is unrelated to the loss-inventory feature.**
-- **Tmpfs leak fix (2026-06-22) — `_generate_loss`-adjacent but actually in the TUNER**: post-mortem of the Gate 2 failure surfaced a real Q3-class HDF5 leak in `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`. The denoised-HDF5 cleanup block (formerly at line ~2099) was in the success path of the per-attempt loop, AFTER the inference + scoring blocks but BEFORE their `continue` statements in the error handlers. When inference returned an error or scoring raised an exception, the existing handlers `continue`d the loop and skipped cleanup, leaving ~80 GB (formal) / ~1.6 GB (trial) of denoised HDF5 files per failed attempt. Fix: wrapped the inference + scoring + result-extraction block in `try:` and moved the cleanup into a paired `finally:`. Now fires on success, on `continue` from either error handler, AND on any uncaught exception. Glob remains keyed to `exp_id` so attempts don't clobber each other. Existing tuner unit tests pass unchanged.
-- _Gate 2 re-launch + Gate 3 launch + sign-off doc pending._
+- **Tmpfs leak fix (2026-06-22, commit `a13778a`) — `_generate_loss`-adjacent but actually in the TUNER**: post-mortem of the Gate 2 failure surfaced a real Q3-class HDF5 leak in `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`. The denoised-HDF5 cleanup block (formerly at line ~2099) was in the success path of the per-attempt loop, AFTER the inference + scoring blocks but BEFORE their `continue` statements in the error handlers. When inference returned an error or scoring raised an exception, the existing handlers `continue`d the loop and skipped cleanup, leaving ~80 GB (formal) / ~1.6 GB (trial) of denoised HDF5 files per failed attempt. Fix: wrapped the inference + scoring + result-extraction block in `try:` and moved the cleanup into a paired `finally:`. Now fires on success, on `continue` from either error handler, AND on any uncaught exception. Glob remains keyed to `exp_id` so attempts don't clobber each other. 504/504 existing tuner unit tests pass unchanged.
+- **No-tee mandate added to canonical Gate testing standard (2026-06-22, commit `b7fb000`)**: `tee` to a `/tmp` file duplicates the chain's stdout into a long-lived log file that accumulates over the run and can exhaust the harness's task-output tmpfs (~50 min of verbose HDF5-saved/scoring lines was enough to overflow). Future gates rely on the harness capture only; never `tee`.
+- **Gate 2 + Gate 3 re-launched in parallel via detached `screen` sessions (2026-06-22)**:
+  - Gate 2 → screen `checkpoint_l_gate2`, workspace `/tmp/checkpoint_l_1782174048`
+  - Gate 3 → screen `checkpoint_l_gate3`, workspace `/tmp/checkpoint_l_gate3_1782174060`
+  - `--trial_vram_budget_gb 10 --formal_vram_budget_gb 10` on both (20 GB total + ~12 GB headroom on the 32 GB RTX 5090; per operator experience this combination is safe for two concurrent chains)
+  - Detached screens survive harness disconnects and terminal closes — verification runs against the workspace JSON artifacts when both chains exit. Monitor via `screen -r checkpoint_l_gate2` / `screen -r checkpoint_l_gate3`.
+- _Sign-off docs (`docs/checkpoint_l_sign_off.md` and `docs/checkpoint_l_gate3_sign_off.md`) pending Gate 2 + Gate 3 completion._
 
 ---
 
