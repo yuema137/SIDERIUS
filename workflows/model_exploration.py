@@ -677,6 +677,7 @@ def _register_plugin(
     impl_output,
     model_name: str,
     dest_plugin_dirs: "list[str] | str",
+    dest_loss_dirs: "list[str] | str | None" = None,
 ):
     """
     Mirror validated plugin files to one or more destination dirs.
@@ -704,6 +705,22 @@ def _register_plugin(
     as the workflow) resolves the new model type without a re-scan.
 
     Accepts a single string for back-compat with older call sites and tests.
+
+    L6a — loss-plugin propagation. When ``dest_loss_dirs`` is provided AND
+    ``impl_output.loss_provenance.action == "generated"``, the loss plugin
+    file at ``loss_provenance.loss_file_path`` is mirrored to each dest as
+    ``{dest}/{loss_name}.py``. Callers typically pass both a tuner-scoped
+    ``get_loss_dir(tuning_dir, run_name)`` (so the training subprocess's
+    ``SIDERIUS_LOSS_DIRS`` resolves the plugin) and a chain-canonical
+    ``get_loss_dir(workspace, run_name)`` (so resume / cross-iter Branch B
+    reuse can find the same plugin without re-traversing the per-attempt
+    tree). Pre-L6a, the implementor wrote the loss file to a per-attempt
+    ``{attempt_dir}/losses/`` directory that no subsequent code copied
+    anywhere, so training subprocesses could never load it. Defaults to
+    ``None`` for back-compat with all existing call sites and unit tests.
+    Skipped silently when ``loss_provenance is None`` (built-in loss path)
+    or when ``loss_provenance.action == "reused"`` (the chain-canonical
+    copy from the originating iter is expected to still exist).
 
     Skips gracefully if source files don't exist (e.g. unit tests with mocks).
     """
@@ -738,6 +755,26 @@ def _register_plugin(
             f"    Warning: description not found at "
             f"{impl_output.description_file_path}, skipping registration"
         )
+
+    # L6a — loss plugin propagation. Only mirror on "generated" so reused
+    # losses (Branch B) don't double-copy onto themselves on every iter.
+    loss_prov = getattr(impl_output, "loss_provenance", None)
+    if dest_loss_dirs is not None and loss_prov is not None and loss_prov.action == "generated":
+        if isinstance(dest_loss_dirs, str):
+            loss_dest_list = [dest_loss_dirs]
+        else:
+            loss_dest_list = list(dest_loss_dirs)
+        if not os.path.isfile(loss_prov.loss_file_path):
+            print(
+                f"    Warning: loss plugin file not found at "
+                f"{loss_prov.loss_file_path}, skipping loss registration"
+            )
+        else:
+            for d in loss_dest_list:
+                os.makedirs(d, exist_ok=True)
+                dest_loss = os.path.join(d, f"{loss_prov.loss_name}.py")
+                shutil.copy2(loss_prov.loss_file_path, dest_loss)
+                print(f"    Loss plugin registered → {dest_loss}")
 
     if primary_plugin is None:
         # ``dest_plugin_dirs`` was empty after normalization — the copy loop
@@ -1586,14 +1623,23 @@ def run_workflow(
         #        ``ml_models.model_descriptions.get_model_description``
         #        walks this tree to resolve agent-generated descriptions
         #        across iterations. Phase 6.8 §3.3.
-        from core.sandbox_executor import get_plugin_dir
+        from core.sandbox_executor import get_loss_dir, get_plugin_dir
 
         tuner_plugin_dir = get_plugin_dir(tuning_dir, run_name)
         chain_plugin_dir = get_plugin_dir(workspace, run_name)
+        # L6a — loss-plugin propagation mirrors the model-plugin pattern.
+        # Tuner-scoped dir must match ``TidmadSandbox.loss_dir`` (computed
+        # from the sandbox's own workspace ≈ ``tuning_dir``) so the
+        # subprocess's ``SIDERIUS_LOSS_DIRS`` resolves the plugin.
+        # Chain-canonical dir preserves the file for resume / future-iter
+        # Branch B lookups. See docs/design/enable_loss_inventory.md § L6.
+        tuner_loss_dir = get_loss_dir(tuning_dir, run_name)
+        chain_loss_dir = get_loss_dir(workspace, run_name)
         _register_plugin(
             impl_output,
             proposal.model_name,
             [tuner_plugin_dir, chain_plugin_dir],
+            dest_loss_dirs=[tuner_loss_dir, chain_loss_dir],
         )
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")

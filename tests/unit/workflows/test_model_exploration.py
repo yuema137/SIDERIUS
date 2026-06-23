@@ -1128,6 +1128,125 @@ class TestRegisterPlugin:
         assert "plugin file not found" in captured.out
         assert not (dest / "ghost.py").exists()
 
+    # ----- L6a: loss-plugin propagation -----------------------------------
+    #
+    # Pre-L6a the implementor wrote the loss plugin to a per-attempt
+    # ``{attempt_dir}/losses/{loss_name}.py`` directory that no subsequent
+    # code copied anywhere. ``SIDERIUS_LOSS_DIRS`` (set by the sandbox to a
+    # workspace-scoped path) pointed at an empty directory, so the training
+    # subprocess could never load the custom loss plugin. The four tests
+    # below pin the L6a contract: the function now copies the loss file to
+    # the caller-supplied ``dest_loss_dirs`` ONLY when the provenance says
+    # ``action="generated"``; ``action="reused"`` is a no-op (the chain-
+    # canonical copy from the originating iter is expected to still exist).
+
+    def _make_implementor_output_with_loss(self, tmp_path, action="generated"):
+        """Build an ImplementorOutput with a real loss plugin file at
+        ``{tmp_path}/src/losses/{loss_name}.py`` and a populated
+        ``loss_provenance`` whose ``action`` is the parameter."""
+        from agent.schemas.implementor import LossProvenance
+
+        loss_name = "expected_value_mse"
+        loss_src_dir = tmp_path / "src" / "losses"
+        loss_src_dir.mkdir(parents=True)
+        loss_src = loss_src_dir / f"{loss_name}.py"
+        loss_src.write_text(
+            f'PLUGIN_LOSS_TYPE = "{loss_name}"\n'
+            "class PLUGIN_LOSS_CONFIG_CLASS: ...\n"
+            "class PLUGIN_LOSS_CLASS: ...\n"
+        )
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        impl.loss_provenance = LossProvenance(
+            loss_name=loss_name,
+            action=action,
+            source_iteration="iter_001",
+            loss_file_path=str(loss_src),
+            dummy_tensor_validated=True,
+        )
+        return impl
+
+    def test_l6a_copies_loss_plugin_when_generated(self, tmp_path):
+        """Branch C / generated path: loss file lands at
+        ``{loss_dest}/{loss_name}.py``."""
+        impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        loss_dest = tmp_path / "ws" / "losses" / "tune_run"
+        _register_plugin(
+            impl,
+            "gated_tcn",
+            str(model_dest),
+            dest_loss_dirs=str(loss_dest),
+        )
+        assert (loss_dest / "expected_value_mse.py").is_file()
+        assert "PLUGIN_LOSS_TYPE" in (loss_dest / "expected_value_mse.py").read_text()
+
+    def test_l6a_copies_loss_plugin_to_multiple_dests(self, tmp_path):
+        """Mirror of the model-plugin dual-dest pattern: tuner-scoped +
+        chain-canonical destinations both receive the file."""
+        impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        tuner_loss_dest = tmp_path / "tuning_dir" / "losses" / "tune_run"
+        chain_loss_dest = tmp_path / "ws" / "losses" / "tune_run"
+        _register_plugin(
+            impl,
+            "gated_tcn",
+            str(model_dest),
+            dest_loss_dirs=[str(tuner_loss_dest), str(chain_loss_dest)],
+        )
+        assert (tuner_loss_dest / "expected_value_mse.py").is_file()
+        assert (chain_loss_dest / "expected_value_mse.py").is_file()
+
+    def test_l6a_skips_loss_copy_when_reused(self, tmp_path):
+        """Branch B / reused path: the implementor recorded an existing
+        plugin path; ``_register_plugin`` MUST NOT copy it. The chain-
+        canonical copy from the originating iter is expected to still
+        exist."""
+        impl = self._make_implementor_output_with_loss(tmp_path, action="reused")
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        loss_dest = tmp_path / "ws" / "losses" / "tune_run"
+        _register_plugin(
+            impl,
+            "gated_tcn",
+            str(model_dest),
+            dest_loss_dirs=str(loss_dest),
+        )
+        assert not (loss_dest / "expected_value_mse.py").exists()
+
+    def test_l6a_no_op_when_dest_loss_dirs_none(self, tmp_path):
+        """Back-compat: existing call sites that pass only the three
+        positional args (no ``dest_loss_dirs``) keep working — the function
+        does not raise and the model copy still completes."""
+        impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        _register_plugin(impl, "gated_tcn", str(model_dest))  # no dest_loss_dirs
+        assert (model_dest / "gated_tcn.py").is_file()  # model still copied
+
+    def test_l6a_warns_when_loss_source_missing(self, tmp_path, capsys):
+        """Defensive symmetry with ``test_skips_when_source_plugin_missing``:
+        if the loss source file doesn't exist (mock setup error), warn and
+        continue rather than raising."""
+        from agent.schemas.implementor import LossProvenance
+
+        impl = self._make_implementor_output_with_real_files(tmp_path)
+        impl.loss_provenance = LossProvenance(
+            loss_name="ghost_loss",
+            action="generated",
+            source_iteration="iter_001",
+            loss_file_path=str(tmp_path / "does_not_exist_loss.py"),
+            dummy_tensor_validated=True,
+        )
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        loss_dest = tmp_path / "ws" / "losses" / "tune_run"
+        _register_plugin(
+            impl,
+            "gated_tcn",
+            str(model_dest),
+            dest_loss_dirs=str(loss_dest),
+        )
+        captured = capsys.readouterr()
+        assert "loss plugin file not found" in captured.out
+        assert not (loss_dest / "ghost_loss.py").exists()
+
 
 # ---------------------------------------------------------------------------
 # _add_plugin_to_registries — Phase 6.8 Commit 6
