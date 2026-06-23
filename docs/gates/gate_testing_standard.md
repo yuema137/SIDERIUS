@@ -74,6 +74,11 @@ bash sdsc_submission_scripts/run_chain.sh \
         /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
 ```
 
+**Important**: do NOT use `tee` to capture chain stdout. The Claude Code
+harness capture file is sufficient and can be read on demand. `tee` writes
+a duplicate log to `/tmp` that accumulates over the run and can exhaust
+the tmpfs filesystem.
+
 **Critical parameter constraints** (lesson learned from Checkpoint T, 2026-06-18):
 
 | Parameter | Value | Why |
