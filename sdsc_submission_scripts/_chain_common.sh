@@ -123,6 +123,15 @@ DRY_RUN=0
 # non-empty workspace from iter 1.
 AUTO_RESUME=1
 FORCE_FRESH=0
+# Force the LAST round of each iteration to be a FORMAL training run
+# (full dataset, no --trial_portion clamp). Default ON to preserve the
+# pre-existing chain behavior. Pass --no-force_formal_round in smoke /
+# gate tests where all rounds should stay in trial mode — otherwise the
+# last round uses the full training set and a 2-iter chain takes 2+
+# hours instead of ~30-60 min. CLI flag exists on run_one_iteration.py
+# (--force_formal_round / --no-force_formal_round); this wrapper-side
+# forwarding closes the same bash-wrapper gap the lit-review flags hit.
+FORCE_FORMAL_ROUND=1
 START_ITER=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
@@ -170,6 +179,8 @@ parse_chain_args() {
         --auto_resume)            AUTO_RESUME=1; shift ;;
         --no_auto_resume)         AUTO_RESUME=0; shift ;;
         --force_fresh)            FORCE_FRESH=1; shift ;;
+        --force_formal_round)     FORCE_FORMAL_ROUND=1; shift ;;
+        --no-force_formal_round)  FORCE_FORMAL_ROUND=0; shift ;;
         --start_iter)             START_ITER="$2"; shift 2 ;;
         # §3.2 — Adaptive-tuning brakes
         --attempts_per_round)        ATTEMPTS_PER_ROUND="$2"; shift 2 ;;
@@ -315,6 +326,12 @@ build_app_args() {
     fi
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
+    fi
+    # FORCE_FORMAL_ROUND default 1 preserves prior chain behavior; only forward
+    # the negation explicitly when set to 0 (run_one_iteration.py's argparse
+    # default is True, so omitting the flag keeps formal forcing on).
+    if [ "$FORCE_FORMAL_ROUND" -eq 0 ]; then
+        APP_ARGS+=(--no-force_formal_round)
     fi
     APP_ARGS+=(--formal_eval_portion "$FORMAL_EVAL_PORTION")
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ]; then

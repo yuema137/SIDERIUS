@@ -68,6 +68,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --train_portion 0.02 \
     --eval_portion 0.02 \
     --trial_time_budget_minutes 5 \
+    --no-force_formal_round \
     --formal_time_budget_minutes 30 \
     --llm_config llm_configs/openai_tiered_v1.json \
     --seed_paths \
@@ -85,18 +86,20 @@ the tmpfs filesystem.
 | Parameter | Value | Why |
 |---|---|---|
 | `--trial_time_budget_minutes 5` | **mandatory** | Engages the time-risk gate. Without it, training runs without a time ceiling and Gate 2 can take 60-90+ min and fill disk. Validated to work in prior Checkpoint S runs. |
-| `--formal_time_budget_minutes 30` | **mandatory** | Caps the formal round. Without it, formal rounds run without a time ceiling and can take 2+ hours each (observed in Gate 3 iter_002 round 2: 2h 02m wall time on 2026-06-22). 30 min gives comfortable headroom for seed-scale models. |
+| `--no-force_formal_round` | **mandatory** | Disables the default behavior of forcing the last round to be a full formal training run. Without this flag, the last round uses the full dataset regardless of `--trial_portion`, causing 2+ hour runtimes (observed in Gate 3 iter_002 round 2: 2h 02m on 2026-06-22). All rounds should stay in trial mode for smoke tests. |
+| `--formal_time_budget_minutes 30` | safety net | Safety net in case `--no-force_formal_round` is accidentally omitted or a future config silently re-enables formal forcing. Only active when a formal round actually runs. |
 | `--trial_portion 0.02` | **mandatory** | Keeps each training epoch under 5 min on lilab GPU (~20K segments). At 0.05 a single attempt can generate 76 GB of intermediate files. |
 | `--llm_config openai_tiered_v1.json` | **mandatory** | gpt-4o-mini (`certify_minimal.json`) cannot reliably generate proposals that pass the validator — Gate 2 run will complete but produce no `denoising_score`. |
 | `--num_iterations 2` | recommended | Two iterations exercise the full chain including the interpretation→propose→implement loop. One iteration is acceptable for simpler features. |
 | `--max_rounds 2` | recommended | Two rounds exercise the tuner planner's multi-round reasoning. |
 | `--max_proposal_attempts 3` | recommended | Gives the implementor two self-correction chances. |
 
-**Estimated wall time**: ~90-180 min (~120 min typical). Per-iter breakdown:
-~15 min LLM setup (interp + 3-stage proposer + implementor + validator) +
-~8 min trial round (5 min training cap + overhead) + ~33 min formal round
-(30 min training cap + overhead) = ~55-65 min per iter × 2 iters. Variance
-comes from gpt-5.4 latency spikes and any proposal/implementor repair attempts.
+**Estimated wall time**: ~30-60 min (all rounds in trial mode with
+`--no-force_formal_round`). Per-iter breakdown: ~15 min LLM setup
+(interp + 3-stage proposer + implementor + validator) + 2 × ~8 min trial
+rounds (5 min training cap + overhead) = ~30 min per iter × 2 iters.
+Variance comes from gpt-5.4 latency spikes and any proposal/implementor
+repair attempts.
 
 **Estimated cost**: ~$1.50-2.50 (gpt-5.4 dominant role).
 
