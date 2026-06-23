@@ -1444,7 +1444,57 @@ class MLModelImplementor:
         # built-in loss type (``inp.custom_loss_spec is None``).
         loss_provenance: LossProvenance | None = None
         if inp.custom_loss_spec is not None:
+            # Branch C: proposer emitted a CustomLossSpec → generate the loss.
             loss_provenance = self._generate_loss(inp)
+        else:
+            # Either Branch A (built-in loss) or Branch B (reuse from registry).
+            # Discriminate by inspecting baseline_config.loss_config.loss_type.
+            # Bug found by Gate 3 (2026-06-22): proposer can emit
+            # loss_type="custom" with a loss_name that doesn't exist in the
+            # registry — Branch B with a phantom loss. Without this guard the
+            # implementor silently proceeded, the tuner planner LLM then
+            # rewrote loss_type to "ce" downstream, and training ran under
+            # the wrong loss. Raise loudly here so the workflow's existing
+            # max_proposal_attempts retry loop re-prompts the proposer.
+            loss_cfg = inp.baseline_config.get("loss_config") or {}
+            if loss_cfg.get("loss_type") == "custom":
+                loss_name = loss_cfg.get("loss_name") or ""
+                existing_names = {m.name for m in self._registry.list(capability_type="loss")}
+                if not loss_name:
+                    raise ValueError(
+                        "Implementor received an invalid Branch B proposal: "
+                        "loss_type='custom' with no loss_name. The proposer must "
+                        "either pick Branch A (built-in loss_type ∈ {focal, "
+                        "focal_cw, ce, smooth_l1}) or Branch C (populate "
+                        "custom_loss_spec with the full spec) or Branch B (reuse "
+                        "an existing registered loss by name)."
+                    )
+                if loss_name not in existing_names:
+                    raise ValueError(
+                        f"Implementor received Branch B proposal "
+                        f"(loss_type='custom', loss_name={loss_name!r}) but "
+                        f"{loss_name!r} is not in the capability registry. "
+                        f"Registry currently contains: "
+                        f"{sorted(existing_names) if existing_names else 'no losses'}. "
+                        f"The proposer must either use Branch A (built-in loss), "
+                        f"Branch C (generate new loss via custom_loss_spec), or "
+                        f"Branch B with a loss_name that actually exists in the "
+                        f"registry. Advice-file loss-name suggestions are not "
+                        f"registry entries — they only become registered after a "
+                        f"prior iteration successfully generated them via Branch C."
+                    )
+                # Branch B happy path: record the reuse provenance.
+                existing_meta = next(
+                    (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
+                    None,
+                )
+                loss_provenance = LossProvenance(
+                    loss_name=loss_name,
+                    action="reused",
+                    source_iteration=(existing_meta.source_iteration if existing_meta else None),
+                    loss_file_path=(existing_meta.file_path if existing_meta else ""),
+                    dummy_tensor_validated=True,
+                )
 
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 

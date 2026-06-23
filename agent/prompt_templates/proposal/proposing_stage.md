@@ -120,6 +120,15 @@ The `loss_config` slot accepts five `loss_type` values: `focal`, `focal_cw`, `ce
      "<name from the table>"`. Set `custom_loss_spec: null` — the
      implementor will skip the LLM call and reuse the registered plugin.
 
+     ⚠ **BRANCH B CONSTRAINT**: Branch B is FORBIDDEN when
+     `{available_losses_block}` shows "No custom losses registered yet". In
+     that case you MUST choose Branch A (built-in loss) or Branch C (generate
+     new custom loss). Selecting Branch B with a `loss_name` that does not
+     appear in the registry table above will cause a training-time failure —
+     the loss plugin does not exist on disk. The `loss_name` you cite MUST
+     appear verbatim in the markdown table; advice-file loss-name suggestions
+     are NOT registry entries.
+
    - **Branch C — Propose a NEW custom loss** (not in the registry): set
      `loss_config.loss_type = "custom"`, pick a fresh snake_case
      `loss_config.loss_name`, AND populate the top-level `custom_loss_spec`
