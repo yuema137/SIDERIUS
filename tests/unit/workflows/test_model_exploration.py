@@ -1247,6 +1247,51 @@ class TestRegisterPlugin:
         assert "loss plugin file not found" in captured.out
         assert not (loss_dest / "ghost_loss.py").exists()
 
+    def test_register_plugin_populates_loss_registry_with_file_not_dir(self, tmp_path):
+        """Regression guard for the L6c bug (2026-06-24): _register_plugin
+        called register_loss_in_memory with the dest *directory* path
+        instead of the dest *file* path. spec_from_file_location silently
+        returned None for the directory, leaving LOSS_REGISTRY empty.
+        Every in-process pre-flight then fell back to filesystem, found
+        nothing (workspace has no SIDERIUS_LOSS_DIRS), and aborted the
+        round. Gate 3 hit aborted_fail_rounds; Gate 2 false-passed by the
+        tuner reverting to a built-in loss.
+
+        This test would have caught the bug immediately — it asserts that
+        after _register_plugin runs with a generated loss, LOSS_REGISTRY[name]
+        holds an actual class object, not None.
+        """
+        from ml_models.loss_models_sandbox import (
+            LOSS_CONFIG_REGISTRY,
+            LOSS_REGISTRY,
+        )
+
+        impl = self._make_implementor_output_with_loss(tmp_path, action="generated")
+        model_dest = tmp_path / "ws" / "plugins" / "tune_run"
+        loss_dest = tmp_path / "ws" / "losses" / "tune_run"
+        # Clear registry to ensure post-call state is from THIS call only.
+        LOSS_REGISTRY.pop("expected_value_mse", None)
+        LOSS_CONFIG_REGISTRY.pop("expected_value_mse", None)
+        _register_plugin(
+            impl,
+            "gated_tcn",
+            str(model_dest),
+            dest_loss_dirs=str(loss_dest),
+        )
+        # The loss file MUST have been copied to disk under loss_dest.
+        assert (loss_dest / "expected_value_mse.py").is_file()
+        # AND LOSS_REGISTRY must contain the loss class (not None, not missing).
+        assert "expected_value_mse" in LOSS_REGISTRY, (
+            f"register_loss_in_memory failed silently — LOSS_REGISTRY keys "
+            f"after _register_plugin: {sorted(LOSS_REGISTRY)}"
+        )
+        assert LOSS_REGISTRY["expected_value_mse"] is not None
+        assert "expected_value_mse" in LOSS_CONFIG_REGISTRY
+        assert LOSS_CONFIG_REGISTRY["expected_value_mse"] is not None
+        # Cleanup
+        LOSS_REGISTRY.pop("expected_value_mse", None)
+        LOSS_CONFIG_REGISTRY.pop("expected_value_mse", None)
+
 
 # ---------------------------------------------------------------------------
 # _add_plugin_to_registries — Phase 6.8 Commit 6

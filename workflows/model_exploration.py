@@ -782,7 +782,14 @@ def _register_plugin(
             # docs/design/enable_loss_inventory.md § L6c.
             from ml_models.loss_models_sandbox import register_loss_in_memory
 
-            _registered_loss = register_loss_in_memory(loss_dest_list[0])
+            # L6c bug-fix — loss_dest_list[0] is a DIRECTORY; the plugin
+            # file is at ``{dir}/{loss_name}.py``. Passing the directory
+            # caused ``spec_from_file_location`` to return None silently,
+            # leaving LOSS_REGISTRY empty and breaking every custom-loss
+            # pre-flight (in-process callers fell through to filesystem
+            # with no SIDERIUS_LOSS_DIRS set). Reconstruct the file path.
+            _loss_file_for_registry = os.path.join(loss_dest_list[0], f"{loss_prov.loss_name}.py")
+            _registered_loss = register_loss_in_memory(_loss_file_for_registry)
             if _registered_loss is not None:
                 print(f"    Loss '{_registered_loss}' added to in-memory LOSS_REGISTRY")
 
@@ -916,6 +923,13 @@ def _promote_loss_to_global(impl_output) -> None:
             created_at=existing.created_at,
             source_iteration=existing.source_iteration,
             description=existing.description,
+            # L6c bug-fix — preserve mathematical_definition through promotion.
+            # The original construction left this field as the default empty
+            # string, so promoted entries lost the formula even when the
+            # implementor had persisted it at registry write time. Result:
+            # the proposer's {available_losses_block} rendered description
+            # only, never the formula block.
+            mathematical_definition=existing.mathematical_definition,
         )
         registry.replace(promoted_meta)
         print(f"  Updated registry entry '{loss_prov.loss_name}' file_path → {global_dest}")
