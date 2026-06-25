@@ -12,10 +12,12 @@ from tqdm import tqdm
 
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
-from ml_models.models_format_sandbox import get_config_class
+from ml_models.loss_models_sandbox import get_target_torch_dtype
+from ml_models.models_format_sandbox import LossConfig, get_config_class
 
 # Import your sandboxed components for Agent Mode
 from ml_models.models_sandbox import MODEL_REGISTRY
+from ml_models.plugin_loader import get_output_type
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -93,10 +95,18 @@ def get_parser():
     return parser
 
 
-def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
+def process_batch(
+    index, inputarr, targetarr, model, args, current_loss_type, current_loss_name=None
+):
     """
     Refactored batch processor to ensure dimension alignment across all models.
     Minimal change: ensures input is always [Batch, Time] before entering the model.
+
+    I15 — ``current_loss_name`` (optional) plumbs the custom-loss declaration
+    through so output decoding (regression vs argmax) reads the model's
+    output-type contract via ``get_output_type`` plus the loss's declared
+    target dtype, rather than the hardcoded ``loss_type == "smooth_l1"``
+    check that broke for classifier-style custom losses.
     """
     # 1. Base Pre-processing (ADC Offset)
     inputarr = inputarr.astype(np.int16) + 128
@@ -121,7 +131,20 @@ def process_batch(index, inputarr, targetarr, model, args, current_loss_type):
         output = model(input_seq)
 
         # 4. Decoding Output based on Task Type
-        if current_loss_type == "smooth_l1":
+        # I15 — output decoding is driven by the MODEL's output contract,
+        # not the loss type. Built-in classifier models always emit
+        # [B, 256, T]; built-in regressor models emit [B, T]; ``fcnet``
+        # is "hybrid" — it adjusts its own forward shape based on
+        # ``loss_type`` at construction time, so hybrid + float-target
+        # loss is treated as regression.
+        output_type = get_output_type(args.denoising_model)
+        target_dtype = get_target_torch_dtype(
+            LossConfig(loss_type=current_loss_type, loss_name=current_loss_name)
+        )
+        is_regression = output_type == "regressor" or (
+            output_type == "hybrid" and target_dtype == torch.float32
+        )
+        if is_regression:
             # Regression task: Output is already [Batch, Time]
             output_seq = output.detach().cpu().numpy()
         else:
@@ -158,6 +181,7 @@ def main():
         model = torch.load(model_file, map_location=DEVICE, weights_only=False)
         input_size = 40000  # Default baseline size
         current_loss_type = "ce"
+        current_loss_name: str | None = None
 
     else:
         # AGENT MODE: Dynamic loading using Registry and Factory
@@ -169,6 +193,10 @@ def main():
         with open(loss_path) as f:
             l_data = json.load(f)
         current_loss_type = l_data.get("loss_type", "ce")
+        # I15 — read loss_name so output decoding can dispatch through
+        # get_target_torch_dtype for classifier-style custom losses (the
+        # registered PLUGIN_LOSS_TARGET_DTYPE drives the decision).
+        current_loss_name = l_data.get("loss_name")
 
         # Load Model Config
         with open(args.model_cfg) as f:
@@ -272,7 +300,9 @@ def main():
             ):
                 batch_in = train_loader[i : i + bs]
                 batch_tgt = target_loader[i : i + bs]
-                _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
+                _, dn, ij = process_batch(
+                    i, batch_in, batch_tgt, model, args, current_loss_type, current_loss_name
+                )
                 actual_n = batch_in.shape[0]
                 denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
                 injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
@@ -343,7 +373,9 @@ def main():
             for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
                 batch_in = train_loader[i : i + bs]
                 batch_tgt = target_loader[i : i + bs]
-                _, dn, ij = process_batch(i, batch_in, batch_tgt, model, args, current_loss_type)
+                _, dn, ij = process_batch(
+                    i, batch_in, batch_tgt, model, args, current_loss_type, current_loss_name
+                )
                 actual_n = batch_in.shape[0]
                 denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
                 injected[i : i + actual_n] = ij.reshape(actual_n, input_size)

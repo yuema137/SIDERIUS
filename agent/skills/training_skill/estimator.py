@@ -37,6 +37,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import torch
+
 from agent.skills.evaluate_time_skill import calibration
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
@@ -113,7 +115,29 @@ def estimate_peak_bytes(
     act_factor = 1 if model_type == "fcnet" else 2
     activations = act_factor * output_logits
 
-    focal_onehot = batch_size * 256 * seg_size * _BYTES_I64 if loss_type == "focal" else 0
+    # I16 — focal one_hot allocation also covers classifier-style custom
+    # losses (e.g. EMD / ordinal) that build ``F.one_hot(targets, 256)``
+    # internally. Detection: ``loss_type == "custom"`` AND the plugin
+    # declares ``PLUGIN_LOSS_TARGET_DTYPE = "long"`` (the classifier
+    # contract). A pre-flight before the loss plugin is registered
+    # (e.g. proposer-side estimation) falls back to the helper's
+    # ``"long"`` default — over-counts a regressor custom loss by one
+    # ``[B, 256, T] × 8 B`` chunk, which is the safe direction.
+    from ml_models.loss_models_sandbox import get_target_torch_dtype
+    from ml_models.models_format_sandbox import LossConfig
+
+    loss_name = loss_config.get("loss_name")
+    try:
+        _cfg = LossConfig(
+            loss_type=loss_type, loss_name=loss_name if loss_type == "custom" else None
+        )
+        _uses_long_targets = get_target_torch_dtype(_cfg) == torch.long
+    except Exception:
+        # If LossConfig validation fails (malformed dict), assume the
+        # classifier contract for the estimate — safe over-count.
+        _uses_long_targets = True
+    _one_hot_loss = loss_type == "focal" or (loss_type == "custom" and _uses_long_targets)
+    focal_onehot = batch_size * 256 * seg_size * _BYTES_I64 if _one_hot_loss else 0
 
     transformer_attn = 0
     if model_type == "transformer":
