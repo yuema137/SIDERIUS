@@ -4,21 +4,15 @@
 
 This PR adds a complete end-to-end pipeline for the agent to discover bottlenecks in built-in loss functions, propose novel custom losses grounded in lit-review findings (or operator advice), generate and validate the loss plugin code, register it for cross-iteration reuse, and train under it via the tuner planner. Closes the gap identified at Checkpoint S where 93% of lit-review findings recommended loss-function changes the system could not act on.
 
-## Merge policy
+## Status
 
-Gate 1 is complete (✅). Gate 2 and Gate 3 are currently running (launched
-2026-06-23, HEAD `84a3caf`). This PR is ready to review now:
+All three gates have passed on HEAD `ec03d79`. Sign-off doc
+(`docs/checkpoint_l_sign_off.md`) is filled in. **This PR is ready to merge.**
 
-- If Gate 2/3 pass cleanly → sign-off doc is filled in and this PR merges as-is
-- If Gate 2/3 reveal small fixes (e.g. tuner schema validator asymmetry already
-  identified in post-run audit) → fixes land as additional commits on this PR
-  before merge
-- If Gate 2/3 reveal a major architectural gap (e.g. facilitator layer needed) →
-  that work opens a separate PR; this PR merges with a note in the sign-off doc
-  recording the gap and its planned resolution
-
-Reviewers do not need to wait for Gate 2/3 to review the L1–L6 implementation,
-I1–I11 fixes, or test coverage.
+The path from PR open to sign-off discovered three additional bugs (I12 +
+L6c Bugs #1–#3) that were fixed inline on this branch per the original
+merge policy. No follow-up architectural work needed; facilitator layer
+not required (audit verdicts all ✅).
 
 ## Feature surface (L1–L6)
 
