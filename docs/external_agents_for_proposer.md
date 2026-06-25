@@ -1159,3 +1159,264 @@ The citation-discipline mechanism
 (`nodes/ml_model_proposal_agent.py:133-164`, `_check_citation_discipline`)
 keeps its logic — iterates over `source_refs` instead of the
 pre-rename `citation_sources`.
+
+---
+
+## §12 Reflections from Checkpoint L (2026-06-22 → 2026-06-24)
+
+This section is **the proposer-receiving-end retrospective** to
+match the architecture-level retrospective in
+[`external_agents_architecture.md`](external_agents_architecture.md) §11.
+Where §11 captures invariants that any future agent must respect,
+this section captures what we learned by running lit-review's
+output through the proposer for ~25 iterations across Gate 1,
+Gate 2, and Gate 3 (including 4 false-positive / failed runs and
+the final clean Gate 2 + Gate 3 pass at HEAD `ec03d79`). Sign-off
+in `docs/checkpoint_l_sign_off.md`.
+
+### §12.1 What worked — keep doing this
+
+**The three-part Implication / Mechanism / Adaptation format was
+the load-bearing contract.** Gate 3 iter_001's lit-review-grounded
+custom loss (`spectral_expected_value_mse`) succeeded as a
+*substantive* citation specifically because the finding's
+`Mechanism` field carried a concrete formula structure (FFT + CWT
+gating) that the proposer could adapt, not just a paper title.
+The proposer wrote `w = 1.0 + dy / 256.0` (transition-magnitude
+weighting) and cited `arxiv:2512.14078` verbatim, with the
+mechanism traceable to the finding's Mechanism block. Without the
+three-part structure, the proposer would have had only a paper
+name and a prose blurb; the most likely outcome would have been a
+decorative citation.
+
+**Confidence rubric at 0.40 / 0.79 thresholds was empirically
+right.** Across §10 FULL suite runs (2026-06-10, 2026-06-22), the
+0.40 floor (`omit_below`) and the 0.79 ceiling for abstract-only
+papers (`abstract_only_ceiling`) produced stable-attractor behavior
+(Mamba + FreLE + DeepDenoiser appear in most runs). Gate 3
+iter_002 emitted 4 findings spanning conf 0.85 down to 0.45 —
+exactly the band the rubric was designed for. **Do not raise the
+floor** unless a future task domain demands stricter evidence.
+
+**`source_ref` verbatim citation in `custom_loss_spec.description`
+is the right contract.** Gate 3 iter_001's
+`custom_loss_spec.description` cites `arxiv:2512.14078` twice
+("suggested by", then "motivated by"). The string match against
+the finding's `source_ref` is the audit signal that proves
+substantive citation. Every future proposer-facing agent's output
+schema should give the proposer a single, machine-checkable
+handle (`source_ref` or equivalent) to cite back to.
+
+**Registry display with formula is correct (post-L6c).** Until
+L6c, `render_available_losses` showed only `name |
+source_iteration | description`. Two losses with near-identical
+prose descriptions (`expected_value_mse` and
+`expected_value_huber`) could not be distinguished by reading the
+block; only by reading the underlying plugin source. L6c added
+`mathematical_definition` to the registry entry and rendered it
+as a fenced code block under each loss's subsection. **Any
+future external agent that emits mechanism-shaped items
+(formulas, code snippets, configs) must include the actual
+structure, not just a description, in its rendering helper.**
+
+### §12.2 What didn't work — the proposer-side failure modes
+
+**I8: silent extraction loss at the proposer agent boundary.**
+When L3 added `CustomLossSpec` to `ProposalOutput`, neither
+`ProposalOutput.model_validate(...)` call site in
+`nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` was
+updated to extract `custom_loss_spec` from the LLM raw dict. The
+LLM correctly emitted Branch C with a populated
+`custom_loss_spec` for 12 attempts before anyone noticed; the
+agent silently dropped it every time. **For future external-agent
+additions to `ProposalOutput`, the extraction site is the
+highest-risk boundary.** Use a round-tripping pattern (e.g.
+`ProposalOutput.model_validate(raw)` with the LLM's raw dict
+directly, allowing Pydantic to enumerate fields) over manual dict
+construction. Where manual dict construction is unavoidable (e.g.
+when post-processing LLM output before validation), add a
+regression test that asserts every schema field can survive the
+extraction → validation round trip.
+
+**Concern 2: silent dropping of low-confidence findings without
+rejection rationale.** Gate 3 iter_002's proposer received 4
+lit-review findings (one at conf 0.85, three at conf 0.45–0.50)
+and incorporated only the highest-confidence one
+(`arxiv:2406.04378`, TIDMAD self-reference) into its motivation.
+The other 3 findings were *silently absent* from the proposal
+artifact — there was no rejection rationale, no acknowledgment of
+their existence. The proposer effectively applied a hidden
+confidence threshold (below `abstract_only_ceiling = 0.79`, drop
+without comment).
+
+This was judged **coherent** (the proposer's threshold matches
+the rubric's `abstract_only_ceiling`), but it leaves a future
+facilitator layer's job harder: there is no audit trail for *why*
+a finding was rejected. **Future iterations of the proposer
+prompt should require explicit rejection rationale** in
+`motivation` or `memo_consistency_notes`: "Findings 2–4
+(conf ≤ 0.5) considered but not adopted because [reason]." This
+is a small prompt change and a large auditability improvement.
+
+**`findings_verbosity = 0` (single-paragraph) would have failed
+Concern 1.** The three-part format made Gate 3's substantive
+citation possible. A single-paragraph format would have invited
+paraphrase loss — the proposer would have rewritten the
+Mechanism into its own words and lost the verbatim `source_ref`
+binding. **`findings_verbosity: 1` should be the production
+default for any proposer-facing external agent.** Backward-compat
+with `0` should be available but not advertised.
+
+### §12.3 Aggregation when multiple proposer-facing agents arrive
+
+`AgentCard.trust_level` (§4 of
+`external_agents_architecture.md`) gives us cross-trust-level
+precedence. But §11.5 of the architecture doc flagged three open
+issues for within-trust-level aggregation. The proposer-side
+rendering needs to handle these:
+
+**Per-source_ref dedup vs intentional overlap.** When two agents
+independently surface the same paper (e.g. a future physics
+agent and lit-review both citing `arxiv:2406.04378`), the
+rendering should show the agreement, not deduplicate it away.
+Two findings with the same `source_ref` but different
+`confidence` should render as:
+
+```markdown
+### `arxiv:2406.04378`
+- **lit-review** (soft_prior, conf 0.85): {Implication} / {Mechanism} / {Adaptation}
+- **physics**   (strong_prior, conf 0.90): {their analysis}
+```
+
+The proposer then sees both perspectives. Silent dedup would
+lose the agreement signal; silent duplication would clutter the
+prompt. **Recommendation**: the rendering helper should group by
+`source_ref` and stack findings under it, with each agent's
+`name+trust+conf` prefix.
+
+**Within-trust-level adjudication when agents disagree.** §9.1
+of the architecture doc punts this until a second `strong_prior`
+agent exists. **The proposer-facing rendering should surface the
+disagreement explicitly** (e.g. "Two agents at strong_prior
+provide conflicting analyses; the proposer must decide.") rather
+than silently picking one. This is the same defect class as the
+silent drops in §12.2: surface, don't hide.
+
+**Volume management with N agents.** Today lit-review caps
+findings at ~4 per iteration (Concern 2 surfaced 4 findings in
+iter_002). With 3–5 active agents each emitting 4 findings, the
+proposer prompt grows ~5x. The `## External Contributors` block
+becomes unwieldy. **A per-iteration cap on total findings** (e.g.
+top-N by confidence × trust, with the rejected count surfaced as
+"K other findings omitted; see workflow artifact") is the natural
+design. This is a Manager-layer responsibility (§5 of the
+architecture doc) but the receiving end (proposer rendering)
+needs to be aware that the cap may apply.
+
+### §12.4 Dynamic orchestration from the proposer's perspective
+
+If we move to Option A (in-process orchestrator) or Option D
+(hybrid) from §11.6 of the architecture doc, the proposer's
+receiving-end contract barely changes — the orchestrator's
+`OrchestrationOutput` should aggregate per-agent `AgentCard`s
+and `ExpertContextItem`s into the same `## External
+Contributors` / `## Expert Context` blocks the proposer already
+consumes. The orchestrator's *rationale* field (why it called
+what it called) should be rendered into the proposer's prompt at
+low trust as a new `## Orchestration Rationale` block —
+observable but not authoritative.
+
+If we move to Option B (CLI orchestrator), the proposer-side
+contract is unchanged but the workflow needs to read the
+orchestrator's decisions from a filesystem channel before
+constructing the proposer's input. **The proposer prompt itself
+should not need to know orchestration happened**; it should see
+the same `AgentCard` / `ExpertContextItem` shape regardless of
+who called what.
+
+The principle: **orchestration is upstream of the proposer; the
+proposer's contract stays stable.** This is what keeps the
+proposer prompt manageable as the agent count grows. The
+proposer's job is to read external context and propose; deciding
+*which* external context to fetch is not the proposer's
+responsibility and should not bleed into its prompt.
+
+A second-order benefit: if the proposer's contract is stable
+across orchestration regimes, swapping orchestrators (fixed →
+policy → in-process LLM → CLI) does not require re-validating
+the proposer's behavior. The proposer's regression tests stay
+green even as the orchestration layer churns.
+
+### §12.5 What changes for non-TIDMAD tasks
+
+Three places where the proposer-side external-agent contract has
+TIDMAD-specific assumptions and must generalize:
+
+1. **The proposer's prompt assumes ADC-bin output (`[B, 256, T]`).**
+   Future tasks with different output contracts need
+   forward-contract-aware proposer prompts. The `forward_contract`
+   field on the proposer input (already plumbed via
+   `task_config`) is the right hook; the proposer's Rule 4
+   references it. Future external agents must not embed
+   task-specific shapes in their `ExpertContextItem.content` —
+   those should be in the agent output's structured fields.
+
+2. **The vocabulary seed is denoising-specific.** The 21-entry
+   vocab seed in `agent/schemas/vocab_seed.json` is hardcoded for
+   the denoising task. Future tasks need a per-task seed (or a
+   bootstrap step that builds the seed from the task description).
+   The lit-review agent itself is task-agnostic; the vocab seed
+   is not. **Move the vocab seed into the same task-config
+   registry as `forward_contract`.**
+
+3. **Citation discipline rules are denoising-bottleneck-aware.**
+   The `_check_citation_discipline` function in
+   `nodes/ml_model_proposal_agent.py` enforces that the proposer's
+   citations match agent-emitted source_refs. This is task-
+   agnostic at the implementation level; what is not task-agnostic
+   is the *rule strength*. For a high-stakes domain (medical), we
+   may want to reject any citation not backed by a deep-read
+   finding. For exploratory tasks, we may want to allow some
+   speculative citations. **Externalize the strength as a config
+   field**, similar to `transfer_tolerance` in the lit-review
+   YAML.
+
+### §12.6 Checklist for the next proposer-facing external agent
+
+Use this list when adding a second proposer-facing agent (e.g.
+`physics`, `data_analysis`):
+
+1. ✅ Output schema includes `findings: list[ExpertContextItem]`
+   (or a strict superset).
+2. ✅ Every `ExpertContextItem` has `confidence: float`,
+   `source_ref: str`, and three-part content (Implication /
+   Mechanism / Adaptation).
+3. ✅ `AgentCard` published with `trust_level` and `agent_name`.
+4. ✅ Operator-visible YAML config with `enabled`, confidence
+   rubric, bounded-cost knobs.
+5. ✅ Rendering helper named `render_available_X(state)` for
+   feeding into the proposer's prompt — and the workflow calls
+   it at EVERY consumer node (proposer + tuner planner + any
+   future consumer), not just one.
+6. ✅ Source_ref prefix registered (`physics:`, `dataset:`,
+   etc.).
+7. ✅ At least one regression test that round-trips a fixture
+   from raw LLM output → extracted dict →
+   `ExpertContextItem.model_validate(...)` to catch I8-class
+   silent drops.
+8. ✅ Implementation of the agent's "I dropped X findings because
+   Y" trail — either in the output schema or in the workflow
+   log.
+9. ✅ A field-for-field test that, after the agent's output
+   passes through every downstream extraction site (proposer
+   agent, workflow protocol, tuner promotion), no schema field
+   is silently lost — catches L6c Bug #3-class regressions.
+
+Items 1–6 are mechanical. Item 7 is the highest-impact
+regression guard (would have caught I8 in retrospect). Item 8 is
+the new requirement from Concern 2 — every external agent must
+surface what it dropped and why, or the proposer prompt loses
+auditability. Item 9 is the new requirement from L6c Bug #3 —
+every promotion / replacement / mirror site must preserve every
+schema field, with a test that fails when a new field is added
+but a promotion site forgets to copy it.
