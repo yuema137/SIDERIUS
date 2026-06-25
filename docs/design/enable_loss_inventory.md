@@ -1473,6 +1473,12 @@ than under-budgeting trips OOMs).
 - Perceptual loss requiring a separate encoder model — separate feature  
 - Loss ensembling (combining multiple loss functions) — separate feature
 - Automatic loss architecture search — separate feature
+- Modular agent orchestration (pluggable, dynamically composable,
+  backward-compatible workflow) — see GitHub issue
+  [#91](https://github.com/Galileo-Sandbox/SIDERIUS/issues/91). The I9 / I12 /
+  I13–I16 issues in this checkpoint are all instances of the registry-asymmetry
+  family that the modular-orchestration vision would make structurally
+  impossible; tracked separately because the fix is multi-quarter.
 
 ### Future: MLLossImplementor split (out of scope)
 
