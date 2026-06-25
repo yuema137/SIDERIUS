@@ -53,8 +53,8 @@ Full root-cause analyses with SHAs in `docs/design/enable_loss_inventory.md` § 
 | Gate | Status |
 |---|---|
 | Gate 1 — Real LLM + pseudo training, 3 variants (`expected_value_mse`, `ordinal_ce`, `emd_ordinal`) | ✅ PASSED (2026-06-22) — all three loss plugins compiled, `backward()` check green, `ordinal_ce` self-corrected one `.detach()` hallucination |
-| Gate 2 — Real LLM + real training, no lit-review | ⬜ PENDING — see `docs/checkpoint_l_sign_off.md` (launched 2026-06-23, HEAD `84a3caf`) |
-| Gate 3 — Real LLM + real training + lit-review (full closed loop) | ⬜ PENDING — see `docs/checkpoint_l_sign_off.md` (launched 2026-06-23, HEAD `84a3caf`) |
+| Gate 2 — Real LLM + real training, no lit-review | ✅ **PASSED** (2026-06-24, HEAD `ec03d79`) — iter_001 score `0.5594`, iter_002 score `0.4429`, 3/4 configs trained under custom loss (`expected_value_mse`), iter_002 Branch B reuse via promoted global path |
+| Gate 3 — Real LLM + real training + lit-review (full closed loop) | ✅ **PASSED** (2026-06-24, HEAD `ec03d79`) — iter_001 score `0.5134`, iter_002 score `0.8090`, **4/4 configs trained under custom loss**, iter_001 generated lit-review-grounded `spectral_expected_value_mse` citing `arxiv:2512.14078` verbatim, iter_002 Branch B reuse — first end-to-end success of the proof-of-loop |
 
 ## Test coverage
 
@@ -69,4 +69,4 @@ Full root-cause analyses with SHAs in `docs/design/enable_loss_inventory.md` § 
 - `siderius capabilities list` CLI — by design (see § Scope in design doc)
 - Loss hyperparameter tuning for custom losses (open question 1 in design doc)
 - Loss versioning across iterations (open question 2)
-- Tuner-side schema-level registry-membership check on `loss_name` (audit identified asymmetry vs proposer; tracked for follow-up)
+- Tuner-side schema-level registry-membership check on `loss_name` (audit identified asymmetry vs proposer; tracked for follow-up; not blocking — runtime path in `_load_custom_loss` does its own check)
