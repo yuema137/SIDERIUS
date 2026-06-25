@@ -29,6 +29,12 @@ it must be falsifiable, comparative, and architecturally concrete.
 - **[HARDWARE CONTEXT]** block (always present when a live GPU manifest is
   available): reports the active device, total VRAM, and the "Effective cap"
   (the hard ceiling any proposal must fit under).
+- **Available custom losses**: the agent-generated loss registry (see the
+  block below). When reasoning about *what to try next*, consider whether
+  an existing custom loss already targets the bottleneck you are diagnosing
+  — reuse is preferred over redundant invention.
+
+{available_losses_block}
 
 ## MANDATORY — Integrated reasoning (science + engineering)
 

@@ -142,6 +142,18 @@ When reviewing past experiments in Research Memory:
 - Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
   definitive.
 
+### AVAILABLE CUSTOM LOSSES:
+
+{available_losses_block}
+
+When the registry above lists one or more custom losses, you may set
+`loss_config.loss_type = "custom"` AND `loss_config.loss_name = <name from
+the table>` to train under that loss. The plugin is already generated and
+dummy-tensor-validated; selecting it does NOT cost an extra implementor
+call. When the block above says "No custom losses registered yet", the only
+legal `loss_type` values are the four built-ins (`focal`, `focal_cw`, `ce`,
+`smooth_l1`) — see the COMPATIBILITY section in the user message below.
+
 ### PER-FILE PERFORMANCE TABLE:
 
 Below is a comparison of your best experiment's per-file scores against two
@@ -798,6 +810,8 @@ def get_planner_user_prompt(
     last_time_estimate_minutes=None,
     last_batch_size=None,
     last_mode=None,
+    # --- L6b — tuner planner registry awareness ---
+    registry=None,
 ):
     """
     Constructs the prompt for the Planner.
@@ -847,6 +861,32 @@ def get_planner_user_prompt(
         json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
     )
 
+    # L6b — registry awareness. ``has_custom_losses`` is True when the
+    # capability registry contains at least one ``capability_type="loss"``
+    # entry; in that case the planner is also told it MAY use
+    # ``loss_type="custom"`` + ``loss_name=<entry from the AVAILABLE
+    # CUSTOM LOSSES table in the system prompt>``. Default False (no
+    # registry passed) preserves pre-L6b behaviour where only the four
+    # built-in loss types were advertised. See
+    # docs/design/enable_loss_inventory.md § L6b.
+    has_custom_losses = False
+    if registry is not None:
+        try:
+            has_custom_losses = bool(list(registry.list(capability_type="loss")))
+        except Exception:
+            # Defensive: registry may be a duck-typed stub in tests. Treat
+            # any failure as "no custom losses available" rather than
+            # propagating the error into prompt rendering.
+            has_custom_losses = False
+    custom_loss_note = (
+        ' You may ALSO use `loss_type="custom"` with a `loss_name` from '
+        "the AVAILABLE CUSTOM LOSSES table in the system prompt above — "
+        "those plugins are already generated and validated, picking one "
+        "costs no extra LLM call."
+        if has_custom_losses
+        else ""
+    )
+
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""
     if force_model != "auto":
@@ -857,18 +897,21 @@ def get_planner_user_prompt(
             loss_note = (
                 "- This model is a **CLASSIFIER** (output [B, 256, T]). "
                 "Valid loss types: **ce, focal, focal_cw**. "
-                "Do NOT use smooth_l1 (regression only).\n"
+                "Do NOT use smooth_l1 (regression only)."
+                f"{custom_loss_note}\n"
             )
         elif output_type == "regressor":
             loss_note = (
                 "- This model is a **REGRESSOR** (output [B, T]). "
                 "Valid loss types: **smooth_l1**. "
-                "Do NOT use ce, focal, or focal_cw (classification only).\n"
+                "Do NOT use ce, focal, or focal_cw (classification only)."
+                f"{custom_loss_note}\n"
             )
         else:  # hybrid
             loss_note = (
                 "- This model is a **HYBRID** — it supports ALL loss types: "
-                "ce, focal, focal_cw, smooth_l1.\n"
+                "ce, focal, focal_cw, smooth_l1."
+                f"{custom_loss_note}\n"
             )
 
         model_constraint = (
@@ -889,6 +932,7 @@ def get_planner_user_prompt(
             "Even when switching architectures, continue to vary loss_type and train_config to explore the full search space.\n"
             "- **Loss compatibility**: 'smooth_l1' is ONLY for regressor models (fcnet). "
             "All other models are classifiers — use 'ce', 'focal', or 'focal_cw'."
+            f"{custom_loss_note}"
         )
 
     # Build an OOM warning if any skipped_oom_risk records exist in memory

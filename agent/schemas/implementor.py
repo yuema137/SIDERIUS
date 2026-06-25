@@ -9,11 +9,12 @@ that is verified by code_validator_agent.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 
@@ -109,6 +110,64 @@ class ConfigAdjustment(BaseModel):
         return self
 
 
+class LossProvenance(BaseModel):
+    """Full audit trail for a single loss plugin use.
+
+    Present whenever ``baseline_config['loss_config']['loss_type'] == "custom"``.
+    ``None`` when the iteration is using a built-in loss type (focal, focal_cw,
+    ce, smooth_l1).
+
+    Two actions are distinguished so the interpreter and reflector can tell
+    which iteration is responsible for the plugin's existence (for credit
+    assignment) vs which iteration merely reused it:
+
+    - ``action="generated"``: the implementor wrote the plugin file *this*
+      iteration after a fresh LLM call. ``source_iteration`` equals the
+      current iteration's ``run_name``.
+    - ``action="reused"``: the plugin already existed in the registry; the
+      implementor made no LLM call for the loss this iteration.
+      ``source_iteration`` equals the ``run_name`` from the registry entry —
+      i.e. the iteration that originally created it.
+
+    See ``docs/design/enable_loss_inventory.md`` § Commit L3.
+    """
+
+    loss_name: str = Field(
+        min_length=1,
+        description="``PLUGIN_LOSS_TYPE`` key of the plugin, e.g. "
+        "``'snr_weighted_mse'``. Matches the value in "
+        "``baseline_config['loss_config']['loss_name']``.",
+    )
+    action: Literal["reused", "generated"] = Field(
+        description="``'generated'`` = implementor wrote the plugin file "
+        "this iteration. ``'reused'`` = plugin already existed in the "
+        "registry; no LLM call was made for the loss.",
+    )
+    source_iteration: str | None = Field(
+        description="Which iteration originally generated this loss plugin. "
+        "For ``action='generated'``: current iteration's ``run_name``. For "
+        "``action='reused'``: the ``run_name`` from the registry entry "
+        "(i.e. the iteration that created it, not the current one). May be "
+        "``None`` for losses with no recorded origin (e.g. a hand-curated "
+        "loss seeded into the registry).",
+    )
+    loss_file_path: str = Field(
+        min_length=1,
+        description="Absolute path to the loss plugin ``.py`` file. The same "
+        "file regardless of action — ``'generated'`` wrote it just now, "
+        "``'reused'`` is pointing at the existing one.",
+    )
+    dummy_tensor_validated: bool = Field(
+        description="True if the implementor's dummy-tensor forward pass "
+        "succeeded against the loaded plugin. Always True for "
+        "``action='reused'`` (the plugin was already validated when first "
+        "generated). Always True for ``action='generated'`` because the "
+        "implementor only writes to disk after the dummy-tensor check "
+        "passes. A False value would mean the audit trail is being "
+        "recorded for a known-broken state — diagnostic only.",
+    )
+
+
 class ImplementorInput(BaseModel):
     """
     Input to ml_model_implementor.
@@ -158,6 +217,29 @@ class ImplementorInput(BaseModel):
         default="agent_generated/tests",
         description="Directory where the test file will be written. "
         "This is a fixed output destination independent of storage.local.workspace.",
+    )
+    loss_dir: str = Field(
+        default="agent_generated/losses",
+        description="Directory where agent-generated loss plugin files will be "
+        "written when ``custom_loss_spec`` is set. Mirrors ``plugin_dir`` for "
+        "model plugins. Independent of ``storage.local.workspace``; the workflow "
+        "overrides this with a per-run path so concurrent iterations do not "
+        "clobber each other's plugins. The executor resolves loss plugins from "
+        "the directories listed in ``SIDERIUS_LOSS_DIRS`` (set by the sandbox "
+        "executor), so writing to ``loss_dir`` is sufficient to make the new "
+        "loss visible to training. See ``docs/design/enable_loss_inventory.md`` "
+        "§ Commit L3.",
+    )
+    custom_loss_spec: CustomLossSpec | None = Field(
+        default=None,
+        description="Specification for a novel loss function the implementor "
+        "should generate this iteration. Threaded through from "
+        "``ProposalOutput.custom_loss_spec`` by the propose→impl protocol. "
+        "``None`` when the proposer is using one of the four built-in losses "
+        "OR when reusing a previously-registered custom loss (in which case "
+        "the implementor only writes the model plugin and the loss lookup "
+        "succeeds against the existing registry entry). Wiring of the actual "
+        "code-generation path lives at L4.",
     )
     max_retries: int = Field(
         default=2,
@@ -254,6 +336,17 @@ class ImplementorOutput(BaseModel):
         "before tuner-time, and by the interpretation agent to flag any "
         "falsifiable_prediction whose target config was mutated. "
         "See docs/improving_validation_awareness.md Phase B.1.",
+    )
+    loss_provenance: LossProvenance | None = Field(
+        default=None,
+        description="Audit trail for custom-loss usage. ``None`` when the "
+        "proposer used a built-in loss type (focal, focal_cw, ce, smooth_l1). "
+        "Populated when ``baseline_config['loss_config']['loss_type'] == "
+        '"custom"`` — records whether the loss was reused from a prior '
+        "iteration or newly generated this iteration, the source iteration's "
+        "``run_name``, the absolute path to the plugin file, and whether the "
+        "dummy-tensor forward pass validated. See "
+        "``docs/design/enable_loss_inventory.md`` § Commit L3.",
     )
 
     @model_validator(mode="after")

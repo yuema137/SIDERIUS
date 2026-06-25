@@ -199,3 +199,91 @@ def render_expert_context(items: list) -> str:
             lines.append("")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# L5 — Loss-registry awareness in the proposer prompt
+# ---------------------------------------------------------------------------
+
+
+_LOSS_REGISTRY_EMPTY_FALLBACK = (
+    "## Available custom losses\n\n"
+    "No custom losses registered yet — propose a new one grounded in "
+    "lit-review findings, or use a built-in loss.\n"
+)
+
+
+def render_available_losses(registry) -> str:
+    """Render the loss-registry block for the proposer's prompt context.
+
+    Pulls all entries with ``capability_type="loss"`` from the registry,
+    sorts by ``created_at`` descending (most recently generated first —
+    most recent generation is most likely to be relevant to the current
+    bottleneck), and renders a markdown table of
+    ``loss_name | source_iteration | description``.
+
+    Args:
+        registry: A ``CapabilityRegistry`` instance. Duck-typed: any
+            object with a ``list(capability_type=...)`` method returning
+            an iterable of ``CapabilityMetadata``-shaped objects (i.e.
+            having ``name``, ``source_iteration``, ``description``,
+            ``created_at`` attributes) is accepted, so tests can pass a
+            simple stub without standing up a tmp index file.
+
+    Returns:
+        A multi-line string ready for ``str.replace`` substitution into
+        the ``{available_losses_block}`` placeholder. Includes a trailing
+        newline so the next template line follows naturally. When the
+        registry has no ``loss`` entries, returns the documented fallback
+        message (also ending in a newline).
+
+    See ``docs/design/enable_loss_inventory.md`` § Commit L5.
+    """
+    metas = list(registry.list(capability_type="loss"))
+    if not metas:
+        return _LOSS_REGISTRY_EMPTY_FALLBACK
+
+    # ISO-8601 UTC strings sort chronologically; reverse=True puts the most
+    # recent first. ``created_at`` is required by ``CapabilityMetadata``
+    # (min_length=1) so this key is never empty.
+    metas_sorted = sorted(metas, key=lambda m: m.created_at, reverse=True)
+
+    lines = [
+        "## Available custom losses",
+        "",
+        "The agent-generated loss registry currently contains the following "
+        "losses, sorted most-recent first. You may **reuse** an existing entry "
+        "by name OR **propose** a new one OR **use a built-in** loss type — "
+        "see the 3-branch rule in the Rules section below.",
+        "",
+        "**Branch B vs Branch C judgment**: compare the formula below against "
+        "the mechanism you want to introduce. If the existing loss already "
+        "implements your intended mechanism, prefer Branch B (reuse) — adding "
+        "a near-duplicate under a new name only fragments the evidence. "
+        "Branch C is for genuinely novel mechanisms not captured below.",
+        "",
+    ]
+    # L6c — subsection format (one ### block per loss). Safer than a markdown
+    # table for multi-line mathematical definitions. Description stays on a
+    # prose line (already normalised one-line by L4b); the formula gets its
+    # own fenced code block so the LLM reads it as code, not flowing prose.
+    for m in metas_sorted:
+        desc = " ".join((m.description or "").split())
+        source = m.source_iteration if m.source_iteration else "—"
+        lines.append(f"### `{m.name}` (source: {source})")
+        lines.append("")
+        lines.append(f"**Description**: {desc}")
+        # Back-compat: pre-L6c registry entries have mathematical_definition=""
+        # — render the description only and skip the Formula block. When
+        # non-empty, render the formula so the proposer can judge similarity
+        # directly against a candidate Branch C without inferring the math.
+        formula = (getattr(m, "mathematical_definition", "") or "").strip()
+        if formula:
+            lines.append("")
+            lines.append("**Formula**:")
+            lines.append("")
+            lines.append("```")
+            lines.append(formula)
+            lines.append("```")
+        lines.append("")
+    return "\n".join(lines)

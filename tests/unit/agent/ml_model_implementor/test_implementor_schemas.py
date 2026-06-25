@@ -5,7 +5,12 @@ Tests for agent/schemas/implementor.py
 import pytest
 from pydantic import ValidationError
 
-from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+from agent.schemas.implementor import (
+    ImplementorInput,
+    ImplementorOutput,
+    LossProvenance,
+)
+from agent.schemas.proposal import CustomLossSpec
 
 
 class TestImplementorInput:
@@ -124,3 +129,201 @@ class TestImplementorOutput:
                 mathematical_definition="y = tanh(Wf*x) * sigmoid(Wg*x)",
             )
         assert "model_description" in str(exc.value)
+
+
+# ==========================================
+# L3 — loss_dir + custom_loss_spec on ImplementorInput;
+#       LossProvenance + loss_provenance on ImplementorOutput
+# ==========================================
+#
+# Verifies the schema-only channel additions from L3. See
+# ``docs/design/enable_loss_inventory.md`` § Commit L3.
+
+
+@pytest.fixture
+def base_input_kwargs():
+    """Minimal valid ImplementorInput kwargs reused across L3 tests."""
+    return dict(
+        model_name="attn_unet",
+        model_description="x",
+        mathematical_definition="x",
+        baseline_config={
+            "model_config": {},
+            "train_config": {},
+            "loss_config": {"loss_type": "focal"},
+        },
+    )
+
+
+@pytest.fixture
+def base_output_kwargs():
+    """Minimal valid ImplementorOutput kwargs reused across L3 tests."""
+    return dict(
+        model_type="attn_unet",
+        description_file_path="/abs/desc.md",
+        model_file_path="/abs/model.py",
+        test_file_path="/abs/test.py",
+        config_fields={},
+        model_description="x",
+        mathematical_definition="x",
+    )
+
+
+@pytest.fixture
+def custom_spec():
+    return CustomLossSpec(
+        loss_name="snr_weighted_mse",
+        description="x",
+        mathematical_definition="x",
+    )
+
+
+class TestImplementorInputL3:
+    """L3 additions to ImplementorInput: loss_dir + custom_loss_spec."""
+
+    def test_loss_dir_default(self, base_input_kwargs):
+        inp = ImplementorInput(**base_input_kwargs)
+        assert inp.loss_dir == "agent_generated/losses"
+
+    def test_loss_dir_override(self, base_input_kwargs):
+        inp = ImplementorInput(**base_input_kwargs, loss_dir="/custom/losses")
+        assert inp.loss_dir == "/custom/losses"
+
+    def test_custom_loss_spec_defaults_to_none(self, base_input_kwargs):
+        inp = ImplementorInput(**base_input_kwargs)
+        assert inp.custom_loss_spec is None
+
+    def test_custom_loss_spec_accepted(self, base_input_kwargs, custom_spec):
+        inp = ImplementorInput(**base_input_kwargs, custom_loss_spec=custom_spec)
+        assert inp.custom_loss_spec is not None
+        assert inp.custom_loss_spec.loss_name == "snr_weighted_mse"
+
+    def test_back_compat_with_pre_l3_construction(self, base_input_kwargs):
+        """A pre-L3 caller passing only the original fields must still
+        produce a fully-valid ImplementorInput."""
+        inp = ImplementorInput(**base_input_kwargs)
+        # All new L3 fields must have their defaults.
+        assert inp.loss_dir == "agent_generated/losses"
+        assert inp.custom_loss_spec is None
+
+
+class TestLossProvenance:
+    """LossProvenance schema enforcement."""
+
+    def test_valid_generated(self):
+        p = LossProvenance(
+            loss_name="snr_weighted_mse",
+            action="generated",
+            source_iteration="iter_001",
+            loss_file_path="/abs/agent_generated/losses/snr_weighted_mse.py",
+            dummy_tensor_validated=True,
+        )
+        assert p.action == "generated"
+        assert p.source_iteration == "iter_001"
+
+    def test_valid_reused(self):
+        p = LossProvenance(
+            loss_name="snr_weighted_mse",
+            action="reused",
+            source_iteration="iter_000",
+            loss_file_path="/abs/agent_generated/losses/snr_weighted_mse.py",
+            dummy_tensor_validated=True,
+        )
+        assert p.action == "reused"
+
+    def test_source_iteration_none_allowed(self):
+        """Hand-curated losses seeded into the registry have no recorded
+        origin — source_iteration=None is valid."""
+        p = LossProvenance(
+            loss_name="hand_curated_loss",
+            action="reused",
+            source_iteration=None,
+            loss_file_path="/abs/path.py",
+            dummy_tensor_validated=True,
+        )
+        assert p.source_iteration is None
+
+    def test_invalid_action_raises(self):
+        with pytest.raises(ValidationError, match="action"):
+            LossProvenance(
+                loss_name="x",
+                action="invented_action",  # type: ignore[arg-type]
+                source_iteration="iter_001",
+                loss_file_path="/abs/x.py",
+                dummy_tensor_validated=True,
+            )
+
+    def test_empty_loss_name_raises(self):
+        with pytest.raises(ValidationError, match="loss_name"):
+            LossProvenance(
+                loss_name="",
+                action="generated",
+                source_iteration="iter_001",
+                loss_file_path="/abs/x.py",
+                dummy_tensor_validated=True,
+            )
+
+    def test_empty_loss_file_path_raises(self):
+        with pytest.raises(ValidationError, match="loss_file_path"):
+            LossProvenance(
+                loss_name="x",
+                action="generated",
+                source_iteration="iter_001",
+                loss_file_path="",
+                dummy_tensor_validated=True,
+            )
+
+
+class TestImplementorOutputLossProvenance:
+    """L3 additions to ImplementorOutput: loss_provenance."""
+
+    def test_defaults_to_none(self, base_output_kwargs):
+        out = ImplementorOutput(**base_output_kwargs)
+        assert out.loss_provenance is None
+
+    def test_accepts_generated_provenance(self, base_output_kwargs):
+        prov = LossProvenance(
+            loss_name="snr_weighted_mse",
+            action="generated",
+            source_iteration="iter_001",
+            loss_file_path="/abs/snr_weighted_mse.py",
+            dummy_tensor_validated=True,
+        )
+        out = ImplementorOutput(**base_output_kwargs, loss_provenance=prov)
+        assert out.loss_provenance is not None
+        assert out.loss_provenance.action == "generated"
+
+    def test_accepts_reused_provenance(self, base_output_kwargs):
+        prov = LossProvenance(
+            loss_name="snr_weighted_mse",
+            action="reused",
+            source_iteration="iter_000",
+            loss_file_path="/abs/snr_weighted_mse.py",
+            dummy_tensor_validated=True,
+        )
+        out = ImplementorOutput(**base_output_kwargs, loss_provenance=prov)
+        assert out.loss_provenance is not None
+        assert out.loss_provenance.action == "reused"
+
+    def test_round_trip_via_json(self, base_output_kwargs):
+        """JSON round-trip preserves loss_provenance — needed because the
+        record is serialised to ``implementor_output_{run_name}.json`` and
+        re-loaded by downstream nodes."""
+        prov = LossProvenance(
+            loss_name="snr_weighted_mse",
+            action="generated",
+            source_iteration="iter_001",
+            loss_file_path="/abs/snr_weighted_mse.py",
+            dummy_tensor_validated=True,
+        )
+        out = ImplementorOutput(**base_output_kwargs, loss_provenance=prov)
+        restored = ImplementorOutput.model_validate_json(out.model_dump_json())
+        assert restored.loss_provenance is not None
+        assert restored.loss_provenance.loss_name == "snr_weighted_mse"
+        assert restored.loss_provenance.action == "generated"
+
+    def test_back_compat_no_loss_provenance(self, base_output_kwargs):
+        """A pre-L3 caller building ImplementorOutput without loss_provenance
+        gets a None default — no validation error."""
+        out = ImplementorOutput(**base_output_kwargs)
+        assert out.loss_provenance is None

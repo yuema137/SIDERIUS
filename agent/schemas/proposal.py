@@ -79,6 +79,56 @@ class FalsifiablePrediction(BaseModel):
         return self
 
 
+# L3 — Custom loss specification (agent-generated loss plugin)
+class CustomLossSpec(BaseModel):
+    """Specification for an agent-generated custom loss function.
+
+    Emitted by ``ml_model_proposal_agent`` when the proposer decides that
+    none of the four built-in loss types (``focal``, ``focal_cw``, ``ce``,
+    ``smooth_l1``) fits the current research direction and a novel loss is
+    warranted. Consumed by ``ml_model_implementor`` at L4 to generate a
+    loss plugin under ``agent_generated/losses/{loss_name}.py``.
+
+    Round-trip contract: when ``ProposalOutput.custom_loss_spec`` is set,
+    ``baseline_config['loss_config']['loss_type']`` must be ``"custom"`` and
+    ``baseline_config['loss_config']['loss_name']`` must equal
+    ``custom_loss_spec.loss_name``. Enforced by
+    ``ProposalOutput._validate_custom_loss_spec_consistency``.
+
+    See ``docs/design/enable_loss_inventory.md`` § Commit L3.
+    """
+
+    loss_name: str = Field(
+        min_length=1,
+        description="Snake_case unique key for this loss. Becomes the "
+        "``PLUGIN_LOSS_TYPE`` constant of the generated plugin and the "
+        "filename ``agent_generated/losses/{loss_name}.py``. Must not "
+        "clash with existing losses in the registry.",
+    )
+    description: str = Field(
+        min_length=1,
+        description="Plain-English description of what this loss computes "
+        "and why it is expected to outperform the built-in alternatives "
+        "on the current research direction.",
+    )
+    mathematical_definition: str = Field(
+        min_length=1,
+        description="Precise mathematical definition of the loss function "
+        "in terms of model outputs and targets. Must be concrete enough "
+        "for the implementor to generate code directly — include reduction "
+        "behavior, weighting terms, and any auxiliary tensors (e.g. spectral "
+        "windows). Avoid hand-waving like 'a weighted variant of...'.",
+    )
+    config_fields: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Hyperparameter fields for the plugin's "
+        "``PLUGIN_LOSS_CONFIG_CLASS``. Keys are field names; values describe "
+        "type, default, and meaning. Concrete structure validated at L4 by "
+        "the implementor. Empty dict = the plugin has no tunable "
+        "hyperparameters (a pure functional loss).",
+    )
+
+
 # B.2 — Inherited component (lineage tracking)
 _EXTERNAL_SOURCE_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*:[\w./-]+$")
 
@@ -950,6 +1000,17 @@ class ProposalOutput(BaseModel):
         "loop the emitted candidate is the lowest-factor draft seen "
         "(not necessarily the last one).",
     )
+    custom_loss_spec: CustomLossSpec | None = Field(
+        default=None,
+        description="Specification for a novel loss function to be generated "
+        "by the implementor at L4. When set, "
+        "``baseline_config['loss_config']['loss_type']`` MUST be ``'custom'`` "
+        "AND ``baseline_config['loss_config']['loss_name']`` MUST equal "
+        "``custom_loss_spec.loss_name`` — enforced by "
+        "``_validate_custom_loss_spec_consistency``. When ``None``, the "
+        "proposer is using one of the four built-in loss types and no "
+        "implementor loss-generation step is triggered.",
+    )
 
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):
@@ -987,3 +1048,123 @@ class ProposalOutput(BaseModel):
                 f"Valid segmentation_size values: {valid}."
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_custom_loss_spec_consistency(self):
+        """Enforce the round-trip contract between ``custom_loss_spec`` and
+        ``baseline_config['loss_config']``.
+
+        Two failure modes this catches:
+          1. ``custom_loss_spec`` set but ``baseline_config`` does not declare
+             ``loss_type='custom'`` — the implementor would generate the
+             plugin but training would never route to it.
+          2. ``loss_name`` mismatch between the spec and the baseline — the
+             implementor would write ``foo.py`` but training would try to
+             load ``bar``.
+
+        No-op when ``custom_loss_spec is None`` (back-compat with all
+        existing built-in-loss proposals) or when ``baseline_config`` lacks
+        a ``loss_config`` dict (some legacy test fixtures pass
+        ``baseline_config={}``; that path is still routed through built-in
+        defaults at the executor layer).
+        """
+        if self.custom_loss_spec is None:
+            return self
+        loss_cfg = self.baseline_config.get("loss_config") if self.baseline_config else None
+        if not isinstance(loss_cfg, dict):
+            raise ValueError(
+                "custom_loss_spec is set but baseline_config['loss_config'] is "
+                "missing or not a dict. When proposing a custom loss, "
+                "baseline_config must include a loss_config dict with "
+                "loss_type='custom' and loss_name matching "
+                "custom_loss_spec.loss_name."
+            )
+        baseline_loss_type = loss_cfg.get("loss_type")
+        if baseline_loss_type != "custom":
+            raise ValueError(
+                f"custom_loss_spec is set but "
+                f"baseline_config['loss_config']['loss_type'] is "
+                f"{baseline_loss_type!r}, not 'custom'. When proposing a "
+                f"custom loss, baseline_config['loss_config']['loss_type'] "
+                f"must be 'custom' so the executor routes through the "
+                f"agent-generated plugin instead of a built-in loss."
+            )
+        baseline_loss_name = loss_cfg.get("loss_name")
+        if baseline_loss_name != self.custom_loss_spec.loss_name:
+            raise ValueError(
+                f"baseline_config['loss_config']['loss_name'] "
+                f"({baseline_loss_name!r}) does not match "
+                f"custom_loss_spec.loss_name "
+                f"({self.custom_loss_spec.loss_name!r}). These must match — "
+                f"the spec defines the plugin to generate; the baseline "
+                f"config selects which plugin to load at training time."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_branch_b_registry_membership(self, info):
+        """Reject phantom Branch B at schema-validation time when caller
+        provides the loss registry as Pydantic context.
+
+        Branch B (reuse a previously-generated custom loss) is the proposer
+        choice when ``loss_type='custom'`` AND ``loss_name`` is set AND
+        ``custom_loss_spec is None``. It is only legal when ``loss_name``
+        appears in the capability registry; otherwise the implementor and
+        downstream training have no plugin to load and will fail.
+
+        Gate 2 + Gate 3 (2026-06-22) both reproduced the same failure mode:
+        the proposer LLM (gpt-5.4) emits Branch C *in intent* (motivation
+        text says "register custom_loss_spec for that loss") but the agent
+        was silently dropping ``custom_loss_spec`` from the LLM raw
+        response. Even after that extraction bug is fixed, this validator
+        catches the regression where the LLM forgets to populate
+        ``custom_loss_spec`` and emits a phantom Branch B — diagnosed *at
+        the same LLM call* so LLMBridge's schema-retry loop re-prompts
+        immediately, rather than waiting for the workflow-level retry one
+        attempt later.
+
+        Activated only when the caller passes ``context={"loss_registry_names":
+        [...]}`` to ``model_validate``. With no context (e.g. unit tests
+        building ``ProposalOutput`` directly), this is a no-op — preserving
+        back-compat with all existing fixtures.
+        """
+        if self.custom_loss_spec is not None:
+            return self  # Branch C — consistency validator above handles this.
+        loss_cfg = self.baseline_config.get("loss_config") if self.baseline_config else None
+        if not isinstance(loss_cfg, dict):
+            return self
+        if loss_cfg.get("loss_type") != "custom":
+            return self  # Branch A — built-in loss, no registry check needed.
+        loss_name = loss_cfg.get("loss_name")
+        if not loss_name:
+            raise ValueError(
+                "baseline_config['loss_config']['loss_type'] is 'custom' but "
+                "loss_name is missing or empty. Branch A (built-in) does not "
+                "use 'custom'; Branch B (reuse) requires loss_name to match a "
+                "registry entry; Branch C (new) requires both loss_name AND a "
+                "populated top-level custom_loss_spec object. Pick one."
+            )
+        ctx = (info.context or {}) if info is not None else {}
+        registry_names = ctx.get("loss_registry_names")
+        if registry_names is None:
+            return self  # No context — schema can't verify Branch B vs phantom.
+        if loss_name in registry_names:
+            return self  # Legitimate Branch B reuse.
+        # Phantom Branch B — name not in the registry.
+        registry_display = (
+            "no losses registered yet" if not registry_names else f"only {sorted(registry_names)!r}"
+        )
+        raise ValueError(
+            f"Phantom Branch B detected: loss_type='custom' + "
+            f"loss_name={loss_name!r} + custom_loss_spec=None implies you "
+            f"intend to REUSE an existing registered loss (Branch B), but "
+            f"the loss registry contains {registry_display}. This is the "
+            f"single most common LLM mistake on the loss-inventory surface — "
+            f"the typical INTENT is Branch C (generate a NEW loss), but the "
+            f"emitted SHAPE is Branch B (reuse). To fix: either (Branch C) "
+            f"populate the top-level custom_loss_spec object with loss_name="
+            f"{loss_name!r}, description, mathematical_definition, and "
+            f"config_fields; OR (Branch A) set loss_type to one of 'focal', "
+            f"'focal_cw', 'ce', 'smooth_l1' and remove loss_name. Do NOT "
+            f"submit Branch B with a loss_name that is not in the registry."
+        )

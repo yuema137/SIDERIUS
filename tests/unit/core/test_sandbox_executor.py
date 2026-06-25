@@ -725,3 +725,128 @@ class TestExecuteTrainingSilentCrash:
         )
         assert out["status"] == "success"
         assert "error_training:" not in out.get("message", "")
+
+
+# ==========================================
+# L1b — SIDERIUS_LOSS_DIRS wiring
+# ==========================================
+#
+# Mirrors the SIDERIUS_PLUGIN_DIRS test block above for the loss-plugin
+# surface added by enable_loss_inventory L1b. See
+# ``docs/design/enable_loss_inventory.md`` § Commit L1.
+
+from core.sandbox_executor import get_loss_dir
+
+
+class TestSubprocessEnvLossDir:
+    """``_subprocess_env(loss_dir=...)`` extends the same env-builder that
+    handles plugin_dir. The two env vars are independent — supplying one
+    must not affect the other, and supplying both must populate both."""
+
+    def test_no_loss_dir_leaves_env_var_unset(self):
+        env = _subprocess_env()
+        assert "SIDERIUS_LOSS_DIRS" not in env
+
+    def test_loss_dir_populates_env_var(self, tmp_path):
+        env = _subprocess_env(loss_dir=str(tmp_path))
+        assert env["SIDERIUS_LOSS_DIRS"] == str(tmp_path)
+
+    def test_loss_dir_does_not_set_plugin_dir(self, tmp_path):
+        """Independence guard: supplying only ``loss_dir`` must leave
+        SIDERIUS_PLUGIN_DIRS unset. If this regresses, the two env vars
+        are coupled and the L1b separation-of-concerns is violated."""
+        env = _subprocess_env(loss_dir=str(tmp_path))
+        assert "SIDERIUS_PLUGIN_DIRS" not in env
+
+    def test_plugin_dir_does_not_set_loss_dir(self, tmp_path):
+        """Mirror of the above — supplying only ``plugin_dir`` must leave
+        SIDERIUS_LOSS_DIRS unset."""
+        env = _subprocess_env(plugin_dir=str(tmp_path))
+        assert "SIDERIUS_LOSS_DIRS" not in env
+
+    def test_both_dirs_populate_both_env_vars(self, tmp_path):
+        plugin = tmp_path / "plugins"
+        loss = tmp_path / "losses"
+        env = _subprocess_env(plugin_dir=str(plugin), loss_dir=str(loss))
+        assert env["SIDERIUS_PLUGIN_DIRS"] == str(plugin)
+        assert env["SIDERIUS_LOSS_DIRS"] == str(loss)
+
+    def test_loss_dir_does_not_clobber_pythonpath(self, tmp_path):
+        """Regression guard: the loss_dir wiring must not interfere with
+        PYTHONPATH construction. Mirror of the plugin_dir version above."""
+        env = _subprocess_env(loss_dir=str(tmp_path))
+        assert "PYTHONPATH" in env
+        project_root = _os.path.dirname(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        )
+        assert project_root in env["PYTHONPATH"]
+        assert _os.path.join(project_root, "ml_models") in env["PYTHONPATH"]
+        assert _os.path.join(project_root, "execute_tools") in env["PYTHONPATH"]
+
+
+class TestSandboxLossDir:
+    """``TidmadSandbox`` owns per-run loss isolation analogously to
+    plugin isolation: it creates ``<workspace>/losses/<run_name>/`` at
+    construction and threads that path into every subprocess via
+    SIDERIUS_LOSS_DIRS."""
+
+    def test_loss_dir_created_under_workspace(self, tmp_path):
+        sb = TidmadSandbox(run_name="run_a", workspace=str(tmp_path))
+        expected = _os.path.join(str(tmp_path), "losses", "run_a")
+        assert sb.loss_dir == expected
+        assert _os.path.isdir(sb.loss_dir)
+
+    def test_two_sandboxes_get_distinct_loss_dirs(self, tmp_path):
+        sb1 = TidmadSandbox(run_name="run_a", workspace=str(tmp_path))
+        sb2 = TidmadSandbox(run_name="run_b", workspace=str(tmp_path))
+        assert sb1.loss_dir != sb2.loss_dir
+
+    def test_sandbox_loss_dir_is_distinct_from_plugin_dir(self, tmp_path):
+        """``plugin_dir`` and ``loss_dir`` are siblings under the workspace
+        with different names; they must never collide."""
+        sb = TidmadSandbox(run_name="run_a", workspace=str(tmp_path))
+        assert sb.plugin_dir != sb.loss_dir
+        # Both still live under the workspace.
+        assert sb.plugin_dir.startswith(str(tmp_path))
+        assert sb.loss_dir.startswith(str(tmp_path))
+
+    @patch("core.sandbox_executor.subprocess.run")
+    def test_training_subprocess_receives_loss_dir_in_env(self, mock_run, sandbox):
+        """End-to-end wiring check: ``execute_training`` must pass the
+        sandbox's loss_dir to the training subprocess via
+        SIDERIUS_LOSS_DIRS. Mirror of the plugin_dir version."""
+        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
+        sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        _, kwargs = mock_run.call_args
+        assert "env" in kwargs
+        assert kwargs["env"]["SIDERIUS_LOSS_DIRS"] == sandbox.loss_dir
+        # And plugin_dir is still wired — regression guard for the existing path.
+        assert kwargs["env"]["SIDERIUS_PLUGIN_DIRS"] == sandbox.plugin_dir
+
+
+class TestGetLossDir:
+    """``get_loss_dir`` is the single source of truth for the workspace-rooted
+    loss-plugin layout. Mirror of ``get_plugin_dir`` tests."""
+
+    def test_layout_matches_doc(self, tmp_path):
+        """Path is exactly ``<workspace>/losses/<run_name>/`` (absolutised)."""
+        result = get_loss_dir(str(tmp_path), "run_a")
+        expected = _os.path.join(str(tmp_path), "losses", "run_a")
+        assert result == expected
+
+    def test_returns_absolute_path(self, tmp_path, monkeypatch):
+        """Workflow may pass a relative workspace; the returned path must be
+        absolute so it equals the sandbox's ``self.loss_dir``."""
+        monkeypatch.chdir(tmp_path)
+        result = get_loss_dir("relative_ws", "run_a")
+        assert _os.path.isabs(result)
+        assert "relative_ws" in result
+        assert result.endswith(_os.path.join("losses", "run_a"))
+
+    def test_distinct_from_plugin_dir(self, tmp_path):
+        """``get_loss_dir`` and ``get_plugin_dir`` must produce different
+        paths for the same (workspace, run_name) — that's the whole point
+        of having separate env vars."""
+        plugin = get_plugin_dir(str(tmp_path), "run_a")
+        loss = get_loss_dir(str(tmp_path), "run_a")
+        assert plugin != loss

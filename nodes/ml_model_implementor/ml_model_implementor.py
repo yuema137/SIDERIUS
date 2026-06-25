@@ -26,12 +26,15 @@ import os
 import re
 import tempfile
 import textwrap
+from datetime import UTC, datetime
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
-from agent.schemas.implementor import ImplementorInput, ImplementorOutput
+from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
+from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
 from workflows.task_config import render_forward_contract
 
 # ---------------------------------------------------------------------------
@@ -417,6 +420,417 @@ Output only the JSON object — no preamble, no markdown fences, no commentary."
 
 
 # ---------------------------------------------------------------------------
+# L4 — Loss-plugin template + prompts + assembly + dummy-tensor validator
+# ---------------------------------------------------------------------------
+#
+# The implementor's existing flow generates a MODEL plugin into
+# ``inp.plugin_dir``. L4 adds a parallel flow that generates a LOSS plugin
+# into ``inp.loss_dir`` when ``inp.custom_loss_spec`` is set. The model and
+# loss flows share the same ``self.bridge``; only the prompts, the
+# assembly template, and the dummy-tensor validation differ.
+#
+# See ``docs/design/enable_loss_inventory.md`` § Commit L4.
+
+
+# Fixed boilerplate for the loss plugin. The LLM fills only the variable
+# slots (extra_imports, config_fields_code, config_validators_code,
+# init_body, forward_body); the 3 required PLUGIN_LOSS_* constants and the
+# class/config skeleton are produced by the template so the LLM cannot
+# accidentally omit them.
+LOSS_PLUGIN_TEMPLATE = """\
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from pydantic import BaseModel, Field, model_validator
+from typing import Self
+{extra_imports}
+
+PLUGIN_LOSS_TYPE = "{loss_name}"
+
+
+class {LossClass}Config(BaseModel):
+    \"\"\"Hyperparameters for the {loss_name} loss.
+
+    Lives in the plugin's own config namespace per the two-config design.
+    Independent of ``LossConfig`` (the router in ``ml_models``); the agent
+    cannot reach LossConfig.alpha / gamma / beta from here.
+    \"\"\"
+{config_fields_code}
+{config_validators_code}
+
+PLUGIN_LOSS_CONFIG_CLASS = {LossClass}Config
+
+
+class {LossClass}(nn.Module):
+    \"\"\"{description}\"\"\"
+
+    def __init__(self, config: "{LossClass}Config"):
+        super().__init__()
+{init_body}
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # Forward contract:
+        #   inputs:  [B, num_classes, T] float32  (model logits)
+        #   targets: [B, T]              int64    (class indices)
+        #   returns: scalar tensor                (requires_grad=True)
+{forward_body}
+
+
+PLUGIN_LOSS_CLASS = {LossClass}
+"""
+
+
+IMPLEMENTOR_LOSS_REASONING_PROMPT = """\
+You are a senior PyTorch engineer specialising in loss functions for signal denoising.
+
+Your task: given a mathematical definition for a new loss function, plan its PyTorch
+implementation in detail before writing code. The loss receives classifier-shaped
+logits and integer class targets; it must return a SCALAR tensor with gradient.
+
+## Forward contract — non-negotiable
+
+  - ``inputs``  : ``torch.Tensor`` of shape ``[B, num_classes, T]`` (float32, logits)
+  - ``targets`` : ``torch.Tensor`` of shape ``[B, T]``              (int64, class indices in [0, num_classes))
+  - returns     : ``torch.Tensor`` SCALAR  (i.e. ``.dim() == 0``)
+                  with ``requires_grad=True`` so training can backprop.
+
+## Allowed imports — STRICT ALLOW-LIST
+
+The loss plugin runtime is the same RESTRICTED sandbox as model plugins. ONLY:
+  - torch
+  - torch.nn (as nn)
+  - torch.nn.functional (as F)
+  - pydantic (BaseModel, Field, model_validator)
+  - typing (Self, Optional, List, Tuple, etc.)
+  - math
+  - dataclasses
+
+ANY other import will fail at plugin load time. In particular:
+  - Do NOT import from project-internal paths (`ml_models`, `agent`, `core`, ...).
+  - Do NOT import third-party libraries (numpy, scipy, einops, ...).
+  - If you need something not in the allow-list, INLINE its logic with torch ops.
+
+## Anti-patterns to avoid
+
+  - Do NOT return a non-scalar tensor (any reduction over the leading and time
+    dims is fine: ``.mean()``, ``.sum()`` / batch_size, etc.).
+  - Do NOT compute the loss on ``targets.float()`` without checking shape — if the
+    loss uses ``F.cross_entropy`` or similar, pass the int64 targets directly.
+
+## Gradient-flow requirement
+
+The final scalar loss MUST have gradient flowing back to ``inputs``. The
+implementor's validator runs ``loss.backward()`` on dummy tensors and rejects
+the plugin if ``inputs.grad is None``.
+
+You MAY use ``.detach()`` or ``torch.no_grad()`` on **weighting or masking
+terms** (treating them as constants is legitimate and sometimes necessary for
+non-differentiable operations like ``argmax``-based weights). However, NEVER
+call ``.detach()`` on ``inputs`` directly, and never sever the main
+computational path from ``inputs`` → loss.
+
+Safe pattern — weight is detached; gradient still flows via ``F.cross_entropy``:
+
+    with torch.no_grad():
+        weight = compute_weight(inputs, targets)   # treated as constant
+    per_elem = F.cross_entropy(inputs, targets, reduction='none')  # flows grad
+    loss = (per_elem * weight).mean()
+
+Unsafe pattern — severs gradient entirely (validator will reject):
+
+    loss = F.cross_entropy(inputs.detach(), targets)  # inputs.grad will be None
+
+In your reasoning, cover all of the following:
+1. How will you reduce the per-element loss to a scalar (mean? sum? weighted mean?).
+2. Does the loss require any per-class weighting, auxiliary tensor, or spectral
+   transform? If so, name each one and how it is computed from ``inputs`` / ``targets``.
+3. What Pydantic config fields are needed? For each: name, type, default, valid range.
+   Keep them minimal — the agent will tune these later.
+4. What additional imports beyond torch, nn, F, BaseModel, Field, model_validator are needed?
+5. Trace the forward pass shape-by-shape from ``[B, num_classes, T]`` to scalar.
+
+Think step by step. Be concrete about tensor shapes at each stage.
+Do not write final Python code yet — that is the next step."""
+
+
+IMPLEMENTOR_LOSS_CODE_PROMPT = """\
+You are a senior PyTorch engineer. You have just reasoned through a loss implementation.
+Now commit to the actual code sections.
+
+Output a JSON object with exactly these fields:
+
+{
+  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator/Self, one per line, or empty string. STRICT ALLOW-LIST: only `import math`, `import dataclasses`, and additional `from typing import ...` lines are accepted.",
+  "config_fields_code": "Pydantic field definitions for the loss's own hyperparameters — each line indented with 4 spaces, e.g.:\\n    snr_threshold: float = Field(default=0.5, ge=0.0, le=1.0)\\n    high_snr_weight: float = Field(default=2.0, ge=0.1, le=10.0)\\nEmpty string if the loss has no tunable hyperparameters.",
+  "config_validators_code": "optional @model_validator(mode='after') method enforcing cross-field constraints, indented with 4 spaces — or empty string if no constraints needed.",
+  "config_fields": {"field_name": default_value, ...},
+  "init_body": "the __init__ body after super().__init__(). Each line indented with 8 spaces. Use this to copy config values onto self (e.g. `self.snr_threshold = config.snr_threshold`). The `config` object is only in scope HERE — forward_body cannot reference it.",
+  "forward_body": "the forward body. Each line indented with 8 spaces. Must end with a return statement of a SCALAR tensor with requires_grad=True."
+}
+
+Hard constraints — violating any of these makes the code invalid:
+- The forward signature is FIXED: ``def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:``.
+  Use ``inputs`` and ``targets`` everywhere in forward_body — NEVER rename them.
+- forward_body MUST end with a return of a SCALAR tensor (``.dim() == 0``) that
+  carries gradient through ``inputs``.
+- init_body MUST define every attribute referenced in forward_body. Do NOT access
+  ``config`` inside forward_body.
+- Do NOT include the 3 PLUGIN_LOSS_* constants — those are emitted by the template.
+- Do NOT define helper classes — write the entire forward body inline.
+- All config fields must be scalar (int, float, bool) — no List/Dict/Tuple.
+- Use Pydantic V2 Field kwargs only: ge, le, gt, lt, multiple_of.
+- Do NOT wrap any forward path in ``torch.no_grad()``; do NOT call ``.detach()`` on
+  ``inputs`` or anything derived from it.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary."""
+
+
+IMPLEMENTOR_LOSS_REPAIR_PROMPT = """\
+Your previous loss-plugin code failed validation. Fix the issue and return a
+corrected JSON object with the same 6 fields: extra_imports, config_fields_code,
+config_validators_code, config_fields, init_body, forward_body.
+
+All hard constraints from the previous prompt still apply. In particular:
+  - The forward signature stays ``forward(self, inputs, targets) -> torch.Tensor``.
+  - The return MUST be a scalar tensor with ``requires_grad=True``.
+  - No torch.no_grad(), no .detach() on inputs.
+
+Focus specifically on the error below — do not rewrite unrelated code.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary."""
+
+
+def _loss_class_name(loss_name: str) -> str:
+    """Snake_case loss name → CamelCase class name. Mirrors ``_class_name``
+    for model plugins. ``"snr_weighted_mse"`` → ``"SnrWeightedMse"``."""
+    return "".join(word.capitalize() for word in loss_name.split("_"))
+
+
+def _assemble_loss_plugin(loss_name: str, description: str, code: dict) -> str:
+    """Assemble the final loss plugin source from the LLM-generated JSON sections.
+
+    Mirrors ``_assemble_plugin`` for model plugins: the template owns the 3
+    required PLUGIN_LOSS_* constants and the class/config skeleton; the LLM
+    only fills the variable slots. Indentation is normalised so the LLM can
+    return any of: 0-space, 4-space, 8-space, or mixed indentation in
+    ``init_body`` / ``forward_body`` and the assembled file always parses.
+
+    Args:
+        loss_name: ``PLUGIN_LOSS_TYPE`` key (snake_case).
+        description: Short docstring for the loss class (shown by
+            ``help(LossClass)`` and rendered into the registry entry's
+            ``description`` field). Stripped of newlines so it stays on one
+            line in the assembled source.
+        code: JSON dict returned by the LLM's loss-code call. Expected keys:
+            ``extra_imports``, ``config_fields_code``, ``config_validators_code``,
+            ``init_body``, ``forward_body``. Missing keys substitute safe
+            placeholders (``"pass"``) so the assembled file still parses
+            for downstream validation messages.
+
+    Returns:
+        The complete assembled ``.py`` source as a string.
+    """
+    loss_cls = _loss_class_name(loss_name)
+
+    extra_imports = code.get("extra_imports", "").strip()
+    config_fields_code = code.get("config_fields_code", "").rstrip()
+    config_validators_code = code.get("config_validators_code", "").rstrip()
+    init_body = code.get("init_body", "        pass").rstrip()
+    forward_body = code.get("forward_body", "        pass").rstrip()
+
+    # Mirror _assemble_plugin: normalise indentation (dedent then re-indent)
+    # so the LLM can emit any indentation level without breaking the assembly.
+    init_body = textwrap.indent(textwrap.dedent(init_body), "        ")
+    forward_body = textwrap.indent(textwrap.dedent(forward_body), "        ")
+
+    # If config_fields_code is empty, insert a no-op pass so the config class
+    # body is not empty (an empty class body would be a SyntaxError after the
+    # docstring; pydantic BaseModel with no fields is otherwise legal).
+    if not config_fields_code.strip():
+        config_fields_code = "    pass"
+
+    # Drop imports already present in the template header. Same allow-list
+    # logic as _assemble_plugin — accept only well-formed import lines.
+    _already_imported = {
+        "import torch",
+        "import torch.nn as nn",
+        "import torch.nn.functional as F",
+        "from pydantic import BaseModel, Field, model_validator",
+        "from typing import Self",
+    }
+    extra_lines = [
+        line
+        for line in extra_imports.splitlines()
+        if line.strip()
+        and line.strip() not in _already_imported
+        and (line.strip().startswith("import ") or line.strip().startswith("from "))
+    ]
+    extra_imports = "\n".join(extra_lines)
+    if extra_imports:
+        extra_imports = "\n" + extra_imports
+
+    if config_validators_code.strip():
+        config_validators_code = textwrap.indent(textwrap.dedent(config_validators_code), "    ")
+
+    # One-line docstring: collapse newlines + strip so the assembled class
+    # docstring fits on a single rendered line.
+    description_oneline = " ".join(description.split()).replace('"', "'")
+
+    return LOSS_PLUGIN_TEMPLATE.format(
+        loss_name=loss_name,
+        LossClass=loss_cls,
+        description=description_oneline,
+        extra_imports=extra_imports,
+        config_fields_code=config_fields_code,
+        config_validators_code=config_validators_code,
+        init_body=init_body,
+        forward_body=forward_body,
+    )
+
+
+def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
+    """Run the L2-equivalent dummy-tensor check on an assembled loss-plugin source.
+
+    Procedure:
+      1. Write the source to a tmp file (so ``importlib`` can load it).
+      2. Import the module and look up the 3 required PLUGIN_LOSS_* attrs.
+      3. Construct ``PLUGIN_LOSS_CONFIG_CLASS()`` with its declared defaults.
+      4. Instantiate ``PLUGIN_LOSS_CLASS(cfg)`` and run forward with:
+         - ``inputs``  = ``torch.randn(2, 256, 100, requires_grad=True)``
+         - ``targets`` = ``torch.randint(0, 256, (2, 100), dtype=torch.int64)``
+      5. Assert ``loss.dim() == 0`` and ``math.isfinite(loss.item())``.
+      6. **Run ``loss.backward()``** and assert ``inputs.grad is not None``
+         and ``torch.isfinite(inputs.grad).all()``. ``requires_grad=True`` on
+         the loss output does NOT guarantee gradient actually flows back to
+         ``inputs`` — a ``.detach()`` on inputs or mid-computation can leave
+         ``requires_grad=True`` on the final tensor while severing the graph.
+         The backward() check is the only reliable detector for this class
+         of bug, and it also surfaces NaN/Inf gradient instabilities the
+         scalar finite check cannot.
+
+    Args:
+        plugin_src: The assembled loss-plugin source code.
+        loss_name: The ``PLUGIN_LOSS_TYPE`` key, used only for error messages.
+
+    Returns:
+        ``None`` if all checks pass; otherwise a human-readable error string
+        describing the first failure. The string is suitable for feeding back
+        into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT`` as the ``error`` field.
+    """
+    # Lazy import keeps torch off the import-time path for callers that
+    # only use the model-code helpers above. Mirrors `_smoke_test_plugin`.
+    import contextlib
+    import importlib.util
+    import math
+
+    import torch
+
+    # Stage in a tmp dir + file (matches `_smoke_test_plugin` convention so
+    # both helpers share the same cleanup pattern).
+    tmp_dir = tempfile.mkdtemp(prefix=f"siderius_loss_dummy_{loss_name}_")
+    tmp_path = os.path.join(tmp_dir, f"{loss_name}.py")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(plugin_src)
+
+        spec = importlib.util.spec_from_file_location(f"siderius_loss_dummy_{loss_name}", tmp_path)
+        if spec is None or spec.loader is None:
+            return f"Could not resolve module spec for assembled loss plugin '{loss_name}'."
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception as e:
+            return f"Plugin source failed to import: {type(e).__name__}: {e}"
+
+        for attr in ("PLUGIN_LOSS_TYPE", "PLUGIN_LOSS_CONFIG_CLASS", "PLUGIN_LOSS_CLASS"):
+            if not hasattr(module, attr):
+                return f"Assembled plugin is missing required attribute '{attr}'."
+
+        config_cls = module.PLUGIN_LOSS_CONFIG_CLASS
+        loss_cls = module.PLUGIN_LOSS_CLASS
+        try:
+            cfg = config_cls()
+        except Exception as e:
+            return (
+                f"PLUGIN_LOSS_CONFIG_CLASS() failed to instantiate with defaults: "
+                f"{type(e).__name__}: {e}. Every config field must have a default."
+            )
+        try:
+            loss_fn = loss_cls(cfg)
+        except Exception as e:
+            return f"PLUGIN_LOSS_CLASS(config) failed to construct: {type(e).__name__}: {e}."
+
+        # Dummy tensors mirror L2's test_custom_plugin_forward_pass_runs.
+        torch.manual_seed(0)
+        inputs = torch.randn(2, 256, 100, requires_grad=True)
+        targets = torch.randint(0, 256, (2, 100), dtype=torch.int64)
+        try:
+            loss = loss_fn(inputs, targets)
+        except Exception as e:
+            return (
+                f"forward(inputs, targets) raised on dummy tensors: "
+                f"{type(e).__name__}: {e}. The forward must accept "
+                f"inputs=[2, 256, 100] float32 and targets=[2, 100] int64."
+            )
+
+        if not isinstance(loss, torch.Tensor):
+            return (
+                f"forward returned {type(loss).__name__}, not a torch.Tensor. "
+                f"It must return a scalar tensor."
+            )
+        if loss.dim() != 0:
+            return (
+                f"forward returned a tensor of shape {tuple(loss.shape)}; "
+                f"expected a SCALAR (dim()==0). Reduce per-element loss to a "
+                f"scalar before returning (e.g. .mean() or .sum())."
+            )
+        try:
+            value = loss.item()
+        except Exception as e:
+            return f"loss.item() raised: {type(e).__name__}: {e}."
+        if not math.isfinite(value):
+            return f"forward returned a non-finite scalar (got {value!r})."
+
+        # Run backward pass to confirm gradient actually flows back to inputs.
+        # requires_grad=True on the loss output does not guarantee this —
+        # a .detach() on inputs or mid-computation can leave requires_grad=True
+        # on the final tensor while severing the gradient graph. See
+        # IMPLEMENTOR_LOSS_REASONING_PROMPT § Gradient-flow requirement for
+        # the safe-vs-unsafe pattern distinction the LLM is shown.
+        try:
+            loss.backward()
+        except Exception as e:
+            return (
+                f"loss.backward() raised: {type(e).__name__}: {e}. "
+                "The loss graph is malformed — check for in-place ops on "
+                "leaf tensors or operations that produce non-differentiable "
+                "outputs on the main path from inputs."
+            )
+        if inputs.grad is None:
+            return (
+                f"Loss '{loss_name}': backward() ran but inputs.grad is None — "
+                "gradient does not flow back to inputs. Check for .detach() on "
+                "inputs (or on any tensor derived from inputs on the main path "
+                "to loss), or for a torch.no_grad() block wrapping the main "
+                "computational path. .detach() on weighting/masking terms is "
+                "OK; .detach() on inputs is not."
+            )
+        if not torch.isfinite(inputs.grad).all():
+            return (
+                f"Loss '{loss_name}': inputs.grad contains NaN or Inf after "
+                "backward(). Loss may be numerically unstable — check for "
+                "log(0), division by small quantities, or unbounded "
+                "exponentials in the forward pass."
+            )
+
+        return None
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+            os.rmdir(tmp_dir)
+
+
+# ---------------------------------------------------------------------------
 # Prompt builders
 # ---------------------------------------------------------------------------
 
@@ -631,6 +1045,83 @@ def _build_repair_prompt(
 
 
 # ---------------------------------------------------------------------------
+# L4b — Loss user-prompt builders
+# ---------------------------------------------------------------------------
+
+
+def _build_loss_reasoning_prompt(spec: CustomLossSpec) -> str:
+    """Render the user-prompt for the loss-reasoning LLM call.
+
+    Provides the LLM with the spec's loss_name, description, mathematical
+    definition, and any pre-specified config_fields hints. Mirrors
+    ``_build_reasoning_prompt`` in shape (sectioned markdown), but the
+    content is loss-specific (no model_config / train_config sections).
+    """
+    lines = [
+        f"## Loss to implement: `{spec.loss_name}`",
+        "",
+        "## Description",
+        spec.description,
+        "",
+        "## Mathematical definition",
+        spec.mathematical_definition,
+    ]
+    if spec.config_fields:
+        lines += [
+            "",
+            "## Pre-specified config fields (from proposer)",
+            json.dumps(spec.config_fields, indent=2),
+            "",
+            "These are hints — keep, drop, or adjust ranges as needed. The plugin's "
+            "config class is independent of LossConfig and carries only this loss's "
+            "own hyperparameters.",
+        ]
+    return "\n".join(lines)
+
+
+def _build_loss_code_prompt(reasoning: str, spec: CustomLossSpec) -> str:
+    """Render the user-prompt for the loss-code LLM call. Includes the
+    reasoning output verbatim, then restates the loss name and class name
+    so the strict-JSON response is anchored."""
+    return (
+        f"## Your Reasoning\n\n{reasoning}\n\n"
+        f"---\n\n"
+        f"## Loss name: `{spec.loss_name}`\n"
+        f"## Class name: `{_loss_class_name(spec.loss_name)}`\n\n"
+        "Now output the JSON code sections."
+    )
+
+
+def _build_loss_repair_prompt(
+    code: dict,
+    error: str,
+    spec: CustomLossSpec,
+    error_history: list[tuple[int, str]] | None = None,
+) -> str:
+    """Render the user-prompt for the loss-code repair call. Mirrors
+    ``_build_repair_prompt`` shape (history block + previous JSON + current
+    error + name anchor)."""
+    history_section = ""
+    if error_history:
+        history_lines = ["## Error History (do NOT reintroduce these mistakes)\n"]
+        for attempt_num, past_error in error_history:
+            history_lines.append(f"Attempt {attempt_num}: {past_error}")
+        history_section = "\n".join(history_lines) + "\n\n"
+
+    return (
+        f"## Previous code (failed)\n\n"
+        f"```json\n{json.dumps(code, indent=2)}\n```\n\n"
+        f"## Current Error (fix this)\n\n{error}\n\n"
+        f"{history_section}"
+        f"---\n\n"
+        f"## Loss name: `{spec.loss_name}`\n"
+        f"## Class name: `{_loss_class_name(spec.loss_name)}`\n\n"
+        "Fix the current error without reintroducing any error from the history. "
+        "Output the corrected JSON code sections."
+    )
+
+
+# ---------------------------------------------------------------------------
 # File assembly
 # ---------------------------------------------------------------------------
 
@@ -708,12 +1199,18 @@ class MLModelImplementor:
         model_id: str = "gemini-3.1-pro-preview",
         max_retries: int | None = None,
         bridge_factory=None,
+        capability_index_path: str | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
         self.bridge = self._bridge_factory(
             provider=provider, model_id=model_id, max_retries=max_retries
         )
+        # L4b — registry handle for custom-loss provenance writes. Tests pass
+        # ``capability_index_path=str(tmp_path / "_capability_index.json")``
+        # to avoid contaminating the canonical index; production callers
+        # leave it None to use ``agent_generated/_capability_index.json``.
+        self._registry = CapabilityRegistry(index_path=capability_index_path)
 
     # ------------------------------------------------------------------
     # Validation helpers (used in the generate-validate-repair loop)
@@ -797,10 +1294,212 @@ class MLModelImplementor:
         return None  # all good
 
     # ------------------------------------------------------------------
+    # L4b — Custom-loss generation (registry-hit short-circuit + LLM path)
+    # ------------------------------------------------------------------
+
+    def _generate_loss(self, inp: ImplementorInput) -> LossProvenance:
+        """Generate (or reuse) a custom loss plugin and return the provenance.
+
+        Preconditions:
+          - ``inp.custom_loss_spec`` is not None — the caller (``run``) is
+            responsible for this guard.
+
+        Flow:
+          1. **Registry hit short-circuit** — if ``CapabilityRegistry``
+             already has an entry for ``(spec.loss_name, "loss")``, log a
+             reuse message, return a ``LossProvenance(action="reused", …)``
+             pointing at the registered file. No LLM call is made.
+          2. **Reasoning + code LLM calls** — two ``bridge`` calls
+             (``implementor.loss.reasoning`` then ``implementor.loss.code``)
+             producing the strict-JSON sections consumed by
+             ``_assemble_loss_plugin``.
+          3. **Dummy-tensor validate → repair loop** — up to
+             ``inp.max_retries`` repair attempts, each feeding the validator
+             error back into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT``.
+          4. **Write** the assembled source to
+             ``{inp.loss_dir}/{spec.loss_name}.py``.
+          5. **Register** in the capability index with
+             ``capability_type="loss"`` and ``source_iteration`` from
+             ``inp.storage.local.run_name``.
+          6. Return ``LossProvenance(action="generated", …)``.
+
+        Raises:
+            ValueError: When all retries fail. The error message includes
+                the final assembled source and the full error history so
+                the caller (workflow + operator) can diagnose.
+        """
+        spec = inp.custom_loss_spec
+        # Caller guarantees this is not None; assert is a pyright hint.
+        assert spec is not None
+        loss_name = spec.loss_name
+
+        # Source iteration label for registry + provenance. ``storage.local``
+        # may be absent for non-local backends; degrade gracefully.
+        source_iteration: str | None = None
+        if inp.storage.backend == "local" and inp.storage.local:
+            source_iteration = inp.storage.local.run_name
+
+        # ---- 1. Registry-hit short-circuit ------------------------------
+        existing = next(
+            (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
+            None,
+        )
+        if existing is not None:
+            print(
+                f"🔁 Reusing existing loss plugin: '{loss_name}' (from {existing.source_iteration})"
+            )
+            print(f"   Loss file → {existing.file_path}")
+            return LossProvenance(
+                loss_name=loss_name,
+                action="reused",
+                source_iteration=existing.source_iteration,
+                loss_file_path=existing.file_path,
+                # Registry entries are only written after dummy-tensor passed
+                # at original generation time. Reuse therefore inherits that
+                # validation result.
+                dummy_tensor_validated=True,
+            )
+
+        # ---- 2. LLM calls (reasoning + code) ----------------------------
+        print(f"🧪 Generating custom loss '{loss_name}' ...")
+        reasoning = self.bridge.generate_text(
+            IMPLEMENTOR_LOSS_REASONING_PROMPT,
+            _build_loss_reasoning_prompt(spec),
+            label="implementor.loss.reasoning",
+        )
+        print(f"   Loss reasoning complete ({len(reasoning)} chars).")
+
+        code = self.bridge.generate(
+            IMPLEMENTOR_LOSS_CODE_PROMPT,
+            _build_loss_code_prompt(reasoning, spec),
+            label="implementor.loss.code",
+        )
+
+        # ---- 3. Validate → repair loop ----------------------------------
+        max_retries = inp.max_retries
+        plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+        error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+        attempt = 0
+        error_history: list[tuple[int, str]] = []
+        while error is not None and attempt < max_retries:
+            attempt += 1
+            print(f"   ⚠ Loss attempt {attempt + 1}/{max_retries + 1}: {error}")
+            repair_prompt = _build_loss_repair_prompt(code, error, spec, error_history)
+            error_history.append((attempt, error))
+            code = self.bridge.generate(
+                IMPLEMENTOR_LOSS_REPAIR_PROMPT,
+                repair_prompt,
+                label="implementor.loss.repair",
+            )
+            plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
+            error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+
+        if error is not None:
+            raise ValueError(
+                f"Loss generation failed after {max_retries + 1} attempts for "
+                f"'{loss_name}': {error}\n\n"
+                f"The assembled loss source:\n{plugin_src}"
+            )
+        if attempt > 0:
+            print(f"   ✅ Loss self-correction succeeded on attempt {attempt + 1}.")
+
+        # ---- 4. Write the loss plugin -----------------------------------
+        os.makedirs(inp.loss_dir, exist_ok=True)
+        loss_file_path = os.path.abspath(os.path.join(inp.loss_dir, f"{loss_name}.py"))
+        with open(loss_file_path, "w", encoding="utf-8") as f:
+            f.write(plugin_src)
+        print(f"✅ Loss written  → {loss_file_path}")
+
+        # ---- 5. Register in the capability index ------------------------
+        registry_description = " ".join(spec.description.split())
+        self._registry.register(
+            CapabilityMetadata(
+                name=loss_name,
+                capability_type="loss",
+                file_path=loss_file_path,
+                created_at=datetime.now(UTC).isoformat(),
+                source_iteration=source_iteration,
+                description=registry_description,
+                # L6c — persist the formula so the proposer's
+                # {available_losses_block} can render it for
+                # semantic-similarity judgment (Branch B vs Branch C).
+                mathematical_definition=spec.mathematical_definition,
+            )
+        )
+        print(f"✅ Registered    → loss '{loss_name}' (source={source_iteration})")
+
+        # ---- 6. Return provenance ---------------------------------------
+        return LossProvenance(
+            loss_name=loss_name,
+            action="generated",
+            source_iteration=source_iteration,
+            loss_file_path=loss_file_path,
+            dummy_tensor_validated=True,
+        )
+
+    # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
 
     def run(self, inp: ImplementorInput) -> ImplementorOutput:
+        # L4b — generate the custom loss BEFORE the model. Sequential order
+        # so a loss-generation failure short-circuits before any model LLM
+        # spend. ``loss_provenance`` is None when the proposer used a
+        # built-in loss type (``inp.custom_loss_spec is None``).
+        loss_provenance: LossProvenance | None = None
+        if inp.custom_loss_spec is not None:
+            # Branch C: proposer emitted a CustomLossSpec → generate the loss.
+            loss_provenance = self._generate_loss(inp)
+        else:
+            # Either Branch A (built-in loss) or Branch B (reuse from registry).
+            # Discriminate by inspecting baseline_config.loss_config.loss_type.
+            # Bug found by Gate 3 (2026-06-22): proposer can emit
+            # loss_type="custom" with a loss_name that doesn't exist in the
+            # registry — Branch B with a phantom loss. Without this guard the
+            # implementor silently proceeded, the tuner planner LLM then
+            # rewrote loss_type to "ce" downstream, and training ran under
+            # the wrong loss. Raise loudly here so the workflow's existing
+            # max_proposal_attempts retry loop re-prompts the proposer.
+            loss_cfg = inp.baseline_config.get("loss_config") or {}
+            if loss_cfg.get("loss_type") == "custom":
+                loss_name = loss_cfg.get("loss_name") or ""
+                existing_names = {m.name for m in self._registry.list(capability_type="loss")}
+                if not loss_name:
+                    raise ValueError(
+                        "Implementor received an invalid Branch B proposal: "
+                        "loss_type='custom' with no loss_name. The proposer must "
+                        "either pick Branch A (built-in loss_type ∈ {focal, "
+                        "focal_cw, ce, smooth_l1}) or Branch C (populate "
+                        "custom_loss_spec with the full spec) or Branch B (reuse "
+                        "an existing registered loss by name)."
+                    )
+                if loss_name not in existing_names:
+                    raise ValueError(
+                        f"Implementor received Branch B proposal "
+                        f"(loss_type='custom', loss_name={loss_name!r}) but "
+                        f"{loss_name!r} is not in the capability registry. "
+                        f"Registry currently contains: "
+                        f"{sorted(existing_names) if existing_names else 'no losses'}. "
+                        f"The proposer must either use Branch A (built-in loss), "
+                        f"Branch C (generate new loss via custom_loss_spec), or "
+                        f"Branch B with a loss_name that actually exists in the "
+                        f"registry. Advice-file loss-name suggestions are not "
+                        f"registry entries — they only become registered after a "
+                        f"prior iteration successfully generated them via Branch C."
+                    )
+                # Branch B happy path: record the reuse provenance.
+                existing_meta = next(
+                    (m for m in self._registry.list(capability_type="loss") if m.name == loss_name),
+                    None,
+                )
+                loss_provenance = LossProvenance(
+                    loss_name=loss_name,
+                    action="reused",
+                    source_iteration=(existing_meta.source_iteration if existing_meta else None),
+                    loss_file_path=(existing_meta.file_path if existing_meta else ""),
+                    dummy_tensor_validated=True,
+                )
+
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
         # --- Call 1: reasoning (free text, runs once) ---
@@ -903,6 +1602,7 @@ class MLModelImplementor:
             config_fields=config_fields,
             model_description=inp.model_description,
             mathematical_definition=inp.mathematical_definition,
+            loss_provenance=loss_provenance,
         )
 
         # --- Persist output record ---

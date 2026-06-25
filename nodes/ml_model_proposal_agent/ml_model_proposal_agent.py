@@ -33,6 +33,7 @@ from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, Proposa
 from agent.schemas.task_config import ForwardContract
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
+from agent_generated._registry import CapabilityRegistry
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from workflows.task_config import render_forward_contract
@@ -926,6 +927,7 @@ class MLModelProposalAgent:
         model_id: str = "gemini-3.1-flash-lite-preview",
         max_retries: int | None = None,
         bridge_factory=None,
+        capability_index_path: str | None = None,
         **kwargs,
     ):
         # **kwargs absorbs per-stage kwargs from ProposalLLMConfig flattening
@@ -937,6 +939,12 @@ class MLModelProposalAgent:
             model_id=model_id,
             max_retries=max_retries,
         )
+        # L5b — registry handle for loss-awareness rendering in the proposer
+        # prompt. Mirrors the L4b implementor DI pattern. Tests pass
+        # ``capability_index_path=str(tmp_path / "_capability_index.json")``
+        # to avoid contaminating the canonical index; production callers
+        # leave it None to use ``agent_generated/_capability_index.json``.
+        self._registry = CapabilityRegistry(index_path=capability_index_path)
 
     def run(self, inp: ProposalInput) -> ProposalOutput:
         print(
@@ -1024,7 +1032,13 @@ class MLModelProposalAgent:
                     "expert_advice": raw.get("expert_advice", {}),
                     "baseline_config": raw.get("baseline_config", {}),
                     "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                }
+                    "custom_loss_spec": raw.get("custom_loss_spec"),
+                },
+                context={
+                    "loss_registry_names": [
+                        m.name for m in self._registry.list(capability_type="loss")
+                    ]
+                },
             )
 
             factor = _run_preflight_check(inp, output)
@@ -1090,6 +1104,7 @@ class MLModelProposalAgent:
         from agent.prompt_templates.proposal import (
             load_stage_prompt,
             render_agent_cards,
+            render_available_losses,
             render_expert_context,
         )
         from nodes.proposal_helpers import (
@@ -1230,6 +1245,14 @@ class MLModelProposalAgent:
             # See docs/design/enable_global_task_config.md § Commit T3.
             "task_description": inp.task_description,
             "forward_contract": render_forward_contract(inp.forward_contract),
+            # L5b — loss-registry awareness. Rendered once per run() so all
+            # stage prompts see a consistent snapshot of the registry — a
+            # mid-run write (e.g. by the implementor in a parallel iteration)
+            # would not retroactively change earlier stages' context. Empty
+            # registry collapses to the fallback message ("No custom losses
+            # registered yet — propose a new one..."). See
+            # docs/design/enable_loss_inventory.md § Commit L5.
+            "available_losses_block": render_available_losses(self._registry),
         }
 
         for stage in pipeline.stages:
@@ -1519,7 +1542,13 @@ class MLModelProposalAgent:
                             "proposed_discoveries": discoveries,
                             "memo_consistency_notes": raw.get("memo_consistency_notes", []),
                             "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                        }
+                            "custom_loss_spec": raw.get("custom_loss_spec"),
+                        },
+                        context={
+                            "loss_registry_names": [
+                                m.name for m in self._registry.list(capability_type="loss")
+                            ]
+                        },
                     )
                     # Citation discipline — warnings, not hard failures.
                     citation_violations = _check_citation_discipline(

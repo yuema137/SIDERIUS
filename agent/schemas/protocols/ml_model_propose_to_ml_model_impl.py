@@ -21,16 +21,24 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
     """
     Map ProposalOutput -> ImplementorInput in-memory.
 
-    Passes model_name, model_description, mathematical_definition, and
-    baseline_config directly from the proposal. plugin_dir and test_dir
-    use their ImplementorInput defaults (agent_generated/models and
-    agent_generated/tests).
+    Passes model_name, model_description, mathematical_definition,
+    baseline_config, and custom_loss_spec directly from the proposal.
+    plugin_dir, test_dir, and loss_dir use their ImplementorInput defaults
+    (agent_generated/models, agent_generated/tests, agent_generated/losses);
+    the workflow overrides loss_dir to a per-run path before invoking the
+    implementor so concurrent iterations do not clobber each other's losses.
+
+    custom_loss_spec is forwarded unchanged — it is None when the proposer
+    used a built-in loss type, and a CustomLossSpec instance when L4 should
+    generate (or reuse) a custom loss plugin. See
+    docs/design/enable_loss_inventory.md § Commit L3.
     """
     return ImplementorInput(
         model_name=output.model_name,
         model_description=output.model_description,
         mathematical_definition=output.mathematical_definition,
         baseline_config=output.baseline_config,
+        custom_loss_spec=output.custom_loss_spec,
         storage=storage,
     )
 

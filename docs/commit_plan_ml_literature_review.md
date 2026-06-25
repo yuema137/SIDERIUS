@@ -71,7 +71,7 @@ commit). A commit is not "done" until both its automated test gate is green
 - [ ] **Commit 6** — Workflow integration (`merge_external_agent_outputs`, `should_run_literature_review`)
   · gate `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` + Tier-0 dual-mode
   - [ ] **Checkpoint D** — End-to-end proposer behavior change
-- [ ] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
+- [x] **Commit 6.5a** — Search-quality prompt fixes (Fixes 1+2+5; post-audit 2026-06-12)
   · gate `tests/unit/agent/prompt_templates/test_literature_review_prompts.py` (5 prompt-content tests) + `tests/unit/agent/schemas/test_literature_review_schemas.py` (1 test on `ConfidenceRubric.render_for_searcher()` single-source-of-truth)
 - [x] **Commit 6.5b** — Search-quality code/schema/YAML fixes (Fixes 3+4+6; post-audit 2026-06-12)
   · gate `tests/unit/agent/schemas/test_literature_review_schemas.py` (2 schema tests: `SearchDecisionRecord` + `LiteratureReviewInput.task_description`) + `tests/unit/agent/ml_literature_review/test_node.py` (5 node tests: Fix 3 no-op feedback + Fix 4 decision log + Fix 6 task threading) + `tests/unit/workflows/test_model_exploration_lit_review_wiring.py` (2 workflow tests: empty-task warning + non-empty no-warning)
@@ -89,8 +89,8 @@ commit). A commit is not "done" until both its automated test gate is green
   (spec: `external_agents_for_proposer.md` §10); cross-cutting, not a single
   commit. Run log: `docs/validation_suite_runs.md`.
   - [x] **First FULL run** — completed across the 2026-06-09 + 2026-06-10 chain; FAILED under the original ≥4 floor, PASSED under the amended ≥2 floor. See `docs/validation_suite_runs.md` 2026-06-09 + 2026-06-10 entries. Floor amendment landed in `5e312ab` (§10.5 floor 4→2 + new §10.5.a stable-attractor calibration); the assertion broadness + V1/V0 example pattern-leak fixes that closed the chain landed in `9f731fe` (Noise2Noise example replacement) + `d652a3b` (equation-vs-shape discriminator).
-  - [ ] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
-        the post-P proposer)
+  - [x] **Prerequisite re-run** — before Checkpoint D / Commit 6 (must pass on
+        the post-P proposer) · signed off 2026-06-22, see `docs/validation_suite_runs.md` 2026-06-22 entry. PASS: 3 findings (Mamba 0.75 / DeepDenoiser 0.85 / FreLE 0.90), all structural assertions green, equation placement rule holds. Closes the §10 prerequisite for Checkpoint D.
 
 ---
 
@@ -2334,25 +2334,43 @@ prerequisite re-run ($1-6) if any prompt / `ConfidenceRubric` /
 `transfer_tolerance` default has changed since the most recent §10 FULL
 sign-off. Operator should be aware before scheduling.
 
-**How to run**: run two complete workflow iterations back-to-back using the
-same starting state (same model, same experiment history, same seed):
+Add ~$0.10–0.40 per iteration when the proposer picks Branch C
+(generate new custom loss) — this triggers the implementor's 2-call
+loss-generation LLM chain plus potential repair attempts. See
+`docs/design/enable_loss_inventory.md` § Gate 3 for a combined
+cost estimate ($2.50–6.50) covering both model and loss generation.
 
-```python
-# Run A: lit review ON.
-proposal_A = run_one_iteration(
-    base_state, should_run_literature_review_override=True,
-)
+**How to run**: invoke two chain iterations back-to-back using the same
+seed and advice file, with lit-review toggled via the YAML config:
 
-# Run B: lit review BYPASSED (patch the gate to return False).
-proposal_B = run_one_iteration(
-    base_state, should_run_literature_review_override=False,
-)
+```bash
+# Run A: lit-review ON (set enabled: true in configs/lit_review_config.yaml)
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_d_runA_$(date +%s) \
+    --run_name checkpoint_d_runA \
+    --num_iterations 1 --max_rounds 2 --max_proposal_attempts 3 \
+    --max_epochs 1 --trial_portion 0.02 --trial_time_budget_minutes 5 \
+    --trial_vram_budget_gb 10 \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --seed_paths 
 
-print("== Run A (lit review on) ==")
-print(proposal_A.model_dump_json(indent=2))
-print("== Run B (lit review off) ==")
-print(proposal_B.model_dump_json(indent=2))
+# Run B: lit-review OFF (set enabled: false in configs/lit_review_config.yaml)
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/checkpoint_d_runB_$(date +%s) \
+    --run_name checkpoint_d_runB \
+    --num_iterations 1 --max_rounds 2 --max_proposal_attempts 3 \
+    --max_epochs 1 --trial_portion 0.02 --trial_time_budget_minutes 5 \
+    --trial_vram_budget_gb 10 \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --seed_paths 
 ```
+
+Note: `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` CLI flags
+exist in `run_one_iteration.py` but are NOT forwarded by
+`_chain_common.sh` (bash-wrapper gap, tracked as follow-up). Use the
+YAML `enabled:` key as the toggle instead.
 
 Print the full `ProposalOutput` from both runs — specifically the proposed
 architecture description and the reasoning trace.
@@ -2373,6 +2391,19 @@ architecture description and the reasoning trace.
 - Check the `expert_context` block that was passed to the proposer: are the
   `ExpertContextItem` entries specific enough to be actionable, or are they
   generic enough that a proposer would rationally ignore them?
+- **Loss surface (added by loss-inventory feature)**: Does Run A's
+  `ProposalOutput.custom_loss_spec` reference a specific technique from
+  a lit-review finding? Check `custom_loss_spec.description` and
+  `mathematical_definition` for `source_ref` values that appear verbatim
+  in `LiteratureReviewOutput.findings[*].source_ref`. A finding that
+  influences the loss design is equally valid evidence of lit-review
+  influence as one that influences the architecture.
+- Loss-inventory Gate 3 (`docs/design/enable_loss_inventory.md`
+  § Gate 3) covers this surface in detail, including a mechanical
+  hallucinated-source_ref check and a post-gate human audit checklist
+  (Concern 1 + Concern 2). If Gate 3 has already been run and signed
+  off before Checkpoint D, its artifacts may partially answer this
+  bullet without re-running.
 
 **What this decides**: whether the end-to-end system is working. This is
 the highest-stakes checkpoint. Possible failure modes and responses:

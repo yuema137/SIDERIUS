@@ -334,9 +334,18 @@ class LossConfig(BaseModel):
     """
     Configuration for the Denoising Scoring Functions (Loss).
     Strictly validates parameters based on the chosen loss_type.
+
+    The four built-in ``loss_type`` values (``focal``, ``focal_cw``, ``ce``,
+    ``smooth_l1``) use the ``alpha`` / ``gamma`` / ``beta`` fields below.
+    The ``custom`` value (L2 — see ``docs/design/enable_loss_inventory.md``)
+    routes to a plugin loss in ``agent_generated/losses/``; the plugin's own
+    ``PLUGIN_LOSS_CONFIG_CLASS`` carries any plugin-specific hyperparameters.
+    LossConfig is purely the *router* in custom mode — ``alpha`` / ``gamma``
+    / ``beta`` are nullified by ``enforce_parameter_consistency`` so the
+    agent can't accidentally pass them through.
     """
 
-    loss_type: Literal["focal", "focal_cw", "ce", "smooth_l1"] = "focal"
+    loss_type: Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"] = "focal"
 
     # Parameters for Focal / Focal_CW
     alpha: float | None = Field(default=0.5, ge=0.0, le=1.0)
@@ -348,6 +357,18 @@ class LossConfig(BaseModel):
     reduction: Literal["mean", "sum"] = "mean"
     use_class_weights: bool = Field(default=False)
 
+    # Custom-loss routing (L2). Required when ``loss_type="custom"``;
+    # forbidden otherwise.
+    loss_name: str | None = Field(
+        default=None,
+        description=(
+            "PLUGIN_LOSS_TYPE key of the agent-generated loss to use. "
+            "Required when loss_type='custom'. The loss plugin must exist "
+            "in agent_generated/losses/ (or in a SIDERIUS_LOSS_DIRS-resolved "
+            "per-run directory) before training begins."
+        ),
+    )
+
     def check_compatibility(self, model_type: str):
         """Called by Executor to prevent illegal combinations."""
         if self.loss_type == "smooth_l1" and model_type != "fcnet":
@@ -355,6 +376,36 @@ class LossConfig(BaseModel):
                 f"Incompatible Pair: 'smooth_l1' is for waveform regression (AE/fcnet). "
                 f"Model '{model_type}' is a classifier and requires 'ce' or 'focal' ."
             )
+        # ``custom`` defers compatibility to the plugin itself — LossConfig
+        # has no way to know what shape contract the plugin satisfies. The
+        # plugin's forward pass will raise on shape mismatch at training
+        # time if the combination is illegal.
+
+    @model_validator(mode="after")
+    def enforce_custom_loss_name(self) -> "LossConfig":
+        """Custom mode requires ``loss_name``; non-custom modes forbid it.
+
+        This pair of checks prevents two silent-failure modes:
+          1. ``loss_type="custom"`` + ``loss_name=None`` → ``get_criterion``
+             would crash trying to look up ``None`` in the registry.
+          2. ``loss_type="focal"`` + ``loss_name="snr_weighted_mse"`` →
+             the operator probably meant ``loss_type="custom"``; surfacing
+             the inconsistency at validation time prevents the run from
+             silently using focal loss instead of the custom one.
+        """
+        if self.loss_type == "custom" and not self.loss_name:
+            raise ValueError(
+                "loss_name is required when loss_type='custom'. "
+                "Set loss_name to the PLUGIN_LOSS_TYPE key of the agent-generated loss "
+                "(e.g. 'snr_weighted_mse')."
+            )
+        if self.loss_type != "custom" and self.loss_name:
+            raise ValueError(
+                f"loss_name must be None when loss_type != 'custom' "
+                f"(got loss_type={self.loss_type!r}, loss_name={self.loss_name!r}). "
+                f"If you meant to use a custom loss, set loss_type='custom'."
+            )
+        return self
 
     @model_validator(mode="after")
     def enforce_parameter_consistency(self) -> "LossConfig":
@@ -375,6 +426,16 @@ class LossConfig(BaseModel):
 
         elif self.loss_type == "ce":
             # CrossEntropy is the baseline, no special hyperparams needed
+            self.alpha = None
+            self.gamma = None
+            self.beta = None
+
+        elif self.loss_type == "custom":
+            # LossConfig is the routing layer only for custom losses — the
+            # plugin's own PLUGIN_LOSS_CONFIG_CLASS carries the actual
+            # hyperparameters. Nullify the built-in params so the agent
+            # can't accidentally pass them through. See
+            # ``docs/design/enable_loss_inventory.md`` § "Two-config design".
             self.alpha = None
             self.gamma = None
             self.beta = None

@@ -27,7 +27,11 @@
 # --ml_lit_review_enabled without editing this file. The CLI flag's
 # `ml_` prefix establishes a naming convention for future external
 # agents (Design Decision 1, 2026-06-11).
-enabled: true
+#
+# Disabled by default — backward-compatible with pre-lit-review chain runs.
+# Operators must explicitly set enabled: true (or pass --ml_lit_review_enabled
+# on the CLI via run_one_iteration.py) to activate literature review.
+enabled: false
 
 # ---------------------------------------------------------------------------
 # Task description — what research task this lit-review run is supporting.

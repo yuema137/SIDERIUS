@@ -530,6 +530,11 @@ def test_phase2_pilot_real_run(tmp_path):
     # resolve + dynamic-search loop.
     agent = MLLiteratureReviewAgent(root_cache_dir=str(tmp_path / "cache"))
     agent.bridge = LLMBridge(provider=DEEPSEEK_PROVIDER, model_id=DEEPSEEK_MODEL_ID)
+    # Mirror what ml_literature_review.py:run() does at line 320: set
+    # self._task_description before calling _synthesize(). The test bypasses
+    # run() to avoid re-resolving / re-compressing, but _synthesize reads
+    # self._task_description (Commit 6.5b-5 / Commit F plumbing).
+    agent._task_description = inp.task_description
     findings = agent._synthesize(inp, retrieved)
 
     # ----- Render the artifact FIRST, before any structural assertion. -----

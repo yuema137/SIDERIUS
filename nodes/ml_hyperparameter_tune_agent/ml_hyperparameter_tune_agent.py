@@ -936,9 +936,28 @@ class HyperparamTuningAgent:
     work identically. Only tests inject the fakes.
     """
 
-    def __init__(self, bridge_factory=None, sandbox_factory=None):
+    def __init__(
+        self,
+        bridge_factory=None,
+        sandbox_factory=None,
+        capability_index_path: str | None = None,
+    ):
         self._bridge_factory = bridge_factory or LLMBridge
         self._sandbox_factory = sandbox_factory or TidmadSandbox
+        # L6b — loss-registry handle. The planner uses this to (a) render
+        # the AVAILABLE CUSTOM LOSSES block into PLANNER_PROMPT and (b)
+        # know whether to advertise ``loss_type="custom"`` as a legal
+        # choice in the per-architecture loss_note. ``index_path=None``
+        # defaults to ``agent_generated/_capability_index.json`` —
+        # operators can override per-run via the constructor kwarg, same
+        # pattern as MLModelProposalAgent (L5b). Built once at agent
+        # construction so all rounds in this run see a consistent
+        # snapshot; new entries the implementor adds DURING a run are
+        # picked up because ``CapabilityRegistry`` reads the file each
+        # ``list()`` call.
+        from agent_generated._registry import CapabilityRegistry
+
+        self._registry = CapabilityRegistry(index_path=capability_index_path)
         # Token-usage audit plumbing (Phase 1 Commit 4 — design doc §1.4).
         # Unlike interpreter/proposer/implementor/validator, the tuner builds
         # its bridge ("brain") lazily inside ``run()`` after the input has
@@ -1297,6 +1316,12 @@ class HyperparamTuningAgent:
                         # {TASK_DESCRIPTION} placeholder in PLANNER_PROMPT.
                         # See docs/design/enable_global_task_config.md § T4a.
                         task_description=agent_input.task_description,
+                        # L6b — loss-registry awareness. Drives both the
+                        # AVAILABLE CUSTOM LOSSES system-prompt block and
+                        # the per-architecture loss_note advertisement of
+                        # ``loss_type="custom"`` as a legal choice. See
+                        # docs/design/enable_loss_inventory.md § L6b.
+                        registry=self._registry,
                     )
 
                     # Validate LLM output into ExperimentPlan (with fallback)
@@ -1837,141 +1862,197 @@ class HyperparamTuningAgent:
                         print(f"  Saved error record: {error_record['status']}")
                         continue
 
-                    print("[Step 2/3] Inference...")
-                    t0 = time.time()
-                    inf_status = _run_skill("inference_skill", sandbox, **active_params)
-                    inference_time = round(time.time() - t0, 1)
-                    if inf_status.get("status") == "error":
-                        error_msg = inf_status.get("message", "Unknown inference error")
-                        is_oom = (
-                            "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
-                        )
-
-                        # Phase 6.7 Fix 3 — when the inference subprocess fails
-                        # because the trainer-side sentinel was missing, the
-                        # error message carries the ``error_training:`` prefix
-                        # (raised by ``inference_single._assert_training_sentinel``).
-                        # That is a *training* failure surfaced through the
-                        # inference subprocess, not an inference failure.
-                        # Re-route the category so the planner sees the right
-                        # cause instead of "inference crashed for mysterious
-                        # reasons" — and the executor-side silent-crash check
-                        # in ``execute_training`` already catches the same
-                        # condition upstream when the process exited 0.
-                        is_silent_train_crash = "error_training:" in error_msg
-
-                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                        if is_silent_train_crash:
-                            status_tag = "error_training"
-                            conclusion = f"Training crashed silently (detected at inference preflight): {short_msg}"
-                            discovery = f"Training subprocess returned 0 but produced no checkpoint sentinel: {short_msg}"
-                            memory_update = (
-                                "Silent training crash — investigate the trainer logs for a "
-                                "post-save segfault, OOM-kill, or GPU watchdog. Do not retry "
-                                "blindly until the root cause is identified."
-                            )
-                        elif is_oom:
-                            status_tag = "error_inference_oom"
-                            conclusion = f"Inference failed: {short_msg}"
-                            discovery = (
-                                "CUDA OOM during inference — reduce batch_size or model size."
-                            )
-                            memory_update = "Inference OOM — the model trained but can't infer. Try smaller batch."
-                        else:
-                            status_tag = "error_inference"
-                            conclusion = f"Inference failed: {short_msg}"
-                            discovery = f"Inference crashed: {short_msg}"
-                            memory_update = "Fix the inference error before retrying."
-
-                        error_record = {
-                            "exp_id": exp_id,
-                            "status": status_tag,
-                            "model_type": model_type,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index": file_index,
-                            "params": record_params,
-                            "denoising_score": None,
-                            "memory": {
-                                "expert_advice_followed": expert_advice_str,
-                                "hypothesis": hypothesis,
-                                "conclusion": conclusion,
-                                "discovery": discovery,
-                                "memory_update": memory_update,
-                            },
-                        }
-                        error_record["memory"]["round_index"] = round_index
-                        error_record["memory"]["attempt_in_round"] = attempt_in_round
-                        ExperimentRecord.model_validate(error_record)
-                        sandbox.save_record(error_record)
-                        print(f"  Saved error record: {error_record['status']}")
-                        continue
-
-                    print("[Step 3/3] Scoring...")
-                    # Fix 4 — memory probe around the scoring block. See
-                    # docs/optimize_inference_and_scoring.md §3 Fix 4. The
-                    # tuner's ``round_index`` is the iter axis inside the
-                    # tuner scope; workflow-scope probes (different
-                    # ``scope`` field) give the outer iteration index.
-                    from core.memory_probe import probe_memory
-
-                    probe_memory(
-                        iter_idx=round_index, phase="pre_score", workspace=workspace, scope="tuner"
-                    )
-                    t0 = time.time()
-                    # V8 hardening Domain 2a — wrap the entire scoring block.
-                    # Pre-V8, an exception in score_vector / denoising_score_skill
-                    # bubbled past the loop without writing a record, so the
-                    # tuner's iteration silently lost evidence (training
-                    # checkpoint preserved on disk but no entry in
-                    # memory_history). Now we catch, write an error_scoring
-                    # record (matches the error_training/inference pattern
-                    # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+                    # Inference + scoring + result extraction wrapped in
+                    # try/finally so the per-attempt HDF5 cleanup ALWAYS fires
+                    # — including on inference-OOM ``continue``, scoring-crash
+                    # ``continue``, and any uncaught exception. Pre-fix the
+                    # cleanup lived inline at the end of the success path and
+                    # silently leaked ~80 GB of denoised HDF5 files per failed
+                    # attempt (see docs/design/enable_loss_inventory.md
+                    # § Checkpoint L "tmpfs leak fix").
                     try:
-                        if anchor_map_data is not None:
-                            # Anchor-normalized scoring (both trial and formal modes).
-                            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
-                            # B023 — default-arg locking pins the captured loop
-                            # variables at definition time; without it a future
-                            # refactor that defers the call would hit the last
-                            # iteration's model_type / exp_id.
-                            def _denoised_fn(fi, model_type=model_type, exp_id=exp_id):
-                                return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-
-                            # Reference vector for the task-specific health check
-                            # inside score_vector (commits b1+b2). Only meaningful
-                            # on a formal round AND when a trial winner exists in
-                            # this iteration's memory_history. None on trial rounds
-                            # (no benchmark) or on all-formal runs (trial_allowed
-                            # =False) → score_vector skips the predicate gracefully.
-                            _ref_fv = None
-                            if not plan.is_trial:
-                                _winner = _best_trial_winner(memory_history)
-                                if _winner is not None:
-                                    _ref_fv = _winner.get("file_vector")
-                            file_vector, final_scalar, is_degenerate, failure_reason = (
-                                sandbox.score_vector(
-                                    sample_set=eval_sample_set,
-                                    anchor_map=anchor_map_data["anchors"],
-                                    s_max=anchor_map_data["s_max"],
-                                    denoised_filename_fn=_denoised_fn,
-                                    reference_file_vector=_ref_fv,
-                                )
+                        print("[Step 2/3] Inference...")
+                        t0 = time.time()
+                        inf_status = _run_skill("inference_skill", sandbox, **active_params)
+                        inference_time = round(time.time() - t0, 1)
+                        if inf_status.get("status") == "error":
+                            error_msg = inf_status.get("message", "Unknown inference error")
+                            is_oom = (
+                                "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
                             )
-                            score_res = {
-                                "status": "success",
-                                "results": {
-                                    "denoising_score": final_scalar,
-                                    "file_vector": file_vector,
-                                    "is_degenerate": is_degenerate,
-                                    "failure_reason": failure_reason,
+
+                            # Phase 6.7 Fix 3 — when the inference subprocess fails
+                            # because the trainer-side sentinel was missing, the
+                            # error message carries the ``error_training:`` prefix
+                            # (raised by ``inference_single._assert_training_sentinel``).
+                            # That is a *training* failure surfaced through the
+                            # inference subprocess, not an inference failure.
+                            # Re-route the category so the planner sees the right
+                            # cause instead of "inference crashed for mysterious
+                            # reasons" — and the executor-side silent-crash check
+                            # in ``execute_training`` already catches the same
+                            # condition upstream when the process exited 0.
+                            is_silent_train_crash = "error_training:" in error_msg
+
+                            short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                            if is_silent_train_crash:
+                                status_tag = "error_training"
+                                conclusion = f"Training crashed silently (detected at inference preflight): {short_msg}"
+                                discovery = f"Training subprocess returned 0 but produced no checkpoint sentinel: {short_msg}"
+                                memory_update = (
+                                    "Silent training crash — investigate the trainer logs for a "
+                                    "post-save segfault, OOM-kill, or GPU watchdog. Do not retry "
+                                    "blindly until the root cause is identified."
+                                )
+                            elif is_oom:
+                                status_tag = "error_inference_oom"
+                                conclusion = f"Inference failed: {short_msg}"
+                                discovery = (
+                                    "CUDA OOM during inference — reduce batch_size or model size."
+                                )
+                                memory_update = "Inference OOM — the model trained but can't infer. Try smaller batch."
+                            else:
+                                status_tag = "error_inference"
+                                conclusion = f"Inference failed: {short_msg}"
+                                discovery = f"Inference crashed: {short_msg}"
+                                memory_update = "Fix the inference error before retrying."
+
+                            error_record = {
+                                "exp_id": exp_id,
+                                "status": status_tag,
+                                "model_type": model_type,
+                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "file_index": file_index,
+                                "params": record_params,
+                                "denoising_score": None,
+                                "memory": {
+                                    "expert_advice_followed": expert_advice_str,
+                                    "hypothesis": hypothesis,
+                                    "conclusion": conclusion,
+                                    "discovery": discovery,
+                                    "memory_update": memory_update,
                                 },
                             }
-                        else:
-                            # Legacy single-file mode (trial_allowed=False, no anchor map)
-                            score_res = _run_skill(
-                                "denoising_score_skill", sandbox, **active_params
+                            error_record["memory"]["round_index"] = round_index
+                            error_record["memory"]["attempt_in_round"] = attempt_in_round
+                            ExperimentRecord.model_validate(error_record)
+                            sandbox.save_record(error_record)
+                            print(f"  Saved error record: {error_record['status']}")
+                            continue
+
+                        print("[Step 3/3] Scoring...")
+                        # Fix 4 — memory probe around the scoring block. See
+                        # docs/optimize_inference_and_scoring.md §3 Fix 4. The
+                        # tuner's ``round_index`` is the iter axis inside the
+                        # tuner scope; workflow-scope probes (different
+                        # ``scope`` field) give the outer iteration index.
+                        from core.memory_probe import probe_memory
+
+                        probe_memory(
+                            iter_idx=round_index,
+                            phase="pre_score",
+                            workspace=workspace,
+                            scope="tuner",
+                        )
+                        t0 = time.time()
+                        # V8 hardening Domain 2a — wrap the entire scoring block.
+                        # Pre-V8, an exception in score_vector / denoising_score_skill
+                        # bubbled past the loop without writing a record, so the
+                        # tuner's iteration silently lost evidence (training
+                        # checkpoint preserved on disk but no entry in
+                        # memory_history). Now we catch, write an error_scoring
+                        # record (matches the error_training/inference pattern
+                        # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+                        try:
+                            if anchor_map_data is not None:
+                                # Anchor-normalized scoring (both trial and formal modes).
+                                # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+                                # B023 — default-arg locking pins the captured loop
+                                # variables at definition time; without it a future
+                                # refactor that defers the call would hit the last
+                                # iteration's model_type / exp_id.
+                                def _denoised_fn(fi, model_type=model_type, exp_id=exp_id):
+                                    return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+
+                                # Reference vector for the task-specific health check
+                                # inside score_vector (commits b1+b2). Only meaningful
+                                # on a formal round AND when a trial winner exists in
+                                # this iteration's memory_history. None on trial rounds
+                                # (no benchmark) or on all-formal runs (trial_allowed
+                                # =False) → score_vector skips the predicate gracefully.
+                                _ref_fv = None
+                                if not plan.is_trial:
+                                    _winner = _best_trial_winner(memory_history)
+                                    if _winner is not None:
+                                        _ref_fv = _winner.get("file_vector")
+                                file_vector, final_scalar, is_degenerate, failure_reason = (
+                                    sandbox.score_vector(
+                                        sample_set=eval_sample_set,
+                                        anchor_map=anchor_map_data["anchors"],
+                                        s_max=anchor_map_data["s_max"],
+                                        denoised_filename_fn=_denoised_fn,
+                                        reference_file_vector=_ref_fv,
+                                    )
+                                )
+                                score_res = {
+                                    "status": "success",
+                                    "results": {
+                                        "denoising_score": final_scalar,
+                                        "file_vector": file_vector,
+                                        "is_degenerate": is_degenerate,
+                                        "failure_reason": failure_reason,
+                                    },
+                                }
+                            else:
+                                # Legacy single-file mode (trial_allowed=False, no anchor map)
+                                score_res = _run_skill(
+                                    "denoising_score_skill", sandbox, **active_params
+                                )
+                        except Exception as e:
+                            scoring_time = round(time.time() - t0, 1)
+                            probe_memory(
+                                iter_idx=round_index,
+                                phase="post_score",
+                                workspace=workspace,
+                                scope="tuner",
                             )
-                    except Exception as e:
+                            error_msg = f"{type(e).__name__}: {e}"
+                            short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+                            error_record = {
+                                "exp_id": exp_id,
+                                "status": "error_scoring",
+                                "model_type": model_type,
+                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                "file_index": file_index,
+                                "params": record_params,
+                                "denoising_score": None,
+                                "timing": {
+                                    "train_time_s": train_time,
+                                    "inference_time_s": inference_time,
+                                    "scoring_time_s": scoring_time,
+                                },
+                                "memory": {
+                                    "expert_advice_followed": expert_advice_str,
+                                    "hypothesis": hypothesis,
+                                    "conclusion": f"Scoring crashed: {short_msg}",
+                                    "discovery": (
+                                        f"Training and inference completed but scoring "
+                                        f"raised {type(e).__name__}: {short_msg}"
+                                    ),
+                                    "memory_update": (
+                                        "Scoring crash — training succeeded so the "
+                                        "checkpoint may be reusable. Investigate the "
+                                        "scoring path (anchor map, sample_set, file "
+                                        "vector shape) before retrying this config."
+                                    ),
+                                },
+                            }
+                            error_record["memory"]["round_index"] = round_index
+                            error_record["memory"]["attempt_in_round"] = attempt_in_round
+                            ExperimentRecord.model_validate(error_record)
+                            sandbox.save_record(error_record)
+                            print(f"  Saved error record: {error_record['status']}")
+                            continue
                         scoring_time = round(time.time() - t0, 1)
                         probe_memory(
                             iter_idx=round_index,
@@ -1979,140 +2060,108 @@ class HyperparamTuningAgent:
                             workspace=workspace,
                             scope="tuner",
                         )
-                        error_msg = f"{type(e).__name__}: {e}"
-                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                        error_record = {
-                            "exp_id": exp_id,
-                            "status": "error_scoring",
-                            "model_type": model_type,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index": file_index,
-                            "params": record_params,
-                            "denoising_score": None,
-                            "timing": {
-                                "train_time_s": train_time,
-                                "inference_time_s": inference_time,
-                                "scoring_time_s": scoring_time,
-                            },
-                            "memory": {
-                                "expert_advice_followed": expert_advice_str,
-                                "hypothesis": hypothesis,
-                                "conclusion": f"Scoring crashed: {short_msg}",
-                                "discovery": (
-                                    f"Training and inference completed but scoring "
-                                    f"raised {type(e).__name__}: {short_msg}"
-                                ),
-                                "memory_update": (
-                                    "Scoring crash — training succeeded so the "
-                                    "checkpoint may be reusable. Investigate the "
-                                    "scoring path (anchor map, sample_set, file "
-                                    "vector shape) before retrying this config."
-                                ),
-                            },
-                        }
-                        error_record["memory"]["round_index"] = round_index
-                        error_record["memory"]["attempt_in_round"] = attempt_in_round
-                        ExperimentRecord.model_validate(error_record)
-                        sandbox.save_record(error_record)
-                        print(f"  Saved error record: {error_record['status']}")
-                        continue
-                    scoring_time = round(time.time() - t0, 1)
-                    probe_memory(
-                        iter_idx=round_index, phase="post_score", workspace=workspace, scope="tuner"
-                    )
 
-                    # Extract results from each stage
-                    train_results = train_status.get("results", {})
-                    score_results = score_res.get("results", {})
+                        # Extract results from each stage
+                        train_results = train_status.get("results", {})
+                        score_results = score_res.get("results", {})
 
-                    # Generic degeneracy reaction. The task-specific predicate
-                    # already ran inside score_vector (execute_tools.squid_health_checks)
-                    # and produced is_degenerate / failure_reason on score_results.
-                    # Here we only translate that signal into the tuner-level
-                    # policy: penalize the formal score so the round can't be
-                    # picked as 'best', and surface failure_reason on the record.
-                    # See _apply_degeneracy_reaction for predicate details.
-                    is_degenerate, failure_reason = _apply_degeneracy_reaction(
-                        score_results,
-                        plan,
-                        agent_input.degenerate_penalty_score,
-                    )
-                    _is_degenerate_formal = is_degenerate and not plan.is_trial
-
-                    # Build the per-file score-comparison table (model vs
-                    # raw_baseline vs ground_truth) with subset-scoped
-                    # aggregates. Defensive try/except — the 15-hour tuning
-                    # loop must not crash on a rendering bug; a None
-                    # score_table simply skips the enriched prompt block in
-                    # the next round. See docs/aggregated_score_table_awareness.md §7.1.
-                    # Skipped on degenerate-formal rounds even when a non-None
-                    # penalty leaves the scalar populated — rendering the
-                    # penalty into the markdown 'model' column would mislead
-                    # the next planner. failure_reason carries the signal.
-                    # Phase 8 / P0 (docs/aggregated_score_table_awareness.md):
-                    # ``score_vector`` returns ``file_vector`` in LINEAR space
-                    # (per-file mean of the normalised score), but
-                    # ``build_score_table`` expects the model column in LOG
-                    # space so it is unit-consistent with the log-space
-                    # reference columns. Convert via the project-standard
-                    # log_{5.27}(v + 1e-10) helper before handing off.
-                    score_table: ScoreComparisonTable | None = None
-                    _sc_fv = score_results.get("file_vector")
-                    _sc_scalar = score_results.get("denoising_score")
-                    if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
-                        try:
-                            _sc_fv_log = file_vector_to_log_space(_sc_fv)
-                            score_table = build_score_table(
-                                model_fv_log=_sc_fv_log,
-                                model_fv_linear=_sc_fv,
-                                model_scalar=_sc_scalar,
-                                reference=reference_scores,
-                            )
-                        except Exception as e:
-                            print(
-                                f"[score_table] build_score_table failed: "
-                                f"{type(e).__name__}: {e} — continuing with "
-                                f"score_table=None."
-                            )
-                            score_table = None
-
-                    # Phase 8 / P-Alpha: append every successfully-built
-                    # score_table to the workspace audit stream so we have
-                    # a queryable record of exactly what was rendered for
-                    # the next agent. Best-effort — failures are logged
-                    # inside ``log_score_table`` and never raised.
-                    if score_table is not None:
-                        log_score_table(
-                            workspace=workspace,
-                            score_table=score_table,
-                            metadata={
-                                "run_name": run_name,
-                                "model_type": agent_input.model_type,
-                                "exp_id": exp_id,
-                                "round_index": round_index,
-                                "attempt_in_round": attempt_in_round,
-                                "is_trial": plan.is_trial,
-                                "table_kind": "trial" if plan.is_trial else "formal",
-                            },
+                        # Generic degeneracy reaction. The task-specific predicate
+                        # already ran inside score_vector (execute_tools.squid_health_checks)
+                        # and produced is_degenerate / failure_reason on score_results.
+                        # Here we only translate that signal into the tuner-level
+                        # policy: penalize the formal score so the round can't be
+                        # picked as 'best', and surface failure_reason on the record.
+                        # See _apply_degeneracy_reaction for predicate details.
+                        is_degenerate, failure_reason = _apply_degeneracy_reaction(
+                            score_results,
+                            plan,
+                            agent_input.degenerate_penalty_score,
                         )
+                        _is_degenerate_formal = is_degenerate and not plan.is_trial
 
-                    # Cleanup denoised files to save disk space
-                    if agent_input.cleanup_denoised:
-                        import glob as _glob
+                        # Build the per-file score-comparison table (model vs
+                        # raw_baseline vs ground_truth) with subset-scoped
+                        # aggregates. Defensive try/except — the 15-hour tuning
+                        # loop must not crash on a rendering bug; a None
+                        # score_table simply skips the enriched prompt block in
+                        # the next round. See docs/aggregated_score_table_awareness.md §7.1.
+                        # Skipped on degenerate-formal rounds even when a non-None
+                        # penalty leaves the scalar populated — rendering the
+                        # penalty into the markdown 'model' column would mislead
+                        # the next planner. failure_reason carries the signal.
+                        # Phase 8 / P0 (docs/aggregated_score_table_awareness.md):
+                        # ``score_vector`` returns ``file_vector`` in LINEAR space
+                        # (per-file mean of the normalised score), but
+                        # ``build_score_table`` expects the model column in LOG
+                        # space so it is unit-consistent with the log-space
+                        # reference columns. Convert via the project-standard
+                        # log_{5.27}(v + 1e-10) helper before handing off.
+                        score_table: ScoreComparisonTable | None = None
+                        _sc_fv = score_results.get("file_vector")
+                        _sc_scalar = score_results.get("denoising_score")
+                        if (
+                            _sc_fv is not None
+                            and _sc_scalar is not None
+                            and not _is_degenerate_formal
+                        ):
+                            try:
+                                _sc_fv_log = file_vector_to_log_space(_sc_fv)
+                                score_table = build_score_table(
+                                    model_fv_log=_sc_fv_log,
+                                    model_fv_linear=_sc_fv,
+                                    model_scalar=_sc_scalar,
+                                    reference=reference_scores,
+                                )
+                            except Exception as e:
+                                print(
+                                    f"[score_table] build_score_table failed: "
+                                    f"{type(e).__name__}: {e} — continuing with "
+                                    f"score_table=None."
+                                )
+                                score_table = None
 
-                        pattern = os.path.join(
-                            sandbox.base_dir,
-                            f"abra_validation_denoised_*_{exp_id}_*.h5",
-                        )
-                        denoised_files = _glob.glob(pattern)
-                        if denoised_files:
-                            total_bytes = sum(os.path.getsize(f) for f in denoised_files)
-                            for f in denoised_files:
-                                os.remove(f)
-                            print(
-                                f"  Cleaned up {len(denoised_files)} denoised files "
-                                f"({total_bytes / (1024**3):.1f} GB freed)"
+                        # Phase 8 / P-Alpha: append every successfully-built
+                        # score_table to the workspace audit stream so we have
+                        # a queryable record of exactly what was rendered for
+                        # the next agent. Best-effort — failures are logged
+                        # inside ``log_score_table`` and never raised.
+                        if score_table is not None:
+                            log_score_table(
+                                workspace=workspace,
+                                score_table=score_table,
+                                metadata={
+                                    "run_name": run_name,
+                                    "model_type": agent_input.model_type,
+                                    "exp_id": exp_id,
+                                    "round_index": round_index,
+                                    "attempt_in_round": attempt_in_round,
+                                    "is_trial": plan.is_trial,
+                                    "table_kind": "trial" if plan.is_trial else "formal",
+                                },
                             )
+
+                    finally:
+                        # Cleanup denoised files — fires on success, on
+                        # ``continue`` from the inference/scoring error handlers
+                        # above, AND on any uncaught exception. Glob is keyed to
+                        # this attempt's ``exp_id`` so other attempts' files
+                        # (e.g. from a not-yet-cleaned prior leak) are untouched.
+                        if agent_input.cleanup_denoised:
+                            import glob as _glob
+
+                            pattern = os.path.join(
+                                sandbox.base_dir,
+                                f"abra_validation_denoised_*_{exp_id}_*.h5",
+                            )
+                            denoised_files = _glob.glob(pattern)
+                            if denoised_files:
+                                total_bytes = sum(os.path.getsize(f) for f in denoised_files)
+                                for f in denoised_files:
+                                    os.remove(f)
+                                print(
+                                    f"  Cleaned up {len(denoised_files)} denoised files "
+                                    f"({total_bytes / (1024**3):.1f} GB freed)"
+                                )
 
                     # D. REFLECT: Analyze results and generate insights
                     print("\nGenerating Research Memory...")
