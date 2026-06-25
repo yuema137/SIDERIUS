@@ -56,8 +56,10 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from workflows.model_exploration import (
+    _CONSTRUCTION_RSS_THRESHOLD_GB,
     _add_plugin_to_registries,
     _register_plugin,
+    _validate_construction_memory,
     load_tuning_outputs,
     load_tuning_outputs_from_paths,
     run_workflow,
@@ -1324,11 +1326,15 @@ _REGRESSOR_PLUGIN_SRC = _textwrap.dedent("""\
     class TestRegressorModel(nn.Module):
         def __init__(self, config):
             super().__init__()
-            self.proj = nn.Linear(config.segmentation_size, config.segmentation_size)
+            # Fixed small projection — doesn't scale with T. The forward
+            # pass is illustrative only; register-plugin tests don't run
+            # it. A real plugin would map seg_size -> seg_size, but doing
+            # so here would (correctly!) trip _validate_construction_memory
+            # at representative_T=16000 because nn.Linear(T, T) is O(T²).
+            self.proj = nn.Linear(8, 8)
 
         def forward(self, x):
-            out = self.proj(x.float())
-            return out.unsqueeze(1)  # [B, 1, T] regressor contract
+            return x.float().mean(dim=-1, keepdim=True).expand(-1, x.shape[-1])
 
     PLUGIN_CONFIG_CLASS = TestRegressorConfig
     PLUGIN_MODEL_CLASS  = TestRegressorModel
@@ -1350,11 +1356,12 @@ _CLASSIFIER_PLUGIN_SRC = _textwrap.dedent("""\
     class TestClassifierModel(nn.Module):
         def __init__(self, config):
             super().__init__()
-            self.proj = nn.Linear(config.segmentation_size, config.segmentation_size)
+            # Fixed small projection — see TestRegressorModel rationale.
+            self.proj = nn.Linear(8, 8)
 
         def forward(self, x):
-            out = self.proj(x.float())
-            return out.unsqueeze(1).expand(-1, 256, -1)
+            out = x.float().mean(dim=-1, keepdim=True)
+            return out.unsqueeze(1).expand(-1, 256, x.shape[-1])
 
     PLUGIN_CONFIG_CLASS = TestClassifierConfig
     PLUGIN_MODEL_CLASS  = TestClassifierModel
@@ -1808,3 +1815,209 @@ class TestL6cPromoteLossToGlobal:
         assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
         # The existing-name file is untouched
         assert global_existing.read_text() == _L6C_PROMO_PLUGIN_SRC_A
+
+
+# ---------------------------------------------------------------------------
+# _validate_construction_memory — guard against T-scaling __init__ allocations
+# ---------------------------------------------------------------------------
+#
+# Added 2026-06-24 after the v15 arch chain was OOM-killed at 53 GB RSS
+# during the tuner's VRAM pre-flight. The suspected cause: a generated
+# SSM plugin that allocated O(T²) host-RAM buffers in ``__init__``. The
+# structural VRAM probe could not catch it because the allocation was in
+# CPU host memory, not CUDA. This validator runs at registration time —
+# before the tuner starts — and rejects any plugin whose ``__init__``
+# allocates more than ``_CONSTRUCTION_RSS_THRESHOLD_GB`` GB of RSS.
+
+
+class TestValidateConstructionMemory:
+    def test_threshold_constant_is_500mb(self):
+        """The threshold must stay at 0.5 GB. Loosening it silently would
+        let the family of bugs this validator exists to catch slip
+        through."""
+        assert _CONSTRUCTION_RSS_THRESHOLD_GB == 0.5
+
+    def test_small_model_passes(self):
+        """A tiny model whose ``__init__`` allocates ~zero RAM passes —
+        prints the [MemCheck] line, returns None, raises nothing."""
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        class TinyConfig(BaseModel):
+            pass
+
+        class TinyModel(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                # A few KB of params, nothing T-scaling.
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        # Should not raise.
+        _validate_construction_memory(TinyModel, TinyConfig, "tiny_model")
+
+    def test_large_init_fails(self):
+        """A model whose ``__init__`` allocates a multi-GB tensor must
+        raise ValueError with the diagnostic message that names T-scaling
+        buffers as the likely cause. This is the regression test the
+        v15 arch OOM would have caught."""
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        class BigConfig(BaseModel):
+            pass
+
+        class BigModel(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                # 16000 × 16000 float32 = 1 GB — the [T, T] attention/SSM
+                # matrix shape the validator exists to forbid.
+                # torch.randn (not torch.zeros) — Linux backs zero-filled
+                # anonymous mmap with the shared zero page until a write
+                # commits real RAM; randn writes during init, matching
+                # the commit pattern of every realistic faulty plugin
+                # (which inits weights / masks / lookup tables).
+                self.bad_buffer = torch.randn(16000, 16000)
+
+            def forward(self, x):
+                return x
+
+        with pytest.raises(ValueError, match=r"allocated.*GB during.*__init__"):
+            _validate_construction_memory(BigModel, BigConfig, "big_model_test")
+
+    def test_error_message_names_t_scaling_diagnostics(self):
+        """The diagnostic line in the error message must point the next
+        author at the cause (T-scaling buffers in __init__) and the fix
+        (move to forward()). Without these, the error is opaque."""
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        class BigConfig(BaseModel):
+            pass
+
+        class BigModel(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                # torch.randn (not torch.zeros) — Linux backs zero-filled
+                # anonymous mmap with the shared zero page until a write
+                # commits real RAM; randn writes during init, matching
+                # the commit pattern of every realistic faulty plugin
+                # (which inits weights / masks / lookup tables).
+                self.bad_buffer = torch.randn(16000, 16000)
+
+            def forward(self, x):
+                return x
+
+        with pytest.raises(ValueError) as exc:
+            _validate_construction_memory(BigModel, BigConfig, "diag_test")
+        msg = str(exc.value)
+        assert "T-dependent" in msg or "scales with T" in msg
+        assert "forward()" in msg
+        assert "[B, d_state]" in msg
+
+    def test_construction_crash_raises_valueerror(self):
+        """A model whose ``__init__`` raises (any exception) is caught
+        and re-raised as ValueError so the iteration loop sees a uniform
+        failure shape — never a bare KeyError / AttributeError / etc."""
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        class BadConfig(BaseModel):
+            pass
+
+        class BadModel(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                raise RuntimeError("intentional construction failure")
+
+            def forward(self, x):
+                return x
+
+        with pytest.raises(ValueError, match=r"__init__ raised RuntimeError"):
+            _validate_construction_memory(BadModel, BadConfig, "bad_model")
+
+    def test_representative_T_injected_when_schema_accepts_segmentation_size(self):
+        """When the config schema declares ``segmentation_size``, the
+        validator must inject ``representative_T`` into it — otherwise
+        a plugin whose default config has a tiny segmentation_size would
+        evade the check even though it allocates [T, T] at the operator's
+        real T. Verified by a plugin whose ``__init__`` allocation
+        scales with segmentation_size."""
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel, Field
+
+        class SegConfig(BaseModel):
+            # Default is tiny; the validator must override to 16000.
+            segmentation_size: int = Field(default=100, gt=0)
+
+        class SegScaledModel(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                # 16000 * 16000 * 4 = 1 GB only if validator overrides
+                # segmentation_size. With default=100 the allocation is
+                # 100 * 100 * 4 = 40 KB and the check would pass.
+                # randn (not zeros) commits real pages — see comment in
+                # test_large_init_fails for the Linux mmap rationale.
+                self.buffer = torch.randn(cfg.segmentation_size, cfg.segmentation_size)
+
+            def forward(self, x):
+                return x
+
+        with pytest.raises(ValueError, match=r"allocated.*GB during.*__init__"):
+            _validate_construction_memory(
+                SegScaledModel, SegConfig, "seg_scaled", representative_T=16000
+            )
+
+    def test_falls_back_to_defaults_when_representative_T_rejected(self):
+        """If ``representative_T`` is out of the schema's declared bounds,
+        the validator must fall back to the schema's defaults rather than
+        skipping the check entirely. (A tiny default may not trip the
+        threshold, but at least we get a real run.)"""
+        import torch.nn as nn
+        from pydantic import BaseModel, Field
+
+        class CappedConfig(BaseModel):
+            # Hard cap at 1000 — representative_T=16000 will be rejected.
+            segmentation_size: int = Field(default=500, gt=0, le=1000)
+
+        class TinyAtCap(nn.Module):
+            def __init__(self, cfg):
+                super().__init__()
+                # Small allocation regardless of cfg — should pass.
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        # Should not raise; falls back to default (500) instead of bailing.
+        _validate_construction_memory(TinyAtCap, CappedConfig, "capped_model")
+
+    def test_passes_loss_type_when_constructor_accepts_it(self):
+        """fcnet-style models that accept ``loss_type`` in their
+        constructor must receive it from the validator (mirroring
+        ``_build_model`` in evaluate_vram_skill). Otherwise the
+        validator would crash with a TypeError on every hybrid model."""
+        import torch.nn as nn
+        from pydantic import BaseModel
+
+        class HybridConfig(BaseModel):
+            pass
+
+        received_loss_type: list[str] = []
+
+        class HybridModel(nn.Module):
+            def __init__(self, cfg, loss_type: str = "ce"):
+                super().__init__()
+                received_loss_type.append(loss_type)
+                self.lin = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        _validate_construction_memory(HybridModel, HybridConfig, "hybrid_model")
+        assert received_loss_type == ["focal"]

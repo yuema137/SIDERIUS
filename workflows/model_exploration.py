@@ -648,6 +648,132 @@ def _cap_knowledge_cache(
     return capped, evicted
 
 
+_CONSTRUCTION_RSS_THRESHOLD_GB = 0.5  # 500 MB
+
+
+def _validate_construction_memory(
+    model_class: type,
+    config_class: type,
+    model_name: str,
+    representative_T: int = 16000,
+) -> None:
+    """Validate that instantiating the model plugin does not allocate
+    excessive RAM during ``__init__``.
+
+    Catches faulty SSM/attention implementations that pre-allocate buffers
+    scaling with T (e.g. ``[T, T]`` attention matrices, ``[B, T, d_state]``
+    state buffers) in ``__init__`` rather than in ``forward()``. Added after
+    the 2026-06-24 v15 arch chain was OOM-killed at 53 GB during VRAM
+    pre-flight — the suspect was a generated SSM plugin with a T-scaling
+    construction-time allocation that the structural VRAM probe could not
+    catch (because the offending allocation lived in CPU host RAM, not CUDA).
+
+    The check is cheap (one ``__init__`` call, no forward, no autograd)
+    and tight (RSS delta measured around a single ``model_class(cfg)``
+    invocation with ``gc.collect`` on either side).
+
+    Args:
+        model_class: the plugin's ``PLUGIN_MODEL_CLASS``.
+        config_class: the plugin's ``PLUGIN_CONFIG_CLASS``.
+        model_name: used in error messages.
+        representative_T: sequence length to test — defaults to ``16000``
+            which is the §10 attractor value for SSM/FNO families. At
+            T=16000, a single ``[T, T]`` float32 matrix = 1 GB, well above
+            the ``_CONSTRUCTION_RSS_THRESHOLD_GB`` floor. Injected into
+            the config as ``segmentation_size`` when the schema accepts
+            that field; otherwise the config's own defaults are used.
+
+    Raises:
+        ValueError: if construction RSS delta exceeds
+            ``_CONSTRUCTION_RSS_THRESHOLD_GB`` OR if ``__init__`` itself
+            raises (a plugin that cannot be constructed with default
+            config is already rejected by the dummy-tensor validator, but
+            we re-raise here as ``ValueError`` so callers see a uniform
+            failure shape).
+    """
+    import gc as _gc
+    import inspect as _inspect
+
+    import psutil as _psutil
+    import torch as _torch
+
+    # Real plugins are always ``nn.Module`` subclasses (plugin loader
+    # contract: ``PLUGIN_MODEL_CLASS: type — nn.Module subclass``). Stub
+    # classes used by some fixture tests aren't, and would crash inside
+    # ``model_class(cfg)`` for unrelated reasons. Skip with a visible
+    # warning so an accidental non-Module in a real path is still loud.
+    if not (isinstance(model_class, type) and issubclass(model_class, _torch.nn.Module)):
+        print(
+            f"    [MemCheck] '{model_name}' skipped — not an nn.Module subclass "
+            f"(type={type(model_class).__name__}).",
+            flush=True,
+        )
+        return
+
+    _gc.collect()
+    rss_before = _psutil.Process().memory_info().rss
+
+    model = None
+    cfg = None
+    try:
+        # Inject representative_T as segmentation_size when the schema
+        # accepts it. Pydantic v2 exposes the field map via model_fields.
+        cfg_kwargs: dict[str, Any] = {}
+        fields = getattr(config_class, "model_fields", None) or {}
+        if "segmentation_size" in fields:
+            cfg_kwargs["segmentation_size"] = representative_T
+        try:
+            cfg = config_class(**cfg_kwargs)
+        except Exception:
+            # If representative_T was rejected (out of declared bounds),
+            # fall back to the schema's own defaults. Still better than
+            # skipping — the bug usually trips at any T ≥ a few thousand.
+            cfg = config_class()
+        # Mirror evaluate_vram_skill._build_model: pass loss_type when the
+        # model's __init__ accepts it (fcnet hybrid pattern, plus any
+        # future plugin that adopts the same convention).
+        if "loss_type" in _inspect.signature(model_class.__init__).parameters:
+            model = model_class(cfg, loss_type="focal")
+        else:
+            model = model_class(cfg)
+        # Measure RSS BEFORE releasing the model. ``del model, cfg`` would
+        # let the allocator reclaim the buffers before we ever sample
+        # ``rss_after``, so a faulty plugin's 1+ GB allocation would
+        # cancel out and the check would never trip.
+        _gc.collect()
+        rss_after = _psutil.Process().memory_info().rss
+    except Exception as e:
+        raise ValueError(
+            f"Model plugin '{model_name}': __init__ raised {type(e).__name__}: {e}. "
+            f"The plugin must be constructable with default config."
+        ) from e
+    finally:
+        # Release whatever was successfully constructed. Runs after the
+        # measurement, so even a passing plugin doesn't leak its
+        # construction-time RSS into the next checkpoint.
+        del model, cfg
+        _gc.collect()
+
+    delta_gb = (rss_after - rss_before) / 1024**3
+
+    print(
+        f"    [MemCheck] '{model_name}' __init__ RSS delta: {delta_gb:.3f} GB "
+        f"(threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB)",
+        flush=True,
+    )
+
+    if delta_gb > _CONSTRUCTION_RSS_THRESHOLD_GB:
+        raise ValueError(
+            f"Model plugin '{model_name}' allocated {delta_gb:.2f} GB during "
+            f"__init__ (threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB). "
+            f"This indicates a construction-time buffer that scales with T. "
+            f"Common causes: [T, T] attention/SSM matrices, [B, T, d_state] "
+            f"state buffers, FFT mixing matrices. "
+            f"Fix: move all T-dependent allocations to forward(). "
+            f"SSM hidden states must be shape [B, d_state], not [B, T, d_state]."
+        )
+
+
 def _add_plugin_to_registries(plugin_path: str) -> str | None:
     """Register a single plugin file in every in-process registry surface.
 
@@ -844,12 +970,31 @@ def _register_plugin(
         # call below.
         return
 
+    registered: str | None = None
     try:
         registered = _add_plugin_to_registries(primary_plugin)
         if registered:
             print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
         print(f"    Warning: could not extend registries: {e}")
+
+    # Construction-time RSS validator — catches faulty SSM/attention plugins
+    # that pre-allocate T-scaling buffers in __init__ before the structural
+    # VRAM probe ever runs. Runs OUTSIDE the registry-extension try/except
+    # because a positive verdict here is load-bearing: a faulty plugin that
+    # passes registry extension but allocates 50+ GB at construct time would
+    # OOM-kill the orchestrator at the tuner's VRAM probe. The
+    # ``ValueError`` from this helper propagates up to the iteration loop
+    # so the iteration ends loudly instead of silently advancing.
+    if registered is not None:
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
+
+        _validate_construction_memory(
+            model_class=MODEL_REGISTRY[registered],
+            config_class=PLUGIN_CONFIG_REGISTRY[registered],
+            model_name=model_name,
+        )
 
 
 # ---------------------------------------------------------------------------
