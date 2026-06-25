@@ -319,7 +319,12 @@ def _measure_ms_per_step(
         from torch.utils.data import DataLoader
 
         from execute_tools.train_engine_sandbox import TIDMADEpochDataset
-        from ml_models.loss_models_sandbox import get_criterion
+        from ml_models.loss_models_sandbox import (
+            get_criterion,
+        )
+        from ml_models.loss_models_sandbox import (
+            get_target_torch_dtype as _get_target_torch_dtype,
+        )
         from ml_models.models_format_sandbox import (
             LossConfig,
             TrainConfig,
@@ -403,7 +408,12 @@ def _measure_ms_per_step(
             x = x.to(device)
             y = y.to(device)
             x = x.float() if model_type == "fcnet" else x.int()
-            y = y.long() if loss_type in ("ce", "focal", "focal_cw") else y.float()
+            # I13 — single source of truth for target dtype routing.
+            # ``get_target_torch_dtype`` reads built-in routing for
+            # ce/focal/focal_cw/smooth_l1 and the plugin's declared
+            # ``PLUGIN_LOSS_TARGET_DTYPE`` for loss_type="custom"
+            # (defaulting to torch.long for pre-I13 plugins).
+            y = y.to(dtype=_get_target_torch_dtype(loss_cfg_obj))
 
             torch.cuda.synchronize()
             t0 = time.perf_counter()

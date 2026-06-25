@@ -116,3 +116,61 @@ class TestSaveWithSentinelAtomicity:
         weird_exp_id = "round_03_explore_punet_v2"
         _save_with_sentinel({"w": "stub"}, save_path, weird_exp_id)
         assert (tmp_path / f"_OK_{weird_exp_id}").exists()
+
+
+# ---------------------------------------------------------------------------
+# I13 — train_engine_sandbox target-dtype casting uses single source of truth
+# ---------------------------------------------------------------------------
+#
+# The pre-I13 train loop hardcoded ``loss_type in ('ce', 'focal', 'focal_cw')``
+# at both the train and validation call sites — same registry-asymmetry shape
+# as I9 / I12. These tests pin the source-level invariants. Runtime routing
+# behavior is covered by tests/unit/ml_models/test_loss_functions.py.
+
+
+class TestI13TrainEngineUsesTargetDtypeHelper:
+    def test_train_engine_imports_get_target_torch_dtype(self):
+        import inspect
+
+        import execute_tools.train_engine_sandbox as tes
+
+        src = inspect.getsource(tes)
+        assert "get_target_torch_dtype" in src, (
+            "train_engine_sandbox must import get_target_torch_dtype — "
+            "the single source of truth for target dtype routing."
+        )
+
+    def test_train_engine_does_not_hardcode_loss_type_dtype_branch(self):
+        """The pre-I13 form ``target_seq.long() if loss_type in (...) else
+        target_seq.float()`` must not exist anywhere in the train engine."""
+        import inspect
+
+        import execute_tools.train_engine_sandbox as tes
+
+        src = inspect.getsource(tes)
+        # Pin the giveaway substring; any reintroduction of the hardcoded
+        # branch would have to use ``target_seq.long() if loss_type`` since
+        # that's the only nearby variable carrying the loss type.
+        assert "target_seq.long() if loss_type" not in src, (
+            "Detected pre-I13 hardcoded dtype branch in train engine. "
+            "Use target_seq.to(dtype=get_target_torch_dtype(loss_cfg)) "
+            "instead."
+        )
+
+    def test_train_engine_uses_helper_at_both_call_sites(self):
+        """Both call sites (train batch + validation batch) must route via
+        the helper. A regression that only fixes one site would still
+        crash custom losses in the other phase."""
+        import inspect
+
+        import execute_tools.train_engine_sandbox as tes
+
+        src = inspect.getsource(tes)
+        # Count occurrences of the helper invocation pattern. Both train
+        # batch and val batch sites should appear.
+        n = src.count("get_target_torch_dtype(loss_cfg)")
+        assert n >= 2, (
+            f"Expected at least 2 calls to get_target_torch_dtype(loss_cfg) "
+            f"in train_engine_sandbox (train + val batch sites); found {n}. "
+            f"If a site was missed, custom losses will still crash there."
+        )

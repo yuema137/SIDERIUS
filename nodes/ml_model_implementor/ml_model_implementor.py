@@ -447,6 +447,11 @@ from typing import Self
 
 PLUGIN_LOSS_TYPE = "{loss_name}"
 
+# I13 — target dtype the loss expects. "long" (int64) is the classifier
+# contract; "float" matches a regressor (smooth_l1-style) contract. All
+# losses generated under the current proposer forward contract use "long".
+PLUGIN_LOSS_TARGET_DTYPE = "long"
+
 
 class {LossClass}Config(BaseModel):
     \"\"\"Hyperparameters for the {loss_name} loss.
@@ -493,6 +498,17 @@ logits and integer class targets; it must return a SCALAR tensor with gradient.
   - ``targets`` : ``torch.Tensor`` of shape ``[B, T]``              (int64, class indices in [0, num_classes))
   - returns     : ``torch.Tensor`` SCALAR  (i.e. ``.dim() == 0``)
                   with ``requires_grad=True`` so training can backprop.
+
+## Module-level constant — REQUIRED (I13)
+
+Every loss plugin you generate MUST declare ``PLUGIN_LOSS_TARGET_DTYPE``
+at module level. For the classifier contract above (int64 targets), the
+value is the literal string ``"long"``. The template already includes
+this declaration — do NOT remove or rename it. Consumers
+(``evaluate_time_skill``, ``train_engine_sandbox``) read this to decide
+whether to cast targets to ``.long()`` or ``.float()`` before invoking
+your loss. Missing this declaration will silently default to ``"long"``
+but is treated as a defect.
 
 ## Allowed imports — STRICT ALLOW-LIST
 

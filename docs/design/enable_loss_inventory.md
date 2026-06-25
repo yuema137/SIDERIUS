@@ -1353,6 +1353,30 @@ grounded in a finding's mechanism, citing a `source_ref` verbatim in
 the advice update.
 **Commit**: `84a3caf`
 
+#### I13 — `evaluate_time_skill` and `train_engine_sandbox` routed `loss_type="custom"` targets to `.float()` (EMD dtype crash in v15)
+
+**Root cause**: `evaluate_time_skill/wrapper.py` and `execute_tools/train_engine_sandbox.py`
+hardcoded `("ce", "focal", "focal_cw")` as the classifier loss types that receive int64
+targets. `loss_type="custom"` fell into the `.float()` branch (regressor path), causing
+`F.one_hot()` to crash with `RuntimeError: one_hot is only applicable to index tensor of
+type LongTensor` in any custom loss that uses integer class indices.
+
+Same registry-asymmetry pattern as I9/I12 — a consumer of `LossConfig` was not updated
+when `loss_type="custom"` was added. Discovered in v15 iter_001 when the proposer
+generated an EMD-family loss using `F.one_hot(targets, num_classes=256)`.
+
+**Why list-extension is the wrong fix**: not all custom losses are classifiers. A future
+regressor-style custom loss (smooth_l1-shaped) would need `.float()`. The dtype contract
+belongs with the plugin, not with a hardcoded consumer list.
+
+**Fix**: Each loss plugin declares `PLUGIN_LOSS_TARGET_DTYPE = "long" | "float"` at module
+scope (mirrors `PLUGIN_OUTPUT_TYPE` on model plugins). The loader registers it in
+`LOSS_TARGET_DTYPE_REGISTRY`. A new `get_target_torch_dtype(loss_config) -> torch.dtype`
+helper in `loss_models_sandbox.py` is the single source of truth for all consumers. Both
+affected call sites replaced with the helper call. Stub template and implementor prompt
+updated to require the declaration in all future generated plugins.
+**Commits**: (to be filled after commit)
+
 ---
 
 ## Open questions

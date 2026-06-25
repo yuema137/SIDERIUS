@@ -251,3 +251,148 @@ class TestEnvVarResolution:
         # The loader prints one "Skipping ... missing 'PLUGIN_LOSS_TYPE'" line
         # — that's the documented behavior on a misnamed file.
         assert "Skipping" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# I13 — PLUGIN_LOSS_TARGET_DTYPE declaration + LOSS_TARGET_DTYPE_REGISTRY
+# ---------------------------------------------------------------------------
+
+_PLUGIN_HEAD = """\
+import torch
+import torch.nn as nn
+from pydantic import BaseModel
+PLUGIN_LOSS_TYPE = "{name}"
+{dtype_line}
+
+class _Cfg(BaseModel):
+    pass
+
+PLUGIN_LOSS_CONFIG_CLASS = _Cfg
+
+class _Loss(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+    def forward(self, inputs, targets):
+        return inputs.mean()
+
+PLUGIN_LOSS_CLASS = _Loss
+"""
+
+
+def _write_plugin(loss_dir: Path, name: str, dtype_line: str) -> Path:
+    """Write a minimal valid plugin with the given PLUGIN_LOSS_TARGET_DTYPE line.
+
+    Pass dtype_line=='' to omit the declaration entirely (back-compat test).
+    """
+    plugin_path = loss_dir / f"{name}.py"
+    plugin_path.write_text(_PLUGIN_HEAD.format(name=name, dtype_line=dtype_line))
+    return plugin_path
+
+
+class TestI13TargetDtypeDeclaration:
+    """I13 — verify ``_load_loss_plugin`` reads the optional
+    ``PLUGIN_LOSS_TARGET_DTYPE`` field and that ``get_loss_target_dtype``
+    returns the right value from ``LOSS_TARGET_DTYPE_REGISTRY``.
+    """
+
+    def test_explicit_long_declaration_registered(self, loss_dir: Path):
+        """Plugin declaring ``PLUGIN_LOSS_TARGET_DTYPE = "long"`` is
+        loaded with ``target_dtype == 'long'`` in the returned dict."""
+        from agent_generated._loss_loader import load_loss_plugin_from_path
+
+        plugin_path = _write_plugin(
+            loss_dir, "long_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "long"'
+        )
+        result = load_loss_plugin_from_path(str(plugin_path))
+        assert result is not None
+        assert result["target_dtype"] == "long"
+
+    def test_explicit_float_declaration_registered(self, loss_dir: Path):
+        """Plugin declaring ``PLUGIN_LOSS_TARGET_DTYPE = "float"`` is
+        loaded with ``target_dtype == 'float'``."""
+        from agent_generated._loss_loader import load_loss_plugin_from_path
+
+        plugin_path = _write_plugin(
+            loss_dir, "float_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "float"'
+        )
+        result = load_loss_plugin_from_path(str(plugin_path))
+        assert result is not None
+        assert result["target_dtype"] == "float"
+
+    def test_missing_declaration_defaults_to_long(self, loss_dir: Path):
+        """Back-compat — a plugin generated before I13 (no
+        ``PLUGIN_LOSS_TARGET_DTYPE`` declaration) defaults to ``'long'``
+        so it keeps receiving int64 targets per the classifier contract."""
+        from agent_generated._loss_loader import load_loss_plugin_from_path
+
+        plugin_path = _write_plugin(loss_dir, "no_decl_loss", dtype_line="")
+        result = load_loss_plugin_from_path(str(plugin_path))
+        assert result is not None
+        assert result["target_dtype"] == "long"
+
+    def test_invalid_declaration_warns_and_defaults(
+        self, loss_dir: Path, capsys: pytest.CaptureFixture
+    ):
+        """Plugin with an invalid value (e.g. typo'd ``'int64'`` or
+        ``'i64'``) — loader warns to stdout and clamps to ``'long'``."""
+        from agent_generated._loss_loader import load_loss_plugin_from_path
+
+        plugin_path = _write_plugin(
+            loss_dir, "bad_decl_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "int64"'
+        )
+        result = load_loss_plugin_from_path(str(plugin_path))
+        assert result is not None
+        assert result["target_dtype"] == "long"
+        out = capsys.readouterr().out
+        assert "PLUGIN_LOSS_TARGET_DTYPE" in out
+        assert "defaulting to 'long'" in out
+
+    def test_get_loss_target_dtype_helper_default(self):
+        """``get_loss_target_dtype(unknown_name)`` returns ``'long'`` —
+        the documented fallback for unregistered loss names."""
+        from agent_generated._loss_loader import get_loss_target_dtype
+
+        # Pick a name that cannot collide with any registered plugin.
+        assert get_loss_target_dtype("__unknown_loss_for_i13_test__") == "long"
+
+    def test_get_loss_target_dtype_helper_reads_registry(self):
+        """When a plugin is registered with ``register_loss_in_memory``
+        (which populates LOSS_TARGET_DTYPE_REGISTRY), the helper returns
+        the declared value."""
+        from agent_generated._loss_loader import (
+            LOSS_TARGET_DTYPE_REGISTRY,
+            get_loss_target_dtype,
+        )
+
+        # Insert directly to test the helper's contract independently of the
+        # register_loss_in_memory plumbing (which has its own coverage).
+        LOSS_TARGET_DTYPE_REGISTRY["__i13_float_test__"] = "float"
+        try:
+            assert get_loss_target_dtype("__i13_float_test__") == "float"
+        finally:
+            LOSS_TARGET_DTYPE_REGISTRY.pop("__i13_float_test__", None)
+
+
+class TestI13StubTemplateDeclaresDtype:
+    """Regression guard — the stub template (used by the L1 unit tests and
+    by the L4 implementor as the assembly template) MUST declare
+    ``PLUGIN_LOSS_TARGET_DTYPE``. If a future refactor strips the line,
+    every generated loss plugin would silently fall back to ``'long'``
+    by default — which is correct today but masks intent and breaks the
+    moment we want a regressor-style custom loss."""
+
+    def test_stub_template_declares_target_dtype(self):
+        from agent_generated._loss_loader import LOSSES_DIR  # noqa: F401 — anchor
+
+        template_path = (
+            Path(__file__).resolve().parents[3]
+            / "agent_generated"
+            / "_stub_loss_template.py"
+        )
+        text = template_path.read_text()
+        assert 'PLUGIN_LOSS_TARGET_DTYPE = "long"' in text, (
+            f"_stub_loss_template.py is missing the I13 declaration "
+            f"PLUGIN_LOSS_TARGET_DTYPE = 'long'. Without it, the L4 implementor's "
+            f"assembled plugins would silently default to 'long' — which is the "
+            f"correct value today but hides intent. Restore the declaration."
+        )

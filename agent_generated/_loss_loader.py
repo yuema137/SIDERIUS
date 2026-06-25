@@ -101,10 +101,25 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
             print(f"[LossLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
             return None
 
+    # I13 — read the optional ``PLUGIN_LOSS_TARGET_DTYPE`` declaration. Plugins
+    # generated before I13 don't carry the field; default to ``"long"`` to
+    # match the int64-targets forward contract documented in
+    # ``proposing_stage.md``. Invalid values are warned and clamped to the
+    # default rather than rejected so a typo doesn't kill the plugin.
+    target_dtype = getattr(module, "PLUGIN_LOSS_TARGET_DTYPE", "long")
+    if target_dtype not in ("long", "float"):
+        print(
+            f"[LossLoader] Warning: {os.path.basename(path)}: "
+            f"PLUGIN_LOSS_TARGET_DTYPE={target_dtype!r} is not 'long' or "
+            f"'float'; defaulting to 'long'."
+        )
+        target_dtype = "long"
+
     return {
         "loss_type": module.PLUGIN_LOSS_TYPE,
         "config_class": module.PLUGIN_LOSS_CONFIG_CLASS,
         "loss_class": module.PLUGIN_LOSS_CLASS,
+        "target_dtype": target_dtype,
     }
 
 
@@ -185,3 +200,39 @@ def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:
             if plugin["loss_type"] == loss_name:
                 return plugin
     return None
+
+
+# ---------------------------------------------------------------------------
+# I13 — Target-dtype registry for in-process consumers
+# ---------------------------------------------------------------------------
+#
+# Mirror of ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY`` but for
+# the loss-plugin surface. Populated by
+# ``ml_models.loss_models_sandbox.register_loss_in_memory`` whenever a loss
+# plugin is loaded into ``LOSS_REGISTRY``. Read by
+# ``ml_models.loss_models_sandbox.get_target_torch_dtype`` (the single
+# source of truth that ``evaluate_time_skill`` and ``train_engine_sandbox``
+# call to decide whether to cast ``targets`` to ``long`` or ``float``).
+#
+# Keyed by ``PLUGIN_LOSS_TYPE`` (the string the proposer / tuner sees as
+# ``loss_config.loss_name``); values are the literal strings ``"long"`` or
+# ``"float"`` as declared by the plugin.
+LOSS_TARGET_DTYPE_REGISTRY: dict[str, str] = {}
+
+
+def get_loss_target_dtype(loss_name: str) -> str:
+    """Return the target-dtype declaration (``"long"`` or ``"float"``) for
+    ``loss_name``.
+
+    Defaults to ``"long"`` when the loss is not in the registry — covering:
+      * losses generated before I13 landed (no ``PLUGIN_LOSS_TARGET_DTYPE``
+        declaration on the plugin)
+      * losses whose plugin file was on disk but never loaded in this
+        process (back-stop; the registry should be populated by
+        ``register_loss_in_memory`` on every loadable plugin)
+
+    The ``"long"`` default matches the classifier forward contract documented
+    in ``proposing_stage.md`` (``targets: [B, T] int64``), so pre-I13 plugins
+    that follow that contract continue to receive correct dtype.
+    """
+    return LOSS_TARGET_DTYPE_REGISTRY.get(loss_name, "long")

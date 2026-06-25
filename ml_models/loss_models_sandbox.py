@@ -61,6 +61,11 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     already-registered one, a warning is printed (subtle bug signal — a
     plugin was reloaded with different code under the same name).
 
+    I13 — also populates ``LOSS_TARGET_DTYPE_REGISTRY`` from the plugin's
+    ``PLUGIN_LOSS_TARGET_DTYPE`` declaration so consumers
+    (``evaluate_time_skill``, ``train_engine_sandbox``) can resolve the
+    correct target dtype without hardcoded loss_type lists.
+
     Args:
         plugin_path: Absolute path to the loss plugin ``.py`` file.
 
@@ -70,7 +75,7 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     """
     # Lazy import keeps ml_models loadable without agent_generated/ on the
     # Python path (legacy tests that exercise loss_models_sandbox in isolation).
-    from agent_generated._loss_loader import load_loss_plugin_from_path
+    from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY, load_loss_plugin_from_path
 
     plugin = load_loss_plugin_from_path(plugin_path)
     if plugin is None:
@@ -88,6 +93,12 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
         )
     LOSS_REGISTRY[loss_type] = new_cls
     LOSS_CONFIG_REGISTRY[loss_type] = plugin["config_class"]
+    # I13 — register the target-dtype declaration alongside the class registry
+    # so ``get_target_torch_dtype`` can resolve custom losses without scanning
+    # disk on every call. ``load_loss_plugin_from_path`` always populates the
+    # ``"target_dtype"`` key (defaulting to ``"long"`` when the plugin's
+    # ``PLUGIN_LOSS_TARGET_DTYPE`` declaration is missing).
+    LOSS_TARGET_DTYPE_REGISTRY[loss_type] = plugin["target_dtype"]
     return loss_type
 
 
@@ -263,6 +274,48 @@ def _load_custom_loss(loss_name: str) -> nn.Module:
     # which is plumbed via a separate channel TBD.
     loss_cfg = plugin["config_class"]()
     return plugin["loss_class"](loss_cfg)
+
+
+def get_target_torch_dtype(config: LossConfig) -> torch.dtype:
+    """Return the ``torch.dtype`` that ``targets`` must be cast to before
+    invoking ``criterion(output, targets)`` for the given ``LossConfig``.
+
+    I13 — single source of truth that replaces the hardcoded
+    ``loss_type in ("ce", "focal", "focal_cw")`` checks that previously
+    lived in ``evaluate_time_skill/wrapper.py`` and
+    ``execute_tools/train_engine_sandbox.py``. Removing those checks closes
+    a registry-asymmetry defect of the same family as I9 (tuner planner
+    not registry-aware) and I12 (in-process pre-flight not aware of
+    workspace losses).
+
+    Routing:
+      * ``"smooth_l1"``                  → ``torch.float32`` (regression head)
+      * ``"ce" | "focal" | "focal_cw"``  → ``torch.long``    (built-in classifier)
+      * ``"custom"``                     → looked up via
+        ``LOSS_TARGET_DTYPE_REGISTRY`` (populated at plugin-load time from
+        each plugin's ``PLUGIN_LOSS_TARGET_DTYPE`` declaration). Defaults to
+        ``torch.long`` for pre-I13 plugins that don't declare the field,
+        matching the int64 classifier contract documented in
+        ``proposing_stage.md``.
+
+    Args:
+        config: A validated ``LossConfig`` instance.
+
+    Returns:
+        ``torch.long`` for classifier-style losses; ``torch.float32`` for
+        regressor-style losses.
+    """
+    if config.loss_type == "smooth_l1":
+        return torch.float32
+    if config.loss_type in ("ce", "focal", "focal_cw"):
+        return torch.long
+    # config.loss_type == "custom" — read from the plugin's declaration.
+    # Lazy import for the same reason ``_load_custom_loss`` uses it: keep
+    # ``ml_models`` loadable without ``agent_generated/`` on the path.
+    from agent_generated._loss_loader import get_loss_target_dtype
+
+    declared = get_loss_target_dtype(config.loss_name or "")
+    return torch.long if declared == "long" else torch.float32
 
 
 def get_criterion(config: LossConfig, class_weights: torch.Tensor | None = None):

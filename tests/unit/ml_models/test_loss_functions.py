@@ -404,18 +404,27 @@ def _l6c_clear_loss_registry():
     """Autouse fixture (L6c) — clear LOSS_REGISTRY between tests so module-
     level state doesn't pollute downstream tests. Restores any pre-existing
     entries on teardown for safety, though in practice the registry should
-    be empty at unit-test boot."""
+    be empty at unit-test boot.
+
+    I13 — also clears LOSS_TARGET_DTYPE_REGISTRY so dtype-routing tests
+    don't leak custom-loss declarations between tests.
+    """
+    from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
     from ml_models.loss_models_sandbox import LOSS_CONFIG_REGISTRY, LOSS_REGISTRY
 
     saved_loss = dict(LOSS_REGISTRY)
     saved_cfg = dict(LOSS_CONFIG_REGISTRY)
+    saved_dtype = dict(LOSS_TARGET_DTYPE_REGISTRY)
     LOSS_REGISTRY.clear()
     LOSS_CONFIG_REGISTRY.clear()
+    LOSS_TARGET_DTYPE_REGISTRY.clear()
     yield
     LOSS_REGISTRY.clear()
     LOSS_CONFIG_REGISTRY.clear()
+    LOSS_TARGET_DTYPE_REGISTRY.clear()
     LOSS_REGISTRY.update(saved_loss)
     LOSS_CONFIG_REGISTRY.update(saved_cfg)
+    LOSS_TARGET_DTYPE_REGISTRY.update(saved_dtype)
 
 
 class TestL6cResolveLossDirsUnion:
@@ -584,3 +593,115 @@ class TestL6cPreloadGlobalLosses:
         monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path / "does_not_exist"))
         loaded = preload_global_losses()
         assert loaded == []
+
+
+# ---------------------------------------------------------------------------
+# I13 — get_target_torch_dtype routing for built-ins + custom plugins
+# ---------------------------------------------------------------------------
+#
+# Verifies the single source of truth for "what dtype must `targets` be cast
+# to before passing into the criterion's forward()". See
+# ``docs/design/enable_loss_inventory.md`` § I13.
+#
+# Built-in routing must match the historical pre-I13 hardcoded behavior
+# (ce/focal/focal_cw → long, smooth_l1 → float32). Custom routing must
+# consult LOSS_TARGET_DTYPE_REGISTRY (populated via register_loss_in_memory).
+
+
+class TestI13GetTargetTorchDtype:
+    def test_ce_routes_to_long(self):
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        cfg = LossConfig(loss_type="ce")
+        assert get_target_torch_dtype(cfg) == torch.long
+
+    def test_focal_routes_to_long(self):
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        cfg = LossConfig(loss_type="focal")
+        assert get_target_torch_dtype(cfg) == torch.long
+
+    def test_focal_cw_routes_to_long(self):
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        cfg = LossConfig(loss_type="focal_cw")
+        assert get_target_torch_dtype(cfg) == torch.long
+
+    def test_smooth_l1_routes_to_float32(self):
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        cfg = LossConfig(loss_type="smooth_l1")
+        assert get_target_torch_dtype(cfg) == torch.float32
+
+    def test_custom_with_registered_long_routes_to_long(self):
+        """Custom loss declared as ``PLUGIN_LOSS_TARGET_DTYPE = "long"`` —
+        registered via the LOSS_TARGET_DTYPE_REGISTRY — routes to torch.long."""
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        LOSS_TARGET_DTYPE_REGISTRY["__i13_custom_long__"] = "long"
+        try:
+            cfg = LossConfig(loss_type="custom", loss_name="__i13_custom_long__")
+            assert get_target_torch_dtype(cfg) == torch.long
+        finally:
+            LOSS_TARGET_DTYPE_REGISTRY.pop("__i13_custom_long__", None)
+
+    def test_custom_with_registered_float_routes_to_float32(self):
+        """Custom loss declared as ``PLUGIN_LOSS_TARGET_DTYPE = "float"`` —
+        e.g. a regressor-style loss — routes to torch.float32."""
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        LOSS_TARGET_DTYPE_REGISTRY["__i13_custom_float__"] = "float"
+        try:
+            cfg = LossConfig(loss_type="custom", loss_name="__i13_custom_float__")
+            assert get_target_torch_dtype(cfg) == torch.float32
+        finally:
+            LOSS_TARGET_DTYPE_REGISTRY.pop("__i13_custom_float__", None)
+
+    def test_custom_unregistered_defaults_to_long(self):
+        """When ``loss_name`` is not in LOSS_TARGET_DTYPE_REGISTRY (e.g.
+        in-process pre-flight before register_loss_in_memory has run),
+        the helper falls back to torch.long — the classifier contract."""
+        from ml_models.loss_models_sandbox import get_target_torch_dtype
+
+        cfg = LossConfig(loss_type="custom", loss_name="__i13_never_registered__")
+        assert get_target_torch_dtype(cfg) == torch.long
+
+
+class TestI13RegisterPopulatesDtypeRegistry:
+    """register_loss_in_memory must populate BOTH LOSS_REGISTRY (the class)
+    AND LOSS_TARGET_DTYPE_REGISTRY (the declared dtype). Without the latter,
+    cross-process Branch B reuse can't route targets correctly."""
+
+    def test_register_populates_dtype_registry_long(self, tmp_path):
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_models_sandbox import register_loss_in_memory
+
+        src = _L6C_PLUGIN_SRC_FOR_FOO + '\nPLUGIN_LOSS_TARGET_DTYPE = "long"\n'
+        plugin_path = tmp_path / "foo_loss_l6c.py"
+        plugin_path.write_text(src)
+        loss_type = register_loss_in_memory(str(plugin_path))
+        assert loss_type == "foo_loss_l6c"
+        assert LOSS_TARGET_DTYPE_REGISTRY.get("foo_loss_l6c") == "long"
+
+    def test_register_populates_dtype_registry_float(self, tmp_path):
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_models_sandbox import register_loss_in_memory
+
+        src = _L6C_PLUGIN_SRC_FOR_FOO + '\nPLUGIN_LOSS_TARGET_DTYPE = "float"\n'
+        plugin_path = tmp_path / "foo_loss_l6c.py"
+        plugin_path.write_text(src)
+        register_loss_in_memory(str(plugin_path))
+        assert LOSS_TARGET_DTYPE_REGISTRY.get("foo_loss_l6c") == "float"
+
+    def test_register_missing_declaration_defaults_to_long(self, tmp_path):
+        """A pre-I13 plugin (no PLUGIN_LOSS_TARGET_DTYPE) registers cleanly
+        with the default 'long' — back-compat path."""
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+        from ml_models.loss_models_sandbox import register_loss_in_memory
+
+        plugin_path = tmp_path / "foo_loss_l6c.py"
+        plugin_path.write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        register_loss_in_memory(str(plugin_path))
+        assert LOSS_TARGET_DTYPE_REGISTRY.get("foo_loss_l6c") == "long"
