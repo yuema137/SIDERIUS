@@ -67,6 +67,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, Literal
 
+import psutil as _psutil
 import yaml
 
 from agent.schemas.external_agents import ExternalAgentOutput
@@ -101,6 +102,26 @@ from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
 from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _log_rss(step: str) -> None:
+    """Print orchestrator RSS at a named workflow step.
+
+    Added after the v15 arch chain was OOM-killed at 53 GB anon_rss during
+    VRAM pre-flight (Iter 1, 2026-06-24). The kill arrived between the
+    ``[Probe RSS] delta=0.46 GB`` log line and the bash wrapper's ``Killed``
+    print, so we never saw which earlier step allocated the bulk of the 52 GB.
+    These checkpoints make the allocation site visible in screen logs before
+    any future OOM.
+
+    Cheap: one ``psutil.Process().memory_info()`` call (~µs) plus a single
+    ``print`` per checkpoint. Safe to leave on permanently — no privileged
+    syscalls, no flush stalls (``flush=True`` keeps screen captures crisp
+    if the next allocation crashes immediately).
+    """
+    rss_gb = _psutil.Process().memory_info().rss / 1024**3
+    print(f"[RSS] {step}: {rss_gb:.2f} GB", flush=True)
+
 
 # Centralised Literal type aliases that match the protocol-layer signatures.
 # Defined here so the four strategy kwargs threaded through ``run_workflow`` /
@@ -734,6 +755,29 @@ def _register_plugin(
         )
         return
 
+    # Forensic copy — preserve the generated plugin source under a
+    # workspace-relative sentinel directory BEFORE any registration / build
+    # step that could OOM-kill the orchestrator and leave us with no record
+    # of the offending code. Anchored under the SIDERIUS_CHAIN_WORKSPACE env
+    # var so the sentinel lives at the workspace root (not the per-iter
+    # attempt tree), surviving the per-iter cleanup that `--cleanup_denoised`
+    # and similar flags perform. Added after the 2026-06-24 v15 arch OOM
+    # where the generated plugin source was lost when we cleaned the
+    # workspace post-mortem. Best-effort: failures here never block plugin
+    # registration; the sentinel is a debug aid, not a load-bearing step.
+    try:
+        _sentinel_root = os.environ.get(
+            "SIDERIUS_CHAIN_WORKSPACE",
+            os.path.dirname(os.path.dirname(impl_output.model_file_path)),
+        )
+        _sentinel_dir = os.path.join(_sentinel_root, "plugin_source_sentinel")
+        os.makedirs(_sentinel_dir, exist_ok=True)
+        _sentinel_path = os.path.join(_sentinel_dir, f"{model_name}.py")
+        shutil.copy2(impl_output.model_file_path, _sentinel_path)
+        print(f"    [DEBUG] Plugin source saved to sentinel: {_sentinel_path}", flush=True)
+    except Exception as _e:
+        print(f"    [DEBUG] Plugin source sentinel write skipped ({type(_e).__name__}: {_e})")
+
     primary_plugin: str | None = None
     for d in dest_plugin_dirs:
         os.makedirs(d, exist_ok=True)
@@ -1176,6 +1220,9 @@ def run_workflow(
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
 
+    # 52 GB OOM forensics — see _log_rss docstring above.
+    _log_rss("post-import (run_workflow entry)")
+
     # All workflow output goes under {workspace}/{run_name}/
     run_dir = os.path.join(workspace, run_name)
     os.makedirs(run_dir, exist_ok=True)
@@ -1481,6 +1528,7 @@ def run_workflow(
                 f"{lit_output.search_rounds_used} search round(s), "
                 f"{len(lit_output.retrieved_papers)} paper(s) retrieved"
             )
+            _log_rss(f"post-lit-review (iter {iteration})")
         external_channels = merge_external_agent_outputs(external_outputs)
 
         # --- Propose → Implement → Validate (retry loop) ---
@@ -1639,6 +1687,7 @@ def run_workflow(
                 _bind_iter_context(_propose_agent)
                 proposal = _propose_agent.run(propose_input)
                 print(f"    Proposed: {proposal.model_name}")
+                _log_rss(f"post-proposal (iter {iteration} attempt {attempt})")
 
                 # Rename attempt dir to include model name
                 named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
@@ -1714,6 +1763,9 @@ def run_workflow(
                     _bind_iter_context(_impl_agent)
                     impl_output = _impl_agent.run(impl_input)
                     print(f"    Plugin: {impl_output.model_file_path}")
+                    _log_rss(
+                        f"post-implement (iter {iteration} attempt {attempt} impl {impl_attempt})"
+                    )
 
                     # --- Validate ---
                     print(f"  [{iteration}.{attempt}] Validating...")
@@ -1734,6 +1786,9 @@ def run_workflow(
                     )
                     _bind_iter_context(_valid_agent)
                     validation = _valid_agent.run(valid_input)
+                    _log_rss(
+                        f"post-validate (iter {iteration} attempt {attempt} impl {impl_attempt})"
+                    )
 
                     if validation.passed:
                         print("    All 7 checks passed.\n")
@@ -1870,6 +1925,10 @@ def run_workflow(
             sandbox_factory=sandbox_factory,
         )
         _bind_iter_context(_tune_agent)
+        # The tuner's planner is what triggers evaluate_vram_skill internally;
+        # log RSS here so an OOM during the probe leaves us with a baseline
+        # to subtract from in the dmesg dump.
+        _log_rss(f"pre-vram-probe (iter {iteration}, before tuner.run)")
         tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
 

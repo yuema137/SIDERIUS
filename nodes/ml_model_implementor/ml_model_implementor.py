@@ -354,6 +354,37 @@ In your reasoning, cover all of the following:
    How will you handle them?
 6. What additional imports beyond torch, nn, F, BaseModel, Field are needed?
 
+## Construction-time memory anti-pattern — STRICT
+
+NEVER pre-allocate buffers in ``__init__`` that scale with the sequence length T.
+Hidden states for SSM/RNN must be shape ``[B, d_state]`` (NOT ``[B, T, d_state]``
+or ``[T, T]``). FFT plans must not materialize T-length arrays at construction
+time. A single layer with a ``[T, T]`` buffer at ``T=16000`` costs 1 GB of RAM;
+4 layers × optimizer moments = >10 GB — the process will be OOM-killed BEFORE
+training starts, and the pre-flight VRAM probe will not catch it because the
+allocation happens in CPU host RAM at module-construct time, not in CUDA.
+
+What this rule covers:
+  - SSM ``A``/``B``/``C``/``D`` matrices: only the recurrent state matrix
+    ``A`` of shape ``[d_state]`` or ``[d_state, d_state]`` belongs in
+    ``__init__``. The unrolled state sequence ``h[1..T]`` must live in
+    ``forward()`` and be released between steps (or computed via an
+    associative scan that does not materialize the full T-length tensor).
+  - Attention: precomputed ``[T, T]`` masks / positional biases at full
+    ``segmentation_size`` are forbidden. Generate masks on the fly inside
+    ``forward()`` or use a chunk size strictly less than ``segmentation_size``.
+  - FFT: ``torch.fft.rfft`` plans are JIT-compiled — fine. Pre-baking
+    ``[T // 2 + 1]`` filter coefficients is fine (small). Pre-baking a
+    ``[T, T]`` mixing matrix is NOT fine.
+  - Positional encodings: a sinusoidal PE table of shape ``[max_len, d]``
+    is fine when ``max_len`` is a config field (typically ≤ 1024). A
+    ``[T, T]`` relative-position matrix at full ``segmentation_size`` is
+    not.
+
+A useful check before declaring any ``self.<name> = ...`` in ``__init__``:
+ask "does this tensor's first dimension equal ``segmentation_size``?" If
+yes, move it to ``forward()`` or rework the architecture.
+
 Think step by step. Be concrete about tensor shapes at each stage.
 Do not write final Python code yet — that is the next step."""
 
