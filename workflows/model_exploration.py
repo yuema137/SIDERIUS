@@ -2064,6 +2064,18 @@ def run_workflow(
         # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
         # See docs/design/enable_global_task_config.md § Commit T4a.
         tune_input.task_description = get_task_description(load_task_config())
+        # Post-v15 delta-gate threading: tell the tuner the best score this
+        # chain run has seen so far. Both the skip_formal and
+        # bypass_formal_time_budget gates inside the tuner use this as the
+        # reference point. ``best_score_overall`` reflects the workflow's
+        # best ``tune_output.best_denoising_score`` across iterations
+        # (formal-dominated under inherit_best_trial / full_clone, which is
+        # the production default — see workflows/model_exploration.py:
+        # 2134-2137). When no iter has completed yet, the schema default
+        # (WaveNet baseline 5.5763) applies, so iter_001's gates have a
+        # meaningful anchor too.
+        if best_score_overall is not None:
+            tune_input.current_run_best_formal_score = best_score_overall
 
         _tune_agent = HyperparamTuningAgent(
             bridge_factory=bridge_factory,

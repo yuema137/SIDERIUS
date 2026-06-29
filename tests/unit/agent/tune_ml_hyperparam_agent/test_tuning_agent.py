@@ -1016,7 +1016,12 @@ class TestTimeBudgetGate:
         Note: max_rounds=2 is required because the agent forces the FINAL
         round to formal mode (`max_rounds=1` would always run formal). The
         first round honours the LLM's is_trial=True so the per-mode pick is
-        actually exercised."""
+        actually exercised.
+
+        Post-v15 — ``skip_formal_min_delta`` disabled (``-inf``) so the
+        low-score fixture (denoising_score=1.5) doesn't trip the
+        skip-formal gate before the formal round's time check fires.
+        This test is about per-mode budget routing, not the skip gate."""
         agent, mock_brain, _, _, skill_calls, cleanup = self._make_agent(
             FAKE_TIME_CHECK_OK,
             enable_trial_mode=True,
@@ -1024,15 +1029,15 @@ class TestTimeBudgetGate:
         # Override the default plan to return is_trial=True for this round.
         mock_brain.plan.return_value = {**FAKE_PLAN_RESPONSE, "is_trial": True}
         try:
-            agent.run(
-                _make_input_with_budget(
-                    tmp_path,
-                    max_rounds=2,
-                    trial_budget=15.0,
-                    formal_budget=240.0,
-                    is_trial=True,  # mirrors LLM plan: caller permits trial mode
-                )
+            tune_input = _make_input_with_budget(
+                tmp_path,
+                max_rounds=2,
+                trial_budget=15.0,
+                formal_budget=240.0,
+                is_trial=True,  # mirrors LLM plan: caller permits trial mode
             )
+            tune_input.skip_formal_min_delta = float("-inf")
+            agent.run(tune_input)
         finally:
             cleanup()
         time_calls = [p for s, p in skill_calls if s == "evaluate_time_skill"]

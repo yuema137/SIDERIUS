@@ -918,6 +918,58 @@ class HyperparamTuningInput(BaseModel):
             return legacy.get(v, v)
         return v
 
+    # --- Post-v15 delta gates: skip_formal + bypass_formal_time_budget ---
+    # Both gates use ``current_run_best_formal_score`` as the reference point,
+    # so the proposer-side behaviour tightens naturally as the run's best
+    # formal score climbs. The default reference (5.5763) is the WaveNet
+    # baseline so the gates have a meaningful anchor before any iteration's
+    # formal round has actually completed.
+    #
+    # Motivation — v15 retrospective (reports/v15_20260628.md):
+    # * arch chain's mamba_multirate_fuser (trial=7.65) and
+    #   dualpath_spectral_router (trial=7.77) had every formal attempt
+    #   rejected by the time-risk gate (formal_time_budget=120 min while
+    #   the estimator predicted >150 min). The bypass gate gives any
+    #   trial winner that beats the current best a chance to run formal.
+    # * trial rounds that score well below the current best formal still
+    #   consumed formal-round budget without producing useful data. The
+    #   skip gate cuts that waste while keeping borderline cases.
+
+    current_run_best_formal_score: float = Field(
+        default=5.5763,
+        description=(
+            "The best formal denoising_score seen so far in this chain "
+            "run. Initialized to the known WaveNet baseline score "
+            "(5.5763). Updated by the workflow after each iteration's "
+            "formal round completes. Used as the reference point for "
+            "``skip_formal_min_delta`` and "
+            "``bypass_formal_time_budget_min_delta``."
+        ),
+    )
+    skip_formal_min_delta: float = Field(
+        default=-1.0,
+        description=(
+            "Skip all formal rounds when ``best_trial_score < "
+            "(current_run_best_formal_score + skip_formal_min_delta)``. "
+            "Default ``-1.0``: only skip formal when trial is more than "
+            "1.0 dB below the current best formal score. Set to ``0.0`` "
+            "to skip formal whenever trial does not beat current best. "
+            "Set to ``float('-inf')`` to disable this gate entirely."
+        ),
+    )
+    bypass_formal_time_budget_min_delta: float = Field(
+        default=0.0,
+        description=(
+            "Bypass the formal time-budget gate when ``best_trial_score "
+            ">= (current_run_best_formal_score + "
+            "bypass_formal_time_budget_min_delta)``. Default ``0.0``: "
+            "bypass the time gate whenever trial sets a new run best. "
+            "Set to ``0.5`` to only bypass when trial beats current "
+            "best by >= 0.5 dB. Set to ``float('inf')`` to disable "
+            "bypass entirely."
+        ),
+    )
+
     degenerate_penalty_score: float | None = Field(
         default=None,
         description=(
