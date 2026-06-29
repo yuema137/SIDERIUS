@@ -1309,6 +1309,11 @@ def run_workflow(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
+    # Tuner delta-gate parameters (added in commit 8f1cf52). Defaults
+    # match the HyperparamTuningInput schema defaults so omitting them
+    # at the CLI surface reproduces pre-v16 behaviour.
+    skip_formal_min_delta: float = -1.0,
+    bypass_formal_time_budget_min_delta: float = 0.0,
     plan_overrides: dict | None = None,
     # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
     trial_time_budget_minutes: float | None = None,
@@ -2199,6 +2204,8 @@ def run_workflow(
             train_base_seed=train_base_seed,
             cleanup_denoised=cleanup_denoised,
             max_epochs=max_epochs,
+            skip_formal_min_delta=skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
             max_retries=tune_llm.get("max_retries"),
             plan_overrides=plan_overrides,
             trial_time_budget_minutes=trial_time_budget_minutes,

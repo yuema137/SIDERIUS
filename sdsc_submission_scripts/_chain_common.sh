@@ -52,6 +52,11 @@ SEED_PATHS=()
 RUN_NAME=""
 MAX_ROUNDS=3                        # §3.2: matches run_one_iteration.py default 3
 MAX_EPOCHS=1                        # §3.2: matches run_one_iteration.py default 1
+# Tuner delta-gates (added in commit 8f1cf52). Defaults match the
+# HyperparamTuningInput schema defaults so omitting these flags
+# reproduces pre-v16 behaviour.
+SKIP_FORMAL_MIN_DELTA=-1.0
+BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 REFLECT_PROVIDER=""
@@ -165,6 +170,8 @@ parse_chain_args() {
           ;;
         --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
         --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
+        --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
+        --bypass_formal_time_budget_min_delta) BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA="$2"; shift 2 ;;
         --llm_model)              LLM_MODEL="$2"; shift 2 ;;
         --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
         --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
@@ -273,6 +280,8 @@ build_app_args() {
         --seed_paths "${SEED_PATHS[@]}"
         --max_rounds "$MAX_ROUNDS"
         --max_epochs "$MAX_EPOCHS"
+        --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
+        --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         --llm_model "$LLM_MODEL"
         --trial_portion "$TRIAL_PORTION"
         --train_portion "$TRAIN_PORTION"
@@ -376,6 +385,8 @@ print_chain_header() {
     done
     echo "  Max rounds       : $MAX_ROUNDS"
     echo "  Max epochs       : $MAX_EPOCHS"
+    echo "  Skip formal Δ    : $SKIP_FORMAL_MIN_DELTA"
+    echo "  Bypass time Δ    : $BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
     echo "  LLM model        : $LLM_MODEL"
     if [ -n "$LLM_CONFIG" ]; then
         echo "  LLM config       : $LLM_CONFIG"

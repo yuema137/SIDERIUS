@@ -50,6 +50,11 @@ def local_validated_model(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
+    # Tuner delta-gates (added in commit 8f1cf52). Defaults match the
+    # HyperparamTuningInput schema defaults so omitting them at the
+    # CLI surface reproduces pre-v16 behaviour.
+    skip_formal_min_delta: float = -1.0,
+    bypass_formal_time_budget_min_delta: float = 0.0,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
@@ -199,6 +204,8 @@ def local_validated_model(
         train_base_seed=train_base_seed,
         cleanup_denoised=cleanup_denoised,
         max_epochs=max_epochs,
+        skip_formal_min_delta=skip_formal_min_delta,
+        bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,

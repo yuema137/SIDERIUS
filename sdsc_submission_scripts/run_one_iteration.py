@@ -475,6 +475,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hard cap on epochs per round. Must be >= 1; None forbidden.",
     )
     parser.add_argument(
+        "--skip_formal_min_delta",
+        type=float,
+        default=-1.0,
+        help="Skip all formal rounds when best_trial_score < "
+        "(current_run_best_formal_score + skip_formal_min_delta). "
+        "Matches HyperparamTuningInput schema default -1.0. "
+        "Set to 0.0 to skip whenever trial does not beat current best.",
+    )
+    parser.add_argument(
+        "--bypass_formal_time_budget_min_delta",
+        type=float,
+        default=0.0,
+        help="Bypass the formal time-budget gate when best_trial_score >= "
+        "(current_run_best_formal_score + bypass_formal_time_budget_min_delta). "
+        "Matches HyperparamTuningInput schema default 0.0. "
+        "Set to 0.5 to only bypass when trial beats current best by >= 0.5 dB.",
+    )
+    parser.add_argument(
         "--is_trial", action="store_true", help="Enable trial mode (default: True for production)."
     )
     parser.add_argument(
@@ -1153,6 +1171,8 @@ def main():
             degenerate_penalty_score=args.degenerate_penalty_score,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
+            skip_formal_min_delta=args.skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
             # Time/VRAM budget gates
             trial_time_budget_minutes=args.trial_time_budget_minutes,
             formal_time_budget_minutes=args.formal_time_budget_minutes,
