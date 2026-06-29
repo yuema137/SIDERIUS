@@ -2318,10 +2318,21 @@ def run_workflow(
             )
 
         # --- Check score target ---
-        if tune_output.best_denoising_score is not None and (
-            best_score_overall is None or tune_output.best_denoising_score > best_score_overall
+        # ``best_score_overall`` is the reference for the next iter's
+        # ``current_run_best_formal_score`` (the anchor for both
+        # ``skip_formal_min_delta`` and ``bypass_formal_time_budget_min_delta``).
+        # It must track FORMAL scores only — a noisy trial score from an iter
+        # whose formal rounds all got gated would otherwise poison every
+        # downstream gate decision. Falling back to ``best_denoising_score``
+        # (the all-rounds max) is exactly what motivated this fix: v15's
+        # mamba_multirate_fuser (trial 7.65) and dualpath_spectral_router
+        # (trial 7.77) had every formal attempt time-gated, and under the
+        # old logic their trial scores would have become the v16 anchor.
+        if tune_output.best_formal_denoising_score is not None and (
+            best_score_overall is None
+            or tune_output.best_formal_denoising_score > best_score_overall
         ):
-            best_score_overall = tune_output.best_denoising_score
+            best_score_overall = tune_output.best_formal_denoising_score
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "

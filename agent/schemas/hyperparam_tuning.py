@@ -1512,6 +1512,18 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description="Highest denoising_score achieved across all completed rounds.",
     )
+    best_formal_denoising_score: float | None = Field(
+        default=None,
+        description=(
+            "Highest denoising_score achieved across completed FORMAL rounds "
+            "only (excludes trial rounds). The workflow uses this — not "
+            "best_denoising_score — to update current_run_best_formal_score "
+            "for the next iter's delta gates, so a noisy trial score cannot "
+            "poison the formal anchor when all formal attempts get gated. "
+            "None when no formal round completed (next iter then keeps the "
+            "schema default 5.5763 WaveNet baseline as its reference)."
+        ),
+    )
     best_config: dict[str, Any] | None = Field(
         default=None,
         description="model_config + train_config + loss_config that produced best_denoising_score.",

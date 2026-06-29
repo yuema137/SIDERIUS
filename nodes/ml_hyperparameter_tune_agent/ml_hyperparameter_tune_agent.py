@@ -2718,6 +2718,9 @@ class HyperparamTuningAgent:
             "total_attempts": total_attempts,
             "best_exp_id": top_record.get("exp_id") if top_record else None,
             "best_denoising_score": top_record.get("denoising_score") if top_record else None,
+            "best_formal_denoising_score": formal_top_record.get("denoising_score")
+            if formal_top_record
+            else None,
             "best_config": top_record.get("params") if top_record else None,
             "best_file_vector": top_record.get("file_vector") if top_record else None,
             "best_score_table": top_record.get("score_table") if top_record else None,

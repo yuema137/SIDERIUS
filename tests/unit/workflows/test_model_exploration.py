@@ -81,6 +81,11 @@ def _make_tuning_output(model_type="punet", run_name="v1", score=1.5):
         total_attempts=3,
         best_exp_id=f"{model_type}_{run_name}_001",
         best_denoising_score=score,
+        # Default: same score as best — i.e. simulates an iter where at least
+        # one formal round completed. Tests that need to simulate a
+        # trial-only iter (all formal gated) must override this explicitly
+        # to None — see test_trial_only_iter_does_not_poison_formal_anchor.
+        best_formal_denoising_score=score,
         best_config={"model_config": {}, "train_config": {}, "loss_config": {}},
         all_records=[
             {
@@ -665,6 +670,48 @@ class TestRunWorkflowMultiIteration:
         )
         # Should stop after first iteration since score 2.5 >= 2.0
         assert len(results) == 1
+
+    def test_trial_only_iter_does_not_poison_formal_anchor(self, workflow_env):
+        """Regression: ``best_score_overall`` (= next iter's
+        ``current_run_best_formal_score``) MUST track formal scores only.
+
+        Failure mode this guards: an iter where every formal attempt is
+        gated (time-risk, OOM, schema rejection) reports a non-None
+        ``best_denoising_score`` (the best trial round) but a None
+        ``best_formal_denoising_score``. If the workflow updated from
+        ``best_denoising_score``, the noisy trial would poison the formal
+        anchor for every subsequent iter, making ``skip_formal_min_delta``
+        and ``bypass_formal_time_budget_min_delta`` too strict (v15
+        mamba_multirate_fuser / dualpath_spectral_router pattern).
+
+        After this fix, iter_2's tune_input.current_run_best_formal_score
+        must be the schema default (5.5763 WaveNet baseline) — unchanged
+        by iter_1's trial-only success.
+        """
+        # iter_1: simulates "all formal attempts gated, only trial scored".
+        iter1_tune = _make_tune_output(model_type="model_a", score=7.7)
+        iter1_tune.best_formal_denoising_score = None  # no formal completed
+        # iter_2: normal output (only here for the second tune_input to inspect).
+        iter2_tune = _make_tune_output(model_type="model_b", score=5.6)
+
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
+        workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter2_tune_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
+        # Schema default = 5.5763 (WaveNet baseline). Must NOT be the
+        # iter_1 trial score (7.7) — that would mean the bug is back.
+        assert iter2_tune_input.current_run_best_formal_score == pytest.approx(5.5763)
 
 
 # ---------------------------------------------------------------------------
