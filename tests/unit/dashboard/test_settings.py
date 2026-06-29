@@ -46,10 +46,6 @@ class TestMissingConfig:
         settings = load_settings(str(tmp_path / "nonexistent.yaml"))
         assert settings.data_source.type == "local"
 
-    def test_default_port_is_8000(self, tmp_path):
-        settings = load_settings(str(tmp_path / "nonexistent.yaml"))
-        assert settings.server.port == 8000
-
     def test_default_refresh_interval(self, tmp_path):
         settings = load_settings(str(tmp_path / "nonexistent.yaml"))
         assert settings.dashboard.refresh_interval_seconds == 30

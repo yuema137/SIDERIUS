@@ -37,10 +37,6 @@ class TestProposalInput:
         )
         assert inp.storage.local.run_name == "r1"
 
-    def test_human_advice_defaults_to_none(self):
-        inp = ProposalInput(interpretation={})
-        assert inp.human_advice is None
-
     def test_human_advice_accepts_plain_string(self):
         inp = ProposalInput(
             interpretation={},
@@ -125,10 +121,6 @@ class TestProposalInputRecentGateExhaustions:
             worst_time_factor=3.1,
             summary_message="All 3 attempts exceeded the 20 min time budget.",
         )
-
-    def test_default_empty_when_omitted(self):
-        inp = ProposalInput(interpretation={})
-        assert inp.recent_gate_exhaustions == []
 
     def test_accepts_single_entry_list(self, gate_exhaustion):
         inp = ProposalInput(

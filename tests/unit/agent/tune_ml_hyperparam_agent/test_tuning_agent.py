@@ -240,11 +240,6 @@ class TestHyperparamTuningAgentRun:
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox
 
-    def test_returns_valid_output(self, agent_and_mocks, tmp_path):
-        agent, _, _ = agent_and_mocks
-        output = agent.run(_make_input(tmp_path))
-        assert isinstance(output, HyperparamTuningOutput)
-
     def test_output_validates_against_schema(self, agent_and_mocks, tmp_path):
         agent, _, _ = agent_and_mocks
         output = agent.run(_make_input(tmp_path))
@@ -972,12 +967,25 @@ class TestTimeBudgetGate:
 
     def test_error_status_does_not_skip_silently(self, tmp_path):
         """status=error from the skill must propagate as a Loop Error (caught
-        by the outer try/except) — it must NOT be treated as feasible=True."""
+        by the outer try/except) — it must NOT be treated as feasible=True.
+
+        ``time.sleep`` is patched because the agent's exception handler at
+        ml_hyperparameter_tune_agent.py:2609 sleeps 5s per failed attempt
+        as an API-rate-limit cool-down. With default attempt budgets
+        (5 formal × 3 max_fail_rounds = 15 attempts) the real sleep adds
+        ~75s — pure latency, no behavior tested. Patching cuts test
+        runtime from 75s to <1s without changing what's exercised.
+        """
         agent, _, _, saved_records, skill_calls, cleanup = self._make_agent(
             {"status": "error", "message": "instantiation failed"}
         )
         try:
-            output = agent.run(_make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0))
+            with patch(
+                "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.time.sleep"
+            ):
+                output = agent.run(
+                    _make_input_with_budget(tmp_path, max_rounds=1, formal_budget=30.0)
+                )
         finally:
             cleanup()
         # The RuntimeError is caught by the loop's try/except → no rounds complete,

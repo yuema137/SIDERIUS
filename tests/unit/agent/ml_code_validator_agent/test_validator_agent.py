@@ -494,11 +494,6 @@ class TestMLCodeValidatorAgentRun:
         out = agent.run(make_input(tmp_path))
         assert out.model_type == "test_model"
 
-    def test_all_pass_output_is_validator_output(self, tmp_path, passing_mocks):
-        agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
-        out = agent.run(make_input(tmp_path))
-        assert isinstance(out, ValidatorOutput)
-
     def test_plugin_failure_sets_passed_false(self, tmp_path, passing_subprocess, mock_llm_bridge):
         bad_plugin = tmp_path / "bad.py"
         bad_plugin.write_text("import broken_import_xyz\n")

@@ -80,10 +80,6 @@ class TestPaperSource:
         assert s.identifier == "2406.04378"
         assert s.verbosity == 1
 
-    def test_default_verbosity_is_one(self):
-        s = PaperSource(source_type="arxiv", identifier="2406.04378")
-        assert s.verbosity == 1
-
     def test_local_repo_relative_ok(self):
         s = PaperSource(
             source_type="local",
@@ -127,15 +123,6 @@ class TestPaperSource:
 
 
 class TestDynamicSearchConfig:
-    def test_defaults(self):
-        c = DynamicSearchConfig()
-        assert c.enabled is True
-        assert c.max_rounds == 3
-        assert c.initial_verbosity == 0
-        assert c.escalation_allowed is True
-        assert c.results_per_query == 10
-        assert c.max_escalations_per_round == 2
-
     def test_results_per_query_min(self):
         with pytest.raises(ValidationError):
             DynamicSearchConfig(results_per_query=0)

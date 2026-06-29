@@ -262,10 +262,6 @@ class TestFileAssembly:
 
 
 class TestOutputCorrectness:
-    def test_output_is_implementor_output(self, agent_with_mocks, inp):
-        output = agent_with_mocks.run(inp)
-        assert isinstance(output, ImplementorOutput)
-
     def test_model_type_matches_input(self, agent_with_mocks, inp):
         output = agent_with_mocks.run(inp)
         assert output.model_type == "gated_dilated_tcn"
