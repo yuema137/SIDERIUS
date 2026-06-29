@@ -12,6 +12,8 @@ import pytest
 
 from agent.schemas.proposal import VocabEntry
 from nodes.interpretation_helpers import (
+    _content_words,
+    _find_duplicate_candidate,
     build_runtime_vocab,
     compute_vocab_diversity_ratio,
     evaluate_prediction,
@@ -381,6 +383,284 @@ class TestBuildRuntimeVocab:
 
 
 # ---------------------------------------------------------------------------
+# _find_duplicate_candidate + _content_words (post-v15 dedup heuristic)
+# ---------------------------------------------------------------------------
+
+
+def _cand_entry(name, kind="feature", description="", tier="candidate"):
+    """Build a VocabEntry with explicit description — used by dedup tests
+    that exercise the description-overlap predicate."""
+    return VocabEntry(
+        name=name,
+        kind=kind,
+        description=description or f"placeholder description for {name}",
+        tier=tier,
+    )
+
+
+class TestContentWords:
+    """``_content_words`` filters stopwords + sub-4-char tokens. Mechanism-
+    bearing words like 'ordinal', 'wasserstein', 'curriculum' must survive."""
+
+    def test_filters_stopwords_and_short_tokens(self):
+        words = _content_words("The ordinal loss is a transport-based metric.")
+        # 'ordinal', 'transport', 'metric' survive. 'loss' is in stopwords.
+        # 'the', 'is', 'a' are stopwords or sub-4-char.
+        assert "ordinal" in words
+        assert "transport" in words
+        assert "metric" in words
+        assert "the" not in words
+        assert "loss" not in words  # in _STOPWORDS
+
+    def test_lowercases(self):
+        assert "wasserstein" in _content_words("WASSERSTEIN distance over ADC bins")
+
+    def test_splits_on_non_alpha(self):
+        words = _content_words("snake_case-and-hyphen tokens")
+        assert "snake" in words
+        assert "case" in words
+        assert "hyphen" in words
+        assert "tokens" in words
+
+
+class TestFindDuplicateCandidate:
+    """Post-v15: this heuristic exists to fix the seen_in_runs==1 epidemic
+    that caused zero promotions across all 20 v15 iterations."""
+
+    def test_returns_none_on_empty_vocab(self):
+        result = _find_duplicate_candidate(
+            new_name="new_feature",
+            new_kind="feature",
+            new_description="some description",
+            existing_vocab={},
+        )
+        assert result is None
+
+    def test_name_substring_match_long_names(self):
+        """``emd_loss`` is a substring of ``emd_ordinal_loss`` — should
+        dedup. v15's canonical example: ``emd_ordinal_loss`` (iter 3) and
+        a hypothetical ``emd_ordinal_loss_v2`` (later iter) should merge."""
+        existing = {
+            "emd_ordinal_loss": _cand_entry("emd_ordinal_loss", description="EMD on bins"),
+        }
+        result = _find_duplicate_candidate(
+            new_name="emd_ordinal_loss_v2",
+            new_kind="feature",
+            new_description="totally unrelated wording",
+            existing_vocab=existing,
+        )
+        assert result is not None
+        assert result.name == "emd_ordinal_loss"
+
+    def test_name_substring_floor_blocks_trivial_match(self):
+        """``emd`` (3 chars) and ``emd_bin_loss`` should NOT trigger the
+        substring predicate because ``emd`` is below the length floor.
+        Description-overlap may still match — this test uses unrelated
+        descriptions to isolate the name predicate."""
+        existing = {
+            "emd_bin_loss": _cand_entry(
+                "emd_bin_loss",
+                description="lorem ipsum dolor sit amet consectetur adipiscing",
+            ),
+        }
+        result = _find_duplicate_candidate(
+            new_name="emd",
+            new_kind="feature",
+            new_description="unrelated text about colourful sunsets nightfall",
+            existing_vocab=existing,
+        )
+        assert result is None
+
+    def test_description_overlap_matches_paraphrases(self):
+        """Two candidates with different names but overlapping mechanism
+        descriptions should dedup. v15 canonical: ``snr_weighted_loss``
+        and ``hardness_reweighting_loss`` both describe per-sample
+        reweighting but with different name surfaces."""
+        existing = {
+            "snr_weighted_loss": _cand_entry(
+                "snr_weighted_loss",
+                description=(
+                    "reweight training samples by inverse signal-to-noise "
+                    "ratio so hard examples receive larger gradient"
+                ),
+            ),
+        }
+        result = _find_duplicate_candidate(
+            new_name="hardness_reweighting_loss",
+            new_kind="feature",
+            new_description=(
+                "reweight examples by hardness signal during training "
+                "so noisy gradient samples receive larger update"
+            ),
+            existing_vocab=existing,
+        )
+        assert result is not None
+        assert result.name == "snr_weighted_loss"
+
+    def test_kind_mismatch_skipped(self):
+        """A feature-kind new candidate must not match a capability-kind
+        existing entry, even if names/descriptions overlap."""
+        existing = {
+            "selective_scan": _cand_entry(
+                "selective_scan",
+                kind="capability",
+                description="parallelisable recurrent scan",
+            ),
+        }
+        result = _find_duplicate_candidate(
+            new_name="selective_scan_block",
+            new_kind="feature",
+            new_description="parallelisable recurrent scan",
+            existing_vocab=existing,
+        )
+        assert result is None
+
+    def test_canonical_entries_skipped(self):
+        """A new candidate that overlaps a CANONICAL entry should NOT
+        dedup here — canonical merge is the existing ``_dedup_promoted``
+        path's job. This function is for candidate→candidate merges only."""
+        existing = {
+            "dilated_causal_conv": _cand_entry(
+                "dilated_causal_conv",
+                tier="canonical",
+                description="dilated convolution with causal masking",
+            ),
+        }
+        result = _find_duplicate_candidate(
+            new_name="causal_dilated_conv",
+            new_kind="feature",
+            new_description="dilated convolution with causal masking",
+            existing_vocab=existing,
+        )
+        assert result is None
+
+    def test_exact_name_match_returns_none(self):
+        """Exact-name matches are the caller's job (the dict lookup in
+        ``build_runtime_vocab`` handles them directly). This helper is
+        for NEAR-duplicate detection."""
+        existing = {
+            "ordinal_emd_loss": _cand_entry("ordinal_emd_loss", description="X"),
+        }
+        result = _find_duplicate_candidate(
+            new_name="ordinal_emd_loss",
+            new_kind="feature",
+            new_description="X",
+            existing_vocab=existing,
+        )
+        assert result is None
+
+
+class TestBuildRuntimeVocabDedup:
+    """End-to-end: ``build_runtime_vocab`` should merge a near-duplicate
+    candidate's run signal into the existing entry rather than creating a
+    separate entry. This is the change that breaks the v15 zero-promotion
+    deadlock."""
+
+    def test_near_duplicate_merges_seen_in_runs(self):
+        incoming = [
+            VocabEntry(
+                name="emd_ordinal_loss",
+                kind="feature",
+                description="earth-mover distance between predicted and target bin distributions",
+                tier="candidate",
+                seen_in_runs=["run_a"],
+            ),
+        ]
+        # A new candidate with overlapping name (substring) AND fresh run.
+        new_candidates = [
+            {
+                "name": "emd_ordinal_loss_v2",
+                "kind": "feature",
+                "description": "earth-mover distance on bin distributions",
+                "proposed_by_run": "run_b",
+            },
+        ]
+        result = build_runtime_vocab(
+            incoming_vocab=incoming,
+            new_discoveries=[],
+            proposed_candidates=new_candidates,
+        )
+        # Should be ONE entry, not two; with seen_in_runs accumulated.
+        assert len(result) == 1
+        entry = result[0]
+        assert entry.name == "emd_ordinal_loss"  # original name kept
+        assert set(entry.seen_in_runs) == {"run_a", "run_b"}
+        assert "emd_ordinal_loss_v2" in entry.aliases
+
+    def test_genuinely_new_candidate_added_as_separate_entry(self):
+        """Sanity check: a new candidate with no overlap to existing must
+        still create a fresh entry, not get spuriously merged."""
+        incoming = [
+            VocabEntry(
+                name="dilated_causal_conv",
+                kind="feature",
+                description="dilated convolution with causal masking",
+                tier="candidate",
+                seen_in_runs=["run_a"],
+            ),
+        ]
+        new_candidates = [
+            {
+                "name": "fourier_neural_operator",
+                "kind": "feature",
+                "description": "spectral convolution using truncated Fourier modes",
+                "proposed_by_run": "run_b",
+            },
+        ]
+        result = build_runtime_vocab(
+            incoming_vocab=incoming,
+            new_discoveries=[],
+            proposed_candidates=new_candidates,
+        )
+        assert len(result) == 2
+        names = {e.name for e in result}
+        assert names == {"dilated_causal_conv", "fourier_neural_operator"}
+
+    def test_three_iters_of_near_duplicates_promote(self):
+        """The v15-failure-mode regression test: three iters propose the
+        same mechanism under three different compound names. Combined
+        with the post-v15 min_runs=2 default, the merged entry should
+        promote to canonical."""
+        vocab: list[VocabEntry] = []
+        # Iter 1
+        vocab = build_runtime_vocab(
+            incoming_vocab=vocab,
+            new_discoveries=[],
+            proposed_candidates=[
+                {
+                    "name": "snr_weighted_loss",
+                    "kind": "feature",
+                    "description": (
+                        "reweight training samples by signal-to-noise ratio "
+                        "so hard examples receive larger gradient"
+                    ),
+                    "proposed_by_run": "iter_001",
+                }
+            ],
+        )
+        # Iter 2 — different name, overlapping description
+        vocab = build_runtime_vocab(
+            incoming_vocab=vocab,
+            new_discoveries=[],
+            proposed_candidates=[
+                {
+                    "name": "hardness_reweighting_loss",
+                    "kind": "feature",
+                    "description": (
+                        "reweight examples by hardness signal during training "
+                        "so harder gradient samples receive larger update"
+                    ),
+                    "proposed_by_run": "iter_002",
+                }
+            ],
+        )
+        assert len(vocab) == 1
+        # Promotion should fire on iter 2 with the new min_runs=2 default.
+        _, promoted = promote_candidates(vocab)
+        assert promoted == ["snr_weighted_loss"]
+
+
+# ---------------------------------------------------------------------------
 # promote_candidates (C.11)
 # ---------------------------------------------------------------------------
 
@@ -411,7 +691,8 @@ class TestPromoteCandidates:
         assert vocab[0].tier == "canonical"
 
     def test_insufficient_runs_stays_candidate(self):
-        entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2"])
+        # Post-v15 default lowered to min_runs=2; one run is below the floor.
+        entry = _make_candidate("log_fno", seen_in_runs=["r1"])
         vocab, promoted = promote_candidates([entry])
         assert promoted == []
         assert vocab[0].tier == "candidate"
@@ -431,13 +712,16 @@ class TestPromoteCandidates:
         assert vocab[0].tier == "canonical"
 
     def test_returns_correct_promoted_names(self):
+        # Post-v15 default min_runs=2: 'b' and 'c' both qualify; 'a' is below.
+        # Keeps the original three-entry shape so we still verify ordering /
+        # set-membership semantics across multiple promotable entries.
         entries = [
-            _make_candidate("a", seen_in_runs=["r1", "r2", "r3"]),
+            _make_candidate("a", seen_in_runs=["r1"]),
             _make_candidate("b", seen_in_runs=["r1", "r2"]),
             _make_candidate("c", seen_in_runs=["r1", "r2", "r3", "r4"]),
         ]
         _, promoted = promote_candidates(entries)
-        assert set(promoted) == {"a", "c"}
+        assert set(promoted) == {"b", "c"}
 
     def test_custom_min_runs(self):
         entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2"])

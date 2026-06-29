@@ -107,6 +107,33 @@ A JSON object with these fields:
    that doesn't fit any existing vocabulary entry, propose it as a candidate
    with a name, kind (feature or capability), and description.
 
+   **BEFORE naming a new candidate, scan the `### Candidates` block above.**
+   If any existing candidate describes a similar mechanism (same loss family,
+   same architectural pattern, same training strategy), **REUSE THAT EXACT
+   NAME VERBATIM** — do not invent a synonym. Only create a new candidate
+   name when the mechanism is genuinely distinct from all existing candidates.
+
+   Examples:
+   - If `emd_ordinal_loss` already exists as a candidate and you want to
+     propose a Wasserstein-distance loss on ADC bins, use `emd_ordinal_loss`
+     as your candidate name, not `wasserstein_bin_loss`. (Both compute Earth-
+     Mover distance over ordinal bins; the technical mechanism is identical.)
+   - If `hardness_reweighting_loss` already exists and you want to propose
+     SNR-weighted sample weighting, use `hardness_reweighting_loss`, not
+     `snr_weighted_loss`. (Both are per-sample weighting schemes; the weight
+     source differs but the mechanism is the same.)
+   - If `selective_ssm_block` already exists and you want to propose a
+     bidirectional Mamba layer, use `selective_ssm_block`, not
+     `bidirectional_mamba`. (Bidirectionality is a directional variant of
+     the same selective-scan mechanism.)
+
+   Why this matters: a candidate must be seen across multiple iterations
+   to be promoted to canonical (validated) status. Inventing a new name
+   for a previously-named mechanism prevents the system from ever
+   accumulating evidence for either name — both candidates stay
+   permanently un-promoted. Reuse is how the vocabulary becomes
+   load-bearing knowledge instead of a passive log.
+
 6. **Suggest ablation experiments.** For the SOTA model's key features,
    note which ones could be ablated to test their isolated contribution.
    E.g. "Removing dilated_causal_conv from wavenet and replacing with

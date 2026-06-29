@@ -7,10 +7,210 @@ They evaluate predictions, generate discoveries, and build the runtime vocabular
 """
 
 import math
+import re
 from collections.abc import Sequence
 from typing import Any
 
 from agent.schemas.proposal import VocabEntry
+
+# ---------------------------------------------------------------------------
+# Candidate semantic deduplication (heuristic, zero LLM cost)
+# ---------------------------------------------------------------------------
+#
+# v15 retrospective surfaced a structural failure: every candidate had
+# ``len(seen_in_runs) == 1`` for the entire 20-iter run because the proposer
+# invented a fresh hyper-specific compound name each iter even when proposing
+# the same mechanism (7 distinct names for "weight each sample by something",
+# 22 EMD-family names, etc.). With no candidate ever reaching seen_in_runs >=
+# 3, ``promote_candidates`` never fired and the vocab became a passive log.
+#
+# This dedup heuristic runs INSIDE ``build_runtime_vocab`` BEFORE a new
+# candidate is added to the vocab. If the new candidate is semantically
+# similar to an existing candidate of the same kind, the new candidate's
+# ``seen_in_runs`` is merged into the existing entry instead — accelerating
+# the path to the promotion threshold. The existing entry's ``aliases``
+# field records the new name for traceability.
+#
+# Two cheap predicates are OR'd:
+#
+#   1. **Substring match on names** (with a length floor of 5 to avoid
+#      trivial 2-3 char matches). Catches ``emd_loss`` vs ``emd_bin_loss``,
+#      ``selective_ssm`` vs ``selective_ssm_block``, etc.
+#   2. **Content-word overlap on descriptions** (at least 3 shared
+#      non-stopword tokens). Catches paraphrased descriptions of the same
+#      mechanism that don't share a substring in their names.
+#
+# Both are deliberately permissive — the cost of a false-merge (two genuinely
+# distinct concepts collapse into one entry) is bounded: the merged entry
+# stays accurate to the original mechanism description; only the new variant
+# name is lost to an alias. The cost of a false-non-merge (the v15 status
+# quo) is permanent inability to ever promote either entry. We optimise for
+# the former.
+
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        # Articles, prepositions, conjunctions, common verbs/copulas
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "are",
+        "was",
+        "were",
+        "has",
+        "have",
+        "had",
+        "but",
+        "not",
+        "all",
+        "any",
+        "can",
+        "may",
+        "such",
+        "via",
+        "into",
+        "out",
+        "over",
+        "under",
+        "between",
+        "across",
+        "each",
+        "per",
+        "also",
+        "than",
+        "then",
+        "when",
+        "where",
+        "while",
+        "which",
+        "would",
+        "could",
+        "should",
+        "more",
+        "less",
+        "most",
+        "least",
+        "use",
+        "uses",
+        "used",
+        "using",
+        "based",
+        "make",
+        "made",
+        "give",
+        "gives",
+        "given",
+        # ML-generic words that don't discriminate between mechanisms.
+        "loss",
+        "model",
+        "layer",
+        "network",
+        "output",
+        "input",
+        "data",
+        "value",
+        "values",
+        "score",
+        "scores",
+        "type",
+        "types",
+        "feature",
+        "function",
+        "method",
+        "approach",
+        "result",
+        "results",
+    }
+)
+
+
+def _content_words(text: str) -> set[str]:
+    """Lowercase content words from a description, excluding stopwords and
+    short tokens.
+
+    Used by ``_find_duplicate_candidate`` to compute the description-overlap
+    predicate. Tokenises on non-alphabetic characters so snake_case and
+    hyphenated tokens both split cleanly. Tokens shorter than 4 characters
+    are dropped along with the ``_STOPWORDS`` set — both filters keep the
+    overlap signal grounded in mechanism-bearing words (``ordinal``,
+    ``wasserstein``, ``curriculum``) and away from generic plumbing.
+    """
+    tokens = re.findall(r"[a-z]+", text.lower())
+    return {t for t in tokens if len(t) >= 4 and t not in _STOPWORDS}
+
+
+def _find_duplicate_candidate(
+    new_name: str,
+    new_kind: str,
+    new_description: str,
+    existing_vocab: dict[str, VocabEntry],
+    *,
+    min_shared_words: int = 3,
+    name_substring_min_len: int = 5,
+) -> VocabEntry | None:
+    """Return an existing **candidate** entry of the same kind that the
+    new candidate likely duplicates, or ``None`` if genuinely novel.
+
+    Two-pass heuristic, no LLM:
+
+      1. **Name substring match** (with length floor). If either lowercased
+         name contains the other as a substring and both have length >=
+         ``name_substring_min_len``, treat as duplicate.
+      2. **Description content-word overlap.** If the two descriptions
+         share at least ``min_shared_words`` non-stopword content tokens,
+         treat as duplicate.
+
+    The caller is responsible for merging ``seen_in_runs`` and ``aliases``
+    into the returned entry.
+
+    Args:
+        new_name: Name of the incoming candidate.
+        new_kind: Kind of the incoming candidate (``"feature"`` or
+            ``"capability"``). Discoveries are never deduplicated; the
+            caller should not invoke this function for them.
+        new_description: Description of the incoming candidate.
+        existing_vocab: Current vocab keyed by name.
+        min_shared_words: Threshold for the description-overlap predicate.
+        name_substring_min_len: Minimum length both names must have for the
+            substring predicate to fire. Avoids spurious matches on tiny
+            tokens.
+
+    Returns:
+        The existing candidate entry to merge into, or ``None`` if no
+        duplicate is found. Only entries with ``tier == "candidate"`` and
+        ``kind == new_kind`` are considered — canonical entries are out of
+        scope (a candidate that overlaps a canonical should still be
+        considered new; it can be merged at promotion time by the existing
+        ``_dedup_promoted`` path).
+    """
+    new_name_lower = new_name.lower()
+    new_words = _content_words(new_description)
+
+    for entry in existing_vocab.values():
+        if entry.tier != "candidate":
+            continue
+        if entry.kind != new_kind:
+            continue
+        if entry.name == new_name:
+            # Exact-name match is the caller's job — this function only
+            # finds NEAR-duplicates.
+            continue
+        ex_name_lower = entry.name.lower()
+        # Predicate 1: substring on names, with length floor
+        if (
+            len(new_name_lower) >= name_substring_min_len
+            and len(ex_name_lower) >= name_substring_min_len
+            and (new_name_lower in ex_name_lower or ex_name_lower in new_name_lower)
+        ):
+            return entry
+        # Predicate 2: content-word overlap on descriptions
+        ex_words = _content_words(entry.description)
+        if len(new_words & ex_words) >= min_shared_words:
+            return entry
+    return None
 
 
 def evaluate_prediction(
@@ -290,7 +490,7 @@ def generate_discoveries(
 
 def promote_candidates(
     vocab: list[VocabEntry],
-    min_runs: int = 3,
+    min_runs: int = 2,
 ) -> tuple[list[VocabEntry], list[str]]:
     """
     Promote candidate VocabEntry items to canonical tier.
@@ -300,13 +500,25 @@ def promote_candidates(
       - kind in {"feature", "capability"}  (discoveries are never promoted)
       - len(seen_in_runs) >= min_runs
 
+    Post-v15: ``min_runs`` lowered from 3 to 2. v15 retrospective found
+    that no candidate ever reached ``seen_in_runs >= 3`` across 20
+    iterations because the proposer invented a new compound name per iter
+    even for repeated mechanisms (root cause documented in
+    ``reports/v15_20260628.md`` §4.5). The complementary fix in
+    ``build_runtime_vocab`` now merges semantic near-duplicates into one
+    entry via ``_find_duplicate_candidate``; combined with the lower
+    ``min_runs`` floor and the new comparison-stage prompt instruction,
+    candidates that genuinely repeat across iterations should now actually
+    promote.
+
     The require_positive_delta criterion (promotion only when candidate
     contributed to SOTA-beating runs) is deferred — it requires per-run
     score context not currently available here. See C.5 design doc.
 
     Args:
         vocab:    Current runtime vocabulary.
-        min_runs: Minimum distinct runs before promotion. Default 3.
+        min_runs: Minimum distinct runs before promotion. Default 2
+            (post-v15 lowered from 3). Tests may override.
 
     Returns:
         (updated_vocab, promoted_names) — updated list with tier changes
@@ -405,22 +617,55 @@ def build_runtime_vocab(
 
     # Add proposed candidates (features/capabilities from the proposal).
     # Track seen_in_runs: append proposed_by_run whenever a candidate is encountered,
-    # whether it is new or already present from a prior iteration.
+    # whether it is new, an exact-name match, or a heuristic near-duplicate of
+    # an existing candidate (post-v15 fix; see ``_find_duplicate_candidate``).
     for candidate in proposed_candidates:
         if not isinstance(candidate, dict) or "name" not in candidate:
             continue
         name = candidate["name"]
         run = candidate.get("proposed_by_run") or ""
         if name not in vocab_by_name:
+            # New name — but check whether it's a NEAR-DUPLICATE of an
+            # existing candidate of the same kind. v15 retrospective: 7
+            # different feature-tier candidates described the same
+            # reweighting mechanism but with different compound names; this
+            # caused seen_in_runs to permanently cap at 1 across all 20
+            # iterations. The heuristic dedup runs BEFORE the new entry is
+            # appended so its run signal merges into the existing entry.
             try:
                 entry = VocabEntry.model_validate(candidate)
+            except Exception:
+                continue  # skip malformed candidates
+            # Discoveries are never deduplicated (they're empirical results
+            # uniquely tied to one run, not architectural primitives).
+            duplicate_of: VocabEntry | None = None
+            if entry.kind in {"feature", "capability"}:
+                duplicate_of = _find_duplicate_candidate(
+                    new_name=entry.name,
+                    new_kind=entry.kind,
+                    new_description=entry.description,
+                    existing_vocab=vocab_by_name,
+                )
+            if duplicate_of is not None:
+                # Merge: extend the existing entry's seen_in_runs with this
+                # run and record the new name as an alias. The existing
+                # entry's description / related_to / etc. are kept verbatim
+                # — the assumption is that the first author of a candidate
+                # name wrote the canonical description for that mechanism.
+                updates: dict[str, Any] = {}
+                if run and run not in duplicate_of.seen_in_runs:
+                    updates["seen_in_runs"] = [*duplicate_of.seen_in_runs, run]
+                if entry.name not in duplicate_of.aliases:
+                    updates["aliases"] = [*duplicate_of.aliases, entry.name]
+                if updates:
+                    vocab_by_name[duplicate_of.name] = duplicate_of.model_copy(update=updates)
+            else:
+                # Genuinely new candidate — add as a fresh entry.
                 if run and run not in entry.seen_in_runs:
                     entry = entry.model_copy(update={"seen_in_runs": [run]})
                 vocab_by_name[name] = entry
-            except Exception:
-                pass  # skip malformed candidates
         else:
-            # Already present: extend seen_in_runs without duplicates
+            # Exact-name match: extend seen_in_runs without duplicates.
             existing = vocab_by_name[name]
             if run and run not in existing.seen_in_runs:
                 vocab_by_name[name] = existing.model_copy(
