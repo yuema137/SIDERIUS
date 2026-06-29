@@ -2016,6 +2016,22 @@ def run_workflow(
             dest_loss_dirs=[tuner_loss_dir, chain_loss_dir],
         )
 
+        # Issue #92 — promote the generated loss plugin to the global
+        # ``agent_generated/losses/`` library IMMEDIATELY after validation
+        # succeeds and the workspace-scoped registration completes, not
+        # after the tuner finishes. The previous behaviour (call only at
+        # iter end, post-tuner) opened a window during which the
+        # capability index advertised the loss but the ``.py`` file still
+        # lived in this chain's workspace — a parallel chain reading the
+        # index could not load it (v15 arch iters 1-3 blocked on this
+        # exact failure, unblocked only by a manual ``cp``). Calling
+        # ``_promote_loss_to_global`` here closes that window before
+        # tuner.run() consumes the registry. The helper's atomicity
+        # (file copy first, then ``registry.replace``) means no parallel
+        # reader sees a registry-says-yes / file-says-no state. The late
+        # call below remains as an idempotent safety net.
+        _promote_loss_to_global(impl_output)
+
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")
         tune_input = local_validated_model(
@@ -2089,13 +2105,22 @@ def run_workflow(
         tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
 
-        # L6c — promote the iter's generated loss (if any) to the global
-        # agent_generated/losses/ library. Fires once per iter, regardless
-        # of training outcome — the implementor produced a validated plugin
-        # even when the tuner failed to score it, and promoting makes the
-        # plugin reachable for future Branch B reuse + cross-process resume.
-        # No-op for built-in / reused losses (handled inside the helper).
-        # See docs/design/enable_loss_inventory.md § L6c.
+        # Issue #92 safety net — the primary promotion fires earlier
+        # (right after ``_register_plugin``) so the loss is globally
+        # available before the tuner starts. This late call is kept as an
+        # idempotent backstop in case the early call was skipped (e.g.
+        # the file moved between calls, a concurrent process altered the
+        # global path, or a future code change inadvertently bypassed
+        # the early promotion). The helper's idempotency check (file
+        # already at global path → skip the copy, still re-assert the
+        # registry entry) makes this safe to call unconditionally.
+        #
+        # Originally L6c was here as the ONLY promotion point — fired
+        # after the iteration's tuner completes so a tuner-failed iter
+        # would still publish its validated plugin. That behaviour is
+        # preserved by the early call above. See
+        # ``docs/design/enable_loss_inventory.md § L6c`` for design
+        # rationale; the early-promotion fix is tracked as issue #92.
         _promote_loss_to_global(impl_output)
         # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
         # auto-evicts the oldest entry so the next iteration's
