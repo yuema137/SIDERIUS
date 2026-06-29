@@ -553,3 +553,78 @@ class TestMeasureMsPerStepDefaults:
         # Either as the typing.Tuple form or the PEP 604 ``tuple[...]``.
         assert "tuple" in str(ret).lower()
         assert "dict" in str(ret).lower()
+
+
+# ---------------------------------------------------------------------------
+# I13 — warmup uses get_target_torch_dtype for target casting
+# ---------------------------------------------------------------------------
+#
+# The pre-I13 wrapper hardcoded ``y = y.long() if loss_type in
+# ('ce','focal','focal_cw') else y.float()`` at the warmup loop. With L2
+# adding loss_type='custom' to the routing, that hardcoded list silently
+# routed every custom loss through ``.float()`` — crashing F.one_hot in
+# EMD-style classifier losses.
+#
+# These tests pin two things:
+#   1. The wrapper module imports get_target_torch_dtype (as the local
+#      alias _get_target_torch_dtype) so the warmup loop reads from the
+#      single source of truth.
+#   2. The aliased helper routes custom losses via the
+#      LOSS_TARGET_DTYPE_REGISTRY rather than guessing.
+
+
+class TestI13TargetDtypeRoutingInWrapper:
+    """Source-level pins on the warmup loop's dtype-casting line. The
+    actual call is inside ``_measure_ms_per_step``'s ``try:`` block (the
+    imports are function-local because the CPU-only test environment
+    must not pull in CUDA-touching code at module load). So we inspect
+    the function's source rather than poke at module attributes.
+    """
+
+    def test_warmup_function_imports_get_target_torch_dtype(self):
+        """``_measure_ms_per_step`` must import ``get_target_torch_dtype``
+        from ml_models.loss_models_sandbox (aliased as
+        ``_get_target_torch_dtype`` for parity with private-helper
+        naming). A regression that re-introduces the hardcoded
+        ``y.long()`` / ``y.float()`` branching would delete this import."""
+        import inspect
+
+        src = inspect.getsource(ts._measure_ms_per_step)
+        assert "get_target_torch_dtype" in src, (
+            "_measure_ms_per_step must import get_target_torch_dtype — "
+            "the single source of truth for target dtype routing. If "
+            "this assertion fails, check whether the pre-I13 hardcoded "
+            "y.long()/y.float() branch was reintroduced."
+        )
+
+    def test_warmup_function_uses_helper_to_cast_targets(self):
+        """The actual target-casting line must call the helper, not the
+        legacy hardcoded conditional. Specifically: ``y = y.to(dtype=...)``
+        with the helper expression inside ``dtype=``."""
+        import inspect
+
+        src = inspect.getsource(ts._measure_ms_per_step)
+        assert "y.to(dtype=_get_target_torch_dtype" in src or (
+            "y.to(dtype=get_target_torch_dtype" in src
+        ), (
+            "_measure_ms_per_step must cast targets via "
+            "y.to(dtype=get_target_torch_dtype(loss_cfg_obj)). The "
+            "hardcoded ``y.long() if loss_type in (...) else y.float()`` "
+            "form is the I13 defect — do not reintroduce it."
+        )
+
+    def test_warmup_function_does_not_hardcode_loss_type_dtype_branch(self):
+        """Negative pin — the legacy hardcoded branch must not return.
+        Catches the specific shape of the pre-I13 EMD crash trigger."""
+        import inspect
+
+        src = inspect.getsource(ts._measure_ms_per_step)
+        # The exact pre-I13 form was:
+        #   y = y.long() if loss_type in ("ce", "focal", "focal_cw") else y.float()
+        # Pin against the giveaway substring of that condition.
+        assert "y.long() if loss_type" not in src, (
+            "Detected the pre-I13 hardcoded dtype branch. Use "
+            "get_target_torch_dtype(loss_cfg_obj) instead — it routes "
+            "custom losses via PLUGIN_LOSS_TARGET_DTYPE rather than "
+            "guessing from loss_type."
+        )

@@ -173,3 +173,98 @@ def get_output_type(model_type: str) -> str:
         return PLUGIN_OUTPUT_TYPE_REGISTRY[model_type]
     # Unknown model — default to classifier (the standard [B, 256, T] contract)
     return "classifier"
+
+
+# ---------------------------------------------------------------------------
+# Per-file registration API (mirrors register_loss_in_memory)
+# ---------------------------------------------------------------------------
+#
+# ``extend_registries`` above is the legacy startup-scan path — it walks
+# every plugin directory and registers everything found at once. The per-
+# file functions below mirror ``ml_models.loss_models_sandbox.register_loss_
+# in_memory`` / ``preload_global_losses`` so the workflow can register a
+# single freshly-generated model plugin without a full directory rescan,
+# and so a Branch B reuse path can check membership against the same
+# in-memory dicts the loss surface uses.
+
+
+def register_model_in_memory(plugin_path: str) -> str | None:
+    """Load a model plugin file and register its classes in the model
+    registries.
+
+    Mirrors ``ml_models.loss_models_sandbox.register_loss_in_memory`` for
+    the model surface. Called by the workflow's ``_register_plugin`` after
+    the model file has been mirrored into the workspace, AND by
+    ``preload_global_models()`` at workflow startup.
+
+    Updates three module-level dicts on success:
+      * ``MODEL_REGISTRY``                 (model_type → model class)
+      * ``PLUGIN_CONFIG_REGISTRY``         (model_type → config class)
+      * ``PLUGIN_OUTPUT_TYPE_REGISTRY``    (model_type → "classifier"/...)
+
+    Idempotency: re-registering the same ``model_type`` is allowed.
+    When the new ``model_class`` differs in ``__qualname__`` from the
+    already-registered one, a warning is printed (subtle bug signal — a
+    plugin was reloaded with different code under the same name).
+
+    Args:
+        plugin_path: Absolute path to the model plugin ``.py`` file.
+
+    Returns:
+        The plugin's ``PLUGIN_MODEL_TYPE`` string on success, ``None`` on
+        load failure (the loader logs the underlying error).
+    """
+    # Lazy import to avoid circular dependency with models_sandbox.
+    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    plugin = _load_plugin(plugin_path)
+    if plugin is None:
+        return None
+    model_type = plugin["model_type"]
+    new_cls = plugin["model_class"]
+    existing_cls = MODEL_REGISTRY.get(model_type)
+    if existing_cls is not None and getattr(existing_cls, "__qualname__", None) != getattr(
+        new_cls, "__qualname__", None
+    ):
+        print(
+            f"[ModelRegistry] Warning: re-registering model_type={model_type!r} "
+            f"with a different class ({existing_cls.__qualname__} → "
+            f"{new_cls.__qualname__}). Most-recent registration wins."
+        )
+    MODEL_REGISTRY[model_type] = new_cls
+    PLUGIN_CONFIG_REGISTRY[model_type] = plugin["config_class"]
+    PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
+    return model_type
+
+
+def preload_global_models() -> list[str]:
+    """Load all model plugins from ``agent_generated/models/`` into the
+    in-memory model registries.
+
+    Mirrors ``ml_models.loss_models_sandbox.preload_global_losses`` for
+    the model surface. Called at workflow startup so cross-process Branch B
+    reuse (e.g. chain resume after restart, parallel chains hitting the
+    same registry) finds previously-promoted models in-memory without
+    needing ``SIDERIUS_PLUGIN_DIRS``. Idempotent — safe to call multiple
+    times; ``register_model_in_memory`` handles re-registration.
+
+    Files starting with ``_`` are skipped (template / dunder convention,
+    matching the existing ``_load_plugin`` scan in ``extend_registries``).
+
+    Returns:
+        List of ``model_type`` strings successfully loaded. Empty list when
+        ``AGENT_GENERATED_DIR`` does not exist or is empty (first-run /
+        fresh checkout).
+    """
+    loaded: list[str] = []
+    if not os.path.isdir(AGENT_GENERATED_DIR):
+        return loaded
+    for fname in sorted(os.listdir(AGENT_GENERATED_DIR)):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        plugin_path = os.path.join(AGENT_GENERATED_DIR, fname)
+        model_type = register_model_in_memory(plugin_path)
+        if model_type is not None:
+            loaded.append(model_type)
+    return loaded

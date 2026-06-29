@@ -1168,3 +1168,56 @@ class ProposalOutput(BaseModel):
             f"'focal_cw', 'ce', 'smooth_l1' and remove loss_name. Do NOT "
             f"submit Branch B with a loss_name that is not in the registry."
         )
+
+    @model_validator(mode="after")
+    def _validate_branch_b_model_registry_membership(self, info):
+        """Reject phantom Branch B for the MODEL surface — symmetric to
+        ``_validate_branch_b_registry_membership`` above for losses.
+
+        Branch B for model (reuse a previously-generated model plugin) is
+        the proposer choice when ``baseline_config['model_config']['model_name']``
+        is set. Branch A (built-in model) and Branch C (generate new) both
+        leave ``model_name`` unset. It is only legal when ``model_name``
+        appears in the model capability registry; otherwise the implementor
+        and downstream training have no plugin to load and will fail.
+
+        Activated only when the caller passes ``context={"model_registry_names":
+        [...]}`` to ``model_validate``. With no context (e.g. unit tests
+        building ``ProposalOutput`` directly), this is a no-op — preserving
+        back-compat with all existing fixtures.
+
+        See the loss-side validator above for the design rationale; the
+        gate-2/gate-3 LLM failure mode (Branch C in intent, Branch B in
+        shape) applies to the model surface for the same reason.
+        """
+        model_cfg = self.baseline_config.get("model_config") if self.baseline_config else None
+        if not isinstance(model_cfg, dict):
+            return self
+        model_name = model_cfg.get("model_name")
+        if not model_name:
+            return self  # Branch A or Branch C — no registry check needed.
+        ctx = (info.context or {}) if info is not None else {}
+        registry_names = ctx.get("model_registry_names")
+        if registry_names is None:
+            return self  # No context — schema can't verify Branch B vs phantom.
+        if model_name in registry_names:
+            return self  # Legitimate Branch B reuse.
+        # Phantom Branch B — name not in the registry.
+        registry_display = (
+            "no models registered yet" if not registry_names else f"only {sorted(registry_names)!r}"
+        )
+        raise ValueError(
+            f"Phantom Branch B detected (model surface): "
+            f"baseline_config['model_config']['model_name']={model_name!r} "
+            f"implies you intend to REUSE an existing registered model "
+            f"(Branch B), but the model registry contains "
+            f"{registry_display}. To fix: either (Branch C) leave "
+            f"model_name unset and describe the new architecture so the "
+            f"implementor generates a fresh plugin; OR (Branch A) leave "
+            f"model_name unset and set model_type to a built-in name "
+            f"(e.g. 'wavenet', 'punet'); OR (Branch B) set model_name to "
+            f"a value that actually appears in the model registry. Advice-"
+            f"file model-name suggestions are not registry entries — they "
+            f"only become registered after a prior iteration successfully "
+            f"generated them via Branch C."
+        )

@@ -1353,6 +1353,93 @@ grounded in a finding's mechanism, citing a `source_ref` verbatim in
 the advice update.
 **Commit**: `84a3caf`
 
+#### I13 — `evaluate_time_skill` and `train_engine_sandbox` routed `loss_type="custom"` targets to `.float()` (EMD dtype crash in v15)
+
+**Root cause**: `evaluate_time_skill/wrapper.py` and `execute_tools/train_engine_sandbox.py`
+hardcoded `("ce", "focal", "focal_cw")` as the classifier loss types that receive int64
+targets. `loss_type="custom"` fell into the `.float()` branch (regressor path), causing
+`F.one_hot()` to crash with `RuntimeError: one_hot is only applicable to index tensor of
+type LongTensor` in any custom loss that uses integer class indices.
+
+Same registry-asymmetry pattern as I9/I12 — a consumer of `LossConfig` was not updated
+when `loss_type="custom"` was added. Discovered in v15 iter_001 when the proposer
+generated an EMD-family loss using `F.one_hot(targets, num_classes=256)`.
+
+**Why list-extension is the wrong fix**: not all custom losses are classifiers. A future
+regressor-style custom loss (smooth_l1-shaped) would need `.float()`. The dtype contract
+belongs with the plugin, not with a hardcoded consumer list.
+
+**Fix**: Each loss plugin declares `PLUGIN_LOSS_TARGET_DTYPE = "long" | "float"` at module
+scope (mirrors `PLUGIN_OUTPUT_TYPE` on model plugins). The loader registers it in
+`LOSS_TARGET_DTYPE_REGISTRY`. A new `get_target_torch_dtype(loss_config) -> torch.dtype`
+helper in `loss_models_sandbox.py` is the single source of truth for all consumers. Both
+affected call sites replaced with the helper call. Stub template and implementor prompt
+updated to require the declaration in all future generated plugins.
+**Commit**: `ca5a479`
+
+#### I14 — `evaluate_vram_skill/wrapper.py` hardcoded `_FLOAT_TARGET_LOSSES` set for probe target dtype/shape
+
+**Root cause**: The VRAM pre-flight skill built its synthetic probe targets by
+checking `loss_type in _FLOAT_TARGET_LOSSES` (a frozenset of `{"smooth_l1", "mse",
+"l1"}`). Custom losses fell to the `else` branch (`[B, T]` long), which happened to
+be correct for every classifier-style custom loss the proposer can generate today —
+but a future regressor-style custom loss declaring `PLUGIN_LOSS_TARGET_DTYPE = "float"`
+would silently get long targets and crash inside `loss_module.forward()` at probe
+time. Discovered during the post-I13 audit sweep — same registry-asymmetry shape
+as I13 (a consumer of `LossConfig` that the L2 `loss_type="custom"` introduction did
+not update).
+
+**Fix**: Replaced `_FLOAT_TARGET_LOSSES` with the same `get_target_torch_dtype()` helper
+landed by I13. Plumbed `loss_name` through `_build_probe_tensors` so the helper can
+resolve the plugin's `PLUGIN_LOSS_TARGET_DTYPE`. Target shape now follows from dtype
+(`long` → class-index `[B, T]`; `float32` → broadcast-shaped `[B, 256, T]` matching the
+model's logits) rather than from a hardcoded list, preserving the original probe
+contract for all built-in losses.
+**Commit**: `fb2ebc5`
+
+#### I15 — `execute_tools/inference_single.py` hardcoded `loss_type == "smooth_l1"` for output decoding
+
+**Root cause**: At inference, the output-decoding step chose between regression
+(`output.detach().cpu().numpy()`) and classification (`output.argmax(dim=1)`) based
+on `current_loss_type == "smooth_l1"`. A regressor-style custom loss would have
+silently been routed through the argmax path and crashed with a dimension error.
+Same registry-asymmetry pattern as I13 / I14.
+
+**Why naive `get_output_type == "regressor"` is the wrong fix**: `fcnet` is `"hybrid"`,
+not `"regressor"` in `BUILTIN_OUTPUT_TYPES`. A literal `get_output_type(model_type) ==
+"regressor"` check would have broken existing fcnet + smooth_l1 inference (currently
+producing `[B, T]` output for that combination). The decision is two-axis: the model's
+output contract decides for `"classifier"` and `"regressor"` models; for `"hybrid"`
+models (fcnet) the loss's declared target dtype disambiguates.
+
+**Fix**: Replaced the loss_type literal with the two-axis check
+`output_type == "regressor" or (output_type == "hybrid" and target_dtype == torch.float32)`.
+`output_type` from `plugin_loader.get_output_type` (which already handles built-ins +
+plugins uniformly). `target_dtype` from I13's `get_target_torch_dtype` helper.
+`current_loss_name` plumbed through `process_batch` and the loss-config JSON loader
+so the dtype helper sees the plugin's declaration.
+**Commit**: `fb2ebc5`
+
+#### I16 — `agent/skills/training_skill/estimator.py` VRAM estimator under-counted custom classifier losses
+
+**Root cause**: The pre-training VRAM estimate added a `B * 256 * T * 8` byte one_hot
+allocation only when `loss_type == "focal"`. Custom classifier-style losses (EMD,
+ordinal, weighted CE variants) typically build the same `F.one_hot(targets, 256)`
+tensor internally — but the estimator returned 0 for them, under-budgeting peak VRAM
+by ~32 MB at v15 trial sizes (B=1, T=16000) and up to ~100 MB at full T. Marginal
+impact at v15 sizes, but the asymmetry would compound as larger seg_sizes become
+viable.
+
+**Fix**: Detection extended to `loss_type == "focal" OR (loss_type == "custom" AND
+target_dtype == torch.long)`. The `torch.long` check via `get_target_torch_dtype`
+correctly identifies classifier-contract custom losses without enumerating the
+specific arithmetic shape (EMD vs ordinal vs weighted CE). Pre-flight before the loss
+plugin is registered (e.g. proposer-side estimation) falls back to the helper's `"long"`
+default — over-counts a regressor custom loss by one `[B, 256, T] × 8` chunk, which
+is the safe direction (over-budgeting trips fewer false-positive infeasible verdicts
+than under-budgeting trips OOMs).
+**Commit**: `fb2ebc5`
+
 ---
 
 ## Open questions
@@ -1386,6 +1473,12 @@ the advice update.
 - Perceptual loss requiring a separate encoder model — separate feature  
 - Loss ensembling (combining multiple loss functions) — separate feature
 - Automatic loss architecture search — separate feature
+- Modular agent orchestration (pluggable, dynamically composable,
+  backward-compatible workflow) — see GitHub issue
+  [#91](https://github.com/Galileo-Sandbox/SIDERIUS/issues/91). The I9 / I12 /
+  I13–I16 issues in this checkpoint are all instances of the registry-asymmetry
+  family that the modular-orchestration vision would make structurally
+  impossible; tracked separately because the fix is multi-quarter.
 
 ### Future: MLLossImplementor split (out of scope)
 

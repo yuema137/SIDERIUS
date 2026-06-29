@@ -67,6 +67,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import Any, Literal
 
+import psutil as _psutil
 import yaml
 
 from agent.schemas.external_agents import ExternalAgentOutput
@@ -101,6 +102,26 @@ from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
 from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _log_rss(step: str) -> None:
+    """Print orchestrator RSS at a named workflow step.
+
+    Added after the v15 arch chain was OOM-killed at 53 GB anon_rss during
+    VRAM pre-flight (Iter 1, 2026-06-24). The kill arrived between the
+    ``[Probe RSS] delta=0.46 GB`` log line and the bash wrapper's ``Killed``
+    print, so we never saw which earlier step allocated the bulk of the 52 GB.
+    These checkpoints make the allocation site visible in screen logs before
+    any future OOM.
+
+    Cheap: one ``psutil.Process().memory_info()`` call (~µs) plus a single
+    ``print`` per checkpoint. Safe to leave on permanently — no privileged
+    syscalls, no flush stalls (``flush=True`` keeps screen captures crisp
+    if the next allocation crashes immediately).
+    """
+    rss_gb = _psutil.Process().memory_info().rss / 1024**3
+    print(f"[RSS] {step}: {rss_gb:.2f} GB", flush=True)
+
 
 # Centralised Literal type aliases that match the protocol-layer signatures.
 # Defined here so the four strategy kwargs threaded through ``run_workflow`` /
@@ -627,6 +648,132 @@ def _cap_knowledge_cache(
     return capped, evicted
 
 
+_CONSTRUCTION_RSS_THRESHOLD_GB = 0.5  # 500 MB
+
+
+def _validate_construction_memory(
+    model_class: type,
+    config_class: type,
+    model_name: str,
+    representative_T: int = 16000,
+) -> None:
+    """Validate that instantiating the model plugin does not allocate
+    excessive RAM during ``__init__``.
+
+    Catches faulty SSM/attention implementations that pre-allocate buffers
+    scaling with T (e.g. ``[T, T]`` attention matrices, ``[B, T, d_state]``
+    state buffers) in ``__init__`` rather than in ``forward()``. Added after
+    the 2026-06-24 v15 arch chain was OOM-killed at 53 GB during VRAM
+    pre-flight — the suspect was a generated SSM plugin with a T-scaling
+    construction-time allocation that the structural VRAM probe could not
+    catch (because the offending allocation lived in CPU host RAM, not CUDA).
+
+    The check is cheap (one ``__init__`` call, no forward, no autograd)
+    and tight (RSS delta measured around a single ``model_class(cfg)``
+    invocation with ``gc.collect`` on either side).
+
+    Args:
+        model_class: the plugin's ``PLUGIN_MODEL_CLASS``.
+        config_class: the plugin's ``PLUGIN_CONFIG_CLASS``.
+        model_name: used in error messages.
+        representative_T: sequence length to test — defaults to ``16000``
+            which is the §10 attractor value for SSM/FNO families. At
+            T=16000, a single ``[T, T]`` float32 matrix = 1 GB, well above
+            the ``_CONSTRUCTION_RSS_THRESHOLD_GB`` floor. Injected into
+            the config as ``segmentation_size`` when the schema accepts
+            that field; otherwise the config's own defaults are used.
+
+    Raises:
+        ValueError: if construction RSS delta exceeds
+            ``_CONSTRUCTION_RSS_THRESHOLD_GB`` OR if ``__init__`` itself
+            raises (a plugin that cannot be constructed with default
+            config is already rejected by the dummy-tensor validator, but
+            we re-raise here as ``ValueError`` so callers see a uniform
+            failure shape).
+    """
+    import gc as _gc
+    import inspect as _inspect
+
+    import psutil as _psutil
+    import torch as _torch
+
+    # Real plugins are always ``nn.Module`` subclasses (plugin loader
+    # contract: ``PLUGIN_MODEL_CLASS: type — nn.Module subclass``). Stub
+    # classes used by some fixture tests aren't, and would crash inside
+    # ``model_class(cfg)`` for unrelated reasons. Skip with a visible
+    # warning so an accidental non-Module in a real path is still loud.
+    if not (isinstance(model_class, type) and issubclass(model_class, _torch.nn.Module)):
+        print(
+            f"    [MemCheck] '{model_name}' skipped — not an nn.Module subclass "
+            f"(type={type(model_class).__name__}).",
+            flush=True,
+        )
+        return
+
+    _gc.collect()
+    rss_before = _psutil.Process().memory_info().rss
+
+    model = None
+    cfg = None
+    try:
+        # Inject representative_T as segmentation_size when the schema
+        # accepts it. Pydantic v2 exposes the field map via model_fields.
+        cfg_kwargs: dict[str, Any] = {}
+        fields = getattr(config_class, "model_fields", None) or {}
+        if "segmentation_size" in fields:
+            cfg_kwargs["segmentation_size"] = representative_T
+        try:
+            cfg = config_class(**cfg_kwargs)
+        except Exception:
+            # If representative_T was rejected (out of declared bounds),
+            # fall back to the schema's own defaults. Still better than
+            # skipping — the bug usually trips at any T ≥ a few thousand.
+            cfg = config_class()
+        # Mirror evaluate_vram_skill._build_model: pass loss_type when the
+        # model's __init__ accepts it (fcnet hybrid pattern, plus any
+        # future plugin that adopts the same convention).
+        if "loss_type" in _inspect.signature(model_class.__init__).parameters:
+            model = model_class(cfg, loss_type="focal")
+        else:
+            model = model_class(cfg)
+        # Measure RSS BEFORE releasing the model. ``del model, cfg`` would
+        # let the allocator reclaim the buffers before we ever sample
+        # ``rss_after``, so a faulty plugin's 1+ GB allocation would
+        # cancel out and the check would never trip.
+        _gc.collect()
+        rss_after = _psutil.Process().memory_info().rss
+    except Exception as e:
+        raise ValueError(
+            f"Model plugin '{model_name}': __init__ raised {type(e).__name__}: {e}. "
+            f"The plugin must be constructable with default config."
+        ) from e
+    finally:
+        # Release whatever was successfully constructed. Runs after the
+        # measurement, so even a passing plugin doesn't leak its
+        # construction-time RSS into the next checkpoint.
+        del model, cfg
+        _gc.collect()
+
+    delta_gb = (rss_after - rss_before) / 1024**3
+
+    print(
+        f"    [MemCheck] '{model_name}' __init__ RSS delta: {delta_gb:.3f} GB "
+        f"(threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB)",
+        flush=True,
+    )
+
+    if delta_gb > _CONSTRUCTION_RSS_THRESHOLD_GB:
+        raise ValueError(
+            f"Model plugin '{model_name}' allocated {delta_gb:.2f} GB during "
+            f"__init__ (threshold: {_CONSTRUCTION_RSS_THRESHOLD_GB} GB). "
+            f"This indicates a construction-time buffer that scales with T. "
+            f"Common causes: [T, T] attention/SSM matrices, [B, T, d_state] "
+            f"state buffers, FFT mixing matrices. "
+            f"Fix: move all T-dependent allocations to forward(). "
+            f"SSM hidden states must be shape [B, d_state], not [B, T, d_state]."
+        )
+
+
 def _add_plugin_to_registries(plugin_path: str) -> str | None:
     """Register a single plugin file in every in-process registry surface.
 
@@ -734,6 +881,29 @@ def _register_plugin(
         )
         return
 
+    # Forensic copy — preserve the generated plugin source under a
+    # workspace-relative sentinel directory BEFORE any registration / build
+    # step that could OOM-kill the orchestrator and leave us with no record
+    # of the offending code. Anchored under the SIDERIUS_CHAIN_WORKSPACE env
+    # var so the sentinel lives at the workspace root (not the per-iter
+    # attempt tree), surviving the per-iter cleanup that `--cleanup_denoised`
+    # and similar flags perform. Added after the 2026-06-24 v15 arch OOM
+    # where the generated plugin source was lost when we cleaned the
+    # workspace post-mortem. Best-effort: failures here never block plugin
+    # registration; the sentinel is a debug aid, not a load-bearing step.
+    try:
+        _sentinel_root = os.environ.get(
+            "SIDERIUS_CHAIN_WORKSPACE",
+            os.path.dirname(os.path.dirname(impl_output.model_file_path)),
+        )
+        _sentinel_dir = os.path.join(_sentinel_root, "plugin_source_sentinel")
+        os.makedirs(_sentinel_dir, exist_ok=True)
+        _sentinel_path = os.path.join(_sentinel_dir, f"{model_name}.py")
+        shutil.copy2(impl_output.model_file_path, _sentinel_path)
+        print(f"    [DEBUG] Plugin source saved to sentinel: {_sentinel_path}", flush=True)
+    except Exception as _e:
+        print(f"    [DEBUG] Plugin source sentinel write skipped ({type(_e).__name__}: {_e})")
+
     primary_plugin: str | None = None
     for d in dest_plugin_dirs:
         os.makedirs(d, exist_ok=True)
@@ -800,12 +970,31 @@ def _register_plugin(
         # call below.
         return
 
+    registered: str | None = None
     try:
         registered = _add_plugin_to_registries(primary_plugin)
         if registered:
             print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
         print(f"    Warning: could not extend registries: {e}")
+
+    # Construction-time RSS validator — catches faulty SSM/attention plugins
+    # that pre-allocate T-scaling buffers in __init__ before the structural
+    # VRAM probe ever runs. Runs OUTSIDE the registry-extension try/except
+    # because a positive verdict here is load-bearing: a faulty plugin that
+    # passes registry extension but allocates 50+ GB at construct time would
+    # OOM-kill the orchestrator at the tuner's VRAM probe. The
+    # ``ValueError`` from this helper propagates up to the iteration loop
+    # so the iteration ends loudly instead of silently advancing.
+    if registered is not None:
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
+
+        _validate_construction_memory(
+            model_class=MODEL_REGISTRY[registered],
+            config_class=PLUGIN_CONFIG_REGISTRY[registered],
+            model_name=model_name,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +1145,132 @@ def _sha256_file(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Model promotion to the global library (symmetric to L6c for losses)
+# ---------------------------------------------------------------------------
+
+
+def _promote_model_to_global(impl_output) -> None:
+    """Promote a generated model plugin to the global ``agent_generated/models/``.
+
+    Mirrors :func:`_promote_loss_to_global` for the model surface. Called
+    by the workflow's iteration loop right after ``_register_plugin``
+    returns (early-promotion timing matches the issue-#92 fix for losses)
+    so a parallel chain or future-iter resume can resolve the model via
+    the capability index without depending on this run's workspace.
+
+    Trigger condition: ``impl_output.model_file_path`` exists AND
+    ``impl_output.model_type`` is registered in the capability index with
+    ``capability_type='model'``. The implementor writes that entry
+    immediately after building the plugin (so by the time the workflow
+    sees ``impl_output``, the index entry already exists), and Branch B
+    reuse paths leave the existing registry entry alone — so this helper
+    no-ops cleanly on Branch B (file already at the global path, registry
+    already correct).
+
+    Content-hash deduplication: before copying, compares SHA256 of the
+    source against every ``.py`` already in the global models dir. On
+    match, skips the copy and logs which existing entry is the duplicate.
+
+    Registry update: after promotion, the capability registry entry's
+    ``file_path`` is rewritten to the global path via
+    ``CapabilityRegistry.replace()``.
+
+    Idempotency: if the destination file already exists at the exact name
+    (e.g. a parallel chain promoted first, or Branch B reuse), the copy
+    is skipped silently and the registry update is still re-asserted.
+
+    No-op when ``impl_output.model_file_path`` is empty (defensive) or
+    when the model name is not in the registry (e.g. a built-in Branch A
+    path that never wrote a generated plugin — nothing to promote).
+    """
+    model_file_path = getattr(impl_output, "model_file_path", "") or ""
+    if not model_file_path or not os.path.isfile(model_file_path):
+        return  # Built-in / Branch B with no fresh codegen / defensive guard.
+
+    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from ml_models.plugin_loader import AGENT_GENERATED_DIR as MODELS_DIR
+
+    model_name = getattr(impl_output, "model_type", None)
+    if not model_name:
+        print("  Warning: cannot promote model — impl_output.model_type is empty")
+        return
+
+    # Branch B reuse path: model_file_path already points at the global
+    # directory (the implementor's Branch B short-circuit returns the
+    # registry's file_path verbatim). Nothing to copy or update.
+    abs_src = os.path.abspath(model_file_path)
+    if os.path.dirname(abs_src) == os.path.abspath(MODELS_DIR):
+        return
+
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    global_dest = os.path.join(MODELS_DIR, f"{model_name}.py")
+
+    # Content-hash dedup: scan existing global plugins for byte-identical
+    # content under a different name. Caches src hash to avoid re-reading.
+    src_hash = _sha256_file(abs_src)
+    for fname in os.listdir(MODELS_DIR):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        existing_path = os.path.join(MODELS_DIR, fname)
+        if os.path.abspath(existing_path) == os.path.abspath(global_dest):
+            continue  # same-name handled by the idempotency branch below
+        if _sha256_file(existing_path) == src_hash:
+            existing_name = fname[:-3]
+            print(
+                f"  Model '{model_name}' not promoted — identical content "
+                f"already exists as '{existing_name}' "
+                f"({global_dest} skipped)."
+            )
+            return
+
+    if os.path.exists(global_dest):
+        print(f"  Model '{model_name}' already at global path {global_dest} (idempotent skip).")
+    else:
+        shutil.copy2(abs_src, global_dest)
+        print(f"  Promoted model '{model_name}' → {global_dest}")
+
+    # Also copy the description.md subdir so the proposer's
+    # ``{available_models_block}`` and downstream readers find it at the
+    # canonical layout (``agent_generated/models/{name}/description.md``).
+    desc_path = getattr(impl_output, "description_file_path", "") or ""
+    if desc_path and os.path.isfile(desc_path):
+        desc_dest_dir = os.path.join(MODELS_DIR, model_name)
+        os.makedirs(desc_dest_dir, exist_ok=True)
+        desc_dest = os.path.join(desc_dest_dir, "description.md")
+        if not os.path.exists(desc_dest):
+            shutil.copy2(desc_path, desc_dest)
+            print(f"  Promoted model description → {desc_dest}")
+
+    # Update capability registry to point at the global path.
+    try:
+        registry = CapabilityRegistry()
+        existing = next(
+            (m for m in registry.list(capability_type="model") if m.name == model_name),
+            None,
+        )
+        if existing is None:
+            print(
+                f"  Warning: model '{model_name}' is not in the capability "
+                f"index — registry not updated. Promotion file copy is "
+                f"preserved at {global_dest}."
+            )
+            return
+        promoted_meta = CapabilityMetadata(
+            name=existing.name,
+            capability_type=existing.capability_type,
+            file_path=global_dest,
+            created_at=existing.created_at,
+            source_iteration=existing.source_iteration,
+            description=existing.description,
+            mathematical_definition=existing.mathematical_definition,
+        )
+        registry.replace(promoted_meta)
+        print(f"  Updated registry entry '{model_name}' file_path → {global_dest}")
+    except Exception as e:
+        print(f"  Warning: could not update registry for '{model_name}': {e}")
+
+
+# ---------------------------------------------------------------------------
 # Workflow
 # ---------------------------------------------------------------------------
 
@@ -994,6 +1309,11 @@ def run_workflow(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
+    # Tuner delta-gate parameters (added in commit 8f1cf52). Defaults
+    # match the HyperparamTuningInput schema defaults so omitting them
+    # at the CLI surface reproduces pre-v16 behaviour.
+    skip_formal_min_delta: float = -1.0,
+    bypass_formal_time_budget_min_delta: float = 0.0,
     plan_overrides: dict | None = None,
     # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
     trial_time_budget_minutes: float | None = None,
@@ -1176,6 +1496,9 @@ def run_workflow(
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
 
+    # 52 GB OOM forensics — see _log_rss docstring above.
+    _log_rss("post-import (run_workflow entry)")
+
     # All workflow output goes under {workspace}/{run_name}/
     run_dir = os.path.join(workspace, run_name)
     os.makedirs(run_dir, exist_ok=True)
@@ -1199,10 +1522,20 @@ def run_workflow(
     # agent_generated/losses/ is empty (returns []). See
     # docs/design/enable_loss_inventory.md § L6c.
     from ml_models.loss_models_sandbox import preload_global_losses
+    from ml_models.plugin_loader import preload_global_models
 
     _preloaded = preload_global_losses()
     if _preloaded:
         print(f"  Preloaded {len(_preloaded)} global loss plugin(s): {sorted(_preloaded)}")
+    # Model surface — symmetric preload so Branch B model reuse resolves
+    # without depending on the workspace's SIDERIUS_PLUGIN_DIRS. Safe when
+    # ``agent_generated/models/`` is empty (returns []).
+    _preloaded_models = preload_global_models()
+    if _preloaded_models:
+        print(
+            f"  Preloaded {len(_preloaded_models)} global model plugin(s): "
+            f"{sorted(_preloaded_models)}"
+        )
     print(f"  Started       : {started_at}")
     if source_paths is not None:
         print(f"  Source paths  : {len(source_paths)} files")
@@ -1481,6 +1814,7 @@ def run_workflow(
                 f"{lit_output.search_rounds_used} search round(s), "
                 f"{len(lit_output.retrieved_papers)} paper(s) retrieved"
             )
+            _log_rss(f"post-lit-review (iter {iteration})")
         external_channels = merge_external_agent_outputs(external_outputs)
 
         # --- Propose → Implement → Validate (retry loop) ---
@@ -1639,6 +1973,7 @@ def run_workflow(
                 _bind_iter_context(_propose_agent)
                 proposal = _propose_agent.run(propose_input)
                 print(f"    Proposed: {proposal.model_name}")
+                _log_rss(f"post-proposal (iter {iteration} attempt {attempt})")
 
                 # Rename attempt dir to include model name
                 named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
@@ -1714,6 +2049,9 @@ def run_workflow(
                     _bind_iter_context(_impl_agent)
                     impl_output = _impl_agent.run(impl_input)
                     print(f"    Plugin: {impl_output.model_file_path}")
+                    _log_rss(
+                        f"post-implement (iter {iteration} attempt {attempt} impl {impl_attempt})"
+                    )
 
                     # --- Validate ---
                     print(f"  [{iteration}.{attempt}] Validating...")
@@ -1734,6 +2072,9 @@ def run_workflow(
                     )
                     _bind_iter_context(_valid_agent)
                     validation = _valid_agent.run(valid_input)
+                    _log_rss(
+                        f"post-validate (iter {iteration} attempt {attempt} impl {impl_attempt})"
+                    )
 
                     if validation.passed:
                         print("    All 7 checks passed.\n")
@@ -1816,6 +2157,29 @@ def run_workflow(
             dest_loss_dirs=[tuner_loss_dir, chain_loss_dir],
         )
 
+        # Issue #92 — promote the generated loss plugin to the global
+        # ``agent_generated/losses/`` library IMMEDIATELY after validation
+        # succeeds and the workspace-scoped registration completes, not
+        # after the tuner finishes. The previous behaviour (call only at
+        # iter end, post-tuner) opened a window during which the
+        # capability index advertised the loss but the ``.py`` file still
+        # lived in this chain's workspace — a parallel chain reading the
+        # index could not load it (v15 arch iters 1-3 blocked on this
+        # exact failure, unblocked only by a manual ``cp``). Calling
+        # ``_promote_loss_to_global`` here closes that window before
+        # tuner.run() consumes the registry. The helper's atomicity
+        # (file copy first, then ``registry.replace``) means no parallel
+        # reader sees a registry-says-yes / file-says-no state. The late
+        # call below remains as an idempotent safety net.
+        _promote_loss_to_global(impl_output)
+        # Model surface — symmetric early promotion so Branch B model
+        # reuse from a parallel chain or the next iter resolves the
+        # plugin via the global path without depending on this run's
+        # workspace. Helper no-ops cleanly on Branch B reuse (file
+        # already at the global path) and on Branch A (no generated
+        # plugin to promote). See ``_promote_model_to_global`` docstring.
+        _promote_model_to_global(impl_output)
+
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")
         tune_input = local_validated_model(
@@ -1840,6 +2204,8 @@ def run_workflow(
             train_base_seed=train_base_seed,
             cleanup_denoised=cleanup_denoised,
             max_epochs=max_epochs,
+            skip_formal_min_delta=skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
             max_retries=tune_llm.get("max_retries"),
             plan_overrides=plan_overrides,
             trial_time_budget_minutes=trial_time_budget_minutes,
@@ -1864,22 +2230,47 @@ def run_workflow(
         # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
         # See docs/design/enable_global_task_config.md § Commit T4a.
         tune_input.task_description = get_task_description(load_task_config())
+        # Post-v15 delta-gate threading: tell the tuner the best score this
+        # chain run has seen so far. Both the skip_formal and
+        # bypass_formal_time_budget gates inside the tuner use this as the
+        # reference point. ``best_score_overall`` reflects the workflow's
+        # best ``tune_output.best_denoising_score`` across iterations
+        # (formal-dominated under inherit_best_trial / full_clone, which is
+        # the production default — see workflows/model_exploration.py:
+        # 2134-2137). When no iter has completed yet, the schema default
+        # (WaveNet baseline 5.5763) applies, so iter_001's gates have a
+        # meaningful anchor too.
+        if best_score_overall is not None:
+            tune_input.current_run_best_formal_score = best_score_overall
 
         _tune_agent = HyperparamTuningAgent(
             bridge_factory=bridge_factory,
             sandbox_factory=sandbox_factory,
         )
         _bind_iter_context(_tune_agent)
+        # The tuner's planner is what triggers evaluate_vram_skill internally;
+        # log RSS here so an OOM during the probe leaves us with a baseline
+        # to subtract from in the dmesg dump.
+        _log_rss(f"pre-vram-probe (iter {iteration}, before tuner.run)")
         tune_output = _tune_agent.run(tune_input)
         iteration_results.append(tune_output)
 
-        # L6c — promote the iter's generated loss (if any) to the global
-        # agent_generated/losses/ library. Fires once per iter, regardless
-        # of training outcome — the implementor produced a validated plugin
-        # even when the tuner failed to score it, and promoting makes the
-        # plugin reachable for future Branch B reuse + cross-process resume.
-        # No-op for built-in / reused losses (handled inside the helper).
-        # See docs/design/enable_loss_inventory.md § L6c.
+        # Issue #92 safety net — the primary promotion fires earlier
+        # (right after ``_register_plugin``) so the loss is globally
+        # available before the tuner starts. This late call is kept as an
+        # idempotent backstop in case the early call was skipped (e.g.
+        # the file moved between calls, a concurrent process altered the
+        # global path, or a future code change inadvertently bypassed
+        # the early promotion). The helper's idempotency check (file
+        # already at global path → skip the copy, still re-assert the
+        # registry entry) makes this safe to call unconditionally.
+        #
+        # Originally L6c was here as the ONLY promotion point — fired
+        # after the iteration's tuner completes so a tuner-failed iter
+        # would still publish its validated plugin. That behaviour is
+        # preserved by the early call above. See
+        # ``docs/design/enable_loss_inventory.md § L6c`` for design
+        # rationale; the early-promotion fix is tracked as issue #92.
         _promote_loss_to_global(impl_output)
         # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
         # auto-evicts the oldest entry so the next iteration's

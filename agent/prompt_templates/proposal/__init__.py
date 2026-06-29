@@ -213,6 +213,13 @@ _LOSS_REGISTRY_EMPTY_FALLBACK = (
 )
 
 
+_MODEL_REGISTRY_EMPTY_FALLBACK = (
+    "## Available custom models\n\n"
+    "No custom models registered yet — propose a new architecture or use "
+    "a built-in model_type (e.g. wavenet, punet, fcnet).\n"
+)
+
+
 def render_available_losses(registry) -> str:
     """Render the loss-registry block for the proposer's prompt context.
 
@@ -281,6 +288,70 @@ def render_available_losses(registry) -> str:
         if formula:
             lines.append("")
             lines.append("**Formula**:")
+            lines.append("")
+            lines.append("```")
+            lines.append(formula)
+            lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def render_available_models(registry) -> str:
+    """Render the model-registry block for the proposer's prompt context.
+
+    Symmetric to :func:`render_available_losses` but for the model surface.
+    Pulls all entries with ``capability_type="model"`` from the registry,
+    sorts by ``created_at`` descending, and renders one ``###`` block per
+    model with description + architectural-definition fenced block.
+
+    Args:
+        registry: A ``CapabilityRegistry`` instance. Duck-typed: any
+            object with a ``list(capability_type=...)`` method returning
+            an iterable of ``CapabilityMetadata``-shaped objects is
+            accepted, so tests can pass a simple stub.
+
+    Returns:
+        A multi-line string ready for ``str.replace`` substitution into
+        the ``{available_models_block}`` placeholder. Includes a trailing
+        newline so the next template line follows naturally. When the
+        registry has no ``model`` entries, returns the documented
+        fallback message (also ending in a newline).
+    """
+    metas = list(registry.list(capability_type="model"))
+    if not metas:
+        return _MODEL_REGISTRY_EMPTY_FALLBACK
+
+    metas_sorted = sorted(metas, key=lambda m: m.created_at, reverse=True)
+
+    lines = [
+        "## Available custom models",
+        "",
+        "The agent-generated model registry currently contains the following "
+        "models, sorted most-recent first. You may **reuse** an existing "
+        "entry by name (set ``baseline_config.model_config.model_name`` to "
+        "the entry's name) OR **propose** a new architecture OR **use a "
+        "built-in** model_type — see the 3-branch rule in the Rules section "
+        "below.",
+        "",
+        "**Branch B vs Branch C judgment**: compare the description and "
+        "architecture below against the design you have in mind. If the "
+        "existing model already implements your intended architecture, "
+        "prefer Branch B (reuse) — adding a near-duplicate under a new "
+        "name only fragments the evidence and prevents controlled comparison "
+        "(loss-explorer chains in particular MUST reuse the iter_001 model "
+        "via Branch B for iter_002 onward to keep architecture as a CONTROL).",
+        "",
+    ]
+    for m in metas_sorted:
+        desc = " ".join((m.description or "").split())
+        source = m.source_iteration if m.source_iteration else "—"
+        lines.append(f"### `{m.name}` (source: {source})")
+        lines.append("")
+        lines.append(f"**Description**: {desc}")
+        formula = (getattr(m, "mathematical_definition", "") or "").strip()
+        if formula:
+            lines.append("")
+            lines.append("**Architecture**:")
             lines.append("")
             lines.append("```")
             lines.append(formula)

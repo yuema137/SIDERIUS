@@ -354,6 +354,37 @@ In your reasoning, cover all of the following:
    How will you handle them?
 6. What additional imports beyond torch, nn, F, BaseModel, Field are needed?
 
+## Construction-time memory anti-pattern — STRICT
+
+NEVER pre-allocate buffers in ``__init__`` that scale with the sequence length T.
+Hidden states for SSM/RNN must be shape ``[B, d_state]`` (NOT ``[B, T, d_state]``
+or ``[T, T]``). FFT plans must not materialize T-length arrays at construction
+time. A single layer with a ``[T, T]`` buffer at ``T=16000`` costs 1 GB of RAM;
+4 layers × optimizer moments = >10 GB — the process will be OOM-killed BEFORE
+training starts, and the pre-flight VRAM probe will not catch it because the
+allocation happens in CPU host RAM at module-construct time, not in CUDA.
+
+What this rule covers:
+  - SSM ``A``/``B``/``C``/``D`` matrices: only the recurrent state matrix
+    ``A`` of shape ``[d_state]`` or ``[d_state, d_state]`` belongs in
+    ``__init__``. The unrolled state sequence ``h[1..T]`` must live in
+    ``forward()`` and be released between steps (or computed via an
+    associative scan that does not materialize the full T-length tensor).
+  - Attention: precomputed ``[T, T]`` masks / positional biases at full
+    ``segmentation_size`` are forbidden. Generate masks on the fly inside
+    ``forward()`` or use a chunk size strictly less than ``segmentation_size``.
+  - FFT: ``torch.fft.rfft`` plans are JIT-compiled — fine. Pre-baking
+    ``[T // 2 + 1]`` filter coefficients is fine (small). Pre-baking a
+    ``[T, T]`` mixing matrix is NOT fine.
+  - Positional encodings: a sinusoidal PE table of shape ``[max_len, d]``
+    is fine when ``max_len`` is a config field (typically ≤ 1024). A
+    ``[T, T]`` relative-position matrix at full ``segmentation_size`` is
+    not.
+
+A useful check before declaring any ``self.<name> = ...`` in ``__init__``:
+ask "does this tensor's first dimension equal ``segmentation_size``?" If
+yes, move it to ``forward()`` or rework the architecture.
+
 Think step by step. Be concrete about tensor shapes at each stage.
 Do not write final Python code yet — that is the next step."""
 
@@ -447,6 +478,11 @@ from typing import Self
 
 PLUGIN_LOSS_TYPE = "{loss_name}"
 
+# I13 — target dtype the loss expects. "long" (int64) is the classifier
+# contract; "float" matches a regressor (smooth_l1-style) contract. All
+# losses generated under the current proposer forward contract use "long".
+PLUGIN_LOSS_TARGET_DTYPE = "long"
+
 
 class {LossClass}Config(BaseModel):
     \"\"\"Hyperparameters for the {loss_name} loss.
@@ -493,6 +529,17 @@ logits and integer class targets; it must return a SCALAR tensor with gradient.
   - ``targets`` : ``torch.Tensor`` of shape ``[B, T]``              (int64, class indices in [0, num_classes))
   - returns     : ``torch.Tensor`` SCALAR  (i.e. ``.dim() == 0``)
                   with ``requires_grad=True`` so training can backprop.
+
+## Module-level constant — REQUIRED (I13)
+
+Every loss plugin you generate MUST declare ``PLUGIN_LOSS_TARGET_DTYPE``
+at module level. For the classifier contract above (int64 targets), the
+value is the literal string ``"long"``. The template already includes
+this declaration — do NOT remove or rename it. Consumers
+(``evaluate_time_skill``, ``train_engine_sandbox``) read this to decide
+whether to cast targets to ``.long()`` or ``.float()`` before invoking
+your loss. Missing this declaration will silently default to ``"long"``
+but is treated as a defect.
 
 ## Allowed imports — STRICT ALLOW-LIST
 
@@ -1500,6 +1547,69 @@ class MLModelImplementor:
                     dummy_tensor_validated=True,
                 )
 
+        # --- Branch B short-circuit for MODEL surface ---
+        # Symmetric to the loss Branch B handling above: if the proposer
+        # set ``model_config['model_name']`` to a value that's already in
+        # the capability registry, skip code generation entirely and
+        # return an ImplementorOutput pointing at the existing plugin.
+        # The phantom Branch B (model_name set, not in registry) is
+        # detected upstream by ``_validate_branch_b_model_registry_membership``
+        # when the proposer agent passes ``model_registry_names`` context;
+        # this guard catches the same shape if validation context was
+        # absent (back-compat). The check uses ``inp.baseline_config``
+        # because the proposer puts ``model_name`` there, not on
+        # ``inp.model_name`` (which is the proposed top-level name).
+        baseline_model_cfg = inp.baseline_config.get("model_config") or {}
+        branch_b_model_name = (
+            baseline_model_cfg.get("model_name") if isinstance(baseline_model_cfg, dict) else None
+        )
+        if branch_b_model_name:
+            existing_model_names = {m.name for m in self._registry.list(capability_type="model")}
+            if branch_b_model_name not in existing_model_names:
+                raise ValueError(
+                    f"Implementor received Branch B model proposal "
+                    f"(model_name={branch_b_model_name!r}) but "
+                    f"{branch_b_model_name!r} is not in the model "
+                    f"capability registry. Registry currently contains: "
+                    f"{sorted(existing_model_names) if existing_model_names else 'no models'}. "
+                    f"The proposer must either use Branch A (built-in "
+                    f"model_type), Branch C (generate new — leave "
+                    f"model_name unset), or Branch B with a model_name "
+                    f"that actually exists in the registry."
+                )
+            existing_meta = next(
+                (
+                    m
+                    for m in self._registry.list(capability_type="model")
+                    if m.name == branch_b_model_name
+                ),
+                None,
+            )
+            assert existing_meta is not None  # narrowed by membership check above
+            existing_path = existing_meta.file_path
+            print(
+                f"♻️  Branch B model reuse: '{branch_b_model_name}' "
+                f"(source={existing_meta.source_iteration}, "
+                f"path={existing_path}) — skipping code generation."
+            )
+            # Build the ImplementorOutput pointing at the existing plugin
+            # file. Description / test paths default to the existing
+            # plugin's sibling layout (LOSSES_DIR / MODELS_DIR convention);
+            # if the description.md no longer exists alongside the global
+            # plugin, downstream readers degrade gracefully.
+            existing_desc_dir = os.path.join(os.path.dirname(existing_path), branch_b_model_name)
+            existing_desc_path = os.path.join(existing_desc_dir, "description.md")
+            return ImplementorOutput(
+                model_type=branch_b_model_name,
+                description_file_path=os.path.abspath(existing_desc_path),
+                model_file_path=os.path.abspath(existing_path),
+                test_file_path="",  # no test re-emitted on Branch B reuse
+                config_fields={},
+                model_description=inp.model_description or "",
+                mathematical_definition=inp.mathematical_definition or "",
+                loss_provenance=loss_provenance,
+            )
+
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
         # --- Call 1: reasoning (free text, runs once) ---
@@ -1566,6 +1676,33 @@ class MLModelImplementor:
         with open(model_file_path, "w", encoding="utf-8") as f:
             f.write(plugin_src)
         print(f"✅ Plugin written → {model_file_path}")
+
+        # --- Register the model in the capability index ---
+        # Symmetric to the loss registration in ``_generate_loss`` above —
+        # writes a ``CapabilityMetadata`` entry with ``capability_type='model'``
+        # so the next iteration's proposer can see this plugin as a Branch B
+        # reuse candidate via the ``{available_models_block}`` placeholder.
+        # The ``file_path`` recorded here is the workspace-scoped path; the
+        # workflow's ``_promote_model_to_global`` rewrites it to the global
+        # ``agent_generated/models/`` path after construction-memory validation
+        # (mirrors the post-#92 loss promotion flow).
+        registry_model_description = " ".join((inp.model_description or "").split())
+        self._registry.register(
+            CapabilityMetadata(
+                name=inp.model_name,
+                capability_type="model",
+                file_path=model_file_path,
+                created_at=datetime.now(UTC).isoformat(),
+                source_iteration=getattr(inp, "source_iteration", None),
+                description=registry_model_description,
+                # Persist the formal architectural definition so the
+                # proposer's ``{available_models_block}`` can render it for
+                # Branch B vs Branch C similarity judgment, mirroring the
+                # loss-side L6c behaviour.
+                mathematical_definition=(inp.mathematical_definition or ""),
+            )
+        )
+        print(f"✅ Registered    → model '{inp.model_name}'")
 
         # --- Write description.md so result_interpretation_agent can load it ---
         # Mirrors the structure expected by ml_models/model_descriptions.py:

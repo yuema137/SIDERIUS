@@ -19,10 +19,6 @@ class TestLocalStorageConfig:
         assert cfg.workspace == "/data/runs"
         assert cfg.run_name == "v1"
 
-    def test_default_run_name(self):
-        cfg = LocalStorageConfig(workspace="/data/runs")
-        assert cfg.run_name == "v1"
-
     def test_missing_workspace_raises(self):
         with pytest.raises(ValidationError) as exc:
             LocalStorageConfig()

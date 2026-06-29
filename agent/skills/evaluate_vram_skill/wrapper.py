@@ -60,7 +60,7 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     probe_activation_footprint,
 )
 from core.hardware_context import HardwareContext, discover
-from ml_models.loss_models_sandbox import get_criterion
+from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
 from ml_models.models_sandbox import MODEL_REGISTRY
 
@@ -72,12 +72,14 @@ _GB: int = 1024**3
 # explicitly; ``overhead.training_overhead_bytes`` hard-errors on anything
 # it does not recognise, so there is no silent fallback downstream.
 _DEFAULT_OPTIMIZER: str = "adam"
-# Loss types whose ``target`` tensor is shape-identical to the model's
-# float output (``[B, 256, T]``) rather than the class-index form
-# (``[B, T]`` int64) CE/focal use. The probe's training-mode forward
-# runs ``loss_module(logits, target)``, so target shape has to match
-# what the loss's forward expects or the probe crashes.
-_FLOAT_TARGET_LOSSES: frozenset[str] = frozenset({"smooth_l1", "mse", "l1"})
+# I14 — target dtype routing now reads from each loss plugin's
+# ``PLUGIN_LOSS_TARGET_DTYPE`` declaration via ``get_target_torch_dtype``
+# rather than a hardcoded float-target loss list. The probe's
+# training-mode forward runs ``loss_module(logits, target)``, so target
+# shape (and dtype) has to match what the loss's forward expects or the
+# probe crashes. Long-dtype losses get ``[B, T]`` class-index targets;
+# float-dtype losses get ``[B, 256, T]`` broadcast-shaped targets matching
+# the model's logits. See ``docs/design/enable_loss_inventory.md`` § I14.
 
 # Hard ceiling on a single forward-pass probe call. A Python time-loop
 # inside `forward()` at long T will burn host RAM linearly under autograd;
@@ -153,15 +155,28 @@ def _build_probe_tensors(
     batch_size: int,
     seg_size: int,
     loss_type: str,
+    loss_name: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero-valued ``(input, target)`` pair matching the SIDERIUS forward
     contract. Both tensors live on CPU; the probe will ``.to(device)`` them
-    if the caller asks for CUDA (we don't, here)."""
+    if the caller asks for CUDA (we don't, here).
+
+    I14 — target dtype is read from the loss plugin's declared
+    ``PLUGIN_LOSS_TARGET_DTYPE`` (via ``get_target_torch_dtype``), with the
+    shape derived from the dtype: long-targets are class-index ``[B, T]``;
+    float-targets broadcast against the model's ``[B, 256, T]`` logits.
+    """
     inp = torch.zeros((batch_size, seg_size), dtype=torch.long)
-    if loss_type in _FLOAT_TARGET_LOSSES:
-        tgt = torch.zeros((batch_size, 256, seg_size), dtype=torch.float32)
-    else:
+    # Dict-unpack to mirror the existing ``LossConfig(**loss_cfg)`` pattern
+    # at the run_skill site (line ~469); avoids a Literal-narrowing pyright
+    # error when ``loss_type`` arrives as a plain ``str``.
+    target_dtype = get_target_torch_dtype(
+        LossConfig(**{"loss_type": loss_type, "loss_name": loss_name})
+    )
+    if target_dtype == torch.long:
         tgt = torch.zeros((batch_size, seg_size), dtype=torch.long)
+    else:
+        tgt = torch.zeros((batch_size, 256, seg_size), dtype=target_dtype)
     return inp, tgt
 
 
@@ -426,6 +441,9 @@ def run_skill(sandbox, **kwargs):
     hardware_context: HardwareContext | None = kwargs.get("hardware_context")
 
     loss_type = loss_cfg.get("loss_type", "ce")
+    # I14 — loss_name plumbs through to _build_probe_tensors so the helper
+    # can route custom-loss target dtype via PLUGIN_LOSS_TARGET_DTYPE.
+    loss_name = loss_cfg.get("loss_name")
     batch_size = int(train_cfg.get("batch_size", 1))
     seg_size = int(model_cfg.get("segmentation_size", 40000))
     optimizer = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
@@ -498,7 +516,7 @@ def run_skill(sandbox, **kwargs):
 
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
-        x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type)
+        x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type, loss_name)
         with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "training_probe"):
             training_probe = probe_activation_footprint(
                 model=model_for_train,

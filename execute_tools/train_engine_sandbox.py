@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
-from ml_models.loss_models_sandbox import get_criterion
+from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
 
 # Import your sandboxed components
@@ -418,10 +418,12 @@ def run_experiment(
             input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
 
             # 2. Target: Based on Loss Type
-            if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
-                target_seq = target_seq.long()  # Classification requires Long targets
-            else:
-                target_seq = target_seq.float()  # Regression (smooth_l1) requires Float targets
+            # I13 — single source of truth for target dtype routing. Built-in
+            # ce/focal/focal_cw use long; smooth_l1 uses float; custom losses
+            # consult LOSS_TARGET_DTYPE_REGISTRY populated from each plugin's
+            # PLUGIN_LOSS_TARGET_DTYPE declaration (default "long" preserves
+            # the int64 classifier contract documented in proposing_stage.md).
+            target_seq = target_seq.to(dtype=get_target_torch_dtype(loss_cfg))
 
             optimizer.zero_grad()
             output = model(input_seq)
@@ -552,10 +554,9 @@ def run_experiment_streaming(
 
             input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
 
-            if loss_cfg.loss_type in ["ce", "focal", "focal_cw"]:
-                target_seq = target_seq.long()
-            else:
-                target_seq = target_seq.float()
+            # I13 — see comment at the first occurrence above. Same
+            # single-source-of-truth dispatch via get_target_torch_dtype.
+            target_seq = target_seq.to(dtype=get_target_torch_dtype(loss_cfg))
 
             optimizer.zero_grad()
             output = model(input_seq)

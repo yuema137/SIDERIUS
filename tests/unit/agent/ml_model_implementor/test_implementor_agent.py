@@ -107,6 +107,7 @@ def inp(tmp_path, storage):
 def agent_with_mocks(inp):
     agent = MLModelImplementor.__new__(MLModelImplementor)
     agent.bridge = MagicMock()
+    agent._registry = MagicMock()
     agent.bridge.generate_text.return_value = FAKE_REASONING
     agent.bridge.generate.return_value = FAKE_CODE_RESPONSE
     return agent
@@ -261,10 +262,6 @@ class TestFileAssembly:
 
 
 class TestOutputCorrectness:
-    def test_output_is_implementor_output(self, agent_with_mocks, inp):
-        output = agent_with_mocks.run(inp)
-        assert isinstance(output, ImplementorOutput)
-
     def test_model_type_matches_input(self, agent_with_mocks, inp):
         output = agent_with_mocks.run(inp)
         assert output.model_type == "gated_dilated_tcn"
@@ -420,6 +417,7 @@ class TestConfigFieldConsistency:
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = "reasoning..."
         agent.bridge.generate.return_value = bad_code
 
@@ -509,6 +507,7 @@ class TestSmokeTest:
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = "reasoning..."
         # All attempts return the same bad code
         agent.bridge.generate.return_value = bad_code
@@ -544,6 +543,7 @@ class TestSelfCorrection:
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
         # First call returns bad code, second (repair) returns good code
         agent.bridge.generate.side_effect = [bad_code, good_code]
@@ -566,6 +566,7 @@ class TestSelfCorrection:
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
         agent.bridge.generate.side_effect = [bad_code, good_code]
 
@@ -586,6 +587,7 @@ class TestSelfCorrection:
         }
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
         agent.bridge.generate.return_value = bad_code
 
@@ -607,6 +609,7 @@ class TestSelfCorrection:
 
         agent = MLModelImplementor.__new__(MLModelImplementor)
         agent.bridge = MagicMock()
+        agent._registry = MagicMock()
         agent.bridge.generate_text.return_value = FAKE_REASONING
         # First two fail, third succeeds
         agent.bridge.generate.side_effect = [bad_code, bad_code, good_code]

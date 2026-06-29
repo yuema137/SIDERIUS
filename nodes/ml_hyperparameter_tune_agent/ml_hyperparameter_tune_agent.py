@@ -1216,6 +1216,37 @@ class HyperparamTuningAgent:
             N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
             round_succeeded = False
 
+            # Post-v15 skip-formal gate: bail before starting the formal round
+            # when the best trial score is well below the current run's best
+            # formal score. Saves the formal-round attempt budget (typically
+            # 5 attempts at 100+ minutes each) for configurations that have a
+            # plausible chance of beating the current best.
+            #
+            # The gate fires only when (a) we're about to enter the
+            # forced-formal round, (b) at least one trial winner exists, and
+            # (c) ``best_trial_score < current_run_best_formal_score +
+            # skip_formal_min_delta`` — semantics documented on the schema
+            # fields. Disabled by setting ``skip_formal_min_delta`` to
+            # ``float('-inf')``.
+            if is_formal_round and agent_input.force_formal_round:
+                _skip_threshold = (
+                    agent_input.current_run_best_formal_score + agent_input.skip_formal_min_delta
+                )
+                if _skip_threshold > float("-inf"):
+                    _winner = _best_trial_winner(sandbox.get_summary() or [])
+                    _best_trial_score = (
+                        _winner.get("denoising_score") if _winner is not None else None
+                    )
+                    if _best_trial_score is not None and _best_trial_score < _skip_threshold:
+                        print(
+                            f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
+                            f"current_best({agent_input.current_run_best_formal_score:.4f}) "
+                            f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
+                            f"{_skip_threshold:.4f} — skipping formal round.",
+                            flush=True,
+                        )
+                        break  # exit the while loop; this iter has no formal score
+
             for attempt_in_round in range(1, N + 1):
                 total_attempts += 1
                 iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
@@ -1766,6 +1797,51 @@ class HyperparamTuningAgent:
                         )
                         if time_check.get("status") == "error":
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
+
+                        # Post-v15 bypass-time-budget gate: when the formal
+                        # round is gated by the time estimator, but the
+                        # underlying trial winner clearly beats the current
+                        # run best, run it anyway. Without this gate, v15's
+                        # mamba_multirate_fuser (trial 7.65) and
+                        # dualpath_spectral_router (trial 7.77) never got
+                        # formal validation despite being the strongest
+                        # candidates in the run. The gate only loosens the
+                        # time guard for the formal round (trial rounds
+                        # still respect it) and only when the trial winner
+                        # has already beat the current best.
+                        if is_formal_round and not time_check.get("feasible", True):
+                            _bypass_threshold = (
+                                agent_input.current_run_best_formal_score
+                                + agent_input.bypass_formal_time_budget_min_delta
+                            )
+                            if _bypass_threshold < float("inf"):
+                                _winner = _best_trial_winner(memory_history)
+                                _best_trial_score = (
+                                    _winner.get("denoising_score") if _winner is not None else None
+                                )
+                                if (
+                                    _best_trial_score is not None
+                                    and _best_trial_score >= _bypass_threshold
+                                ):
+                                    print(
+                                        f"  [BypassTimeBudget] Trial "
+                                        f"{_best_trial_score:.4f} >= "
+                                        f"current_best("
+                                        f"{agent_input.current_run_best_formal_score:.4f}) "
+                                        f"+ delta("
+                                        f"{agent_input.bypass_formal_time_budget_min_delta:.4f}) "
+                                        f"= {_bypass_threshold:.4f} — "
+                                        f"bypassing time gate for this "
+                                        f"formal attempt.",
+                                        flush=True,
+                                    )
+                                    # Force the feasibility flag so the
+                                    # downstream skipped_time_risk path is
+                                    # skipped. The estimator's verdict and
+                                    # suggestion stay in time_check for the
+                                    # downstream record, just not as a hard
+                                    # rejection.
+                                    time_check["feasible"] = True
 
                         if not time_check.get("feasible", True):
                             print("Time check FAILED — this attempt does NOT count as a round.")
