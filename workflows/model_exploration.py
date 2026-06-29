@@ -1145,6 +1145,132 @@ def _sha256_file(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Model promotion to the global library (symmetric to L6c for losses)
+# ---------------------------------------------------------------------------
+
+
+def _promote_model_to_global(impl_output) -> None:
+    """Promote a generated model plugin to the global ``agent_generated/models/``.
+
+    Mirrors :func:`_promote_loss_to_global` for the model surface. Called
+    by the workflow's iteration loop right after ``_register_plugin``
+    returns (early-promotion timing matches the issue-#92 fix for losses)
+    so a parallel chain or future-iter resume can resolve the model via
+    the capability index without depending on this run's workspace.
+
+    Trigger condition: ``impl_output.model_file_path`` exists AND
+    ``impl_output.model_type`` is registered in the capability index with
+    ``capability_type='model'``. The implementor writes that entry
+    immediately after building the plugin (so by the time the workflow
+    sees ``impl_output``, the index entry already exists), and Branch B
+    reuse paths leave the existing registry entry alone — so this helper
+    no-ops cleanly on Branch B (file already at the global path, registry
+    already correct).
+
+    Content-hash deduplication: before copying, compares SHA256 of the
+    source against every ``.py`` already in the global models dir. On
+    match, skips the copy and logs which existing entry is the duplicate.
+
+    Registry update: after promotion, the capability registry entry's
+    ``file_path`` is rewritten to the global path via
+    ``CapabilityRegistry.replace()``.
+
+    Idempotency: if the destination file already exists at the exact name
+    (e.g. a parallel chain promoted first, or Branch B reuse), the copy
+    is skipped silently and the registry update is still re-asserted.
+
+    No-op when ``impl_output.model_file_path`` is empty (defensive) or
+    when the model name is not in the registry (e.g. a built-in Branch A
+    path that never wrote a generated plugin — nothing to promote).
+    """
+    model_file_path = getattr(impl_output, "model_file_path", "") or ""
+    if not model_file_path or not os.path.isfile(model_file_path):
+        return  # Built-in / Branch B with no fresh codegen / defensive guard.
+
+    from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from ml_models.plugin_loader import AGENT_GENERATED_DIR as MODELS_DIR
+
+    model_name = getattr(impl_output, "model_type", None)
+    if not model_name:
+        print("  Warning: cannot promote model — impl_output.model_type is empty")
+        return
+
+    # Branch B reuse path: model_file_path already points at the global
+    # directory (the implementor's Branch B short-circuit returns the
+    # registry's file_path verbatim). Nothing to copy or update.
+    abs_src = os.path.abspath(model_file_path)
+    if os.path.dirname(abs_src) == os.path.abspath(MODELS_DIR):
+        return
+
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    global_dest = os.path.join(MODELS_DIR, f"{model_name}.py")
+
+    # Content-hash dedup: scan existing global plugins for byte-identical
+    # content under a different name. Caches src hash to avoid re-reading.
+    src_hash = _sha256_file(abs_src)
+    for fname in os.listdir(MODELS_DIR):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        existing_path = os.path.join(MODELS_DIR, fname)
+        if os.path.abspath(existing_path) == os.path.abspath(global_dest):
+            continue  # same-name handled by the idempotency branch below
+        if _sha256_file(existing_path) == src_hash:
+            existing_name = fname[:-3]
+            print(
+                f"  Model '{model_name}' not promoted — identical content "
+                f"already exists as '{existing_name}' "
+                f"({global_dest} skipped)."
+            )
+            return
+
+    if os.path.exists(global_dest):
+        print(f"  Model '{model_name}' already at global path {global_dest} (idempotent skip).")
+    else:
+        shutil.copy2(abs_src, global_dest)
+        print(f"  Promoted model '{model_name}' → {global_dest}")
+
+    # Also copy the description.md subdir so the proposer's
+    # ``{available_models_block}`` and downstream readers find it at the
+    # canonical layout (``agent_generated/models/{name}/description.md``).
+    desc_path = getattr(impl_output, "description_file_path", "") or ""
+    if desc_path and os.path.isfile(desc_path):
+        desc_dest_dir = os.path.join(MODELS_DIR, model_name)
+        os.makedirs(desc_dest_dir, exist_ok=True)
+        desc_dest = os.path.join(desc_dest_dir, "description.md")
+        if not os.path.exists(desc_dest):
+            shutil.copy2(desc_path, desc_dest)
+            print(f"  Promoted model description → {desc_dest}")
+
+    # Update capability registry to point at the global path.
+    try:
+        registry = CapabilityRegistry()
+        existing = next(
+            (m for m in registry.list(capability_type="model") if m.name == model_name),
+            None,
+        )
+        if existing is None:
+            print(
+                f"  Warning: model '{model_name}' is not in the capability "
+                f"index — registry not updated. Promotion file copy is "
+                f"preserved at {global_dest}."
+            )
+            return
+        promoted_meta = CapabilityMetadata(
+            name=existing.name,
+            capability_type=existing.capability_type,
+            file_path=global_dest,
+            created_at=existing.created_at,
+            source_iteration=existing.source_iteration,
+            description=existing.description,
+            mathematical_definition=existing.mathematical_definition,
+        )
+        registry.replace(promoted_meta)
+        print(f"  Updated registry entry '{model_name}' file_path → {global_dest}")
+    except Exception as e:
+        print(f"  Warning: could not update registry for '{model_name}': {e}")
+
+
+# ---------------------------------------------------------------------------
 # Workflow
 # ---------------------------------------------------------------------------
 
@@ -1391,10 +1517,20 @@ def run_workflow(
     # agent_generated/losses/ is empty (returns []). See
     # docs/design/enable_loss_inventory.md § L6c.
     from ml_models.loss_models_sandbox import preload_global_losses
+    from ml_models.plugin_loader import preload_global_models
 
     _preloaded = preload_global_losses()
     if _preloaded:
         print(f"  Preloaded {len(_preloaded)} global loss plugin(s): {sorted(_preloaded)}")
+    # Model surface — symmetric preload so Branch B model reuse resolves
+    # without depending on the workspace's SIDERIUS_PLUGIN_DIRS. Safe when
+    # ``agent_generated/models/`` is empty (returns []).
+    _preloaded_models = preload_global_models()
+    if _preloaded_models:
+        print(
+            f"  Preloaded {len(_preloaded_models)} global model plugin(s): "
+            f"{sorted(_preloaded_models)}"
+        )
     print(f"  Started       : {started_at}")
     if source_paths is not None:
         print(f"  Source paths  : {len(source_paths)} files")
@@ -2031,6 +2167,13 @@ def run_workflow(
         # reader sees a registry-says-yes / file-says-no state. The late
         # call below remains as an idempotent safety net.
         _promote_loss_to_global(impl_output)
+        # Model surface — symmetric early promotion so Branch B model
+        # reuse from a parallel chain or the next iter resolves the
+        # plugin via the global path without depending on this run's
+        # workspace. Helper no-ops cleanly on Branch B reuse (file
+        # already at the global path) and on Branch A (no generated
+        # plugin to promote). See ``_promote_model_to_global`` docstring.
+        _promote_model_to_global(impl_output)
 
         print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
         tune_llm = llm_config.get("tune")

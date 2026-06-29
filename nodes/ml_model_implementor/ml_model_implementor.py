@@ -1547,6 +1547,69 @@ class MLModelImplementor:
                     dummy_tensor_validated=True,
                 )
 
+        # --- Branch B short-circuit for MODEL surface ---
+        # Symmetric to the loss Branch B handling above: if the proposer
+        # set ``model_config['model_name']`` to a value that's already in
+        # the capability registry, skip code generation entirely and
+        # return an ImplementorOutput pointing at the existing plugin.
+        # The phantom Branch B (model_name set, not in registry) is
+        # detected upstream by ``_validate_branch_b_model_registry_membership``
+        # when the proposer agent passes ``model_registry_names`` context;
+        # this guard catches the same shape if validation context was
+        # absent (back-compat). The check uses ``inp.baseline_config``
+        # because the proposer puts ``model_name`` there, not on
+        # ``inp.model_name`` (which is the proposed top-level name).
+        baseline_model_cfg = inp.baseline_config.get("model_config") or {}
+        branch_b_model_name = (
+            baseline_model_cfg.get("model_name") if isinstance(baseline_model_cfg, dict) else None
+        )
+        if branch_b_model_name:
+            existing_model_names = {m.name for m in self._registry.list(capability_type="model")}
+            if branch_b_model_name not in existing_model_names:
+                raise ValueError(
+                    f"Implementor received Branch B model proposal "
+                    f"(model_name={branch_b_model_name!r}) but "
+                    f"{branch_b_model_name!r} is not in the model "
+                    f"capability registry. Registry currently contains: "
+                    f"{sorted(existing_model_names) if existing_model_names else 'no models'}. "
+                    f"The proposer must either use Branch A (built-in "
+                    f"model_type), Branch C (generate new — leave "
+                    f"model_name unset), or Branch B with a model_name "
+                    f"that actually exists in the registry."
+                )
+            existing_meta = next(
+                (
+                    m
+                    for m in self._registry.list(capability_type="model")
+                    if m.name == branch_b_model_name
+                ),
+                None,
+            )
+            assert existing_meta is not None  # narrowed by membership check above
+            existing_path = existing_meta.file_path
+            print(
+                f"♻️  Branch B model reuse: '{branch_b_model_name}' "
+                f"(source={existing_meta.source_iteration}, "
+                f"path={existing_path}) — skipping code generation."
+            )
+            # Build the ImplementorOutput pointing at the existing plugin
+            # file. Description / test paths default to the existing
+            # plugin's sibling layout (LOSSES_DIR / MODELS_DIR convention);
+            # if the description.md no longer exists alongside the global
+            # plugin, downstream readers degrade gracefully.
+            existing_desc_dir = os.path.join(os.path.dirname(existing_path), branch_b_model_name)
+            existing_desc_path = os.path.join(existing_desc_dir, "description.md")
+            return ImplementorOutput(
+                model_type=branch_b_model_name,
+                description_file_path=os.path.abspath(existing_desc_path),
+                model_file_path=os.path.abspath(existing_path),
+                test_file_path="",  # no test re-emitted on Branch B reuse
+                config_fields={},
+                model_description=inp.model_description or "",
+                mathematical_definition=inp.mathematical_definition or "",
+                loss_provenance=loss_provenance,
+            )
+
         print(f"🔧 Implementing model '{inp.model_name}' ...")
 
         # --- Call 1: reasoning (free text, runs once) ---
@@ -1613,6 +1676,33 @@ class MLModelImplementor:
         with open(model_file_path, "w", encoding="utf-8") as f:
             f.write(plugin_src)
         print(f"✅ Plugin written → {model_file_path}")
+
+        # --- Register the model in the capability index ---
+        # Symmetric to the loss registration in ``_generate_loss`` above —
+        # writes a ``CapabilityMetadata`` entry with ``capability_type='model'``
+        # so the next iteration's proposer can see this plugin as a Branch B
+        # reuse candidate via the ``{available_models_block}`` placeholder.
+        # The ``file_path`` recorded here is the workspace-scoped path; the
+        # workflow's ``_promote_model_to_global`` rewrites it to the global
+        # ``agent_generated/models/`` path after construction-memory validation
+        # (mirrors the post-#92 loss promotion flow).
+        registry_model_description = " ".join((inp.model_description or "").split())
+        self._registry.register(
+            CapabilityMetadata(
+                name=inp.model_name,
+                capability_type="model",
+                file_path=model_file_path,
+                created_at=datetime.now(UTC).isoformat(),
+                source_iteration=getattr(inp, "source_iteration", None),
+                description=registry_model_description,
+                # Persist the formal architectural definition so the
+                # proposer's ``{available_models_block}`` can render it for
+                # Branch B vs Branch C similarity judgment, mirroring the
+                # loss-side L6c behaviour.
+                mathematical_definition=(inp.mathematical_definition or ""),
+            )
+        )
+        print(f"✅ Registered    → model '{inp.model_name}'")
 
         # --- Write description.md so result_interpretation_agent can load it ---
         # Mirrors the structure expected by ml_models/model_descriptions.py:

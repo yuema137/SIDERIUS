@@ -16,12 +16,20 @@ architectural choice must trace back to the comparisons and reasoning.
   analysis, causal hypothesis, inherited components, falsifiable prediction.
 - **Vocabulary**: features/capabilities with confirmed links.
 - **Expert context**: upstream findings, human directives.
-- **Existing model types**: names you must NOT reuse.
+- **Existing model types**: names you must NOT reuse as a fresh
+  generation (Branch C); you MAY however reuse an entry from
+  `## Available custom models` below via Branch B.
 - **Available custom losses**: a registry of previously-generated loss
   functions (see the block below). You may reuse one, propose a new one,
   or use a built-in loss — see Rule 9.
+- **Available custom models**: a registry of previously-generated model
+  plugins (see the block below). You may reuse one (Branch B), propose
+  a new architecture (Branch C), or use a built-in `model_type` (Branch A)
+  — see Rule 10.
 
 {available_losses_block}
+
+{available_models_block}
 
 ## What you produce
 
@@ -88,8 +96,10 @@ making the same mistake unless the shape is fixed at emission time.**
    explain why in `memo_consistency_notes`.
 
 3. **Name uniqueness.** Your `model_name` must NOT be any of the existing
-   model types: {existing_model_types}. Use snake_case: lowercase letters,
-   digits, and underscores only.
+   model types: {existing_model_types}, UNLESS you are taking Branch B
+   (reuse a previously-generated custom model from the registry below —
+   see Rule 10). Use snake_case: lowercase letters, digits, and
+   underscores only.
 
 4. **Forward contract.** The model MUST satisfy:
 
@@ -164,6 +174,59 @@ making the same mistake unless the shape is fixed at emission time.**
    avoids redundant implementor work and concentrates evidence on one loss.
    Branch C is for genuinely new mechanisms (e.g. a spectral-weighted
    variant when no prior iteration tried one).
+
+10. **Model selection — 3-branch decision rule.** Exactly one of these
+    three branches MUST hold; the schema validator rejects any other
+    combination. This is fully symmetric with Rule 9 for losses.
+
+    - **Branch A — Use a built-in model** (default when no custom
+      architecture is warranted): set `model_name` to a fresh snake_case
+      name (NOT in `{existing_model_types}`). Leave
+      `baseline_config.model_config.model_name` UNSET (or `null`).
+      The implementor will generate fresh code from your
+      `mathematical_definition` — this is the standard Branch C path
+      and is what happens by default. (A "built-in" model is one
+      shipped in `MODEL_REGISTRY` directly; you cannot point at one of
+      those by name here — you propose a new architecture and the
+      runner registers it as Branch C.)
+      *(Branch A is reserved for future use where the orchestrator
+      pins an exact built-in `model_type`; today the proposer takes
+      Branch C by default.)*
+
+    - **Branch B — Reuse an existing custom model** from the
+      `## Available custom models` registry above:
+      - Set `model_name = "<name from the table>"` (this is the
+        exception to Rule 3 — Branch B intentionally reuses the
+        registered name).
+      - Set `baseline_config.model_config.model_name` to the SAME
+        string. This dict key is what the implementor branches on:
+        when present and matching a registered model, it short-circuits
+        and reuses the registered plugin — no code generation.
+
+      ⚠ **BRANCH B CONSTRAINT**: Branch B is FORBIDDEN when
+      `{available_models_block}` shows "No custom models registered
+      yet". In that case you MUST choose Branch C. Selecting Branch B
+      with a `model_name` that does not appear in the registry table
+      above will be rejected by the validator — the model plugin does
+      not exist on disk. The `model_name` you cite MUST appear
+      verbatim in the markdown table.
+
+    - **Branch C — Propose a NEW custom architecture** (the
+      historical default): set `model_name` to a fresh snake_case
+      name (NOT in `{existing_model_types}`). Leave
+      `baseline_config.model_config.model_name` UNSET (or `null`).
+      The implementor will generate fresh plugin code from your
+      `mathematical_definition`.
+
+    **Prefer Branch C** when the DiscoveryMemo's `proposed_change`
+    motivates a genuinely new architecture. **Prefer Branch B over
+    Branch C** when a registered model matches the hypothesis — reuse
+    avoids redundant implementor work and concentrates evidence on
+    one architecture. A workflow whose discovery focus is the *loss*
+    surface (advice field `model_branch_required = "B"`) MUST take
+    Branch B from iter_002 onward; a workflow whose focus is the
+    *model* surface (`loss_branch_required = "B"`) MUST take loss
+    Branch B and is free to take any model branch.
 
 {# EXPLORATION_MODE_BLOCK #}
 

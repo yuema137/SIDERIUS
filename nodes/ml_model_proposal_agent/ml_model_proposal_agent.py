@@ -1037,7 +1037,10 @@ class MLModelProposalAgent:
                 context={
                     "loss_registry_names": [
                         m.name for m in self._registry.list(capability_type="loss")
-                    ]
+                    ],
+                    "model_registry_names": [
+                        m.name for m in self._registry.list(capability_type="model")
+                    ],
                 },
             )
 
@@ -1105,6 +1108,7 @@ class MLModelProposalAgent:
             load_stage_prompt,
             render_agent_cards,
             render_available_losses,
+            render_available_models,
             render_expert_context,
         )
         from nodes.proposal_helpers import (
@@ -1253,6 +1257,13 @@ class MLModelProposalAgent:
             # registered yet — propose a new one..."). See
             # docs/design/enable_loss_inventory.md § Commit L5.
             "available_losses_block": render_available_losses(self._registry),
+            # Symmetric for the model surface — rendered into the
+            # ``{available_models_block}`` placeholder by the proposing
+            # stage so the LLM can pick Branch B (reuse) for the model
+            # config when an existing plugin already implements the
+            # intended architecture. Empty registry collapses to the
+            # fallback message ("No custom models registered yet...").
+            "available_models_block": render_available_models(self._registry),
         }
 
         for stage in pipeline.stages:
@@ -1547,7 +1558,10 @@ class MLModelProposalAgent:
                         context={
                             "loss_registry_names": [
                                 m.name for m in self._registry.list(capability_type="loss")
-                            ]
+                            ],
+                            "model_registry_names": [
+                                m.name for m in self._registry.list(capability_type="model")
+                            ],
                         },
                     )
                     # Citation discipline — warnings, not hard failures.
