@@ -25,6 +25,7 @@
 | `llm_model_id` | `str` | Yes | — | LLMBridge model id for the compression + synthesis steps (e.g. `"deepseek-v4-pro"`). |
 | `search_llm_provider` | `str \| None` | No | `None` | Optional separate provider for the cheap, templated search-decision step. Falls back to `llm_provider`. Lets the search loop run on a cheaper model while compression + synthesis stay on the main one. |
 | `search_llm_model_id` | `str \| None` | No | `None` | Optional separate model id for the search-decision step. Falls back to `llm_model_id`. |
+| `task_description` | `str` | No | `""` | Plain-English framing of the research task the lit-review run is supporting. Injected into all three lit-review prompts (paper-extract, search-decision, synthesis) via the `{TASK_DESCRIPTION}` placeholder. Sourced from `configs/task_config.yaml` by the workflow (Commit T3+T4 — the T-series de-hardcoding, `docs/design/enable_global_task_config.md`); empty string when unset means the prompt section is bare (no task-domain anchor). The workflow emits a warning at YAML-load time when the field is empty. |
 
 ### Workflow-populated fields
 
@@ -45,6 +46,7 @@
 | `suggested_mindset` | `str \| None` | Optional directional prior overriding the workflow's explore/exploit default. **Wired-empty in v1** — always returns `None`. |
 | `retrieved_papers` | `list[RetrievedPaper]` | Full audit trail — every paper the agent resolved or peeked at this run (root papers + dynamic-search results). Not consumed by downstream nodes. |
 | `search_rounds_used` | `int` | Number of dynamic-search rounds executed. Bounded by `DynamicSearchConfig.max_rounds`. |
+| `search_decisions` | `list[SearchDecisionRecord]` | Per-LLM-call audit trail of the dynamic-search loop — one row per decision. Captures `round_index`, `action` (`search` / `escalate` / `done`), the emitted `query` or `paper_id` + `verbosity`, the LLM's `reasoning`, and the node-side `outcome` (`n_hits=N` / `ok` / `noop` / `error` / `budget_exceeded` / `target_not_found` / `unknown_action` / `done`). Not consumed by downstream nodes; used for post-hoc diagnosis of dimension coverage, escalation payoff, and loop-termination reasons. Empty when `dynamic_search.enabled=False` or the first LLM call raised before a record was logged. |
 | `run_name` | `str` | Echoed from input — for audit clarity in the dumped JSON. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
@@ -174,6 +176,7 @@ The synthesis prompt requires every finding's **Implication** to ground in one o
 | `experiment_history.key_findings` | `agent/schemas/interpretation.py` | `list[str]` | — | Findings carried from prior iterations. Provided to the synthesis LLM as PRIMARY input alongside bottlenecks. | finding quality (relevance) |
 | `experiment_history.take_home_message` | `agent/schemas/interpretation.py` | `str` | — | One-line summary of current state. Surfaced near the top of the synthesis prompt. | finding quality (framing) |
 | `root_papers` (count) | `agent/schemas/literature_review.py:400` length | `list[PaperSource]` length | `[]` | Locked starting set of papers. More roots = more candidate citations, more equations in scope. | finding count, finding quality |
+| `task_description` | `agent/schemas/literature_review.py:494` | `str` | `""` (workflow warns) | Task-domain anchor injected into `{TASK_DESCRIPTION}` in all three lit-review prompts (paper-extract, search-decision, synthesis). Sourced from `configs/task_config.yaml` by the workflow (T-series de-hardcoding). Empty → the LLM has no task-domain anchor for `relevance_to_task`, search queries, or synthesis grounding. | finding quality (relevance grounding), search behavior, extraction quality (`relevance_to_task` field) |
 
 ### LLM routing
 
@@ -195,9 +198,8 @@ The synthesis prompt requires every finding's **Implication** to ground in one o
 
 | Constant | Location | Value | Controls | Affects |
 |---|---|---|---|---|
-| `MAX_RAW_TEXT_CHARS` | `agent/prompt_templates/literature_review/__init__.py:182` | `120_000` (~30k tokens at 4 chars/token) | Hard cap on raw paper text fed to the compression prompt. Beyond is replaced with `[...TRUNCATED...]`. | extraction quality (truncated papers lose content) |
-| `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review/ml_literature_review.py:61` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
-| `SIDERIUS_TASK` | `agent/prompt_templates/literature_review/__init__.py:188` | task-description string | Downstream task description injected into the compression + synthesis prompts. `render_paper_extract_prompt` accepts `task_description=` if generalizing beyond SQUID. | finding quality (relevance grounding), extraction quality (`relevance_to_task` field) |
+| `MAX_RAW_TEXT_CHARS` | `agent/prompt_templates/literature_review/__init__.py:185` | `120_000` (~30k tokens at 4 chars/token) | Hard cap on raw paper text fed to the compression prompt. Beyond is replaced with `[...TRUNCATED...]`. | extraction quality (truncated papers lose content) |
+| `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review/ml_literature_review.py:64` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
 | `S2_DEFAULT_TIMEOUT_S` / `S2_MIN_REQUEST_INTERVAL_S` / `S2_MAX_RETRIES` | `agent/skills/paper_resolver_skill/wrapper.py:46-51` | `30` / `1.1` / `3` | S2 network behavior. | extraction success rate |
 | `_AGENT_CARD.trust_level` | `nodes/ml_literature_review/ml_literature_review.py:65` | `"soft_prior"` | Machine-readable trust calibration emitted on every run, read by the proposer's synthesis rules (P-b + P-c). Three valid levels: `hard_limit` (non-negotiable — physics-style constraints), `strong_prior` (weight comparably to experiment data — human directives), `soft_prior` (inspirational priors requiring experiment validation — literature). Lit-review is `soft_prior` by design. **Override only by changing the constant in code** — per-run override would defeat the calibration's role as a stable signal. | proposal weighting |
 

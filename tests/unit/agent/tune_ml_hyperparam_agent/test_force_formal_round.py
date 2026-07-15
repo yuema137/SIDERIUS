@@ -1160,6 +1160,9 @@ class TestRegistryShape:
 # the in-process check inside `execute_tools.scoring_utils.score_vector`
 # (commits b1+b2) plus the agent-side `_apply_degeneracy_reaction` policy
 # helper (commit c2). Coverage now lives in:
-#   - tests/unit/execute_tools/test_squid_health_checks.py
+#   - tests/unit/execute_tools/health_checks/test_output_diversity_check.py
+#   - tests/unit/execute_tools/health_checks/test_amplitude_collapse_check.py
+#   - tests/unit/execute_tools/health_checks/test_runner.py
+#   - tests/unit/agent/tune_ml_hyperparam_agent/test_gate_integration.py
 #   - tests/unit/agent/tune_ml_hyperparam_agent/test_degeneracy_handling.py
 # ---------------------------------------------------------------------------

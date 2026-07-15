@@ -685,8 +685,11 @@ class TestRunWorkflowMultiIteration:
         mamba_multirate_fuser / dualpath_spectral_router pattern).
 
         After this fix, iter_2's tune_input.current_run_best_formal_score
-        must be the schema default (5.5763 WaveNet baseline) — unchanged
-        by iter_1's trial-only success.
+        must be the schema default (1.0007 raw baseline) — unchanged by
+        iter_1's trial-only success. NOTE: 5.5763 is intentionally NOT
+        the default — it is the class-127 mode-collapse fingerprint
+        (SNR=2^17 FP artifact), see docs/design/pluggable_health_checks.md
+        §7.1.
         """
         # iter_1: simulates "all formal attempts gated, only trial scored".
         iter1_tune = _make_tune_output(model_type="model_a", score=7.7)
@@ -709,9 +712,9 @@ class TestRunWorkflowMultiIteration:
             max_iterations=2,
         )
         iter2_tune_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
-        # Schema default = 5.5763 (WaveNet baseline). Must NOT be the
+        # Schema default = 1.0007 (raw baseline). Must NOT be the
         # iter_1 trial score (7.7) — that would mean the bug is back.
-        assert iter2_tune_input.current_run_best_formal_score == pytest.approx(5.5763)
+        assert iter2_tune_input.current_run_best_formal_score == pytest.approx(1.0007)
 
 
 # ---------------------------------------------------------------------------

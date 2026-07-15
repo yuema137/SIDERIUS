@@ -329,20 +329,27 @@ def test_determinism_same_run_id_yields_same_stream(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_score_vector_returns_synthetic_four_tuple(stub: StubSandbox) -> None:
+def test_score_vector_returns_synthetic_two_tuple(stub: StubSandbox) -> None:
     """``ml_hyperparameter_tune_agent`` calls ``sandbox.score_vector`` (not
     ``execute_scoring``) when ``anchor_map_data is not None`` — the default
     modern chain path. The inherited prod implementation opens the
     ``abra_validation_denoised_*.h5`` artefacts produced by inference;
     under ``--is_pseudo_training`` those files don't exist (inference is
     stubbed), so the stub must override the method to return a synthetic
-    4-tuple matching the tuner's unpacking at the call site:
+    2-tuple matching the tuner's unpacking at the call site:
 
-        file_vector, final_scalar, is_degenerate, failure_reason
+        file_vector, final_scalar
 
-    Pins all four contract fields: ``file_vector`` length 9 and bounded
-    in [-3.0, -2.0]; ``final_scalar`` in the same band; flags fixed."""
-    fv, fs, deg, fr = stub.score_vector(
+    Pins both contract fields: ``file_vector`` length 9 and bounded in
+    [-3.0, -2.0]; ``final_scalar`` in the same band.
+
+    Health-check separation (commit-5a): the trailing
+    ``(is_degenerate, failure_reason)`` pair was removed when
+    ``score_vector`` shed its embedded health-check logic. See
+    ``docs/design/pluggable_health_checks.md`` §14 Option A. Extra
+    kwargs like ``reference_file_vector`` are silently swallowed by
+    ``**kwargs`` — verified below."""
+    fv, fs = stub.score_vector(
         sample_set={6: [0, 1, 2]},
         anchor_map={6: 1.0},
         s_max=1.0,
@@ -355,8 +362,6 @@ def test_score_vector_returns_synthetic_four_tuple(stub: StubSandbox) -> None:
         assert -3.0 <= v <= -2.0
     assert isinstance(fs, float)
     assert -3.0 <= fs <= -2.0
-    assert deg is False
-    assert fr is None
 
 
 # ---------------------------------------------------------------------------

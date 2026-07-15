@@ -40,7 +40,7 @@ from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
 
-SIDERIUS_ROOT = os.path.dirname(os.path.abspath(__file__))
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DATA_DIR = SIDERIUS_DATA_DIR
 DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
@@ -202,7 +202,10 @@ def run_baseline(
 
 
 def run_baseline_trial(
-    model_type: str, baseline_workspace: str, progress_bar: bool = False
+    model_type: str,
+    baseline_workspace: str,
+    progress_bar: bool = False,
+    max_epochs: int = 1,
 ) -> dict:
     """
     Runs baseline with the TIDMAD paper config using the trial pipeline:
@@ -230,9 +233,9 @@ def run_baseline_trial(
     run_name = f"baseline_{model_type}"
     exp_id = f"baseline_{model_type}_{int(time.time())}"
 
-    # Override epochs to match paper (10 epochs with 10% subsampling ≈ paper's training)
+    # Override epochs to 1 per paper authors (direct communication).
     t_cfg = dict(t_cfg)
-    t_cfg["epochs"] = 10
+    t_cfg["epochs"] = max_epochs
 
     sandbox = TidmadSandbox(
         metadata_source="local",
@@ -305,7 +308,7 @@ def run_baseline_trial(
     def _denoised_fn(fi):
         return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
 
-    file_vector, final_scalar, _, _ = score_vector(
+    file_vector, final_scalar = score_vector(
         data_dir=baseline_workspace,
         sample_set=eval_sample_set,
         anchor_map=anchor_data["anchors"],
@@ -427,6 +430,9 @@ def run_agent(
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    max_epochs: int | None = None,
+    trial_time_budget_minutes: float | None = None,
+    formal_time_budget_minutes: float | None = None,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
@@ -486,6 +492,13 @@ def run_agent(
     cmd.extend(["--formal_strategy", formal_strategy])
     cmd.extend(["--formal_portion", str(formal_portion)])
     cmd.extend(["--formal_train_portion", str(formal_train_portion)])
+    # Epoch cap + wall-time budgets (forwarded when set; None → tuner defaults).
+    if max_epochs is not None:
+        cmd.extend(["--max_epochs", str(max_epochs)])
+    if trial_time_budget_minutes is not None:
+        cmd.extend(["--trial_time_budget_minutes", str(trial_time_budget_minutes)])
+    if formal_time_budget_minutes is not None:
+        cmd.extend(["--formal_time_budget_minutes", str(formal_time_budget_minutes)])
 
     print(f"\n{'=' * 60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
@@ -643,6 +656,37 @@ def main():
         default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
     )
+    parser.add_argument(
+        "--max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "Optional epoch cap for Phase 2/3 planner rounds. When omitted, "
+            "the planner may choose epochs within the TrainConfig bounds. "
+            "Phase 1 baseline remains fixed at 1 epoch per paper authors "
+            "(direct communication)."
+        ),
+    )
+    parser.add_argument(
+        "--trial_time_budget_minutes",
+        type=float,
+        default=None,
+        help=(
+            "Forwarded to the tuner subprocess as --trial_time_budget_minutes "
+            "when set. Wall-time cap per trial round. Default None = tuner "
+            "default (no cap)."
+        ),
+    )
+    parser.add_argument(
+        "--formal_time_budget_minutes",
+        type=float,
+        default=None,
+        help=(
+            "Forwarded to the tuner subprocess as --formal_time_budget_minutes "
+            "when set. Wall-time cap for the formal round. Default None = tuner "
+            "default (no cap)."
+        ),
+    )
     args = parser.parse_args()
 
     # --- Resolve reflect provider/model defaults ---
@@ -734,6 +778,7 @@ def main():
                 model_type,
                 baseline_workspace,
                 progress_bar=args.progress_bar,
+                max_epochs=(args.max_epochs if args.max_epochs is not None else 1),
             )
         else:
             baseline_record = run_baseline(
@@ -814,6 +859,9 @@ def main():
         formal_strategy=args.formal_strategy,
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
+        max_epochs=args.max_epochs,
+        trial_time_budget_minutes=args.trial_time_budget_minutes,
+        formal_time_budget_minutes=args.formal_time_budget_minutes,
     )
 
     print(f"\n{'#' * 60}")

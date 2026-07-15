@@ -262,3 +262,42 @@ class CapabilityRegistry:
             f"capability_type={metadata.capability_type!r} in the registry. "
             f"Use register() to add a new entry instead."
         )
+
+    def remove(self, name: str, capability_type: CapabilityType | None = None) -> bool:
+        """Remove a capability entry by ``(name, capability_type)``.
+
+        Companion to :meth:`register` used by cleanup paths — the
+        workflow-startup phantom sweep in
+        ``workflows.model_exploration._cleanup_stale_registry_entries``
+        removes entries whose ``file_path`` no longer resolves to a real
+        file (a signal that the plugin was registered pre-validation and
+        the validator later failed, or that the ``.py`` was garbage-
+        collected with the workspace).
+
+        Atomicity: same tmp-file-then-rename via ``_write_raw`` as
+        :meth:`register` / :meth:`replace`, so concurrent readers never
+        see a partially-rewritten index.
+
+        Args:
+            name: Registry entry name to remove.
+            capability_type: Optional filter — when set, only removes a
+                row matching BOTH ``name`` and ``capability_type``.
+                ``None`` removes any row with the matching name
+                regardless of type (rarely useful; kept symmetric with
+                :meth:`list` / :meth:`exists`).
+
+        Returns:
+            ``True`` if a row was removed, ``False`` if no matching row
+            existed. Returning ``False`` on miss (rather than raising)
+            makes idempotent cleanup loops cleanly re-runnable.
+        """
+        rows = self._read_raw()
+        for i, row in enumerate(rows):
+            if row.get("name") != name:
+                continue
+            if capability_type is not None and row.get("capability_type") != capability_type:
+                continue
+            del rows[i]
+            self._write_raw(rows)
+            return True
+        return False

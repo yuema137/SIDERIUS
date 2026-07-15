@@ -149,7 +149,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_vector_length_is_20(self, mock_psd, mock_snr):
         sample_set: SampleSet = {0: [0, 1], 6: [0]}
-        vector, _scalar, _, _ = score_vector(
+        vector, _scalar = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -163,7 +163,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_excluded_files_are_none(self, mock_psd, mock_snr):
         sample_set: SampleSet = {6: [0]}
-        vector, _, _, _ = score_vector(
+        vector, _ = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -190,7 +190,7 @@ class TestScoreVector:
         ``log_{5.27}(0.01 + 1e-10) ≈ -2.7708``.
         """
         sample_set: SampleSet = {6: [0]}
-        vector, scalar, _, _ = score_vector(
+        vector, scalar = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -210,7 +210,7 @@ class TestScoreVector:
         the simple mean of the two ``file_vector`` entries.
         """
         sample_set: SampleSet = {0: [0], 19: [199]}
-        vector, scalar, _, _ = score_vector(
+        vector, scalar = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -249,7 +249,7 @@ class TestScoreVector:
     @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
     def test_empty_sample_set(self, mock_psd, mock_snr):
         """Empty sample set: all-None vector, -inf scalar."""
-        vector, scalar, _, _ = score_vector(
+        vector, scalar = score_vector(
             data_dir="/fake",
             sample_set={},
             anchor_map=MOCK_ANCHOR_MAP,
@@ -266,7 +266,7 @@ class TestScoreVector:
         """Normal mode: single file with all segments — 1 real value, 19 None."""
         all_segments = list(range(SEGMENTS_PER_FILE))
         sample_set: SampleSet = {6: all_segments}
-        vector, _scalar, _, _ = score_vector(
+        vector, _scalar = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=MOCK_ANCHOR_MAP,
@@ -296,7 +296,7 @@ class TestScoreVector:
         constant independent of which segments happen to be sampled.
         """
         sample_set: SampleSet = {6: [0]}
-        _, scalar_legacy, _, _ = score_vector(
+        _, scalar_legacy = score_vector(
             data_dir="/fake",
             sample_set=sample_set,
             anchor_map=None,
@@ -311,133 +311,10 @@ class TestScoreVector:
         assert abs(scalar_legacy - expected) < 1e-12
 
 
-# ---------------------------------------------------------------------------
-# score_vector — reference / health-check integration (commit b2)
-# ---------------------------------------------------------------------------
-
-
-class TestScoreVectorHealthCheck:
-    """``score_vector`` accepts an optional ``reference_file_vector`` and
-    returns ``(file_vector, scalar, is_degenerate, failure_reason)``.
-
-    The collapse predicate itself is unit-tested in
-    ``test_squid_health_checks.py`` — these tests verify the wiring:
-    ``score_vector`` correctly forwards to ``check_amplitude_collapse``
-    and surfaces the result in its return tuple.
-    """
-
-    def _filename_fn(self, file_index: int) -> str:
-        return f"validation_denoised_{file_index:04d}.h5"
-
-    @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
-    @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_no_reference_returns_false_none(self, mock_psd, mock_snr):
-        """Graceful fallback: ``reference_file_vector=None`` (the default)
-        skips the health check; ``is_degenerate`` is False, reason is None."""
-        sample_set: SampleSet = {6: [0]}
-        _, _, is_degen, reason = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-            # reference_file_vector omitted -> None default
-        )
-        assert is_degen is False
-        assert reason is None
-
-    @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
-    @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_reference_with_collapse_trips_check(self, mock_psd, mock_snr):
-        """A reference 1000× the current output must trip collapse."""
-        sample_set: SampleSet = {6: [0]}
-        # Current output mocked to a small magnitude. Pass a reference
-        # whose mean magnitude vastly exceeds the current.
-        reference_huge = [None] * NUM_FILES
-        reference_huge[6] = 10000.0
-        _, _, is_degen, reason = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-            reference_file_vector=reference_huge,
-        )
-        assert is_degen is True
-        assert reason is not None
-        assert "amplitude_collapse" in reason
-
-    @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
-    @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_reference_with_normal_output_passes(self, mock_psd, mock_snr):
-        """When the current output is comparable to the reference, the
-        check passes."""
-        sample_set: SampleSet = {6: [0]}
-        # Mock returns snr_squid=2.0 — score should be a small linear
-        # value. Pass a reference at a similar order of magnitude.
-        # Because mocks are non-trivial, we read the actual file_vector
-        # first then build a reference at parity.
-        fv, _, _, _ = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-        )
-        # Use the same vector as reference -> ratio is 1.0, well above 1%.
-        _, _, is_degen, reason = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-            reference_file_vector=fv,
-        )
-        assert is_degen is False
-        assert reason is None
-
-    @patch("execute_tools.scoring_utils.get_snr", side_effect=_mock_get_snr_fixed)
-    @patch("execute_tools.scoring_utils.get_one_sec_psd", side_effect=_mock_get_one_sec_psd)
-    def test_custom_threshold_forwarded(self, mock_psd, mock_snr):
-        """A 5% threshold catches a 4%-of-reference output that the default
-        (1%) would miss — proves ``degeneracy_threshold_ratio`` is forwarded."""
-        sample_set: SampleSet = {6: [0]}
-        fv, _, _, _ = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-        )
-        # Build reference 25× larger -> ratio = 4% (below 5%, above 1%)
-        ref = [None] * NUM_FILES
-        ref[6] = float(fv[6]) * 25.0
-        # Default 1% threshold passes
-        _, _, is_degen_default, _ = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-            reference_file_vector=ref,
-        )
-        assert is_degen_default is False
-        # Custom 5% threshold trips
-        _, _, is_degen_custom, reason_custom = score_vector(
-            data_dir="/fake",
-            sample_set=sample_set,
-            anchor_map=MOCK_ANCHOR_MAP,
-            s_max=MOCK_S_MAX,
-            denoised_filename_fn=self._filename_fn,
-            parallel=False,
-            reference_file_vector=ref,
-            degeneracy_threshold_ratio=0.05,
-        )
-        assert is_degen_custom is True
-        assert reason_custom is not None
+# Note (commit-5a): ``TestScoreVectorHealthCheck`` used to live here (5
+# tests exercising ``reference_file_vector`` + the ``is_degenerate`` /
+# ``failure_reason`` return fields). Those fields were removed from
+# ``score_vector``'s signature per Option A in
+# ``docs/design/pluggable_health_checks.md`` §14 — health checks now run
+# tuner-side via ``evaluate_gate``. The equivalent testing lives in the
+# tuner's gate-integration tests (added in commit-5b).

@@ -103,11 +103,27 @@ repair attempts.
 
 **Estimated cost**: ~$1.50-2.50 (gpt-5.4 dominant role).
 
-**Pass criteria**:
+**Pass criteria — HealthGate framework correctness**
+
+These criteria test the HealthGate infrastructure only, not model denoising quality.
+
 1. Chain exits 0
-2. `run_output_*.json` written for each iteration with non-null finite `denoising_score`
-3. Feature-specific injection verified (e.g. `task_config_snapshot.yaml` present,
-   SQUID text in interpretation output, etc.)
+2. Every round has a recorded `gate_action` in `final_record`
+   (any value: PASS, INVALIDATE_ROUND, ABORT_CHAIN)
+3. Every `denoising_score` is either:
+   a. A finite positive number, OR
+   b. `None` / `-inf` WITH a corresponding `gate_action` of
+      `INVALIDATE_ROUND` or `ABORT_CHAIN` in that round's record
+   (A `None` score with no `gate_action` recorded is a framework bug)
+4. No phantom `5.5762667` appears as a final accepted score
+   (phantom scores caught and invalidated by HealthGate are acceptable)
+5. At least one round triggers a HealthGate evaluation
+   (confirms gate firing logic is reachable)
+
+The following are explicitly NOT pass/fail criteria for Gate 2:
+- Whether denoising_score > baseline
+- Whether the model learned to denoise
+- Whether score is above any threshold
 
 **Needs user approval**: yes (real LLM + real training cost and time).
 

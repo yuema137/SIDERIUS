@@ -201,51 +201,82 @@ class TestCheckPlugin:
 
 
 class TestRunTests:
-    def test_passing_tests_return_true(self):
+    @staticmethod
+    def _touch_test_file(tmp_path):
+        """Materialize a real file so the empty-path guard doesn't
+        short-circuit — these tests exercise the pytest-subprocess path."""
+        p = tmp_path / "test_dummy.py"
+        p.write_text("def test_dummy(): assert True\n")
+        return str(p)
+
+    def test_passing_tests_return_true(self, tmp_path):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "3 passed in 0.5s"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, _output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests(self._touch_test_file(tmp_path))
         assert ok is True
 
-    def test_failing_tests_return_false(self):
+    def test_failing_tests_return_false(self, tmp_path):
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = "FAILED test_forward - AssertionError"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            ok, _output = _run_tests("/fake/test_file.py")
+            ok, _output = _run_tests(self._touch_test_file(tmp_path))
         assert ok is False
 
-    def test_stdout_and_stderr_concatenated(self):
+    def test_stdout_and_stderr_concatenated(self, tmp_path):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "stdout content"
         mock_result.stderr = "stderr content"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests(self._touch_test_file(tmp_path))
         assert "stdout content" in output
         assert "stderr content" in output
 
-    def test_output_returned_on_pass(self):
+    def test_output_returned_on_pass(self, tmp_path):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "3 passed"
         mock_result.stderr = ""
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests(self._touch_test_file(tmp_path))
         assert "3 passed" in output
 
-    def test_output_returned_on_fail(self):
+    def test_output_returned_on_fail(self, tmp_path):
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stdout = "FAILED"
         mock_result.stderr = "error detail"
         with patch("nodes.ml_code_validator_agent.subprocess.run", return_value=mock_result):
-            _ok, output = _run_tests("/fake/test_file.py")
+            _ok, output = _run_tests(self._touch_test_file(tmp_path))
         assert "FAILED" in output
+
+    # --- Branch B empty/nonexistent-path guard (v16 fix) ---
+
+    def test_run_tests_skips_when_empty_path(self):
+        """Empty ``test_file_path`` is the Branch B model reuse sentinel
+        emitted by the implementor's short-circuit. Pytest must NOT be
+        invoked — an empty positional arg triggers full-project discovery
+        (the v16 loss-chain false-negative bug)."""
+        with patch("nodes.ml_code_validator_agent.subprocess.run") as mocked:
+            ok, output = _run_tests("")
+        assert ok is True
+        assert "Skipped" in output
+        assert "Branch B model reuse" in output
+        mocked.assert_not_called()
+
+    def test_run_tests_skips_when_path_not_a_file(self):
+        """Nonexistent path also skips — same guard, defensive against a
+        stale/cleaned path (v16 iter_015 pytest-tmp-dir race)."""
+        with patch("nodes.ml_code_validator_agent.subprocess.run") as mocked:
+            ok, output = _run_tests("/nonexistent/path/that/does/not/exist.py")
+        assert ok is True
+        assert "Skipped" in output
+        mocked.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

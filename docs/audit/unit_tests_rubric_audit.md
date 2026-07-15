@@ -3113,11 +3113,10 @@ Tests: 29
 
 ### `tests/unit/execute_tools/test_scoring_utils.py`
 
-Tests: 17
+Tests: 13
 
 | Test function | Verdict | Reason (cite actual code) |
 |---|---|---|
-| `test_custom_threshold_forwarded` | Keep | `assert is_degen_default is False` and `assert is_degen_custom is True` for 25× reference with 1% vs 5% threshold — threshold parameter forwarding |
 | `test_empty_sample_set` | Keep | `assert all(v is None for v in vector)` and `assert scalar == float("-inf")` — empty sample set returns -inf scalar |
 | `test_empty_segments_returns_nan` | Keep | `assert math.isnan(result)` for `segment_indices=[]` — empty segment edge case |
 | `test_excluded_files_are_none` | Keep | `assert vector[6] is not None and not math.isnan(vector[6])` and `for i in range(NUM_FILES): if i != 6: assert vector[i] is None` — files not in sample_set are None |
@@ -3125,34 +3124,12 @@ Tests: 17
 | `test_legacy_mode_derives_s_max_globally_from_collected_pairs` | Keep | `expected = math.log(2.0, 5.27)` then `assert abs(scalar_legacy - expected) < 1e-12` — legacy mode s_max derivation logic |
 | `test_multiple_files_grand_mean` | Keep | `grand_mean = (vector[0] + vector[19]) / 2.0; expected = math.log(grand_mean, 5.27)` then `assert abs(scalar - expected) < 1e-12` — grand mean is not mean-of-file-means |
 | `test_multiple_segments_averaged` | Keep | `expected = (w0 + w9) / 2.0` then `assert abs(result - expected) < 1e-10` — multi-segment mean computation |
-| `test_no_reference_returns_false_none` | Keep | `assert is_degen is False` and `assert reason is None` — reference=None skips health check |
 | `test_normal_mode_single_file` | Keep | `assert len(present) == 1` and `assert vector[6] is not None` — normal mode single file scoring |
 | `test_raises_without_filename_fn` | Keep | `with pytest.raises(ValueError, match="denoised_filename_fn is required")` — explicit error for missing fn |
 | `test_raises_without_s_max_in_non_legacy_mode` | Keep | `with pytest.raises(ValueError, match="Non-legacy mode requires s_max")` — explicit error for missing s_max |
-| `test_reference_with_collapse_trips_check` | Keep | `reference_huge[6] = 10000.0` then `assert is_degen is True` and `assert "amplitude_collapse" in reason` — large reference triggers collapse |
-| `test_reference_with_normal_output_passes` | Keep | uses same vector as reference then `assert is_degen is False` and `assert reason is None` — parity reference passes |
 | `test_scalar_is_log_of_grand_mean` | Keep | `expected = math.log(vector[6], 5.27)` then `assert abs(scalar - expected) < 1e-12` — pins exact log base-5.27 formula with no quantization |
 | `test_single_segment` | Keep | `assert abs(result - expected) < 1e-10` where `expected = 2.0 * (1.0 / 4000.0)` — arithmetic of weighted SNR with predictable anchor map |
 | `test_vector_length_is_20` | Keep | `assert len(vector) == NUM_FILES` — score_vector always returns 20-element vector |
-
-### `tests/unit/execute_tools/test_squid_health_checks.py`
-
-Tests: 12
-
-| Test function | Verdict | Reason (cite actual code) |
-|---|---|---|
-| `test_collapse_detected_at_explore_v7_magnitude` | Keep | `file_vec = [0.005] * 20; ref_vec = [8.6] * 20; is_degen, reason = check_amplitude_collapse(file_vec, ref_vec); assert is_degen is True; assert "0.005" in reason; assert "8.6" in reason; assert "amplitude_collapse" in reason` — exact real-world collapse magnitudes from live run |
-| `test_custom_threshold_overrides_default` | Keep | `is_degen, reason = check_amplitude_collapse(file_vec, ref_vec, threshold_ratio=0.05); assert is_degen is True; assert "5%" in reason` — custom threshold + reason includes threshold |
-| `test_empty_reference_returns_false_safely` | Keep | `is_degen, reason = check_amplitude_collapse([0.005], []); assert is_degen is False` |
-| `test_failure_reason_includes_actual_and_reference_magnitudes` | Keep | `is_degen, reason = check_amplitude_collapse([0.123], [45.6]); assert "0.123" in reason; assert "45.6" in reason` — magnitudes in reason string |
-| `test_failure_reason_includes_ratio_and_threshold` | Keep | `assert "0.500%" in reason or "0.5%" in reason; assert "1%" in reason` — ratio and threshold in reason |
-| `test_no_file_vector_returns_false_safely` | Keep | `is_degen, reason = check_amplitude_collapse(None, [8.6]); assert is_degen is False` |
-| `test_no_reference_returns_false_safely` | Keep | `is_degen, reason = check_amplitude_collapse([0.005], None); assert is_degen is False; assert reason is None` — missing reference → safe pass |
-| `test_none_entries_in_vectors_are_skipped` | Keep | `file_vec = [7.2, None, 7.2, None, 7.2]; ref_vec = [8.6, 8.6, 8.6, 8.6, 8.6]; is_degen, _ = check_amplitude_collapse(file_vec, ref_vec); assert is_degen is False` — None entries skipped, not treated as zero |
-| `test_normal_output_passes_through` | Keep | `file_vec = [7.2] * 20; ref_vec = [8.6] * 20; is_degen, reason = check_amplitude_collapse(...); assert is_degen is False; assert reason is None` — healthy output |
-| `test_threshold_boundary_exactly_at_1pct_does_not_trip` | Keep | `is_degen, _ = check_amplitude_collapse([1.0], [100.0], threshold_ratio=0.01); assert is_degen is False` — strict < semantics at boundary |
-| `test_threshold_just_below_trips` | Keep | `is_degen, reason = check_amplitude_collapse([0.99], [100.0], threshold_ratio=0.01); assert is_degen is True` — just below boundary |
-| `test_zero_reference_magnitude_returns_false_safely` | Keep | `is_degen, reason = check_amplitude_collapse([0.005], [0.0, 0.0]); assert is_degen is False` — divide-by-zero avoided |
 
 ### `tests/unit/execute_tools/test_train_sentinel.py`
 

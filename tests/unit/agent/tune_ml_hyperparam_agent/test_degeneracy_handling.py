@@ -1,11 +1,13 @@
 """Unit tests for the generic degeneracy reaction helper.
 
-The task-specific predicate (amplitude collapse for SQUID denoising)
-lives in ``execute_tools/squid_health_checks.py`` and is exercised in
-``tests/unit/execute_tools/test_squid_health_checks.py``. By the time
-``_apply_degeneracy_reaction`` runs, ``score_results`` already carries
-the predicate's verdict on ``is_degenerate`` and the human-readable
-``failure_reason``.
+Post-commit-5b, the health-check verdict is produced by tuner-side gate
+evaluation (``get_gates_for_position`` → ``evaluate_gate`` →
+``resolve_action``) and mapped to the legacy ``is_degenerate`` /
+``failure_reason`` contract via ``_gate_results_to_score_meta``. By the
+time ``_apply_degeneracy_reaction`` runs, ``score_results`` already
+carries the mapping's output — the exact same contract these policy
+tests exercise. Tests remain independent of the source (score_vector in
+earlier revs, tuner-side gates now).
 
 These tests pin down the **policy** layer alone — the translation from
 ``(is_degenerate, plan.is_trial, penalty_score)`` to ``denoising_score``
@@ -98,10 +100,13 @@ def test_degenerate_formal_with_float_penalty_uses_penalty():
 
 
 def test_degenerate_trial_round_is_no_op():
-    """Trial rounds never get penalized — no magnitude benchmark exists at
-    trial time. score_vector should not flag is_degenerate on trial
-    rounds (reference_file_vector=None upstream), but defensive: if it
-    does, the policy ignores the signal."""
+    """Trial rounds never get penalized (AMB-5b-A → A). Post-commit-5b,
+    tuner-side gate evaluation MAY flag is_degenerate=True on a trial
+    round — e.g. round-1 ``collapse_check_round_1`` firing SKIP_ITER
+    still sets is_degenerate=True per ``_gate_results_to_score_meta``.
+    The policy function ignores the signal for score mutation but still
+    returns the raw signal so the caller can log/audit and drive
+    loop control."""
     plan = _make_plan(is_trial=True)
     score_results = {
         "denoising_score": 0.5,

@@ -19,7 +19,7 @@
             "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",
@@ -46,7 +46,7 @@
             "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",
@@ -68,7 +68,7 @@
             "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",
@@ -88,12 +88,14 @@
             "num_blocks": 10
         },
         "loss_cfg": {
-            "loss_type": "ce",
+            "loss_type": "focal",
+            "alpha": 0.5,
+            "gamma": 2.0,
             "reduction": "mean",
-            "use_class_weights": true
+            "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",
@@ -118,7 +120,7 @@
             "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",
@@ -143,7 +145,7 @@
             "use_class_weights": false
         },
         "train_cfg": {
-            "lr": 1e-3,
+            "lr": 5e-4,
             "epochs": 10,
             "batch_size": 1,
             "optimizer_type": "adam",

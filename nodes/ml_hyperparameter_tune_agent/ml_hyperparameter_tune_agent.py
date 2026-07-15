@@ -50,6 +50,16 @@ from core.hardware_context import get_or_create
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.health_checks.runner import (
+    evaluate_gate,
+    get_gates_for_position,
+    resolve_action,
+)
+from execute_tools.health_checks.schemas import (
+    GateAction,
+    GateResult,
+    HealthCheckContext,
+)
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import (
     build_score_table,
@@ -58,6 +68,45 @@ from execute_tools.scoring_helpers import (
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
+
+
+def _build_denoised_filename(
+    *,
+    model_type: str,
+    run_name: str,
+    exp_id: str,
+    file_index: int,
+    base_dir: str,
+) -> str:
+    """Construct the absolute path to a denoised HDF5 artefact.
+
+    Introduced by Bug A fix (PR #101 Gate 2 forensic, 2026-07-15). The
+    inline closure at the round-scoring site previously returned a bare
+    filename; downstream consumers that use the string verbatim
+    (``HealthCheckContext.get_denoised_path`` per the peek helper's path
+    contract in ``execute_tools/health_checks/_peek.py:20-24``) then
+    failed to open the file at CWD. Extracting the construction to a
+    module-level helper makes it unit-testable in isolation without
+    standing up the full tuner loop.
+
+    Args:
+        model_type: Plugin model identifier (e.g. ``wavenet``).
+        run_name: Chain-level run name (pins the workspace scope).
+        exp_id: Per-round experiment id.
+        file_index: Validation file index (0-19 for TIDMAD).
+        base_dir: Sandbox output directory (usually
+            ``TidmadSandbox.base_dir`` — the abspath of the run
+            workspace). ``os.path.join(base_dir, absolute_filename)`` is
+            safe because ``os.path.join`` discards the base when the
+            right-hand side is absolute, so upstream code paths that
+            still prepend ``data_dir`` are unaffected.
+
+    Returns:
+        Absolute path to the denoised HDF5 file, joinable and openable
+        by any caller that receives it verbatim.
+    """
+    filename = f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{file_index:04d}.h5"
+    return os.path.join(base_dir, filename)
 
 
 def _validate_data_config(
@@ -114,11 +163,12 @@ def _best_trial_winner(memory_history: list) -> dict | None:
     produced a usable score).
 
     Used by both the forced-formal-round hyperparameter inheritance in
-    :func:`_apply_mode_override_chain` and the per-round
-    ``reference_file_vector`` plumbed into ``sandbox.score_vector`` so the
-    task-specific health check inside scoring (e.g.
-    ``execute_tools.squid_health_checks.check_amplitude_collapse``) has a
-    benchmark on formal rounds.
+    :func:`_apply_mode_override_chain` (trial winner's config drives the
+    formal round's plan) and the SkipFormal / bypass-formal-budget gates
+    that consult the best trial score before deciding whether to run the
+    formal round. The pre-5a ``reference_file_vector`` plumbing into
+    ``sandbox.score_vector`` is gone — health checks now run tuner-side
+    per ``docs/design/pluggable_health_checks.md`` §14 Option A.
     """
     candidates = [
         r
@@ -370,21 +420,26 @@ def _apply_degeneracy_reaction(
     plan: ExperimentPlan,
     penalty_score: float | None,
 ) -> tuple[bool, str | None]:
-    """Generic policy reaction to score_vector's task-specific health-check
-    signal.
+    """Generic policy reaction to tuner-side HealthGate evaluation.
 
-    The task-specific predicate (e.g. amplitude collapse for SQUID
-    denoising) lives in ``execute_tools.squid_health_checks`` and is
-    invoked from inside ``execute_tools.scoring_utils.score_vector``.
-    By the time this helper runs, ``score_results`` already carries the
-    ``is_degenerate`` and ``failure_reason`` keys.
+    Post-commit-5b, the health-check verdict is produced by tuner-side
+    gate evaluation (``get_gates_for_position`` → ``evaluate_gate`` →
+    ``resolve_action``) and mapped to the legacy ``is_degenerate`` /
+    ``failure_reason`` contract via ``_gate_results_to_score_meta``. By
+    the time this helper runs, ``score_results`` already carries the
+    mapping's output — ``is_degenerate=True`` on any non-``CONTINUE``
+    gate action, ``failure_reason`` pipe-concatenated across failed
+    gates prefixed by gate_id. See
+    ``docs/design/pluggable_health_checks.md`` §4 and §8.
 
     The agent's role here is purely **policy** — translate the task-side
     health signal into the right tuner-level reaction:
 
-    * Trial rounds are immune (no magnitude benchmark exists), so the
-      reaction never fires when ``plan.is_trial`` is True.
-    * On a degenerate **formal** round:
+    * Trial rounds are immune per policy (AMB-5b-A → A). The reaction
+      never nulls the score when ``plan.is_trial`` is True, but the
+      ``failure_reason`` and ``gate_action`` fields still propagate to
+      the record so the next planner sees the diagnostic.
+    * On a degenerate (or gate-flagged) **formal** round:
 
       - ``penalty_score is None`` → null ``denoising_score`` so the round
         cannot be picked as 'best' by the planner's max-score logic.
@@ -419,6 +474,94 @@ def _apply_degeneracy_reaction(
         print(f"  [HEALTH CHECK] {failure_reason}")
         score_results["denoising_score"] = penalty_score
     return is_degenerate, failure_reason
+
+
+# ---------------------------------------------------------------------------
+# Tuner-side gate-integration helpers (commit-5b).
+# ---------------------------------------------------------------------------
+
+
+def _gate_results_to_score_meta(
+    gate_results: list[GateResult],
+    resolved_action: GateAction,
+) -> tuple[bool, str | None, str]:
+    """Map gate evaluation output to the legacy score-meta contract.
+
+    Contract: ``(is_degenerate, failure_reason, gate_action_str)`` — the
+    first two feed the existing ``_apply_degeneracy_reaction`` policy;
+    the third goes into ``ExperimentRecord.gate_action`` for observability.
+
+    Health status and routing are independent:
+
+      * No failed gates → ``is_degenerate=False`` and no failure reason,
+        regardless of the resolved routing action.
+      * Any failed gate → ``is_degenerate=True`` and preserve its failure
+        reason, even when the resolved action is ``CONTINUE``.
+
+    ``failure_reason`` is a pipe-concatenation over failed gates prefixed
+    by gate_id (``[gate_id] reason``), or a synthetic fallback string when
+    every failed gate has an empty reason. ``resolved_action`` controls only
+    routing and is always returned unchanged for record observability.
+    """
+    failed_gates = [gr for gr in gate_results if not gr.passed]
+    if not failed_gates:
+        return False, None, resolved_action.value
+
+    failure_reason = (
+        " | ".join(
+            f"[{gr.gate_id}] {gr.failure_reason}" for gr in failed_gates if gr.failure_reason
+        )
+        or f"gate action {resolved_action.value} with no reason"
+    )
+    return True, failure_reason, resolved_action.value
+
+
+def _should_break_iteration(resolved_action: GateAction) -> bool:
+    """SKIP_ITER → break the tuner's outer while loop. Chain-level caller
+    of ``run()`` moves to the next chain iteration on return."""
+    return resolved_action is GateAction.SKIP_ITER
+
+
+def _should_skip_to_formal(
+    resolved_action: GateAction,
+    is_formal_round: bool,
+) -> bool:
+    """SKIP_TO_FORMAL → jump ``completed_rounds`` so the next while
+    iteration lands on the formal round. Guarded when already on the
+    formal round — no re-run."""
+    return resolved_action is GateAction.SKIP_TO_FORMAL and not is_formal_round
+
+
+def _compute_termination_state(
+    *,
+    completed_rounds: int,
+    max_rounds: int,
+    consecutive_fails: int,
+    max_fail_rounds: int,
+    gate_aborted: bool,
+) -> tuple[str, str]:
+    """Compute ``(run_status, termination_reason)`` from loop-exit state.
+
+    Precedence (highest → lowest):
+      1. ``gate_aborted=True`` (SKIP_ITER from a health gate) →
+         ``("partial", "aborted_by_gate")``. Wins over every other
+         condition because the gate signal is a deliberate abort, not a
+         boundary condition.
+      2. ``completed_rounds >= max_rounds`` → ``("completed", "completed")``.
+      3. ``consecutive_fails >= max_fail_rounds`` → ``("partial",
+         "aborted_fail_rounds")``.
+      4. Fallback → ``("partial", "completed")``.
+
+    See ``docs/design/pluggable_health_checks.md`` §4 and the audit
+    Gap #3 fix in the follow-up to commit-5b.
+    """
+    if gate_aborted:
+        return "partial", "aborted_by_gate"
+    if completed_rounds >= max_rounds:
+        return "completed", "completed"
+    if consecutive_fails >= max_fail_rounds:
+        return "partial", "aborted_fail_rounds"
+    return "partial", "completed"
 
 
 def _resolve_sample_set_cfg(
@@ -1197,6 +1340,11 @@ class HyperparamTuningAgent:
         completed_rounds = 0
         total_attempts = 0
         consecutive_fails = 0
+        # Set to True when a SKIP_ITER gate action breaks the outer while
+        # loop before max_rounds. Consumed by _compute_termination_state
+        # to distinguish gate-driven aborts from fail-round-driven aborts
+        # and healthy completions (audit Gap #3, follow-up to commit-5b).
+        _gate_aborted = False
         # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
         # Appended to on every evaluate_vram_skill feasible=False event.
         # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
@@ -1215,6 +1363,13 @@ class HyperparamTuningAgent:
             is_formal_round = completed_rounds == max_rounds - 1
             N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
             round_succeeded = False
+            # Per-round gate evaluation state (commit-5b). Updated inside
+            # the attempts loop on the score_vector success path and
+            # consumed after the attempts loop for SKIP_ITER /
+            # SKIP_TO_FORMAL loop control. Stays CONTINUE when all attempts
+            # crash (gates only fire on completed scoring outputs; failed
+            # rounds are handled by consecutive_fails).
+            resolved_action: GateAction = GateAction.CONTINUE
 
             # Post-v15 skip-formal gate: bail before starting the formal round
             # when the best trial score is well below the current run's best
@@ -2047,28 +2202,54 @@ class HyperparamTuningAgent:
                                 # variables at definition time; without it a future
                                 # refactor that defers the call would hit the last
                                 # iteration's model_type / exp_id.
-                                def _denoised_fn(fi, model_type=model_type, exp_id=exp_id):
-                                    return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
-
-                                # Reference vector for the task-specific health check
-                                # inside score_vector (commits b1+b2). Only meaningful
-                                # on a formal round AND when a trial winner exists in
-                                # this iteration's memory_history. None on trial rounds
-                                # (no benchmark) or on all-formal runs (trial_allowed
-                                # =False) → score_vector skips the predicate gracefully.
-                                _ref_fv = None
-                                if not plan.is_trial:
-                                    _winner = _best_trial_winner(memory_history)
-                                    if _winner is not None:
-                                        _ref_fv = _winner.get("file_vector")
-                                file_vector, final_scalar, is_degenerate, failure_reason = (
-                                    sandbox.score_vector(
-                                        sample_set=eval_sample_set,
-                                        anchor_map=anchor_map_data["anchors"],
-                                        s_max=anchor_map_data["s_max"],
-                                        denoised_filename_fn=_denoised_fn,
-                                        reference_file_vector=_ref_fv,
+                                # Bug A fix (PR #101 Gate 2 forensic): return an
+                                # absolute path so downstream consumers that use the
+                                # string verbatim (HealthCheckContext.get_denoised_path
+                                # per the peek helper's path contract in
+                                # execute_tools/health_checks/_peek.py:20-24) can open
+                                # the file directly. Callers that also os.path.join a
+                                # data_dir (scoring_utils.process_segment) are
+                                # unaffected — os.path.join discards the base when
+                                # the second arg is absolute.
+                                def _denoised_fn(
+                                    fi,
+                                    model_type=model_type,
+                                    exp_id=exp_id,
+                                    base_dir=sandbox.base_dir,
+                                ):
+                                    return _build_denoised_filename(
+                                        model_type=model_type,
+                                        run_name=run_name,
+                                        exp_id=exp_id,
+                                        file_index=fi,
+                                        base_dir=base_dir,
                                     )
+
+                                file_vector, final_scalar = sandbox.score_vector(
+                                    sample_set=eval_sample_set,
+                                    anchor_map=anchor_map_data["anchors"],
+                                    s_max=anchor_map_data["s_max"],
+                                    denoised_filename_fn=_denoised_fn,
+                                )
+                                # Tuner-side gate evaluation (commit-5b).
+                                # score_vector is pure scoring post-5a; the HealthGate
+                                # model runs here at the round boundary per
+                                # docs/design/pluggable_health_checks.md §8.
+                                # Loop control (SKIP_ITER, SKIP_TO_FORMAL) is applied
+                                # after the attempts loop; see the block below.
+                                _hc_ctx = HealthCheckContext(
+                                    model_name=model_type,
+                                    run_name=run_name,
+                                    round_index=round_index,
+                                    denoised_filename_fn=_denoised_fn,
+                                    file_vector=file_vector,
+                                    denoising_score=final_scalar,
+                                )
+                                _gate_ids = get_gates_for_position(round_index)
+                                _gate_results = [evaluate_gate(gid, _hc_ctx) for gid in _gate_ids]
+                                resolved_action = resolve_action(_gate_results)
+                                is_degenerate, failure_reason, _gate_action_str = (
+                                    _gate_results_to_score_meta(_gate_results, resolved_action)
                                 )
                                 score_res = {
                                     "status": "success",
@@ -2077,6 +2258,7 @@ class HyperparamTuningAgent:
                                         "file_vector": file_vector,
                                         "is_degenerate": is_degenerate,
                                         "failure_reason": failure_reason,
+                                        "gate_action": _gate_action_str,
                                     },
                                 }
                             else:
@@ -2142,8 +2324,9 @@ class HyperparamTuningAgent:
                         score_results = score_res.get("results", {})
 
                         # Generic degeneracy reaction. The task-specific predicate
-                        # already ran inside score_vector (execute_tools.squid_health_checks)
-                        # and produced is_degenerate / failure_reason on score_results.
+                        # already ran tuner-side (evaluate_gate + resolve_action +
+                        # _gate_results_to_score_meta) and produced is_degenerate /
+                        # failure_reason / gate_action on score_results.
                         # Here we only translate that signal into the tuner-level
                         # policy: penalize the formal score so the round can't be
                         # picked as 'best', and surface failure_reason on the record.
@@ -2430,12 +2613,21 @@ class HyperparamTuningAgent:
                         # coerces it back to ScoreComparisonTable below). None
                         # when scoring failed or no scalar was produced.
                         "score_table": score_table.model_dump() if score_table else None,
-                        # Health-check failure reason. None on healthy rounds
-                        # and on trial rounds; populated when the task-specific
-                        # predicate inside score_vector fired. Surfaced to the
-                        # next planner via memory_history (verbatim in the
-                        # recent window, key-projected in the condensed tail).
-                        "failure_reason": failure_reason if _is_degenerate_formal else None,
+                        # Health-check failure reason from tuner-side gate
+                        # evaluation (commit-5b). Written unconditionally when
+                        # non-None — trial-round SKIP_ITER also propagates its
+                        # reason string so the next planner iteration sees the
+                        # diagnostic even though _apply_degeneracy_reaction
+                        # preserves the trial score (audit Gap #1 fix,
+                        # follow-up to commit-5b).
+                        "failure_reason": failure_reason,
+                        # Resolved gate action string from tuner-side gate
+                        # evaluation. "continue" on healthy rounds where gates
+                        # ran; "skip_iter" / "skip_to_formal" / "invalidate_round"
+                        # on failed gates; None on error paths and single-file
+                        # legacy mode where scoring didn't run through the gate
+                        # path (audit Gap #2 fix, follow-up to commit-5b).
+                        "gate_action": score_results.get("gate_action"),
                         # Data volume
                         "training_psd_segments": train_psd_segments,
                         "eval_psd_segments": eval_psd_segments,
@@ -2620,6 +2812,25 @@ class HyperparamTuningAgent:
                     f"{max_fail_rounds_setting})."
                 )
 
+            # Post-round gate-action loop control (commit-5b).
+            # SKIP_ITER: break the while loop entirely; chain-level caller
+            #   of tuner.run() moves to the next chain iteration.
+            # SKIP_TO_FORMAL: jump completed_rounds so the next while
+            #   iteration lands on the formal round. Guarded when already
+            #   on the formal round — no re-run.
+            # See docs/design/pluggable_health_checks.md §4 for action
+            # semantics and §8 for severity resolution.
+            if _should_break_iteration(resolved_action):
+                print(f"  [HEALTH GATE] SKIP_ITER at round {round_index} — aborting iteration.")
+                _gate_aborted = True
+                break
+            if _should_skip_to_formal(resolved_action, is_formal_round):
+                print(
+                    f"  [HEALTH GATE] SKIP_TO_FORMAL at round {round_index} — "
+                    f"jumping to formal round {max_rounds}."
+                )
+                completed_rounds = max_rounds - 1
+
             # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop
             # local refs to the largest per-round transients before the
             # next round's plan() call so inter-round RSS stays flat.
@@ -2645,21 +2856,16 @@ class HyperparamTuningAgent:
         # --- Build, validate, and save the run output ---
         finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
         # Phase L (§11) — termination_reason captures *why* the outer
-        # loop exited. ``aborted_fail_rounds`` fires when the
-        # consecutive-fail counter hits ``max_fail_rounds`` before all
-        # rounds completed; otherwise we either landed every round
-        # ("completed") or stopped early for some other reason
-        # ("partial" — currently unreachable with ``max_rounds >= 1``,
-        # kept as a defensive fallback).
-        if completed_rounds >= max_rounds:
-            run_status = "completed"
-            termination_reason = "completed"
-        elif consecutive_fails >= max_fail_rounds_setting:
-            run_status = "partial"
-            termination_reason = "aborted_fail_rounds"
-        else:
-            run_status = "partial"
-            termination_reason = "completed"
+        # loop exited. Precedence: gate-driven abort (SKIP_ITER) wins
+        # over the fail-round brake wins over the max_rounds completion
+        # check. See _compute_termination_state.
+        run_status, termination_reason = _compute_termination_state(
+            completed_rounds=completed_rounds,
+            max_rounds=max_rounds,
+            consecutive_fails=consecutive_fails,
+            max_fail_rounds=max_fail_rounds_setting,
+            gate_aborted=_gate_aborted,
+        )
         all_records = sandbox.get_summary()
         successful_records = [
             r
@@ -3083,6 +3289,17 @@ def main():
         "after this many consecutive rounds exhaust their inner "
         "attempt budget.",
     )
+    parser.add_argument(
+        "--max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "Hard cap on epochs per round. When set, the tuner clamps the "
+            "LLM's planned epochs to min(planned_epochs, max_epochs). "
+            "Wires into HyperparamTuningInput.max_epochs (already enforced "
+            "in the round loop). Default None = no clamp (LLM plan unchanged)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -3130,15 +3347,12 @@ def main():
                 "train_portion": args.train_portion,
             }
         )
-        # Clamp the LLM's per-round ExperimentPlan portions to the operator's
-        # CLI values. Without this, the top-level trial_portion only sizes the
-        # sample set; the LLM is still free to pick its own ExperimentPlan
-        # portions, which can blow past the time-budget gate. Mirrors the
-        # chain runner's plan_overrides wiring.
+        # Clamp trial/eval scope to the operator's CLI values. The planner
+        # remains free to choose train_portion, which controls the per-epoch
+        # subsample within that fixed training scope.
         input_dict["plan_overrides"] = {
             "is_trial": True,
             "trial_portion": args.trial_portion,
-            "train_portion": args.train_portion,
             "eval_portion": args.eval_portion,
         }
     # Phase M — formal-mode training levers. Always forwarded (trial or not)
@@ -3154,6 +3368,8 @@ def main():
         input_dict["trial_time_budget_minutes"] = args.trial_time_budget_minutes
     if args.formal_time_budget_minutes is not None:
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
+    if args.max_epochs is not None:
+        input_dict["max_epochs"] = args.max_epochs
     if args.data_dir is not None:
         input_dict["data_dir"] = args.data_dir
     if args.trial_vram_budget_gb is not None:

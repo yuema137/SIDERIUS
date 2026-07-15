@@ -1,0 +1,67 @@
+# configs/health_checks.yaml
+#
+# HealthGate configuration for the scoring pipeline.
+# See docs/design/pluggable_health_checks.md §3 for the full schema.
+#
+# Each entry is an independent HealthGate. Gates fire only at their
+# configured round position (after_round). Rounds without a gate
+# proceed normally — no overhead.
+#
+# Adding a new gate: implement the referenced checks in
+# execute_tools/health_checks/checks/, register them in
+# execute_tools/health_checks/__init__.py, then list the gate here.
+
+health_gates:
+  - id: "collapse_check_round_1"
+    after_round: 1
+    short_circuit: true
+    checks:
+      - name: output_diversity
+        config:
+          min_unique_int8_values: 5
+          peek_samples: 100000
+      - name: amplitude_collapse
+        config:
+          collapse_threshold: 0.95
+    on_pass:
+      action: continue
+    on_fail:
+      action: continue
+    reason: >
+      Class-127 mode collapse produces exactly 1 unique int8 value. on_fail=continue:
+      the round completes with its existing score (typically -inf) and failure_reason
+      is propagated to the planner via memory_history so it can adjust hyperparameters
+      in subsequent rounds. Switch to skip_iter in full workflow runs where GPU time
+      is scarce.
+
+  - id: "quality_check_round_3"
+    after_round: 3
+    short_circuit: true
+    checks:
+      - name: output_diversity
+        config:
+          min_unique_int8_values: 20
+    on_pass:
+      action: continue
+    on_fail:
+      action: continue
+    reason: >
+      Mid-trial collapse gate at round 3. on_fail=continue: records failure_reason
+      and continues remaining rounds so the planner has full visibility into the
+      collapse pattern. Switch to skip_to_formal in full workflow runs.
+
+  - id: "formal_validation_round_5"
+    after_round: 5
+    short_circuit: true
+    checks:
+      - name: output_diversity
+        config:
+          min_unique_int8_values: 50
+    on_pass:
+      action: continue
+    on_fail:
+      action: invalidate_round
+    reason: >
+      Formal-round gate. Strictest diversity threshold. On fail: the round's
+      score is invalidated but the iteration continues (does not affect
+      best_score, does not skip anything).
