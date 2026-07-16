@@ -249,6 +249,61 @@ learned" case (which byte-identity dedup misses because the vector
 varies per file). Generic because pearson correlation is well-defined
 between any two continuous sequences.
 
+### 4.7 Multi-file peek pattern (generic framework capability)
+
+**Category**: aggregation-across-files strategy for any check whose
+per-file measurement can be computed independently.
+**Implementation**: `execute_tools/health_checks/_multi_file_peek.py` —
+`peek_and_aggregate(ctx, peek_file_indices, metric_fn, predicate,
+aggregation, peek_samples, channel)`. Adopted M9 (2026-07-16).
+
+The pattern refactors the pre-M9 single-file peek shape into a
+per-file `metric_fn` + `predicate` pair plus a batch-level
+`aggregation`. Each blocking check declares its own metric and
+threshold-direction predicate; the helper handles file resolution,
+I/O errors, and aggregation uniformly. Task-agnostic — nothing in
+the helper knows about TIDMAD.
+
+**Threshold direction as a predicate concern.** The helper does not
+own a `threshold_direction: min | max` YAML knob. Instead, each
+check's `predicate` callback expresses the pass condition directly:
+
+  * `output_diversity`: `predicate = lambda m: m > threshold`
+    (min-threshold direction — pass when the metric exceeds a floor).
+  * `output_std`: `predicate = lambda m: m >= threshold` (min-threshold,
+    inclusive at the boundary).
+  * `amplitude_collapse`: `predicate = lambda m: m <= threshold`
+    (max-threshold direction — pass when the metric stays under a
+    ceiling; dominant_fraction < 0.95 is healthy).
+
+This keeps the helper generic — the check author picks the direction
+by writing the predicate. A YAML `threshold_direction` field would
+only encode information the check already has to declare in code
+anyway.
+
+**Supported aggregation modes** (see `AggregationMode` in
+`_multi_file_peek.py`):
+
+| Mode | Verdict rule | I/O failure handling |
+|------|-------------|----------------------|
+| `any_pass` | at least one per-file `passed=True` | dropped from population |
+| `all_pass` | every per-file `passed=True` | counts as fail (strictest) |
+| `max` | apply predicate to `max(metric_values)` | dropped from aggregate |
+| `min` | apply predicate to `min(metric_values)` | dropped from aggregate |
+| `mean` | apply predicate to `mean(metric_values)` | dropped from aggregate |
+| `median` | apply predicate to `median(metric_values)` | dropped from aggregate |
+
+**Backward compat**: an empty `peek_file_indices` list falls back to
+`[min(ctx.denoised_paths.keys())]` (or `[0]` when the dict is empty).
+Existing YAML entries that don't specify `peek_file_indices` continue
+to behave as pre-M9 single-file peek.
+
+**Empirical basis** for the concrete `peek_file_indices` choice used
+in the shipped TIDMAD YAML: [`paper_and_collapse_reference_baselines.md`
+§6.4](./paper_and_collapse_reference_baselines.md). The framework
+itself is agnostic — future tasks pick their own triplet (or single, or
+per-check custom set).
+
 ## 5. Acceptance criteria for this framework
 
 The framework is task-agnostic iff **all** of the following hold:

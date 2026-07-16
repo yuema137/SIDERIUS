@@ -29,6 +29,9 @@ from __future__ import annotations
 
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
+from execute_tools.health_checks.output_std import OutputStdCheck
+from execute_tools.health_checks.pearson_dispersion import PearsonDispersionCheck
+from execute_tools.health_checks.per_file_output_std import PerFileOutputStdCheck
 from execute_tools.health_checks.protocol import HealthCheckSkill
 from execute_tools.health_checks.registry import (
     _REGISTRY,
@@ -43,11 +46,13 @@ from execute_tools.health_checks.runner import (
     severity_of,
 )
 from execute_tools.health_checks.schemas import (
+    BLOCKING_ACTIONS,
     GateAction,
     GateResult,
     HealthCheckContext,
     HealthCheckResult,
 )
+from execute_tools.health_checks.spectral_peak_ratio import SpectralPeakRatioCheck
 
 
 def _bootstrap_registry() -> None:
@@ -58,7 +63,14 @@ def _bootstrap_registry() -> None:
     we silently skip. Tests that want a clean slate use ``_REGISTRY.clear()``
     and then call this bootstrap explicitly.
     """
-    for check in (OutputDiversityCheck(), AmplitudeCollapseCheck()):
+    for check in (
+        OutputDiversityCheck(),
+        AmplitudeCollapseCheck(),
+        OutputStdCheck(),
+        PearsonDispersionCheck(),
+        SpectralPeakRatioCheck(),
+        PerFileOutputStdCheck(),
+    ):
         if check.name not in _REGISTRY:
             register(check)
 
@@ -67,6 +79,7 @@ _bootstrap_registry()
 
 
 __all__ = [
+    "BLOCKING_ACTIONS",
     "GateAction",
     "GateResult",
     "HealthCheckContext",

@@ -17,11 +17,18 @@ correction on 4a):
 
 from __future__ import annotations
 
+import json
+
 import h5py
 import numpy as np
 
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+
+
+def _per_file(result) -> list[dict]:
+    """M9: per-file breakdown is JSON-serialised in metrics['per_file_json']."""
+    return json.loads(result.metrics["per_file_json"])
 
 
 def _write_denoised_h5(path, ch1: np.ndarray) -> None:
@@ -52,10 +59,11 @@ class TestSingleBinDominance:
         result = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert result.passed is False
         assert result.check_name == "amplitude_collapse"
-        assert result.metrics["dominant_class"] == -1
-        assert result.metrics["dominant_fraction"] == 1.0
+        # M9: dominant_class is no longer exposed (metric_fn returns only
+        # the fraction). Operator can recover it from the raw data if
+        # needed for diagnosis.
+        assert _per_file(result)[0]["metric_value"] == 1.0
         assert "amplitude_collapse" in result.reason
-        assert "-1" in result.reason  # dominant class in reason
 
     def test_96_percent_dominance_is_flagged(self, tmp_path):
         """96% of one class, 4% spread — > 0.95 threshold → flagged.
@@ -76,8 +84,8 @@ class TestSingleBinDominance:
         ctx = _ctx(denoised_paths={0: str(p)})
         result = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert result.passed is False
-        assert result.metrics["dominant_class"] == 0
-        assert result.metrics["dominant_fraction"] == 0.96
+        # M9: dominant_class no longer exposed; check the fraction only.
+        assert _per_file(result)[0]["metric_value"] == 0.96
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +104,7 @@ class TestHealthyDistribution:
         result = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert result.passed is True
         assert result.reason == ""
-        assert result.metrics["dominant_fraction"] < 0.1  # nowhere near 0.95
+        assert _per_file(result)[0]["metric_value"] < 0.1  # nowhere near 0.95
 
     def test_balanced_two_class_not_flagged(self, tmp_path):
         """50/50 two classes → dominant_fraction ≈ 0.5, far below 0.95."""
@@ -106,7 +114,7 @@ class TestHealthyDistribution:
         ctx = _ctx(denoised_paths={0: str(p)})
         result = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert result.passed is True
-        assert result.metrics["dominant_fraction"] == 0.5
+        assert _per_file(result)[0]["metric_value"] == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +137,7 @@ class TestStrictThresholdBoundary:
         ctx = _ctx(denoised_paths={0: str(p)})
         result = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert result.passed is True
-        assert result.metrics["dominant_fraction"] == 0.95
+        assert _per_file(result)[0]["metric_value"] == 0.95
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +154,7 @@ class TestPathResolution:
         )
         result = AmplitudeCollapseCheck().run(ctx)
         assert result.passed is False
-        assert result.metrics["file_index"] == 0
+        assert _per_file(result)[0]["file_index"] == 0
 
     def test_uses_min_key_from_denoised_paths(self, tmp_path):
         """AMB-4-5 → A: min key wins."""
@@ -158,7 +166,7 @@ class TestPathResolution:
         result = AmplitudeCollapseCheck().run(ctx)
         # min key is 3 → picks the collapsed file → flagged
         assert result.passed is False
-        assert result.metrics["file_index"] == 3
+        assert _per_file(result)[0]["file_index"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -182,15 +190,19 @@ class TestNotApplicable:
 
 class TestPeekError:
     def test_missing_file_returns_failed_with_path(self, tmp_path):
+        """OSError → passed=False; per_file[0].io_error carries the class name
+        and the path via the exception message."""
         bogus = str(tmp_path / "does_not_exist.h5")
         ctx = _ctx(denoised_paths={0: bogus})
         result = AmplitudeCollapseCheck().run(ctx)
         assert result.passed is False
         assert bogus in result.reason
-        assert result.metrics["attempted_path"] == bogus
-        err_name = result.metrics["peek_error"]
-        assert isinstance(err_name, str) and err_name
-        assert err_name in result.reason
+        per_file = _per_file(result)
+        assert per_file[0]["io_error"] is not None
+        assert bogus in per_file[0]["io_error"]
+        assert per_file[0]["io_error"].startswith("OSError") or per_file[0]["io_error"].startswith(
+            "FileNotFoundError"
+        )
 
     def test_missing_dataset_returns_failed_with_path(self, tmp_path):
         p = tmp_path / "wrong_shape.h5"
@@ -199,9 +211,10 @@ class TestPeekError:
         ctx = _ctx(denoised_paths={0: str(p)})
         result = AmplitudeCollapseCheck().run(ctx)
         assert result.passed is False
-        assert str(p) in result.reason
-        assert result.metrics["peek_error"] == "KeyError"
         assert "KeyError" in result.reason
+        per_file = _per_file(result)
+        assert per_file[0]["io_error"] is not None
+        assert per_file[0]["io_error"].startswith("KeyError")
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +266,7 @@ class TestCustomThreshold:
         # threshold=0.5 (strict) → 0.60 > 0.5 → flagged
         strict = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.5})
         assert strict.passed is False
-        assert strict.metrics["dominant_fraction"] == 0.6
+        assert _per_file(strict)[0]["metric_value"] == 0.6
         # threshold=0.95 → 0.60 < 0.95 → not flagged
         loose = AmplitudeCollapseCheck().run(ctx, {"collapse_threshold": 0.95})
         assert loose.passed is True

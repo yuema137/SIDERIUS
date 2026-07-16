@@ -257,21 +257,30 @@ class TestLoadHealthGatesConfig:
 
     def test_default_path_loads_shipped_config(self):
         """The shipped configs/health_checks.yaml must load cleanly and
-        contain the three example gates from the design doc §3."""
+        contain the M8 rev-7 gate set: 3 blocking + 3 recording, all
+        firing on every round. See M8 execution plan §3.5."""
         cfg = load_health_gates_config()
         ids = [g.id for g in cfg.health_gates]
-        assert "collapse_check_round_1" in ids
-        assert "quality_check_round_3" in ids
-        assert "formal_validation_round_5" in ids
-        # Round-1 gate has both checks; round-3 and round-5 gates have
-        # only output_diversity.
-        gate1 = next(g for g in cfg.health_gates if g.id == "collapse_check_round_1")
-        assert {c.name for c in gate1.checks} == {
-            "output_diversity",
-            "amplitude_collapse",
+        assert "output_diversity_blocking" in ids
+        assert "output_std_blocking" in ids
+        assert "amplitude_collapse_blocking" in ids
+        assert "pearson_dispersion_recording" in ids
+        assert "spectral_peak_ratio_recording" in ids
+        assert "per_file_output_std_recording" in ids
+        # All gates fire on every round.
+        for g in cfg.health_gates:
+            assert g.after_round == "every", f"{g.id} should be after_round=every"
+        # Blocking gates route to invalidate_round on failure.
+        blocking = {
+            "output_diversity_blocking",
+            "output_std_blocking",
+            "amplitude_collapse_blocking",
         }
-        gate3 = next(g for g in cfg.health_gates if g.id == "quality_check_round_3")
-        assert [c.name for c in gate3.checks] == ["output_diversity"]
+        for g in cfg.health_gates:
+            if g.id in blocking:
+                assert g.on_fail.action.value == "invalidate_round"
+            else:
+                assert g.on_fail.action.value == "continue"
 
     def test_shipped_config_all_actions_valid(self):
         """Every on_pass/on_fail action string in the shipped YAML must

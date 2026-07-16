@@ -65,15 +65,16 @@ custom losses (per S5 v17 chain advice content).
 
 | # | Gap | Effort | Files to change |
 |---|-----|--------|-----------------|
-| **M1** | **File-vector byte-identity dedup** as a new `HealthCheckSkill`. Registers every file_vector's hash; on repeat within the same chain, returns `INVALIDATE_ROUND`. Catches 5.5763 AND 6.3556 AND any future collapse constant. | **1 day** | new `execute_tools/health_checks/file_vector_dedup.py`; register in `execute_tools/health_checks/__init__.py`; add YAML entry to `configs/health_checks.yaml` |
+| **M1** | ~~File-vector byte-identity dedup~~ — **DROPPED 2026-07-16**. Superseded by **M8**. Rationale: hash-based dedup matches specific byte-identical outputs; a phantom that shifts by one LSB in one segment evades it, and the defense requires two rounds to prime. Output-diversity metrics defend against the collapse *mechanism* on the first round with 10×-1000× separation between real learning (FCNet unique_int8=127+) and collapse variants (unique_int8 ≤ 15). Empirical: Pearson feasibility experiment 2026-07-16. Issue **#108** to be closed with a pointer to M8. | ~~1 day~~ | n/a — plan file deleted |
 | **M2** | **Wire `is_degenerate` / `failure_reason` / `gate_action` into `ModelRunSummary`**. Without this, the interpreter never learns from collapse; even if we detect it, the signal dies at the tuner boundary (Drop #1 in the signal-flow trace: `HyperparamTuningOutput` → `ModelRunSummary`). | **1 day** | `agent/schemas/interpretation.py` (add per-round fields to `ModelRunSummary`); `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py` (map fields); interpretation prompt template (surface fields) |
 | **M3** | **Adopt v15 §6.9 mitigation #1: increase formal-round training**. Set `--max_epochs 3` (or 5) for formal rounds AND `formal_train_portion=1.0` (already default). Trivial config change but structurally required for collapse escape. Note: `--max_epochs` is currently the tuner CLI cap; there is no separate `--formal_max_epochs` today, so this would apply to trial rounds too — either accept that or add the separate flag. | **0.5 day** (config only) OR **1 day** (add `--formal_max_epochs` CLI flag) | `scripts/run_comparison.py` argparse + launch commands. Optionally add `--formal_max_epochs` flag to tuner |
-| **M4** | **Precomputed phantom table** for known K values. Provides deterministic rejection of the two known phantoms (5.5763, 6.3556) plus any others discovered by simulation. Complements M1 (dedup catches WITHIN-run repeats; phantom table catches FIRST occurrence). | **1 day** | new `reference_data/collapse_phantoms.json`; new HealthCheckSkill `execute_tools/health_checks/phantom_score_check.py`; register in YAML |
+| **M4** | ~~Precomputed phantom table for known K values~~ — **DROPPED 2026-07-16**. Superseded by **M8**. Rationale: table-based lookup matches specific numeric scalars (5.5763, 6.3556); a new phantom that produces a novel scalar slips through, and the table needs manual curation. Output-diversity checks catch collapse regardless of the resulting scalar. Issue **#109** to be closed with a pointer to M8. | ~~1 day~~ | n/a — plan file deleted |
 | **M5** | **Resolve v15 §6.9 outlier** (iter 4 R4: `final_loss=5.03` untrained but produced 5.5763 phantom). This suggests a **second mechanism** beyond mode collapse — possibly silent inference crash reading stale HDF5. Must be understood or v17 formal rounds may still produce untraceable phantoms. | **1-2 days** forensic investigation | forensic: reproduce iter 4 R4 conditions, add file-existence + write-timestamp assertions to `execute_tools/inference_single.py` around `create_abra_file` |
-| **M6** | **Execute Gate 2** (issue #102) — HealthGate PR #101 has never had its end-to-end real-LLM smoke run. Blocks any v17 launch. | **~1h wall time**, ~$2 cost | run canonical Gate 2 command from `docs/design/pluggable_health_checks.md` §15.3 |
-| **M7** | **Loss-implementor contract violation** (issue #112) — proposer specifies custom loss name, but implementor is not invoked to generate the plugin file before the training subprocess runs. Every training attempt aborts with `ValueError: Custom loss '...' not found in LOSS_REGISTRY or agent_generated/losses/`. Discovered during Gate 2 execution on 2026-07-15; caused Gate 2 to fail with 0 rounds completed. Root-cause candidate: capability index advertises losses whose file paths point to old run-workspaces, not to `agent_generated/losses/`, and `render_available_losses` lacks the phantom filter that `render_available_models` has. | **1-2 days** (needs investigation of proposer → implementor → training subprocess handoff) | TBD — investigation required. Candidates: `nodes/ml_model_implementor/`, `agent/prompt_templates/proposal/__init__.py::render_available_losses`, workflow orchestration, subprocess launch path. |
+| **M6** | **Execute Gate 2** (issue #102) — HealthGate PR #101 has never had its end-to-end real-LLM smoke run. Blocks any v17 launch. **DONE** 2026-07-15 (PR #101 merged at `a595fcc`). | ~~1h~~ | closed |
+| **M7** | **Loss-implementor contract violation** (issue #112) — proposer specifies custom loss name, but implementor is not invoked to generate the plugin file before the training subprocess runs. Every training attempt aborts with `ValueError: Custom loss '...' not found in LOSS_REGISTRY or agent_generated/losses/`. Discovered during Gate 2 execution on 2026-07-15; caused Gate 2 to fail with 0 rounds completed. Root-cause candidate: capability index advertises losses whose file paths point to old run-workspaces, not to `agent_generated/losses/`, and `render_available_losses` lacks the phantom filter that `render_available_models` has. Execution plan: [`m7_loss_implementor_contract_execution_plan.md`](./m7_loss_implementor_contract_execution_plan.md) | **1-2 days** (needs investigation of proposer → implementor → training subprocess handoff) | TBD — investigation required. Candidates: `nodes/ml_model_implementor/`, `agent/prompt_templates/proposal/__init__.py::render_available_losses`, workflow orchestration, subprocess launch path. |
+| **M8** | **Complete gate coverage + output-diversity metrics** (issue **#118**). Adds `after_round: every` schema extension so gates fire on every round (fixes the round-7 agent_012 escape), adds `OutputStdCheck` blocking (min_std_mv: 1.0), adds three recording-only checks (pearson_correlation, spectral_peak_ratio, per_file_output_std), tightens `output_diversity` threshold to 30, and fixes `build_diagnostic_summary.py` semantics to distinguish `passed / failed / not_run`. Replaces M1 and M4. Empirical basis: 6.3556 investigation + Pearson feasibility experiment 2026-07-16. Execution plan: [`m8_gate_coverage_and_diversity_metrics_execution_plan.md`](./m8_gate_coverage_and_diversity_metrics_execution_plan.md) | **2-3 days** | new `execute_tools/health_checks/output_std.py`, `pearson_correlation.py`, `spectral_peak_ratio.py`, `per_file_output_std.py`; extend `HealthCheckContext` with `target_path_fn`; extend `HealthGateConfig.after_round` to `int \| Literal["every"]`; rewrite `configs/health_checks.yaml`; update `scripts/build_diagnostic_summary.py` |
 
-**Total MUST effort: ~6-9 days + Gate 2 run.**
+**Total MUST effort: ~5-7 days** (M2 + M3 + M5 + M7 + M8; M1 + M4 dropped; M6 done).
 
 ## SHOULD fix during v17
 
@@ -100,7 +101,7 @@ custom losses (per S5 v17 chain advice content).
 | **D6** | ModelConfig typed Pydantic (issue #97) | Tech-debt, unrelated to collapse. |
 | **D7** | Info-source weighting (issue #94) | Optimization on top of a working proposer. |
 
-## Dependency graph
+## Dependency graph (revised 2026-07-16 — M1/M4 dropped, M8 added)
 
 ```
                     ┌─────────────────────────────────────────────┐
@@ -108,55 +109,62 @@ custom losses (per S5 v17 chain advice content).
                     └─────────────────────────────────────────────┘
                                         ▲
                                         │  needs all of
-      ┌──────────────────┬──────────────┼──────────────┬──────────────────┐
-      │                  │              │              │                  │
-┌─────┴─────┐   ┌────────┴────────┐  ┌──┴───┐   ┌──────┴──────┐   ┌───────┴────────┐
-│ M3:       │   │ M1+M4+M5: score │  │ M6:  │   │ M7: loss    │   │ (S* items       │
-│ training  │   │ guards prevent  │  │ Gate │   │ implementor │   │  land during    │
-│ regime    │   │ phantom from    │  │ 2    │   │ contract    │   │  v17, not       │
-│ unblocks  │   │ being counted   │  │ pass │   │ bug         │   │  blocking)      │
-│ real      │   │ as beat         │  │ (#102│   │ (#112 —     │   │                 │
-│ converge  │   │                 │  │ )    │   │ custom loss │   │                 │
-│ (epochs,  │   │                 │  │      │   │ materializ- │   │                 │
-│  data)    │   │                 │  │      │   │ ation)      │   │                 │
-└─────┬─────┘   └────────┬────────┘  └──┬───┘   └──────┬──────┘   └───────┬────────┘
-      │                  │              ▲              │                  │
-      │                  ▼              │              │                  │
-      │       ┌────────────────────┐    │              │                  │
-      │       │ M2: MRS carries    │    │              │                  │
-      │       │ collapse signal    │    │              │                  │
-      │       │ (unblocks feedback │    │              │                  │
-      │       │  loop for interp/  │    │              │                  │
-      │       │  proposer)         │    │              │                  │
-      │       └─────────┬──────────┘    │              │                  │
-      │                 │               │              │                  │
-      │       ┌─────────┴──────────┐    │              │                  │
-      │       │ S6 (interp prompt) │    │              │                  │
-      │       │ S7 (proposer prom) │    │              │                  │
-      │       │ S1 (n_unique_int8) │    │              │                  │
-      │       │ S2 (tighten checks)│    │              │                  │
-      │       │ S3 (corr guard)    │    │              │                  │
-      │       └─────────┬──────────┘    │              │                  │
-      │                 │               │              │                  │
-      │       ┌─────────┴──────────┐    │              │                  │
-      │       │ S4 (yaml positions)│    │              │                  │
-      │       │ S5 (v17 advice)    │    │              │                  │
-      │       │ S8 (seed path docs)│    │              │                  │
-      │       └─────────┬──────────┘    │              │                  │
-      │                 │               │              │                  │
-      └─────────────────┼───────────────┴──────────────┴──────────────────┘
-                        ▼
-                   V17 LAUNCH
-                                        │
-                                        ▼
-                                (post-v17 deferred)
-                                        │
-                       ┌────────────────┼────────────────┐
-                       ▼                ▼                ▼
-                    D1 (Run       D2 (bidir           D3 (metric
-                    Monitor)      cross-iter flow)     redesign)
+      ┌──────────────────┬──────────────┴──────────────┬──────────────────┐
+      │                  │                             │                  │
+┌─────┴─────┐   ┌────────┴─────────────┐   ┌───────────┴──────┐   ┌───────┴────────┐
+│ M3:       │   │ M8: complete gate    │   │ M7: loss         │   │ (S* items       │
+│ training  │   │ coverage + output    │   │ implementor      │   │  land during    │
+│ regime    │   │ diversity metrics    │   │ contract bug     │   │  v17, not       │
+│ unblocks  │   │ (blocking + record-  │   │ (#112 — custom   │   │  blocking)      │
+│ real      │   │ ing checks; every    │   │ loss materializ- │   │                 │
+│ converge  │   │ round gated).        │   │ ation)           │   │                 │
+│ (epochs,  │   │ SUPERSEDES M1 + M4.  │   │                  │   │                 │
+│  data)    │   │                      │   │                  │   │                 │
+└─────┬─────┘   └────────┬─────────────┘   └───────┬──────────┘   └───────┬────────┘
+      │                  │                         │                      │
+      │                  ▼                         │                      │
+      │       ┌────────────────────┐               │                      │
+      │       │ M2: MRS carries    │               │                      │
+      │       │ collapse signal    │               │                      │
+      │       │ (unblocks feedback │               │                      │
+      │       │  loop for interp/  │               │                      │
+      │       │  proposer)         │               │                      │
+      │       └─────────┬──────────┘               │                      │
+      │                 │                          │                      │
+      │       ┌─────────┴──────────┐               │                      │
+      │       │ S6 (interp prompt) │               │                      │
+      │       │ S7 (proposer prom) │               │                      │
+      │       │ S1 (n_unique_int8) │               │                      │
+      │       │ S3 (corr guard)    │               │                      │
+      │       └─────────┬──────────┘               │                      │
+      │                 │                          │                      │
+      │       ┌─────────┴──────────┐               │                      │
+      │       │ S5 (v17 advice)    │               │                      │
+      │       │ S8 (seed path docs)│               │                      │
+      │       └─────────┬──────────┘               │                      │
+      │                 │                          │                      │
+      └─────────────────┴──────────────────────────┴──────────────────────┘
+                                       ▼
+                                 V17 LAUNCH
+                                       │
+                                       ▼
+                              (post-v17 deferred)
+                                       │
+                       ┌───────────────┼────────────────┐
+                       ▼               ▼                ▼
+                    D1 (Run       D2 (bidir        D3 (metric
+                    Monitor)      cross-iter        redesign)
+                                  flow)
 ```
 
-## Critical path
+Notes on graph changes:
+- **M1 (file-vector dedup) and M4 (phantom lookup) boxes REMOVED** — replaced by **M8**.
+- **M6 (Gate 2) DONE** — no longer in the critical path.
+- **S2 (tighten OutputDiversityCheck) folded into M8** (which does exactly this and more) — no longer listed as separate.
+- **S4 (yaml positions per max_rounds) folded into M8** (`after_round: every` obviates round-specific tuning) — no longer listed as separate.
 
-M6 (Gate 2 under Option B, ~1h) → M3 (config, 0.5d) → M1+M2+M4+M7 in parallel (M1+M2+M4=3d, M7=1-2d, so M7 does not extend critical path) → M5 (2d, overlap) → v17 launch
+## Critical path (revised 2026-07-16)
+
+M8 (2-3d, includes gate coverage + diversity metrics + summary fix) ∥ M7 (1-2d, custom loss materialization) ∥ M3 (0.5d, formal training regime) → M2 (1d, wire collapse signal to interpreter) → M5 (1-2d forensic on iter-4-R4 outlier, overlapping) → **V17 LAUNCH**
+
+Total remaining critical-path effort: **~5-7 days** (M6 done; M1/M4 dropped).

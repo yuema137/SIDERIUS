@@ -17,11 +17,18 @@ values are used verbatim. Tests pass absolute paths via ``str(tmp_path / ...)``.
 
 from __future__ import annotations
 
+import json
+
 import h5py
 import numpy as np
 
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
+
+
+def _per_file(result) -> list[dict]:
+    """M9: per-file breakdown is JSON-serialised in metrics['per_file_json']."""
+    return json.loads(result.metrics["per_file_json"])
 
 
 def _write_denoised_h5(path, ch1: np.ndarray) -> None:
@@ -57,7 +64,7 @@ class TestConstantOutputDetection:
         assert result.check_name == "output_diversity"
         assert "output_diversity" in result.reason
         assert "5.5762667" in result.reason  # collapse-artifact score in reason
-        assert result.metrics["unique_count"] == 1
+        assert _per_file(result)[0]["metric_value"] == 1  # unique_int8 count
 
     def test_two_alternating_values_is_flagged(self, tmp_path):
         """Just above trivial constant — still collapsed."""
@@ -69,7 +76,7 @@ class TestConstantOutputDetection:
             ctx, {"min_unique_int8_values": 5, "peek_samples": 100_000}
         )
         assert result.passed is False
-        assert result.metrics["unique_count"] == 2
+        assert _per_file(result)[0]["metric_value"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +96,7 @@ class TestHealthyOutput:
         )
         assert result.passed is True
         assert result.reason == ""
-        assert result.metrics["unique_count"] > 5
+        assert _per_file(result)[0]["metric_value"] > 5
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +116,7 @@ class TestCallablePath:
             ctx, {"min_unique_int8_values": 5, "peek_samples": 100_000}
         )
         assert result.passed is False
-        assert result.metrics["file_index"] == 0
+        assert _per_file(result)[0]["file_index"] == 0
 
     def test_uses_min_key_from_denoised_paths(self, tmp_path):
         """AMB-4-5 → A: min key from denoised_paths wins over higher indices."""
@@ -121,7 +128,7 @@ class TestCallablePath:
         result = OutputDiversityCheck().run(ctx, {"min_unique_int8_values": 5})
         # min key is 3 → picks p3 (collapsed) → flagged
         assert result.passed is False
-        assert result.metrics["file_index"] == 3
+        assert _per_file(result)[0]["file_index"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -147,29 +154,36 @@ class TestNotApplicable:
 
 class TestPeekError:
     def test_missing_file_returns_failed_with_path(self, tmp_path):
-        """OSError → passed=False, path in reason, peek_error in metrics."""
+        """OSError → passed=False; per_file[0].io_error carries the class name
+        AND the path (via the exception message)."""
         bogus = str(tmp_path / "does_not_exist.h5")
         ctx = _ctx(denoised_paths={0: bogus})
         result = OutputDiversityCheck().run(ctx)
         assert result.passed is False
+        # Path travels via the per-file io_error message (which is embedded
+        # in the top-level reason via outcome.reason).
         assert bogus in result.reason
-        assert result.metrics["attempted_path"] == bogus
-        err_name = result.metrics["peek_error"]
-        assert isinstance(err_name, str) and err_name
-        assert err_name in result.reason  # exact class name appears in reason
+        per_file = _per_file(result)
+        assert per_file[0]["io_error"] is not None
+        assert bogus in per_file[0]["io_error"]
+        # Error class name appears in both per_file.io_error and reason.
+        assert per_file[0]["io_error"].startswith("OSError") or per_file[0]["io_error"].startswith(
+            "FileNotFoundError"
+        )
 
     def test_missing_dataset_returns_failed_with_path(self, tmp_path):
-        """KeyError → passed=False, path in reason, peek_error='KeyError'."""
+        """KeyError → passed=False; per_file[0].io_error mentions the class."""
         p = tmp_path / "wrong_shape.h5"
         with h5py.File(str(p), "w") as f:
             f.create_group("wrong_group")  # no timeseries/channel0001
         ctx = _ctx(denoised_paths={0: str(p)})
         result = OutputDiversityCheck().run(ctx)
         assert result.passed is False
-        assert str(p) in result.reason
-        assert result.metrics["peek_error"] == "KeyError"
-        assert result.metrics["attempted_path"] == str(p)
+        # Path travels via per_file[0].io_error; top-level reason includes it.
         assert "KeyError" in result.reason
+        per_file = _per_file(result)
+        assert per_file[0]["io_error"] is not None
+        assert per_file[0]["io_error"].startswith("KeyError")
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +241,6 @@ class TestConfigThresholds:
         ctx = _ctx(denoised_paths={0: str(p)})
         small = OutputDiversityCheck().run(ctx, {"min_unique_int8_values": 5, "peek_samples": 40})
         assert small.passed is False
-        assert small.metrics["unique_count"] == 1
+        assert _per_file(small)[0]["metric_value"] == 1
         big = OutputDiversityCheck().run(ctx, {"min_unique_int8_values": 5, "peek_samples": 10_000})
         assert big.passed is True

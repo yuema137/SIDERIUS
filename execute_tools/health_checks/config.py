@@ -14,10 +14,10 @@ shape and §5 for the schema-side design principles.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from execute_tools.health_checks.schemas import GateAction
 
@@ -86,14 +86,54 @@ class GateConfig(BaseModel):
             "``HealthChecksConfig._validate_unique_ids``."
         ),
     )
-    after_round: int = Field(
+    after_round: int | Literal["every"] | list[int] = Field(
         ...,
         description=(
-            "Which round triggers this gate. The tuner calls "
-            "``get_gates_for_position(round_index)`` after each round to "
-            "look up the ``gate_id`` values configured for that round."
+            "Which round(s) trigger this gate. Three accepted forms: "
+            "(a) a positive int — fires on that specific round; "
+            '(b) the literal string ``"every"`` — fires on every round; '
+            "(c) a list of positive ints — fires on any listed round. "
+            "The tuner calls ``get_gates_for_position(round_index)`` after "
+            "each round to look up gates matching that round. See M8 §3.2."
         ),
     )
+
+    @field_validator("after_round")
+    @classmethod
+    def _validate_after_round(cls, v: int | str | list[int]) -> int | Literal["every"] | list[int]:
+        """Reject 0/negative round indices and empty lists; normalise types."""
+        if isinstance(v, str):
+            if v != "every":
+                raise ValueError(f"after_round string must be 'every', got {v!r}.")
+            return v
+        if isinstance(v, list):
+            if not v:
+                raise ValueError("after_round list must contain at least one round.")
+            for item in v:
+                if not isinstance(item, int) or isinstance(item, bool):
+                    raise ValueError(f"after_round list entries must be int, got {item!r}.")
+                if item < 1:
+                    raise ValueError(f"after_round list entries must be >= 1, got {item}.")
+            return v
+        # int case (bool is a subclass of int — reject explicitly)
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"after_round must be int, list[int], or 'every'; got {v!r}.")
+        if v < 1:
+            raise ValueError(f"after_round must be >= 1, got {v}.")
+        return v
+
+    def matches_round(self, round_index: int) -> bool:
+        """Return True when this gate fires at ``round_index``.
+
+        Encapsulates the three ``after_round`` forms so the runner has one
+        place to change if the schema grows. See ``get_gates_for_position``.
+        """
+        if isinstance(self.after_round, str):
+            return self.after_round == "every"
+        if isinstance(self.after_round, list):
+            return round_index in self.after_round
+        return self.after_round == round_index
+
     short_circuit: bool = Field(
         default=True,
         description=(

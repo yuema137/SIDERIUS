@@ -164,6 +164,85 @@ class TestGateResultsToScoreMeta:
         _is_degen, reason, _action = _gate_results_to_score_meta(gates, GateAction.INVALIDATE_ROUND)
         assert reason == "[gate_b] bad"
 
+    # ------------------------------------------------------------------
+    # M8 §3.2 semantic-fix tests (Caveat A): recording-only failures
+    # never flag is_degenerate=True. Reasons are still surfaced.
+    # ------------------------------------------------------------------
+
+    def test_recording_only_failure_does_not_flag_degenerate(self):
+        """Recording gate (action=CONTINUE) that failed must not set
+        is_degenerate — it would otherwise silently zero-out a formal
+        score via _apply_degeneracy_reaction."""
+        gr = _gr(
+            "pearson_dispersion_recording",
+            GateAction.CONTINUE,
+            passed=False,
+            failure_reason="pearson: mean=0.001 below noise floor",
+        )
+        is_degen, reason, action = _gate_results_to_score_meta([gr], GateAction.CONTINUE)
+        assert is_degen is False
+        # But the reason is still surfaced for observability
+        assert reason == "[pearson_dispersion_recording] pearson: mean=0.001 below noise floor"
+        assert action == "continue"
+
+    def test_mixed_recording_failure_and_blocking_pass(self):
+        """Recording fail + blocking pass: not degenerate; recording
+        reason still surfaces so the operator sees what the recording
+        gate noticed."""
+        gates = [
+            _gr("output_diversity_blocking", GateAction.CONTINUE, passed=True),
+            _gr(
+                "pearson_dispersion_recording",
+                GateAction.CONTINUE,
+                passed=False,
+                failure_reason="pearson: soft threshold",
+            ),
+        ]
+        is_degen, reason, action = _gate_results_to_score_meta(gates, GateAction.CONTINUE)
+        assert is_degen is False
+        assert reason == "[pearson_dispersion_recording] pearson: soft threshold"
+        assert action == "continue"
+
+    def test_mixed_recording_failure_and_blocking_failure(self):
+        """Blocking fail wins: is_degenerate=True, reason concatenates
+        both so the round record shows the full picture."""
+        gates = [
+            _gr(
+                "output_diversity_blocking",
+                GateAction.INVALIDATE_ROUND,
+                passed=False,
+                failure_reason="unique=2 (threshold 30)",
+            ),
+            _gr(
+                "pearson_dispersion_recording",
+                GateAction.CONTINUE,
+                passed=False,
+                failure_reason="mean pearson=0.001",
+            ),
+        ]
+        is_degen, reason, action = _gate_results_to_score_meta(gates, GateAction.INVALIDATE_ROUND)
+        assert is_degen is True
+        assert reason == (
+            "[output_diversity_blocking] unique=2 (threshold 30) | "
+            "[pearson_dispersion_recording] mean pearson=0.001"
+        )
+        assert action == "invalidate_round"
+
+    def test_recording_failure_with_empty_reason_no_ghost_reason(self):
+        """Recording gate fails with empty reason and no blocking failure:
+        return None (not the synthetic fallback) — the fallback is only
+        appropriate when the routing action is blocking."""
+        gr = _gr(
+            "recording_check",
+            GateAction.CONTINUE,
+            passed=False,
+            failure_reason="",
+        )
+        is_degen, reason, action = _gate_results_to_score_meta([gr], GateAction.CONTINUE)
+        assert is_degen is False
+        assert reason is None
+        assert action == "continue"
+
 
 # ---------------------------------------------------------------------------
 # _should_break_iteration — SKIP_ITER only

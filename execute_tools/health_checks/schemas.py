@@ -45,6 +45,18 @@ class GateAction(StrEnum):
     """Mark this round's score as None. Continue to the next round."""
 
 
+BLOCKING_ACTIONS: frozenset[GateAction] = frozenset(
+    {GateAction.INVALIDATE_ROUND, GateAction.SKIP_TO_FORMAL, GateAction.SKIP_ITER}
+)
+"""Actions that stop the round from being accepted as a valid experiment.
+
+Recording-only gates use ``CONTINUE`` on both ``on_pass`` and ``on_fail`` —
+they never appear here. The tuner uses this set to decide when a failed
+gate should flag ``is_degenerate`` (see ``_gate_results_to_score_meta`` in
+``nodes/ml_hyperparameter_tune_agent``). Kept next to ``GateAction`` so
+future contributors see it when they read the enum."""
+
+
 # ---------------------------------------------------------------------------
 # HealthCheckContext — inputs shared by all skills
 # ---------------------------------------------------------------------------
@@ -124,6 +136,20 @@ class HealthCheckContext(BaseModel):
         ),
         exclude=True,
     )
+    target_path_fn: Callable[[int], str] | None = Field(
+        default=None,
+        description=(
+            "Optional lazy filename constructor for the TARGET-signal HDF5: "
+            "file_index → filename of the file containing the ground-truth "
+            "channel that comparisons are made against (e.g. CH2 for "
+            "TIDMAD). Parallel to ``denoised_filename_fn`` but for the "
+            "target rather than the model output. None when the caller "
+            "cannot resolve target paths — checks that need it fall back "
+            "to ``passed=True`` with a 'not applicable' reason. Excluded "
+            "from JSON serialisation."
+        ),
+        exclude=True,
+    )
 
     # --- Scoring context (available at gates triggered after scoring) ---
     file_vector: list[float | None] = Field(
@@ -154,6 +180,20 @@ class HealthCheckContext(BaseModel):
             return self.denoised_paths[file_index]
         if self.denoised_filename_fn is not None:
             return self.denoised_filename_fn(file_index)
+        return None
+
+    def get_target_path(self, file_index: int) -> str | None:
+        """Resolve the target-signal HDF5 filename for one file_index.
+
+        Returns None when ``target_path_fn`` is not set. Recording-only
+        checks (pearson_correlation, spectral_peak_ratio) that need the
+        target signal must treat None as "not applicable" and pass
+        without judgement — mirrors the ``get_denoised_path`` fallback
+        contract used by ``output_diversity`` when no denoised path is
+        available. See M8 §3.4.
+        """
+        if self.target_path_fn is not None:
+            return self.target_path_fn(file_index)
         return None
 
 

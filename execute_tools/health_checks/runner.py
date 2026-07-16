@@ -68,11 +68,13 @@ def resolve_action(gate_results: Iterable[GateResult]) -> GateAction:
 def get_gates_for_position(round_index: int) -> list[str]:
     """Return the ids of gates configured to fire at this round.
 
-    Multiple gates may share a ``round_index``. Empty list = no gates fire →
-    the tuner proceeds with no per-round overhead.
+    Multiple gates may share a round position. Empty list = no gates fire →
+    the tuner proceeds with no per-round overhead. Matching is delegated to
+    ``GateConfig.matches_round`` so the three ``after_round`` forms (int,
+    ``"every"``, list[int]) are handled uniformly.
     """
     config = load_health_gates_config()
-    return [g.id for g in config.health_gates if g.after_round == round_index]
+    return [g.id for g in config.health_gates if g.matches_round(round_index)]
 
 
 def evaluate_gate(gate_id: str, ctx: HealthCheckContext) -> GateResult:

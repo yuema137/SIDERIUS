@@ -49,6 +49,7 @@ from agent.utils.architectural_pattern_tagger import (
 from core.hardware_context import get_or_create
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.health_checks.runner import (
     evaluate_gate,
@@ -56,6 +57,7 @@ from execute_tools.health_checks.runner import (
     resolve_action,
 )
 from execute_tools.health_checks.schemas import (
+    BLOCKING_ACTIONS,
     GateAction,
     GateResult,
     HealthCheckContext,
@@ -491,29 +493,48 @@ def _gate_results_to_score_meta(
     first two feed the existing ``_apply_degeneracy_reaction`` policy;
     the third goes into ``ExperimentRecord.gate_action`` for observability.
 
-    Health status and routing are independent:
+    Semantic (M8 §3.2 revision, 2026-07-16):
 
-      * No failed gates → ``is_degenerate=False`` and no failure reason,
-        regardless of the resolved routing action.
-      * Any failed gate → ``is_degenerate=True`` and preserve its failure
-        reason, even when the resolved action is ``CONTINUE``.
+      * ``is_degenerate`` reflects only **blocking** gate failures — a
+        failed gate whose ``action`` is in ``BLOCKING_ACTIONS``
+        (``INVALIDATE_ROUND``, ``SKIP_TO_FORMAL``, ``SKIP_ITER``). A
+        recording-only gate that returns ``passed=False`` with
+        ``action=CONTINUE`` never sets ``is_degenerate=True``, so it
+        cannot silently zero-out a formal round's score via
+        ``_apply_degeneracy_reaction``.
+      * ``failure_reason`` still concatenates ALL failed gates (blocking
+        and recording) for observability — recording-only diagnostics
+        remain visible in the round record without changing routing.
+      * ``resolved_action`` controls only routing and is always returned
+        unchanged for record observability.
 
-    ``failure_reason`` is a pipe-concatenation over failed gates prefixed
-    by gate_id (``[gate_id] reason``), or a synthetic fallback string when
-    every failed gate has an empty reason. ``resolved_action`` controls only
-    routing and is always returned unchanged for record observability.
+    Pre-M8 behaviour flagged ``is_degenerate=True`` for any failed gate
+    (including recording-only). See docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md
+    §3.2 and Caveat A discussion for the bug this fix addresses.
     """
     failed_gates = [gr for gr in gate_results if not gr.passed]
     if not failed_gates:
         return False, None, resolved_action.value
 
-    failure_reason = (
-        " | ".join(
-            f"[{gr.gate_id}] {gr.failure_reason}" for gr in failed_gates if gr.failure_reason
-        )
-        or f"gate action {resolved_action.value} with no reason"
+    # is_degenerate reflects blocking failures only (M8 §3.2 fix).
+    failed_blocking = [gr for gr in failed_gates if gr.action in BLOCKING_ACTIONS]
+
+    # failure_reason concatenates ALL failed gates for observability —
+    # blocking AND recording. The tuner records this string in the
+    # round's failure_reason field regardless of is_degenerate outcome.
+    failure_reason: str | None = " | ".join(
+        f"[{gr.gate_id}] {gr.failure_reason}" for gr in failed_gates if gr.failure_reason
     )
-    return True, failure_reason, resolved_action.value
+    if failed_blocking and not failure_reason:
+        failure_reason = f"gate action {resolved_action.value} with no reason"
+    elif not failure_reason:
+        # No blocking failure AND every failed recording gate had an empty
+        # reason. There is nothing degenerate to flag and no reason to
+        # surface — clean pass-through with the CONTINUE routing.
+        failure_reason = None
+
+    is_degenerate = bool(failed_blocking)
+    return is_degenerate, failure_reason, resolved_action.value
 
 
 def _should_break_iteration(resolved_action: GateAction) -> bool:
@@ -2231,17 +2252,26 @@ class HyperparamTuningAgent:
                                     s_max=anchor_map_data["s_max"],
                                     denoised_filename_fn=_denoised_fn,
                                 )
+
                                 # Tuner-side gate evaluation (commit-5b).
                                 # score_vector is pure scoring post-5a; the HealthGate
                                 # model runs here at the round boundary per
                                 # docs/design/pluggable_health_checks.md §8.
                                 # Loop control (SKIP_ITER, SKIP_TO_FORMAL) is applied
                                 # after the attempts loop; see the block below.
+                                # Target-signal path resolver for CH2-comparing
+                                # recording checks (pearson_dispersion, etc.).
+                                # M8 §3.4: the check module stays task-agnostic;
+                                # the tuner constructs the task-specific path here.
+                                def _target_fn(i: int, _base: str = TIDMAD_DATA_DIR) -> str:
+                                    return os.path.join(_base, f"abra_validation_{i:04d}.h5")
+
                                 _hc_ctx = HealthCheckContext(
                                     model_name=model_type,
                                     run_name=run_name,
                                     round_index=round_index,
                                     denoised_filename_fn=_denoised_fn,
+                                    target_path_fn=_target_fn,
                                     file_vector=file_vector,
                                     denoising_score=final_scalar,
                                 )

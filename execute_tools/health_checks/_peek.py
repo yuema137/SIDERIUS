@@ -35,27 +35,36 @@ from execute_tools.health_checks.schemas import HealthCheckContext
 
 
 def choose_peek_file_index(ctx: HealthCheckContext) -> int:
-    """Pick the file_index to peek at (AMB-4-5 → A).
+    """Legacy single-file peek-target resolver.
 
-    Uses the smallest explicit key in ``ctx.denoised_paths`` when the dict
-    is non-empty; otherwise defaults to 0 so ``denoised_filename_fn(0)``
-    is called. Peek is a canary — any one file suffices for collapse
-    detection.
+    **Deprecated (M9)**: use ``peek_and_aggregate`` from
+    ``execute_tools/health_checks/_multi_file_peek.py`` with an empty
+    ``peek_file_indices`` (which triggers the same single-file fallback
+    semantic). Retained for backward compatibility with callers not yet
+    migrated. Do not use in new code.
+
+    Uses the smallest explicit key in ``ctx.denoised_paths`` when the
+    dict is non-empty; otherwise defaults to 0 so
+    ``denoised_filename_fn(0)`` is called.
     """
     if ctx.denoised_paths:
         return min(ctx.denoised_paths)
     return 0
 
 
-def peek_int8_at_path(path: str, peek_samples: int) -> np.ndarray:
-    """Read up to ``peek_samples`` from ``channel0001`` of an HDF5 file.
+def peek_int8_at_channel(path: str, channel: str, peek_samples: int) -> np.ndarray:
+    """Read up to ``peek_samples`` from a named channel of a TIDMAD HDF5 file.
 
-    Pure I/O — no context awareness, no error swallowing. The caller
-    supplies a fully-resolved path and receives either the samples array
-    or a raised exception it can classify.
+    Generalises the CH1-only ``peek_int8_at_path``. Pure I/O — no
+    context awareness, no error swallowing. The caller supplies a
+    fully-resolved path and channel name and receives either the samples
+    array or a raised exception it can classify.
 
     Args:
-        path: Absolute or CWD-relative path to the denoised HDF5 file.
+        path: Absolute or CWD-relative path to the HDF5 file.
+        channel: Channel key inside ``timeseries`` — e.g. ``"channel0001"``
+            (model output in denoised files, raw noisy readout in
+            ground-truth files) or ``"channel0002"`` (target DM signal).
         peek_samples: Upper bound on how many leading samples to read.
             The returned array's shape reflects the actual read — reading
             fewer than requested is normal for tiny fixtures (numpy's
@@ -67,14 +76,25 @@ def peek_int8_at_path(path: str, peek_samples: int) -> np.ndarray:
     Raises:
         OSError: File missing, unreadable, or not a valid HDF5 file
             (includes ``FileNotFoundError`` as a subclass).
-        KeyError: A step in the ``timeseries/channel0001/timeseries``
-            walk is absent from the file structure.
+        KeyError: A step in the ``timeseries/<channel>/timeseries`` walk
+            is absent from the file structure.
     """
     with h5py.File(path, "r") as h5f:
         # h5py's __getitem__ union type forces the Any-then-cast dance
         # (same pattern as scoring_utils._h5_dataset).
         node: Any = h5f
-        for k in ("timeseries", "channel0001", "timeseries"):
+        for k in ("timeseries", channel, "timeseries"):
             node = node[k]
         dset = cast(h5py.Dataset, node)
         return np.asarray(dset[:peek_samples])
+
+
+def peek_int8_at_path(path: str, peek_samples: int) -> np.ndarray:
+    """Read up to ``peek_samples`` from ``channel0001`` of an HDF5 file.
+
+    Thin wrapper around ``peek_int8_at_channel`` preserving the pre-M8
+    signature — all existing callers continue to work unchanged.
+
+    See ``peek_int8_at_channel`` for full docstring, args, and errors.
+    """
+    return peek_int8_at_channel(path, "channel0001", peek_samples)

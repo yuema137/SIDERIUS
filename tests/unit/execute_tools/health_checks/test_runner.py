@@ -216,12 +216,20 @@ class TestGetGatesForPosition:
         assert get_gates_for_position(3) == ["gate_a", "gate_b"]
 
     def test_shipped_config_all_rounds(self):
-        """The shipped configs/health_checks.yaml has gates at rounds 1, 3, 5."""
-        assert get_gates_for_position(1) == ["collapse_check_round_1"]
-        assert get_gates_for_position(3) == ["quality_check_round_3"]
-        assert get_gates_for_position(5) == ["formal_validation_round_5"]
-        assert get_gates_for_position(2) == []
-        assert get_gates_for_position(4) == []
+        """The shipped configs/health_checks.yaml (M8 rev-7) fires all
+        6 gates on every round via ``after_round: every``."""
+        expected = [
+            "output_diversity_blocking",
+            "output_std_blocking",
+            "amplitude_collapse_blocking",
+            "pearson_dispersion_recording",
+            "spectral_peak_ratio_recording",
+            "per_file_output_std_recording",
+        ]
+        for r in [1, 2, 3, 4, 5, 7, 10]:
+            assert get_gates_for_position(r) == expected, (
+                f"round {r} did not return all 6 every-round gates"
+            )
 
 
 # ---------------------------------------------------------------------------
