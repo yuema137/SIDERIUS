@@ -15,6 +15,7 @@ from execute_tools.scoring_utils import (
     NUM_FILES,
     SEGMENTS_PER_FILE,
     SampleSet,
+    get_snr,
     score_segments,
     score_vector,
 )
@@ -29,6 +30,25 @@ MOCK_S_MAX = 4000.0
 MOCK_ANCHOR_MAP = {
     str(i): [(i + 1) * (j + 1) for j in range(SEGMENTS_PER_FILE)] for i in range(NUM_FILES)
 }
+
+
+@pytest.mark.parametrize(
+    ("noise", "expect_valid"),
+    [(0.5e-10, False), (1.0e-10, False), (1.5e-10, True)],
+)
+def test_get_snr_noise_validity_boundary(noise, expect_valid):
+    """The frozen scorer rejects noise at and below 1e-10 only."""
+    freq = np.arange(201, dtype=float)
+    pwr = np.zeros(201, dtype=float)
+    center = 100
+    pwr[center - 10] = noise
+    snr, center_freq = get_snr(freq, pwr, target=freq[center])
+    assert center_freq == freq[center]
+    if expect_valid:
+        assert np.isfinite(snr)
+        assert snr == 0.0
+    else:
+        assert np.isnan(snr)
 
 
 def _mock_get_one_sec_psd(data_dir, files, ch, start=0):

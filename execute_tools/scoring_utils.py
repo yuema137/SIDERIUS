@@ -180,7 +180,7 @@ def get_snr(
     ``docs/design/pluggable_health_checks.md`` §7.1 and the v16 forensic
     audit in ``reports/v16_20260630.md``.
 
-    The v17 guard: return ``NaN`` when ``noise < 1e-10`` (subnormal
+    The v17 guard: return ``NaN`` when ``noise <= 1e-10`` (subnormal
     territory). Downstream ``_collect_raw_pairs`` and ``score_vector``
     filter NaN pairs so the artifact never enters the aggregation.
 
@@ -200,7 +200,7 @@ def get_snr(
     noise_range = 50
     signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
     noise = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    if noise < 1e-10:
+    if noise <= 1e-10:
         # Noise window is at floating-point-subnormal level — computing
         # signal/noise here would produce the class-127 mode-collapse
         # artifact. Return NaN so the caller filters this segment out.

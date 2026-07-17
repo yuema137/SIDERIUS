@@ -15,13 +15,14 @@ import argparse
 import gc
 import importlib
 import json
+import math
 import os
 import time
 import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -408,7 +409,35 @@ def _apply_mode_override_chain(
             )
         return plan
 
-    inherited = handler(plan, winner)
+    latest_record = (memory_history or [])[-1] if memory_history else None
+    recovering_from_formal_oom = (
+        canonical == "full_clone"
+        and isinstance(latest_record, dict)
+        and latest_record.get("status") == "error_training_oom"
+        and (latest_record.get("memory") or {}).get("round_index")
+        == (
+            max(
+                (
+                    (record.get("memory") or {}).get("round_index", 0)
+                    for record in (memory_history or [])
+                ),
+                default=0,
+            )
+        )
+    )
+    if recovering_from_formal_oom:
+        # A full clone is the right first formal attempt, but repeatedly
+        # restoring the winning architecture and batch size makes the
+        # planner's OOM recovery proposal impossible to execute. Preserve
+        # the validated loss surface and learning rate while allowing the
+        # planner to reduce model capacity and/or batch size on retries.
+        inherited = _strategy_hybrid_params(plan, winner)
+        print(
+            "  [FORMAL RECOVERY] prior formal attempt OOMed — "
+            "preserving planner model_cfg/batch_size/epochs"
+        )
+    else:
+        inherited = handler(plan, winner)
     print(
         f"  [FORMAL OVERRIDE] strategy={canonical} "
         f"winner={winner['exp_id']!r} score={winner['denoising_score']:.4f} "
@@ -535,6 +564,31 @@ def _gate_results_to_score_meta(
 
     is_degenerate = bool(failed_blocking)
     return is_degenerate, failure_reason, resolved_action.value
+
+
+def _merge_score_validity_failure(
+    denoising_score: float | None,
+    *,
+    is_degenerate: bool,
+    failure_reason: str | None,
+) -> tuple[bool, str | None]:
+    """Treat a missing/non-finite scorer result as a completed collapse.
+
+    HealthGates fire only at configured round positions. Numerical validity,
+    however, is an invariant of every completed scoring attempt; otherwise a
+    round without a configured gate can be persisted as ``success`` with a
+    JSON-null score. This helper changes classification/feedback only and does
+    not alter the frozen scoring formula or denominator policy.
+    """
+    if denoising_score is not None and math.isfinite(denoising_score):
+        return is_degenerate, failure_reason
+    validity_reason = (
+        "[scoring_validity] denoising_score is None or non-finite; "
+        "the model produced no valid denoising signal"
+    )
+    if failure_reason:
+        validity_reason = f"{failure_reason} | {validity_reason}"
+    return True, validity_reason
 
 
 def _should_break_iteration(resolved_action: GateAction) -> bool:
@@ -1077,6 +1131,35 @@ def _render_gate_exhaustion_trigger_b_summary(
 # ---------------------------------------------------------------------------
 
 
+def _resume_progress(
+    existing_history: list[dict[str, Any]],
+    *,
+    model_type: str,
+    run_name: str,
+) -> tuple[int, int]:
+    """Return completed round count and the highest run-local attempt suffix.
+
+    Baseline records can share the same summary history as tuner records. Their
+    timestamp-like suffixes must not be interpreted as tuner attempt counters.
+    """
+    completed_round_indices = {
+        (record.get("memory") or {}).get("round_index")
+        for record in existing_history
+        if record.get("status") in {"success", "failed_mode_collapse"}
+        and (record.get("memory") or {}).get("round_index") is not None
+    }
+    attempt_prefix = f"{model_type}_{run_name}_"
+    attempt_suffixes: list[int] = []
+    for record in existing_history:
+        exp_id = str(record.get("exp_id") or "")
+        if not exp_id.startswith(attempt_prefix):
+            continue
+        suffix = exp_id.removeprefix(attempt_prefix)
+        if suffix.isdigit():
+            attempt_suffixes.append(int(suffix))
+    return len(completed_round_indices), max(attempt_suffixes, default=0)
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -1358,8 +1441,17 @@ class HyperparamTuningAgent:
         # round) and only increments ``completed_rounds`` on success.
         # ``consecutive_fails`` aborts the iteration after
         # ``max_fail_rounds`` rounds in a row exhaust their inner budget.
-        completed_rounds = 0
-        total_attempts = 0
+        existing_history = sandbox.get_summary()
+        completed_rounds, total_attempts = _resume_progress(
+            existing_history,
+            model_type=model_type_setting,
+            run_name=run_name,
+        )
+        if completed_rounds:
+            print(
+                f"[RESUME] Found {completed_rounds}/{max_rounds} completed "
+                f"round(s) and {total_attempts} prior attempt(s); continuing."
+            )
         consecutive_fails = 0
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state
@@ -2281,6 +2373,11 @@ class HyperparamTuningAgent:
                                 is_degenerate, failure_reason, _gate_action_str = (
                                     _gate_results_to_score_meta(_gate_results, resolved_action)
                                 )
+                                is_degenerate, failure_reason = _merge_score_validity_failure(
+                                    final_scalar,
+                                    is_degenerate=is_degenerate,
+                                    failure_reason=failure_reason,
+                                )
                                 score_res = {
                                     "status": "success",
                                     "results": {
@@ -2626,7 +2723,8 @@ class HyperparamTuningAgent:
                     # E. COMMIT: Build, validate, and save the finalized record
                     final_record = {
                         "exp_id": exp_id,
-                        "status": "failed_mode_collapse" if _is_degenerate_formal else "success",
+                        # Collapse is a completed result in both trial and formal modes.
+                        "status": "failed_mode_collapse" if is_degenerate else "success",
                         "model_type": model_type,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "file_index": file_index,

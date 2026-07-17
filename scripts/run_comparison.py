@@ -26,6 +26,7 @@ Usage:
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -37,6 +38,8 @@ from typing import cast
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
+from execute_tools.health_checks import evaluate_gate, get_gates_for_position, resolve_action
+from execute_tools.health_checks.schemas import HealthCheckContext
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
 
@@ -44,6 +47,89 @@ SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT_DATA_DIR = SIDERIUS_DATA_DIR
 DATA_DIR = TIDMAD_DATA_DIR
 LEGACY_CONFIGS_PATH = os.path.join(SIDERIUS_ROOT, "ml_models", "legacy_baseline_configs.json")
+HEALTH_CHECKS_PATH = os.path.join(SIDERIUS_ROOT, "configs", "health_checks.yaml")
+
+
+def _sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_diagnostic_metadata(
+    model_type, run_name, run_dir, baseline_workspace, baseline_record, baseline_retrained
+):
+    """Write the reproducibility snapshot for a diagnostic pre-v17 run."""
+    import torch
+
+    anchor_path = os.path.join(DATA_DIR, "segment_anchors.json")
+    anchor_data = load_anchor_map(anchor_path)
+    dataset_files = sorted(
+        glob.glob(os.path.join(DATA_DIR, "abra_training_????.h5"))
+        + glob.glob(os.path.join(DATA_DIR, "abra_validation_????.h5"))
+    )
+    try:
+        driver = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version,name,memory.total", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        driver = None
+    payload = {
+        "run_name": run_name,
+        "run_class": "diagnostic_pre_v17",
+        "objective": "current_siderius_workflow_diagnostics",
+        "paper_reproduction": False,
+        "model": model_type,
+        "git_sha": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=SIDERIUS_ROOT, text=True
+        ).strip(),
+        "exact_command": [sys.executable, *sys.argv],
+        "siderius_training_configuration": baseline_record.get("params", {}),
+        "scorer": {
+            "implementation": "execute_tools/scoring_utils.py::score_vector",
+            "threshold_policy": "noise <= 1e-10 -> invalid; no epsilon and no denominator floor",
+        },
+        "anchor_map": {
+            "path": anchor_path,
+            "sha256": _sha256(anchor_path),
+            "s_max": anchor_data["s_max"],
+        },
+        "healthgate": {"path": HEALTH_CHECKS_PATH, "sha256": _sha256(HEALTH_CHECKS_PATH)},
+        "dataset_inventory": [
+            {"path": p, "size_bytes": os.path.getsize(p), "mtime_ns": os.stat(p).st_mtime_ns}
+            for p in dataset_files
+        ],
+        "runtime": {
+            "python": sys.version,
+            "pytorch": torch.__version__,
+            "cuda_runtime": torch.version.cuda,
+            "cuda_available": torch.cuda.is_available(),
+            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "driver_query": driver,
+        },
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "finished_at": None,
+        "output_path": os.path.abspath(run_dir),
+        "baseline_source": "new_diagnostic_artifact"
+        if baseline_retrained
+        else "reused_existing_artifact",
+        "baseline_checkpoint_path": baseline_record.get("checkpoint_path"),
+        "baseline_workspace": os.path.abspath(baseline_workspace),
+        "baseline_retrained": baseline_retrained,
+        "inference_reused": False,
+        "rescored_with_current_scorer": True,
+        "healthgate_rerun": True,
+    }
+    path = os.path.join(run_dir, "run_metadata.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+    return path
 
 
 def _agent_env() -> dict:
@@ -317,13 +403,27 @@ def run_baseline_trial(
         raw_data_dir=DATA_DIR,
     )
     scoring_time = round(time.time() - t0, 1)
+    health_context = HealthCheckContext(
+        model_name=model_type,
+        run_name=run_name,
+        round_index=1,
+        denoised_filename_fn=lambda fi: os.path.join(baseline_workspace, _denoised_fn(fi)),
+        file_vector=file_vector,
+        denoising_score=final_scalar,
+    )
+    gate_results = [evaluate_gate(gid, health_context) for gid in get_gates_for_position(1)]
+    gate_action = resolve_action(gate_results)
+    failed_gates = [result for result in gate_results if not result.passed]
+    failure_reason = (
+        " | ".join(f"[{result.gate_id}] {result.failure_reason}" for result in failed_gates) or None
+    )
 
     # Extract training results. See run_baseline_single for the cast rationale.
     train_res = cast(dict, train_result.get("results", {}))
 
     record = {
         "exp_id": exp_id,
-        "status": "success",
+        "status": "failed_mode_collapse" if failed_gates else "success",
         "model_type": model_type,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "file_index": 6,
@@ -340,6 +440,8 @@ def run_baseline_trial(
         "model_params": train_res.get("model_params"),
         "denoising_score": final_scalar,
         "file_vector": file_vector,
+        "failure_reason": failure_reason,
+        "gate_action": gate_action.value,
         "is_trial": False,
         "trial_strategy": "snapshot",
         "trial_portion": 1.0,
@@ -720,7 +822,11 @@ def main():
     model_root = os.path.join(ROOT_DATA_DIR, model_type)
     run_dir = os.path.join(model_root, args.run_name)
     # Trial and single-file baselines are on different scoring scales — keep separate
-    baseline_subdir = "baseline_trial" if args.is_trial else "baseline"
+    baseline_subdir = (
+        f"{args.run_name}_baseline_trial"
+        if args.is_trial and args.run_name == "diagnostic_baseline_pre_v17"
+        else ("baseline_trial" if args.is_trial else "baseline")
+    )
     baseline_workspace = os.path.join(model_root, baseline_subdir)
     agent_workspace = os.path.join(run_dir, "agent")
     agent_run_name = f"{args.run_name}_agent"
@@ -772,6 +878,7 @@ def main():
         except (OSError, json.JSONDecodeError):
             pass
 
+    baseline_retrained = not baseline_done
     if not baseline_done:
         if args.is_trial:
             baseline_record = run_baseline_trial(
@@ -787,6 +894,17 @@ def main():
                 progress_bar=args.progress_bar,
                 file_index=args.file_index,
             )
+
+    if args.run_name == "diagnostic_baseline_pre_v17":
+        path = _write_diagnostic_metadata(
+            model_type,
+            args.run_name,
+            run_dir,
+            baseline_workspace,
+            baseline_record,
+            baseline_retrained,
+        )
+        print(f"  Diagnostic run metadata written: {path}")
 
     # --- Phase 2: Seed agent memory ---
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)

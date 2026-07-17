@@ -28,6 +28,7 @@ from execute_tools.health_checks.schemas import (
 from nodes.ml_hyperparameter_tune_agent import (
     _compute_termination_state,
     _gate_results_to_score_meta,
+    _merge_score_validity_failure,
     _should_break_iteration,
     _should_skip_to_formal,
 )
@@ -355,3 +356,39 @@ class TestComputeTerminationState:
             max_fail_rounds=3,
             gate_aborted=False,
         ) == ("partial", "completed")
+
+
+class TestScoreValidityFailure:
+    """Every completed scoring attempt must have a finite scalar."""
+
+    def test_finite_score_preserves_healthy_state(self):
+        assert _merge_score_validity_failure(
+            -3.14,
+            is_degenerate=False,
+            failure_reason=None,
+        ) == (False, None)
+
+    @pytest.mark.parametrize("score", [None, float("-inf"), float("inf"), float("nan")])
+    def test_missing_or_nonfinite_score_is_collapse(self, score):
+        is_degenerate, reason = _merge_score_validity_failure(
+            score,
+            is_degenerate=False,
+            failure_reason=None,
+        )
+
+        assert is_degenerate is True
+        assert reason is not None
+        assert "[scoring_validity]" in reason
+
+    def test_preserves_existing_gate_failure(self):
+        is_degenerate, reason = _merge_score_validity_failure(
+            float("-inf"),
+            is_degenerate=True,
+            failure_reason="[gate] output_diversity",
+        )
+
+        assert is_degenerate is True
+        assert reason == (
+            "[gate] output_diversity | [scoring_validity] denoising_score is "
+            "None or non-finite; the model produced no valid denoising signal"
+        )
