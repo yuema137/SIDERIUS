@@ -128,11 +128,17 @@ class TestPipelineTemplateVarsWiring:
         # by the next test in this class).
         agent = MLModelProposalAgent.__new__(MLModelProposalAgent)
         agent._registry = CapabilityRegistry(index_path=index_path)
+        loss_dir = tmp_path / "agent_generated" / "losses"
+        loss_dir.mkdir(parents=True)
+        snr_loss_path = loss_dir / "snr_weighted_mse.py"
+        spectral_loss_path = loss_dir / "spectral_focal.py"
+        snr_loss_path.write_text("# loadable test plugin\n")
+        spectral_loss_path.write_text("# loadable test plugin\n")
         agent._registry.register(
             CapabilityMetadata(
                 name="snr_weighted_mse",
                 capability_type="loss",
-                file_path="/abs/snr_weighted_mse.py",
+                file_path=str(snr_loss_path),
                 created_at="2026-06-22T00:00:00+00:00",
                 source_iteration="iter_005",
                 description="SNR-weighted MSE.",
@@ -142,7 +148,7 @@ class TestPipelineTemplateVarsWiring:
             CapabilityMetadata(
                 name="spectral_focal",
                 capability_type="loss",
-                file_path="/abs/spectral_focal.py",
+                file_path=str(spectral_loss_path),
                 created_at="2026-06-23T00:00:00+00:00",
                 source_iteration="iter_006",
                 description="Spectral focal.",
@@ -165,9 +171,12 @@ class TestPipelineTemplateVarsWiring:
         class _AbortPipeline(Exception):
             pass
 
-        with patch(
-            "agent.prompt_templates.proposal.load_stage_prompt",
-            side_effect=_fake_load_stage_prompt,
+        with (
+            patch("agent.prompt_templates.proposal._GLOBAL_LOSS_DIR", str(loss_dir)),
+            patch(
+                "agent.prompt_templates.proposal.load_stage_prompt",
+                side_effect=_fake_load_stage_prompt,
+            ),
         ):
             with pytest.raises(_AbortPipeline):
                 # _run_pipeline needs a real ProposalInput. Build a minimal

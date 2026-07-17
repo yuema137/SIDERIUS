@@ -15,6 +15,9 @@ load_stage_prompt() and render_expert_context().
 import os
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_GLOBAL_LOSS_DIR = os.path.abspath(
+    os.path.join(_PROMPT_DIR, "..", "..", "..", "agent_generated", "losses")
+)
 
 
 def load_prompt(filename: str) -> str:
@@ -220,6 +223,40 @@ _MODEL_REGISTRY_EMPTY_FALLBACK = (
 )
 
 
+def live_loss_metadata(registry) -> list:
+    """Return custom losses that training subprocesses can load reliably.
+
+    Capability-index entries are durable metadata, but older entries may
+    point into an iteration workspace that still exists while being absent
+    from the global loss-plugin directory scanned by fresh subprocesses.
+    Such entries are not valid Branch-B reuse candidates.  Keep the prompt
+    inventory and proposal-schema context aligned by using this helper for
+    both surfaces.
+
+    Duck-typed test metadata without ``file_path`` remains accepted for
+    backward compatibility; production ``CapabilityMetadata`` always has it.
+    """
+    live = []
+    for meta in registry.list(capability_type="loss"):
+        file_path = getattr(meta, "file_path", None)
+        if file_path is None:
+            live.append(meta)
+            continue
+        absolute_path = os.path.abspath(file_path)
+        if (
+            os.path.dirname(absolute_path) == _GLOBAL_LOSS_DIR
+            and absolute_path.endswith(".py")
+            and os.path.isfile(absolute_path)
+        ):
+            live.append(meta)
+    return live
+
+
+def live_loss_registry_names(registry) -> list[str]:
+    """Return names that are safe for proposer Branch-B loss reuse."""
+    return [meta.name for meta in live_loss_metadata(registry)]
+
+
 def render_available_losses(registry) -> str:
     """Render the loss-registry block for the proposer's prompt context.
 
@@ -246,7 +283,7 @@ def render_available_losses(registry) -> str:
 
     See ``docs/design/enable_loss_inventory.md`` § Commit L5.
     """
-    metas = list(registry.list(capability_type="loss"))
+    metas = live_loss_metadata(registry)
     if not metas:
         return _LOSS_REGISTRY_EMPTY_FALLBACK
 

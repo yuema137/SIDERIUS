@@ -33,7 +33,10 @@ An observation layer that:
 - Not a collapse-detection optimizer. Thresholds are frozen for observation, not proven optimal.
 - Not a workflow-adaptation release. Interpreter, proposer, and cross-iteration feedback stay unchanged.
 - Not a metric redesign. `denoising_score` computation is untouched; only the score-validity guard (`noise <= 1e-10`) is enforced.
-- Not a custom-loss release. V17 relies on registered built-in losses only (advice-enforced); the custom-loss implementor contract redesign is a V18 item.
+- Not a custom-loss redesign. V17 uses the existing three-branch loss surface,
+  including Branch C generation. Issue #112's stale runtime-inventory defect
+  must be fixed before launch; no new loss protocol or implementor architecture
+  is introduced.
 - Not a forensics deep-dive. Past outliers (e.g., the v15 iter-4/R4 anomaly) are preserved as issues and reopened only if the pattern re-appears during V17.
 
 ## 5. Delivered capabilities
@@ -116,14 +119,14 @@ Run the three-model observation campaign per [`v17_pregate_baseline_launch_plan.
 
 Same gate standard, same score-validity policy, same file selection throughout. Record completeness validated before proceeding to the next model.
 
-### 6.2 Built-in-loss constraint reaches the tuner (verification)
+### 6.2 Custom-loss runtime inventory (issue #112)
 
-The built-in-loss-only constraint currently lives as advice narrative in `advice/workflow/v17_pregate_baseline_advice.json`. Verify at launch that:
-
-- The constraint actually reaches the tuner (advice is loaded and applied, not silently dropped).
-- The intentional restriction is recorded in per-model run metadata so post-hoc analysis can attribute any missing custom-loss exploration to this campaign choice.
-
-If the tuner does not enforce the constraint on the input plan, add a minimum guard: reject `loss_type: custom` / non-null `custom_loss_spec` at plan validation. Small verification + small guard if needed; not a redesign.
+V17 retains Option C custom-loss generation. Before launch, ensure prompt
+rendering and proposal validation expose only losses that a fresh training
+subprocess can load from the global generated-loss directory. Workspace-only
+or missing capability-index entries must not pass as Branch B reuse. A new
+loss remains valid when the proposer supplies a complete `custom_loss_spec`,
+which invokes the existing implementor path before tuning.
 
 ### 6.3 `build_diagnostic_summary.py` schema update
 
@@ -139,7 +142,9 @@ See [`v18_priorities.md`](./v18_priorities.md) for the full list with rationale 
 
 - **Feedback propagation** — collapse signals flowing from tuner into `ModelRunSummary`, interpreter schemas, and proposer prompts.
 - **Adaptation** — adaptive thresholds, aggregation-policy search, cross-iteration collapse-fingerprint avoidance.
-- **Workflow evolution** — custom-loss implementor contract redesign (unblocks non-built-in losses in tuner planning), bidirectional cross-iteration information flow.
+- **Workflow evolution** — broader custom-loss protocol redesign beyond the
+  narrowly scoped issue #112 runtime-inventory fix, plus bidirectional
+  cross-iteration information flow.
 - **Metric refinement** — correlation-based score-modification exploration, other post-observation-data-informed changes.
 - **Forensic backlog** — v15 iter-4/R4 outlier + related historical anomalies, revisited if V17 observation data warrants.
 
