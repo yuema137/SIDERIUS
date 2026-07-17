@@ -65,10 +65,13 @@ def test_partial_three_of_ten_returns_stable_nonzero(tmp_path, capsys):
         termination_reason="aborted_fail_rounds",
     )
     # The child is shell-clean; the persisted result remains authoritative.
-    with patch(
-        "scripts.run_comparison.subprocess.run",
-        return_value=SimpleNamespace(returncode=0),
-    ), pytest.raises(SystemExit) as exc:
+    with (
+        patch(
+            "scripts.run_comparison.subprocess.run",
+            return_value=SimpleNamespace(returncode=0),
+        ),
+        pytest.raises(SystemExit) as exc,
+    ):
         _run_agent(tmp_path)
 
     assert exc.value.code == PARTIAL_CAMPAIGN_EXIT_CODE
@@ -92,6 +95,7 @@ def test_partial_exit_prevents_sequential_next_launch(tmp_path):
         "scripts.run_comparison.subprocess.run",
         return_value=SimpleNamespace(returncode=0),
     ):
+
         def launch_sequence():
             nonlocal next_model_launched
             _run_agent(tmp_path)
@@ -111,9 +115,7 @@ def test_partial_exit_prevents_sequential_next_launch(tmp_path):
         ("completed", 9, "completed"),
     ],
 )
-def test_persisted_summary_and_completion_contract_agree(
-    tmp_path, status, rounds, reason
-):
+def test_persisted_summary_and_completion_contract_agree(tmp_path, status, rounds, reason):
     output = tmp_path / "run_output.json"
     _write_output(
         output,

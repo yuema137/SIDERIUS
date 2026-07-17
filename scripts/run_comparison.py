@@ -575,9 +575,7 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 PARTIAL_CAMPAIGN_EXIT_CODE = 2
 
 
-def _read_tuner_completion(
-    output_path: str, *, requested_rounds: int
-) -> tuple[bool, str]:
+def _read_tuner_completion(output_path: str, *, requested_rounds: int) -> tuple[bool, str]:
     """Return whether the persisted tuner result completed the request."""
     try:
         with open(output_path, encoding="utf-8") as f:
@@ -705,9 +703,7 @@ def run_agent(
 
     child = subprocess.run(cmd, cwd=SIDERIUS_ROOT, env=_agent_env(), check=False)
     output_path = os.path.join(agent_workspace, f"run_output_{agent_run_name}.json")
-    completed, detail = _read_tuner_completion(
-        output_path, requested_rounds=max_rounds
-    )
+    completed, detail = _read_tuner_completion(output_path, requested_rounds=max_rounds)
     if not completed:
         print(f"Comparison run ended partial: {detail}")
         raise SystemExit(PARTIAL_CAMPAIGN_EXIT_CODE)

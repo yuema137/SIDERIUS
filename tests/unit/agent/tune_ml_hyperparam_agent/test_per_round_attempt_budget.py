@@ -257,18 +257,14 @@ def test_structural_failure_is_persisted_and_visible_to_next_plan(
             "bilinear": True,
         },
     }
-    former_error = RuntimeError(
-        "expected input to have 64 channels, but got 32 channels instead"
-    )
+    former_error = RuntimeError("expected input to have 64 channels, but got 32 channels instead")
     agent, saved, _counter, cleanup = _setup(
         agent_with_scripted_skill,
         [former_error, FAKE_VRAM_OK],
         plans=[failing_plan, corrected_plan],
     )
     try:
-        with patch(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.time.sleep"
-        ):
+        with patch("nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.time.sleep"):
             output = agent.run(
                 _make_input(
                     tmp_path,
