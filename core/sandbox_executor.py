@@ -72,10 +72,22 @@ def _tidmad_data_dir() -> str:
 # catch a runaway before the kernel OOM-killer wakes up, not to minimise
 # absolute VA. Scoring stays at 24 GiB because its VA ≈ RSS on CPU-only
 # code, and that was the exact codepath the 2026-04-20 incident hit.
+#
+# Inference override (bumped 2026-07-13 from 40 → 60 GiB): the Phase 1
+# baseline path (``run_baseline_trial`` in ``scripts/run_comparison.py``,
+# hardcoded ``trial_portion=1.0``) holds four ~1.86 GiB int8 numpy arrays
+# simultaneously at ``inference_single.py:325-331`` (``denoised`` +
+# ``injected`` + their ``.flatten().astype()`` copies passed to
+# ``create_abra_file``) — ~7.4 GiB numpy peak on wavenet at seg_size=40k.
+# Combined with the ~18-20 GiB CUDA VA baseline and h5py buffers, that
+# reproducibly exceeded the 40 GiB cap (numpy._ArrayMemoryError on the
+# fourth allocation). Trial-round and formal-round inference use much
+# smaller LLM-planned ``eval_portion`` sample sets and would fit under
+# 40 GiB, but sharing the cap keeps the sandbox launch path simple.
 
 _ROLE_DEFAULT_RSS_GB = {
     "training": 40,  # CUDA — 20 (static) + 16 (working VRAM) + 4 (safety)
-    "inference": 40,  # CUDA — same breakdown as training
+    "inference": 60,  # CUDA — training's 40 GiB + 20 GiB for full-scope numpy peak
     "scoring": 24,  # CPU-only — kept at original value, protects the 2026-04-20 incident path
 }
 
@@ -1042,7 +1054,7 @@ class StubSandbox(TidmadSandbox):
         denoised_filename_fn,
         **kwargs,
     ) -> tuple:
-        """Synthesise the anchor-normalised scoring 4-tuple. No h5 read.
+        """Synthesise the anchor-normalised scoring 2-tuple. No h5 read.
 
         Production ``TidmadSandbox.score_vector`` delegates to
         ``execute_tools.scoring_utils.score_vector``, which opens the
@@ -1051,22 +1063,28 @@ class StubSandbox(TidmadSandbox):
         (inference is stubbed), so calling the inherited implementation
         crashes with ``FileNotFoundError`` mid-scoring. This override
         mirrors the synthesis contract of ``execute_scoring`` — same
-        ``denoising_score`` ∈ [-3.0, -2.0] band, length-9 ``file_vector``,
-        and the fixed ``is_degenerate=False / failure_reason=None`` pair —
-        and returns them in the 4-tuple order the tuner unpacks at
+        ``denoising_score`` ∈ [-3.0, -2.0] band, length-9 ``file_vector``
+        — and returns them in the 2-tuple order the tuner unpacks at
         ``ml_hyperparameter_tune_agent.py`` (``score_vector`` call site).
 
         Args mirror the production signature for swap-in compatibility;
-        all are accepted but only ``**kwargs`` swallowing matters here
-        (e.g. ``reference_file_vector`` from the tuner's formal-round
-        health check). No anchor lookup, no parallel workers, no disk I/O.
+        ``**kwargs`` remains for backward compatibility with any callers
+        still passing removed kwargs like ``reference_file_vector`` (they
+        are silently swallowed). No anchor lookup, no parallel workers,
+        no disk I/O.
+
+        Health-check separation (commit-5a): the fixed
+        ``(is_degenerate=False, failure_reason=None)`` pair that this
+        stub previously appended was removed together with
+        ``score_vector``'s health-check logic. See
+        ``docs/design/pluggable_health_checks.md`` §14 Option A.
 
         Returns:
-            (file_vector, final_scalar, is_degenerate, failure_reason)
+            (file_vector, final_scalar)
         """
         file_vector = [self._rng.uniform(-3.0, -2.0) for _ in range(9)]
         final_scalar = self._rng.uniform(-3.0, -2.0)
-        return file_vector, final_scalar, False, None
+        return file_vector, final_scalar
 
     def save_record(self, record: dict[str, Any]) -> None:
         """Stamp ``_pseudo_origin`` audit marker, persist via parent, mirror in-memory.

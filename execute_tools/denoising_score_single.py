@@ -93,18 +93,6 @@ parser.add_argument(
 parser.add_argument(
     "--output_json", type=str, help="Optional path; denoising_score is merged into this JSON."
 )
-parser.add_argument(
-    "--reference_json",
-    type=str,
-    default=None,
-    help="Optional path to a JSON file with a top-level "
-    "'file_vector' key (typically the highest-scoring "
-    "trial-mode round's score record). When provided, "
-    "score_vector runs the task-specific amplitude-"
-    "collapse health check and writes is_degenerate + "
-    "failure_reason to --output_json. Absent => the "
-    "health check is skipped (graceful default).",
-)
 
 args = parser.parse_args()
 
@@ -183,27 +171,7 @@ def _denoised_fn(_fi: int) -> str:
 print(f"Calculating score for [{args.mode.upper()}] mode: {fname}")
 print(f"  s_max (global, from anchor map) = {s_max:.4f}")
 
-# Optional reference for the task-specific amplitude-collapse health
-# check. Absent => check is skipped (is_degenerate stays False).
-reference_file_vector = None
-if args.reference_json:
-    if os.path.exists(args.reference_json):
-        with open(args.reference_json) as f:
-            ref_data = json.load(f)
-        reference_file_vector = ref_data.get("file_vector")
-        if reference_file_vector is not None:
-            print(f"  reference file_vector loaded from {args.reference_json}")
-        else:
-            print(
-                f"  WARNING: --reference_json {args.reference_json} has no "
-                f"'file_vector' key; health check disabled."
-            )
-    else:
-        print(
-            f"  WARNING: --reference_json {args.reference_json} not found; health check disabled."
-        )
-
-file_vector, scalar, is_degenerate, failure_reason = score_vector(
+file_vector, scalar = score_vector(
     data_dir=args.data_dir,
     sample_set=sample_set,
     anchor_map=anchors,
@@ -213,12 +181,9 @@ file_vector, scalar, is_degenerate, failure_reason = score_vector(
     parallel=args.parallel,
     num_workers=args.num_workers,
     legacy_mode=False,
-    reference_file_vector=reference_file_vector,
 )
 
 print(f"\nFinal Denoising Score: {scalar:.4f}")
-if is_degenerate:
-    print(f"  HEALTH CHECK: is_degenerate=True ({failure_reason})")
 
 # ---------------------------------------------------------------------------
 # Optional: merge into output JSON
@@ -229,8 +194,6 @@ if args.output_json and os.path.exists(args.output_json):
         data = json.load(f)
     data["denoising_score"] = scalar
     data["file_vector"] = file_vector
-    data["is_degenerate"] = is_degenerate
-    data["failure_reason"] = failure_reason
     safe_data = coerce_nonfinite_to_none(data)
     with open(args.output_json, "w") as f:
         json.dump(safe_data, f, indent=4)

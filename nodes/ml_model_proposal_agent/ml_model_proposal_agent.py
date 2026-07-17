@@ -63,6 +63,43 @@ def _active_time_budget_minutes(inp: ProposalInput) -> float | None:
     return inp.formal_time_budget_minutes
 
 
+def _live_model_registry_names(registry: CapabilityRegistry) -> list[str]:
+    """Return the intersection of the capability index and the live
+    ``MODEL_REGISTRY``.
+
+    Fix for phantom Branch B model reuse. The implementor writes a
+    ``CapabilityMetadata`` entry to ``agent_generated/_capability_index.json``
+    *before* the code validator runs (``ml_model_implementor.py`` line 1690).
+    If validation subsequently fails the entry stays in the index, so the
+    next iteration's proposer sees the failed model as a Branch B reuse
+    candidate. That is the v16 iter_015 loss-chain failure mode
+    (``gated_dilated_tcn`` proposed in iter_009, never validated, offered
+    to iter_015's proposer as reusable).
+
+    ``ml_models.models_sandbox.MODEL_REGISTRY`` is populated only by
+    ``register_model_in_memory``, which the workflow calls from
+    ``_promote_model_to_global`` — after successful validation. It is the
+    correct source of truth for "what has actually validated and is loadable
+    right now."
+
+    We keep the index as the source of the *metadata* (description,
+    mathematical_definition) needed to render the ``{available_models_block}``
+    prompt, but for the phantom-Branch-B validator context we filter to the
+    intersection so ``ProposalOutput.model_validate`` only accepts
+    ``model_name`` values that will actually load at training time.
+
+    Returns:
+        Sorted list of names present in both the capability index and the
+        live in-memory ``MODEL_REGISTRY``. Empty list when the intersection
+        is empty (fresh workspace or all indexed models are phantoms).
+    """
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    indexed = {m.name for m in registry.list(capability_type="model")}
+    live = set(MODEL_REGISTRY.keys())
+    return sorted(indexed & live)
+
+
 def _build_preflight_rejection_block(
     num_params: int,
     estimated_minutes: float,
@@ -1038,9 +1075,7 @@ class MLModelProposalAgent:
                     "loss_registry_names": [
                         m.name for m in self._registry.list(capability_type="loss")
                     ],
-                    "model_registry_names": [
-                        m.name for m in self._registry.list(capability_type="model")
-                    ],
+                    "model_registry_names": _live_model_registry_names(self._registry),
                 },
             )
 
@@ -1559,9 +1594,7 @@ class MLModelProposalAgent:
                             "loss_registry_names": [
                                 m.name for m in self._registry.list(capability_type="loss")
                             ],
-                            "model_registry_names": [
-                                m.name for m in self._registry.list(capability_type="model")
-                            ],
+                            "model_registry_names": _live_model_registry_names(self._registry),
                         },
                     )
                     # Citation discipline — warnings, not hard failures.

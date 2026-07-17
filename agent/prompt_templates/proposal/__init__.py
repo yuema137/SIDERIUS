@@ -304,6 +304,20 @@ def render_available_models(registry) -> str:
     sorts by ``created_at`` descending, and renders one ``###`` block per
     model with description + architectural-definition fenced block.
 
+    Phantom filter: entries in ``_capability_index.json`` whose name is
+    NOT present in the live ``ml_models.models_sandbox.MODEL_REGISTRY`` are
+    silently excluded from the rendered block. Historically the index and
+    the runtime registry could disagree (implementor wrote the entry
+    before the validator ran; validation failure left a phantom entry
+    that the next proposer then advertised as a Branch B candidate — the
+    v16 iter_015 ``gated_dilated_tcn`` failure mode). The
+    ``feat/v16-fixes`` commit moved the registry write to post-validation
+    so new phantoms cannot appear, but this filter also protects against
+    any pre-existing pollution in older indexes. Tests that stub the
+    registry can patch ``MODEL_REGISTRY`` — an empty patch is treated as
+    "no filter applied" (any name in the stub registry is rendered) so
+    the render-shape tests do not need to also stub the module registry.
+
     Args:
         registry: A ``CapabilityRegistry`` instance. Duck-typed: any
             object with a ``list(capability_type=...)`` method returning
@@ -314,10 +328,21 @@ def render_available_models(registry) -> str:
         A multi-line string ready for ``str.replace`` substitution into
         the ``{available_models_block}`` placeholder. Includes a trailing
         newline so the next template line follows naturally. When the
-        registry has no ``model`` entries, returns the documented
-        fallback message (also ending in a newline).
+        registry has no ``model`` entries (or every entry is a phantom),
+        returns the documented fallback message.
     """
     metas = list(registry.list(capability_type="model"))
+    # Lazy import so this module stays importable without the ml_models
+    # side-effects (matters for docs builds and static analysis).
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    if MODEL_REGISTRY:
+        # Filter to entries whose plugin has actually loaded into the live
+        # registry. When MODEL_REGISTRY is empty (fresh workspace / tests
+        # that don't populate it), we skip the filter so legacy render
+        # tests using stub registries continue to work unchanged.
+        metas = [m for m in metas if m.name in MODEL_REGISTRY]
+
     if not metas:
         return _MODEL_REGISTRY_EMPTY_FALLBACK
 

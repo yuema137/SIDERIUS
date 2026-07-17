@@ -103,18 +103,18 @@ class RecordingSandbox:
         self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn, **kwargs
     ):
         """Mirror of :meth:`TidmadSandbox.score_vector`. Returns
-        ``(file_vector, scalar, is_degenerate, failure_reason)`` from the
-        next predefined result. The trailing two fields default to
-        ``(False, None)`` when omitted from the pseudo-data JSON, so
-        existing fixtures keep working."""
+        ``(file_vector, scalar)`` from the next predefined result.
+
+        Health-check separation (commit-5a): the trailing
+        ``(is_degenerate, failure_reason)`` pair was removed when
+        ``score_vector`` shed its embedded health-check logic. See
+        ``docs/design/pluggable_health_checks.md`` §14 Option A.
+        Extra fields on pseudo-data fixtures (e.g. ``is_degenerate``,
+        ``failure_reason``) are ignored silently so old JSON fixtures
+        keep loading without an update pass."""
         self.calls.append(("score_vector",))
         result = self._pop("score_vector")
-        return (
-            result["file_vector"],
-            result["scalar"],
-            result.get("is_degenerate", False),
-            result.get("failure_reason", None),
-        )
+        return result["file_vector"], result["scalar"]
 
     def execute_training(
         self,

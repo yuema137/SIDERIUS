@@ -99,17 +99,16 @@ class TestSubprocessRssGb:
         [
             pytest.param("scoring", 24, id="scoring_default_24gib"),
             pytest.param("training", 40, id="training_default_40gib"),
-            pytest.param("inference", 40, id="inference_default_40gib"),
+            pytest.param("inference", 60, id="inference_default_60gib"),
         ],
     )
     def test_role_default_ceiling(self, role, expected_gb, monkeypatch):
         """Per-role default RSS ceiling, no env override.
 
         Scoring (CPU-only) keeps the original 24 GiB — this is the codepath the
-        2026-04-20 incident hit, so we don't loosen it. Training/inference (CUDA
-        subprocesses) get 40 GiB = 20 (static CUDA+torch VA) + 16 (working VRAM
-        budget) + 4 (safety margin), leaving ~21 GiB of host RAM free after the
-        cap. See VA-vs-RSS calibration note in sandbox_executor.py.
+        2026-04-20 incident hit, so we don't loosen it. Training remains capped
+        at 40 GiB, while inference gets 60 GiB for full-scope baseline inference.
+        See the VA-vs-RSS calibration note in sandbox_executor.py.
         """
         monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
         assert _subprocess_rss_gb(role) == expected_gb

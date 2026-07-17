@@ -169,11 +169,20 @@ def get_snr(
     """
     Compute signal-to-noise ratio around a spectral peak.
 
-    Byte-strict transcription of ``denoising_score_old.getSNR``. The
-    zero-noise trap uses strict equality ``noise == 0`` (not ``<= 0``) —
-    the legacy spec only guards the exact-zero case. In practice PSD
-    values are ``|FFT|² / N ≥ 0`` so ``noise`` is never negative; the
-    ``== 0`` form is deliberately preserved for byte-strict parity.
+    Transcribed from ``denoising_score_old.getSNR`` with one v17 change to
+    the noise-floor guard. The legacy spec triggered a fallback of
+    ``noise = 1e-5`` when ``noise == 0`` exactly. That fallback produced
+    the class-127 mode-collapse artifact: constant int8 output → PSD is
+    all floating-point subnormals → noise window sums to ~1e-40 → noise
+    minus signal is a subnormal cancellation residue ~1e-45 → SNR ratio
+    is deterministic 2^17 = 131072 → propagated all the way to a "score"
+    of 5.5762667 that has zero information content. See
+    ``docs/design/pluggable_health_checks.md`` §7.1 and the v16 forensic
+    audit in ``reports/v16_20260630.md``.
+
+    The v17 guard: return ``NaN`` when ``noise <= 1e-10`` (subnormal
+    territory). Downstream ``_collect_raw_pairs`` and ``score_vector``
+    filter NaN pairs so the artifact never enters the aggregation.
 
     Args:
         freq:   Frequency array from ``get_one_sec_psd``.
@@ -181,7 +190,9 @@ def get_snr(
         target: Target frequency (Hz). 0 = auto-detect peak.
 
     Returns:
-        (snr, center_freq) — the SNR value and the frequency of the peak.
+        ``(snr, center_freq)`` — SNR value and peak frequency. ``snr`` is
+        ``NaN`` when the noise window collapsed to FP-precision noise
+        (i.e. the model output was near-constant).
     """
     center_id = find_peak(pwr) if target == 0 else int(np.where(freq == target)[0][0])
 
@@ -189,8 +200,11 @@ def get_snr(
     noise_range = 50
     signal = np.sum(pwr[center_id - sig_range : center_id + sig_range + 1])
     noise = np.sum(pwr[center_id - noise_range : center_id + noise_range + 1]) - signal
-    if noise == 0:
-        noise = 1e-5
+    if noise <= 1e-10:
+        # Noise window is at floating-point-subnormal level — computing
+        # signal/noise here would produce the class-127 mode-collapse
+        # artifact. Return NaN so the caller filters this segment out.
+        return float("nan"), freq[center_id]
     return signal / noise, freq[center_id]
 
 
@@ -395,6 +409,13 @@ def _collect_raw_pairs(
         freq_ch1, psd_ch1 = get_one_sec_psd(data_dir, denoised_filename, ch=1, start=local_idx)
         snr_squid = get_snr(freq_ch1, psd_ch1, target=center_freq)[0]
 
+        # v17 NaN filter — ``get_snr`` returns NaN when the noise window
+        # collapsed to floating-point subnormals (mode-collapse signature).
+        # Drop the segment so it does NOT contribute a phantom 2^17 ratio
+        # to the file mean. If every segment of a file is dropped, the
+        # caller sees an empty pair list and marks the file as None.
+        if not math.isfinite(snr_sg) or not math.isfinite(snr_squid):
+            continue
         pairs.append((float(snr_sg), float(snr_squid)))
     return file_index, pairs
 
@@ -409,9 +430,7 @@ def score_vector(
     parallel: bool = True,
     num_workers: int = 8,
     legacy_mode: bool = False,
-    reference_file_vector: list[float | None] | None = None,
-    degeneracy_threshold_ratio: float = 0.01,
-) -> tuple[list[float | None], float, bool, str | None]:
+) -> tuple[list[float | None], float]:
     """
     Score multiple files and return the length-``NUM_FILES`` per-file vector
     plus a scalar score aligned with the legacy TIDMAD formula.
@@ -456,24 +475,8 @@ def score_vector(
                                ``snr_sg`` values, mirroring legacy's
                                file-list-local maximum. No anchor map is
                                consulted.
-        reference_file_vector: Optional per-file PSD output magnitudes
-                               from a reference run (typically the
-                               highest-scoring trial-mode success in the
-                               same iteration). When provided, the
-                               task-specific health check
-                               ``execute_tools.squid_health_checks
-                               .check_amplitude_collapse`` runs on the
-                               freshly computed ``file_vector`` against
-                               this reference. When ``None``, the health
-                               check is skipped and ``is_degenerate``
-                               always returns ``False``.
-        degeneracy_threshold_ratio:
-                               Forwarded to ``check_amplitude_collapse``.
-                               Default 0.01 (1%) — the V7 collapse
-                               (~0.005 / ~8.6 ≈ 0.06%) trips this.
-
     Returns:
-        (file_vector, final_scalar, is_degenerate, failure_reason):
+        (file_vector, final_scalar):
         - ``file_vector``: length-``NUM_FILES`` list. Entry ``f`` is the
           per-file weighted mean
           ``mean_i( snr_sg[f][i] / s_max_used * snr_squid[f][i] )`` for
@@ -484,17 +487,17 @@ def score_vector(
           / Σ_f |S_f|``. For uniform ``|S_f|`` this equals the mean
           of ``file_vector`` entries; for non-uniform sampling the grand
           mean is the legacy-compatible aggregation.
-        - ``is_degenerate``: ``True`` when the task-specific health
-          check declared the output collapsed against the reference;
-          ``False`` when no reference was provided or the output
-          passed. The agent's generic handling layer decides what to
-          do with this signal — ``score_vector`` itself does not
-          modify the score.
-        - ``failure_reason``: human-readable explanation when
-          ``is_degenerate`` is ``True``, otherwise ``None``. Includes
-          actual vs reference magnitudes and the ratio so the LLM
-          planner has concrete numbers to reason about in subsequent
-          rounds' memory_history.
+
+    Health-check separation (commit-5a): ``score_vector`` is pure
+    scoring — no health-check code. The previous embedded Phase 0
+    pre-FFT short-circuit and Phase 3 post-scoring panel were removed
+    entirely per Option A in
+    ``docs/design/pluggable_health_checks.md`` §14. Health checks now
+    run tuner-side via ``evaluate_gate`` at round boundaries; see the
+    tuner's post-``sandbox.score_vector()`` block (landed in commit-5b).
+    ``reference_file_vector`` and ``degeneracy_threshold_ratio`` were
+    removed from this signature — both were only consumed by the
+    deleted magnitude-ratio predicate.
 
     Raises:
         ValueError: If ``denoised_filename_fn`` is None, or if
@@ -535,7 +538,7 @@ def score_vector(
 
     raw_pairs: dict[int, list[tuple[float, float]]] = {}
     if not tasks:
-        return file_vector, float("-inf"), False, None
+        return file_vector, float("-inf")
 
     if parallel and len(tasks) > 1:
         # Phase 6.8 §2 Layer A — force ``spawn`` start method so worker
@@ -562,7 +565,7 @@ def score_vector(
     if legacy_mode:
         all_snr_sg = [sg for pairs in raw_pairs.values() for (sg, _) in pairs]
         if not all_snr_sg:
-            return file_vector, float("-inf"), False, None
+            return file_vector, float("-inf")
         # Legacy uses ``np.amax(snr_sg)`` as the normalizer. We cast to
         # a float array and take ``np.amax`` to match the legacy call
         # shape exactly (same op as ``snr_sg/np.amax(snr_sg)``).
@@ -595,7 +598,7 @@ def score_vector(
         total_count += len(pairs)
 
     if total_count == 0:
-        return file_vector, float("-inf"), False, None
+        return file_vector, float("-inf")
 
     grand_mean = total_weighted / total_count
     if grand_mean > 0 and math.isfinite(grand_mean):
@@ -603,25 +606,7 @@ def score_vector(
     else:
         final_scalar = float("-inf")
 
-    # ------------------------------------------------------------------
-    # Phase 3 — task-specific health check (optional)
-    # ------------------------------------------------------------------
-    # Decoupled from this module: ``check_amplitude_collapse`` lives in
-    # ``execute_tools.squid_health_checks`` and owns the SQUID 1%
-    # amplitude-collapse predicate. ``score_vector`` only knows the
-    # generic contract ``(file_vector, reference) -> (bool, str|None)``.
-    is_degenerate = False
-    failure_reason: str | None = None
-    if reference_file_vector is not None:
-        from execute_tools.squid_health_checks import check_amplitude_collapse
-
-        is_degenerate, failure_reason = check_amplitude_collapse(
-            file_vector=file_vector,
-            reference_file_vector=reference_file_vector,
-            threshold_ratio=degeneracy_threshold_ratio,
-        )
-
-    return file_vector, final_scalar, is_degenerate, failure_reason
+    return file_vector, final_scalar
 
 
 # ---------------------------------------------------------------------------

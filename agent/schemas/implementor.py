@@ -17,6 +17,7 @@ from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent_generated._registry import CapabilityMetadata
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
 # proposer (dataset-level, global, knowable at proposal time). A violation
@@ -347,6 +348,20 @@ class ImplementorOutput(BaseModel):
         "``run_name``, the absolute path to the plugin file, and whether the "
         "dummy-tensor forward pass validated. See "
         "``docs/design/enable_loss_inventory.md`` § Commit L3.",
+    )
+    capability_metadata: CapabilityMetadata | None = Field(
+        default=None,
+        description="Registry metadata for a newly-generated model plugin, "
+        "handed back to the workflow so registration happens ONLY after the "
+        "validator passes. Mirrors the #92 fix for losses on the model "
+        "surface: previously the implementor wrote this entry to "
+        "``_capability_index.json`` immediately after generating the plugin, "
+        "before the validator ran — validation failures then left phantom "
+        "entries in the index that future proposers advertised as Branch B "
+        "reuse candidates (v16 iter_015 ``gated_dilated_tcn`` failure mode). "
+        "``None`` on Branch A (built-in) and Branch B (reuse) paths where no "
+        "new plugin was generated. See ``feat/v16-fixes`` commit history and "
+        "``reports/v16_20260630.md`` §9.10.",
     )
 
     @model_validator(mode="after")

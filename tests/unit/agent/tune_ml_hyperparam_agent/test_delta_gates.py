@@ -3,7 +3,8 @@
 
 Both gates use ``current_run_best_formal_score`` as the reference point.
 Defaults:
-  * ``current_run_best_formal_score = 5.5763`` (WaveNet baseline)
+  * ``current_run_best_formal_score = 1.0007`` (raw baseline; 5.5763 is
+    the class-127 collapse artifact, not a real baseline)
   * ``skip_formal_min_delta = -1.0`` → skip formal when trial < (best - 1.0)
   * ``bypass_formal_time_budget_min_delta = 0.0`` → bypass time gate when
     trial >= best
@@ -58,11 +59,14 @@ def _make_input(**overrides) -> HyperparamTuningInput:
 
 class TestDeltaGateSchema:
     def test_default_baseline_used_as_initial_reference(self):
-        """``current_run_best_formal_score`` defaults to 5.5763 — the
-        WaveNet baseline — so iter_001 has a meaningful gate anchor
-        before any formal round has actually completed in the run."""
+        """``current_run_best_formal_score`` defaults to 1.0007 — the
+        RAW baseline (identity model) — so iter_001 has a physically
+        meaningful gate anchor before any formal round has actually
+        completed in the run. 5.5763 is intentionally NOT the default:
+        it is the class-127 mode-collapse fingerprint (SNR=2^17 FP
+        artifact), see docs/design/pluggable_health_checks.md §7.1."""
         inp = _make_input()
-        assert inp.current_run_best_formal_score == 5.5763
+        assert inp.current_run_best_formal_score == 1.0007
 
     def test_skip_formal_min_delta_default_is_one_dB_floor(self):
         """Default ``-1.0`` means a trial score has to be more than 1.0

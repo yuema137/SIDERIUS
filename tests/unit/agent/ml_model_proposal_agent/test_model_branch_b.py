@@ -194,27 +194,41 @@ class TestRenderSymmetry:
 
     def test_render_available_models_renders_one_block_per_entry(self):
         """A registry with two model entries renders two ``###`` blocks,
-        each carrying the description and the architecture formula."""
-        block = render_available_models(
-            _StubRegistry(
-                [
-                    _StubMeta(
-                        name="wavenet_baseline_v16",
-                        capability_type="model",
-                        description="8-block dilated WaveNet baseline.",
-                        math="y = sum_l tanh(W_f * x) * sigmoid(W_g * x)",
-                        source="iter_001",
-                    ),
-                    _StubMeta(
-                        name="mamba_v1",
-                        capability_type="model",
-                        description="Selective SSM, linear in T.",
-                        math="dh/dt = A(x) h + B(x) u",
-                        source="iter_004",
-                    ),
-                ]
+        each carrying the description and the architecture formula.
+
+        The v16-fixes phantom filter looks up each name in
+        ``MODEL_REGISTRY`` when populated — patch to include the stub
+        names so the render is what the test is actually verifying (the
+        block shape), not the intersection semantics (which have their
+        own test file). Empty ``MODEL_REGISTRY`` would also work here
+        (filter disabled) but patching explicitly documents the coupling.
+        """
+        from unittest.mock import patch
+
+        with patch(
+            "ml_models.models_sandbox.MODEL_REGISTRY",
+            new={"wavenet_baseline_v16": object(), "mamba_v1": object()},
+        ):
+            block = render_available_models(
+                _StubRegistry(
+                    [
+                        _StubMeta(
+                            name="wavenet_baseline_v16",
+                            capability_type="model",
+                            description="8-block dilated WaveNet baseline.",
+                            math="y = sum_l tanh(W_f * x) * sigmoid(W_g * x)",
+                            source="iter_001",
+                        ),
+                        _StubMeta(
+                            name="mamba_v1",
+                            capability_type="model",
+                            description="Selective SSM, linear in T.",
+                            math="dh/dt = A(x) h + B(x) u",
+                            source="iter_004",
+                        ),
+                    ]
+                )
             )
-        )
         assert "### `wavenet_baseline_v16`" in block
         assert "### `mamba_v1`" in block
         assert "8-block dilated WaveNet baseline." in block
@@ -222,15 +236,23 @@ class TestRenderSymmetry:
 
     def test_render_helpers_share_shape_and_emit_distinct_blocks(self):
         """Render the same registry through both helpers — each picks
-        the right capability_type and emits the matching block header."""
+        the right capability_type and emits the matching block header.
+
+        Same MODEL_REGISTRY patch rationale as above."""
+        from unittest.mock import patch
+
         registry = _StubRegistry(
             [
                 _StubMeta(name="snr_mse", capability_type="loss", description="d", math="x"),
                 _StubMeta(name="wavenet_v16", capability_type="model", description="d", math="y"),
             ]
         )
-        loss_block = render_available_losses(registry)
-        model_block = render_available_models(registry)
+        with patch(
+            "ml_models.models_sandbox.MODEL_REGISTRY",
+            new={"wavenet_v16": object()},
+        ):
+            loss_block = render_available_losses(registry)
+            model_block = render_available_models(registry)
         assert "Available custom losses" in loss_block
         assert "Available custom models" in model_block
         # Each helper filters by capability_type — no cross-contamination.

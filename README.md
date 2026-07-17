@@ -20,9 +20,17 @@ schema and output schema; every edge is a typed `protocol` function; every LLM c
 through `agent/llm_bridge.LLMBridge` (the single source of truth for retry policy and provider
 routing — enforced by `tests/unit/agent/test_llm_bridge_singleton.py`).
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design and
-[`CLAUDE.md`](CLAUDE.md) for the coding standards every contributor (human or LLM) must follow.
-New nodes follow [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md).
+Task-specific framing (`task_description` + `forward_contract`) lives in one operator-visible
+file, [`configs/task_config.yaml`](configs/task_config.example.yaml), and is injected into
+every LLM prompt via `{TASK_DESCRIPTION}` / `{FORWARD_CONTRACT}` placeholders. Porting
+SIDERIUS to a new task starts with editing that file — no grep-and-replace across Python
+sources. See [`docs/design/enable_global_task_config.md`](docs/design/enable_global_task_config.md).
+
+See [`docs/architecture.md`](docs/architecture.md) for the full design,
+[`docs/design/agent_composition_architecture.md`](docs/design/agent_composition_architecture.md)
+for the three-layer roadmap, and [`CLAUDE.md`](CLAUDE.md) for the coding standards every
+contributor (human or LLM) must follow. New nodes follow
+[`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md).
 
 ### The model-exploration loop (6 agents)
 
@@ -39,7 +47,7 @@ ml_model_proposal_agent
    │   (LLM proposes architecture, consumes lit-review findings as soft priors)
    ▼
 ml_model_implementor
-   │   (writes PyTorch plugin file + test skeleton + description.md)
+   │   (writes PyTorch model plugin + optional custom loss plugin + test skeleton + description.md)
    ▼
 ml_code_validator_agent
    │   (7 checks: load, pytest, description, config, instantiation, gradient flow, LLM review)
@@ -63,6 +71,16 @@ trigger automatic retry with error feedback.
 - **Cumulative negative feedback** — architectural patterns that gate-exhausted in earlier
   iterations are tagged and forwarded as `disallowed_architectural_patterns`. The proposer
   won't re-propose them. See [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md).
+- **Pluggable HealthGates** — YAML-configured check-and-route gates (`configs/health_checks.yaml`)
+  fire at specific rounds; `OutputDiversityCheck` + `AmplitudeCollapseCheck` catch mode-collapse
+  before it burns compute, routing to one of `continue` / `skip_iter` / `skip_to_formal` /
+  `invalidate_round`. Skills live under `execute_tools/health_checks/`; the tuner integrates all
+  four `GateAction`s. See [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md).
+- **Cross-iteration knowledge accumulation** — runtime vocab, key findings, per-model knowledge
+  cache, negative feedback (physical rejections + gate exhaustions), and the previous iter's
+  proposal are all carried forward by `sdsc_submission_scripts/run_one_iteration.py` and injected
+  into the next iter's proposer / interpreter / tuner. See
+  [`docs/Consistent_growing_vocab_list.md`](docs/Consistent_growing_vocab_list.md).
 
 ---
 
@@ -87,6 +105,12 @@ uv sync && source .venv/bin/activate
 cp tidmad_data_config.example.yaml tidmad_data_config.yaml
 cp dashboard_config.example.yaml   dashboard_config.yaml
 # edit each for your machine's paths
+
+# 2b. (Only if you're changing tasks) copy the task-config template and set
+#     task_description + forward_contract for your problem. The committed
+#     configs/task_config.yaml already carries the SQUID/TIDMAD defaults.
+cp configs/task_config.example.yaml configs/task_config.yaml
+# edit only if your task differs from the committed defaults
 
 # 3. API keys (.env)
 cat > .env << 'EOF'
@@ -114,19 +138,26 @@ convention).
 
 ### Single-tuner run (most common)
 
-One model, N rounds of hyperparameter tuning.
+One model, N rounds of hyperparameter tuning. The tuner CLI takes advice as a raw string via
+`--human_advice`, not a file path — the JSON advice files under
+[`advice/single_agent/`](advice/single_agent/) are meant for the chain runner. For an ad-hoc
+single-tuner run, pass a short prompt inline:
 
 ```bash
 python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
     --force_model gated_fno \
     --is_trial --max_rounds 20 \
-    --human_advice_file advice/single_agent/gated_fno_freq_band_aware_v1.json \
-    --run_name gated_fno_freq_band_aware_v1
+    --run_name gated_fno_smoke_v1
 ```
 
-The planner/reflector split (`--reflect_model_id`) cuts top-tier LLM quota use roughly in
-half. See [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md). Trial-mode details are in
-[`docs/small_sample_trial.md`](docs/small_sample_trial.md).
+The planner/reflector split (`--reflect_provider` / `--reflect_model_id`) cuts top-tier LLM
+quota use roughly in half. See [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md).
+Trial-mode details (sampling strategies, portions, time / VRAM budgets) are in
+[`docs/small_sample_trial.md`](docs/small_sample_trial.md). Delta-based skip-formal and
+bypass-time-budget gates (`--skip_formal_min_delta`, `--bypass_formal_time_budget_min_delta`)
+suppress spurious formal promotions when a new plan's trial score barely moves — see the
+`HyperparamTuningInput` schema docstring in `agent/schemas/hyperparam_tuning.py` for
+semantics.
 
 ### Multi-iteration exploration chain
 
@@ -200,17 +231,19 @@ SIDERIUS/
 │   ├── ml_code_validator_agent/
 │   └── ml_hyperparameter_tune_agent/
 │
-├── workflows/             # deterministic graph traversals (model_exploration.py, llm_config.py)
+├── workflows/             # deterministic graph traversals (model_exploration.py, llm_config.py, task_config.py)
 ├── core/                  # sandbox executor, hardware context, resume, server calibration
 ├── execute_tools/         # training / inference / scoring subprocess entry points
+│   └── health_checks/     # pluggable HealthGate skills (output_diversity, amplitude_collapse, …)
 ├── ml_models/             # built-in models + LossConfig + plugin loader
-├── agent_generated/       # LLM-written plugins (gitignored; runtime-extended MODEL_REGISTRY)
+├── agent_generated/       # LLM-written plugins (gitignored) — models AND custom losses;
+│                          # runtime-extended MODEL_REGISTRY + LOSS_REGISTRY via CapabilityRegistry
 ├── dashboard/             # FastAPI + Plotly result browser
 ├── scripts/               # standalone runners (run_comparison, checkpoint_s_runner, baselines, …)
 ├── sdsc_submission_scripts/  # Slurm wrappers + chain runner (--mode lilab|sdsc)
-├── advice/                # human-written advice JSON (single_agent/, workflow/)
+├── advice/                # human-written advice JSON (single_agent/, workflow/ — incl. v15/v16 explorer configs)
 ├── llm_configs/           # per-stage LLM routing JSON (consumed by --llm_config)
-├── configs/               # operator-visible YAML (lit_review_config.yaml)
+├── configs/               # operator-visible YAML — task_config, lit_review_config, health_checks
 ├── reference_data/        # in-repo scoring baselines, signal frequencies, paper caches
 ├── docs/                  # design docs (see Documentation map below)
 └── tests/{unit,integration}/   # 5-tier pyramid — see Testing
@@ -266,6 +299,7 @@ The full set lives under [`docs/`](docs/). The curated start:
 
 **Design + invariants**
 - [`docs/architecture.md`](docs/architecture.md) — full system design (graph, nodes, protocols, skills)
+- [`docs/design/agent_composition_architecture.md`](docs/design/agent_composition_architecture.md) — three-layer roadmap (nodes → protocols → orchestrators; Run Monitor vision)
 - [`docs/external_agents_architecture.md`](docs/external_agents_architecture.md) — external-agent design vision
 - [`CLAUDE.md`](CLAUDE.md) — coding standards every contributor must follow
 - [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md) — node-directory contract
@@ -276,11 +310,20 @@ The full set lives under [`docs/`](docs/). The curated start:
 - [`docs/commit_plan_ml_literature_review.md`](docs/commit_plan_ml_literature_review.md) — lit-review execution log
 - [`docs/search_quality_validation.md`](docs/search_quality_validation.md) — Checkpoint S sign-off
 - [`docs/running_chain_test.md`](docs/running_chain_test.md) — operational runbook (lilab + SDSC)
+- [`docs/Consistent_growing_vocab_list.md`](docs/Consistent_growing_vocab_list.md) — cross-iteration knowledge carry-over (vocab, findings, cache, negatives, previous proposal)
 
-**Tuner + LLM infrastructure**
+**Custom-loss inventory + task config (recent)**
+- [`docs/design/enable_loss_inventory.md`](docs/design/enable_loss_inventory.md) — proposer proposes custom loss plugins symmetric with model plugins; `LOSS_REGISTRY` + promotion contract
+- [`docs/checkpoint_l_sign_off.md`](docs/checkpoint_l_sign_off.md) — Checkpoint L (loss inventory) Gate 2 + Gate 3 sign-off
+- [`docs/design/enable_global_task_config.md`](docs/design/enable_global_task_config.md) — `configs/task_config.yaml` de-hardcodes `task_description` + `forward_contract` across implementor / proposer / tuner / lit-review
+- [`docs/checkpoint_t_sign_off.md`](docs/checkpoint_t_sign_off.md) — Checkpoint T (task config) sign-off
+
+**HealthGate + tuner controls**
+- [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md) — HealthGate skills + `configs/health_checks.yaml`
 - [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md) — planner/reflector split
 - [`docs/small_sample_trial.md`](docs/small_sample_trial.md) — multi-fidelity trial/formal mode
 - [`docs/hyperparameter_tuner_features.md`](docs/hyperparameter_tuner_features.md) — tuner prompt features
+- [`docs/refactor_formal_round_strategy.md`](docs/refactor_formal_round_strategy.md) — strategy-based formal-round dispatch
 
 **Scoring**
 - [`docs/align_denoising_score.md`](docs/align_denoising_score.md) — canonical: ruler derivation + legacy-parity proof
@@ -291,8 +334,9 @@ The full set lives under [`docs/`](docs/). The curated start:
 - [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md) — cumulative negative feedback
 - [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md) — per-run plugin isolation
 
-**Test infra**
+**Test infra + gates**
 - [`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md) — dual-mode pseudo/real tests
+- [`docs/gates/gate_testing_standard.md`](docs/gates/gate_testing_standard.md) — canonical Gate testing standard (params + pass criteria)
 
 Per-developer memories live under `docs/memories/` (gitignored). See `docs/memories/README.md`.
 

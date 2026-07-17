@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
@@ -314,14 +315,38 @@ class ExperimentRecord(BaseModel):
     failure_reason: str | None = Field(
         default=None,
         description=(
-            "Human-readable health-check failure message when the task-specific "
-            "predicate inside ``execute_tools.scoring_utils.score_vector`` "
-            "flagged a degenerate output (e.g. amplitude collapse on a formal "
-            "round). Populated together with ``status='failed_mode_collapse'``; "
-            "None on healthy rounds and on trial rounds (which are immune to "
-            "the magnitude check). Surfaced verbatim to the next planner "
-            "iteration via memory_history so the LLM gets a learning signal."
+            "Human-readable health-check failure message from tuner-side gate "
+            "evaluation (commit-5b). Pipe-concatenated over all failed gates "
+            "at the round boundary, prefixed by gate_id: "
+            "``[gate_id_1] reason1 | [gate_id_2] reason2``. Populated together "
+            "with ``status='failed_mode_collapse'`` when the resolved gate "
+            "action was non-``CONTINUE``; None on healthy rounds. Trial rounds "
+            "with a non-``CONTINUE`` action still populate this field so the "
+            "next planner iteration sees the diagnostic, but the score itself "
+            "is preserved (trial-round penalty immunity per "
+            "``_apply_degeneracy_reaction``). Surfaced verbatim to the LLM "
+            "planner via memory_history."
         ),
+    )
+    gate_action: str | None = Field(
+        default=None,
+        description=(
+            "The resolved ``GateAction`` string from tuner-side gate "
+            "evaluation (commit-5b) — one of ``continue`` / ``skip_iter`` "
+            "/ ``skip_to_formal`` / ``invalidate_round``. ``None`` when "
+            "no gate fired at this round or scoring didn't run (error "
+            "paths, single-file legacy mode). Non-``continue`` values "
+            "pair with ``is_degenerate``-analog behavior via "
+            "``_apply_degeneracy_reaction`` and any loop-control actions "
+            "the tuner took (SKIP_ITER → break while, SKIP_TO_FORMAL → "
+            "jump completed_rounds). See "
+            "``docs/design/pluggable_health_checks.md`` §4 for action "
+            "semantics and §8 for severity resolution."
+        ),
+    )
+    health_gate_results: list[PersistedHealthGateResult] = Field(
+        default_factory=list,
+        description="Full typed results for every HealthGate configured for this experiment.",
     )
 
     # --- Data volume ---
@@ -701,6 +726,16 @@ class HyperparamTuningInput(BaseModel):
         ge=1,
         description="Maximum number of completed experiment rounds (OOM-skipped attempts do not count).",
     )
+    health_checks_config: str | None = Field(
+        default=None,
+        description=(
+            "Optional HealthGate YAML override. None preserves the shipped default config."
+        ),
+    )
+    resume: bool = Field(
+        default=False,
+        description="Resume from validated completed rounds already present in this run workspace.",
+    )
 
     # --- Phase L — per-round attempt budget + fail-round abort ---
     # Pre-Phase-L the tuner used a single shared pool (max_rounds * 3) and
@@ -921,9 +956,19 @@ class HyperparamTuningInput(BaseModel):
     # --- Post-v15 delta gates: skip_formal + bypass_formal_time_budget ---
     # Both gates use ``current_run_best_formal_score`` as the reference point,
     # so the proposer-side behaviour tightens naturally as the run's best
-    # formal score climbs. The default reference (5.5763) is the WaveNet
-    # baseline so the gates have a meaningful anchor before any iteration's
+    # formal score climbs. The default reference is the RAW BASELINE
+    # (1.0007 — a model that passes noisy CH1 through unchanged) so the
+    # gates have a physically-meaningful anchor before any iteration's
     # formal round has actually completed.
+    #
+    # Do NOT use 5.5763 as the default. That value is the deterministic
+    # scoring fingerprint of the class-127 mode-collapse attractor:
+    # constant int8=-1 output → PSD is all FP subnormals → SNR = 2^17
+    # exactly → ``log_5.27(10592.7443) = 5.5762667``. Every v15/v16
+    # arch-chain "successful" formal score matched this artifact, not a
+    # WaveNet denoising baseline. See
+    # ``docs/design/pluggable_health_checks.md`` §7.1 and the v16
+    # forensic audit in ``reports/v16_20260630.md``.
     #
     # Motivation — v15 retrospective (reports/v15_20260628.md):
     # * arch chain's mamba_multirate_fuser (trial=7.65) and
@@ -936,14 +981,19 @@ class HyperparamTuningInput(BaseModel):
     #   skip gate cuts that waste while keeping borderline cases.
 
     current_run_best_formal_score: float = Field(
-        default=5.5763,
+        default=1.0007,
         description=(
             "The best formal denoising_score seen so far in this chain "
-            "run. Initialized to the known WaveNet baseline score "
-            "(5.5763). Updated by the workflow after each iteration's "
-            "formal round completes. Used as the reference point for "
-            "``skip_formal_min_delta`` and "
-            "``bypass_formal_time_budget_min_delta``."
+            "run. Initialized to the RAW BASELINE score (1.0007 — the "
+            "score of a model that passes noisy CH1 through unchanged, "
+            "measured on TIDMAD). Updated by the workflow after each "
+            "iteration's formal round completes. Used as the reference "
+            "point for ``skip_formal_min_delta`` and "
+            "``bypass_formal_time_budget_min_delta``. "
+            "NOTE: do NOT use 5.5763 as the default. That value is the "
+            "class-127 mode-collapse fingerprint (SNR=2^17 FP artifact "
+            "on constant int8=-1 output), not a genuine denoising "
+            "baseline. See docs/design/pluggable_health_checks.md §7.1."
         ),
     )
     skip_formal_min_delta: float = Field(
@@ -1521,7 +1571,7 @@ class HyperparamTuningOutput(BaseModel):
             "for the next iter's delta gates, so a noisy trial score cannot "
             "poison the formal anchor when all formal attempts get gated. "
             "None when no formal round completed (next iter then keeps the "
-            "schema default 5.5763 WaveNet baseline as its reference)."
+            "schema default 1.0007 raw baseline as its reference)."
         ),
     )
     best_config: dict[str, Any] | None = Field(
@@ -1622,12 +1672,15 @@ class HyperparamTuningOutput(BaseModel):
             "loop aborted via the consecutive-failure brake."
         ),
     )
-    termination_reason: Literal["completed", "aborted_fail_rounds"] = Field(
+    termination_reason: Literal["completed", "aborted_fail_rounds", "aborted_by_gate"] = Field(
         default="completed",
         description=(
             "Why the loop exited. 'completed' = reached max_rounds successful "
             "rounds; 'aborted_fail_rounds' = max_fail_rounds consecutive "
-            "rounds exhausted their attempt budgets."
+            "rounds exhausted their attempt budgets; 'aborted_by_gate' = a "
+            "health-check gate action (SKIP_ITER) broke the while loop "
+            "before max_rounds — see docs/design/pluggable_health_checks.md "
+            "§4."
         ),
     )
 

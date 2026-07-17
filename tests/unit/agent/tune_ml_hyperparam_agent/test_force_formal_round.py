@@ -27,6 +27,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
+    _resume_progress,
 )
 
 # ---------------------------------------------------------------------------
@@ -146,6 +147,70 @@ def test_strategy_default_is_full_clone():
     just the name on disk."""
     inp = _make_input()
     assert inp.formal_round_strategy == "full_clone"
+
+
+def test_full_clone_formal_oom_retry_preserves_planner_recovery_fields(capsys):
+    """A formal OOM retry must not reapply the batch/model that just OOMed."""
+    plan = _make_plan()
+    plan.model_cfg = {"model_type": "wavenet", "num_blocks": 8}
+    plan.train_cfg = {"lr": 1e-4, "epochs": 1, "batch_size": 8}
+    plan.loss_cfg = {"loss_type": "focal"}
+    winner = _make_trial_record(
+        "trial_best",
+        score=1.0,
+        model_config={"model_type": "wavenet", "num_blocks": 10},
+        loss_type="focal_cw",
+        lr=3e-4,
+        epochs=1,
+        batch_size=16,
+    )
+    oom = {
+        "exp_id": "formal_oom",
+        "status": "error_training_oom",
+        "memory": {"round_index": 10},
+    }
+
+    _apply_mode_override_chain(
+        plan,
+        trial_allowed=True,
+        is_formal_round=True,
+        force_formal_round=True,
+        formal_round_strategy="full_clone",
+        memory_history=[winner, oom],
+    )
+
+    assert plan.model_cfg["num_blocks"] == 8
+    assert plan.train_cfg["batch_size"] == 8
+    assert plan.train_cfg["lr"] == 3e-4
+    assert plan.loss_cfg["loss_type"] == "focal_cw"
+    assert "[FORMAL RECOVERY]" in capsys.readouterr().out
+
+
+def test_resume_progress_ignores_baseline_timestamp_suffix():
+    """Baseline experiment IDs must not inflate the tuner attempt counter."""
+    history = [
+        {
+            "exp_id": "baseline_wavenet_1784177030",
+            "status": "failed_mode_collapse",
+            "memory": {},
+        },
+        {
+            "exp_id": "wavenet_diagnostic_baseline_pre_v17_004",
+            "status": "failed_mode_collapse",
+            "memory": {"round_index": 1},
+        },
+        {
+            "exp_id": "wavenet_diagnostic_baseline_pre_v17_005",
+            "status": "success",
+            "memory": {"round_index": 2},
+        },
+    ]
+
+    assert _resume_progress(
+        history,
+        model_type="wavenet",
+        run_name="diagnostic_baseline_pre_v17",
+    ) == (2, 5)
 
 
 def test_strategy_accepts_canonical_full_clone():
@@ -1160,6 +1225,9 @@ class TestRegistryShape:
 # the in-process check inside `execute_tools.scoring_utils.score_vector`
 # (commits b1+b2) plus the agent-side `_apply_degeneracy_reaction` policy
 # helper (commit c2). Coverage now lives in:
-#   - tests/unit/execute_tools/test_squid_health_checks.py
+#   - tests/unit/execute_tools/health_checks/test_output_diversity_check.py
+#   - tests/unit/execute_tools/health_checks/test_amplitude_collapse_check.py
+#   - tests/unit/execute_tools/health_checks/test_runner.py
+#   - tests/unit/agent/tune_ml_hyperparam_agent/test_gate_integration.py
 #   - tests/unit/agent/tune_ml_hyperparam_agent/test_degeneracy_handling.py
 # ---------------------------------------------------------------------------

@@ -77,7 +77,7 @@ def local_validated_model(
         "inherit_best_trial",  # legacy alias of full_clone
         "llm_propose",  # legacy alias of independent
     ] = "full_clone",
-    # --- Degenerate-output reaction (paired with execute_tools.squid_health_checks) ---
+    # --- Degenerate-output reaction (paired with tuner-side HealthGate evaluation) ---
     degenerate_penalty_score: float | None = None,
     # --- Per-round attempt budget (Phase L, §11) ---
     # Tuner-only fan-out; no proposer-side equivalent. Defaults mirror the
@@ -143,16 +143,21 @@ def local_validated_model(
         physical estimator constants. Eval strategy stays locked to
         ``snapshot``.
       - degenerate_penalty_score :
-        Operator policy for the agent's reaction when score_vector's
-        task-specific health check flags a degenerate formal-round output
-        (``is_degenerate=True`` AND ``not plan.is_trial``). ``None``
-        (default) nulls the ``denoising_score`` so the round can never be
-        picked as 'best'; a float value (typically large-negative) is used
-        as the score so the planner can still rank-order the failure. In
-        both cases the record is tagged ``status='failed_mode_collapse'``
-        with the predicate's ``failure_reason`` preserved verbatim. Trial
-        rounds are immune (no magnitude benchmark exists). Paired with
-        ``execute_tools.squid_health_checks.check_amplitude_collapse``.
+        Operator policy for the agent's reaction when tuner-side gate
+        evaluation produces a non-``CONTINUE`` ``GateAction``
+        (``INVALIDATE_ROUND`` / ``SKIP_TO_FORMAL`` / ``SKIP_ITER``) on a
+        formal round. ``None`` (default) nulls the ``denoising_score``
+        so the round can never be picked as 'best'; a float value
+        (typically large-negative) is used as the score so the planner
+        can still rank-order the failure. In both cases the record is
+        tagged ``status='failed_mode_collapse'`` with the gate's
+        ``failure_reason`` (pipe-concatenated per gate_id) preserved
+        verbatim. Trial rounds are immune per policy — the gate signal
+        still propagates to the record's ``failure_reason`` and
+        ``gate_action`` fields, but the trial score itself is preserved
+        (see ``_apply_degeneracy_reaction``). Paired with the
+        tuner-side HealthGate framework — see
+        ``docs/design/pluggable_health_checks.md`` §4.
       - attempts_per_round / attempts_per_formal_round / max_fail_rounds :
         Phase L per-round attempt budget + consecutive-failure brake
         (defaults 3 / 5 / 3). Trial rounds get ``attempts_per_round`` inner

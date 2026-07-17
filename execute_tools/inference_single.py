@@ -51,6 +51,38 @@ def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
         )
 
 
+def _is_complete_trial_output(path: str, expected_samples: int) -> bool:
+    """Return whether an attempt-scoped trial HDF5 is safe to reuse.
+
+    A CUDA/host failure can leave earlier files from the same inference
+    subprocess fully flushed while later files are absent or incomplete.
+    Reuse is deliberately opt-in and requires both ABRA channels to be
+    readable int8 vectors of the exact expected length.
+    """
+    try:
+        with h5py.File(path, "r") as handle:
+            channel1 = _h5_dataset(handle, "timeseries", "channel0001", "timeseries")
+            channel2 = _h5_dataset(handle, "timeseries", "channel0002", "timeseries")
+            expected_shape = (expected_samples,)
+            if (
+                channel1.shape != expected_shape
+                or channel2.shape != expected_shape
+                or channel1.dtype != np.dtype(np.int8)
+                or channel2.dtype != np.dtype(np.int8)
+            ):
+                return False
+            # Force reads at both allocation boundaries. Opening metadata alone
+            # is insufficient evidence that the final chunks were flushed.
+            if expected_samples:
+                channel1[0]
+                channel1[-1]
+                channel2[0]
+                channel2[-1]
+        return True
+    except (KeyError, OSError, ValueError):
+        return False
+
+
 def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
@@ -91,6 +123,14 @@ def get_parser():
         default=None,
         help="If set, write per-file inference timings to this JSON path. "
         "Trial-mode only; ignored in --mode fix or normal single-file mode.",
+    )
+    parser.add_argument(
+        "--reuse_complete_outputs",
+        action="store_true",
+        help=(
+            "In trial/sample-set mode, reuse exact attempt-named HDF5 outputs "
+            "only after validating both int8 channels and expected length."
+        ),
     )
     return parser
 
@@ -245,6 +285,28 @@ def main():
         per_file_timings_ms: list[dict] = []
         for file_index_str, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index_str)
+            out_name = os.path.join(
+                out_dir,
+                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5",
+            )
+            expected_samples = len(psd_segment_indices) * PSD_SEGMENT_LENGTH
+            if args.reuse_complete_outputs and _is_complete_trial_output(
+                out_name, expected_samples
+            ):
+                print(
+                    f"Reusing verified trial inference output: {out_name} "
+                    f"({expected_samples} int8 samples/channel)"
+                )
+                per_file_timings_ms.append(
+                    {
+                        "file_index": file_index,
+                        "n_psd_segs": len(psd_segment_indices),
+                        "elapsed_ms": 0.0,
+                        "reused": True,
+                    }
+                )
+                continue
+
             fname = f"abra_validation_{file_index:04d}.h5"
             fpath = os.path.join(args.data_dir, fname)
 
@@ -307,10 +369,6 @@ def main():
                 denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
                 injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
 
-            out_name = os.path.join(
-                out_dir,
-                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5",
-            )
             if os.path.exists(out_name):
                 os.remove(out_name)
 

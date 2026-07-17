@@ -1677,32 +1677,42 @@ class MLModelImplementor:
             f.write(plugin_src)
         print(f"✅ Plugin written → {model_file_path}")
 
-        # --- Register the model in the capability index ---
-        # Symmetric to the loss registration in ``_generate_loss`` above —
-        # writes a ``CapabilityMetadata`` entry with ``capability_type='model'``
-        # so the next iteration's proposer can see this plugin as a Branch B
-        # reuse candidate via the ``{available_models_block}`` placeholder.
-        # The ``file_path`` recorded here is the workspace-scoped path; the
-        # workflow's ``_promote_model_to_global`` rewrites it to the global
-        # ``agent_generated/models/`` path after construction-memory validation
-        # (mirrors the post-#92 loss promotion flow).
+        # --- Build model capability metadata (NOT yet registered) ---
+        # Mirror of the #92 fix for the model surface: previously we called
+        # ``self._registry.register(...)`` here, immediately after writing
+        # the plugin file but BEFORE the validator ran. On validation
+        # failure the entry persisted permanently in
+        # ``_capability_index.json`` — every subsequent proposer then saw
+        # the failed model as a Branch B reuse candidate. That is the v16
+        # iter_015 ``gated_dilated_tcn`` failure mode (proposed in iter_009,
+        # never validated, offered to iter_015's proposer as reusable).
+        #
+        # New contract: we BUILD the ``CapabilityMetadata`` here (we own the
+        # description-normalisation logic and the timestamp) but return it
+        # to the workflow via ``ImplementorOutput.capability_metadata``. The
+        # workflow calls ``registry.register(...)`` ONLY after
+        # ``validation.passed == True``, guaranteeing the index and the
+        # runtime ``MODEL_REGISTRY`` never disagree.
+        #
+        # ``file_path`` here is the workspace-scoped path; the workflow's
+        # ``_promote_model_to_global`` rewrites it to the global
+        # ``agent_generated/models/`` path via ``registry.replace()`` after
+        # promotion succeeds.
         registry_model_description = " ".join((inp.model_description or "").split())
-        self._registry.register(
-            CapabilityMetadata(
-                name=inp.model_name,
-                capability_type="model",
-                file_path=model_file_path,
-                created_at=datetime.now(UTC).isoformat(),
-                source_iteration=getattr(inp, "source_iteration", None),
-                description=registry_model_description,
-                # Persist the formal architectural definition so the
-                # proposer's ``{available_models_block}`` can render it for
-                # Branch B vs Branch C similarity judgment, mirroring the
-                # loss-side L6c behaviour.
-                mathematical_definition=(inp.mathematical_definition or ""),
-            )
+        capability_metadata = CapabilityMetadata(
+            name=inp.model_name,
+            capability_type="model",
+            file_path=model_file_path,
+            created_at=datetime.now(UTC).isoformat(),
+            source_iteration=getattr(inp, "source_iteration", None),
+            description=registry_model_description,
+            # Persist the formal architectural definition so the
+            # proposer's ``{available_models_block}`` can render it for
+            # Branch B vs Branch C similarity judgment, mirroring the
+            # loss-side L6c behaviour.
+            mathematical_definition=(inp.mathematical_definition or ""),
         )
-        print(f"✅ Registered    → model '{inp.model_name}'")
+        print(f"📝 Metadata built → model '{inp.model_name}' (register-on-pass)")
 
         # --- Write description.md so result_interpretation_agent can load it ---
         # Mirrors the structure expected by ml_models/model_descriptions.py:
@@ -1740,6 +1750,7 @@ class MLModelImplementor:
             model_description=inp.model_description,
             mathematical_definition=inp.mathematical_definition,
             loss_provenance=loss_provenance,
+            capability_metadata=capability_metadata,
         )
 
         # --- Persist output record ---

@@ -1,0 +1,74 @@
+# Frozen observe-only policy for the v17_pregate_baseline campaign.
+# Threshold evidence is reviewed in docs/design/v17_pregate_baseline_launch_plan.md §6.
+health_gates:
+  - id: output_diversity_blocking
+    after_round: every
+    short_circuit: true
+    checks:
+      - name: output_diversity
+        config:
+          min_unique_int8_values: 25
+          peek_samples: 100000
+          peek_file_indices: [3, 10, 17]
+          aggregation: any_pass
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Observe only; production policy would invalidate a failed result.
+
+  - id: output_std_blocking
+    after_round: every
+    short_circuit: true
+    checks:
+      - name: output_std
+        config:
+          min_std_mv: 1.0
+          peek_samples: 100000
+          peek_file_indices: [3, 10, 17]
+          aggregation: any_pass
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Observe only; production policy would invalidate a failed result.
+
+  - id: amplitude_collapse_blocking
+    after_round: every
+    short_circuit: true
+    checks:
+      - name: amplitude_collapse
+        config:
+          collapse_threshold: 0.95
+          peek_samples: 100000
+          peek_file_indices: [3, 10, 17]
+          aggregation: any_pass
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Observe only; production policy would invalidate a failed result.
+
+  - id: pearson_dispersion_recording
+    after_round: every
+    short_circuit: false
+    checks:
+      - name: pearson_dispersion
+        config: {peek_samples: 1000000}
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Recording only.
+
+  - id: spectral_peak_ratio_recording
+    after_round: every
+    short_circuit: false
+    checks:
+      - name: spectral_peak_ratio
+        config: {peek_samples: 1000000}
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Recording only.
+
+  - id: per_file_output_std_recording
+    after_round: every
+    short_circuit: false
+    checks:
+      - name: per_file_output_std
+        config: {peek_samples: 100000}
+    on_pass: {action: continue}
+    on_fail: {action: continue}
+    reason: Recording only.

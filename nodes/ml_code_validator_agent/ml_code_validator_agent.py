@@ -242,9 +242,29 @@ def _check_plugin(model_file_path: str) -> tuple[bool, str | None]:
 
 def _run_tests(test_file_path: str) -> tuple[bool, str]:
     """
-    Run pytest on test_file_path.
+    Run pytest on ``test_file_path``.
+
+    Branch B model reuse produces no new test file — the implementor's
+    Branch B short-circuit (``ml_model_implementor.run`` early return) emits
+    ``ImplementorOutput.test_file_path=""`` because the reused plugin was
+    already validated at initial registration. When that empty sentinel
+    (or any non-file path) reaches this function, pytest's positional
+    argument becomes ``""``, which pytest treats as "no path given → discover
+    from rootdir" and collects the entire project test suite. In v16 this
+    caused 22 loss-chain iterations to false-fail on real-API integration
+    tests that legitimately fail in the validator subprocess.
+
+    Guard: on empty or non-file ``test_file_path``, skip pytest and return
+    success. Re-validating a previously-registered plugin here is both
+    wasted work and, as v16 showed, actively harmful.
+
     Returns (passed, full_stdout_stderr).
     """
+    if not test_file_path or not os.path.isfile(test_file_path):
+        return True, (
+            "Skipped: no test file provided (Branch B model reuse — "
+            "plugin already validated at registration time)."
+        )
     result = subprocess.run(
         [sys.executable, "-m", "pytest", test_file_path, "-v", "--tb=short"],
         capture_output=True,

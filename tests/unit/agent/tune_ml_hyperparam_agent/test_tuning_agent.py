@@ -172,6 +172,16 @@ FAKE_SCORE_RESULT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _disable_health_gates_for_legacy_tuner_tests():
+    """Keep non-gate tuner tests isolated from filesystem-backed HealthGates."""
+    with patch(
+        "nodes.ml_hyperparameter_tune_agent.get_gates_for_position",
+        return_value=[],
+    ):
+        yield
+
+
 def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
     # Phase L (§11): pin per-round + fail-round budgets so this helper
     # matches the pre-Phase-L worst-case of ``max_rounds * 3`` total
@@ -497,7 +507,7 @@ def _make_trial_input(tmp_path, max_rounds=1, is_trial=True):
     )
 
 
-FAKE_SCORE_VECTOR_RESULT = ([float("nan")] * 20, 1.5, False, None)
+FAKE_SCORE_VECTOR_RESULT = ([float("nan")] * 20, 1.5)
 
 
 class TestDynamicTrialFormal:
@@ -1608,7 +1618,7 @@ class TestCopySeedPlugin:
 # Trial-mode score_vector stub with real values (not NaN) so build_score_table
 # produces a valid table end-to-end. All 20 files sampled → the subset-scoped
 # aggregate will equal the full-20 scalars from _synth_reference() (Decision 14).
-FAKE_SCORE_VECTOR_FULL = ([1.0] * 20, 2.5, False, None)
+FAKE_SCORE_VECTOR_FULL = ([1.0] * 20, 2.5)
 
 
 class TestScoreTablePropagation:

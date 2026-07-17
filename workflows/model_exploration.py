@@ -1271,6 +1271,48 @@ def _promote_model_to_global(impl_output) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Startup cleanup — phantom registry entries
+# ---------------------------------------------------------------------------
+
+
+def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
+    """Remove ``_capability_index.json`` rows whose ``file_path`` is missing.
+
+    Phantom entries accumulate when the implementor writes a
+    ``CapabilityMetadata`` row before validation (the pre-``feat/v16-fixes``
+    behaviour) and validation later fails, or when a workspace containing
+    the plugin file is cleaned but the global index still references it,
+    or when unit-test fixtures leak a ``tmp_path`` entry into the canonical
+    index. The v16 loss-chain iter_015 failure is the reproducer: the
+    global index contains ``gated_dilated_tcn`` whose file_path is a
+    ``/tmp/pytest-of-...`` path that no longer exists.
+
+    This helper runs once at workflow startup so every subsequent proposer
+    sees an index consistent with the filesystem. Entries are removed via
+    :meth:`CapabilityRegistry.remove` (atomic tmp-file rewrite), so a
+    parallel reader never sees a half-repaired index.
+
+    Args:
+        registry: A ``CapabilityRegistry`` — typically the default global
+            one. Duck-typed for tests that pass a stub.
+
+    Returns:
+        ``(n_removed, names)`` where ``names`` are the entries that were
+        pruned. ``(0, [])`` on a clean index.
+    """
+    stale: list[tuple[str, str, str]] = []  # (name, capability_type, file_path)
+    for meta in registry.list():
+        fp = getattr(meta, "file_path", "") or ""
+        if fp and not os.path.isfile(fp):
+            stale.append((meta.name, meta.capability_type, fp))
+
+    for name, cap_type, _ in stale:
+        registry.remove(name, capability_type=cap_type)
+
+    return len(stale), [f"{name} ({cap_type})" for name, cap_type, _ in stale]
+
+
+# ---------------------------------------------------------------------------
 # Workflow
 # ---------------------------------------------------------------------------
 
@@ -1333,7 +1375,7 @@ def run_workflow(
     formal_eval_portion: float = 1.0,
     force_formal_round: bool = True,
     formal_round_strategy: FormalRoundStrategy = "full_clone",
-    # --- Degenerate-output reaction policy (paired with execute_tools.squid_health_checks) ---
+    # --- Degenerate-output reaction policy (paired with tuner-side HealthGate evaluation) ---
     degenerate_penalty_score: float | None = None,
     # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
     # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
@@ -1516,6 +1558,24 @@ def run_workflow(
 
     print(f"\n{'=' * 60}")
     print("  SIDERIUS Model Exploration Workflow")
+    # v16-fixes — phantom sweep BEFORE preload. Any ``_capability_index.json``
+    # row whose ``file_path`` doesn't resolve to a real file is removed
+    # here so downstream preload + proposer rendering never advertises a
+    # loadable plugin that isn't actually there. Historically this happened
+    # when the pre-fix implementor wrote the index entry before the
+    # validator ran; the ``feat/v16-fixes`` commit moved the write to
+    # post-validation, but existing indexes may already carry phantoms
+    # from prior runs (e.g. v16 global index still has
+    # ``gated_dilated_tcn`` pointing at a stale pytest tmp dir).
+    from agent_generated._registry import CapabilityRegistry as _StartupCapReg
+
+    _n_pruned, _pruned_names = _cleanup_stale_registry_entries(_StartupCapReg())
+    if _n_pruned:
+        print(
+            f"  Pruned {_n_pruned} stale registry entr"
+            f"{'y' if _n_pruned == 1 else 'ies'} (missing file_path): "
+            f"{_pruned_names}"
+        )
     # L6c — preload promoted losses into the in-memory LOSS_REGISTRY so
     # cross-process Branch B reuse (chain resume after restart) resolves
     # without depending on SIDERIUS_LOSS_DIRS. Safe to call when
@@ -2078,6 +2138,36 @@ def run_workflow(
 
                     if validation.passed:
                         print("    All 7 checks passed.\n")
+                        # Mirror the #92 fix for the model surface: register
+                        # the model in ``_capability_index.json`` and load it
+                        # into ``MODEL_REGISTRY`` ONLY after validation
+                        # passes. The implementor now hands the metadata
+                        # back via ``impl_output.capability_metadata`` (see
+                        # ``agent/schemas/implementor.py``) so the registry
+                        # write happens here, not inside the implementor.
+                        # Before this fix, a validation failure left a
+                        # phantom index entry that every future proposer
+                        # then advertised as a Branch B candidate (v16
+                        # iter_015 ``gated_dilated_tcn``).
+                        _capmeta = getattr(impl_output, "capability_metadata", None)
+                        if _capmeta is not None:
+                            from agent_generated._registry import (
+                                CapabilityRegistry as _CapReg,
+                            )
+
+                            _CapReg().register(_capmeta)
+                            print(f"    ✅ Registered → model '{_capmeta.name}' (post-validation)")
+                            from ml_models.plugin_loader import (
+                                register_model_in_memory,
+                            )
+
+                            _registered_in_memory = register_model_in_memory(
+                                impl_output.model_file_path
+                            )
+                            if _registered_in_memory is not None:
+                                print(
+                                    f"    ✅ MODEL_REGISTRY ← '{_registered_in_memory}' (in-memory)"
+                                )
                         break
 
                     previous_validation_failure = (
@@ -2238,8 +2328,10 @@ def run_workflow(
         # (formal-dominated under inherit_best_trial / full_clone, which is
         # the production default — see workflows/model_exploration.py:
         # 2134-2137). When no iter has completed yet, the schema default
-        # (WaveNet baseline 5.5763) applies, so iter_001's gates have a
-        # meaningful anchor too.
+        # (raw baseline 1.0007) applies, so iter_001's gates have a
+        # meaningful anchor too. NOTE: 5.5763 is intentionally NOT the
+        # default — it is the class-127 mode-collapse fingerprint (SNR=2^17
+        # FP artifact), see docs/design/pluggable_health_checks.md §7.1.
         if best_score_overall is not None:
             tune_input.current_run_best_formal_score = best_score_overall
 

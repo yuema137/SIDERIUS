@@ -219,6 +219,30 @@ Each bug fixed manually in v15/v16 had the same three-part structure:
 
 A graph-aware orchestrator with cross-iteration memory and per-control-point policy decisions catches all of these automatically. The Run Monitor (issue #100) is the first instance of that pattern.
 
+### Health checks as first pluggable skill (v16)
+
+The class-127 collapse attractor discovery (see
+`docs/design/pluggable_health_checks.md` § Motivation) demonstrated why
+health checks cannot be hardcoded: different tasks have different collapse
+attractors. The `execute_tools/health_checks/` system is the first
+concrete implementation of a pluggable skill following the three-layer
+pattern — typed Protocol, YAML config, import-time registry — and serves
+as the reference implementation for all future skills.
+
+### Incident log (v15/v16)
+
+These concrete failures motivated each architectural decision:
+
+| Incident | Root cause | Fix | Architectural lesson |
+|---|---|---|---|
+| Ghost scores (5.5763) | Class-127 collapse + 2^17 FP artifact | `OutputDiversityCheck` + SNR noise-floor guard + corrected schema default (commit `6fcc87f`) | Health checks must be pluggable and run before scoring |
+| Registry timing race | `_capability_index.json` written before validation | #92 fix: write after validation (commit `f1e1ba8`, loss surface) | Registry write and file promotion must be atomic |
+| Phantom Branch B model | Model written to index before validation passes | Mirror #92 fix for models (commit `8c5ff23`) | Same timing invariant applies to all component types |
+| Loss chain design violation | No "model Branch B" concept existed | Model Branch B (commit `408838d`) | Component symmetry: every pluggable type needs A/B/C |
+| Arch chain time-gate blocks | Trial scores not comparable to formal anchor | Narrow-coverage suppression (planned for v17; see `reports/v16_20260630.md` §8.1) | Scores from different sampling strategies are incommensurable |
+| Vocab promotion zero | Proposer invented new names every iter | Three vocab fixes (commit `9592494`) | Naming discipline must be enforced at prompt level |
+| I13–I16 registry asymmetry | Consumers hardcoded loss_type lists | `get_target_torch_dtype()` helper | Protocol is the boundary — consumers must not hardcode capability lists |
+
 ---
 
 ## 5. Node Catalog (current nodes)
@@ -255,22 +279,46 @@ All 6 share the consistent `def run(self, inp: XxxInput) → XxxOutput` interfac
 
 The `wrapper.py` naming pattern indicates skills were retrofitted into a module shape rather than designed as `SkillSpec`-compliant nodes from day one. The flat `forbidden_pattern_skill.py` is an interface outlier — useful as a target for the Phase 1 normalization.
 
+### Health check skills (`execute_tools/health_checks/`)
+
+The first pluggable skill family in production — `HealthCheckSkill`
+Protocol + import-time registry + `configs/health_checks.yaml`. Two
+checks currently registered (`OutputDiversityCheck`,
+`AmplitudeCollapseCheck`), called from
+`execute_tools/scoring_utils.py::score_vector`. Reference implementation
+for main-agent `SkillSpec` adoption in the rest of Phase 1.
+
+Full spec: **`docs/design/pluggable_health_checks.md`**.
+
 ---
 
 ## 6. Implementation Roadmap
 
-### Phase 1: Complete Layer 1 (Node self-description)
+### Phase 1: Complete Layer 1 (Node self-description) — IN PROGRESS
 
 **Goal:** Every node has a discoverable `SkillSpec`.
 
-**Tasks:**
+**Phase 1 progress (as of `feat/v16-fixes`):**
+- ✅ Health check skills: first pluggable skill with typed Protocol + YAML config
+- ✅ Model Branch B: `MODEL_REGISTRY` + `register_model_in_memory()`
+- ✅ Loss Branch B: `LOSS_REGISTRY` (`feat/enable-loss-inventory`)
+- ⬜ `SkillSpec` adoption on 6 main nodes
+- ⬜ `NODE_REGISTRY` with register-on-import
+- ⬜ `agent/skills/__init__.py` populated
+
+**Remaining tasks (detail):**
 - Add `spec: ClassVar[SkillSpec] = SkillSpec(...)` to each of the 6 main agents.
 - Normalize skill nodes to a uniform interface (`def run_skill(input: SkillInput) → SkillOutput` with Pydantic input/output schemas, replacing the current `**kwargs` pattern). Convert `forbidden_pattern_skill.py` from flat module to subdirectory layout.
 - Populate `agent/skills/__init__.py` and `nodes/__init__.py` with re-exports.
 - Build `NODE_REGISTRY: dict[str, SkillSpec]` via decorator or `__init_subclass__`. One canonical location: `agent/node_registry.py`.
 
-**Estimated effort:** 1–2 days.
+**Estimated effort:** ~1 day for the main-agent adoption. Skill-node
+normalization can be deferred until an actual consumer (the LLM
+orchestrator in Phase 5) needs it.
 **Unlocks:** LLM can enumerate available nodes via `[spec.to_openai_tool() for spec in NODE_REGISTRY.values()]`. The Run Monitor (Phase 2) can discover what nodes exist without hardcoded knowledge.
+**De-risked by:** the health-check registry is empirical proof that the
+Protocol + registry + config pattern works in production, not just
+in theory.
 
 ### Phase 2: Run Monitor (First non-human orchestrator)
 
@@ -332,7 +380,17 @@ The `wrapper.py` naming pattern indicates skills were retrofitted into a module 
 2. **Nodes don't know the graph.** A node only knows its own input/output contract. It doesn't know what comes before or after, what orchestrator is running it, or whether it's inside a cycle.
 3. **Orchestrators are swappable.** The same set of nodes can be composed by a human-defined DAG, a Run Monitor, or an LLM. The substrate is identical.
 4. **Registry is the single source of truth.** What nodes exist, what plugins are available, what's been validated — all in registries (`NODE_REGISTRY`, `agent_generated/_capability_index.json`, `MODEL_REGISTRY`, `LOSS_REGISTRY`). Consumers query; nobody hardcodes.
-5. **Symmetry.** Loss plugins, model plugins, nodes — all follow the same Branch A (built-in) / Branch B (reuse registered) / Branch C (generate new) pattern. The pattern landed for losses (PR Checkpoint L) and models (PR #98); extending it to nodes is the natural next step.
+5. **Component symmetry.** Every pluggable component type follows the same Branch A/B/C pattern and registry contract:
+
+    | | Loss | Model | Health Check |
+    |---|---|---|---|
+    | Branch A | built-in (ce/focal) | built-in (wavenet/punet) | built-in check |
+    | Branch B | reuse registered | reuse registered | reuse config |
+    | Branch C | generate new plugin | generate new plugin | implement new skill |
+    | Registry | `LOSS_REGISTRY` | `MODEL_REGISTRY` | `_HEALTH_CHECK_REGISTRY` |
+    | Config | `LossConfig` | `ModelConfig` (dict, #97) | `health_checks.yaml` |
+
+    Issue #97 tracks completing schema-level symmetry (typed `ModelConfig`).
 6. **Transport-agnostic schemas.** Per `docs/architecture.md` §8: schemas define data format; `StorageConfig` defines location. A protocol's `local_*` and `database_*` variants populate the same schema differently.
 7. **Cycles are orchestrator-driven, not node-driven.** A node doesn't know it's in a loop. Per `docs/architecture.md` §7: an orchestrator traverses cycles repeatedly; nodes are stateless on each traversal.
 
@@ -343,8 +401,8 @@ The `wrapper.py` naming pattern indicates skills were retrofitted into a module 
 | Issue | Status | Relationship |
 |---|---|---|
 | **#91** (modular agent orchestration) | OPEN | This document is the detailed spec for the three-layer framing #91 calls out. Themes A–I in #91 map onto specific phases here: A → Phase 3, B → Phase 1, C → Phase 1, D → Phase 1, E → Phase 5 (tool-calling for LLM orchestrator), F → adjacent (corpus/retrieval), G → Phase 1 (validator check registry), H → Phase 2 (Run Monitor retry policy), I → Phase 1 (typed schema instead of free-text). |
-| **#92** (registry timing) | CLOSED | Fixed in PR #98 (loss + model promotion at validator-passes, not tuner-completes). |
-| **#93** (adaptive training regime) | OPEN | Phase 2 subsumes the "adaptive training budget" sub-bullet (Run Monitor policy: detect collapse → next iter gets higher `max_epochs`). The training-skill-internal diversity gates (#93 items 1, 3) remain separate. |
+| **#92** (registry timing) | CLOSED | Loss surface closed by commit `f1e1ba8`. Model surface closed by commit `8c5ff23` on `feat/v16-fixes` — the earlier belief that PR #98 closed both was incorrect; PR #98 was the symmetric-Branch-B feature and left the model registry-write timing untouched. |
+| **#93** (adaptive training regime) | OPEN | Phase 2 subsumes the "adaptive training budget" sub-bullet (Run Monitor policy: detect collapse → next iter gets higher `max_epochs`). The training-skill-internal diversity gates (#93 items 1, 3) remain separate. The class-127 audit (in `docs/design/pluggable_health_checks.md`) makes this concrete: the collapse signal is `output_diversity → is_degenerate=True`, and the Run Monitor's cross-iter policy consumes it directly. |
 | **#94** (info source weighting) | OPEN | Phase 5 (LLM orchestrator) is the natural home — the orchestrator decides the proposer's information mix per goal. |
 | **#95** (bidirectional info flow) | OPEN | Phase 2 prerequisite — Run Monitor consumes the structured tuner-findings channel #95 establishes. |
 | **#96** (dynamic resource allocation) | CLOSED | Subsumed by Run Monitor (#100). |
@@ -382,9 +440,11 @@ This sequencing lets each phase deliver value independently and validates the de
 ## 10. References
 
 - `docs/architecture.md` — foundational principles (graph topology, fan-in protocols, transport-agnostic schemas, orchestrator-as-node).
+- `docs/design/pluggable_health_checks.md` — the pluggable-skill pattern's design spec (Phase 1 proof-of-concept, §5 in this doc).
 - `agent/schemas/skill_spec.py` — the `SkillSpec` class designed for Layer 1 self-description.
 - `agent/schemas/protocols/` — the 6 production protocols (Layer 2, complete).
-- `workflows/model_exploration.py` — the de-facto Layer 3 orchestrator (2608 lines, refactor target).
-- `reports/v16_20260630.md` §8 — design observations on anchor strategy commensurability that motivated this doc.
+- `execute_tools/health_checks/` — first pluggable-skill family in production; blueprint for main-agent adoption.
+- `workflows/model_exploration.py` — the de-facto Layer 3 orchestrator (~2660 lines, refactor target).
+- `reports/v16_20260630.md` §§8–9 — anchor-strategy commensurability and the class-127 forensic audit that motivated the health-check framework (see `docs/design/pluggable_health_checks.md`).
 - v15 final report — ghost-score audit, mode-collapse signatures, anchor-strategy artifacts.
 - Issues #91, #93, #94, #95, #97, #100 — feature work that depends on this architecture.

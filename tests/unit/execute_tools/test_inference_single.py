@@ -27,9 +27,14 @@ import ast
 import os
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
-from execute_tools.inference_single import _assert_training_sentinel
+from execute_tools.inference_single import (
+    _assert_training_sentinel,
+    _is_complete_trial_output,
+)
 
 _INFERENCE_SOURCE = Path(__file__).resolve().parents[3] / "execute_tools" / "inference_single.py"
 
@@ -93,6 +98,40 @@ class TestAssertTrainingSentinel:
         msg = str(exc_info.value).lower()
         for forbidden in ("retry", "retrying", "backoff", "will try again"):
             assert forbidden not in msg, f"Message must not promise a retry; got: {msg!r}"
+
+
+class TestCompleteTrialOutput:
+    """Interrupted inference may reuse only fully flushed ABRA outputs."""
+
+    @staticmethod
+    def _write(path: Path, channel1: np.ndarray, channel2: np.ndarray) -> None:
+        with h5py.File(path, "w") as handle:
+            timeseries = handle.create_group("timeseries")
+            timeseries.create_group("channel0001").create_dataset("timeseries", data=channel1)
+            timeseries.create_group("channel0002").create_dataset("timeseries", data=channel2)
+
+    def test_accepts_exact_readable_int8_channels(self, tmp_path):
+        path = tmp_path / "complete.h5"
+        values = np.arange(8, dtype=np.int8)
+        self._write(path, values, values)
+
+        assert _is_complete_trial_output(str(path), expected_samples=8)
+
+    @pytest.mark.parametrize(
+        ("channel1", "channel2", "expected_samples"),
+        [
+            (np.arange(7, dtype=np.int8), np.arange(8, dtype=np.int8), 8),
+            (np.arange(8, dtype=np.int16), np.arange(8, dtype=np.int8), 8),
+        ],
+    )
+    def test_rejects_wrong_shape_or_dtype(self, tmp_path, channel1, channel2, expected_samples):
+        path = tmp_path / "invalid.h5"
+        self._write(path, channel1, channel2)
+
+        assert not _is_complete_trial_output(str(path), expected_samples=expected_samples)
+
+    def test_rejects_missing_or_unreadable_file(self, tmp_path):
+        assert not _is_complete_trial_output(str(tmp_path / "missing.h5"), expected_samples=8)
 
 
 # =============================================================================

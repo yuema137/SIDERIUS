@@ -63,6 +63,34 @@ Plan your experiments across rounds, not just one at a time:
 - **Score Reliability**: Treat score improvements of < ±5% at trial_portion < 0.1 as
   noise. Do not pivot strategy based on noise — repeat with more data if unsure.
 
+### COLLAPSE RECOVERY GUIDELINES:
+- `denoising_score=-inf` or `denoising_score=None` with a non-None
+  `failure_reason` means HealthGate detected model collapse or invalid output.
+- `gate_action="continue"` with a non-None `failure_reason` means the gate
+  detected a problem but allowed later rounds to run; it is NOT a healthy round.
+- `failure_reason` containing `output_diversity` means the model produced
+  near-constant values, commonly class-127 mode collapse.
+- `failure_reason` containing `amplitude_collapse` means the output PSD
+  amplitude collapsed relative to the reference.
+- If `loss_type="ce"`, switch immediately to focal loss with `alpha=0.5`
+  and `gamma=2.0`; CE is unstable on class-imbalanced data.
+- If focal loss still collapses, reduce `lr` by 2-5×, for example
+  `1e-3 → 5e-4 → 1e-4`.
+- If `lr` is already low and collapse persists, switch from Adam to AdamW
+  with `weight_decay=1e-4`.
+- Do NOT increase model capacity or change architecture during collapse
+  recovery. Stabilize training first and change one major factor at a time.
+- Three or more consecutive records with non-None `failure_reason` indicate
+  a fundamental configuration problem, not random variance.
+- After persistent collapse, reset to the known-working baseline:
+  focal loss (`alpha=0.5`, `gamma=2.0`), `lr=5e-4`, and Adam.
+- Do not continue exploring a loss/optimizer/learning-rate region that has
+  collapsed repeatedly.
+- A finite negative score such as `-3.14` is NOT collapse. It is valid,
+  low-but-real performance below the anchor ceiling.
+- Treat collapse as present only when `failure_reason` is set; do not infer
+  collapse from the sign of a finite score alone.
+
 ### EFFICIENCY AWARENESS:
 - A simpler model (fewer parameters) or shorter training (fewer epochs) that achieves a score
   within 5% of the current best is a **highly valuable result** — prefer it over marginal gains
