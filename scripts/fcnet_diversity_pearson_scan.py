@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Any, cast
 
 import h5py
 import numpy as np
-from scipy.stats import pearsonr
 
 MV_PER_LSB: float = 40.0 / 128.0
 PEEK_SAMPLES: int = 1_000_000
@@ -58,7 +58,11 @@ def _target_path(file_index: int) -> Path:
 
 def _read_channel(path: Path, channel: str, n: int) -> np.ndarray:
     with h5py.File(str(path), "r") as f:
-        return np.asarray(f["timeseries"][channel]["timeseries"][:n])
+        node: Any = f
+        for k in ("timeseries", channel, "timeseries"):
+            node = node[k]
+        dset = cast(h5py.Dataset, node)
+        return np.asarray(dset[:n])
 
 
 def scan_denoised(path: Path) -> dict:
@@ -78,8 +82,10 @@ def compute_pearson(denoised_arr: np.ndarray, target_arr: np.ndarray) -> float:
     t = target_arr[:n].astype(np.float64) * MV_PER_LSB
     if np.std(d) < 1e-12 or np.std(t) < 1e-12:
         return float("nan")
-    r, _ = pearsonr(d, t)
-    return float(r) if np.isfinite(r) else float("nan")
+    # np.corrcoef(a, b)[0, 1] is numerically identical to scipy.stats.pearsonr(a, b)[0]
+    # and has cleaner numpy stub typing.
+    r = float(np.corrcoef(d, t)[0, 1])
+    return r if np.isfinite(r) else float("nan")
 
 
 def _fmt(x, w: int = 8):

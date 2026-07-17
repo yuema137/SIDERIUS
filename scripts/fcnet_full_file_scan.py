@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import importlib
 import sys
 import time
 from pathlib import Path
@@ -35,14 +36,15 @@ import h5py
 import numpy as np
 import torch
 
-# Paper's AE class must be importable so torch.load can unpickle the .pth
+# Paper's ``network`` module (with the AE class inside) must be importable
+# so ``torch.load`` can unpickle paper's saved model instances. The module
+# lives outside SIDERIUS at /home/tidmad/TIDMAD/, so we push its directory
+# onto sys.path and import via ``importlib`` — a static
+# ``from network import AE`` would fail pyright's import resolution (the
+# module is not on the analysis path). At runtime, ``importlib`` puts
+# ``network`` into ``sys.modules`` — pickle finds ``network.AE`` there.
 sys.path.insert(0, "/home/tidmad/TIDMAD/")
-from network import AE
-
-# torch.load needs paper's AE class in sys.modules to unpickle the
-# saved model. Reference the import here so lint understands it is
-# intentionally kept in scope for the unpickle path.
-_UNPICKLE_TARGET = AE
+_UNPICKLE_MODULE = importlib.import_module("network")
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 INPUT_SIZE = 40_000
@@ -110,7 +112,10 @@ def _run_inference_on_file(model: torch.nn.Module, file_index: int) -> None:
             input_seq = torch.from_numpy(arr).float().to(DEVICE)
             output_seq = model(input_seq).detach().cpu().numpy()
             # -128 shift per paper's inference.py process_batch line 128.
-            denoised_batches.append(np.int8(output_seq - 128))
+            # ``.astype(np.int8)`` is preferred over ``np.int8(...)`` — the
+            # latter is a scalar-cast overload for pyright's stubs, while
+            # the former's return type is unambiguously ``ndarray``.
+            denoised_batches.append((output_seq - 128).astype(np.int8))
     denoised = np.concatenate([b.flatten() for b in denoised_batches])
     infer_t = time.time() - t0
 

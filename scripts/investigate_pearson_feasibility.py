@@ -31,10 +31,10 @@ This is a DIAGNOSTIC script. Do not commit.
 """
 
 from pathlib import Path
+from typing import Any, cast
 
 import h5py
 import numpy as np
-from scipy.stats import pearsonr
 
 GROUND_TRUTH_DIR = Path("/home/klz/Data/TIDMAD")
 BASELINE_TRIAL_DIR = Path(
@@ -56,10 +56,17 @@ MV_PER_LSB = 40.0 / 128.0  # int8 -> mV conversion factor
 
 
 def _read_channel(path: Path, channel: str, n_samples: int) -> np.ndarray:
-    """Read the first n_samples int8 values from timeseries/<channel>/timeseries."""
+    """Read the first n_samples int8 values from timeseries/<channel>/timeseries.
+
+    Uses ``cast(h5py.Dataset, ...)`` after the group walk to narrow the type
+    (mirrors ``execute_tools/health_checks/_peek.py::peek_int8_at_channel``).
+    """
     with h5py.File(path, "r") as handle:
-        dset = handle["timeseries"][channel]["timeseries"]
-        return dset[:n_samples].astype(np.int8)
+        node: Any = handle
+        for k in ("timeseries", channel, "timeseries"):
+            node = node[k]
+        dset = cast(h5py.Dataset, node)
+        return np.asarray(dset[:n_samples], dtype=np.int8)
 
 
 def load_target_ch2(file_index: int, n_samples: int) -> np.ndarray:
@@ -119,7 +126,9 @@ def compute_metrics(denoised_int8: np.ndarray, target_int8: np.ndarray) -> dict:
     if output_std < 1e-12 or target_std < 1e-12:
         pearson = float("nan")
     else:
-        r, _ = pearsonr(denoised_mv, target_mv)
+        # ``np.corrcoef(a, b)[0, 1]`` is numerically identical to
+        # ``scipy.stats.pearsonr(a, b)[0]`` and has cleaner numpy stub typing.
+        r = float(np.corrcoef(denoised_mv, target_mv)[0, 1])
         pearson = float(r) if np.isfinite(r) else float("nan")
 
     mse = float(np.mean((denoised_mv - target_mv) ** 2))
