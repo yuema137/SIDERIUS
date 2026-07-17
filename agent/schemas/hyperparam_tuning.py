@@ -256,6 +256,7 @@ class ExperimentMemory(BaseModel):
 
 
 class ExperimentRecord(BaseModel):
+    record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str
     status: Literal[
         "success",
@@ -277,6 +278,14 @@ class ExperimentRecord(BaseModel):
         description="Training/validation file index. Defaults to the standard split used in the TIDMAD paper.",
     )
     params: dict[str, Any]
+    logical_round: int | None = None
+    attempt_index: int | None = None
+    failure_stage: str | None = None
+    failure_type: str | None = None
+    proposed_config: dict[str, Any] | None = None
+    traceback_summary: str | None = None
+    counts_toward_completed_rounds: bool | None = None
+    counts_toward_attempt_budget: bool = True
 
     # --- Training results ---
     final_loss: float | None = Field(

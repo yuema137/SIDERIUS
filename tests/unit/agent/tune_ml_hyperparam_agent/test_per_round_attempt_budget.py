@@ -163,7 +163,10 @@ def _make_scripted_skill(vram_verdicts):
                     f"vram_verdicts exhausted at attempt {i + 1}; "
                     f"schedule length={len(vram_verdicts)}"
                 )
-            return vram_verdicts[i]
+            verdict = vram_verdicts[i]
+            if isinstance(verdict, BaseException):
+                raise verdict
+            return verdict
         if skill_folder == "training_skill":
             return FAKE_TRAIN
         if skill_folder == "inference_skill":
@@ -199,7 +202,7 @@ def agent_with_scripted_skill():
     yield make
 
 
-def _setup(make_factory, vram_verdicts):
+def _setup(make_factory, vram_verdicts, *, plans=None):
     """Open all five context managers + return (agent, saved_records, counter,
     cleanup-callable)."""
     (mock_bridge_cm, mock_sandbox_cm, mock_skill_cm, mock_ref_cm, configs_cm), counter = (
@@ -212,7 +215,10 @@ def _setup(make_factory, vram_verdicts):
     configs_dir = configs_cm.__enter__()
 
     mock_brain = MockBridge.return_value
-    mock_brain.plan.return_value = FAKE_PLAN
+    if plans is None:
+        mock_brain.plan.return_value = FAKE_PLAN
+    else:
+        mock_brain.plan.side_effect = plans
     mock_brain.reflect.return_value = FAKE_REFLECT
 
     saved = []
@@ -229,6 +235,68 @@ def _setup(make_factory, vram_verdicts):
         mock_bridge_cm.__exit__(None, None, None)
 
     return HyperparamTuningAgent(), saved, counter, cleanup
+
+
+def test_structural_failure_is_persisted_and_visible_to_next_plan(
+    agent_with_scripted_skill, tmp_path
+):
+    failing_plan = {
+        **FAKE_PLAN,
+        "model_config": {
+            **FAKE_PLAN["model_config"],
+            "multi": 8,
+            "depth": 2,
+            "bilinear": False,
+            "segmentation_size": 40000,
+        },
+    }
+    corrected_plan = {
+        **FAKE_PLAN,
+        "model_config": {
+            **failing_plan["model_config"],
+            "bilinear": True,
+        },
+    }
+    former_error = RuntimeError(
+        "expected input to have 64 channels, but got 32 channels instead"
+    )
+    agent, saved, _counter, cleanup = _setup(
+        agent_with_scripted_skill,
+        [former_error, FAKE_VRAM_OK],
+        plans=[failing_plan, corrected_plan],
+    )
+    try:
+        with patch(
+            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.time.sleep"
+        ):
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=1,
+                    attempts_per_round=2,
+                    attempts_per_formal_round=2,
+                    max_fail_rounds=1,
+                )
+            )
+
+        failure = next(r for r in saved if r.get("record_type") == "attempt_failure")
+        assert failure["status"] == "error"
+        assert failure["failure_stage"] == "vram_structural_probe"
+        assert failure["failure_type"] == "model_forward_error"
+        assert "64 channels" in failure["failure_reason"]
+        assert failure["proposed_config"]["model_config"]["bilinear"] is False
+        assert failure["counts_toward_completed_rounds"] is False
+        assert failure["counts_toward_attempt_budget"] is True
+        assert output.completed_rounds == 1
+        assert output.total_attempts == 2
+
+        second_memory = agent._bridge_factory.return_value.plan.call_args_list[1].args[0]
+        remembered = second_memory[-1]
+        assert remembered["failure_stage"] == "vram_structural_probe"
+        assert remembered["proposed_config"]["model_config"]["bilinear"] is False
+        assert "64 channels" in remembered["failure_reason"]
+    finally:
+        cleanup()
 
 
 def _round_records(saved, round_index):

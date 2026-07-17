@@ -572,6 +572,31 @@ def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_nam
 # ==========================================
 
 
+PARTIAL_CAMPAIGN_EXIT_CODE = 2
+
+
+def _read_tuner_completion(
+    output_path: str, *, requested_rounds: int
+) -> tuple[bool, str]:
+    """Return whether the persisted tuner result completed the request."""
+    try:
+        with open(output_path, encoding="utf-8") as f:
+            result = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"tuner result unavailable or unreadable: {exc}"
+
+    status = result.get("status")
+    completed = result.get("completed_rounds")
+    reason = result.get("termination_reason") or "unspecified"
+    if status == "completed" and completed == requested_rounds:
+        return True, f"{completed}/{requested_rounds} rounds completed"
+    return (
+        False,
+        f"status={status}, {completed}/{requested_rounds} rounds completed, "
+        f"termination_reason={reason}",
+    )
+
+
 def run_agent(
     model_type: str,
     agent_workspace: str,
@@ -678,7 +703,17 @@ def run_agent(
         print("  Reflector: (same as planner)")
     print(f"{'=' * 60}\n")
 
-    subprocess.run(cmd, cwd=SIDERIUS_ROOT, env=_agent_env(), check=True)
+    child = subprocess.run(cmd, cwd=SIDERIUS_ROOT, env=_agent_env(), check=False)
+    output_path = os.path.join(agent_workspace, f"run_output_{agent_run_name}.json")
+    completed, detail = _read_tuner_completion(
+        output_path, requested_rounds=max_rounds
+    )
+    if not completed:
+        print(f"Comparison run ended partial: {detail}")
+        raise SystemExit(PARTIAL_CAMPAIGN_EXIT_CODE)
+    if child.returncode != 0:
+        raise subprocess.CalledProcessError(child.returncode, cmd)
+    print("Comparison run completed successfully.")
 
 
 # ==========================================

@@ -260,7 +260,11 @@ class PositionalUNet(nn.Module):
 
         # Up: reversal of down
         for i in range(self.depth):
-            up_in_ch = curr_ch * 2
+            # Bilinear upsampling preserves channels, so the existing Up
+            # contract receives the concatenated-width channel count. A
+            # transposed convolution operates on the decoder tensor before
+            # concatenation and must therefore receive its actual width.
+            up_in_ch = curr_ch * 2 if self.bilinear else curr_ch
             up_out_ch = curr_ch // 2
             # align the top layer output
             if i == self.depth - 1:
