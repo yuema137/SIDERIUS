@@ -1,6 +1,6 @@
 # V17 Pre-Gate Baseline Launch Plan
 
-- **Status**: draft — operator review required; not launch-ready
+- **Status**: approved — shared preflight passed; FCNet launch authorized
 - **Scope**: post-M9 observation campaign for unified all-file WaveNet, PUNet, and FCNet models
 - **Owner**: TBD
 - **Created**: 2026-07-16
@@ -820,5 +820,6 @@ approve before launch:
 5. Whether current 3-trial/5-formal retry budgets are acceptable for the disk
    and wall-time envelope.
 
-Until the preflight is green and these operational decisions are approved,
-this document remains **draft / not launch-ready**.
+The operator approved the finalized policy on 2026-07-16. Shared preflight,
+threshold freeze, observe-only routing, CUDA allocation, dataset inventory,
+disk capacity, and continuation tests passed before the FCNet launch.

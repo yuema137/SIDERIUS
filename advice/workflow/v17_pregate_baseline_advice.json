@@ -1,0 +1,3 @@
+{
+  "tune": "V17 pre-gate observation campaign — use only registered built-in losses. Set loss_type to one of focal, focal_cw, ce, or smooth_l1. Never use loss_type=custom, never set loss_name, and keep custom_loss_spec null. Prefer focal with alpha=0.5, gamma=2.0 when recovering from class imbalance or collapse. A HealthGate failure with resolved_action=continue is an observed failed check, not a healthy round and not an infrastructure failure. Preserve the observation, learn from its failure_reason and per-file metrics, and continue to the next round. Do not respond to collapse by increasing architecture size; stabilize loss, learning rate, and optimizer first."
+}

@@ -8,7 +8,12 @@ import json
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from execute_tools.health_checks.schemas import GateAction, GateResult, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    GateAction,
+    GateResult,
+    HealthCheckResult,
+    PersistedHealthGateResult,
+)
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.helpers.recording_llm_bridge import RecordingLLMBridge
 from tests.helpers.recording_sandbox import RecordingSandbox
@@ -44,7 +49,24 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
             failure_reason=check.reason,
         )
 
-    monkeypatch.setattr(tuner_module, "evaluate_gate", failed_continue)
+    def failed_continue_adapter(ctx, **_kwargs):
+        result = failed_continue("collapse", ctx)
+        persisted = PersistedHealthGateResult(
+            gate_name="collapse",
+            execution_status="failed",
+            check_passed=False,
+            would_invalidate_under_production_policy=True,
+            resolved_action=GateAction.CONTINUE,
+            failure_reason=result.failure_reason,
+            metrics={"unique_count": 1},
+        )
+        return [result], [persisted], GateAction.CONTINUE
+
+    monkeypatch.setattr(
+        tuner_module,
+        "evaluate_and_persist_health_gates",
+        failed_continue_adapter,
+    )
 
     plan = _load_json(
         "tests/pseudo_data/api_call_outputs/ml_hyperparameter_tune_agent/generate.json"
@@ -110,6 +132,7 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
     assert all(record.status == "failed_mode_collapse" for record in output.all_records)
     assert all(record.failure_reason for record in output.all_records)
     assert all(record.gate_action == "continue" for record in output.all_records)
+    assert all(len(record.health_gate_results) == 1 for record in output.all_records)
     assert all(
         record.memory.round_index == index for index, record in enumerate(output.all_records, 1)
     )
