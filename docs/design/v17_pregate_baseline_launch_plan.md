@@ -4,9 +4,11 @@
 - **Scope**: post-M9 observation campaign for unified all-file WaveNet, PUNet, and FCNet models
 - **Owner**: TBD
 - **Created**: 2026-07-16
-- **Last Updated**: 2026-07-16
+- **Last Updated**: 2026-07-17
 - **Related design docs**:
-  - [`v17_priorities.md`](./v17_priorities.md)
+  - [`v17_priorities.md`](./v17_priorities.md) — V17 scope authority; this launch plan is the operational execution of §6.1 of that doc
+  - [`v17_pregate_threshold_review.md`](./v17_pregate_threshold_review.md) — frozen threshold decisions applied here
+  - [`v18_priorities.md`](./v18_priorities.md) — deferred workflow-adaptation items (post-campaign)
   - [`collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md)
   - [`m8_gate_coverage_and_diversity_metrics_execution_plan.md`](./m8_gate_coverage_and_diversity_metrics_execution_plan.md)
   - [`m9_multi_file_peek_execution_plan.md`](./m9_multi_file_peek_execution_plan.md)
