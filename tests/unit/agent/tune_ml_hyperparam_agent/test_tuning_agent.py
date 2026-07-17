@@ -998,12 +998,15 @@ class TestTimeBudgetGate:
                 )
         finally:
             cleanup()
-        # The RuntimeError is caught by the loop's try/except → no rounds complete,
-        # no records saved (training never reached, no skipped_time_risk emitted
-        # because status was error not infeasible).
+        # The RuntimeError is caught by the loop's try/except → no rounds
+        # complete and training never starts. Every failed attempt is now
+        # persisted so the next planner call sees the actual cause.
         assert output.completed_rounds == 0
         assert not any(s == "training_skill" for s, _ in skill_calls)
-        assert not saved_records
+        assert saved_records
+        assert all(r["record_type"] == "attempt_failure" for r in saved_records)
+        assert all(r["failure_stage"] == "time_estimation" for r in saved_records)
+        assert all("instantiation failed" in r["failure_reason"] for r in saved_records)
 
     # --- gate-disabled path -------------------------------------------------
 

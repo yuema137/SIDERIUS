@@ -79,6 +79,43 @@ class TestPositionalUNet:
         out = model(input_tensor)
         assert out.shape == (BATCH, 256, SEG_SIZE)
 
+    @pytest.mark.parametrize(
+        ("bilinear", "depth", "multi"),
+        [
+            (True, 2, 8),
+            (False, 2, 8),
+            (False, 4, 16),
+        ],
+    )
+    def test_validated_upsampling_modes_complete_forward(
+        self, input_tensor, bilinear, depth, multi
+    ):
+        config = PUNetConfig.model_validate(
+            {
+                "segmentation_size": SEG_SIZE,
+                "bilinear": bilinear,
+                "depth": depth,
+                "multi": multi,
+            }
+        )
+        output = PositionalUNet(config)(input_tensor)
+        assert output.shape == (BATCH, 256, SEG_SIZE)
+
+    def test_transposed_conv_exact_campaign_regression(self):
+        """Formerly failed: ConvTranspose expected 64 channels but received 32."""
+        segment_length = 40_000
+        config = PUNetConfig.model_validate(
+            {
+                "segmentation_size": segment_length,
+                "bilinear": False,
+                "depth": 2,
+                "multi": 8,
+            }
+        )
+        inputs = torch.randint(0, 256, (1, segment_length))
+        output = PositionalUNet(config)(inputs)
+        assert output.shape == (1, 256, segment_length)
+
     def test_output_is_float(self, input_tensor):
         model = self._make_model()
         out = model(input_tensor)

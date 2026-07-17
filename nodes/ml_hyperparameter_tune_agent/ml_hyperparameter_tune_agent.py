@@ -1517,6 +1517,11 @@ class HyperparamTuningAgent:
             for attempt_in_round in range(1, N + 1):
                 total_attempts += 1
                 iteration = round_index  # legacy alias for prints + brain.plan(current_round=...)
+                failure_stage = "planning"
+                exp_id = f"{model_type_setting}_{run_name}_{total_attempts:03d}"
+                model_type = model_type_setting
+                record_params: dict[str, Any] = {}
+                hypothesis = "Attempt failed before a validated hypothesis was available."
                 try:
                     print(
                         f"\n\n{'=' * 60}\nROUND {iteration}/{max_rounds} "
@@ -1837,6 +1842,7 @@ class HyperparamTuningAgent:
                         f"(mode={'trial' if plan.is_trial else 'formal'}, "
                         f"budget={vram_budget_desc})..."
                     )
+                    failure_stage = "vram_structural_probe"
                     # Phase 6.6 A.11 — pass the per-run hardware manifest (from
                     # A.1.6's get_or_create) into the skill so the cap is
                     # physically correct and consistent across the whole run.
@@ -2035,6 +2041,7 @@ class HyperparamTuningAgent:
                     chosen_time_budget = trial_time_budget if plan.is_trial else formal_time_budget
                     time_check = None
                     if chosen_time_budget is not None:
+                        failure_stage = "time_estimation"
                         # refine_inference_time_estimator.md Commit D — pull
                         # the most recent successful trial round's measured
                         # per-PSD-segment inference cost out of this iter's
@@ -2167,6 +2174,7 @@ class HyperparamTuningAgent:
                             sandbox.save_record(time_record)
                             continue
 
+                    failure_stage = "training"
                     print("\n[Step 1/3] Training...")
                     t0 = time.time()
                     train_status = _run_skill("training_skill", sandbox, **active_params)
@@ -2214,6 +2222,7 @@ class HyperparamTuningAgent:
                     # attempt (see docs/design/enable_loss_inventory.md
                     # § Checkpoint L "tmpfs leak fix").
                     try:
+                        failure_stage = "inference"
                         print("[Step 2/3] Inference...")
                         t0 = time.time()
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
@@ -2283,6 +2292,7 @@ class HyperparamTuningAgent:
                             print(f"  Saved error record: {error_record['status']}")
                             continue
 
+                        failure_stage = "scoring"
                         print("[Step 3/3] Scoring...")
                         # Fix 4 — memory probe around the scoring block. See
                         # docs/optimize_inference_and_scoring.md §3 Fix 4. The
@@ -2960,6 +2970,52 @@ class HyperparamTuningAgent:
                 except Exception as e:
                     print(f"Loop Error: {e}")
                     traceback.print_exc()
+                    failure_reason = str(e)
+                    failure_type = (
+                        "model_forward_error"
+                        if failure_stage == "vram_structural_probe" and isinstance(e, RuntimeError)
+                        else type(e).__name__
+                    )
+                    traceback_summary = traceback.format_exc()[-4000:]
+                    failure_record = {
+                        "record_type": "attempt_failure",
+                        "exp_id": exp_id,
+                        "status": "error",
+                        "model_type": model_type,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "file_index": file_index,
+                        "params": record_params,
+                        "logical_round": round_index,
+                        "attempt_index": total_attempts,
+                        "failure_stage": failure_stage,
+                        "failure_type": failure_type,
+                        "failure_reason": failure_reason,
+                        "proposed_config": record_params,
+                        "traceback_summary": traceback_summary,
+                        "counts_toward_completed_rounds": False,
+                        "counts_toward_attempt_budget": True,
+                        "memory": {
+                            "expert_advice_followed": expert_advice_str,
+                            "hypothesis": hypothesis,
+                            "conclusion": f"Attempt failed during {failure_stage}: {failure_reason}",
+                            "discovery": (
+                                f"{failure_type} in {failure_stage}; proposed_config="
+                                f"{record_params}"
+                            ),
+                            "memory_update": (
+                                "Do not repeat the failing configuration unchanged. "
+                                f"Correct the {failure_stage} failure before retrying."
+                            ),
+                            "round_index": round_index,
+                            "attempt_in_round": attempt_in_round,
+                        },
+                    }
+                    try:
+                        validated_failure = ExperimentRecord.model_validate(failure_record)
+                        sandbox.save_record(validated_failure.model_dump())
+                        print(f"  Saved structured attempt failure: {exp_id}")
+                    except Exception as persist_error:
+                        print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
                     time.sleep(5)
 
             # Phase L — inner attempt loop ended without a successful
@@ -3181,7 +3237,10 @@ class HyperparamTuningAgent:
 # ---------------------------------------------------------------------------
 
 
-def main():
+PARTIAL_CAMPAIGN_EXIT_CODE = 2
+
+
+def main() -> int:
     """Thin CLI wrapper — parses args, builds HyperparamTuningInput, calls run()."""
     # Import MODEL_REGISTRY here (not at module level) because it depends on
     # ml_models/ being on PYTHONPATH, which is only guaranteed in CLI/pytest contexts.
@@ -3561,8 +3620,11 @@ def main():
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 
     agent = HyperparamTuningAgent()
-    agent.run(agent_input)
+    output = agent.run(agent_input)
+    if output.status != "completed" or output.completed_rounds != args.max_rounds:
+        return PARTIAL_CAMPAIGN_EXIT_CODE
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
