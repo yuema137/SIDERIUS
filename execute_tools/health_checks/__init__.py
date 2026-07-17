@@ -28,6 +28,7 @@ fixture and re-register the checks they exercise.
 from __future__ import annotations
 
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
+from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.output_std import OutputStdCheck
 from execute_tools.health_checks.pearson_dispersion import PearsonDispersionCheck
@@ -86,6 +87,7 @@ __all__ = [
     "HealthCheckResult",
     "HealthCheckSkill",
     "all_registered",
+    "evaluate_and_persist_health_gates",
     "evaluate_gate",
     "get",
     "get_gates_for_position",

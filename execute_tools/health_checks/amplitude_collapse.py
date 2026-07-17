@@ -109,6 +109,7 @@ class AmplitudeCollapseCheck:
                 "aggregation": outcome.aggregation,
                 "n_files_attempted": outcome.n_files_attempted,
                 "n_files_io_failed": outcome.n_files_io_failed,
+                "per_file": [r.model_dump() for r in outcome.per_file],
                 "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
                 "threshold": threshold,
                 "peek_samples_requested": peek_samples,

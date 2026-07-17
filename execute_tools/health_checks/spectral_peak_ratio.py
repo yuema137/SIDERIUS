@@ -105,13 +105,17 @@ class SpectralPeakRatioCheck:
                 per_file[i] = float(signal_win / noise_win)
 
         measured = [v for v in per_file.values() if v == v]
-        metrics: dict[str, float | int | str] = {
+        metrics: dict[str, Any] = {
             "n_files_measured": len(measured),
             "n_files_io_failed": len(io_failed),
             "n_files_attempted": len(files),
+            "ratio_per_file": {str(k): v for k, v in per_file.items()},
+            "io_failed": {str(k): v for k, v in io_failed.items()},
             "ratio_per_file_json": json.dumps({str(k): v for k, v in per_file.items()}),
             "io_failed_json": json.dumps(io_failed),
             "peek_samples_requested": peek_samples,
+            "unit": "dimensionless_ratio",
+            "calculation_version": "spectral_peak_ratio_v1",
         }
         if measured:
             metrics["ratio_mean"] = float(np.mean(measured))

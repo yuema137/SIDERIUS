@@ -28,6 +28,7 @@ import argparse
 import glob
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -35,10 +36,17 @@ import time
 from datetime import UTC
 from typing import cast
 
+from core.campaign_artifacts import (
+    decide_phase1_reuse,
+    sha256_file,
+    validate_phase1_baseline,
+    write_campaign_manifest,
+)
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
-from execute_tools.health_checks import evaluate_gate, get_gates_for_position, resolve_action
+from execute_tools.health_checks.config import load_health_gates_config
+from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.schemas import HealthCheckContext
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
@@ -292,6 +300,9 @@ def run_baseline_trial(
     baseline_workspace: str,
     progress_bar: bool = False,
     max_epochs: int = 1,
+    health_checks_config: str | None = None,
+    campaign_run_name: str | None = None,
+    existing_record: dict | None = None,
 ) -> dict:
     """
     Runs baseline with the TIDMAD paper config using the trial pipeline:
@@ -316,8 +327,16 @@ def run_baseline_trial(
     t_cfg = cfg["train_cfg"]
     l_cfg = cfg["loss_cfg"]
 
-    run_name = f"baseline_{model_type}"
-    exp_id = f"baseline_{model_type}_{int(time.time())}"
+    run_name = (
+        str((existing_record.get("params") or {}).get("run_name"))
+        if existing_record
+        else f"baseline_{model_type}"
+    )
+    exp_id = (
+        str(existing_record["exp_id"])
+        if existing_record
+        else f"baseline_{model_type}_{int(time.time())}"
+    )
 
     # Override epochs to 1 per paper authors (direct communication).
     t_cfg = dict(t_cfg)
@@ -356,21 +375,33 @@ def run_baseline_trial(
     )
 
     # --- Train (streaming, all 20 files, 10% subsample/epoch) ---
-    t0 = time.time()
-    train_result = sandbox.execute_training(
-        exp_id=exp_id,
-        run_name=run_name,
-        model_type=model_type,
-        m_cfg=m_cfg,
-        t_cfg=t_cfg,
-        l_cfg=l_cfg,
-        sample_set=train_sample_set,
-        train_portion=0.1,
-        train_base_seed=42,
-    )
-    train_time = round(time.time() - t0, 1)
-    if train_result["status"] != "success":
-        raise RuntimeError(f"Baseline training failed:\n{train_result.get('message')}")
+    if existing_record is None:
+        t0 = time.time()
+        train_result = sandbox.execute_training(
+            exp_id=exp_id,
+            run_name=run_name,
+            model_type=model_type,
+            m_cfg=m_cfg,
+            t_cfg=t_cfg,
+            l_cfg=l_cfg,
+            sample_set=train_sample_set,
+            train_portion=0.1,
+            train_base_seed=42,
+        )
+        train_time = round(time.time() - t0, 1)
+        if train_result["status"] != "success":
+            raise RuntimeError(f"Baseline training failed:\n{train_result.get('message')}")
+    else:
+        train_time = float((existing_record.get("timing") or {}).get("train_time_s") or 0.0)
+        train_result = {
+            "status": "success",
+            "results": {
+                "final_loss": existing_record.get("final_loss"),
+                "loss_history": existing_record.get("loss_history"),
+                "model_params": existing_record.get("model_params"),
+            },
+        }
+        print("  [resume] Reusing validated Phase 1 checkpoint; regenerating inference/scoring.")
 
     # --- Inference (all 20 files, all segments) ---
     t0 = time.time()
@@ -403,16 +434,22 @@ def run_baseline_trial(
         raw_data_dir=DATA_DIR,
     )
     scoring_time = round(time.time() - t0, 1)
+    checkpoint_path = os.path.join(sandbox.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth")
     health_context = HealthCheckContext(
         model_name=model_type,
         run_name=run_name,
         round_index=1,
         denoised_filename_fn=lambda fi: os.path.join(baseline_workspace, _denoised_fn(fi)),
+        target_path_fn=lambda fi: os.path.join(DATA_DIR, f"abra_validation_{fi:04d}.h5"),
+        checkpoint_path=checkpoint_path,
         file_vector=file_vector,
         denoising_score=final_scalar,
     )
-    gate_results = [evaluate_gate(gid, health_context) for gid in get_gates_for_position(1)]
-    gate_action = resolve_action(gate_results)
+    gate_results, persisted_gate_results, gate_action = evaluate_and_persist_health_gates(
+        health_context,
+        config_path=health_checks_config,
+        production_config_path=HEALTH_CHECKS_PATH,
+    )
     failed_gates = [result for result in gate_results if not result.passed]
     failure_reason = (
         " | ".join(f"[{result.gate_id}] {result.failure_reason}" for result in failed_gates) or None
@@ -423,7 +460,12 @@ def run_baseline_trial(
 
     record = {
         "exp_id": exp_id,
-        "status": "failed_mode_collapse" if failed_gates else "success",
+        "status": (
+            "failed_mode_collapse"
+            if any(item.would_invalidate_under_production_policy for item in persisted_gate_results)
+            else "success"
+        ),
+        "campaign_run_name": campaign_run_name,
         "model_type": model_type,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "file_index": 6,
@@ -440,8 +482,23 @@ def run_baseline_trial(
         "model_params": train_res.get("model_params"),
         "denoising_score": final_scalar,
         "file_vector": file_vector,
+        "invalid_score_reason": (
+            "score is missing or non-finite under the frozen scorer policy"
+            if final_scalar is None or not math.isfinite(final_scalar)
+            else None
+        ),
+        "file_vector_absence_reason": None
+        if file_vector is not None
+        else "scorer returned no vector",
         "failure_reason": failure_reason,
         "gate_action": gate_action.value,
+        "health_gate_results": [item.model_dump(mode="json") for item in persisted_gate_results],
+        "checkpoint_path": checkpoint_path,
+        "checkpoint_sha256": sha256_file(checkpoint_path),
+        "training_files": sorted(glob.glob(os.path.join(DATA_DIR, "abra_training_????.h5"))),
+        "training_sample_set": train_sample_set,
+        "evaluation_sample_set": eval_sample_set,
+        "train_base_seed": 42,
         "is_trial": False,
         "trial_strategy": "snapshot",
         "trial_portion": 1.0,
@@ -535,6 +592,8 @@ def run_agent(
     max_epochs: int | None = None,
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
+    health_checks_config: str | None = None,
+    resume: bool = False,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
@@ -601,6 +660,10 @@ def run_agent(
         cmd.extend(["--trial_time_budget_minutes", str(trial_time_budget_minutes)])
     if formal_time_budget_minutes is not None:
         cmd.extend(["--formal_time_budget_minutes", str(formal_time_budget_minutes)])
+    if health_checks_config:
+        cmd.extend(["--health_checks_config", health_checks_config])
+    if resume:
+        cmd.append("--resume")
 
     print(f"\n{'=' * 60}")
     print(f"  PHASE 3 — AGENT EXPLORATION: {model_type.upper()}")
@@ -733,6 +796,23 @@ def main():
         action="store_true",
         help="Delete denoised HDF5 files after scoring each round to save disk space.",
     )
+    parser.add_argument(
+        "--health_checks_config",
+        type=str,
+        default=None,
+        help="Optional HealthGate YAML override; omitted preserves the default.",
+    )
+    parser.add_argument(
+        "--baseline_workspace",
+        type=str,
+        default=None,
+        help="Optional isolated Phase 1 workspace; omitted preserves current defaults.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Validate and reuse same-campaign Phase 1 and completed rounds.",
+    )
     # --- Formal-mode training levers (Phase M, docs §12) ---
     # Forwarded to the agent subprocess. Formal eval strategy is locked to
     # ``snapshot``; the portion defaults to 1.0 (production full-clone,
@@ -791,6 +871,25 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.health_checks_config:
+        args.health_checks_config = os.path.abspath(args.health_checks_config)
+        loaded_gate_config = load_health_gates_config(args.health_checks_config)
+        if args.run_name == "v17_pregate_baseline":
+            policy_errors = []
+            for gate in loaded_gate_config.health_gates:
+                if gate.after_round != "every":
+                    policy_errors.append(f"{gate.id}: after_round must be 'every'")
+                if (
+                    gate.on_pass.action.value != "continue"
+                    or gate.on_fail.action.value != "continue"
+                ):
+                    policy_errors.append(f"{gate.id}: pass/fail actions must both be continue")
+            if policy_errors:
+                raise SystemExit(
+                    "[ERROR] v17_pregate_baseline requires observe-only every-round gates:\n- "
+                    + "\n- ".join(policy_errors)
+                )
+
     # --- Resolve reflect provider/model defaults ---
     # The reflector sub-call does templated extraction (not reasoning), so it
     # benefits from a faster/cheaper/higher-quota model than the planner. For
@@ -827,12 +926,14 @@ def main():
         if args.is_trial and args.run_name == "diagnostic_baseline_pre_v17"
         else ("baseline_trial" if args.is_trial else "baseline")
     )
-    baseline_workspace = os.path.join(model_root, baseline_subdir)
+    baseline_workspace = os.path.abspath(
+        args.baseline_workspace or os.path.join(model_root, baseline_subdir)
+    )
     agent_workspace = os.path.join(run_dir, "agent")
     agent_run_name = f"{args.run_name}_agent"
 
     # --- Guard: prevent accidental overwrite of existing run ---
-    if os.path.exists(run_dir) and os.listdir(run_dir):
+    if os.path.exists(run_dir) and os.listdir(run_dir) and not args.resume:
         if not args.override_old_run:
             raise SystemExit(
                 f"\n[ERROR] Run '{args.run_name}' already exists at:\n"
@@ -864,10 +965,72 @@ def main():
     # --- Phase 1: Baseline (computed once, reused across all run_names) ---
     matches = glob.glob(os.path.join(baseline_workspace, "summary_*.json"))
     baseline_done = False
-    if matches:
+    baseline_needs_inference = False
+    if matches and args.resume:
         try:
             with open(matches[0]) as f:
                 history = json.load(f)
+            if history:
+                candidate = history[0]
+                with open(LEGACY_CONFIGS_PATH, encoding="utf-8") as handle:
+                    expected_source = json.load(handle)[model_type]
+                expected_params = {
+                    "model_config": expected_source["model_cfg"],
+                    "train_config": {
+                        **expected_source["train_cfg"],
+                        "epochs": args.max_epochs if args.max_epochs is not None else 1,
+                    },
+                    "loss_config": expected_source["loss_cfg"],
+                }
+                exp_id = candidate.get("exp_id", "")
+                baseline_run_name = (candidate.get("params") or {}).get(
+                    "run_name", f"baseline_{model_type}"
+                )
+                expected_outputs = [
+                    os.path.join(
+                        baseline_workspace,
+                        f"abra_validation_denoised_{model_type}_{baseline_run_name}_{exp_id}_{i:04d}.h5",
+                    )
+                    for i in range(20)
+                ]
+                gate_ids = [
+                    gate.id
+                    for gate in load_health_gates_config(args.health_checks_config).health_gates
+                    if gate.matches_round(1)
+                ]
+                decision = decide_phase1_reuse(
+                    candidate,
+                    campaign_name=args.run_name,
+                    model_type=model_type,
+                    expected_params=expected_params,
+                    expected_training_files=sorted(
+                        glob.glob(os.path.join(DATA_DIR, "abra_training_????.h5"))
+                    ),
+                    configured_gate_ids=gate_ids,
+                    expected_output_paths=expected_outputs,
+                )
+                validation = decision.validation
+                if decision.action != "train":
+                    assert validation is not None
+                    baseline_record = candidate
+                    baseline_done = decision.action == "reuse"
+                    baseline_needs_inference = decision.action == "regenerate_inference"
+                    print(
+                        f"\n  Validated same-campaign Phase 1: {candidate.get('exp_id')} "
+                        f"(missing outputs={len(validation.missing_inference_outputs)})."
+                    )
+                else:
+                    print("\n  Phase 1 reuse rejected:")
+                    for error in validation.errors if validation else ["no campaign record"]:
+                        print(f"    - {error}")
+        except (OSError, json.JSONDecodeError):
+            pass
+    elif matches and not args.baseline_workspace:
+        # Backward-compatible legacy behavior: shared baseline workspaces are
+        # still reused by existence when the new campaign options are omitted.
+        try:
+            with open(matches[0], encoding="utf-8") as handle:
+                history = json.load(handle)
             if history:
                 baseline_record = history[0]
                 baseline_done = True
@@ -878,14 +1041,26 @@ def main():
         except (OSError, json.JSONDecodeError):
             pass
 
-    baseline_retrained = not baseline_done
-    if not baseline_done:
+    baseline_retrained = not baseline_done and not baseline_needs_inference
+    if baseline_needs_inference:
+        baseline_record = run_baseline_trial(
+            model_type,
+            baseline_workspace,
+            progress_bar=args.progress_bar,
+            max_epochs=(args.max_epochs if args.max_epochs is not None else 1),
+            health_checks_config=args.health_checks_config,
+            campaign_run_name=args.run_name,
+            existing_record=baseline_record,
+        )
+    elif not baseline_done:
         if args.is_trial:
             baseline_record = run_baseline_trial(
                 model_type,
                 baseline_workspace,
                 progress_bar=args.progress_bar,
                 max_epochs=(args.max_epochs if args.max_epochs is not None else 1),
+                health_checks_config=args.health_checks_config,
+                campaign_run_name=args.run_name,
             )
         else:
             baseline_record = run_baseline(
@@ -894,6 +1069,83 @@ def main():
                 progress_bar=args.progress_bar,
                 file_index=args.file_index,
             )
+
+    if args.baseline_workspace:
+        with open(LEGACY_CONFIGS_PATH, encoding="utf-8") as handle:
+            expected_source = json.load(handle)[model_type]
+        expected_params = {
+            "model_config": expected_source["model_cfg"],
+            "train_config": {
+                **expected_source["train_cfg"],
+                "epochs": args.max_epochs if args.max_epochs is not None else 1,
+            },
+            "loss_config": expected_source["loss_cfg"],
+        }
+        baseline_exp_id = baseline_record["exp_id"]
+        baseline_run_name = (baseline_record.get("params") or {}).get(
+            "run_name", f"baseline_{model_type}"
+        )
+        expected_outputs = [
+            os.path.join(
+                baseline_workspace,
+                f"abra_validation_denoised_{model_type}_{baseline_run_name}_{baseline_exp_id}_{i:04d}.h5",
+            )
+            for i in range(20)
+        ]
+        gate_ids = [
+            gate.id
+            for gate in load_health_gates_config(args.health_checks_config).health_gates
+            if gate.matches_round(1)
+        ]
+        validation = validate_phase1_baseline(
+            baseline_record,
+            campaign_name=args.run_name,
+            model_type=model_type,
+            expected_params=expected_params,
+            expected_training_files=sorted(
+                glob.glob(os.path.join(DATA_DIR, "abra_training_????.h5"))
+            ),
+            configured_gate_ids=gate_ids,
+            expected_output_paths=expected_outputs,
+        )
+        if not validation.valid or validation.missing_inference_outputs:
+            problems = [
+                *validation.errors,
+                f"missing inference outputs: {validation.missing_inference_outputs}",
+            ]
+            raise RuntimeError(
+                "Phase 1 completeness validation failed:\n- " + "\n- ".join(problems)
+            )
+        manifest_path = os.path.join(run_dir, "campaign_manifest.json")
+        write_campaign_manifest(
+            manifest_path,
+            {
+                "campaign_run_name": args.run_name,
+                "model_type": model_type,
+                "baseline": {
+                    "workspace": baseline_workspace,
+                    "record": os.path.join(
+                        baseline_workspace,
+                        "records",
+                        baseline_run_name,
+                        f"{baseline_exp_id}.json",
+                    ),
+                    "summary": matches[0]
+                    if matches
+                    else os.path.join(baseline_workspace, f"summary_{baseline_run_name}.json"),
+                    "checkpoint": baseline_record["checkpoint_path"],
+                    "checkpoint_sha256": baseline_record["checkpoint_sha256"],
+                    "denoised_outputs": expected_outputs,
+                    "health_gate_results": "embedded:baseline_record.health_gate_results",
+                },
+                "agent_workspace": agent_workspace,
+                "threshold_review": os.path.join(run_dir, "threshold_review.json"),
+                "health_checks_config": os.path.abspath(args.health_checks_config)
+                if args.health_checks_config
+                else HEALTH_CHECKS_PATH,
+            },
+        )
+        print(f"  Campaign artifact manifest written: {manifest_path}")
 
     if args.run_name == "diagnostic_baseline_pre_v17":
         path = _write_diagnostic_metadata(
@@ -980,6 +1232,8 @@ def main():
         max_epochs=args.max_epochs,
         trial_time_budget_minutes=args.trial_time_budget_minutes,
         formal_time_budget_minutes=args.formal_time_budget_minutes,
+        health_checks_config=args.health_checks_config,
+        resume=args.resume,
     )
 
     print(f"\n{'#' * 60}")

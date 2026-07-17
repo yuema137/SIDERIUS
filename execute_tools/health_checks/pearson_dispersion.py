@@ -67,6 +67,7 @@ class PearsonDispersionCheck:
             )
 
         per_file_values: list[float] = []
+        per_file: dict[str, float] = {}
         io_failed_count = 0
         for i in files:
             denoised_path = ctx.get_denoised_path(i)
@@ -100,14 +101,18 @@ class PearsonDispersionCheck:
             r = float(np.corrcoef(d, t)[0, 1])
             if np.isfinite(r):
                 per_file_values.append(r)
+                per_file[str(i)] = r
 
         # Aggregate the dispersion (the whole point of this check).
         n_measured = len(per_file_values)
-        metrics: dict[str, float | int | str] = {
+        metrics: dict[str, Any] = {
             "n_files_measured": n_measured,
             "n_files_io_failed": io_failed_count,
             "n_files_attempted": len(files),
             "peek_samples_requested": peek_samples,
+            "pearson_per_file": per_file,
+            "unit": "dimensionless_correlation",
+            "calculation_version": "pearson_dispersion_v1",
         }
         if n_measured >= 2:
             # ddof=1 for the standard "sample stdev" — matches

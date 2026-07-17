@@ -70,13 +70,17 @@ class PerFileOutputStdCheck:
             per_file[i] = float(np.std(ch1.astype(np.float64)) * _MV_PER_LSB)
 
         measured = list(per_file.values())
-        metrics: dict[str, float | int | str] = {
+        metrics: dict[str, Any] = {
             "n_files_measured": len(measured),
             "n_files_io_failed": len(io_failed),
             "n_files_attempted": len(files),
+            "std_mv_per_file": {str(k): v for k, v in per_file.items()},
+            "io_failed": {str(k): v for k, v in io_failed.items()},
             "std_mv_per_file_json": json.dumps({str(k): v for k, v in per_file.items()}),
             "io_failed_json": json.dumps(io_failed),
             "peek_samples_requested": peek_samples,
+            "unit": "mV",
+            "calculation_version": "per_file_output_std_v1",
         }
         if measured:
             metrics["std_mv_mean"] = float(np.mean(measured))

@@ -52,11 +52,8 @@ from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.health_checks.runner import (
-    evaluate_gate,
-    get_gates_for_position,
-    resolve_action,
-)
+from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
+from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
     BLOCKING_ACTIONS,
     GateAction,
@@ -71,6 +68,8 @@ from execute_tools.scoring_helpers import (
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
+
+SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 def _build_denoised_filename(
@@ -2358,18 +2357,48 @@ class HyperparamTuningAgent:
                                 def _target_fn(i: int, _base: str = TIDMAD_DATA_DIR) -> str:
                                     return os.path.join(_base, f"abra_validation_{i:04d}.h5")
 
+                                _gate_ids = (
+                                    get_gates_for_position(
+                                        round_index,
+                                        config_path=agent_input.health_checks_config,
+                                    )
+                                    if agent_input.health_checks_config
+                                    else get_gates_for_position(round_index)
+                                )
+                                _sandbox_dirs = getattr(sandbox, "dirs", {})
+                                _models_dir = (
+                                    _sandbox_dirs.get("models")
+                                    if isinstance(_sandbox_dirs, dict)
+                                    else None
+                                )
+                                _checkpoint_path = (
+                                    os.path.join(
+                                        _models_dir,
+                                        f"model_{model_type}_{exp_id}_agent.pth",
+                                    )
+                                    if _gate_ids and _models_dir
+                                    else None
+                                )
                                 _hc_ctx = HealthCheckContext(
                                     model_name=model_type,
                                     run_name=run_name,
                                     round_index=round_index,
                                     denoised_filename_fn=_denoised_fn,
                                     target_path_fn=_target_fn,
+                                    checkpoint_path=_checkpoint_path,
                                     file_vector=file_vector,
                                     denoising_score=final_scalar,
                                 )
-                                _gate_ids = get_gates_for_position(round_index)
-                                _gate_results = [evaluate_gate(gid, _hc_ctx) for gid in _gate_ids]
-                                resolved_action = resolve_action(_gate_results)
+                                _gate_results, _persisted_gate_results, resolved_action = (
+                                    evaluate_and_persist_health_gates(
+                                        _hc_ctx,
+                                        config_path=agent_input.health_checks_config,
+                                        production_config_path=os.path.join(
+                                            SIDERIUS_ROOT, "configs", "health_checks.yaml"
+                                        ),
+                                        gate_ids=_gate_ids,
+                                    )
+                                )
                                 is_degenerate, failure_reason, _gate_action_str = (
                                     _gate_results_to_score_meta(_gate_results, resolved_action)
                                 )
@@ -2386,6 +2415,10 @@ class HyperparamTuningAgent:
                                         "is_degenerate": is_degenerate,
                                         "failure_reason": failure_reason,
                                         "gate_action": _gate_action_str,
+                                        "health_gate_results": [
+                                            item.model_dump(mode="json")
+                                            for item in _persisted_gate_results
+                                        ],
                                     },
                                 }
                             else:
@@ -2756,6 +2789,7 @@ class HyperparamTuningAgent:
                         # legacy mode where scoring didn't run through the gate
                         # path (audit Gap #2 fix, follow-up to commit-5b).
                         "gate_action": score_results.get("gate_action"),
+                        "health_gate_results": score_results.get("health_gate_results", []),
                         # Data volume
                         "training_psd_segments": train_psd_segments,
                         "eval_psd_segments": eval_psd_segments,
@@ -3364,6 +3398,17 @@ def main():
         help="TIDMAD data directory used by evaluate_time_skill's real-dataset "
         "warmup. None makes the skill fall back to its static formula.",
     )
+    parser.add_argument(
+        "--health_checks_config",
+        type=str,
+        default=None,
+        help="Optional HealthGate YAML override; omitted uses configs/health_checks.yaml.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from validated completed rounds already in this workspace.",
+    )
 
     # evaluate_vram_skill gate (Phase K two-budget split). Each default is
     # None which keeps that mode's budget disabled — skill falls back to the
@@ -3452,6 +3497,8 @@ def main():
         "seed_plugin_path": args.seed_plugin_path,
         "file_index": args.file_index,
         "max_rounds": args.max_rounds,
+        "health_checks_config": args.health_checks_config,
+        "resume": args.resume,
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,
         "llm_model_id": args.model_id,

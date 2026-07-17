@@ -65,7 +65,7 @@ def resolve_action(gate_results: Iterable[GateResult]) -> GateAction:
     return max_action
 
 
-def get_gates_for_position(round_index: int) -> list[str]:
+def get_gates_for_position(round_index: int, config_path: str | None = None) -> list[str]:
     """Return the ids of gates configured to fire at this round.
 
     Multiple gates may share a round position. Empty list = no gates fire →
@@ -73,11 +73,17 @@ def get_gates_for_position(round_index: int) -> list[str]:
     ``GateConfig.matches_round`` so the three ``after_round`` forms (int,
     ``"every"``, list[int]) are handled uniformly.
     """
-    config = load_health_gates_config()
+    config = (
+        load_health_gates_config(config_path)
+        if config_path is not None
+        else load_health_gates_config()
+    )
     return [g.id for g in config.health_gates if g.matches_round(round_index)]
 
 
-def evaluate_gate(gate_id: str, ctx: HealthCheckContext) -> GateResult:
+def evaluate_gate(
+    gate_id: str, ctx: HealthCheckContext, config_path: str | None = None
+) -> GateResult:
     """Evaluate a named gate from ``configs/health_checks.yaml``.
 
     Runs the gate's checks in config-listed order. When the gate's
@@ -96,7 +102,11 @@ def evaluate_gate(gate_id: str, ctx: HealthCheckContext) -> GateResult:
         KeyError: A referenced check name is not in the registry (bubbles up
             from ``registry.get``).
     """
-    config = load_health_gates_config()
+    config = (
+        load_health_gates_config(config_path)
+        if config_path is not None
+        else load_health_gates_config()
+    )
     gate_cfg = next((g for g in config.health_gates if g.id == gate_id), None)
     if gate_cfg is None:
         available = sorted(g.id for g in config.health_gates)

@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
@@ -342,6 +343,10 @@ class ExperimentRecord(BaseModel):
             "``docs/design/pluggable_health_checks.md`` §4 for action "
             "semantics and §8 for severity resolution."
         ),
+    )
+    health_gate_results: list[PersistedHealthGateResult] = Field(
+        default_factory=list,
+        description="Full typed results for every HealthGate configured for this experiment.",
     )
 
     # --- Data volume ---
@@ -720,6 +725,16 @@ class HyperparamTuningInput(BaseModel):
         default=50,
         ge=1,
         description="Maximum number of completed experiment rounds (OOM-skipped attempts do not count).",
+    )
+    health_checks_config: str | None = Field(
+        default=None,
+        description=(
+            "Optional HealthGate YAML override. None preserves the shipped default config."
+        ),
+    )
+    resume: bool = Field(
+        default=False,
+        description="Resume from validated completed rounds already present in this run workspace.",
     )
 
     # --- Phase L — per-round attempt budget + fail-round abort ---

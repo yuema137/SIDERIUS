@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -150,6 +151,10 @@ class HealthCheckContext(BaseModel):
         ),
         exclude=True,
     )
+    checkpoint_path: str | None = Field(
+        default=None,
+        description="Checkpoint that produced the denoised outputs, for persisted provenance.",
+    )
 
     # --- Scoring context (available at gates triggered after scoring) ---
     file_vector: list[float | None] = Field(
@@ -229,7 +234,7 @@ class HealthCheckResult(BaseModel):
             "``'{check_name}: {details with numbers}'``."
         ),
     )
-    metrics: dict[str, float | int | str] = Field(
+    metrics: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Structured metrics from the check (unique_count=1, "
@@ -237,6 +242,21 @@ class HealthCheckResult(BaseModel):
             "and by the Run Monitor's cross-iter policy."
         ),
     )
+
+
+class PersistedHealthGateResult(BaseModel):
+    """Fully serialisable gate observation for durable experiment records."""
+
+    gate_name: str
+    execution_status: Literal["passed", "failed", "not_run", "error"]
+    check_passed: bool | None = None
+    would_invalidate_under_production_policy: bool
+    resolved_action: GateAction
+    failure_reason: str | None = None
+    threshold: dict[str, Any] | None = None
+    aggregation: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    gate_runtime_seconds: float = 0.0
 
 
 # ---------------------------------------------------------------------------
