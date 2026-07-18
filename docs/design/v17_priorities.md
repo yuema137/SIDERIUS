@@ -148,14 +148,14 @@ The diagnostics established the observation and continuation behavior used to
 prepare V17. V17 itself remains the two-chain workflow exploration described in
 the launch report, with three tuner rounds per workflow iteration.
 
-## 6. Remaining V17 work
+## 6. V17 launch readiness
 
-Small and narrow. All operational or documentation-alignment; no framework changes.
+The launch-readiness PR completes the remaining narrow operational work without
+changing HealthGate, scoring, or exploration architecture.
 
-### 6.1 Observe-mode HealthGate launch plumbing — blocking
+### 6.1 Observe-mode HealthGate launch plumbing — implemented
 
-The tuner schema and tuner CLI accept `health_checks_config`, but the production
-chain does not yet propagate it through:
+The optional `health_checks_config` value now propagates through:
 
 ```text
 run_chain.sh / _chain_common.sh
@@ -165,25 +165,26 @@ run_chain.sh / _chain_common.sh
   → HyperparamTuningInput.health_checks_config
 ```
 
-Without this optional pass-through, V17 silently loads
-`configs/health_checks.yaml`, whose blocking-style checks resolve failures to
-`invalidate_round`, rather than the approved observe-only YAML. This is a true
-launch blocker and should be the only runtime-code change in the final launch
-plumbing PR.
+When omitted, existing callers retain the shipped default. When supplied, the
+exact path is persisted in the tuner output and iteration manifest. The final
+Gate 2 demonstrated consumption of
+`configs/health_checks_baseline_observe_mode.yaml` on every completed round.
 
-### 6.2 V17 advice files — blocking operational artifacts
+### 6.2 V17 advice files — implemented
 
-The approved commands reference `advice/workflow/v17_loss_explorer.json` and
-`advice/workflow/v17_arch_explorer.json`; neither file exists on master. Create
-them from the V16 control-variable strategy while explicitly retaining Branch
-A, live Branch B, and Option C. These files can land in the same focused launch
-plumbing PR as §6.1.
+`advice/workflow/v17_loss_explorer.json` and
+`advice/workflow/v17_arch_explorer.json` preserve the V16 control-variable
+strategy while explicitly retaining Branch A, live Branch B, and Option C.
+They also state the model/task output-contract constraint and the limits of
+V17's observe-only feedback path.
 
-### 6.3 V17 workflow execution (operational, after §6.1–6.2)
+### 6.3 V17 workflow execution — operator approval required
 
-Run the two V17 workflow chains only after the observe-mode config path and
-advice files are verified by dry-run. This is the actual V17 campaign; it must
-not be conflated with the completed pre-gate diagnostics in §5.9.
+The production command has been dry-run with both advice files and the explicit
+observe-mode config. Run the two V17 workflow chains only from merged, clean
+`master`, after the post-merge preflight and explicit operator approval. This
+is the actual V17 campaign; it must not be conflated with the completed
+pre-gate diagnostics in §5.9.
 
 ### 6.4 `build_diagnostic_summary.py` schema update
 
