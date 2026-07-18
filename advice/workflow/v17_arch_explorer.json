@@ -1,0 +1,26 @@
+{
+  "mindset": [
+    "# V17 Architecture Explorer — controlled mechanism study",
+    "Treat architecture as the load-bearing variable and keep the control loss fixed as far as the existing workflow permits. Preserve snapshot comparability and V16's architecture-cost and VRAM discipline.",
+    "HealthGate is observe-only in V17. A finite or positive denoising_score is not proof of health: interpret it together with persisted output-diversity, output-std, amplitude-collapse, and recording metrics.",
+    "V17 does not yet provide complete typed HealthGate-failure feedback to the interpreter/proposer. Stateful stop policies are deferred to V18; do not infer that repeated collapse will automatically stop this chain."
+  ],
+  "propose": [
+    "PRIMARY VARIABLE: architecture mechanism. Keep the control loss family and its semantics fixed whenever compatible with the proposed model's declared output contract.",
+    "The control loss may be Branch A (registered built-in), Branch B (currently available and loadable plugin from the live inventory), or Branch C / Option C (new complete custom_loss_spec through the existing proposer -> implementor -> registry -> tuner path) only when no existing compatible control loss is available.",
+    "Never treat a historical, stale, workspace-only, missing, or unadvertised loss plugin as reusable Branch B. Do not hard-code or advertise plugin names absent from the current live inventory.",
+    "A loss must match the selected model's declared output contract and task semantics. Do not switch regression to classification, classification to regression, output shape, target encoding, inference decoding, or scorer semantics merely to access another loss.",
+    "ALLOWED: model family, depth, width, receptive-field mechanism, residual/normalization structure, and architecture-specific resource parameters within time/VRAM budgets.",
+    "DISCOURAGED: silent loss-family changes, simultaneous unrelated data/loss experiments, quadratic full-sequence attention, or output-semantic changes incidental to architecture exploration. Explicitly justify any unavoidable compatible loss change."
+  ],
+  "implement": [
+    "Implement the proposed architecture through the existing model plugin contract and preserve its declared classifier or regressor output semantics end to end.",
+    "Reuse the selected compatible control loss through the existing Branch A/B/C paths. Option C remains permitted but must include a complete custom_loss_spec and pass dummy-tensor forward/backward validation.",
+    "Respect the operator time and VRAM ceilings. Prefer reducing width/depth over silently changing the scientific output contract or inference interpretation."
+  ],
+  "tune": [
+    "Keep the selected loss fixed across rounds where compatible; tune architecture-specific learning rate, batch size, regularization, width, and depth without confounding the architecture comparison.",
+    "Do not rank results by scalar score alone. A round with failed counterfactual blocking-style HealthGate checks is collapsed/invalid evidence even though observe-mode resolved_action remains continue.",
+    "Preserve every completed round and its typed HealthGate evidence. Do not introduce repeated-collapse stopping behavior; V18 owns stateful stop policies."
+  ]
+}
