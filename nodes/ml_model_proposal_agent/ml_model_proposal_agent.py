@@ -27,6 +27,7 @@ from typing import Any, cast
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
@@ -1072,9 +1073,7 @@ class MLModelProposalAgent:
                     "custom_loss_spec": raw.get("custom_loss_spec"),
                 },
                 context={
-                    "loss_registry_names": [
-                        m.name for m in self._registry.list(capability_type="loss")
-                    ],
+                    "loss_registry_names": live_loss_registry_names(self._registry),
                     "model_registry_names": _live_model_registry_names(self._registry),
                 },
             )
@@ -1591,9 +1590,7 @@ class MLModelProposalAgent:
                             "custom_loss_spec": raw.get("custom_loss_spec"),
                         },
                         context={
-                            "loss_registry_names": [
-                                m.name for m in self._registry.list(capability_type="loss")
-                            ],
+                            "loss_registry_names": live_loss_registry_names(self._registry),
                             "model_registry_names": _live_model_registry_names(self._registry),
                         },
                     )
