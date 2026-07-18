@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-V17 answered: "Can SIDERIUS consistently detect, record, and compare model-health behavior under one shared gate policy without interrupting exploration?"
+V17 asks: "Can SIDERIUS consistently detect, record, and compare model-health behavior under one shared gate policy without interrupting exploration?"
 
 V18 answers: **"Can SIDERIUS use that structured health information to adapt its future proposals and workflow decisions?"**
 
@@ -18,8 +18,10 @@ V17 built the observation substrate. V18 makes it actionable.
 
 Before V18 kickoff:
 
-1. V17 observation infrastructure landed on master. ✅ (as of 2026-07-17)
-2. V17 three-model observation campaign completed with valid records for FCNet, WaveNet, PUNet.
+1. V17 observation infrastructure and final production launch plumbing landed on master.
+2. V17 workflow exploration completed with valid typed observation records;
+   the retained FCNet, PUNet, and WaveNet pre-gate diagnostics remain reference
+   evidence rather than substitutes for this campaign.
 3. Post-campaign analysis available — enough data to reclassify some post-V17 items with evidence rather than speculation.
 4. Threshold disposition finalized — the campaign's `production_disposition: undetermined` becomes an actual production decision.
 
@@ -37,7 +39,7 @@ Concrete work:
 - **Interpreter prompt template** — surface the structured collapse fields; drop text-only interpretations.
 - **Proposer prompt template** — instruct explicit collapse-fingerprint avoidance using the fields propagated through `ModelRunSummary`.
 
-Dependencies: nothing on V17 code. Blocks: 3.3 (cross-iteration flow uses the same fields).
+Dependencies: nothing on V17 code. Blocks: 3.4 (cross-iteration flow uses the same fields).
 
 ### 3.2 Adaptation
 
@@ -52,19 +54,81 @@ Concrete work:
 
 Dependencies: 3.1 (needs feedback flow to compute fingerprints). Blocked by: V17 campaign data availability.
 
-### 3.3 Workflow evolution
+### 3.3 Independent stateful stop policies
+
+**Capability**: an optional, tuner-scoped circuit breaker evaluates persisted
+completed-round observations without changing scorer mathematics or per-gate
+routing.
+
+Conceptual separation:
+
+```text
+score validity
+  ↓
+HealthGate observation
+  ↓
+round-health classification
+  ↓
+independent tuner stop policies
+  ↓
+routing decision
+```
+
+Candidate policies include repeated model collapse and repeated invalid score.
+Each policy owns an independent consecutive-round counter; the routing decision
+uses OR aggregation and records every policy that blocks. The scorer remains
+stateless, HealthGate continues to report observations and its configured
+action, and the policy layer alone may resolve `stop_remaining_rounds`.
+
+The initial policy scope is tuner-local. Streaks must not span workflow
+iterations, models, or concurrent chains; baseline observations and failed
+attempts do not seed the counter. Trial and formal completed rounds may share a
+tuner-local streak only under an explicitly reviewed policy configuration.
+
+This framework was reviewed before V17 and deliberately deferred:
+
+- V17 schedules three rounds per tuner invocation, so a threshold of three
+  saves no work inside that invocation.
+- Lowering the threshold to two would increase false-stop risk and bias V17's
+  measurement of whether later proposals recover from collapse by censoring
+  those recovery observations.
+- A successful `completed_early` state requires new tuner, wrapper, resume, and
+  monitoring contracts without weakening PR #121's protection against genuine
+  partial campaigns.
+- V17's purpose is unified observation, not adaptive or stateful routing.
+
+Future implementation goals:
+
+- typed `ScoreValidityResult` independent of HealthGate;
+- typed `RoundHealthClassification` (`healthy`, `collapsed`, `indeterminate`);
+- a tuner-level stop-policy evaluator with independent collapse and
+  invalid-score policies;
+- OR-aggregated typed routing results;
+- deterministic reconstruction from persisted completed-round history;
+- policy-result persistence and audit metadata;
+- a successful `completed_early` terminal state; and
+- a default-disabled operational circuit breaker enabled only after campaign
+  policy review.
+
+Dependencies: V17 observation data and explicit completion/resume contract
+design. Independent of the existing Option C custom-loss workflow.
+
+### 3.4 Workflow evolution
 
 **Capability**: broader workflow changes that were deferred out of V17 because they touch agent contracts or long-lived infrastructure.
 
 Concrete work:
 
-- **Custom-loss implementor contract redesign** — the pre-V17 loss-implementor bug (proposer emits `custom_loss` name; implementor does not materialize the plugin) is walled off in V17 by the built-in-loss-only advice. V18 fixes the contract so the tuner can accept genuine custom losses. Investigation-first (root cause in the proposer → implementor → training subprocess handoff).
 - **Bidirectional cross-iteration information flow** — a fuller feedback substrate beyond one-shot `ModelRunSummary` propagation: cross-iteration memory, structured cross-run comparisons, iteration-level meta-planner.
 - **Larger orchestration + monitoring architecture** — Run Monitor agent, modular orchestration; likely a multi-week rework.
 
 Dependencies: 3.1 for the feedback substrate; independent of 3.2.
 
-### 3.4 Metric refinement
+The existing Branch A / live Branch B / Option C custom-loss framework is not
+a deferred V18 feature. PR #122 preserved that workflow and removed stale or
+unavailable Branch B inventory entries.
+
+### 3.5 Metric refinement
 
 **Capability**: the `denoising_score` computation itself gains additional safeguards or collapse-resistant variants, informed by campaign data.
 
@@ -75,7 +139,7 @@ Concrete work:
 
 Dependencies: V17 campaign data. Blocked by: nothing until data is in hand.
 
-### 3.5 Deferred forensic backlog
+### 3.6 Deferred forensic backlog
 
 **Capability**: revisit historical anomalies with post-V17 tools.
 
@@ -91,11 +155,11 @@ Compact re-classification. Full evaluation post-V17 with observation data in han
 
 | Item | Prior classification | V18 disposition | Notes |
 |------|---------------------|-----------------|-------|
-| Run Monitor agent | D1 | Retained under 3.3 workflow evolution | Umbrella for feedback + adaptation at orchestrator level |
-| Bidirectional cross-iteration flow | D2 | Retained under 3.3 workflow evolution | Follows 3.1 |
-| Metric redesign — collapse-resistant score | D3 | Retained under 3.4 metric refinement | Requires paper-comparability governance decision |
-| Multi-condition stop gates | D4 | Reconsider post-V17 | May be obviated by adaptive routing in 3.2 |
-| Modular agent orchestration | D5 | Retained under 3.3 workflow evolution | Architecture-level; long-tail |
+| Run Monitor agent | D1 | Retained under 3.4 workflow evolution | Umbrella for feedback + adaptation at orchestrator level |
+| Bidirectional cross-iteration flow | D2 | Retained under 3.4 workflow evolution | Follows 3.1 |
+| Metric redesign — collapse-resistant score | D3 | Retained under 3.5 metric refinement | Requires paper-comparability governance decision |
+| Multi-condition stop gates | D4 | Refined into 3.3 independent tuner stop policies | Default-disabled circuit breaker; no scorer or HealthGate routing change |
+| Modular agent orchestration | D5 | Retained under 3.4 workflow evolution | Architecture-level; long-tail |
 | ModelConfig typed Pydantic | D6 | Tech-debt; not V18-blocking | Independent of feedback/adaptation |
 | Info-source weighting | D7 | Follows 3.2 adaptation | Only meaningful after cross-iteration feedback exists |
 
@@ -104,10 +168,11 @@ Compact re-classification. Full evaluation post-V17 with observation data in han
 Not committed — proposed as a starting point once V17 data is in hand:
 
 1. **Feedback propagation (3.1)** — smallest surface change, unblocks the rest
-2. **Metric refinement (3.4)** — parallel; independent
+2. **Metric refinement (3.5)** — parallel; independent
 3. **Adaptation (3.2)** — needs 3.1 for fingerprints; needs V17 data for thresholds
-4. **Workflow evolution (3.3)** — larger surface; custom-loss fix first, then Run Monitor / orchestration
-5. **Forensic backlog (3.5)** — throughout, as evidence accumulates
+4. **Independent stop policies (3.3)** — after completion/resume semantics are designed; default disabled
+5. **Workflow evolution (3.4)** — larger surface; Run Monitor / orchestration
+6. **Forensic backlog (3.6)** — throughout, as evidence accumulates
 
 ## 6. Related docs
 

@@ -1,13 +1,16 @@
 # V17 Priority Decisions — Revised 2026-07-17
 
-- **Status**: scope frozen; observation infrastructure feature-complete; awaiting campaign execution
-- **Scope**: observation-layer release — HealthGate coverage, typed persistence, unified all-file baselines + 10-round campaigns for FCNet, WaveNet, PUNet
+- **Status**: scope frozen; core observation infrastructure complete; final launch plumbing pending
+- **Scope**: observation-layer release — HealthGate coverage, typed persistence, score validity, and a unified observation standard for V17 workflow exploration
 - **Owner**: SIDERIUS operators
 - **Related**: [`v17_pregate_baseline_launch_plan.md`](./v17_pregate_baseline_launch_plan.md), [`v17_pregate_threshold_review.md`](./v17_pregate_threshold_review.md), [`v18_priorities.md`](./v18_priorities.md)
 
 ## 1. Goal
 
-Establish one consistent, reasonable, auditable model-health standard for both the newly trained all-file baselines and the V17 workflow exploration, without allowing gate failures to interrupt the exploration.
+Establish one consistent, reasonable, auditable model-health standard for V17
+workflow exploration, using the retained all-file pre-gate diagnostics as
+reference evidence without treating them as V17 workflow runs or replaying
+them as a launch prerequisite.
 
 ## 2. Guiding principle — stability over optimality
 
@@ -24,30 +27,38 @@ An observation layer that:
 - Routes every successfully executed gate to `continue`, regardless of whether the check passes or fails. Nothing invalidates a round mid-campaign.
 - Persists complete typed per-file metrics, aggregate results, recording metrics, execution status, counterfactual production verdict, and resolved observe-mode action for every gate execution.
 - Distinguishes four execution states — `passed`, `failed`, `not_run`, `error` — with `not_run` and `error` marked as observability / infrastructure states, not model-collapse verdicts.
-- Trains one unified all-file generalist baseline (no frequency splitting) plus exactly ten tuning rounds for each of FCNet, WaveNet, PUNet.
-- Reuses a validated same-campaign Phase 1 baseline on resume; requires a fresh baseline for a new campaign.
-- Adds only the minimum necessary wiring to the existing `run_comparison.py`; no parallel runner, no artifact-storage redesign.
+- Uses the completed pre-gate diagnostics as evidence, while keeping those diagnostic campaigns distinct from the V17 workflow exploration.
+- Retains the existing implemented three-branch loss exploration framework: Branch A built-ins, Branch B currently available reusable plugins, and Branch C / Option C newly generated custom losses.
+- Retains the V16 execution topology: concurrent loss-explorer and
+  architecture-explorer chains, 20 workflow iterations per chain, and three
+  tuner rounds per iteration.
+- Persists structured failed attempts in planner history and treats an
+  unexpected partial tuner campaign as a non-zero workflow failure.
 
 ## 4. What V17 is not
 
 - Not a collapse-detection optimizer. Thresholds are frozen for observation, not proven optimal.
 - Not a workflow-adaptation release. Interpreter, proposer, and cross-iteration feedback stay unchanged.
+- Not a complete typed HealthGate-feedback release. Gate observations are
+  authoritative in persisted records but are not yet a full structured input
+  contract for the interpreter and proposer.
+- Not a stateful-routing release. Consecutive-collapse/invalid-score circuit breakers and a `completed_early` terminal state were reviewed and intentionally deferred to V18.
 - Not a metric redesign. `denoising_score` computation is untouched; only the score-validity guard (`noise <= 1e-10`) is enforced.
-- Not a custom-loss redesign. V17 uses the existing three-branch loss surface,
-  including Branch C generation. Issue #112's stale runtime-inventory defect
-  must be fixed before launch; no new loss protocol or implementor architecture
-  is introduced.
+- Not a custom-loss redesign. V17 retains the existing
+  proposer → implementor → registry → tuner path. PR #122 only prevents stale
+  or unavailable Branch B plugins from being advertised or accepted as reusable.
 - Not a forensics deep-dive. Past outliers (e.g., the v15 iter-4/R4 anomaly) are preserved as issues and reopened only if the pattern re-appears during V17.
 
 ## 5. Delivered capabilities
 
-All the following are on master and satisfy the V17 contract:
+The following core capabilities are on master and satisfy the V17 contract.
+The remaining production launch-path pass-through is listed in §6.
 
 ### 5.1 Gate execution + coverage
 
 - Every configured gate fires every round via `after_round: every` (schema-supported; runner delegates to `GateConfig.matches_round`).
-- Baseline and tuner rounds load the same observe-mode YAML.
-- `scripts/run_comparison.py` refuses to launch the pre-gate baseline unless every gate is `after_round: every` + `continue`/`continue` — invariant enforced at launch, not documentation only.
+- The pre-gate `run_comparison.py` campaign loads and validates the observe-mode YAML.
+- The tuner accepts an optional `health_checks_config`; the production chain still needs the narrow pass-through listed in §6.1 before V17 launch.
 
 Evidence: `configs/health_checks_baseline_observe_mode.yaml`, `execute_tools/health_checks/runner.py`, `scripts/run_comparison.py` launch-time check.
 
@@ -105,34 +116,80 @@ Evidence: `execute_tools/health_checks/schemas.py::PersistedHealthGateResult`, `
 
 Per-check disposition documented and frozen for the campaign in [`v17_pregate_threshold_review.md`](./v17_pregate_threshold_review.md). Three blocking-style thresholds `retain`; three recording-only checks `provisional recording-only`. Production disposition remains `undetermined` — the campaign provides evidence for a later production decision, not a mid-campaign edit.
 
+### 5.8 Loss exploration and runtime inventory
+
+V17 retains all three implemented loss branches:
+
+- **Branch A** — registered built-in losses.
+- **Branch B** — reusable loss plugins that are currently present and loadable
+  in the execution context.
+- **Branch C / Option C** — a new loss with a complete `custom_loss_spec`,
+  materialized through the existing proposer → implementor → registry → tuner
+  workflow.
+
+PR #122 centralizes the live reusable-loss inventory used by prompt rendering
+and proposal validation. Historical, workspace-only, stale, or missing plugins
+are no longer advertised or accepted as Branch B. Option C remains unchanged
+and was verified by deterministic tests and Gate 1; the unrestricted Gate 2
+also passed.
+
+### 5.9 Completed pre-gate diagnostic evidence
+
+These campaigns are diagnostic evidence, not the V17 workflow exploration and
+not a completion requirement to be replayed before launch:
+
+| Model | Diagnostic result | Disposition |
+|---|---|---|
+| FCNet | Baseline completed; tuning stopped at `6/10` after the collapse pattern was established | Partial evidence retained; no rerun required |
+| PUNet | Baseline completed; tuning ended partial at `3/10` after repeated `bilinear=False` structural failures | Partial evidence retained exactly as recorded; PR #121 repaired the defect; no rerun required |
+| WaveNet | Baseline and `10/10` tuning rounds completed | Completed evidence retained; nominal best score remained HealthGate-collapsed |
+
+The diagnostics established the observation and continuation behavior used to
+prepare V17. V17 itself remains the two-chain workflow exploration described in
+the launch report, with three tuner rounds per workflow iteration.
+
 ## 6. Remaining V17 work
 
 Small and narrow. All operational or documentation-alignment; no framework changes.
 
-### 6.1 Campaign execution (operational)
+### 6.1 Observe-mode HealthGate launch plumbing — blocking
 
-Run the three-model observation campaign per [`v17_pregate_baseline_launch_plan.md`](./v17_pregate_baseline_launch_plan.md):
+The tuner schema and tuner CLI accept `health_checks_config`, but the production
+chain does not yet propagate it through:
 
-- FCNet: unified all-file baseline + 10 rounds
-- WaveNet: unified all-file baseline + 10 rounds
-- PUNet: unified all-file baseline + 10 rounds
+```text
+run_chain.sh / _chain_common.sh
+  → run_one_iteration.py
+  → workflows.model_exploration.run_workflow
+  → local_validated_model protocol
+  → HyperparamTuningInput.health_checks_config
+```
 
-Same gate standard, same score-validity policy, same file selection throughout. Record completeness validated before proceeding to the next model.
+Without this optional pass-through, V17 silently loads
+`configs/health_checks.yaml`, whose blocking-style checks resolve failures to
+`invalidate_round`, rather than the approved observe-only YAML. This is a true
+launch blocker and should be the only runtime-code change in the final launch
+plumbing PR.
 
-### 6.2 Custom-loss runtime inventory (issue #112)
+### 6.2 V17 advice files — blocking operational artifacts
 
-V17 retains Option C custom-loss generation. Before launch, ensure prompt
-rendering and proposal validation expose only losses that a fresh training
-subprocess can load from the global generated-loss directory. Workspace-only
-or missing capability-index entries must not pass as Branch B reuse. A new
-loss remains valid when the proposer supplies a complete `custom_loss_spec`,
-which invokes the existing implementor path before tuning.
+The approved commands reference `advice/workflow/v17_loss_explorer.json` and
+`advice/workflow/v17_arch_explorer.json`; neither file exists on master. Create
+them from the V16 control-variable strategy while explicitly retaining Branch
+A, live Branch B, and Option C. These files can land in the same focused launch
+plumbing PR as §6.1.
 
-### 6.3 `build_diagnostic_summary.py` schema update
+### 6.3 V17 workflow execution (operational, after §6.1–6.2)
+
+Run the two V17 workflow chains only after the observe-mode config path and
+advice files are verified by dry-run. This is the actual V17 campaign; it must
+not be conflated with the completed pre-gate diagnostics in §5.9.
+
+### 6.4 `build_diagnostic_summary.py` schema update
 
 The diagnostic-summary script still infers a binary `passed | failed` from `failure_reason` presence. It has not been updated to consume `PersistedHealthGateResult.execution_status` (four states). Not blocking for the campaign, but should be updated so post-campaign analysis uses the same state vocabulary as the persisted records.
 
-### 6.4 Seed-path documentation
+### 6.5 Seed-path documentation
 
 Update seed-path documentation for operator clarity (issue #104). Cosmetic but reduces launch confusion.
 
@@ -142,9 +199,13 @@ See [`v18_priorities.md`](./v18_priorities.md) for the full list with rationale 
 
 - **Feedback propagation** — collapse signals flowing from tuner into `ModelRunSummary`, interpreter schemas, and proposer prompts.
 - **Adaptation** — adaptive thresholds, aggregation-policy search, cross-iteration collapse-fingerprint avoidance.
-- **Workflow evolution** — broader custom-loss protocol redesign beyond the
-  narrowly scoped issue #112 runtime-inventory fix, plus bidirectional
-  cross-iteration information flow.
+- **Stateful tuner stop policies** — independent repeated-collapse and
+  repeated-invalid-score counters, tuner-level routing, persistence/resume,
+  and a successful `completed_early` terminal state. Reviewed before V17 and
+  intentionally deferred because V17 is observational and uses only three
+  rounds per tuner invocation.
+- **Workflow evolution** — bidirectional cross-iteration information flow and
+  larger orchestration/monitoring changes.
 - **Metric refinement** — correlation-based score-modification exploration, other post-observation-data-informed changes.
 - **Forensic backlog** — v15 iter-4/R4 outlier + related historical anomalies, revisited if V17 observation data warrants.
 
