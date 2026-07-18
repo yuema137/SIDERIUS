@@ -1406,6 +1406,7 @@ class HyperparamTuningAgent:
 
         print("=== TIDMAD Agent Activated ===")
         print(f"Provider: {agent_input.llm_provider} | Model: {agent_input.llm_model_id}")
+        print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
 
@@ -3137,6 +3138,7 @@ class HyperparamTuningAgent:
             "run_name": run_name,
             "model_type": model_type_setting,
             "file_index": file_index,
+            "health_checks_config": agent_input.health_checks_config,
             "status": run_status,
             "completed_rounds": completed_rounds,
             "total_attempts": total_attempts,

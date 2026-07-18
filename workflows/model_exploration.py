@@ -1332,6 +1332,7 @@ def run_workflow(
     target_score: float | None = None,
     file_index: int = 6,
     llm_config: WorkflowLLMConfig | None = None,
+    health_checks_config: str | None = None,
     human_advice_interpret: str | None = None,
     human_advice_propose: str | None = None,
     human_advice_implement: str | None = None,
@@ -1499,6 +1500,8 @@ def run_workflow(
         file_index: Training/validation file index (ignored when is_trial=True).
         llm_config: Per-node LLM configuration. If None, each node uses its
             own built-in default. See WorkflowLLMConfig for details.
+        health_checks_config: Optional HealthGate YAML override forwarded to
+            every tuner invocation. None preserves the tuner's shipped default.
         human_advice_interpret: Human guidance for interpretation steps.
         human_advice_propose: Human guidance for proposal steps.
         human_advice_implement: Human guidance for implementation steps.
@@ -2277,6 +2280,7 @@ def run_workflow(
             proposal,
             tuning_storage,
             max_rounds=max_rounds,
+            health_checks_config=health_checks_config,
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),

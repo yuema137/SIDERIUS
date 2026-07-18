@@ -337,10 +337,11 @@ class TestArgparseSurface:
 class _StubResult:
     """Minimal HyperparamTuningOutput-shaped object for write_manifest."""
 
-    def __init__(self, model_type, score=0.7):
+    def __init__(self, model_type, score=0.7, health_checks_config=None):
         self.model_type = model_type
         self.best_denoising_score = score
         self.completed_rounds = 3
+        self.health_checks_config = health_checks_config
 
 
 def _run_main(argv):
@@ -425,6 +426,56 @@ class TestRestoreWiring:
         kwargs = mock_wf.call_args.kwargs
         assert kwargs["source_paths"] == [str(seed_file)]
         assert kwargs["run_name"] == "iter_001"
+
+    def test_health_checks_config_reaches_workflow(
+        self,
+        tmp_path,
+        isolated_registries,
+    ):
+        seed_file = tmp_path / "seed.json"
+        seed_file.write_text(
+            json.dumps(
+                {
+                    "run_name": "seed",
+                    "model_type": "punet",
+                    "file_index": 6,
+                    "status": "completed",
+                    "completed_rounds": 1,
+                    "total_attempts": 1,
+                    "started_at": "x",
+                    "finished_at": "y",
+                }
+            )
+        )
+        health_path = "configs/health_checks_baseline_observe_mode.yaml"
+
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            with patch.object(
+                runner,
+                "write_manifest",
+                return_value={
+                    "status": "completed",
+                    "model_name": "c8_test_arch_a",
+                    "best_score": 0.7,
+                    "output_path": "x",
+                },
+            ):
+                code = _run_main(
+                    [
+                        "--workspace",
+                        str(tmp_path),
+                        "--start_iteration",
+                        "1",
+                        "--seed_paths",
+                        str(seed_file),
+                        "--health_checks_config",
+                        health_path,
+                    ]
+                )
+
+        assert code == 0
+        assert mock_wf.call_args.kwargs["health_checks_config"] == health_path
 
     def test_start_iteration_2_restores_iter_1_plugin_and_prepends_path(
         self,
@@ -794,6 +845,18 @@ class TestNoRecordsExit:
         manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
         assert manifest["status"] == "completed"
         assert manifest["best_score"] == 0.71
+
+    def test_write_manifest_records_consumed_health_checks_config(self, tmp_path):
+        path = "configs/health_checks_baseline_observe_mode.yaml"
+        results = [
+            _StubResult(
+                "c8_test_arch_a",
+                score=0.71,
+                health_checks_config=path,
+            )
+        ]
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
+        assert manifest["health_checks_config"] == path
 
     def test_write_manifest_crashed_forces_failed_regardless_of_results(self, tmp_path):
         # Crash path: even if results is non-empty, crashed=True forces failed.

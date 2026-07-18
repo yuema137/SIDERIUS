@@ -59,6 +59,7 @@ SKIP_FORMAL_MIN_DELTA=-1.0
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
+HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 0.02)
@@ -182,6 +183,7 @@ parse_chain_args() {
         --advice)                 ADVICE="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
+        --health_checks_config)   HEALTH_CHECKS_CONFIG="$2"; shift 2 ;;
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
@@ -324,6 +326,9 @@ build_app_args() {
     if [ -n "$LLM_CONFIG" ]; then
         APP_ARGS+=(--llm_config "$LLM_CONFIG")
     fi
+    if [ -n "$HEALTH_CHECKS_CONFIG" ]; then
+        APP_ARGS+=(--health_checks_config "$HEALTH_CHECKS_CONFIG")
+    fi
     if [ -n "$REFLECT_PROVIDER" ]; then
         APP_ARGS+=(--reflect_provider "$REFLECT_PROVIDER")
     fi
@@ -391,6 +396,7 @@ print_chain_header() {
     if [ -n "$LLM_CONFIG" ]; then
         echo "  LLM config       : $LLM_CONFIG"
     fi
+    echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi

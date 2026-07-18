@@ -198,6 +198,11 @@ class TestHealthChecksConfig:
 
 
 class TestLoadHealthGatesConfig:
+    def test_missing_explicit_path_raises_file_not_found(self, tmp_path):
+        missing = tmp_path / "missing_health_checks.yaml"
+        with pytest.raises(FileNotFoundError):
+            load_health_gates_config(path=str(missing))
+
     def test_loads_valid_yaml(self, tmp_path):
         p = tmp_path / "hc.yaml"
         p.write_text(

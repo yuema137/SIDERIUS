@@ -155,6 +155,7 @@ CONTRACT_FLAGS = [
     "is_pseudo_llm",
     "is_pseudo_training",
     "llm_config",
+    "health_checks_config",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse
@@ -393,7 +394,13 @@ class TestShellPythonConsistency:
 _RUN_CHAIN_SH = _Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_chain.sh"
 
 
-def _run_dry(mode: str, workspace: _Path, num_iters: int, seed_path: _Path):
+def _run_dry(
+    mode: str,
+    workspace: _Path,
+    num_iters: int,
+    seed_path: _Path,
+    *extra_args: str,
+):
     """Invoke run_chain.sh in dry-run mode and return (rc, stdout, stderr)."""
     cmd = [
         "bash",
@@ -409,6 +416,7 @@ def _run_dry(mode: str, workspace: _Path, num_iters: int, seed_path: _Path):
         str(num_iters),
         "--seed_paths",
         str(seed_path),
+        *extra_args,
     ]
     proc = _subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     return proc.returncode, proc.stdout, proc.stderr
@@ -458,6 +466,20 @@ class TestDryRunSmoke:
             f"contract violated. Contents: "
             f"{list(workspace.iterdir()) if workspace.exists() else None}"
         )
+
+    def test_health_checks_config_is_rendered_verbatim(self, workspace, seed_path):
+        config_path = "configs/health_checks_baseline_observe_mode.yaml"
+        rc, stdout, stderr = _run_dry(
+            "lilab",
+            workspace,
+            1,
+            seed_path,
+            "--health_checks_config",
+            config_path,
+        )
+        assert rc == 0, f"non-zero exit: stdout={stdout!r}\nstderr={stderr!r}"
+        assert f"--health_checks_config {config_path}" in stdout
+        assert f"HealthGate config: {config_path}" in stdout
 
     def test_sdsc_emits_afterany_dependency_for_iter_two_and_three(self, workspace, seed_path):
         rc, stdout, stderr = _run_dry("sdsc", workspace, 3, seed_path)

@@ -32,6 +32,7 @@ def local_validated_model(
     proposal: ProposalOutput,
     storage: StorageConfig,
     max_rounds: int = 50,
+    health_checks_config: str | None = None,
     file_index: int = 6,
     llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
@@ -105,6 +106,8 @@ def local_validated_model(
                         in the order spec → inheritance.
       - storage       : passed through from the workflow
       - max_rounds    : tuning budget (caller-supplied, default 50)
+      - health_checks_config : optional HealthGate YAML override; None keeps
+        the tuner's shipped default.
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
       - llm_provider  : planner-call provider (caller-supplied, default gemini)
       - llm_model_id  : planner-call model ID (caller-supplied)
@@ -191,6 +194,7 @@ def local_validated_model(
         model_type=output.model_type,
         file_index=file_index,
         max_rounds=max_rounds,
+        health_checks_config=health_checks_config,
         expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
