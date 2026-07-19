@@ -78,6 +78,7 @@ elapsed: 859 seconds
 exit: 0
 iterations: 2/2 completed
 tuner rounds: 2/2 in each iteration
+token usage: 537,319
 ```
 
 Both manifests and tuner outputs persist:
@@ -123,6 +124,11 @@ is operational and must occur after merge:
 
 Independent tuner stop policies were reviewed, found technically feasible,
 and intentionally deferred to V18. They are not required for V17 launch.
+
+The production command rejects pre-existing timestamped workspaces, logs, exit
+markers, and screen session names before creating launch artifacts. Operators
+must monitor cumulative token usage per iteration because the final two-iteration
+Gate 2 alone consumed 537,319 tokens.
 
 ## Final verdict
 
