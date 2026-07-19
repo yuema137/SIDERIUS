@@ -85,6 +85,21 @@ def _make_trial_record(
         "exp_id": exp_id,
         "status": status,
         "denoising_score": score,
+        "is_trial": time_mode == "trial",
+        "health_gate_results": [
+            {
+                "gate_name": gate_name,
+                "execution_status": "passed",
+                "check_passed": True,
+                "would_invalidate_under_production_policy": False,
+                "resolved_action": "continue",
+            }
+            for gate_name in (
+                "output_diversity_blocking",
+                "output_std_blocking",
+                "amplitude_collapse_blocking",
+            )
+        ],
         "params": {
             "model_config": dict(model_config),
             "loss_config": {

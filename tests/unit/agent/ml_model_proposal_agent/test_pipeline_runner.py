@@ -35,6 +35,12 @@ FAKE_INTERPRETATION = {
     "model_types": ["punet", "wavenet", "fcnet", "gated_fno"],
     "total_experiments": 20,
     "per_model_best": {"punet": 1.8, "wavenet": 5.5, "fcnet": 0.9, "gated_fno": 4.2},
+    "per_model_best_valid": {
+        "punet": 1.8,
+        "wavenet": 5.5,
+        "fcnet": 0.9,
+        "gated_fno": 4.2,
+    },
     "per_model_worst": {"punet": 1.2, "wavenet": 3.1, "fcnet": 0.7, "gated_fno": 2.0},
     "best_denoising_score": 5.5,
     "worst_denoising_score": 0.7,

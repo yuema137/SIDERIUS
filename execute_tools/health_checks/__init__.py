@@ -28,6 +28,12 @@ fixture and re-register the checks they exercise.
 from __future__ import annotations
 
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
+from execute_tools.health_checks.candidate_eligibility import (
+    CandidateHealthValidity,
+    classify_candidate_health,
+    is_valid_candidate,
+    required_blocking_gate_ids,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.output_std import OutputStdCheck
@@ -81,17 +87,21 @@ _bootstrap_registry()
 
 __all__ = [
     "BLOCKING_ACTIONS",
+    "CandidateHealthValidity",
     "GateAction",
     "GateResult",
     "HealthCheckContext",
     "HealthCheckResult",
     "HealthCheckSkill",
     "all_registered",
+    "classify_candidate_health",
     "evaluate_and_persist_health_gates",
     "evaluate_gate",
     "get",
     "get_gates_for_position",
+    "is_valid_candidate",
     "register",
+    "required_blocking_gate_ids",
     "resolve_action",
     "severity_of",
 ]

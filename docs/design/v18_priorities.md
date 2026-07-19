@@ -113,7 +113,34 @@ Future implementation goals:
 Dependencies: V17 observation data and explicit completion/resume contract
 design. Independent of the existing Option C custom-loss workflow.
 
-### 3.4 Workflow evolution
+### 3.4 Chain-wide best valid formal incumbent
+
+V18 will replace V17's fixed `0.0` comparison reference with committed,
+chain-local state:
+
+```text
+chain_best_valid_formal_score: float | None
+chain_best_valid_formal_record: provenance | None
+```
+
+Only formal, HealthGate-valid results are eligible. Loss and architecture
+chains maintain independent incumbents. The incumbent is reconstructed from
+committed prior-iteration manifests and tuner outputs, frozen at iteration
+start, and updated only after a successful iteration commit; the new value
+becomes active in the next iteration. Raw scores remain separately preserved.
+
+The design must specify no-incumbent initialization, partial-campaign
+eligibility, legacy records with missing HealthGate metadata, stable
+tie-breaking, interrupted iterations, duplicate/replayed artifacts,
+`--auto_resume`, and equivalence with in-process
+`run_workflow(max_iterations>1)`. Uncommitted outputs are ignored. Migration
+from V17's fixed `0.0` reference must be explicit and deterministic.
+
+Delta thresholds (`skip_formal_min_delta` and
+`bypass_formal_time_budget_min_delta`) will be evaluated against this restored
+incumbent only after commit-boundary activation.
+
+### 3.5 Workflow evolution
 
 **Capability**: broader workflow changes that were deferred out of V17 because they touch agent contracts or long-lived infrastructure.
 
@@ -128,7 +155,7 @@ The existing Branch A / live Branch B / Option C custom-loss framework is not
 a deferred V18 feature. PR #122 preserved that workflow and removed stale or
 unavailable Branch B inventory entries.
 
-### 3.5 Metric refinement
+### 3.6 Metric refinement
 
 **Capability**: the `denoising_score` computation itself gains additional safeguards or collapse-resistant variants, informed by campaign data.
 
@@ -139,7 +166,7 @@ Concrete work:
 
 Dependencies: V17 campaign data. Blocked by: nothing until data is in hand.
 
-### 3.6 Deferred forensic backlog
+### 3.7 Deferred forensic backlog
 
 **Capability**: revisit historical anomalies with post-V17 tools.
 

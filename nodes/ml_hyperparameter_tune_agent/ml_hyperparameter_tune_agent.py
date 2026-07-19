@@ -52,6 +52,7 @@ from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
@@ -155,14 +156,11 @@ def _validate_data_config(
 
 
 def _best_trial_winner(memory_history: list) -> dict | None:
-    """Highest-scoring trial-mode success record from ``memory_history``,
-    or ``None`` if no eligible record exists.
+    """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
-    Eligibility predicate: ``status == "success"`` AND
-    ``denoising_score is not None`` AND
-    ``memory.time_mode == "trial"`` (so we never inherit from a previous
-    formal round, and never from a gate-rejected attempt that never
-    produced a usable score).
+    Trial metadata must agree in both the typed ``is_trial`` field and the
+    persisted ``memory.time_mode`` field. Legacy, collapsed, non-finite, or
+    incompletely observed records are not execution candidates.
 
     Used by both the forced-formal-round hyperparameter inheritance in
     :func:`_apply_mode_override_chain` (trial winner's config drives the
@@ -175,13 +173,43 @@ def _best_trial_winner(memory_history: list) -> dict | None:
     candidates = [
         r
         for r in memory_history
-        if r.get("status") == "success"
-        and r.get("denoising_score") is not None
+        if is_valid_candidate(r)
+        and r.get("is_trial") is True
         and (r.get("memory") or {}).get("time_mode") == "trial"
     ]
     if not candidates:
         return None
     return max(candidates, key=lambda r: r["denoising_score"])
+
+
+def _should_skip_formal(
+    memory_history: list,
+    *,
+    reference_score: float,
+    min_delta: float,
+) -> bool:
+    """Return whether the best valid trial falls below the formal threshold."""
+
+    winner = _best_trial_winner(memory_history)
+    threshold = reference_score + min_delta
+    return (
+        winner is not None and threshold > float("-inf") and winner["denoising_score"] < threshold
+    )
+
+
+def _should_bypass_formal_time_budget(
+    memory_history: list,
+    *,
+    reference_score: float,
+    min_delta: float,
+) -> bool:
+    """Return whether the best valid trial clears the formal bypass threshold."""
+
+    winner = _best_trial_winner(memory_history)
+    threshold = reference_score + min_delta
+    return (
+        winner is not None and threshold < float("inf") and winner["denoising_score"] >= threshold
+    )
 
 
 def _latest_trial_inference_marginal(memory_history: list) -> float | None:
@@ -342,7 +370,7 @@ def _apply_mode_override_chain(
          verbatim. ``plan.is_trial`` is still flipped to False.
 
        Shared no-winner fallback for ``full_clone`` and ``hybrid_params``:
-       when ``memory_history`` carries no successful trial round, the
+       when ``memory_history`` carries no HealthGate-valid trial round, the
        planner's plan is preserved unchanged and a WARNING is logged
        (resilient — a messy trial stage shouldn't kill the chain).
        ``independent`` skips the warning because the strategy explicitly
@@ -402,7 +430,7 @@ def _apply_mode_override_chain(
             print(f"  [FORMAL OVERRIDE] strategy={canonical} winner=none inherited=(none)")
         else:
             print(
-                "  [FORMAL OVERRIDE] WARNING: no successful trial round "
+                "  [FORMAL OVERRIDE] WARNING: no successful trial round is HealthGate-valid "
                 "in this iteration — planner's plan unchanged. "
                 "Score may be unreliable."
             )
@@ -1407,6 +1435,13 @@ class HyperparamTuningAgent:
         print("=== TIDMAD Agent Activated ===")
         print(f"Provider: {agent_input.llm_provider} | Model: {agent_input.llm_model_id}")
         print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
+        print(
+            "Formal comparison thresholds: "
+            f"reference={agent_input.current_run_best_formal_score:.4f}, "
+            f"skip={agent_input.current_run_best_formal_score + agent_input.skip_formal_min_delta:.4f}, "
+            "bypass="
+            f"{agent_input.current_run_best_formal_score + agent_input.bypass_formal_time_budget_min_delta:.4f}"
+        )
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
 
@@ -1505,7 +1540,11 @@ class HyperparamTuningAgent:
                     _best_trial_score = (
                         _winner.get("denoising_score") if _winner is not None else None
                     )
-                    if _best_trial_score is not None and _best_trial_score < _skip_threshold:
+                    if _should_skip_formal(
+                        sandbox.get_summary() or [],
+                        reference_score=agent_input.current_run_best_formal_score,
+                        min_delta=agent_input.skip_formal_min_delta,
+                    ):
                         print(
                             f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
                             f"current_best({agent_input.current_run_best_formal_score:.4f}) "
@@ -1569,10 +1608,10 @@ class HyperparamTuningAgent:
                     last_batch_size = last_train_cfg.get("batch_size")
                     last_mode = last_memory.get("time_mode")
 
-                    # Pick the best-so-far score_table for the planner-prompt
-                    # {SCORE_COMPARISON_TABLE} substitution. Filter to
-                    # successful records with a populated score_table dict,
-                    # then max by denoising_score. Empty history or no
+                    # Pick the best HealthGate-valid score_table for the
+                    # planner prompt. Raw collapsed winners remain persisted
+                    # but are not presented as the viable incumbent. Empty
+                    # history or no
                     # populated score_table → None, which the bridge replaces
                     # with the "no prior round yet" fallback. See
                     # docs/aggregated_score_table_awareness.md §9.1.
@@ -1580,8 +1619,7 @@ class HyperparamTuningAgent:
                     _records_with_table = [
                         r
                         for r in memory_history
-                        if r.get("status") == "success"
-                        and r.get("denoising_score") is not None
+                        if is_valid_candidate(r)
                         and isinstance(r.get("score_table"), dict)
                         and r["score_table"].get("rendered_markdown")
                     ]
@@ -2094,9 +2132,10 @@ class HyperparamTuningAgent:
                                 _best_trial_score = (
                                     _winner.get("denoising_score") if _winner is not None else None
                                 )
-                                if (
-                                    _best_trial_score is not None
-                                    and _best_trial_score >= _bypass_threshold
+                                if _should_bypass_formal_time_budget(
+                                    memory_history,
+                                    reference_score=agent_input.current_run_best_formal_score,
+                                    min_delta=agent_input.bypass_formal_time_budget_min_delta,
                                 ):
                                     print(
                                         f"  [BypassTimeBudget] Trial "
@@ -3089,7 +3128,9 @@ class HyperparamTuningAgent:
         successful_records = [
             r
             for r in all_records
-            if r.get("status") == "success" and r.get("denoising_score") is not None
+            if r.get("status") == "success"
+            and isinstance(r.get("denoising_score"), int | float)
+            and math.isfinite(r["denoising_score"])
         ]
         top_record = (
             max(successful_records, key=lambda r: r["denoising_score"])
@@ -3108,6 +3149,16 @@ class HyperparamTuningAgent:
         formal_records = [r for r in successful_records if not r.get("is_trial", False)]
         formal_top_record = (
             max(formal_records, key=lambda r: r["denoising_score"]) if formal_records else None
+        )
+        valid_records = [r for r in successful_records if is_valid_candidate(r)]
+        valid_top_record = (
+            max(valid_records, key=lambda r: r["denoising_score"]) if valid_records else None
+        )
+        valid_formal_records = [r for r in valid_records if not r.get("is_trial", False)]
+        valid_formal_top_record = (
+            max(valid_formal_records, key=lambda r: r["denoising_score"])
+            if valid_formal_records
+            else None
         )
 
         # Phase K.7 — gate-exhaustion feedback for the next iteration's
@@ -3146,6 +3197,26 @@ class HyperparamTuningAgent:
             "best_denoising_score": top_record.get("denoising_score") if top_record else None,
             "best_formal_denoising_score": formal_top_record.get("denoising_score")
             if formal_top_record
+            else None,
+            "best_valid_exp_id": valid_top_record.get("exp_id") if valid_top_record else None,
+            "best_valid_denoising_score": valid_top_record.get("denoising_score")
+            if valid_top_record
+            else None,
+            "best_valid_formal_exp_id": valid_formal_top_record.get("exp_id")
+            if valid_formal_top_record
+            else None,
+            "best_valid_formal_denoising_score": valid_formal_top_record.get("denoising_score")
+            if valid_formal_top_record
+            else None,
+            "best_valid_config": valid_top_record.get("params") if valid_top_record else None,
+            "best_valid_file_vector": valid_top_record.get("file_vector")
+            if valid_top_record
+            else None,
+            "best_valid_score_table": valid_top_record.get("score_table")
+            if valid_top_record
+            else None,
+            "best_valid_formal_score_table": valid_formal_top_record.get("score_table")
+            if valid_formal_top_record
             else None,
             "best_config": top_record.get("params") if top_record else None,
             "best_file_vector": top_record.get("file_vector") if top_record else None,

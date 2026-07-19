@@ -2332,7 +2332,7 @@ def run_workflow(
         # (formal-dominated under inherit_best_trial / full_clone, which is
         # the production default — see workflows/model_exploration.py:
         # 2134-2137). When no iter has completed yet, the schema default
-        # (raw baseline 1.0007) applies, so iter_001's gates have a
+        # (V17 fixed reference 0.0) applies, so iter_001's gates have a
         # meaningful anchor too. NOTE: 5.5763 is intentionally NOT the
         # default — it is the class-127 mode-collapse fingerprint (SNR=2^17
         # FP artifact), see docs/design/pluggable_health_checks.md §7.1.

@@ -194,6 +194,23 @@ The diagnostic-summary script still infers a binary `passed | failed` from `fail
 
 Update seed-path documentation for operator clarity (issue #104). Cosmetic but reduces launch confusion.
 
+### 6.6 V17 valid-candidate selection and fixed formal reference
+
+Execution-affecting trial selection is HealthGate-valid-only. Observe-mode
+`resolved_action=continue` is not itself evidence of validity: successful,
+finite records must contain all required blocking-style gate results, all must
+execute and pass, and no counterfactual production invalidation or collapse
+marker may be present. Legacy records lacking typed gate evidence remain raw
+historical evidence but have unknown validity and are ineligible as viable
+candidates.
+
+V17 preserves raw-best reporting and adds explicit best-valid and
+best-valid-formal fields. Each production iteration uses the fixed formal
+comparison reference `0.0`; with the approved deltas, the skip threshold is
+`0.0` and the formal-time-budget bypass threshold is `0.5`. This fixed value is
+not a chain-wide incumbent. Dynamic committed incumbent restoration is
+deferred to V18.
+
 ## 7. Deferred to V18
 
 See [`v18_priorities.md`](./v18_priorities.md) for the full list with rationale and dependencies. In summary, V18 will cover:

@@ -63,6 +63,7 @@ def _entry(
         "strategy_assessment": "",
         "_stats": {
             "best_denoising_score": best,
+            "best_valid_denoising_score": best,
             "completed_rounds": rounds,
         },
     }
@@ -76,6 +77,7 @@ def _summary(model_type: str, best: float | None, rounds: int = 1) -> ModelRunSu
         status="completed",
         completed_rounds=rounds,
         best_denoising_score=best,
+        best_valid_denoising_score=best,
     )
 
 

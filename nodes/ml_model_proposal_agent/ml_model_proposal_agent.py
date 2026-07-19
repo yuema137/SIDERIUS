@@ -751,17 +751,24 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         "## Interpretation Summary",
         f"Models analysed     : {interp.get('model_types', [])}",
         f"Total experiments   : {interp.get('total_experiments', 'unknown')}",
-        f"Overall best score  : {interp.get('best_denoising_score')}",
+        f"Overall raw best    : {interp.get('best_denoising_score')}",
+        f"Overall best valid  : {interp.get('best_valid_denoising_score')}",
         f"Overall worst score : {interp.get('worst_denoising_score')}",
         "",
     ]
 
     per_best = interp.get("per_model_best", {})
+    per_best_valid = interp.get("per_model_best_valid", {})
+    per_raw_health = interp.get("per_model_raw_best_health_validity", {})
     per_worst = interp.get("per_model_worst", {})
     if per_best:
         lines.append("### Per-model scores")
         for mt in interp.get("model_types", []):
-            lines.append(f"  {mt}: best={per_best.get(mt)}  worst={per_worst.get(mt)}")
+            lines.append(
+                f"  {mt}: raw_best={per_best.get(mt)} "
+                f"(health={per_raw_health.get(mt, 'unknown')}) "
+                f"best_valid={per_best_valid.get(mt)} worst={per_worst.get(mt)}"
+            )
         lines.append("")
 
     findings = interp.get("key_findings", [])
@@ -1183,7 +1190,7 @@ class MLModelProposalAgent:
         candidate_names = {c["model_type"] for c in candidates}
         cache = inp.interpretation.get("model_knowledge_cache") or {}
         descriptions = inp.interpretation.get("model_descriptions") or {}
-        per_best = inp.interpretation.get("per_model_best") or {}
+        per_best = inp.interpretation.get("per_model_best_valid") or {}
         score_tables = inp.interpretation.get("per_model_score_tables") or {}
 
         non_candidates_overview = []

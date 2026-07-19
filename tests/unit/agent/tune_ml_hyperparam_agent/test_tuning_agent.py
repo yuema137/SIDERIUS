@@ -1762,12 +1762,11 @@ class TestScoreTablePropagation:
         assert output.best_score_table is None
         assert output.formal_score_table is None
 
-    def test_score_table_md_threaded_to_brain_plan(self, agent_and_mocks, tmp_path):
-        """Sub-commit C: the tuner picks the best-so-far record's
-        ``score_table.rendered_markdown`` and threads it into ``brain.plan()``
-        via the ``score_table_md`` kwarg. Round 1 (empty memory) → None;
-        round 2 (one prior record) → the prior record's rendered_markdown."""
-        agent, mock_brain, _, saved_records = agent_and_mocks
+    def test_score_table_md_excludes_record_without_health_evidence(
+        self, agent_and_mocks, tmp_path
+    ):
+        """Legacy records without typed gate evidence are not viable context."""
+        agent, mock_brain, _, _saved_records = agent_and_mocks
         agent.run(_make_trial_input(tmp_path, max_rounds=2, is_trial=True))
 
         # Two planner calls — one per round.
@@ -1777,12 +1776,11 @@ class TestScoreTablePropagation:
         first_kwargs = mock_brain.plan.call_args_list[0].kwargs
         assert first_kwargs.get("score_table_md") is None
 
-        # Round 2: the single prior record's rendered_markdown is threaded.
+        # Round 2: the prior record has no gates because this legacy fixture
+        # disables them, so its validity is unknown and it is not presented as
+        # the best viable score table.
         second_kwargs = mock_brain.plan.call_args_list[1].kwargs
-        assert second_kwargs.get("score_table_md") is not None
-        assert (
-            second_kwargs["score_table_md"] == saved_records[0]["score_table"]["rendered_markdown"]
-        )
+        assert second_kwargs.get("score_table_md") is None
 
     def test_score_table_md_picks_highest_scoring_record(self, tmp_path):
         """With multiple prior records, the tuner threads the ``rendered_markdown``
@@ -1830,6 +1828,20 @@ class TestScoreTablePropagation:
                     "params": _seed_params,
                     "denoising_score": 9.99,
                     "score_table": high_table,
+                    "health_gate_results": [
+                        {
+                            "gate_name": name,
+                            "execution_status": "passed",
+                            "check_passed": True,
+                            "would_invalidate_under_production_policy": False,
+                            "resolved_action": "continue",
+                        }
+                        for name in (
+                            "output_diversity_blocking",
+                            "output_std_blocking",
+                            "amplitude_collapse_blocking",
+                        )
+                    ],
                 },
                 {
                     "exp_id": "prior_LOW",
@@ -1839,6 +1851,20 @@ class TestScoreTablePropagation:
                     "params": _seed_params,
                     "denoising_score": 0.01,
                     "score_table": low_table,
+                    "health_gate_results": [
+                        {
+                            "gate_name": name,
+                            "execution_status": "passed",
+                            "check_passed": True,
+                            "would_invalidate_under_production_policy": False,
+                            "resolved_action": "continue",
+                        }
+                        for name in (
+                            "output_diversity_blocking",
+                            "output_std_blocking",
+                            "amplitude_collapse_blocking",
+                        )
+                    ],
                 },
             ]
             mock_sandbox = MockSandbox.return_value

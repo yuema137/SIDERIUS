@@ -51,7 +51,15 @@ class ModelRunSummary(BaseModel):
     )
     best_denoising_score: float | None = Field(
         default=None,
-        description="Highest denoising score achieved in this run.",
+        description="Highest raw denoising score achieved in this run.",
+    )
+    best_valid_denoising_score: float | None = Field(
+        default=None,
+        description="Highest HealthGate-valid denoising score; None when none is valid.",
+    )
+    best_raw_health_validity: str = Field(
+        default="unknown",
+        description="Health validity of the raw-best record: valid, invalid, or unknown.",
     )
     worst_denoising_score: float | None = Field(
         default=None,
@@ -61,6 +69,10 @@ class ModelRunSummary(BaseModel):
         default=None,
         description="The params dict (model_config, train_config, loss_config) "
         "that produced the best denoising score.",
+    )
+    best_valid_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Config that produced the highest HealthGate-valid score.",
     )
     round_scores: list[float | None] = Field(
         default_factory=list,
@@ -93,6 +105,10 @@ class ModelRunSummary(BaseModel):
         description="Denoising score from the formal (final) round specifically. "
         "Distinct from best_denoising_score which may come from a trial round.",
     )
+    best_valid_formal_score: float | None = Field(
+        default=None,
+        description="Highest HealthGate-valid formal score; None when none is valid.",
+    )
     formal_file_vector: list[float | None] | None = Field(
         default=None,
         description="File vector from the formal round. Definitive per-file performance.",
@@ -105,6 +121,10 @@ class ModelRunSummary(BaseModel):
         "view of best_file_vector alongside raw_baseline and "
         "ground_truth columns with pre-rendered markdown. "
         "Downstream agents prefer this over best_file_vector.",
+    )
+    best_valid_score_table: ScoreComparisonTable | None = Field(
+        default=None,
+        description="Score table for the highest HealthGate-valid experiment.",
     )
     formal_score_table: ScoreComparisonTable | None = Field(
         default=None,
@@ -342,6 +362,14 @@ class InterpretationOutput(BaseModel):
         description="model_type → best denoising score. "
         "None if the model has no successful experiments.",
     )
+    per_model_best_valid: dict[str, float | None] = Field(
+        default_factory=dict,
+        description="model_type → highest HealthGate-valid score; None when unavailable.",
+    )
+    per_model_raw_best_health_validity: dict[str, str] = Field(
+        default_factory=dict,
+        description="model_type → validity label for its raw-best record.",
+    )
     per_model_worst: dict[str, float | None] = Field(
         default_factory=dict,
         description="model_type → worst denoising score. "
@@ -351,7 +379,11 @@ class InterpretationOutput(BaseModel):
     # --- Overall best ---
     best_denoising_score: float | None = Field(
         default=None,
-        description="Highest denoising score observed across all models.",
+        description="Highest raw denoising score observed across all models.",
+    )
+    best_valid_denoising_score: float | None = Field(
+        default=None,
+        description="Highest HealthGate-valid score observed across all models.",
     )
     worst_denoising_score: float | None = Field(
         default=None,
@@ -359,7 +391,11 @@ class InterpretationOutput(BaseModel):
     )
     best_config: dict[str, Any] | None = Field(
         default=None,
-        description="The params dict that produced the overall best denoising score.",
+        description="The params dict that produced the overall raw-best score.",
+    )
+    best_valid_config: dict[str, Any] | None = Field(
+        default=None,
+        description="The params dict that produced the overall best valid score.",
     )
 
     # --- Per-model knowledge cache (from Phase 1) ---
