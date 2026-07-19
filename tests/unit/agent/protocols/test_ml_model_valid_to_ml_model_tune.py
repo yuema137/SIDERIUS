@@ -559,6 +559,27 @@ class TestAttemptBudgetFanOut:
 
 
 # ---------------------------------------------------------------------------
+# HealthGate config fan-out
+# ---------------------------------------------------------------------------
+
+
+class TestHealthChecksConfigFanOut:
+    def test_default_is_none(self, validator_output, proposal_output, storage):
+        result = local_validated_model(validator_output, proposal_output, storage)
+        assert result.health_checks_config is None
+
+    def test_explicit_path_reaches_tuner_input(self, validator_output, proposal_output, storage):
+        path = "configs/health_checks_baseline_observe_mode.yaml"
+        result = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            health_checks_config=path,
+        )
+        assert result.health_checks_config == path
+
+
+# ---------------------------------------------------------------------------
 # formal_round_strategy fan-out
 #
 # Orchestration policy for the forced formal round. Phase 1 of

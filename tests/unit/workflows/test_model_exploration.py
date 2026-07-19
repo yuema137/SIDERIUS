@@ -1611,6 +1611,25 @@ def _tune_input_from_workflow(workflow_env, tmp_path, **workflow_kwargs):
 
 
 class TestOrchestrationParamForwarding:
+    def test_signature_accepts_health_checks_config(self):
+        import inspect
+
+        sig = inspect.signature(run_workflow)
+        assert "health_checks_config" in sig.parameters
+
+    def test_health_checks_config_reaches_tuner(self, workflow_env, tmp_path):
+        path = "configs/health_checks_baseline_observe_mode.yaml"
+        tune_input = _tune_input_from_workflow(
+            workflow_env,
+            tmp_path,
+            health_checks_config=path,
+        )
+        assert tune_input.health_checks_config == path
+
+    def test_health_checks_config_defaults_to_none(self, workflow_env, tmp_path):
+        tune_input = _tune_input_from_workflow(workflow_env, tmp_path)
+        assert tune_input.health_checks_config is None
+
     def test_signature_accepts_formal_round_strategy(self):
         import inspect
 

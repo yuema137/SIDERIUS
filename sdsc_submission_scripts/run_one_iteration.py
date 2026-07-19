@@ -345,6 +345,7 @@ def write_manifest(
             "model_name": model_name,
             "best_score": score,
             "completed_rounds": tune_output.completed_rounds,
+            "health_checks_config": getattr(tune_output, "health_checks_config", None),
         }
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
@@ -660,6 +661,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to a WorkflowLLMConfig JSON file for per-node model routing. "
         "Overrides --llm_model when provided.",
+    )
+    parser.add_argument(
+        "--health_checks_config",
+        type=str,
+        default=None,
+        help=(
+            "Optional HealthGate YAML override forwarded unchanged to the tuner. "
+            "None preserves the shipped default configuration."
+        ),
     )
     parser.add_argument(
         "--advice",
@@ -1149,6 +1159,7 @@ def main():
             chain_run_name=chain_run_name,
             run_id=run_id,
             llm_config=llm_config,
+            health_checks_config=args.health_checks_config,
             max_iterations=1,
             start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,

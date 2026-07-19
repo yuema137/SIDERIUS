@@ -1550,6 +1550,13 @@ class HyperparamTuningOutput(BaseModel):
     run_name: str
     model_type: str
     file_index: int
+    health_checks_config: str | None = Field(
+        default=None,
+        description=(
+            "HealthGate YAML override consumed by this tuner invocation. "
+            "None means the shipped default configuration was used."
+        ),
+    )
 
     # --- Execution summary ---
     status: Literal["completed", "partial", "failed"] = Field(
