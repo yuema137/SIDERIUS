@@ -107,6 +107,35 @@ diagnostic text describing the historical phantom artifact. No persisted Gate
 2 artifact names the default `configs/health_checks.yaml` as its effective
 configuration.
 
+## HealthGate-valid selection validation
+
+The V17 candidate-selection change was validated on the feature worktree with
+the centralized three-state eligibility predicate and fixed formal reference
+`0.0`.
+
+- Focused deterministic suites passed (159, 496, 75, and 92 tests in the
+  targeted selector, schema, interpretation, proposal, and failure subsets).
+- The adjacent unit run produced 2,955 passes and three legacy warning-text
+  assertion failures; after the compatibility wording fix, those remaining
+  three tests passed.
+- Real-LLM Gate 1 passed (`1 passed`) using
+  `llm_configs/openai_tiered_v1.json`.
+- The final two-iteration Gate 2 retry exited `0`; both iterations completed
+  2/2 rounds and used
+  `configs/health_checks_baseline_observe_mode.yaml`.
+- All four Gate 2 rounds were collapsed observations. Their raw best scores
+  were retained (`-2.544968305767763` and `-3.1821064188644397`), while each
+  persisted `best_valid_denoising_score=null`. Every round retained all six
+  gate results and every resolved action remained `continue`.
+- The literal historical phantom value `5.5762667` appeared only inside gate
+  diagnostic text; it was never accepted as a numeric score.
+
+The first Gate 2 attempt failed before training because the isolated worktree
+did not contain the ignored local `tidmad_data_config.yaml`. The single retry
+used the same repository configuration through a symlink to the primary
+checkout's local data config and completed successfully. This was an isolated
+worktree environment issue, not a workflow failure.
+
 ## Remaining before launch
 
 No code or design blocker remains on this feature branch. The remaining work
@@ -124,6 +153,17 @@ is operational and must occur after merge:
 
 Independent tuner stop policies were reviewed, found technically feasible,
 and intentionally deferred to V18. They are not required for V17 launch.
+
+V17 uses `HyperparamTuningInput.current_run_best_formal_score=0.0` as a fixed
+per-iteration formal reference. With the production deltas, skip and bypass
+thresholds are `0.0` and `0.5`. Execution candidates are HealthGate-valid-only,
+while raw and valid best scores are persisted separately. Dynamic committed
+best-valid-formal restoration is intentionally deferred to V18.
+
+Every new `HyperparamTuningOutput` durably records the resolved formal
+reference, skip threshold, and bypass threshold; the iteration manifest mirrors
+the same values. Historical outputs remain loadable with these optional fields
+set to `null`.
 
 The production command rejects pre-existing timestamped workspaces, logs, exit
 markers, and screen session names before creating launch artifacts. Operators

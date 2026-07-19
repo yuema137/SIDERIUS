@@ -8,8 +8,12 @@ including the vocabulary stagnation centrifugal force (Concern #1).
 
 import pytest
 
-from agent.schemas.proposal import ReasoningPipelineConfig, ResearchPolicy
-from nodes.proposal_helpers import resolve_exploration_mode
+from agent.schemas.proposal import (
+    ModelSelectionStrategy,
+    ReasoningPipelineConfig,
+    ResearchPolicy,
+)
+from nodes.proposal_helpers import resolve_exploration_mode, select_candidate_models
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,6 +71,25 @@ class TestEvidenceDepth:
         interp = _interp(model_types=[f"proposed_{i}" for i in range(5)])
         pipeline = _pipeline()
         assert resolve_exploration_mode(interp, pipeline) == "exploit"
+
+
+def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
+    interpretation = {
+        "model_types": ["wavenet", "punet"],
+        "per_model_best": {"wavenet": 0.13, "punet": -1.77},
+        "per_model_best_valid": {"wavenet": None, "punet": -1.77},
+        "per_model_raw_best_health_validity": {
+            "wavenet": "invalid",
+            "punet": "valid",
+        },
+        "model_descriptions": {},
+        "model_knowledge_cache": {},
+    }
+    selected = select_candidate_models(
+        interpretation, ModelSelectionStrategy(method="top_n", params={"n": 2})
+    )
+    assert [candidate["model_type"] for candidate in selected] == ["punet"]
+    assert selected[0]["best_score"] == -1.77
 
     def test_many_proposed_models_triggers_exploit(self):
         interp = _interp(model_types=[f"m{i}" for i in range(10)])

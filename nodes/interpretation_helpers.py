@@ -843,7 +843,8 @@ def select_active_models(
 
     active: set[str] = set()
 
-    # (1) Top-K by best_denoising_score across cache_entries.
+    # (1) Top-K by raw score for prompt-refresh scheduling. This controls LLM
+    # summarization cost, not execution-candidate eligibility.
     scored = [
         (mt, entry.get("_stats", {}).get("best_denoising_score"))
         for mt, entry in cache_entries.items()

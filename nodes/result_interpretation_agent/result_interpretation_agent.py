@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
-from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.hyperparam_tuning import ExperimentRecord, serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
@@ -151,7 +151,9 @@ def _build_per_model_prompt(
     lines = [
         f"## Model: {summary.model_type}",
         f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
-        f"Best denoising score : {summary.best_denoising_score}",
+        f"Raw best score       : {summary.best_denoising_score} "
+        f"(health={summary.best_raw_health_validity})",
+        f"Best valid score     : {summary.best_valid_denoising_score}",
         f"Worst denoising score: {summary.worst_denoising_score}",
     ]
 
@@ -396,6 +398,9 @@ def _build_synthesis_prompt(
     overall_best_score: float | None,
     overall_worst_score: float | None,
     overall_best_config: dict | None,
+    per_model_best_valid: dict[str, float | None] | None = None,
+    per_model_raw_best_health_validity: dict[str, str] | None = None,
+    overall_best_valid_score: float | None = None,
     per_model_score_tables: dict[str, ScoreComparisonTable] | None = None,
     per_model_params: dict[str, int] | None = None,
     per_model_training_segments: dict[str, int] | None = None,
@@ -419,11 +424,14 @@ def _build_synthesis_prompt(
     with a single header line that points the LLM to the on-disk
     iteration record for full detail. Active models render unchanged.
     """
+    per_model_best_valid = per_model_best_valid or {}
+    per_model_raw_best_health_validity = per_model_raw_best_health_validity or {}
     compressed_model_types = compressed_model_types or set()
 
     lines = [
         "## Overall Performance",
-        f"Best score across all models : {overall_best_score}",
+        f"Raw best across all models   : {overall_best_score}",
+        f"Best valid across all models : {overall_best_valid_score}",
         f"Worst score across all models: {overall_worst_score}",
         f"Config that produced overall best:\n{json.dumps(overall_best_config, indent=2) if overall_best_config else 'none'}",
         "",
@@ -443,7 +451,9 @@ def _build_synthesis_prompt(
         lines += [
             "---",
             f"## Model: {model_type}",
-            f"Best score : {per_model_best.get(model_type)}",
+            f"Raw best   : {per_model_best.get(model_type)} "
+            f"(health={per_model_raw_best_health_validity.get(model_type, 'unknown')})",
+            f"Best valid : {per_model_best_valid.get(model_type)}",
             f"Worst score: {per_model_worst.get(model_type)}",
         ]
         if per_model_formal:
@@ -755,12 +765,16 @@ class ResultInterpretationAgent:
         # New models: read from inp.summaries.
         # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
         per_model_best: dict[str, float | None] = {}
+        per_model_best_valid: dict[str, float | None] = {}
+        per_model_raw_best_health_validity: dict[str, str] = {}
         per_model_worst: dict[str, float | None] = {}
         per_model_formal: dict[str, float | None] = {}
         per_model_best_config: dict[str, dict | None] = {}
         overall_best_score: float | None = None
+        overall_best_valid_score: float | None = None
         overall_worst_score: float | None = None
         overall_best_config: dict[str, Any] | None = None
+        overall_best_valid_config: dict[str, Any] | None = None
         total_experiments = 0
 
         # Map model_type → ModelRunSummary (new models only)
@@ -779,6 +793,14 @@ class ResultInterpretationAgent:
                 if overall_best_score is None or s.best_denoising_score > overall_best_score:
                     overall_best_score = s.best_denoising_score
                     overall_best_config = s.best_config
+            per_model_best_valid[mt] = s.best_valid_denoising_score
+            per_model_raw_best_health_validity[mt] = s.best_raw_health_validity
+            if s.best_valid_denoising_score is not None and (
+                overall_best_valid_score is None
+                or s.best_valid_denoising_score > overall_best_valid_score
+            ):
+                overall_best_valid_score = s.best_valid_denoising_score
+                overall_best_valid_config = s.best_valid_config
 
             if s.worst_denoising_score is not None:
                 current_worst = per_model_worst.get(mt)
@@ -796,10 +818,15 @@ class ResultInterpretationAgent:
                 continue  # new summary takes precedence
             stats = entry.get("_stats", {})
             best = stats.get("best_denoising_score")
+            best_valid = stats.get("best_valid_denoising_score")
             worst = stats.get("worst_denoising_score")
             total_experiments += stats.get("completed_rounds", 0)
 
             per_model_best[mt] = best
+            per_model_best_valid[mt] = best_valid
+            per_model_raw_best_health_validity[mt] = stats.get(
+                "best_raw_health_validity", "unknown"
+            )
             per_model_worst[mt] = worst
             per_model_best_config[mt] = stats.get("best_config")
             if stats.get("formal_score") is not None:
@@ -808,12 +835,21 @@ class ResultInterpretationAgent:
             if best is not None and (overall_best_score is None or best > overall_best_score):
                 overall_best_score = best
                 overall_best_config = stats.get("best_config")
+            if best_valid is not None and (
+                overall_best_valid_score is None or best_valid > overall_best_valid_score
+            ):
+                overall_best_valid_score = best_valid
+                overall_best_valid_config = stats.get("best_valid_config") or stats.get(
+                    "best_config"
+                )
             if worst is not None and (overall_worst_score is None or worst < overall_worst_score):
                 overall_worst_score = worst
 
         # Fill None for any model type still missing
         for mt in effective_types:
             per_model_best.setdefault(mt, None)
+            per_model_best_valid.setdefault(mt, None)
+            per_model_raw_best_health_validity.setdefault(mt, "unknown")
             per_model_worst.setdefault(mt, None)
             per_model_best_config.setdefault(mt, None)
 
@@ -925,6 +961,8 @@ class ResultInterpretationAgent:
 
                 new_stats = {
                     "best_denoising_score": summary.best_denoising_score,
+                    "best_valid_denoising_score": summary.best_valid_denoising_score,
+                    "best_raw_health_validity": summary.best_raw_health_validity,
                     "worst_denoising_score": summary.worst_denoising_score,
                     "best_file_vector": summary.best_file_vector,
                     "best_score_table": (
@@ -933,6 +971,7 @@ class ResultInterpretationAgent:
                     "best_model_params": summary.best_model_params,
                     "completed_rounds": summary.completed_rounds,
                     "best_config": summary.best_config,
+                    "best_valid_config": summary.best_valid_config,
                     "formal_score": summary.formal_score,
                     "model_description": model_descriptions.get(mt),
                 }
@@ -1099,8 +1138,11 @@ class ResultInterpretationAgent:
                 synthesis_prompt = _build_synthesis_prompt(
                     per_model_summaries=per_model_summaries_for_prompt,
                     per_model_best=per_model_best,
+                    per_model_best_valid=per_model_best_valid,
+                    per_model_raw_best_health_validity=per_model_raw_best_health_validity,
                     per_model_worst=per_model_worst,
                     overall_best_score=overall_best_score,
+                    overall_best_valid_score=overall_best_valid_score,
                     overall_worst_score=overall_worst_score,
                     overall_best_config=overall_best_config,
                     per_model_score_tables=per_model_score_tables or None,
@@ -1319,10 +1361,14 @@ class ResultInterpretationAgent:
                     "model_descriptions": model_descriptions,
                     "total_experiments": total_experiments,
                     "per_model_best": per_model_best,
+                    "per_model_best_valid": per_model_best_valid,
+                    "per_model_raw_best_health_validity": per_model_raw_best_health_validity,
                     "per_model_worst": per_model_worst,
                     "best_denoising_score": overall_best_score,
+                    "best_valid_denoising_score": overall_best_valid_score,
                     "worst_denoising_score": overall_worst_score,
                     "best_config": overall_best_config,
+                    "best_valid_config": overall_best_valid_config,
                     "model_knowledge_cache": model_knowledge_cache,
                     "key_findings": llm_findings,
                     "bottlenecks": llm_bottlenecks,
@@ -1397,10 +1443,14 @@ class ResultInterpretationAgent:
                     "model_descriptions": model_descriptions,
                     "total_experiments": total_experiments,
                     "per_model_best": per_model_best,
+                    "per_model_best_valid": per_model_best_valid,
+                    "per_model_raw_best_health_validity": per_model_raw_best_health_validity,
                     "per_model_worst": per_model_worst,
                     "best_denoising_score": overall_best_score,
+                    "best_valid_denoising_score": overall_best_valid_score,
                     "worst_denoising_score": overall_worst_score,
                     "best_config": overall_best_config,
+                    "best_valid_config": overall_best_valid_config,
                     "model_knowledge_cache": dict(inp.model_knowledge_cache),
                     "key_findings": [],
                     "bottlenecks": [],
@@ -1601,6 +1651,17 @@ def main():
 # ---------------------------------------------------------------------------
 
 
+def _required_denoising_score(record: ExperimentRecord) -> float:
+    """Return a score after enforcing the valid-record invariant."""
+
+    score = record.denoising_score
+    if score is None:
+        raise ValueError(
+            f"Experiment {record.exp_id!r} entered valid-record ranking without a score."
+        )
+    return score
+
+
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
 ) -> ModelRunSummary:
@@ -1628,7 +1689,13 @@ def tuning_output_to_model_run_summary(
         else:
             round_conclusions.append(r.memory.conclusion or "")
 
-    # Find best record (highest denoising_score)
+    from execute_tools.health_checks.candidate_eligibility import (
+        CandidateHealthValidity,
+        classify_candidate_health,
+        is_valid_candidate,
+    )
+
+    # Find raw best record (highest finite successful denoising_score).
     success = [r for r in records if r.status == "success" and r.denoising_score is not None]
     best_rec = (
         max(
@@ -1637,6 +1704,12 @@ def tuning_output_to_model_run_summary(
         )
         if success
         else None
+    )
+    valid_records = [r for r in success if is_valid_candidate(r)]
+    valid_best_rec = max(valid_records, key=_required_denoising_score) if valid_records else None
+    valid_formal_records = [r for r in valid_records if not r.is_trial]
+    valid_formal_rec = (
+        max(valid_formal_records, key=_required_denoising_score) if valid_formal_records else None
     )
 
     # Find formal round (last record with is_trial=False)
@@ -1677,16 +1750,28 @@ def tuning_output_to_model_run_summary(
         status=output.status,
         completed_rounds=output.completed_rounds,
         best_denoising_score=output.best_denoising_score,
+        best_valid_denoising_score=(valid_best_rec.denoising_score if valid_best_rec else None),
+        best_raw_health_validity=(
+            classify_candidate_health(best_rec).value
+            if best_rec
+            else CandidateHealthValidity.UNKNOWN.value
+        ),
         worst_denoising_score=worst_score,
         best_config=output.best_config,
+        best_valid_config=(valid_best_rec.params if valid_best_rec else None),
         round_scores=round_scores,
         round_conclusions=round_conclusions,
         # Per-file performance (raw primitive retained per §7.2 scope note)
         best_file_vector=best_rec.file_vector if best_rec else None,
         formal_score=formal_rec.denoising_score if formal_rec else None,
+        best_valid_formal_score=(valid_formal_rec.denoising_score if valid_formal_rec else None),
         formal_file_vector=formal_rec.file_vector if formal_rec else None,
         # Per-file performance (enriched — Phase 4)
         best_score_table=best_score_table,
+        best_valid_score_table=(
+            _as_table(output.best_valid_score_table)
+            or (_as_table(valid_best_rec.score_table) if valid_best_rec else None)
+        ),
         formal_score_table=formal_score_table,
         # Efficiency
         best_model_params=best_rec.model_params if best_rec else None,

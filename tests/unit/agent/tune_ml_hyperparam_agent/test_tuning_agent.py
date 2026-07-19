@@ -296,6 +296,66 @@ class TestHyperparamTuningAgentRun:
         assert data["force_model"] == "punet"
         assert data["max_rounds"] == 1
 
+    def test_default_formal_thresholds_persist_and_match_log(
+        self, agent_and_mocks, tmp_path, capsys
+    ):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(
+            _make_input(tmp_path).model_copy(
+                update={
+                    "skip_formal_min_delta": 0.0,
+                    "bypass_formal_time_budget_min_delta": 0.5,
+                }
+            )
+        )
+
+        assert output.formal_reference_score == 0.0
+        assert output.resolved_skip_formal_threshold == 0.0
+        assert output.resolved_bypass_formal_threshold == 0.5
+        persisted = json.loads((tmp_path / "run_output_test_run.json").read_text())
+        assert persisted["formal_reference_score"] == 0.0
+        assert persisted["resolved_skip_formal_threshold"] == 0.0
+        assert persisted["resolved_bypass_formal_threshold"] == 0.5
+        run_config = json.loads((tmp_path / "run_config_test_run.json").read_text())
+        assert run_config["formal_reference_score"] == 0.0
+        assert run_config["resolved_skip_formal_threshold"] == 0.0
+        assert run_config["resolved_bypass_formal_threshold"] == 0.5
+        assert "reference=0.0000, skip=0.0000, bypass=0.5000" in capsys.readouterr().out
+
+    def test_injected_formal_thresholds_persist(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(
+            _make_input(tmp_path).model_copy(
+                update={
+                    "current_run_best_formal_score": 6.0,
+                    "skip_formal_min_delta": 0.2,
+                    "bypass_formal_time_budget_min_delta": 0.7,
+                }
+            )
+        )
+
+        assert output.formal_reference_score == 6.0
+        assert output.resolved_skip_formal_threshold == pytest.approx(6.2)
+        assert output.resolved_bypass_formal_threshold == pytest.approx(6.7)
+
+    def test_historical_output_without_formal_threshold_metadata_loads(self):
+        output = HyperparamTuningOutput.model_validate(
+            {
+                "run_name": "legacy",
+                "model_type": "punet",
+                "file_index": 6,
+                "status": "completed",
+                "completed_rounds": 0,
+                "total_attempts": 0,
+                "started_at": "x",
+                "finished_at": "y",
+            }
+        )
+
+        assert output.formal_reference_score is None
+        assert output.resolved_skip_formal_threshold is None
+        assert output.resolved_bypass_formal_threshold is None
+
     def test_string_expert_advice_passed_to_plan(self, agent_and_mocks, tmp_path):
         agent, mock_brain, _ = agent_and_mocks
         agent.run(_make_input(tmp_path, expert_advice="focus on depth"))
@@ -1762,12 +1822,11 @@ class TestScoreTablePropagation:
         assert output.best_score_table is None
         assert output.formal_score_table is None
 
-    def test_score_table_md_threaded_to_brain_plan(self, agent_and_mocks, tmp_path):
-        """Sub-commit C: the tuner picks the best-so-far record's
-        ``score_table.rendered_markdown`` and threads it into ``brain.plan()``
-        via the ``score_table_md`` kwarg. Round 1 (empty memory) → None;
-        round 2 (one prior record) → the prior record's rendered_markdown."""
-        agent, mock_brain, _, saved_records = agent_and_mocks
+    def test_score_table_md_excludes_record_without_health_evidence(
+        self, agent_and_mocks, tmp_path
+    ):
+        """Legacy records without typed gate evidence are not viable context."""
+        agent, mock_brain, _, _saved_records = agent_and_mocks
         agent.run(_make_trial_input(tmp_path, max_rounds=2, is_trial=True))
 
         # Two planner calls — one per round.
@@ -1777,12 +1836,11 @@ class TestScoreTablePropagation:
         first_kwargs = mock_brain.plan.call_args_list[0].kwargs
         assert first_kwargs.get("score_table_md") is None
 
-        # Round 2: the single prior record's rendered_markdown is threaded.
+        # Round 2: the prior record has no gates because this legacy fixture
+        # disables them, so its validity is unknown and it is not presented as
+        # the best viable score table.
         second_kwargs = mock_brain.plan.call_args_list[1].kwargs
-        assert second_kwargs.get("score_table_md") is not None
-        assert (
-            second_kwargs["score_table_md"] == saved_records[0]["score_table"]["rendered_markdown"]
-        )
+        assert second_kwargs.get("score_table_md") is None
 
     def test_score_table_md_picks_highest_scoring_record(self, tmp_path):
         """With multiple prior records, the tuner threads the ``rendered_markdown``
@@ -1830,6 +1888,20 @@ class TestScoreTablePropagation:
                     "params": _seed_params,
                     "denoising_score": 9.99,
                     "score_table": high_table,
+                    "health_gate_results": [
+                        {
+                            "gate_name": name,
+                            "execution_status": "passed",
+                            "check_passed": True,
+                            "would_invalidate_under_production_policy": False,
+                            "resolved_action": "continue",
+                        }
+                        for name in (
+                            "output_diversity_blocking",
+                            "output_std_blocking",
+                            "amplitude_collapse_blocking",
+                        )
+                    ],
                 },
                 {
                     "exp_id": "prior_LOW",
@@ -1839,6 +1911,20 @@ class TestScoreTablePropagation:
                     "params": _seed_params,
                     "denoising_score": 0.01,
                     "score_table": low_table,
+                    "health_gate_results": [
+                        {
+                            "gate_name": name,
+                            "execution_status": "passed",
+                            "check_passed": True,
+                            "would_invalidate_under_production_policy": False,
+                            "resolved_action": "continue",
+                        }
+                        for name in (
+                            "output_diversity_blocking",
+                            "output_std_blocking",
+                            "amplitude_collapse_blocking",
+                        )
+                    ],
                 },
             ]
             mock_sandbox = MockSandbox.return_value

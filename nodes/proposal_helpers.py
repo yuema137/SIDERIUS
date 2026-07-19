@@ -48,7 +48,9 @@ def select_candidate_models(
         straight through — downstream stages render from its fields directly.
     """
     model_types = interpretation.get("model_types", [])
-    per_best = interpretation.get("per_model_best") or {}
+    per_raw_best = interpretation.get("per_model_best") or {}
+    per_best = interpretation.get("per_model_best_valid") or {}
+    per_raw_health = interpretation.get("per_model_raw_best_health_validity") or {}
     per_worst = interpretation.get("per_model_worst") or {}
     score_tables = interpretation.get("per_model_score_tables") or {}
     model_params = interpretation.get("per_model_params") or {}
@@ -61,6 +63,8 @@ def select_candidate_models(
         summary = {
             "model_type": mt,
             "best_score": per_best.get(mt),
+            "raw_best_score": per_raw_best.get(mt),
+            "raw_best_health_validity": per_raw_health.get(mt, "unknown"),
             "worst_score": per_worst.get(mt),
             "score_table": score_tables.get(mt),
             "model_params": model_params.get(mt),

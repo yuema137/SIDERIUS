@@ -964,11 +964,9 @@ class HyperparamTuningInput(BaseModel):
 
     # --- Post-v15 delta gates: skip_formal + bypass_formal_time_budget ---
     # Both gates use ``current_run_best_formal_score`` as the reference point,
-    # so the proposer-side behaviour tightens naturally as the run's best
-    # formal score climbs. The default reference is the RAW BASELINE
-    # (1.0007 — a model that passes noisy CH1 through unchanged) so the
-    # gates have a physically-meaningful anchor before any iteration's
-    # formal round has actually completed.
+    # V17 intentionally fixes the production subprocess reference at 0.0 for
+    # every iteration. Chain-wide committed incumbent restoration is deferred
+    # to V18.
     #
     # Do NOT use 5.5763 as the default. That value is the deterministic
     # scoring fingerprint of the class-127 mode-collapse attractor:
@@ -990,19 +988,14 @@ class HyperparamTuningInput(BaseModel):
     #   skip gate cuts that waste while keeping borderline cases.
 
     current_run_best_formal_score: float = Field(
-        default=1.0007,
+        default=0.0,
         description=(
-            "The best formal denoising_score seen so far in this chain "
-            "run. Initialized to the RAW BASELINE score (1.0007 — the "
-            "score of a model that passes noisy CH1 through unchanged, "
-            "measured on TIDMAD). Updated by the workflow after each "
-            "iteration's formal round completes. Used as the reference "
+            "The fixed V17 formal-comparison reference. Initialized to "
+            "0.0 for every production iteration. Used as the reference "
             "point for ``skip_formal_min_delta`` and "
             "``bypass_formal_time_budget_min_delta``. "
-            "NOTE: do NOT use 5.5763 as the default. That value is the "
-            "class-127 mode-collapse fingerprint (SNR=2^17 FP artifact "
-            "on constant int8=-1 output), not a genuine denoising "
-            "baseline. See docs/design/pluggable_health_checks.md §7.1."
+            "V17 does not restore or update a chain-wide formal incumbent; "
+            "that committed-state behavior is deferred to V18."
         ),
     )
     skip_formal_min_delta: float = Field(
@@ -1557,6 +1550,26 @@ class HyperparamTuningOutput(BaseModel):
             "None means the shipped default configuration was used."
         ),
     )
+    formal_reference_score: float | None = Field(
+        default=None,
+        description=(
+            "Resolved current_run_best_formal_score used by this tuner invocation. "
+            "None only for historical outputs written before this metadata existed."
+        ),
+    )
+    resolved_skip_formal_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Resolved formal_reference_score + skip_formal_min_delta for this invocation."
+        ),
+    )
+    resolved_bypass_formal_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Resolved formal_reference_score + bypass_formal_time_budget_min_delta "
+            "for this invocation."
+        ),
+    )
 
     # --- Execution summary ---
     status: Literal["completed", "partial", "failed"] = Field(
@@ -1582,13 +1595,49 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description=(
             "Highest denoising_score achieved across completed FORMAL rounds "
-            "only (excludes trial rounds). The workflow uses this — not "
-            "best_denoising_score — to update current_run_best_formal_score "
-            "for the next iter's delta gates, so a noisy trial score cannot "
-            "poison the formal anchor when all formal attempts get gated. "
-            "None when no formal round completed (next iter then keeps the "
-            "schema default 1.0007 raw baseline as its reference)."
+            "only (excludes trial rounds). This raw scientific field remains "
+            "separate from best_valid_formal_denoising_score. V17 production "
+            "subprocess iterations use the fixed 0.0 formal reference; "
+            "chain-wide restoration is deferred to V18."
         ),
+    )
+    best_valid_exp_id: str | None = Field(
+        default=None,
+        description="Experiment id of the highest HealthGate-valid scored record.",
+    )
+    best_valid_denoising_score: float | None = Field(
+        default=None,
+        description=(
+            "Highest finite denoising_score among HealthGate-valid records. "
+            "None when no valid candidate exists; never falls back to raw best."
+        ),
+    )
+    best_valid_formal_exp_id: str | None = Field(
+        default=None,
+        description="Experiment id of the highest HealthGate-valid formal record.",
+    )
+    best_valid_formal_denoising_score: float | None = Field(
+        default=None,
+        description=(
+            "Highest finite denoising_score among HealthGate-valid formal records. "
+            "Reporting only in V17; dynamic chain restoration is deferred to V18."
+        ),
+    )
+    best_valid_config: dict[str, Any] | None = Field(
+        default=None,
+        description="Configuration that produced best_valid_denoising_score.",
+    )
+    best_valid_file_vector: list[float | None] | None = Field(
+        default=None,
+        description="File vector from the highest HealthGate-valid record.",
+    )
+    best_valid_score_table: ScoreComparisonTable | None = Field(
+        default=None,
+        description="Score table from the highest HealthGate-valid record.",
+    )
+    best_valid_formal_score_table: ScoreComparisonTable | None = Field(
+        default=None,
+        description="Score table from the highest HealthGate-valid formal record.",
     )
     best_config: dict[str, Any] | None = Field(
         default=None,

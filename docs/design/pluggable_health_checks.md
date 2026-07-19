@@ -662,11 +662,12 @@ constant input — not a measure of denoising ability.
    ever forming, even if the diversity check is disabled.
 3. **Schema default corrected** — `current_run_best_formal_score`
    changed from `5.5763` (the collapse artifact) to `1.0007` (the raw
-   baseline — score of a model passing input through unchanged) in
-   `feat/v16-fixes`. The value `5.5763` must never be used as a
-   performance baseline; it is a hardware-level FP fingerprint,
-   achievable by any model outputting constant int8=-1 with zero
-   training.
+   pass-through baseline) in `feat/v16-fixes`. V17 subsequently replaced
+   that default with the fixed per-iteration formal reference `0.0`; the
+   dynamic committed best-valid-formal incumbent is deferred to V18. The
+   value `5.5763` must never be used as a performance baseline; it is a
+   hardware-level FP fingerprint, achievable by any model outputting
+   constant int8=-1 with zero training.
 
 ### Why this required pluggability
 

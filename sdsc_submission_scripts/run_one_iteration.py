@@ -344,8 +344,21 @@ def write_manifest(
             "output_path": output_path if score is not None else None,
             "model_name": model_name,
             "best_score": score,
+            "raw_best_score": score,
+            "best_valid_score": getattr(tune_output, "best_valid_denoising_score", None),
+            "raw_best_formal_score": getattr(tune_output, "best_formal_denoising_score", None),
+            "best_valid_formal_score": getattr(
+                tune_output, "best_valid_formal_denoising_score", None
+            ),
             "completed_rounds": tune_output.completed_rounds,
             "health_checks_config": getattr(tune_output, "health_checks_config", None),
+            "formal_reference_score": getattr(tune_output, "formal_reference_score", None),
+            "resolved_skip_formal_threshold": getattr(
+                tune_output, "resolved_skip_formal_threshold", None
+            ),
+            "resolved_bypass_formal_threshold": getattr(
+                tune_output, "resolved_bypass_formal_threshold", None
+            ),
         }
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
