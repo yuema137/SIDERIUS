@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
-from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.hyperparam_tuning import ExperimentRecord, serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
@@ -1651,6 +1651,17 @@ def main():
 # ---------------------------------------------------------------------------
 
 
+def _required_denoising_score(record: ExperimentRecord) -> float:
+    """Return a score after enforcing the valid-record invariant."""
+
+    score = record.denoising_score
+    if score is None:
+        raise ValueError(
+            f"Experiment {record.exp_id!r} entered valid-record ranking without a score."
+        )
+    return score
+
+
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
 ) -> ModelRunSummary:
@@ -1695,10 +1706,10 @@ def tuning_output_to_model_run_summary(
         else None
     )
     valid_records = [r for r in success if is_valid_candidate(r)]
-    valid_best_rec = max(valid_records, key=lambda r: r.denoising_score) if valid_records else None
+    valid_best_rec = max(valid_records, key=_required_denoising_score) if valid_records else None
     valid_formal_records = [r for r in valid_records if not r.is_trial]
     valid_formal_rec = (
-        max(valid_formal_records, key=lambda r: r.denoising_score) if valid_formal_records else None
+        max(valid_formal_records, key=_required_denoising_score) if valid_formal_records else None
     )
 
     # Find formal round (last record with is_trial=False)
