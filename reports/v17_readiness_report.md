@@ -160,6 +160,11 @@ thresholds are `0.0` and `0.5`. Execution candidates are HealthGate-valid-only,
 while raw and valid best scores are persisted separately. Dynamic committed
 best-valid-formal restoration is intentionally deferred to V18.
 
+Every new `HyperparamTuningOutput` durably records the resolved formal
+reference, skip threshold, and bypass threshold; the iteration manifest mirrors
+the same values. Historical outputs remain loadable with these optional fields
+set to `null`.
+
 The production command rejects pre-existing timestamped workspaces, logs, exit
 markers, and screen session names before creating launch artifacts. Operators
 must monitor cumulative token usage per iteration because the final two-iteration

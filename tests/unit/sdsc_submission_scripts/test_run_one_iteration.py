@@ -337,11 +337,22 @@ class TestArgparseSurface:
 class _StubResult:
     """Minimal HyperparamTuningOutput-shaped object for write_manifest."""
 
-    def __init__(self, model_type, score=0.7, health_checks_config=None):
+    def __init__(
+        self,
+        model_type,
+        score=0.7,
+        health_checks_config=None,
+        formal_reference_score=None,
+        resolved_skip_formal_threshold=None,
+        resolved_bypass_formal_threshold=None,
+    ):
         self.model_type = model_type
         self.best_denoising_score = score
         self.completed_rounds = 3
         self.health_checks_config = health_checks_config
+        self.formal_reference_score = formal_reference_score
+        self.resolved_skip_formal_threshold = resolved_skip_formal_threshold
+        self.resolved_bypass_formal_threshold = resolved_bypass_formal_threshold
 
 
 def _run_main(argv):
@@ -857,6 +868,21 @@ class TestNoRecordsExit:
         ]
         manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
         assert manifest["health_checks_config"] == path
+
+    def test_write_manifest_mirrors_resolved_formal_thresholds(self, tmp_path):
+        results = [
+            _StubResult(
+                "c8_test_arch_a",
+                score=0.71,
+                formal_reference_score=6.0,
+                resolved_skip_formal_threshold=6.2,
+                resolved_bypass_formal_threshold=6.7,
+            )
+        ]
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results)
+        assert manifest["formal_reference_score"] == 6.0
+        assert manifest["resolved_skip_formal_threshold"] == 6.2
+        assert manifest["resolved_bypass_formal_threshold"] == 6.7
 
     def test_write_manifest_crashed_forces_failed_regardless_of_results(self, tmp_path):
         # Crash path: even if results is non-empty, crashed=True forces failed.

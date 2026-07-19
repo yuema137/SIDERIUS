@@ -1550,6 +1550,26 @@ class HyperparamTuningOutput(BaseModel):
             "None means the shipped default configuration was used."
         ),
     )
+    formal_reference_score: float | None = Field(
+        default=None,
+        description=(
+            "Resolved current_run_best_formal_score used by this tuner invocation. "
+            "None only for historical outputs written before this metadata existed."
+        ),
+    )
+    resolved_skip_formal_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Resolved formal_reference_score + skip_formal_min_delta for this invocation."
+        ),
+    )
+    resolved_bypass_formal_threshold: float | None = Field(
+        default=None,
+        description=(
+            "Resolved formal_reference_score + bypass_formal_time_budget_min_delta "
+            "for this invocation."
+        ),
+    )
 
     # --- Execution summary ---
     status: Literal["completed", "partial", "failed"] = Field(

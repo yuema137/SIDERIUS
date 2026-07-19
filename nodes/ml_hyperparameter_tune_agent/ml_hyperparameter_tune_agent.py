@@ -212,6 +212,26 @@ def _should_bypass_formal_time_budget(
     )
 
 
+def _resolve_formal_comparison_thresholds(
+    *,
+    reference_score: float,
+    skip_min_delta: float,
+    bypass_min_delta: float,
+) -> tuple[float, float, float]:
+    """Resolve invocation-wide formal comparison values once.
+
+    The returned tuple is ``(reference, skip_threshold, bypass_threshold)``.
+    It is used for both startup logging and durable output metadata so those
+    audit surfaces cannot drift while leaving selector behavior unchanged.
+    """
+
+    return (
+        reference_score,
+        reference_score + skip_min_delta,
+        reference_score + bypass_min_delta,
+    )
+
+
 def _latest_trial_inference_marginal(memory_history: list) -> float | None:
     """Return the most recent successful trial round's measured per-PSD-segment
     inference cost in ms, or ``None`` if no qualifying record exists.
@@ -1416,6 +1436,19 @@ class HyperparamTuningAgent:
             f"gt_scalar_full={reference_scores.gt_scalar_full:.4f}."
         )
 
+        # Resolve invocation-wide formal comparison metadata once. The same
+        # values feed startup logging and durable output provenance; selector
+        # behavior continues to use the equivalent runtime input formula.
+        (
+            formal_reference_score,
+            resolved_skip_formal_threshold,
+            resolved_bypass_formal_threshold,
+        ) = _resolve_formal_comparison_thresholds(
+            reference_score=agent_input.current_run_best_formal_score,
+            skip_min_delta=agent_input.skip_formal_min_delta,
+            bypass_min_delta=agent_input.bypass_formal_time_budget_min_delta,
+        )
+
         # Save run configuration once
         started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         run_config = {
@@ -1426,6 +1459,9 @@ class HyperparamTuningAgent:
             "max_rounds": max_rounds,
             "file_index": file_index,
             "trial_allowed": trial_allowed,
+            "formal_reference_score": formal_reference_score,
+            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
+            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
             "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
@@ -1437,10 +1473,9 @@ class HyperparamTuningAgent:
         print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
         print(
             "Formal comparison thresholds: "
-            f"reference={agent_input.current_run_best_formal_score:.4f}, "
-            f"skip={agent_input.current_run_best_formal_score + agent_input.skip_formal_min_delta:.4f}, "
-            "bypass="
-            f"{agent_input.current_run_best_formal_score + agent_input.bypass_formal_time_budget_min_delta:.4f}"
+            f"reference={formal_reference_score:.4f}, "
+            f"skip={resolved_skip_formal_threshold:.4f}, "
+            f"bypass={resolved_bypass_formal_threshold:.4f}"
         )
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
@@ -3190,6 +3225,9 @@ class HyperparamTuningAgent:
             "model_type": model_type_setting,
             "file_index": file_index,
             "health_checks_config": agent_input.health_checks_config,
+            "formal_reference_score": formal_reference_score,
+            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
+            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
             "status": run_status,
             "completed_rounds": completed_rounds,
             "total_attempts": total_attempts,
@@ -3272,6 +3310,9 @@ class HyperparamTuningAgent:
                 "status": "failed",
                 "completed_rounds": completed_rounds,
                 "total_attempts": total_attempts,
+                "formal_reference_score": formal_reference_score,
+                "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
+                "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "termination_reason": termination_reason,

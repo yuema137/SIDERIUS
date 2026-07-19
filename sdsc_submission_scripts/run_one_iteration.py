@@ -352,6 +352,13 @@ def write_manifest(
             ),
             "completed_rounds": tune_output.completed_rounds,
             "health_checks_config": getattr(tune_output, "health_checks_config", None),
+            "formal_reference_score": getattr(tune_output, "formal_reference_score", None),
+            "resolved_skip_formal_threshold": getattr(
+                tune_output, "resolved_skip_formal_threshold", None
+            ),
+            "resolved_bypass_formal_threshold": getattr(
+                tune_output, "resolved_bypass_formal_threshold", None
+            ),
         }
 
     manifest_path = os.path.join(iter_dir, "manifest.json")

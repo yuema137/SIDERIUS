@@ -296,6 +296,66 @@ class TestHyperparamTuningAgentRun:
         assert data["force_model"] == "punet"
         assert data["max_rounds"] == 1
 
+    def test_default_formal_thresholds_persist_and_match_log(
+        self, agent_and_mocks, tmp_path, capsys
+    ):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(
+            _make_input(tmp_path).model_copy(
+                update={
+                    "skip_formal_min_delta": 0.0,
+                    "bypass_formal_time_budget_min_delta": 0.5,
+                }
+            )
+        )
+
+        assert output.formal_reference_score == 0.0
+        assert output.resolved_skip_formal_threshold == 0.0
+        assert output.resolved_bypass_formal_threshold == 0.5
+        persisted = json.loads((tmp_path / "run_output_test_run.json").read_text())
+        assert persisted["formal_reference_score"] == 0.0
+        assert persisted["resolved_skip_formal_threshold"] == 0.0
+        assert persisted["resolved_bypass_formal_threshold"] == 0.5
+        run_config = json.loads((tmp_path / "run_config_test_run.json").read_text())
+        assert run_config["formal_reference_score"] == 0.0
+        assert run_config["resolved_skip_formal_threshold"] == 0.0
+        assert run_config["resolved_bypass_formal_threshold"] == 0.5
+        assert "reference=0.0000, skip=0.0000, bypass=0.5000" in capsys.readouterr().out
+
+    def test_injected_formal_thresholds_persist(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(
+            _make_input(tmp_path).model_copy(
+                update={
+                    "current_run_best_formal_score": 6.0,
+                    "skip_formal_min_delta": 0.2,
+                    "bypass_formal_time_budget_min_delta": 0.7,
+                }
+            )
+        )
+
+        assert output.formal_reference_score == 6.0
+        assert output.resolved_skip_formal_threshold == pytest.approx(6.2)
+        assert output.resolved_bypass_formal_threshold == pytest.approx(6.7)
+
+    def test_historical_output_without_formal_threshold_metadata_loads(self):
+        output = HyperparamTuningOutput.model_validate(
+            {
+                "run_name": "legacy",
+                "model_type": "punet",
+                "file_index": 6,
+                "status": "completed",
+                "completed_rounds": 0,
+                "total_attempts": 0,
+                "started_at": "x",
+                "finished_at": "y",
+            }
+        )
+
+        assert output.formal_reference_score is None
+        assert output.resolved_skip_formal_threshold is None
+        assert output.resolved_bypass_formal_threshold is None
+
     def test_string_expert_advice_passed_to_plan(self, agent_and_mocks, tmp_path):
         agent, mock_brain, _ = agent_and_mocks
         agent.run(_make_input(tmp_path, expert_advice="focus on depth"))
