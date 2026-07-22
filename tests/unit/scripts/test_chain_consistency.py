@@ -160,12 +160,11 @@ CONTRACT_FLAGS = [
 
 # Flags whose shell default intentionally diverges from Python's argparse
 # default. Each entry documents why.
-SHELL_DEFAULT_OVERRIDES = {
-    # 13.C directive — pre-filled with the canonical lilab data path so the
-    # chain runbook works without an explicit --data_dir flag on lilab.
-    # Python argparse default is None; shell pre-fills /home/klz/Data/TIDMAD/.
-    "data_dir": "/home/klz/Data/TIDMAD/",
-}
+# (data_dir used to live here — the 13.C lilab pre-fill of
+# /home/klz/Data/TIDMAD/ — until PR #127 commit 44b2d94 dropped the
+# hardcoded shell default for server portability. data_dir now goes
+# through the normal parity check: shell "" ≡ Python None.)
+SHELL_DEFAULT_OVERRIDES: dict[str, str] = {}
 
 
 # Flag → shell variable name. Convention: uppercase-snake of the flag.
