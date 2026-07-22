@@ -201,15 +201,16 @@ class TestArgparseSurface:
             )
         # argparse writes its own message to stderr.
 
-    def test_seed_paths_is_required(self, capsys):
-        """Omitting BOTH --seed_paths and --source_paths is an error."""
+    def test_omitting_seed_paths_is_a_cold_start(self):
+        """Omitting BOTH --seed_paths and --source_paths is a valid cold start
+        (empty seed list), not an error — seedless chain support. A bare
+        --seed_paths with no values remains an argparse error (nargs='+'),
+        covered by the cold-start CLI tests."""
         args = runner.build_parser().parse_args(
             ["--workspace", "/tmp/ws", "--run_name", "iter_001", "--start_iteration", "1"]
         )
-        with pytest.raises(SystemExit):
-            runner.normalize_args(args)
-        err = capsys.readouterr().err
-        assert "one of --seed_paths / --source_paths is required" in err
+        normalized = runner.normalize_args(args)
+        assert normalized.seed_paths == []
 
     def test_legacy_source_paths_alias_works_with_deprecation_warning(self):
         """--source_paths still resolves to args.seed_paths and emits one DeprecationWarning."""

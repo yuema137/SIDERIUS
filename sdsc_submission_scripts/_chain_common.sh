@@ -243,10 +243,14 @@ parse_chain_args() {
       esac
     done
 
-    if [ -z "$WORKSPACE" ] || [ ${#SEED_PATHS[@]} -eq 0 ] || [ -z "$RUN_NAME" ]; then
-        echo "Required: --workspace, --seed_paths, --run_name" >&2
+    if [ -z "$WORKSPACE" ] || [ -z "$RUN_NAME" ]; then
+        echo "Required: --workspace, --run_name" >&2
         exit 1
     fi
+    # --seed_paths is optional: an empty list is a valid cold start (no prior
+    # experimental evidence). build_app_args omits --seed_paths entirely when
+    # SEED_PATHS is empty so run_one_iteration.py falls back to its cold-start
+    # default. A bare --seed_paths with zero values remains an argparse error.
 }
 
 load_advice_file() {
@@ -279,7 +283,6 @@ build_app_args() {
         --workspace "$WORKSPACE"
         --run_name "$RUN_NAME"
         --start_iteration "$iter"
-        --seed_paths "${SEED_PATHS[@]}"
         --max_rounds "$MAX_ROUNDS"
         --max_epochs "$MAX_EPOCHS"
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
@@ -307,6 +310,12 @@ build_app_args() {
         # submit_one_iteration.slurm hardcodes for SDSC mode.
         --cleanup_denoised
     )
+    # Emit --seed_paths only when seeds are actually supplied. Omitting the flag
+    # (empty SEED_PATHS) is a valid cold start; a bare --seed_paths with zero
+    # values would be an argparse error by design (see requirement 2).
+    if [ ${#SEED_PATHS[@]} -gt 0 ]; then
+        APP_ARGS+=(--seed_paths "${SEED_PATHS[@]}")
+    fi
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
     fi

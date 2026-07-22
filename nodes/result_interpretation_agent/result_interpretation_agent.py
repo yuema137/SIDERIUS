@@ -727,6 +727,34 @@ class ResultInterpretationAgent:
         )
 
     def run(self, inp: InterpretationInput) -> InterpretationOutput:
+        # --- Cold-start branch (explicit workflow state) ---
+        # A cold start is the first iteration of a chain with NO prior
+        # experimental evidence. There is nothing to interpret or rank, so emit
+        # a deterministic "no prior evidence" interpretation (no LLM call, no
+        # fabricated history). We branch on the EXPLICIT inp.cold_start flag set
+        # by the workflow — never inferred here from empty summaries. Registries
+        # remain the proposer's concern (available options), so model_types and
+        # model_descriptions are intentionally left empty.
+        if inp.cold_start:
+            return InterpretationOutput(
+                model_types=[],
+                model_descriptions={},
+                total_experiments=0,
+                key_findings=[
+                    "Cold start: no prior experimental runs or score history exist yet.",
+                ],
+                bottlenecks=[],
+                take_home_message=(
+                    "This is a cold start — there is no prior experimental evidence. "
+                    "Propose the first experiment from the task description, the "
+                    "available model/loss registries (as options, not results), "
+                    "advice, and resource constraints. Do not claim improvement "
+                    "over prior runs; none exist."
+                ),
+                runtime_vocab=inp.runtime_vocab,
+                cold_start=True,
+            )
+
         # --- Effective model types ---
         # Union of: new summaries + explicitly listed types + cache (models from prior iterations)
         effective_types = sorted(
