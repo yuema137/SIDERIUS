@@ -440,8 +440,8 @@ def score_vector(
     1. Collect raw ``(snr_sg, snr_squid)`` pairs for every sampled segment
        across every sampled file, via ``_collect_raw_pairs``.
     2. Choose ``s_max`` per ``legacy_mode``, normalize, aggregate as the
-       **grand mean** across all sampled segments, then apply the TIDMAD
-       ``round(·, 2) + 1e-10`` step before ``log_{5.27}``.
+       **grand mean** across all sampled segments, then take ``log_{5.27}``
+       (no ``round(·, 2)`` and no ``+ 1e-10``; ``-inf`` when the grand mean <= 0).
 
     Args:
         data_dir:              Directory containing the denoised HDF5 files.
@@ -481,8 +481,8 @@ def score_vector(
           per-file weighted mean
           ``mean_i( snr_sg[f][i] / s_max_used * snr_squid[f][i] )`` for
           files in ``sample_set``, ``None`` otherwise.
-        - ``final_scalar``: the legacy-style score
-          ``log_{5.27}(round(grand_mean, 2) + 1e-10)``
+        - ``final_scalar``: the score
+          ``log_{5.27}(grand_mean)`` (``-inf`` when ``grand_mean <= 0``)
           where ``grand_mean = Σ_{f,i} (snr_sg/s_max_used · snr_squid)
           / Σ_f |S_f|``. For uniform ``|S_f|`` this equals the mean
           of ``file_vector`` entries; for non-uniform sampling the grand

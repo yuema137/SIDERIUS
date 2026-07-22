@@ -353,7 +353,7 @@ class TestFileVectorToLogSpace:
     aggregate scalar are in log_{5.27}-space. ``file_vector_to_log_space``
     is the helper that puts the model column on the same ruler before
     ``build_score_table`` consumes it. Formula:
-    ``log_{5.27}(max(v, 0) + 1e-10)``.
+    ``log_{5.27}(v)`` for ``v > 0``, else ``-inf`` (no ``+ 1e-10`` offset).
     """
 
     def test_typical_linear_values_map_correctly(self):
@@ -373,23 +373,18 @@ class TestFileVectorToLogSpace:
         assert out[2] == pytest.approx(math.log(1e3 + _LOG_OFFSET, _LOG_BASE), rel=1e-12)
         assert out[3] is None
 
-    def test_zero_maps_to_soft_floor(self):
-        # Soft floor at log_{5.27}(1e-10) ≈ -13.854 — files with no signal
-        # render as a finite floor, not -inf, matching reference convention.
+    def test_zero_maps_to_neg_inf(self):
+        # No soft floor: a zero linear mean maps to -inf, matching
+        # score_vector's grand-mean guard (the +1e-10 offset was removed).
         out = file_vector_to_log_space([0.0])
-        expected_floor = math.log(_LOG_OFFSET, _LOG_BASE)
-        assert out[0] == pytest.approx(expected_floor, rel=1e-12)
-        assert out[0] == pytest.approx(-13.854049, abs=1e-4)
-        assert math.isfinite(out[0])
+        assert out[0] == float("-inf")
 
-    def test_negative_input_clamped_then_offset_applied(self):
-        # Defensive clip: negative linear means are not expected from the
-        # score formula but must not crash the log. They map to the same
-        # soft floor as zero.
+    def test_negative_input_maps_to_neg_inf(self):
+        # Defensive clip: negative linear means (not expected from the score
+        # formula) must not crash the log. They map to -inf like zero.
         out = file_vector_to_log_space([-0.5, -1e-12])
-        floor = math.log(_LOG_OFFSET, _LOG_BASE)
-        assert out[0] == pytest.approx(floor, rel=1e-12)
-        assert out[1] == pytest.approx(floor, rel=1e-12)
+        assert out[0] == float("-inf")
+        assert out[1] == float("-inf")
 
     def test_length_preserved(self):
         fv = [0.0, None, 1.0, 1e3, None, 1e-9]
@@ -397,14 +392,14 @@ class TestFileVectorToLogSpace:
         assert len(out) == len(fv)
 
     def test_custom_base_and_offset_kwargs(self):
-        # Both knobs work; default base is 5.27, default offset 1e-10.
+        # Both knobs work; default base is 5.27, default offset 0.0.
         out_default = file_vector_to_log_space([1.0])
         out_base_e = file_vector_to_log_space([1.0], base=math.e)
-        out_no_offset_at_pos = file_vector_to_log_space([1.0], offset=0.0)
+        out_explicit_offset = file_vector_to_log_space([1.0], offset=1e-10)
 
-        assert out_default[0] == pytest.approx(math.log(1.0 + 1e-10, 5.27), rel=1e-12)
-        assert out_base_e[0] == pytest.approx(math.log(1.0 + 1e-10, math.e), rel=1e-12)
-        assert out_no_offset_at_pos[0] == pytest.approx(0.0, abs=1e-9)
+        assert out_default[0] == pytest.approx(math.log(1.0, 5.27), abs=1e-9)
+        assert out_base_e[0] == pytest.approx(math.log(1.0, math.e), abs=1e-9)
+        assert out_explicit_offset[0] == pytest.approx(math.log(1.0 + 1e-10, 5.27), rel=1e-12)
 
 
 # =============================================================================
