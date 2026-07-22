@@ -882,18 +882,26 @@ consistency only; `validate_runtime_config` does all dataset-resolved checks at
 startup; LLM plans normalize with persisted provenance; resolved scope stamped
 into all artifacts; disabled mode wired end-to-end.
 
+*(Implemented as three git commits per the split rule: **DS5a** schema +
+runtime validation; **DS5b** tuner wiring; **DS5c** prompt disclosure + CLI +
+pseudo-data.)*
+
 **Code**:
-- [ ] `agent/schemas/hyperparam_tuning.py` — `data_scope: DataScope` (default
+- [x] `agent/schemas/hyperparam_tuning.py` — `data_scope: DataScope` (default
   `DataScope.default()`), `health_gate_enabled: bool = True`,
   `health_gate_files: list[int] | None = None` in the *Hard constraints on LLM
-  plan output* section (`:1135`). Schema validators: **internal consistency
+  plan output* section. Schema validators: **internal consistency
   only** (`enabled=False` + files set → error; `files == []` → error). No
-  dataset-resolved checks in the schema.
-- [ ] New `validate_runtime_config(agent_input, dataset)` (tuner module or
-  `core/`): resolve scope; partial + `formal_strategy != "snapshot"` → error;
-  single-file `file_index ∈ scope`; enabled + partial + `files is None` →
-  error; then health materialization (DS4) + `validate_health_scope`. Called
-  at `run()` entry before any LLM call.
+  dataset-resolved checks in the schema. *(DS5a)*
+- [x] New `validate_runtime_config(agent_input, dataset=TIDMAD)` — placed in
+  `agent/schemas/hyperparam_tuning.py` right after the input class (pure, no
+  I/O; importable by both tuner and workflow without the 3700-line tuner
+  module): resolves scope (returns the resolved list); partial +
+  `formal_strategy != "snapshot"` → error; enabled + partial +
+  `files is None` → error; single-file `file_index ∈ scope` (trial mode
+  deliberately ignores `file_index`, matching its documented semantics).
+  Health materialization + `validate_health_scope` happen right after it at
+  tuner startup (DS5b). *(DS5a)*
 - [ ] Effective-config path swap: `agent_input.health_checks_config` replaced
   by the materialized path for the run; `run_config_{run_name}.json` records
   `health_checks_config_source` + `health_checks_config_effective` +
@@ -926,12 +934,16 @@ into all artifacts; disabled mode wired end-to-end.
   schema fields (two-file rule).
 
 **Tests**:
-- [ ] Schema: internal-consistency validators only (disabled+files → error;
+- [x] Schema: internal-consistency validators only (disabled+files → error;
   `[]` → error; partial scope + formal target **passes schema**, fails
-  `validate_runtime_config` — asserting the split)
-- [ ] `validate_runtime_config`: each failure mode (formal target, bad
-  file_index, enabled+partial+None files, out-of-scope health files) fails
-  with distinct messages before any sandbox/LLM activity
+  `validate_runtime_config` — asserting the split); old serialized inputs
+  without the new fields still validate
+  *(DS5a — `test_data_scope_input.py`, 16 tests, 16/16 in 1.95s)*
+- [x] `validate_runtime_config`: each failure mode (formal target/anchors,
+  out-of-scope `file_index`, enabled+partial+None files, out-of-range scope)
+  fails with distinct messages; disabled+partial passes without files;
+  trial mode ignores `file_index` *(DS5a; the health-files subset check is
+  `validate_health_scope`'s job at materialization — DS5b)*
 - [ ] Normalization: plan with `target` under partial scope → effective
   snapshot + provenance fields persisted + logged; full scope → no
   normalization, reason `None`

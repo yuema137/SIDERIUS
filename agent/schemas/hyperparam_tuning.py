@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
 # ---------------------------------------------------------------------------
@@ -1153,6 +1154,59 @@ class HyperparamTuningInput(BaseModel):
             "Empty dict (default) = LLM has full control."
         ),
     )
+    data_scope: DataScope = Field(
+        default_factory=DataScope.default,
+        description=(
+            "Which subset of the dataset this run may access. Default = the "
+            "complete dataset (behavior identical to pre-scope runs). Under "
+            "a partial scope only 'snapshot' sampling is legal; enforcement "
+            "is constructive (build_sample_set) + the sandbox boundary "
+            "invariant — never prompts. Dataset-resolved validation (is the "
+            "scope partial? is file_index inside it?) happens at startup via "
+            "validate_runtime_config(), NOT in schema validators. "
+            "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    health_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the HealthGate subsystem participates in this run. "
+            "False = no gate evaluation, no gate persistence, and candidate "
+            "eligibility waives the gate requirement (successful finite-"
+            "score records are VALID). Score-validity classification of "
+            "non-finite scores stays active regardless."
+        ),
+    )
+    health_gate_files: list[int] | None = Field(
+        default=None,
+        description=(
+            "Run-level shared monitored-file list for ALL file-accessing "
+            "HealthGate checks (v1: uniform across blocking + recording-"
+            "only). None + full scope = YAML defaults; None + partial scope "
+            "= startup error (an explicit in-scope list is required — no "
+            "automatic default, no intersection). Requires "
+            "health_gate_enabled=True."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_health_gate_consistency(self):
+        """Dataset-independent internal consistency only (see the schema/
+        runtime validation split in docs/design/enable_partial_file_list.md
+        — anything requiring dataset resolution lives in
+        ``validate_runtime_config``)."""
+        if not self.health_gate_enabled and self.health_gate_files is not None:
+            raise ValueError(
+                "health_gate_files must be None when health_gate_enabled=False "
+                "— a disabled HealthGate subsystem monitors nothing."
+            )
+        if self.health_gate_files is not None and not self.health_gate_files:
+            raise ValueError(
+                "health_gate_files must be non-empty when provided — to "
+                "monitor nothing, set health_gate_enabled=False (or use an "
+                "observe/disabled gate config), never an empty file list."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_trial_fields(self):
@@ -1318,6 +1372,59 @@ class HyperparamTuningInput(BaseModel):
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",
     )
+
+
+def validate_runtime_config(
+    agent_input: HyperparamTuningInput,
+    dataset: DatasetConfig = TIDMAD,
+) -> list[int]:
+    """Dataset-resolved startup validation for a tuner run.
+
+    The second stage of the schema/runtime validation split
+    (docs/design/enable_partial_file_list.md): schema validators check
+    dataset-independent internal consistency; this function resolves the
+    DataScope against the dataset definition and validates everything that
+    depends on that resolution. Called at tuner ``run()`` entry and workflow
+    pre-flight, BEFORE any LLM call or file I/O. Pure — no I/O; the
+    subsequent health-config materialization (``materialize_effective_config``
+    + ``validate_health_scope``) performs the monitored-file subset check.
+
+    Returns:
+        The resolved scope (sorted list of allowed file indices).
+
+    Raises:
+        ValueError: Out-of-range scope; partial scope with a non-snapshot
+            ``formal_strategy`` (illegal operator configuration); partial
+            scope with gates enabled but no explicit ``health_gate_files``;
+            single-file mode with ``file_index`` outside the scope.
+    """
+    resolved = agent_input.data_scope.resolve(dataset)
+    is_partial = resolved != list(range(dataset.num_files))
+    if not is_partial:
+        return resolved
+
+    if agent_input.formal_strategy != "snapshot":
+        raise ValueError(
+            f"formal_strategy={agent_input.formal_strategy!r} is not allowed "
+            f"under a partial DataScope {resolved} — only 'snapshot' may be "
+            f"used when the scope is a subset of the dataset. Operator "
+            f"configuration is a contract: fix the flag, it is not "
+            f"normalized."
+        )
+    if agent_input.health_gate_enabled and agent_input.health_gate_files is None:
+        raise ValueError(
+            f"A partial DataScope {resolved} with HealthGate enabled requires "
+            f"an explicit --health_gate_files list (the YAML default "
+            f"monitored files are full-dataset placements; there is no "
+            f"automatic default and no intersection). Pass in-scope files, "
+            f"or disable the subsystem with --no-health_gate_enabled."
+        )
+    if not agent_input.is_trial and agent_input.file_index not in resolved:
+        raise ValueError(
+            f"file_index={agent_input.file_index} (single-file mode) is "
+            f"outside the DataScope {resolved}."
+        )
+    return resolved
 
 
 # ---------------------------------------------------------------------------
