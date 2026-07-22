@@ -612,38 +612,58 @@ green, ruff + pyright clean. Any schema change updates the matching
 partial scopes. Default scope preserves behavioral identity.
 
 **Code**:
-- [ ] `execute_tools/sample_set_builder.py` — add `scope: DataScope | None = None`
+- [x] `execute_tools/sample_set_builder.py` — add `scope: DataScope | None = None`
   (None → `DataScope.default()`); resolve once per call.
-- [ ] `snapshot` → `files = resolved_scope` (replaces `range(NUM_FILES)`).
-- [ ] partial scope (`not scope.is_full(...)`) + `anchors` or `target` →
+- [x] `snapshot` → `files = resolved_scope` (replaces `range(NUM_FILES)`).
+- [x] partial scope (`not scope.is_full(...)`) + `anchors` or `target` →
   `ValueError` naming the strategy, the scope, and the snapshot-only rule.
   (This is the low-level hard stop; the tuner normalizes LLM plans *before*
   reaching here — DS5 — so this error only fires on operator/programming
   errors.)
-- [ ] full scope: `anchors` / `target` behavior identical to today.
-- [ ] `_build_normal(file_index, scope)` — `file_index ∉ scope` → `ValueError`.
-- [ ] RNG discipline: file iteration order and per-file `rng.sample` calls
+- [x] full scope: `anchors` / `target` behavior identical to today.
+- [x] `_build_normal(file_index, scope)` — `file_index ∉ scope` → `ValueError`.
+- [x] RNG discipline: file iteration order and per-file `rng.sample` calls
   unchanged for full scope so existing seeds reproduce identical SampleSets.
 
 **Tests** (`tests/unit/execute_tools/test_sample_set_builder.py`, extend):
-- [ ] **behavioral identity**: full scope + fixed seed → SampleSet identical to
-  pre-change output for all three strategies (golden values inline)
-- [ ] partial scope + snapshot → keys == scope exactly; segment counts per
+- [x] **behavioral identity**: full scope + fixed seed → SampleSet identical to
+  pre-change output for all three strategies (golden sha16 digests captured
+  from the pre-change builder at `56a54b8^`, seed=42, portion=0.05;
+  parametrized over `scope=None` and `scope=DataScope.default()`)
+- [x] partial scope + snapshot → keys == scope exactly; segment counts per
   `trial_portion` unchanged
-- [ ] partial scope + `anchors` → `ValueError`; + `target` → `ValueError`
+- [x] partial scope + `anchors` → `ValueError`; + `target` → `ValueError`
   (even when `target_files ⊆ scope` — the rule is strategy-level)
-- [ ] `_build_normal` in-scope passes; out-of-scope raises
-- [ ] determinism: same seed + same partial scope → same SampleSet
+- [x] `_build_normal` in-scope passes; out-of-scope raises
+- [x] determinism: same seed + same partial scope → same SampleSet
 
 **Verification checklist**:
-- [ ] Full unit suite green (tuner unit tests exercise `build_sample_set`
-  indirectly — no call-site passes `scope` yet, defaults preserve behavior)
-- [ ] `grep -n "range(NUM_FILES)" execute_tools/sample_set_builder.py` → no hits
-- [ ] ruff + pyright clean
+- [x] Relevant suites green (per only-relevant-tests rule): builder tests
+  35/35 (1.47s); `tests/unit/agent/utils` (preflight caller) — 77 total pass
+  incl. builder file. Existing callers unaffected: `scope` is a trailing
+  kwarg with a behavior-preserving default (callers audited: tuner,
+  run_comparison, proposer_preflight, 2 schema modules).
+- [x] `grep -n "range(NUM_FILES)" execute_tools/sample_set_builder.py` → no
+  hits (NUM_FILES import dropped)
+- [x] ruff check + format clean; pyright clean
+  (`--pythonpath .venv/bin/python`)
 
 **Test gate**: unit only.
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-22):
+- Scope is resolved against `TIDMAD` inside the builder (consistent with its
+  existing `SEGMENTS_PER_FILE` coupling; the multi-dataset backend TODO will
+  parameterize both together).
+- Full-scope `target` keeps its historical non-validation of out-of-range
+  `target_files` (e.g. `[25]`) — constructively unchanged for behavioral
+  identity; the DS3 sandbox boundary catches it before I/O.
+- Golden capture: all three strategies share the same first-file segments
+  (`[6, 26, 28, 35, 57]`) because `rng.sample` consumption is per-file in
+  iteration order — this property is what makes full-scope identity
+  structural, and the digests pin it.
+- Test-class constants annotated `ClassVar` (RUF012).
+- **Test results**: 35/35 builder (1.47s) + agent/utils 42 → 77 pass; ruff +
+  pyright clean.
 
 ---
 
