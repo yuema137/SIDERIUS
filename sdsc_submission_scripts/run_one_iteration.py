@@ -433,7 +433,10 @@ def build_parser() -> argparse.ArgumentParser:
         "from {workspace}/iter_NNN/manifest.json by restore_prior_state — "
         "they no longer need to be listed here for chain runs (back-compat "
         "still accepts @manifest: indirection in this list). "
-        "Mutually exclusive with the deprecated --source_paths alias.",
+        "Mutually exclusive with the deprecated --source_paths alias. "
+        "OPTIONAL: omit the flag entirely to start a cold chain with no prior "
+        "experimental evidence (a bare --seed_paths with no values is still an "
+        "error).",
     )
     parser.add_argument(
         "--source_paths",
@@ -903,7 +906,12 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             "--source_paths is the deprecated alias; use --seed_paths only."
         )
     if seed_legacy is None and seed_canonical is None:
-        parser.error("one of --seed_paths / --source_paths is required.")
+        # Neither flag supplied → cold start: no prior experimental evidence.
+        # An empty seed list is valid; the workflow marks the first iteration
+        # as cold_start. A bare --seed_paths with zero values is still an
+        # argparse error (nargs="+"), so this branch only fires when the flag
+        # is omitted entirely.
+        args.seed_paths = []
     if seed_legacy is not None:
         warnings.warn(
             "--source_paths is deprecated; use --seed_paths instead. "
