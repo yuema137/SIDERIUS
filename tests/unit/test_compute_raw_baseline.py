@@ -11,8 +11,12 @@ this test fixes the *aggregation* formula
     linear_sum  = Σ_i per_segment[i]                  (unrounded, for grand-mean)
     n_segments  = n
 
-Phase 6.7 dropped the legacy ``round(·, 2) + 1e-10`` quantization (see
-``docs/phase67_infra_hardening_and_feedback_integrity.md`` Fix 4).
+Phase 6.7 dropped the legacy ``round(·, 2)`` quantization, and the
+``+ 1e-10`` soft-floor offset has since also been removed (see
+``docs/phase67_infra_hardening_and_feedback_integrity.md`` Fix 4). The
+formula is now ``log_{5.27}(x)`` for ``x > 0`` and ``float('-inf')``
+otherwise — a zero/negative mean yields ``-inf``, not the old
+``-13.854`` floor.
 
 and the fixed segment counts — ``n = 200`` (fine) or ``n = 20`` (coarse,
 every 10th segment). No HDF5 read — ``process_segment`` is the only
@@ -66,10 +70,10 @@ class TestCalculateScoreFine:
                 num_workers=1,
             )
 
-        # ``+ 1e-10`` mirrors the production soft-floor offset
-        # (compute_raw_baseline._calculate_score :131) — kept by Path-A
-        # regen (commit 8947511); only the round(·,2) was dropped.
-        expected_log = math.log(1.5 + 1e-10, 5.27)
+        # No soft-floor offset: the production formula is now
+        # ``log_{5.27}(mean)`` for mean > 0 (both the round(·,2) and the
+        # ``+ 1e-10`` offset were dropped).
+        expected_log = math.log(1.5, 5.27)
         assert abs(log_score - expected_log) < 1e-12
         assert abs(linear_sum - 300.0) < 1e-9
         assert n_segments == 200
@@ -103,9 +107,8 @@ class TestCalculateScoreFine:
                 num_workers=1,
             )
 
-        # ``+ 1e-10`` soft floor (see :131) — at mean=5e-4 it shifts the
-        # log by ~1.2e-7, well above the 1e-12 tolerance.
-        expected_log = math.log(5.0e-4 + 1e-10, 5.27)
+        # No soft-floor offset — ``log_{5.27}(mean)`` directly.
+        expected_log = math.log(5.0e-4, 5.27)
         assert abs(log_score - expected_log) < 1e-12
         # The ghost-score collapse must NOT happen.
         assert abs(log_score - (-2.7708098959837675)) > 0.5
@@ -204,10 +207,8 @@ class TestCalculateScoreCoarse:
 
         # smaller s_max -> larger per_segment -> larger score
         assert log_small > log_large
-        # Both sides carry the production soft-floor offset (+1e-10);
-        # the offset does not cancel exactly because
-        # log(a+ε) − log(b+ε) ≠ log(a/b) when ε > 0.
-        expected_delta = math.log(2.0 + 1e-10, 5.27) - math.log(1.0 + 1e-10, 5.27)
+        # No soft-floor offset: ``log_{5.27}(a) - log_{5.27}(b) = log(a/b)``.
+        expected_delta = math.log(2.0, 5.27) - math.log(1.0, 5.27)
         assert abs((log_small - log_large) - expected_delta) < 1e-12
 
 
@@ -254,7 +255,7 @@ class TestMaybeWriteAnchorNormalizedScalar:
 
         Uniform per-file linear_sum=100, n_segments=200:
           grand_mean = (100 * 20) / (200 * 20) = 0.5
-          scalar     = log_{5.27}(0.5)  (Phase 6.7: no rounding, no eps)
+          scalar     = log_{5.27}(0.5)  (no rounding, no +1e-10 offset)
         """
         for i in range(20):
             _write_fine_json(str(tmp_path), i, linear_sum=100.0, n_segments=200)
@@ -288,9 +289,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
         # file_vector is linear per-file means (linear_sum / n_segments).
         for v in got["file_vector"]:
             assert abs(v - 0.5) < 1e-12
-        # ``+ 1e-10`` soft-floor offset on the grand mean
-        # (compute_raw_baseline._maybe_write_anchor_normalized_scalar :199).
-        expected_scalar = math.log(0.5 + 1e-10, 5.27)
+        # No soft-floor offset on the grand mean — ``log_{5.27}(grand_mean)``.
+        expected_scalar = math.log(0.5, 5.27)
         assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
     def test_skip_when_any_fine_index_missing(self, tmp_path, capsys):
@@ -339,8 +339,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
           total_linear = 10*10 + 10*90 = 1000
           total_n      = 10*100 + 10*300 = 4000
           grand_mean   = 1000 / 4000 = 0.25
-          scalar       = log_{5.27}(0.25 + 1e-10)
-                         (Path-A regen: rounding dropped, soft-floor +1e-10 kept.)
+          scalar       = log_{5.27}(0.25)
+                         (rounding dropped; +1e-10 soft-floor also removed.)
         """
         for i in range(10):
             _write_fine_json(str(tmp_path), i, linear_sum=10.0, n_segments=100)
@@ -358,9 +358,8 @@ class TestMaybeWriteAnchorNormalizedScalar:
         with open(scalar_path) as f:
             got = json.load(f)
 
-        # ``+ 1e-10`` soft-floor offset (see production formula at
-        # compute_raw_baseline._maybe_write_anchor_normalized_scalar :199).
-        expected_scalar = math.log(0.25 + 1e-10, 5.27)
+        # No soft-floor offset — ``log_{5.27}(grand_mean)``.
+        expected_scalar = math.log(0.25, 5.27)
         assert abs(got["scalar_score"] - expected_scalar) < 1e-12
 
         # Per-file linear means preserve both groups.

@@ -34,7 +34,11 @@ from execute_tools.dataset_config import NUM_FILES
 from nodes.scoring_reference import ReferenceScores
 
 _LOG_BASE = 5.27
-_LOG_OFFSET = 1e-10
+# The legacy ``+ 1e-10`` log-space offset was removed as outdated: scoring now
+# matches ``score_vector`` exactly — ``log_{5.27}(x)`` for ``x > 0``, else
+# ``-inf``. Kept as ``0.0`` (not deleted) so the log<->linear round-trip
+# ``base**v - offset`` stays exact and callers passing ``offset=`` still work.
+_LOG_OFFSET = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +63,11 @@ def file_vector_to_log_space(
     expects the model column in the same log-space units so the rendered
     markdown is unit-consistent across all three columns.
 
-    The conversion mirrors the reference convention with one robustness
-    knob: an additive ``offset`` (default ``1e-10``) keeps ``log(0)``
-    finite. At base 5.27 this places the soft floor at
-    ``log_5.27(1e-10) ≈ -13.854``, matching the floor visible in the
-    reference per-file log columns for files with no signal.
+    Matches ``score_vector`` and the reference columns exactly: a positive,
+    finite input maps to ``log_{base}(v)``; a non-positive or non-finite input
+    maps to ``-inf`` (no ``+ 1e-10`` soft floor — that was outdated and is
+    removed). The ``offset`` knob defaults to ``0.0`` and is retained only for
+    the log<->linear round-trip and back-compat with explicit callers.
 
     Parameters
     ----------
@@ -74,23 +78,23 @@ def file_vector_to_log_space(
     base
         Logarithm base. Default ``5.27`` (the project-wide convention).
     offset
-        Additive offset applied before the log to keep ``log(0)`` finite.
-        Default ``1e-10``.
+        Additive offset applied before the log. Default ``0.0`` (the legacy
+        ``1e-10`` was removed). With the default, ``v <= 0`` maps to ``-inf``.
 
     Returns
     -------
     Same-length list with each non-``None`` entry mapped to
-    ``log_{base}(max(v, 0) + offset)``. Negative inputs (which are not
-    expected from the score formula but are clipped defensively) are
-    treated as zero before applying the offset.
+    ``log_{base}(v)`` when ``max(v, 0) + offset > 0``, else ``-inf``. Negative
+    inputs (not expected from the score formula) are clipped to zero, so with
+    the default ``offset=0.0`` they map to ``-inf``.
     """
     out: list[float | None] = []
     for v in file_vector_linear:
         if v is None:
             out.append(None)
             continue
-        clamped = max(float(v), 0.0)
-        out.append(float(math.log(clamped + offset, base)))
+        arg = max(float(v), 0.0) + offset
+        out.append(float(math.log(arg, base)) if arg > 0 else float("-inf"))
     return out
 
 
@@ -320,20 +324,16 @@ def _compute_weight_and_impact(
         return weights, impacts
 
     grand_mean_current = total_linear / total_n
-    log_current = math.log(
-        max(grand_mean_current, 0.0) + _LOG_OFFSET,
-        _LOG_BASE,
-    )
+    _arg_current = max(grand_mean_current, 0.0) + _LOG_OFFSET
+    log_current = math.log(_arg_current, _LOG_BASE) if _arg_current > 0 else float("-inf")
 
     for i in sampled_indices:
         gt_sum = float(reference.gt_per_file_linear_sum[i])
         # Replace this file's linear contribution with its ceiling.
         swapped = total_linear - n_per_file_linear_sum[i] + gt_sum
         gm_after = swapped / total_n
-        log_after = math.log(
-            max(gm_after, 0.0) + _LOG_OFFSET,
-            _LOG_BASE,
-        )
+        _arg_after = max(gm_after, 0.0) + _LOG_OFFSET
+        log_after = math.log(_arg_after, _LOG_BASE) if _arg_after > 0 else float("-inf")
         # Clip to non-negative: a model that over-amplifies file i above
         # its gt ceiling would produce a negative raw delta when swapped
         # to ceiling. Surfacing that as "negative Impact" would invert

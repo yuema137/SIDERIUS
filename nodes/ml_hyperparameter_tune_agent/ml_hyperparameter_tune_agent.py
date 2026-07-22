@@ -2599,7 +2599,7 @@ class HyperparamTuningAgent:
                         # ``build_score_table`` expects the model column in LOG
                         # space so it is unit-consistent with the log-space
                         # reference columns. Convert via the project-standard
-                        # log_{5.27}(v + 1e-10) helper before handing off.
+                        # log_{5.27}(v) helper before handing off.
                         score_table: ScoreComparisonTable | None = None
                         _sc_fv = score_results.get("file_vector")
                         _sc_scalar = score_results.get("denoising_score")

@@ -14,10 +14,10 @@ grand-mean formulas collapse to anchor-only expressions:
 
     per_segment      = anchor[f][i]² / s_max_GLOBAL
     per_file_linear  = mean_i(per_segment)
-    per_file_score   = log_{5.27}(per_file_linear + 1e-10)
+    per_file_score   = log_{5.27}(per_file_linear)          [-inf if <= 0]
 
     grand_mean       = ( Σ_{f,i} per_segment ) / ( Σ_f |S_f| )
-    scalar_score     = log_{5.27}(grand_mean + 1e-10)
+    scalar_score     = log_{5.27}(grand_mean)               [-inf if <= 0]
 
 Both are read directly from ``segment_anchors.json`` — no HDF5 reads, runs
 in milliseconds.
@@ -60,18 +60,16 @@ def _global_per_file_ceiling(anchors_f: list[float], s_max: float) -> tuple[floa
         per_segment     = anchor[i]² / s_max_GLOBAL
         linear_sum      = Σ_i per_segment                   (unrounded)
         per_file_linear = linear_sum / n
-        log_score       = log_{5.27}(per_file_linear + 1e-10)
+        log_score       = log_{5.27}(per_file_linear)          [-inf if <= 0]
 
     Same ruler as ``compute_raw_baseline._calculate_score`` and as
     ``scoring_utils.score_vector`` (``legacy_mode=False``), so baseline,
     ceiling, and model scores are mutually comparable.
 
-    The ``+ 1e-10`` offset places a soft log-space floor at
-    ``log_{5.27}(1e-10) ≈ −13.854`` for files with no signal. Negligible
-    for any ``per_file_linear ≫ 1e-10``. The legacy ``round(·, 2)``
-    quantization that used to live alongside the offset was removed by
-    commit ``6c3f736`` ("kill ghost scores") and is intentionally not
-    reinstated.
+    No ``+ 1e-10`` offset and no ``round(·, 2)`` quantization: both were
+    outdated and are removed so this matches ``score_vector`` exactly. A file
+    whose ``per_file_linear`` is ``<= 0`` (or non-finite) scores ``-inf`` via
+    the same guard ``score_vector`` uses.
 
     Returns a 3-tuple ``(log_score, linear_sum, n_segments)``. The
     unrounded ``linear_sum`` + ``n_segments`` are required by
@@ -84,8 +82,8 @@ def _global_per_file_ceiling(anchors_f: list[float], s_max: float) -> tuple[floa
     n = len(anchors_f)
     linear_sum = sum(v * v for v in anchors_f) / s_max
     per_file_linear = linear_sum / n
-    if math.isfinite(per_file_linear):
-        log_score = float(math.log(max(per_file_linear, 0.0) + 1e-10, 5.27))
+    if per_file_linear > 0 and math.isfinite(per_file_linear):
+        log_score = float(math.log(per_file_linear, 5.27))
     else:
         log_score = float("-inf")
     return log_score, float(linear_sum), n
@@ -99,7 +97,7 @@ def _anchor_normalized_ceiling(
     Per-segment:   per_segment[f,i] = anchor[f,i]² / s_max
     Per-file:      file_vector[f]   = mean_i(per_segment[f,i])
     Grand mean:    grand            = Σ_{f,i} per_segment  /  Σ_f |S_f|
-    Scalar:        score            = log_{5.27}(grand + 1e-10)
+    Scalar:        score            = log_{5.27}(grand)          [-inf if <= 0]
 
     Same aggregation as ``scoring_utils.score_vector`` (grand mean over
     log_{5.27}); the only change is that ``snr_squid`` is replaced by
@@ -123,8 +121,8 @@ def _anchor_normalized_ceiling(
         total_weighted += file_sum
         total_count += len(a)
     grand_mean = total_weighted / total_count
-    if math.isfinite(grand_mean):
-        scalar = math.log(max(grand_mean, 0.0) + 1e-10, 5.27)
+    if grand_mean > 0 and math.isfinite(grand_mean):
+        scalar = math.log(grand_mean, 5.27)
     else:
         scalar = float("-inf")
     return file_vector, float(scalar)

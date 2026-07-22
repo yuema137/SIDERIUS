@@ -1,0 +1,11 @@
+{
+  "file_index": 4,
+  "score": -2.92605420089486,
+  "linear_sum": 1.545158419805735,
+  "n_segments": 200,
+  "mode": "fine",
+  "data_file": "abra_validation_0004.h5",
+  "s_max": 295715680.14248306,
+  "formula": "option_b_global_s_max",
+  "computed_at": "2026-07-22 03:32:50"
+}

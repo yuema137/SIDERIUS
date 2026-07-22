@@ -1,0 +1,11 @@
+{
+  "file_index": 7,
+  "score": 6.921165512569271,
+  "linear_sum": 19806180.48559891,
+  "n_segments": 200,
+  "mode": "fine",
+  "s_max": 295715680.14248306,
+  "formula": "option_b_global_s_max_ceiling",
+  "source": "segment_anchors.json",
+  "computed_at": "2026-07-22 03:31:04"
+}
