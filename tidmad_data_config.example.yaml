@@ -11,8 +11,9 @@
 # will be visible to every other developer through git.
 
 # Where the raw TIDMAD HDF5 files live
-# (abra_training_0000.h5..0019.h5 + abra_validation_0000.h5..0019.h5
-#  + segment_anchors.json after running build_anchor_map.py).
+# (abra_training_0000.h5..0019.h5 + abra_validation_0000.h5..0019.h5).
+# The scoring anchor map ships committed at reference_data/segment_anchors.json,
+# so it is NOT required in this directory.
 tidmad_data_dir: /path/to/TIDMAD/
 
 # Where SIDERIUS run outputs are written

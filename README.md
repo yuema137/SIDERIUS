@@ -120,13 +120,41 @@ DEEPSEEK_API_KEY=...      # optional, for lit-review
 S2_API_KEY=...            # optional, for lit-review
 EOF
 
-# 4. Pre-compute the scoring anchor map (one-time, ~30 min)
-python execute_tools/build_anchor_map.py --parallel -n 8
-
-# 5. Smoke test
+# 4. Smoke test — the scoring anchor map ships committed at
+#    reference_data/segment_anchors.json (a fixed artifact determined by the
+#    TIDMAD data), so no per-machine precompute is needed.
 python env_validation/test_agent_env.py
 uv run pytest tests/unit/ -q
 ```
+
+### Porting to a new server or GPU
+
+Moving to a different server or GPU is **config-only — no code changes**:
+
+1. `uv sync` to build the venv (step 1 above).
+2. Set the two paths in `tidmad_data_config.yaml` (`tidmad_data_dir` = raw
+   TIDMAD `.h5` files, `siderius_data_dir` = run outputs) and stage the `.h5`
+   files at `tidmad_data_dir`. This gitignored file is the single server path
+   profile.
+3. Put your API keys in `.env`.
+
+Everything else adapts automatically:
+
+- **GPU** — `core/hardware_context.py` detects the active device at runtime and
+  scales the VRAM budget to it (`0.80 ×` detected VRAM); device selection is
+  `cuda:0` with CPU fallback. A different GPU needs no config. On a multi-GPU
+  node, pick one with `CUDA_VISIBLE_DEVICES` (honored externally).
+- **Scoring anchor map** — committed at `reference_data/segment_anchors.json`
+  and used by default (resolved relative to the package, independent of the
+  working directory). Override with `--anchor_map` only to use a different map.
+
+Optional, not required to run:
+
+- Per-server scoring wall-time calibration lives in
+  `core/server_configs/{hostname}.py`; an unknown host falls back to a default
+  (with a one-time warning) and only the time *forecast* is affected until a
+  module is added. The per-GPU calibration cache location is overridable via
+  `$SIDERIUS_CALIBRATION_DIR`.
 
 ---
 
