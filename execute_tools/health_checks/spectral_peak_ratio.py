@@ -55,7 +55,7 @@ class SpectralPeakRatioCheck:
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))
         sampling_freq = float(TIDMAD.sampling_frequency)
 
-        files = self._resolve_files(ctx)
+        files = self._resolve_files(ctx, cfg)
         if not files:
             return HealthCheckResult(
                 check_name=self.name,
@@ -142,7 +142,12 @@ class SpectralPeakRatioCheck:
         )
 
     @staticmethod
-    def _resolve_files(ctx: HealthCheckContext) -> list[int]:
+    def _resolve_files(ctx: HealthCheckContext, cfg: dict[str, Any]) -> list[int]:
+        """Priority: config ``peek_file_indices`` (run-level monitored set,
+        DataScope-aware) > ``ctx.denoised_paths`` keys > 0..19 fallback."""
+        configured = cfg.get("peek_file_indices")
+        if configured:
+            return sorted({int(i) for i in configured})
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:

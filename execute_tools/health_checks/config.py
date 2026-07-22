@@ -13,15 +13,23 @@ shape and §5 for the schema-side design principles.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import tempfile
 from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from execute_tools.dataset_config import TIDMAD
 from execute_tools.health_checks.schemas import GateAction
 
 _DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
+
+# Basename of the per-workspace materialized effective config — the single
+# path every downstream loader reads once the run-level monitored-file
+# override is applied. See docs/design/enable_partial_file_list.md (DS4).
+EFFECTIVE_CONFIG_BASENAME: str = "health_checks_effective.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -249,3 +257,179 @@ def clear_health_gates_config_cache() -> None:
     never call from production code."""
     global _CACHED_GATES
     _CACHED_GATES = None
+
+
+# ---------------------------------------------------------------------------
+# DataScope-aware monitored-file override (enable_partial_file_list, DS4)
+# ---------------------------------------------------------------------------
+
+
+def apply_monitored_files(config: HealthChecksConfig, files: list[int]) -> HealthChecksConfig:
+    """Return a NEW config with every check's ``peek_file_indices`` replaced.
+
+    v1 intentional simplification: ONE shared run-level monitored-file list
+    is applied uniformly to ALL file-accessing checks — blocking AND
+    recording-only (the recording checks honor ``peek_file_indices`` as
+    their top-priority file source since DS4). Per-check customization is
+    out of scope; a custom YAML remains the escape hatch.
+
+    Pure transform: the input ``config`` (and the process-wide default-path
+    cache) is never mutated.
+
+    Raises:
+        ValueError: If ``files`` is empty (monitoring nothing must be
+            expressed via ``health_gate_enabled=False``, never an empty list).
+    """
+    if not files:
+        raise ValueError(
+            "apply_monitored_files: files must be non-empty — to disable "
+            "HealthGate monitoring use health_gate_enabled=False, not an "
+            "empty monitored-file list."
+        )
+    normalized = sorted({int(i) for i in files})
+    dumped = config.model_dump(mode="python")
+    for gate in dumped.get("health_gates", []):
+        for check in gate.get("checks", []):
+            check_cfg = check.setdefault("config", {})
+            check_cfg["peek_file_indices"] = list(normalized)
+    return HealthChecksConfig.model_validate(dumped)
+
+
+def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int]) -> None:
+    """Startup invariant: every file-accessing check stays inside the scope.
+
+    Covers ALL checks, not only blocking ones. A check WITHOUT an explicit
+    ``peek_file_indices`` reads the full dataset by default (recording
+    checks fall back to ``range(num_files)``; blocking checks to the
+    pre-M9 single-file peek) — under a partial DataScope that implicit
+    full-dataset access is itself a violation. No intersection, no
+    fallback, no silent correction: violations fail before any execution.
+
+    Raises:
+        ValueError: Listing every offending gate/check with remediation.
+    """
+    scope_set = set(resolved_scope)
+    scope_is_full = scope_set == set(range(TIDMAD.num_files))
+    problems: list[str] = []
+    for gate in config.health_gates:
+        for check in gate.checks:
+            configured = check.config.get("peek_file_indices") or []
+            if not configured:
+                if not scope_is_full:
+                    problems.append(
+                        f"gate '{gate.id}' check '{check.name}': no explicit "
+                        f"peek_file_indices (defaults to full-dataset access) "
+                        f"— an explicit in-scope list is required under a "
+                        f"partial DataScope"
+                    )
+                continue
+            outside = sorted({int(i) for i in configured} - scope_set)
+            if outside:
+                problems.append(
+                    f"gate '{gate.id}' check '{check.name}': peek_file_indices "
+                    f"{outside} outside the DataScope {sorted(scope_set)}"
+                )
+    if problems:
+        raise ValueError(
+            "HealthGate monitored files violate the DataScope:\n  - "
+            + "\n  - ".join(problems)
+            + "\n  Remediation: pass --health_gate_files with in-scope files "
+            "(one shared list, applied to every check), or disable the "
+            "subsystem with --no-health_gate_enabled."
+        )
+
+
+def materialize_effective_config(
+    source_path: str | None,
+    files: list[int] | None,
+    workspace: str,
+    resolved_scope: list[int] | None = None,
+) -> tuple[str, str]:
+    """Materialize the run's effective HealthGate config to the workspace.
+
+    load → apply monitored-file override (no-op when ``files is None``) →
+    validate against the scope (when ``resolved_scope`` given) → write
+    ``{workspace}/health_checks_effective.yaml`` atomically (same-directory
+    temp file + rename). The returned sha256 is computed over the canonical
+    YAML body (header excluded) and is what the run-invariants lock pins
+    (DS6).
+
+    Resume semantics — the effective config is workspace-immutable:
+    an existing file with the same body sha256 is reused; a mismatch raises,
+    distinguishing "operator inputs changed" (header's recorded
+    ``health_gate_files`` differs) from "source YAML content drifted"
+    (same inputs, different body — e.g. the shipped
+    ``configs/health_checks.yaml`` changed underneath the workspace).
+
+    Returns:
+        (effective_config_path, body_sha256)
+    """
+    cfg = load_health_gates_config(source_path)
+    if files is not None:
+        cfg = apply_monitored_files(cfg, files)
+    if resolved_scope is not None:
+        validate_health_scope(cfg, resolved_scope)
+
+    body = yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=True)
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    files_repr = sorted({int(i) for i in files}) if files else None
+    header = (
+        "# Materialized effective HealthGate config — do not edit.\n"
+        "# Written by materialize_effective_config (enable_partial_file_list DS4).\n"
+        f"# source: {source_path or _DEFAULT_CONFIG_PATH}\n"
+        f"# health_gate_files: {files_repr}\n"
+        f"# sha256: {sha}\n"
+    )
+    path = os.path.join(workspace, EFFECTIVE_CONFIG_BASENAME)
+
+    if os.path.exists(path):
+        with open(path) as f:
+            existing = f.read()
+        existing_sha = _header_value(existing, "# sha256:")
+        if existing_sha == sha:
+            return path, sha
+        existing_files = _header_value(existing, "# health_gate_files:")
+        if existing_files is None:
+            cause = (
+                "the existing file has no recognizable materialization header "
+                "(corrupted or hand-written)"
+            )
+        elif existing_files != str(files_repr):
+            cause = (
+                f"operator inputs changed — the workspace was materialized "
+                f"with health_gate_files={existing_files} but this invocation "
+                f"passes {files_repr}"
+            )
+        else:
+            cause = (
+                "source YAML content drifted since materialization (e.g. the "
+                "shipped configs/health_checks.yaml changed underneath the "
+                "workspace, perhaps via git pull)"
+            )
+        raise ValueError(
+            f"{EFFECTIVE_CONFIG_BASENAME} mismatch in workspace {workspace!r}: "
+            f"{cause}. HealthGate policy is workspace-immutable — use a new "
+            f"workspace to change it."
+        )
+
+    os.makedirs(workspace, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(header + body)
+        os.rename(tmp_path, path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+    return path, sha
+
+
+def _header_value(content: str, prefix: str) -> str | None:
+    """Extract a materialization-header value; None when the line is absent."""
+    for line in content.splitlines():
+        if line.startswith(prefix):
+            return line.removeprefix(prefix).strip()
+        if not line.startswith("#"):
+            break
+    return None

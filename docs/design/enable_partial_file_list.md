@@ -165,9 +165,21 @@ Key verified facts this design rests on. Line numbers as of commit `9e503ea`.
     production actions**; it never re-runs checks, so its peek files are
     never read. The monitored-file override therefore only needs to reach
     the **active** config.
-  - `load_health_gates_config` is cached per-process keyed on path
-    (`config.py:221`). Any in-memory-object override would be silently
-    bypassed at every path-based reload site above.
+  - `load_health_gates_config` caches **only the default path** — explicitly
+    passed paths are loaded fresh on every call and never cached
+    (`config.py:236-244`; corrected during DS4 from the earlier
+    "keyed on path" description). Consequence: materializing to a new
+    per-workspace path has zero cache-mutation hazard, and every path-based
+    reload site picks the effective config up naturally. An in-memory-object
+    override would still be silently bypassed at every reload site — the
+    materialized-path design stands.
+  - **Recording-only checks do not use `peek_file_indices`** (found during
+    DS4): `pearson_dispersion` / `spectral_peak_ratio` /
+    `per_file_output_std` resolve files via `_resolve_files(ctx)` —
+    `ctx.denoised_paths` keys, else a `range(20)` fallback. DS4 (Option A,
+    approved 2026-07-22) makes the run-level monitored list universal: the
+    shared `peek_file_indices` is written into all six checks and the
+    recording checks honor it as their top-priority file source.
 - The delta-gate anchor `current_run_best_formal_score` defaults to **0.0**
   (V17 fixed reference, `hyperparam_tuning.py:990`; the 5.5763 default was
   removed by PR #124 as the class-127 collapse fingerprint). 0.0 is
@@ -346,8 +358,15 @@ Semantics:
 No automatic intersection, no fallback, no silent correction — ever.
 
 **v1 simplification (intentional, explicit)**: one shared monitored-file list
-overrides **all** gates uniformly. Per-gate monitored-file customization is out
-of scope for v1; anyone needing it authors a custom YAML.
+overrides **all six file-accessing checks uniformly — blocking AND
+recording-only** (the recording checks gained `peek_file_indices` as their
+top-priority file source in DS4; their `ctx.denoised_paths` /
+`range(num_files)` fallbacks remain for full-scope runs without an override).
+Per-gate/per-check monitored-file customization is out of scope for v1;
+anyone needing it authors a custom YAML. `validate_health_scope` covers every
+file-accessing check: a check without an explicit list counts as full-dataset
+access and therefore fails validation under a partial scope — the invariant
+is airtight independent of call ordering.
 
 ### Disabled mode — precise semantics
 
@@ -758,55 +777,101 @@ above; pure transform + materialized effective config so **no reload site can
 bypass the override**; startup validation with no intersection, no fallback,
 no silent correction.
 
-**Code**:
-- [ ] `execute_tools/health_checks/config.py` — pure function
-  `apply_monitored_files(config: HealthChecksConfig, files: list[int]) ->
-  HealthChecksConfig` returning a **new** instance with every check's
-  `peek_file_indices` replaced (v1: one shared list, all gates uniformly);
-  the per-process cache is never mutated.
-- [ ] Same module — `validate_health_scope(config, resolved_scope: list[int])
-  -> None`: every gate's effective `peek_file_indices ⊆ scope`, else
-  `ValueError` listing offending gate id, files, and remediation
-  (`pass --health_gate_files with in-scope files`).
-- [ ] Same module — `materialize_effective_config(source_path, files,
-  workspace) -> tuple[str, str]`: load → apply override (no-op when
-  `files is None`) → validate → write `{workspace}/health_checks_effective.yaml`
-  (canonical/deterministic serialization) → return `(path, sha256)`. The
-  sha256 is what the run-invariants lock pins (DS6). On resume, an existing
-  effective file is compared by hash: equal → reuse; different → **startup
-  error** distinguishing "operator inputs changed" from "source YAML content
-  drifted" (the two diff cases have different remediation messages).
-- [ ] Disabled-mode plumbing hooks: nothing in this package changes for
-  disabled mode (the tuner simply never calls it) — assert this in review.
+**Universality refinement (Option A, approved 2026-07-22)**: the run-level
+`health_gate_files` is the shared monitored-file set for **all** six
+file-accessing checks, not only the blocking three. The recording-only checks
+gained `peek_file_indices` as an explicit config field with top-priority
+resolution (config → `ctx.denoised_paths` → full-dataset fallback). Under a
+partial scope every check operates exclusively on the explicit list —
+attempting all 20 files and counting the missing ones as I/O failures is not
+acceptable. Full-scope behavior without an override is unchanged (blocking:
+YAML defaults; recording: all-file fallback). Authority stays with the pure
+effective-config materialization — never split between YAML and runtime ctx.
 
-**Tests** (`tests/unit/execute_tools/health_checks/test_health_scope.py`, new):
-- [ ] `apply_monitored_files` replaces all gates' peek lists; original config
-  object unmodified; cached object unmodified (identity check)
-- [ ] `validate_health_scope`: default YAML `[3,10,17]` vs scope `[4..9]` →
-  error naming all three gates; vs full scope → passes
-- [ ] override `[4,7,9]` + scope `[4..9]` → passes; `[3,7,10]` → error
-- [ ] `materialize_effective_config`: written file loads through
-  `load_health_gates_config` and shows the override in every gate;
-  `files=None` materializes source content unchanged; returned sha256 is
-  stable across re-materialization with identical inputs (canonical
-  serialization) and changes when the source YAML content changes
-- [ ] round-trip: loading the materialized path via the normal cached loader
-  returns the overridden peek lists (proves path-based reload sites get the
-  override)
+**Code**:
+- [x] Recording checks (`pearson_dispersion.py`, `spectral_peak_ratio.py`,
+  `per_file_output_std.py`) — `_resolve_files(ctx, cfg)` honors
+  `cfg["peek_file_indices"]` first (sorted/deduped), then
+  `ctx.denoised_paths`, then the existing `range(20)` fallback.
+- [x] `execute_tools/health_checks/config.py` — pure function
+  `apply_monitored_files(config, files) -> HealthChecksConfig` returning a
+  **new** instance with every check's `peek_file_indices` replaced (v1: one
+  shared list, all six checks uniformly); never mutates input or cache;
+  `files=[]` → `ValueError`.
+- [x] Same module — `validate_health_scope(config, resolved_scope) -> None`:
+  **every file-accessing check** validated; explicit list must be ⊆ scope; a
+  check *without* an explicit list counts as full-dataset access → violation
+  under a partial scope; error lists all offending gate/check pairs +
+  remediation.
+- [x] Same module — `materialize_effective_config(source_path, files,
+  workspace, resolved_scope=None) -> tuple[str, str]`: load → apply override
+  (no-op when `files is None`) → validate (when scope given) → write
+  `{workspace}/health_checks_effective.yaml` **atomically** (same-dir temp +
+  rename) with a materialization header (`source`, `health_gate_files`,
+  body sha256) → return `(path, body_sha256)` — the sha the run-invariants
+  lock pins (DS6). Resume: identical body sha → reuse; mismatch → error
+  distinguishing "operator inputs changed" (header files differ) from
+  "source YAML content drifted" (same inputs, different body).
+- [x] Disabled-mode plumbing hooks: nothing in this package changes for
+  disabled mode (the tuner simply never calls it) — confirmed in review.
+
+**Tests** (`tests/unit/execute_tools/health_checks/test_health_scope.py`,
+new, 20 tests):
+- [x] `apply_monitored_files` replaces the peek list in **all six** checks;
+  normalizes sorted/deduped; original config unmodified (dump-compare);
+  default-path cached object unmodified (identity + content); `[]` rejected
+- [x] `validate_health_scope`: default YAML vs scope `[4..9]` → error naming
+  **all six gates** (blocking: `[3,10,17]` outside; recording: missing
+  explicit list = full-dataset default); vs full scope → passes
+- [x] override `[4,7,9]` + scope `[4..9]` → passes; `[3,7,10]` → error
+  naming `[3, 10]`
+- [x] `materialize_effective_config`: written file loads through
+  `load_health_gates_config` with the override in every check;
+  `files=None` materializes source content semantically unchanged
+  (loaded-config equality); identical inputs → reuse (same path+sha);
+  changed operator files → "operator inputs changed"; edited source YAML →
+  "source YAML content drifted"; in-materialize scope validation failure →
+  no file written
+- [x] **Attempted-open sets (all six checks)**: recording path-fns capture
+  every requested file index; under `peek_file_indices=[4,7,9]` each check's
+  requested set is non-empty and ⊆ `{4,7,9}`; recording checks with no
+  config keep the exact `range(20)` fallback (full-scope behavioral
+  identity); `ctx.denoised_paths` still beats the fallback (priority order)
 
 **Verification checklist**:
-- [ ] `configs/health_checks.yaml` and
+- [x] `configs/health_checks.yaml` and
   `configs/health_checks_baseline_observe_mode.yaml` **unchanged**
-- [ ] Reload-site audit recorded here: `get_gates_for_position`,
-  `evaluate_gate`, `evaluate_and_persist_health_gates` all receive the
+  (git status clean for both)
+- [x] Reload-site audit: `get_gates_for_position`, `evaluate_gate`,
+  `evaluate_and_persist_health_gates` all load by path → will receive the
   materialized path once DS5 swaps `agent_input.health_checks_config`;
-  `required_blocking_gate_ids` + production-policy `_persist` confirmed to
-  read only IDs/actions (no peek fields) — re-verify against HEAD
-- [ ] Full unit suite green; ruff + pyright clean
+  `required_blocking_gate_ids` + production-policy `_persist` re-verified to
+  read only gate IDs/actions (no peek fields)
+- [x] Relevant suite green: `tests/unit/execute_tools/health_checks/` —
+  **225 passed** (2.4s), including all pre-existing recording-check tests
+  (full-scope identity) and the 20 new DS4 tests
+- [x] ruff check + format clean; pyright clean
+  (`--pythonpath .venv/bin/python`)
 
 **Test gate**: unit only.
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-22):
+- **Cache-behavior correction** (audit note updated): the loader caches only
+  the *default* path; explicit paths are loaded fresh every call
+  (`config.py:236-244`). The materialized per-workspace path therefore has
+  zero cache-mutation hazard by construction; purity tests assert it anyway.
+- The materialization header doubles as the mismatch diagnostic: sha line
+  drives reuse, `health_gate_files` line distinguishes operator-input change
+  from source drift; a file with no recognizable header errors as
+  corrupted/hand-written.
+- `resolved_scope` is an optional param on `materialize_effective_config` so
+  DS5 can do load→apply→validate→write in one call while tests can exercise
+  the transform standalone.
+- Attempted-open tests observe the *requested index set* via recording
+  `denoised_filename_fn`/`target_path_fn` wrappers (paths point at
+  nonexistent files; the checks' tolerated I/O-failure path absorbs the
+  opens) — asserting the request set, which is exactly the invariant.
+- **Test results**: 225/225 health_checks suite; ruff + pyright clean.
 
 ---
 
