@@ -70,6 +70,18 @@ class DatasetConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ScopeViolationError(ValueError):
+    """A SampleSet (or file access) referenced files outside the DataScope.
+
+    Subclass of ``ValueError`` so callers with an existing "raises
+    ValueError" contract (e.g. ``score_vector``) are unaffected, while the
+    sandbox executors can catch this class specifically and convert it into
+    their structured error-dict contract with
+    ``error_type="scope_violation"`` — a non-retryable configuration/
+    invariant failure, never a transient training error.
+    """
+
+
 class DataScope(BaseModel):
     """Which subset of the dataset this run may access.
 

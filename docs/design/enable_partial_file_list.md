@@ -673,38 +673,81 @@ partial scopes. Default scope preserves behavioral identity.
 file I/O, regardless of who built it. Closes the existing `score_vector`
 validation gap.
 
+**Error-shape contract (decided during implementation, 2026-07-22)**: the
+invariant is uniform — **rejection before any file I/O** — while the outward
+error shape follows each executor method's established contract. This
+difference is intentional:
+
+- `execute_training` / `execute_inference`: reject the out-of-scope SampleSet
+  before any subprocess launch and return the structured error dict
+  `{"status": "error", "error_type": "scope_violation", "message":
+  "error_scope_violation: ..."}` (the `error_type` field is the structured
+  classification; the stable prefix follows the `error_training:` convention
+  for greppability — consumers access these dicts via `.get(...)`, so the
+  extra key is safe). Inference's dict additionally carries its timing keys
+  (`per_file_timings_ms: []`, `process_startup_ms/subprocess_wall_ms: None`).
+- `score_vector`: raises `ScopeViolationError` (a `ValueError` subclass
+  defined next to `DataScope`), consistent with its existing exception
+  contract.
+
 **Code**:
-- [ ] `execute_tools/scoring_utils.py` — `validate_sample_set(sample_set,
+- [x] `execute_tools/dataset_config.py` — `ScopeViolationError(ValueError)`
+  next to `DataScope` (structured classification without message parsing).
+- [x] `execute_tools/scoring_utils.py` — `validate_sample_set(sample_set,
   scope: DataScope | None = None)`; existing `[0, NUM_FILES)` check retained;
-  when scope provided, out-of-scope key → `ValueError` naming key + scope.
-- [ ] `core/sandbox_executor.py` — `TidmadSandbox.__init__` accepts
-  `data_scope: DataScope | None` (default full); stores resolved scope.
-- [ ] `execute_training` (`:569`) and `execute_inference` (`:735`) pass the
-  sandbox scope into `validate_sample_set`.
-- [ ] `score_vector` (`:800`) — add the missing `validate_sample_set` call
-  (with scope) before delegating to `scoring_utils.score_vector`.
-- [ ] `StubSandbox` — same constructor param + same validation (pseudo-mode
-  tests must exercise the invariant, not bypass it).
+  when scope provided, out-of-scope key → `ScopeViolationError` naming key +
+  resolved scope.
+- [x] `core/sandbox_executor.py` — `TidmadSandbox.__init__` accepts
+  `data_scope: DataScope | None` (default full); module-level
+  `_scope_violation_result()` helper builds the structured error dict.
+- [x] `execute_training` (validate site inside its try; specific
+  `except ScopeViolationError` **before** the generic handler) and
+  `execute_inference` (validate site is *before* its subprocess try-block —
+  wrapped directly at the call site) return the structured error dict.
+- [x] `score_vector` — the missing `validate_sample_set` call added (with
+  scope) before delegating; `ScopeViolationError` propagates.
+- [x] `StubSandbox` — same constructor param + same validation and error
+  shapes in all three methods (pseudo-mode tests exercise the invariant,
+  not bypass it).
 
 **Tests**:
-- [ ] `tests/unit/core/test_sandbox_scope.py` (new): out-of-scope SampleSet →
-  `ValueError` from each of the three methods (training / inference /
-  score_vector), full-scope passes; `StubSandbox` mirrors behavior
-- [ ] `validate_sample_set` unit tests: scope=None keeps today's behavior;
-  legacy string-key JSON dicts still coerced
-- [ ] Regression: existing sandbox/pseudo integration tests green with no
+- [x] `tests/unit/core/test_sandbox_scope.py` (new, 15 tests): out-of-scope
+  SampleSet → structured `scope_violation` error dict from training +
+  inference **with `subprocess.run` asserted not called** (rejection before
+  I/O), `ScopeViolationError` raised from `score_vector`; in-scope training
+  proceeds to the (mocked) subprocess; `StubSandbox` mirrors all shapes
+- [x] `validate_sample_set` unit tests: scope=None keeps today's behavior
+  (out-of-range stays a plain `ValueError`, not `ScopeViolationError`);
+  legacy string-key JSON dicts still coerced; `ScopeViolationError`
+  is-a `ValueError`
+- [x] Regression: existing sandbox/stub/scoring/builder suites green with no
   call-site changes (default = full scope)
 
 **Verification checklist**:
-- [ ] All three execution methods provably validate:
-  `grep -n "validate_sample_set" core/sandbox_executor.py` shows **three** call
-  sites (was two)
-- [ ] Full unit + pseudo integration suites green
-- [ ] ruff + pyright clean
+- [x] All six execution methods provably validate:
+  `grep -c "validate_sample_set(sample_set, scope=self.data_scope)"
+  core/sandbox_executor.py` → 6 (3 production + 3 stub; was 2)
+- [x] Relevant suites green: 161 passed (sandbox_scope 15, sandbox_executor,
+  stub_sandbox, sandbox_rlimit, scoring_utils, sample_set_builder)
+- [x] ruff check + format clean; pyright clean
+  (`--pythonpath .venv/bin/python`)
 
 **Test gate**: unit only.
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-22):
+- Structure discovery that shaped the fix: training's validate site is inside
+  its method-wide `try` (whose generic `except Exception` would have
+  swallowed the typed error — the specific except precedes it), while
+  inference's validate site runs *before* its subprocess-only `try` (no
+  catch-all exists there; the wrap is at the call site). A first
+  implementation put inference's handler on the wrong try and the new test
+  caught it (`ScopeViolationError` propagated) — fixed before commit.
+- `ScopeViolationError` subclasses `ValueError` so `score_vector`'s
+  documented "raises ValueError" contract is unchanged.
+- Stub `score_vector` now validates its (required) `sample_set` argument —
+  pseudo-data sample sets must be structurally valid, which they are.
+- **Test results**: 161/161 across the six relevant files (16.1s); ruff +
+  pyright clean.
 
 ---
 
@@ -800,6 +843,14 @@ into all artifacts; disabled mode wired end-to-end.
   round record; loud log line.
 - [ ] `_resolve_sample_set_cfg` / `build_sample_set` call sites (`:1820,:1827`)
   pass the resolved scope; sandbox constructed with `data_scope`.
+- [ ] **`scope_violation` is non-retryable (DS3 follow-through)**: when an
+  executor result carries `error_type == "scope_violation"` (or
+  `ScopeViolationError` escapes `score_vector`), the tuner must treat it as
+  a configuration/invariant failure — a bug in scope plumbing, deterministic
+  on retry — and **terminate the run immediately** (fail-fast abort with the
+  scope-violation message), never consuming normal proposal/training attempt
+  retries or waiting for `max_fail_rounds`. Unit test: a stubbed
+  scope-violation result aborts the run on first occurrence.
 - [ ] `agent/prompts.py` `_format_fixed_params_block` (`:706`) — when scope is
   partial, disclose the allowed files and the snapshot-only rule.
 - [ ] Scope stamps: `ExperimentRecord` + `HyperparamTuningOutput` gain

@@ -39,7 +39,14 @@ from typing import Any, cast
 import h5py
 import numpy as np
 
-from execute_tools.dataset_config import NUM_FILES, SEGMENT_LENGTH, SEGMENTS_PER_FILE
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    SEGMENT_LENGTH,
+    SEGMENTS_PER_FILE,
+    TIDMAD,
+    DataScope,
+    ScopeViolationError,
+)
 
 
 def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
@@ -245,23 +252,38 @@ SampleSet = dict[int, list[int]]
 """Mapping of file_index → list of segment indices to process."""
 
 
-def validate_sample_set(sample_set: dict) -> SampleSet:
+def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> SampleSet:
     """
     Lightweight validation for a SampleSet dict.
 
     Checks structure and types without a full Pydantic model. Normalizes
     JSON string keys to int. Raises ValueError on invalid input.
 
+    Boundary DataScope invariant (docs/design/enable_partial_file_list.md):
+    when ``scope`` is provided, every file index must lie inside it — this is
+    the final guarantee before file I/O, catching SampleSets that did not go
+    through ``build_sample_set``'s constructive enforcement.
+
     Args:
         sample_set: Raw dict, possibly from JSON (string keys).
+        scope:      Optional DataScope; file indices outside its resolution
+                    raise :class:`ScopeViolationError`. ``None`` (default)
+                    keeps the legacy full-dataset range check only.
 
     Returns:
         Validated SampleSet with int keys and sorted int segment lists.
+
+    Raises:
+        ValueError: On structural/type/range problems.
+        ScopeViolationError: When ``scope`` is given and a file index falls
+            outside it (subclass of ValueError).
     """
     if not isinstance(sample_set, dict):
         raise ValueError(f"SampleSet must be a dict, got {type(sample_set).__name__}")
     if not sample_set:
         raise ValueError("SampleSet must not be empty.")
+
+    allowed = scope.resolve(TIDMAD) if scope is not None else None
 
     validated: SampleSet = {}
     for key, segments in sample_set.items():
@@ -271,6 +293,10 @@ def validate_sample_set(sample_set: dict) -> SampleSet:
             raise ValueError(f"SampleSet key must be an integer, got {key!r}") from e
         if not (0 <= file_index < NUM_FILES):
             raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
+        if allowed is not None and file_index not in allowed:
+            raise ScopeViolationError(
+                f"SampleSet file_index {file_index} is outside the DataScope {allowed}."
+            )
         if not isinstance(segments, list) or not segments:
             raise ValueError(
                 f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}"
