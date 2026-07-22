@@ -1,34 +1,34 @@
 # Raw baseline and ground-truth reference — Option B, global s_max
 
 **Scoring convention:** Option B (`TS.astype(np.float64)` before `np.fft.rfft`),
-`log_{5.27}(v + 1e-10)` over the linear per-file mean (no 2-dp rounding —
-the legacy `round(·, 2) + 1e-10` quantization was removed by commit
-`6c3f736` "kill ghost scores"), **global s_max** from the anchor map.
-Model, baseline, and ceiling all live on one ruler and are directly
-comparable at every index.
+`log_{5.27}(per_file_lin)` over the linear per-file mean — `-inf` when the mean
+is `<= 0`. No `+ 1e-10` offset and no `round(·, 2)`: both were outdated and are
+removed so this matches `scoring_utils.score_vector` exactly. **Global s_max**
+from the anchor map. Model, baseline, and ceiling all live on one ruler and are
+directly comparable at every index.
 
 - **Anchor map:** `{TIDMAD_DATA_DIR}/segment_anchors.json`
 - **Global s_max:** `295_715_680.1425` (identical across all 41 reference JSONs)
-- **Raw baseline JSONs:** `{SIDERIUS_DATA_DIR}/raw_baseline/raw_baseline_score_file_XXXX.json`
-- **Ground-truth JSONs:** `{SIDERIUS_DATA_DIR}/ground_truth/ground_truth_score_file_XXXX.json`
-- **Scalar baseline:** `{SIDERIUS_DATA_DIR}/raw_baseline/scalar_anchor_normalized.json`
-- **Scalar ceiling:** `{SIDERIUS_DATA_DIR}/ground_truth/ceiling_anchor_normalized.json`
+- **Raw baseline JSONs:** `reference_data/raw_baseline/raw_baseline_score_file_XXXX.json`
+- **Ground-truth JSONs:** `reference_data/ground_truth/ground_truth_score_file_XXXX.json`
+- **Scalar baseline:** `reference_data/raw_baseline/scalar_anchor_normalized.json`
+- **Scalar ceiling:** `reference_data/ground_truth/ceiling_anchor_normalized.json`
 - **Generators:** `compute_raw_baseline.py`, `compute_ground_truth.py`
-- **Regenerated:** 2026-05-01
+- **Regenerated:** 2026-07-22 (removed the outdated `+ 1e-10` offset and `round(·, 2)`)
 
 ## Per-file scores (all under global s_max)
 
 ```
 per_segment  = (snr_sg_fi / s_max_GLOBAL) · snr_squid_fi            # snr_squid = raw CH1 for baseline, = CH2 anchor for ceiling
 per_file_lin = mean_i(per_segment)                                  # n = 200 (fine)
-per_file_log = log_{5.27}(per_file_lin + 1e-10)
+per_file_log = log_{5.27}(per_file_lin)                             # -inf if per_file_lin <= 0
 ```
 
 | file | raw_baseline | ground_truth | headroom (gt − raw) |
 |-----:|-------------:|-------------:|--------------------:|
-|    0 |     −11.4294 |      −8.2609 |              3.1685 |
-|    1 |     −11.9238 |      −9.3734 |              2.5504 |
-|    2 |     −10.3064 |      −4.6847 |              5.6217 |
+|    0 |     −11.4402 |      −8.2610 |              3.1792 |
+|    1 |     −11.9486 |      −9.3737 |              2.5749 |
+|    2 |     −10.3080 |      −4.6847 |              5.6233 |
 |    3 |      −6.6794 |       0.0919 |              6.7713 |
 |    4 |      −2.9261 |       4.9414 |              7.8674 |
 |    5 |      −1.8656 |       7.4617 |              9.3272 |
@@ -47,13 +47,13 @@ per_file_log = log_{5.27}(per_file_lin + 1e-10)
 |   18 |       1.7314 |      11.0215 |              9.2902 |
 |   19 |       1.0027 |      10.5676 |              9.5649 |
 
-**Reading the table.** With the `round(·, 2)` quantization removed, no
-file clips to the soft `log_{5.27}(1e-10) ≈ −13.854` floor — every
-per-file value reflects the true linear mean of `per_segment`. The
-weakest-injection files (0–2) sit deep in the negatives because their
-linear means are tiny but non-zero; the perfect-denoiser ceiling (`gt`)
-already lifts off the noise floor at file 0 (gt = −8.26 vs. raw =
-−11.43, ~3 log-units of headroom available even at the lowest
+**Reading the table.** With both the `round(·, 2)` quantization and the
+`+ 1e-10` offset removed, every per-file value is simply `log_{5.27}` of the
+true linear mean of `per_segment` (`-inf` only for a mean of `<= 0`, which does
+not occur here). The weakest-injection files (0–2) sit deep in the negatives
+because their linear means are tiny but non-zero; the perfect-denoiser ceiling
+(`gt`) already lifts off the noise floor at file 0 (gt = −8.26 vs. raw =
+−11.44, ~3 log-units of headroom available even at the lowest
 injection). File 3 is the first file where the ceiling crosses zero
 (gt = +0.09); the baseline catches up a couple of files later as the
 raw SQUID channel starts to carry recoverable signal. Headroom (gt −
@@ -77,7 +77,7 @@ log-space scores above.
 ```
 per_segment  = (snr_sg[f][i] / s_max) · snr_squid[f][i]             # or anchor[f][i]² / s_max for the ceiling
 grand_mean   = ( Σ_f Σ_i per_segment ) / ( Σ_f |S_f| )               # |S_f| = 200 per file
-scalar_score = log_{5.27}(grand_mean + 1e-10)
+scalar_score = log_{5.27}(grand_mean)                               # -inf if grand_mean <= 0
 ```
 
 | metric                         | scalar_score | source                                                   |
@@ -90,7 +90,7 @@ Both scalars are computed by the same anchor-normalized grand-mean path —
 `compute_raw_baseline._maybe_write_anchor_normalized_scalar` and
 `compute_ground_truth._anchor_normalized_ceiling` are symmetric aggregators
 that sum `linear_sum` and `n_segments` across the 20 fine files before
-applying `log_{5.27}(grand_mean + 1e-10)`. The production scorer
+applying `log_{5.27}(grand_mean)`. The production scorer
 `execute_tools.scoring_utils.score_vector` uses this exact same grand-mean
 path for model evaluations, so the three numbers sit on one ruler.
 
