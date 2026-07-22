@@ -203,6 +203,16 @@ class InterpretationInput(BaseModel):
         "When None, model types are derived from summaries. "
         "Cannot be an empty list — use None to derive from summaries.",
     )
+    cold_start: bool = Field(
+        default=False,
+        description="Explicit cold-start state. True means this is the first "
+        "iteration of a chain with NO prior experimental evidence (no seeds, no "
+        "committed prior iters, empty cache). Set by the workflow — never inferred "
+        "downstream from missing prompt text. When True, require_at_least_one_model "
+        "permits an empty model set and the interpreter renders explicit 'no prior "
+        "evidence' language instead of ranking non-existent history. Registries "
+        "remain available options, not historical runs.",
+    )
     task_description: str = Field(
         default="",
         description="Plain-English description of the research task, sourced from "
@@ -325,10 +335,12 @@ class InterpretationInput(BaseModel):
             )
         derived = {s.model_type for s in self.summaries}
         effective = derived | set(self.model_types or []) | set(self.model_knowledge_cache.keys())
-        if not effective:
+        if not effective and not self.cold_start:
             raise ValueError(
                 "At least one model type must be provided — "
-                "via summaries, model_types, or model_knowledge_cache."
+                "via summaries, model_types, or model_knowledge_cache. "
+                "(Set cold_start=True to intentionally start a chain with no "
+                "prior experimental evidence.)"
             )
         return self
 
@@ -354,6 +366,15 @@ class InterpretationOutput(BaseModel):
     # --- Experiment counts ---
     total_experiments: int = Field(
         description="Total completed rounds across all summaries.",
+    )
+
+    # --- Cold-start state ---
+    cold_start: bool = Field(
+        default=False,
+        description="True when this interpretation was produced for a cold-start "
+        "iteration (no prior experimental evidence). Propagated to the proposer so "
+        "its prompt states there is no history and treats registries as available "
+        "options, not completed runs. False for all history-backed iterations.",
     )
 
     # --- Per-model scores ---

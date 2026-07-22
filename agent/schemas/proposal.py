@@ -635,6 +635,15 @@ class ProposalInput(BaseModel):
         description="Model type keys already registered in MODEL_REGISTRY. "
         "The proposal agent must not reuse any of these names.",
     )
+    cold_start: bool = Field(
+        default=False,
+        description="True when there is no prior experimental evidence (first "
+        "iteration of a cold chain). Propagated from InterpretationOutput.cold_start. "
+        "When True the proposer prompt states explicitly that no prior runs exist and "
+        "asks for a first experiment grounded in the task contract, available "
+        "model/loss registries (as options, not history), advice, and resource "
+        "constraints — without claiming improvement over non-existent results.",
+    )
     task_description: str = Field(
         default="",
         description="Plain-English description of the research task, sourced from "

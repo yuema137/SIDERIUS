@@ -360,6 +360,28 @@ def _build_reasoning_system_prompt(inp: ProposalInput) -> str:
     )
 
 
+def _render_cold_start_block(cold_start: bool) -> str:
+    """Explicit cold-start banner for the proposer USER prompt.
+
+    Non-empty ONLY when ``cold_start`` is True; returns the empty string
+    otherwise so that seeded (history-backed) prompts are byte-for-byte
+    unchanged. Communicates that no prior experimental evidence exists, treats
+    registries as available options (not past results), and forbids claiming
+    improvement over a non-existent history.
+    """
+    if not cold_start:
+        return ""
+    return (
+        "[COLD START — NO PRIOR EXPERIMENTAL EVIDENCE]\n"
+        "This is the first iteration of the chain. No prior experimental runs, "
+        "scores, model history, or failures exist yet. Do not reference or claim "
+        "improvement over previous results — there are none. Propose the first "
+        "experiment grounded in the task contract, the available model and loss "
+        "registries (listed below as available options, not past results), the "
+        "advice, and the resource constraints."
+    )
+
+
 def _render_hardware_context_block(
     ctx: HardwareContext | None,
     vram_budget_gb: float | None,
@@ -1228,6 +1250,9 @@ class MLModelProposalAgent:
         agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_block = render_expert_context(inp.expert_context)
         vocab_block = self._render_vocabulary(inp.vocab_seed)
+        # Explicit cold-start banner — empty string unless inp.cold_start is True,
+        # so seeded prompts are byte-for-byte unchanged.
+        cold_start_block = _render_cold_start_block(inp.cold_start)
 
         # --- Run enabled reasoning stages (accumulate context) ---
         accumulated = {
@@ -1346,6 +1371,8 @@ class MLModelProposalAgent:
                 input_keys=_PROPOSER_INPUT_KEYS,
             )
             user_prompt_parts: list[str] = []
+            if cold_start_block:
+                user_prompt_parts.append(cold_start_block)
             if hardware_block:
                 user_prompt_parts.append(hardware_block)
             if constraints_block:

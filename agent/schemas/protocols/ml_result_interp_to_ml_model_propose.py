@@ -167,6 +167,10 @@ def local_full_context(
     result = {
         "interpretation": output.model_dump(),
         "existing_model_types": list(output.model_types),
+        # Propagate the explicit cold-start state so the proposer renders a
+        # "no prior evidence" prompt instead of implying an empty history is a
+        # failed / degenerate result.
+        "cold_start": output.cold_start,
         "expert_context": [c.model_dump() for c in merged_context],
         "storage": storage.model_dump(),
     }

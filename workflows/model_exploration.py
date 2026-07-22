@@ -1816,10 +1816,19 @@ def run_workflow(
         else:
             new_summaries = [latest_new_summary] if latest_new_summary is not None else []
 
+        # Cold start (explicit workflow state): no prior experimental evidence to
+        # interpret — no seed/restored summaries AND an empty knowledge cache.
+        # Computed here and passed explicitly so downstream nodes read the flag
+        # rather than inferring it from empty prompt text. Becomes False as soon
+        # as iteration 1 commits a real output (restored into new_summaries for
+        # iteration 2). Never fabricates history.
+        is_cold_start = (not new_summaries) and (not model_knowledge_cache)
+
         interp_storage = _make_storage(iter_dir, run_name)
         interp_input = InterpretationInput(
             summaries=new_summaries,
             model_knowledge_cache=model_knowledge_cache,
+            cold_start=is_cold_start,
             human_advice=human_advice_interpret,
             runtime_vocab=current_runtime_vocab,
             previous_proposal=previous_proposal_data,
