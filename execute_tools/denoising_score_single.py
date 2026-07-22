@@ -68,7 +68,8 @@ parser.add_argument(
     type=str,
     default=None,
     help="Path to segment_anchors.json (used for global s_max). "
-    "Default: {TIDMAD_DATA_DIR}/segment_anchors.json.",
+    "Default: the committed reference_data/segment_anchors.json, resolved from "
+    "the package location (independent of the working directory).",
 )
 parser.add_argument("--denoising_model", "-m", type=str, default="punet")
 parser.add_argument(
@@ -115,14 +116,19 @@ if args.weak:
 # Resolve defaults
 # ---------------------------------------------------------------------------
 
+from execute_tools.build_anchor_map import resolve_anchor_map_path  # noqa: E402
 from execute_tools.data_paths import TIDMAD_DATA_DIR  # noqa: E402
 
 if args.data_dir is None:
     args.data_dir = TIDMAD_DATA_DIR
 if args.raw_data_dir is None:
     args.raw_data_dir = TIDMAD_DATA_DIR
-if args.anchor_map is None:
-    args.anchor_map = os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json")
+# Anchor map: an explicit --anchor_map override wins; otherwise use the
+# committed reference artifact (reference_data/segment_anchors.json), resolved
+# from the package location independently of the current working directory. The
+# artifact is never regenerated during scoring; load_anchor_map (below) fails
+# clearly if it is missing or malformed.
+args.anchor_map = resolve_anchor_map_path(args.anchor_map)
 
 # ---------------------------------------------------------------------------
 # Filename construction (preserved from legacy for sandbox compatibility)

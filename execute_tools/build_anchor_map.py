@@ -105,15 +105,61 @@ def build_anchor_map(
     }
 
 
+def default_anchor_map_path() -> str:
+    """Absolute path to the committed reference anchor map.
+
+    The anchor map is a fixed reference artifact uniquely determined by the
+    TIDMAD dataset, committed at ``reference_data/segment_anchors.json``. The
+    path is resolved from this module's package location (the repo root),
+    independent of the caller's current working directory, so the committed
+    artifact is used automatically regardless of where a process is launched.
+    """
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(pkg_root, "reference_data", "segment_anchors.json")
+
+
+def resolve_anchor_map_path(explicit: str | None) -> str:
+    """Resolve the anchor-map path to use.
+
+    An explicit override (``--anchor_map``) always wins; otherwise fall back to
+    the committed reference artifact (:func:`default_anchor_map_path`). This
+    function never touches the filesystem — existence/validity is enforced by
+    :func:`load_anchor_map` at read time so a bad path fails clearly.
+    """
+    return explicit if explicit is not None else default_anchor_map_path()
+
+
 def load_anchor_map(path: str) -> dict:
     """
     Load a pre-computed anchor map from a JSON file.
 
     Returns the same dict structure as ``build_anchor_map()``, with
     ``"anchors"`` keys as strings (JSON constraint).
+
+    Raises:
+        FileNotFoundError: if ``path`` does not exist (clear message pointing at
+            the committed reference artifact).
+        ValueError: if the file is not valid JSON, or is valid JSON but missing
+            the required ``"s_max"`` / ``"anchors"`` keys.
     """
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"segment anchor map not found at {path!r}. The committed reference "
+            "artifact is reference_data/segment_anchors.json; pass --anchor_map "
+            "to override with a different path."
+        )
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"segment anchor map at {path!r} is malformed JSON: {e}") from e
+    if not isinstance(data, dict) or "s_max" not in data or "anchors" not in data:
+        found = sorted(data) if isinstance(data, dict) else type(data).__name__
+        raise ValueError(
+            f"segment anchor map at {path!r} is missing required keys "
+            f"('s_max', 'anchors'); found {found}."
+        )
+    return data
 
 
 def main():
