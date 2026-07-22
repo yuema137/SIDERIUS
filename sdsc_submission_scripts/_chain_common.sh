@@ -68,12 +68,14 @@ EVAL_PORTION=0.1                    # §3.2: synced to Python default 0.1 (was 0
 HUMAN_ADVICE_FILE=""
 ADVICE=""
 PLAN_OVERRIDES=""
-# DATA_DIR: lilab environment default per 13.C directive. Python argparse
-# default is None; the shell pre-fills the canonical lilab data path so the
-# chain runbook works without an explicit --data_dir flag on lilab. SDSC
-# operators must override via --data_dir to point at the cluster's
-# scratch path.
-DATA_DIR="/home/klz/Data/TIDMAD/"
+# DATA_DIR: unset by default. The TIDMAD data directory used for training,
+# inference, and scoring is resolved by the Python config layer
+# (execute_tools/data_paths.py -> tidmad_data_config.yaml), so the chain does
+# not need this value to locate data and stays portable across servers.
+# --data_dir only feeds evaluate_time_skill's optional real-dataset wall-time
+# warmup; when empty the time skill uses its static formula. Operators may
+# still pass --data_dir to enable warmup against a specific directory.
+DATA_DIR=""
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
