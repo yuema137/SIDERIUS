@@ -95,20 +95,29 @@ def read_process_rss_bytes() -> int | None:
     return None
 
 
-def capture_storage_provenance(data_dir: str, file_paths: list[str]) -> dict[str, Any]:
+def capture_storage_provenance(
+    data_dir: str, file_paths: list[str], *, scoped_bytes: int | None = None
+) -> dict[str, Any]:
     """Snapshot the dataset's storage identity (§2.2).
 
     Args:
-        data_dir:   Root directory of the dataset.
-        file_paths: Absolute paths of the files the setup will read.
-                    Missing files are counted, not raised — the engine
-                    itself decides how to treat absent files.
+        data_dir:     Root directory of the dataset.
+        file_paths:   Absolute paths of the files the setup will read.
+                      Missing files are counted, not raised — the engine
+                      itself decides how to treat absent files.
+        scoped_bytes: The bytes the setup will ACTUALLY read (sparse /
+                      scoped slices). When provided it becomes
+                      ``expected_raw_bytes`` — pre-Gate finding F2:
+                      whole-file sizes misclassify a genuinely cold
+                      sparse read as warm because the read counter never
+                      approaches the full file size. Whole-file sizes
+                      stay available as ``total_file_bytes``.
 
     Returns:
-        Dict with dataset root, file counts, total expected raw bytes
-        (sum of on-disk sizes of the existing files), and the
-        filesystem type of the best-matching mount point (``"unknown"``
-        when undeterminable).
+        Dict with dataset root, file counts, expected raw bytes (scoped
+        when known, else on-disk file sizes), total on-disk file bytes,
+        and the filesystem type of the best-matching mount point
+        (``"unknown"`` when undeterminable).
     """
     existing = [p for p in file_paths if os.path.exists(p)]
     total_bytes = sum(os.stat(p).st_size for p in existing)
@@ -116,7 +125,8 @@ def capture_storage_provenance(data_dir: str, file_paths: list[str]) -> dict[str
         "dataset_root": os.path.abspath(data_dir),
         "file_count": len(file_paths),
         "files_present": len(existing),
-        "expected_raw_bytes": total_bytes,
+        "expected_raw_bytes": scoped_bytes if scoped_bytes is not None else total_bytes,
+        "total_file_bytes": total_bytes,
         "filesystem_type": _filesystem_type(os.path.abspath(data_dir)),
     }
 

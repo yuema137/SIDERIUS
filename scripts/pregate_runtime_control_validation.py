@@ -94,10 +94,13 @@ class SidecarWatcher(threading.Thread):
         super().__init__(daemon=True)
         self.path = path
         self.stages: list[str] = []
-        self._stop = threading.Event()
+        # NOTE: must not be named ``_stop`` — that shadows
+        # threading.Thread._stop(), which the interpreter calls on
+        # join/fork (found live in scenario 1).
+        self._halt = threading.Event()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._halt.is_set():
             try:
                 with open(self.path, encoding="utf-8") as f:
                     status = json.load(f).get("final_status")
@@ -108,7 +111,7 @@ class SidecarWatcher(threading.Thread):
             time.sleep(0.2)
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
 
 
 def _component_table(observation: dict) -> dict:
@@ -275,7 +278,10 @@ def main() -> int:
 
     elif scenario == 3:
         # Watchdog: tiny training admitted under the 90 s budget; the
-        # 480-batch / 240 MB-output inference outlasts it and is KILLED.
+        # inference outlasts the deadline and is KILLED. Eval scope
+        # resized after S1/S2 measured ~19.4 ms/batch on this H100
+        # (2x faster than the sizing guess): 80 PSD → 3200 batches
+        # ≈ 65-75 s, above the 60 s floor / sub-90 s tightened deadline.
         policy = {
             **base_policy,
             "operator_budget_seconds": 90.0,
@@ -293,7 +299,7 @@ def main() -> int:
             model_cfg={**WAVENET_SMALL},
             train_cfg={"epochs": 1, "batch_size": 8, "optimizer_type": "adam", "lr": 5e-4},
             train_ss={"0": [0, 1]},
-            eval_ss={"0": list(range(10)), "1": [0, 1]},
+            eval_ss={"0": list(range(40)), "1": list(range(40))},
             policy=policy,
             run_inference=True,
             report=report,

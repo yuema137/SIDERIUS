@@ -326,7 +326,13 @@ def main():
         per_file_timings_ms: list[dict] = []
         use_cuda_sync = torch.cuda.is_available()
         write_seconds_per_psd: list[float] = []
+        # Pre-Gate finding F1: input loading and the per-file fixed
+        # residual (allocs, gc, sidecar writes) must be PRICED, not
+        # hidden — at small scales they dominate the prediction error.
+        read_seconds_per_psd: list[float] = []
+        residual_seconds_per_file: list[float] = []
         total_psd_planned = sum(len(v) for v in sample_set.values())
+        total_files_planned = len(sample_set)
         verification_completed = False
         if runtime_session is not None:
             runtime_session.record_phase_workload(
@@ -343,30 +349,38 @@ def main():
             """Assemble the inference prediction once evidence suffices.
 
             §2.6 prediction = resolved batches × steady batch time
-            + inference setup + output-write term. The write term is
-            extrapolated per PSD segment from measured file writes so
-            output cost is priced separately from compute, never hidden
-            inside it.
+            + inference setup + input-read term + output-write term
+            + per-file fixed residual. Read/write are extrapolated per
+            PSD segment and the residual per file from measured file
+            passes, so I/O and fixed costs are priced separately from
+            compute, never hidden inside it (pre-Gate finding F1).
             """
             nonlocal verification_completed
             assert runtime_session is not None and verifier is not None
-            write_per_psd = (
-                sum(write_seconds_per_psd) / len(write_seconds_per_psd)
-                if write_seconds_per_psd
-                else 0.0
-            )
+
+            def _mean(values: list[float]) -> float:
+                return sum(values) / len(values) if values else 0.0
+
+            write_per_psd = _mean(write_seconds_per_psd)
+            read_per_psd = _mean(read_seconds_per_psd)
+            residual_per_file = _mean(residual_seconds_per_file)
             runtime_session.complete_phase_verification(
                 "inference",
                 verifier,
                 source="real_inference_verification",
                 extra_predicted_seconds=(
-                    inference_setup_seconds + write_per_psd * total_psd_planned
+                    inference_setup_seconds
+                    + (read_per_psd + write_per_psd) * total_psd_planned
+                    + residual_per_file * total_files_planned
                 ),
                 extra_detail={
                     "inference_setup_seconds": inference_setup_seconds,
+                    "input_read_seconds_per_psd": read_per_psd,
                     "output_write_seconds_per_psd": write_per_psd,
-                    "output_write_files_measured": len(write_seconds_per_psd),
+                    "per_file_residual_seconds": residual_per_file,
+                    "io_files_measured": len(write_seconds_per_psd),
                     "total_psd_planned": total_psd_planned,
+                    "total_files_planned": total_files_planned,
                 },
             )
             verification_completed = True
@@ -443,6 +457,10 @@ def main():
             denoised = np.zeros((dim1, input_size), dtype=np.int8)
             injected = np.zeros((dim1, input_size), dtype=np.int8)
             bs = args.inference_batch_size
+            # F1: input-read window = file open → loop start (h5 slice,
+            # concat, reshape, buffer alloc), priced per PSD segment.
+            t_loop_start = time.perf_counter()
+            file_read_seconds = t_loop_start - t_file_start
 
             for i in tqdm(
                 range(0, dim1, bs),
@@ -474,6 +492,8 @@ def main():
                         _complete_inference_verification()
                         verifier = None
 
+            file_loop_seconds = time.perf_counter() - t_loop_start
+
             if os.path.exists(out_name):
                 os.remove(out_name)
 
@@ -495,10 +515,35 @@ def main():
                 injected.flatten().astype(np.int8),
                 indexed=False,
             )
-            write_seconds_per_psd.append(
-                (time.perf_counter() - t_write) / max(len(psd_segment_indices), 1)
-            )
+            file_write_seconds = time.perf_counter() - t_write
+            n_psd_this_file = max(len(psd_segment_indices), 1)
+            write_seconds_per_psd.append(file_write_seconds / n_psd_this_file)
+            read_seconds_per_psd.append(file_read_seconds / n_psd_this_file)
             print(f"Trial inference saved: {out_name}")
+
+            del denoised, injected
+            gc.collect()
+
+            elapsed_ms = (time.perf_counter() - t_file_start) * 1000.0
+            # F1: the per-file fixed residual — everything the read /
+            # compute-loop / write windows do not cover (allocs, gc,
+            # deletes, file bookkeeping) — priced per file.
+            residual_seconds_per_file.append(
+                max(
+                    elapsed_ms / 1000.0
+                    - file_read_seconds
+                    - file_loop_seconds
+                    - file_write_seconds,
+                    0.0,
+                )
+            )
+            per_file_timings_ms.append(
+                {
+                    "file_index": file_index,
+                    "n_psd_segs": len(psd_segment_indices),
+                    "elapsed_ms": elapsed_ms,
+                }
+            )
 
             if (
                 runtime_session is not None
@@ -507,21 +552,10 @@ def main():
                 and verifier.is_terminal
             ):
                 # Verification went terminal mid-file before any write was
-                # measured — complete now that the first write cost exists.
+                # measured — complete now that this file's full I/O split
+                # (read / write / residual) exists.
                 _complete_inference_verification()
                 verifier = None
-
-            del denoised, injected
-            gc.collect()
-
-            elapsed_ms = (time.perf_counter() - t_file_start) * 1000.0
-            per_file_timings_ms.append(
-                {
-                    "file_index": file_index,
-                    "n_psd_segs": len(psd_segment_indices),
-                    "elapsed_ms": elapsed_ms,
-                }
-            )
 
         if args.timing_out_json:
             with open(args.timing_out_json, "w") as f:

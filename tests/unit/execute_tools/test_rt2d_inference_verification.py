@@ -171,6 +171,9 @@ class TestInferenceVerification:
         detail = pred["detail"]
         assert detail["inference_setup_seconds"] > 0.0
         assert detail["output_write_seconds_per_psd"] >= 0.0
+        # Pre-Gate F1: input-read and per-file residual terms priced too.
+        assert detail["input_read_seconds_per_psd"] >= 0.0
+        assert detail["per_file_residual_seconds"] >= 0.0
         assert detail["total_psd_planned"] == N_PSD_SEGMENTS
         assert inference["prediction_error"] is not None
 

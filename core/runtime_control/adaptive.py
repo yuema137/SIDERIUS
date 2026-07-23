@@ -295,16 +295,19 @@ class AdaptiveUnitVerification:
             self._prior_agreement = "new_configuration"
             return
         ratio = steady_median_ms / self.prior_expected_unit_ms
-        agreement: PriorAgreement = (
+        # Recomputed on EVERY measuring step from the current steady
+        # median: a transient early median must not lock in a "drift"
+        # verdict that the settled plateau contradicts (pre-Gate S4
+        # finding F3 — the old sticky rule labeled a 0.98-ratio run
+        # verified_drift). While the momentary ratio is outside
+        # tolerance the extended-measurement requirement applies (§2.5
+        # "keep measuring within budget"); the outcome that persists is
+        # the one in force at the verification stopping point.
+        self._prior_agreement = (
             "verified_match"
             if abs(ratio - 1.0) <= self.config.prior_match_tol
             else "verified_drift"
         )
-        # A drifting prior never flips back to match mid-verification —
-        # the extended-measurement requirement must stay sticky, or the
-        # required-steps target would oscillate with the rolling median.
-        if self._prior_agreement != "verified_drift":
-            self._prior_agreement = agreement
 
     # ── Results ──────────────────────────────────────────────────────────
 

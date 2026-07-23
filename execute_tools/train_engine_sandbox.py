@@ -606,8 +606,15 @@ def run_experiment_streaming(
                 os.path.join(data_dir, f"abra_training_{int(k):04d}.h5")
                 for k in sorted(sample_set.keys(), key=int)
             ]
+            # Scoped read volume (pre-Gate F2): the setup reads only the
+            # scope's PSD slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
+            n_psd_scoped = sum(len(v) for v in sample_set.values())
             runtime_session.complete_setup(
-                storage_provenance=capture_storage_provenance(data_dir, file_paths),
+                storage_provenance=capture_storage_provenance(
+                    data_dir,
+                    file_paths,
+                    scoped_bytes=n_psd_scoped * PSD_SEGMENT_LENGTH * 3,
+                ),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
                     unit="optimizer_step",
