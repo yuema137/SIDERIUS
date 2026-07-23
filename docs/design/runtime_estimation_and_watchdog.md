@@ -75,7 +75,7 @@ Runtime-Control Implementation
 [x] RT2-D   — inference verification (734592b, 2ad6222)
 [x] RT2-E   — scoring + orchestration accounting (0cca7bf; contribution-based policy per operator decision)
 [x] RT2-F   — observation store + historical priors (9a6f0a0; built before RT2-E — no dependency on its decision)
-[ ] RT2-G   — formal admission wiring + pseudo integration
+[x] RT2-G   — formal admission wiring + pseudo integration (c5ec268)
 [ ] RT3     — trigger policy + provenance fields
 [ ] RT4     — runtime watchdog
 [ ] RT5     — guardrails
@@ -1581,3 +1581,45 @@ Built:
   with `historical_orchestration` (env-scoped, provenance-recorded);
   live orchestration actuals accrue via the store once RT2-G wires
   appends.
+
+### RT2-G — formal admission wiring + pseudo integration ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `c5ec268`.
+- **Checkpoint** (targeted, per the operator's test-scope policy — the
+  §11 full-suite requirement moves to the pre-Gate sweep): 5 hermetic
+  tuner-wiring tests + 3 store-prior tests; tuner suite 637 passed;
+  core + execute_tools 875 passed / 1 pre-existing skip; ruff + format
+  clean; pyright 0 errors (rejection-record construction extracted to
+  keep `run()` under the analyzer's complexity ceiling).
+
+Built:
+
+- [x] Tuner policy wiring: formal rounds enforce the operator budget
+  (seconds) — the in-subprocess measured verification is the sole
+  formal authority (§2.1/§3), the pre-flight time gate stays as the
+  cheap screen; trial rounds run RECORD-ONLY (observations + priors
+  accrue, zero behavior change). Policy carries the store root.
+- [x] Rejection routing + ATTEMPT ACCOUNTING (operator decision):
+  `rejected_time_risk` → `skipped_time_risk` record (§2.11 vocabulary)
+  with `memory.verification_stage="in_subprocess"`, §2.1 cost-model
+  discovery text, attached observation — and the attempt is CONSUMED
+  (real setup was paid), unlike pre-flight skips.
+- [x] §7.3 additive record field: success records carry
+  `runtime_verification` (inference-side block preferred — it resumed
+  the training observation; explicit `None` otherwise). Finalized and
+  rejected observations appended to
+  `{workspace}/runtime_observations/` (best-effort, §6.3 fail-safe).
+- [x] Prior consumption: `session.lookup_phase_prior` (context + §6b
+  env checks; only `valid` lookups yield priors) consumed by the
+  trainer at `start_phase_verification` — §2.5 early exit on
+  `verified_match`, never a verification substitute. Skill wrappers
+  forward `runtime_policy`.
+- **Admission scenarios (§11) evidence map**: static-only formal →
+  in-subprocess verification failure fails closed
+  (`test_failed_verification_fails_closed_with_budget`); prior without
+  verification → priors only feed `start_phase_verification`, never
+  predictions (structural + `test_prior_enables_verified_match_early_
+  exit`); verified admission + verified over-budget → RT2-C session
+  tests + worked example 3; legacy records →
+  `TestRecordVerifiedUnderContributionPolicy` + RT2-A §7.3 matrix;
+  tuner-level routing → the RT2-G harness suite.
