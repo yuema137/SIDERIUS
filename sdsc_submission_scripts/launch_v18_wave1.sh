@@ -156,4 +156,4 @@ for spec in "${WAVE1[@]}"; do
     sleep 90
   fi
 done
-echo "[done] wave-1 ${DRY_RUN:+dry-run }processing complete"
+if [ "$DRY_RUN" = 1 ]; then echo "[done] wave-1 dry-run complete"; else echo "[done] wave-1 launch complete"; fi
