@@ -51,7 +51,7 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-    "real_run: requires API keys and real TIDMAD data. Run locally only with: pytest -m real_run",
+    "real_run: requires API keys and real TIDMAD data. Skipped unless a real-mode flag is passed. Run locally only with: pytest -m real_run --real-api-call",
     "real_data: uses real TIDMAD HDF5 files instead of synthetic data. Enable with: pytest --real-data",
 ]
 
