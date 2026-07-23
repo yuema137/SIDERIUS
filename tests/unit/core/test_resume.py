@@ -1450,3 +1450,92 @@ class TestRestorePriorStateProposalCarryOver:
         state = restore_prior_state(str(tmp_path), 2, [])
         assert state.committed_iters == [1]
         assert state.previous_proposal_data is None
+
+
+# ===========================================================================
+# DS6b — run-invariants ingress validation
+# ===========================================================================
+
+from core.run_invariants import (
+    RunInvariants,
+    RunInvariantsViolation,
+    write_run_invariants,
+)
+
+_FULL_SCOPE = list(range(20))
+_INV_FULL = RunInvariants(
+    resolved_data_scope=_FULL_SCOPE,
+    health_gate_enabled=True,
+    health_config_sha256="e" * 64,
+)
+_INV_PARTIAL = RunInvariants(
+    resolved_data_scope=[4, 5, 6, 7, 8, 9],
+    health_gate_enabled=True,
+    health_config_sha256="e" * 64,
+)
+
+
+class TestRunInvariantsIngress:
+    def test_none_skips_all_checks(self, tmp_path, isolated_registries):
+        """expected_invariants=None → pre-DS6b behavior, even with a
+        contradicting lock present."""
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        write_run_invariants(str(tmp_path), _INV_PARTIAL)
+        state = restore_prior_state(str(tmp_path), 2, [])
+        assert state.committed_iters == [1]
+
+    def test_legacy_unstamped_history_vs_full_run_passes(self, tmp_path, isolated_registries):
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        state = restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_FULL)
+        assert state.committed_iters == [1]
+
+    def test_legacy_unstamped_history_vs_partial_run_fails_unmutated(
+        self, tmp_path, isolated_registries
+    ):
+        from ml_models.models_sandbox import MODEL_REGISTRY
+
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        with pytest.raises(RunInvariantsViolation, match="resolved_data_scope"):
+            restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+        # The mismatching iter's plugin was NOT registered (fails before
+        # mutation — DS6b invariant 4).
+        assert "resume_test_arch_a" not in MODEL_REGISTRY
+
+    def test_stamped_matching_history_passes(self, tmp_path, isolated_registries):
+        _materialise_iter(
+            tmp_path,
+            1,
+            "resume_test_arch_a",
+            0.71,
+            run_output_overrides={
+                "resolved_data_scope": [4, 5, 6, 7, 8, 9],
+                "health_gate_enabled": True,
+                "health_config_sha256": "e" * 64,
+            },
+        )
+        state = restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+        assert state.committed_iters == [1]
+
+    def test_stamped_sha_drift_fails(self, tmp_path, isolated_registries):
+        _materialise_iter(
+            tmp_path,
+            1,
+            "resume_test_arch_a",
+            0.71,
+            run_output_overrides={
+                "resolved_data_scope": [4, 5, 6, 7, 8, 9],
+                "health_gate_enabled": True,
+                "health_config_sha256": "f" * 64,
+            },
+        )
+        with pytest.raises(RunInvariantsViolation, match="health_config_sha256"):
+            restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_PARTIAL)
+
+    def test_contradicting_lock_fails_before_any_iter(self, tmp_path, isolated_registries):
+        from ml_models.models_sandbox import MODEL_REGISTRY
+
+        _materialise_iter(tmp_path, 1, "resume_test_arch_a", 0.71)
+        write_run_invariants(str(tmp_path), _INV_PARTIAL)
+        with pytest.raises(RunInvariantsViolation, match="lock violation"):
+            restore_prior_state(str(tmp_path), 2, [], expected_invariants=_INV_FULL)
+        assert "resume_test_arch_a" not in MODEL_REGISTRY

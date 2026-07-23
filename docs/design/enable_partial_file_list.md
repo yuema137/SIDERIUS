@@ -1122,9 +1122,10 @@ workspace becomes scope-homogeneous (atomic lock + ingress validation +
 functional campaign identity).
 
 **Code**:
-- [ ] `workflows/model_exploration.py` — `run_workflow(data_scope=...,
+- [x] `workflows/model_exploration.py` — `run_workflow(data_scope=...,
   health_gate_enabled=..., health_gate_files=...)`; resolve once; pre-flight
   `validate_runtime_config` equivalents (fail before iteration 1's LLM calls).
+  *(DS6b)*
 - [ ] **Atomic run-invariants lock**: `{workspace}/run_invariants_lock.json`
   created via same-directory temp file + `os.link` (first writer wins;
   losing writer re-reads and validates. Corrected from the round-4 text's
@@ -1142,12 +1143,19 @@ functional campaign identity).
   the same workspace, and `core/resume.restore_prior_state` read-and-validate,
   fail fast on mismatch (scope change, enabled flip, or policy-content drift
   each produce a distinct error message).
+  *(DS6b — done for workflow startup, standalone tuner, and
+  `restore_prior_state`; the box is ticked when the chain CLI threads
+  `expected_invariants` in DS6c)*
 - [ ] **Ingress validation**: seed summaries / seed_records / restored outputs /
   `run_comparison.seed_agent_memory` — compare each record's
   `resolved_data_scope` (missing = full scope) against the run scope; mismatch
   → startup `ValueError` naming the offending record path.
-- [ ] `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — thread
-  `data_scope` + `health_gate_enabled` + `health_gate_files`.
+  *(DS6b — seed summaries + restored outputs done via
+  `validate_stamped_invariants` in `run_workflow` pre-flight,
+  `restore_prior_state`, and tuner resume-history; `seed_records` and
+  `run_comparison.seed_agent_memory` remain for DS6c/DS6d)*
+- [x] `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — thread
+  `data_scope` + `health_gate_enabled` + `health_gate_files`. *(DS6b)*
 - [ ] `sdsc_submission_scripts/run_one_iteration.py` + `_chain_common.sh` +
   `run_chain.sh` — `--data_scope "4-9"` / `--health_gate_enabled|--no-...` /
   `--health_gate_files "4,7,9"` (parsed via `DataScope.from_cli`).
@@ -1167,12 +1175,18 @@ functional campaign identity).
   each fail with their distinct message; ingress validation
   (stamped-match, stamped-mismatch, legacy-unstamped=full); protocol
   threading; CLI parsing round-trip
+  *(DS6b — all done except the chain-CLI parsing round-trip (DS6c):
+  `test_run_invariants.py` 27, `test_resume.py::TestRunInvariantsIngress`
+  6, protocol `TestDataScopeThreading` 3, workflow
+  `test_data_scope_preflight.py` 8)*
 - [ ] Campaign: manifest with mismatched scope → `ValidationReport` error;
   matching scope → reuse allowed
 - [ ] Pseudo-mode workflow test: one-iteration `run_workflow` with partial
   scope on stubs — lock written, tuner input carries scope, manifest stamped
-- [ ] Pseudo-mode: seeded workflow with full-scope legacy seeds + partial scope
-  → fails at ingress with the documented error
+- [x] Pseudo-mode: seeded workflow with full-scope legacy seeds + partial scope
+  → fails at ingress with the documented error *(DS6b —
+  `test_data_scope_preflight.py::test_legacy_full_scope_seed_vs_partial_run`;
+  fails before the lock is stamped, no LLM stubs needed)*
 
 **Verification checklist**:
 - [ ] Chain smoke in pseudo mode (`run_one_iteration.py` with `--pseudo` +
@@ -1201,6 +1215,63 @@ functional campaign identity).
 - Wiring into workflow startup / standalone tuner / resume / campaign
   validation lands in the subsequent DS6 commits; bullets stay unticked
   until then.
+
+**Implementation notes** (2026-07-23, DS6b — workflow/tuner/protocol/resume
+wiring; operator invariants 1–5 recorded in this session's directions):
+- Shared computation (invariants 1/2/5): new
+  `core/run_invariants.build_run_invariants` materializes + hashes the
+  effective HealthGate config FIRST, then constructs `RunInvariants` —
+  the one path both `run_workflow` pre-flight and the tuner startup call;
+  `validate_stamped_invariants` is the shared legacy-aware ingress check
+  (unstamped scope = full; unstamped enabled = gates-active, compatible
+  only with enabled runs; missing sha = pre-policy-lock, skipped).
+- Tuner: DS5b's inline materialization replaced by the shared helper. An
+  existing lock is validated at startup (before hardware/LLM/sandbox);
+  lock CREATION is deferred until `sandbox.get_summary()` history is
+  stamp-validated (final records only — error records carry no stamps by
+  design), still before the first plan call. Invariant 3: a legacy
+  workspace is never silently locked.
+- `run_workflow`: three new params; pre-flight after Step-0 seed loading —
+  operator-contract checks (partial+formal_strategy, enabled+partial+no
+  files), `build_run_invariants` at the CHAIN ROOT (`workspace`, shared
+  across iterations — the scalar-comparability boundary; per-iteration
+  tuner dirs get their own identical-sha lock), stamp-validation of every
+  loaded seed/restored output, THEN `ensure_run_invariants`. The original
+  `health_checks_config` (not the chain-root effective path) is still
+  forwarded to tuners — each tuner re-materializes into its own workspace
+  and pins the identical body sha.
+- Protocol `local_validated_model`: threads the three fields;
+  `data_scope=None` normalizes to the explicit full scope at the protocol
+  layer so the input always carries a concrete `DataScope`.
+- `core/resume.restore_prior_state(expected_invariants=None)`: validates
+  an existing workspace lock up front and each prior iter's parsed
+  run_output stamps BEFORE that iter's plugin registration (zero registry
+  mutation on mismatch — invariant 4). Production threading of
+  `expected_invariants` from the chain CLI lands in DS6c.
+- Guard layering discovered while testing: with gates enabled, changed
+  operator inputs on a locked workspace hit the materialized-config
+  immutability guard (DS4) before the lock check — both are pre-LLM
+  fail-fast; the lock additionally covers what materialization can't see
+  (scope drift with identical health inputs, enable flips, disabled
+  runs). Pinned by
+  `test_data_scope_preflight.py::TestPreflightPass` (both orders).
+- Tests: `test_run_invariants.py` 27/27 (+13);
+  `test_resume.py::TestRunInvariantsIngress` 6/6; protocol
+  `TestDataScopeThreading` 3/3 (file 49/49);
+  `test_data_scope_preflight.py` 8/8 (sentinel on
+  `ResultInterpretationAgent` proves lock-before-first-agent with no LLM
+  stubs); DataScope tuner regression set 33/33.
+- **Full-suite results (2026-07-23, pre-commit)**: `tests/unit/` **3963
+  passed** / 1 skipped / 3 xfailed (4:23);
+  `tests/integration/ -m "not real_run"` **124 passed** / 1 failed
+  (FU-7 vocab only — pre-existing on master) / 1 skipped / 129
+  deselected (9:42); ruff check + format clean; pyright clean.
+- Operator audit rider (2026-07-23): backward-compat audit delivered —
+  behavioral identity holds for default configs; deliberate breaks are
+  workspace policy immutability, legacy-resume-with-disabled-gates
+  refusal, the closed `score_vector` validation gap, and two new
+  workspace artifacts. Follow-up approved as a separate commit: FU-10
+  `plan_overrides` fail-fast hardening (see tracker).
 
 ---
 
@@ -1417,6 +1488,16 @@ standard.
   once DS6 plumbs the flag through `run_workflow` (currently passing
   because its choreography doesn't reach gate-dependent rounds; add the
   flag in DS6 for consistency and future-proofing).
+- **FU-10** — `plan_overrides` fail-fast hardening (operator-approved
+  2026-07-23, separate small commit after DS6b): unknown keys fail at
+  schema validation; overrides merge over every LLM plan and the
+  effective plan revalidates; an invalid effective plan is an
+  operator-configuration error that terminates the run — the
+  warn-and-use-unclamped-plan fallback
+  (`ml_hyperparameter_tune_agent.py:1806-1815`) is removed. Alias-vs-
+  python-name key normalization included. No new strategy-lock fields —
+  `plan_overrides` + the fixed-params disclosure block remain the
+  preferred strategy-locking abstraction.
 
 ## Non-goals (explicit out of scope)
 

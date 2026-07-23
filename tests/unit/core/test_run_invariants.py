@@ -19,9 +19,11 @@ from core.run_invariants import (
     RUN_INVARIANTS_BASENAME,
     RunInvariants,
     RunInvariantsViolation,
+    build_run_invariants,
     ensure_run_invariants,
     load_run_invariants,
     validate_run_invariants,
+    validate_stamped_invariants,
     write_run_invariants,
 )
 
@@ -132,3 +134,184 @@ class TestViolationMatrix:
             "health_config_sha256",
             "created_at",
         }
+
+
+FULL_SCOPE = list(range(20))
+
+
+class TestBuildRunInvariants:
+    """DS6b — the ONE shared invariant-computation path (materialize+hash
+    first, then construct)."""
+
+    def test_enabled_full_scope_materializes_and_hashes(self, tmp_path):
+        inv, path = build_run_invariants(
+            resolved_data_scope=FULL_SCOPE,
+            health_gate_enabled=True,
+            health_gate_files=None,
+            health_checks_config=None,
+            workspace=str(tmp_path),
+        )
+        assert path is not None and os.path.isfile(path)
+        assert inv.health_config_sha256 is not None
+        assert inv.resolved_data_scope == FULL_SCOPE
+        assert inv.health_gate_enabled is True
+
+    def test_disabled_has_no_config_and_null_sha(self, tmp_path):
+        inv, path = build_run_invariants(
+            resolved_data_scope=[4, 5, 6],
+            health_gate_enabled=False,
+            health_gate_files=None,
+            health_checks_config=None,
+            workspace=str(tmp_path),
+        )
+        assert path is None
+        assert inv.health_config_sha256 is None
+        assert not os.path.exists(tmp_path / "health_checks_effective.yaml")
+
+    def test_partial_scope_with_in_scope_files(self, tmp_path):
+        inv, path = build_run_invariants(
+            resolved_data_scope=[4, 5, 6, 7, 8, 9],
+            health_gate_enabled=True,
+            health_gate_files=[4, 7, 9],
+            health_checks_config=None,
+            workspace=str(tmp_path),
+        )
+        assert path is not None
+        assert inv.health_config_sha256 is not None
+
+    def test_partial_scope_out_of_scope_files_fails(self, tmp_path):
+        with pytest.raises(ValueError, match="DataScope"):
+            build_run_invariants(
+                resolved_data_scope=[4, 5, 6, 7, 8, 9],
+                health_gate_enabled=True,
+                health_gate_files=[3, 7],
+                health_checks_config=None,
+                workspace=str(tmp_path),
+            )
+
+    def test_partial_scope_default_peeks_fail_without_override(self, tmp_path):
+        # The shipped YAML peeks [3,10,17]; without health_gate_files the
+        # helper itself rejects a scope excluding them — the invariant is
+        # enforced even if a caller skipped its precondition checks.
+        with pytest.raises(ValueError):
+            build_run_invariants(
+                resolved_data_scope=[4, 5, 6, 7, 8, 9],
+                health_gate_enabled=True,
+                health_gate_files=None,
+                health_checks_config=None,
+                workspace=str(tmp_path),
+            )
+
+    def test_deterministic_sha_across_workspaces(self, tmp_path):
+        """Workflow (chain root) and tuner (its own dir) must pin the SAME
+        sha from the same canonical inputs — invariant 2 of DS6b."""
+        inv_a, _ = build_run_invariants(
+            resolved_data_scope=FULL_SCOPE,
+            health_gate_enabled=True,
+            health_gate_files=None,
+            health_checks_config=None,
+            workspace=str(tmp_path / "chain_root"),
+        )
+        inv_b, _ = build_run_invariants(
+            resolved_data_scope=FULL_SCOPE,
+            health_gate_enabled=True,
+            health_gate_files=None,
+            health_checks_config=None,
+            workspace=str(tmp_path / "iter_001_tuner"),
+        )
+        assert inv_a.canonical() == inv_b.canonical()
+
+
+class TestValidateStampedInvariants:
+    """DS6b — legacy-aware ingress validation of persisted stamps."""
+
+    EXPECTED_FULL = RunInvariants(
+        resolved_data_scope=FULL_SCOPE,
+        health_gate_enabled=True,
+        health_config_sha256="e" * 64,
+    )
+    EXPECTED_PARTIAL = RunInvariants(
+        resolved_data_scope=[4, 5, 6, 7, 8, 9],
+        health_gate_enabled=True,
+        health_config_sha256="e" * 64,
+    )
+
+    def test_fully_stamped_match_passes(self):
+        validate_stamped_invariants(
+            {
+                "resolved_data_scope": FULL_SCOPE,
+                "health_gate_enabled": True,
+                "health_config_sha256": "e" * 64,
+            },
+            self.EXPECTED_FULL,
+            full_scope=FULL_SCOPE,
+            source="record x",
+        )
+
+    def test_legacy_unstamped_vs_full_run_passes(self):
+        validate_stamped_invariants(
+            {}, self.EXPECTED_FULL, full_scope=FULL_SCOPE, source="legacy record"
+        )
+
+    def test_legacy_unstamped_vs_partial_run_fails(self):
+        with pytest.raises(RunInvariantsViolation, match="legacy = full scope"):
+            validate_stamped_invariants(
+                {}, self.EXPECTED_PARTIAL, full_scope=FULL_SCOPE, source="legacy record"
+            )
+
+    def test_stamped_scope_mismatch_fails(self):
+        with pytest.raises(RunInvariantsViolation, match="resolved_data_scope"):
+            validate_stamped_invariants(
+                {"resolved_data_scope": [1, 2, 3]},
+                self.EXPECTED_FULL,
+                full_scope=FULL_SCOPE,
+                source="record x",
+            )
+
+    def test_enabled_flip_fails(self):
+        expected_disabled = RunInvariants(
+            resolved_data_scope=FULL_SCOPE,
+            health_gate_enabled=False,
+            health_config_sha256=None,
+        )
+        with pytest.raises(RunInvariantsViolation, match="health_gate_enabled"):
+            validate_stamped_invariants(
+                {"resolved_data_scope": FULL_SCOPE, "health_gate_enabled": True},
+                expected_disabled,
+                full_scope=FULL_SCOPE,
+                source="record x",
+            )
+
+    def test_legacy_missing_enabled_incompatible_with_disabled_run(self):
+        expected_disabled = RunInvariants(
+            resolved_data_scope=FULL_SCOPE,
+            health_gate_enabled=False,
+            health_config_sha256=None,
+        )
+        with pytest.raises(RunInvariantsViolation, match="legacy = gates active"):
+            validate_stamped_invariants(
+                {"resolved_data_scope": FULL_SCOPE},
+                expected_disabled,
+                full_scope=FULL_SCOPE,
+                source="record x",
+            )
+
+    def test_sha_drift_fails_and_missing_sha_skipped(self):
+        with pytest.raises(RunInvariantsViolation, match="health_config_sha256"):
+            validate_stamped_invariants(
+                {
+                    "resolved_data_scope": FULL_SCOPE,
+                    "health_gate_enabled": True,
+                    "health_config_sha256": "f" * 64,
+                },
+                self.EXPECTED_FULL,
+                full_scope=FULL_SCOPE,
+                source="record x",
+            )
+        # Missing sha (pre-policy-lock record) → skipped, no error.
+        validate_stamped_invariants(
+            {"resolved_data_scope": FULL_SCOPE, "health_gate_enabled": True},
+            self.EXPECTED_FULL,
+            full_scope=FULL_SCOPE,
+            source="record x",
+        )

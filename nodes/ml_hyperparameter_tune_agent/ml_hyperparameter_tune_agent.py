@@ -49,13 +49,19 @@ from agent.utils.architectural_pattern_tagger import (
     tag_architecture,
 )
 from core.hardware_context import get_or_create
+from core.run_invariants import (
+    build_run_invariants,
+    ensure_run_invariants,
+    load_run_invariants,
+    validate_run_invariants,
+    validate_stamped_invariants,
+)
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
-from execute_tools.health_checks.config import materialize_effective_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
@@ -1324,18 +1330,32 @@ class HyperparamTuningAgent:
         resolved_data_scope = validate_runtime_config(agent_input)
         scope_is_partial = resolved_data_scope != list(range(DATASET_CONFIG.num_files))
         health_checks_config_source = agent_input.health_checks_config
-        health_config_sha256: str | None = None
-        if agent_input.health_gate_enabled:
-            effective_path, health_config_sha256 = materialize_effective_config(
-                health_checks_config_source,
-                agent_input.health_gate_files,
-                workspace,
-                resolved_scope=resolved_data_scope,
-            )
+        # DS6b — build_run_invariants is the ONE shared path (tuner +
+        # workflow) that materializes/hashes the effective config and then
+        # constructs the invariants from the result, so the sha in the lock
+        # always describes the exact config this run reads.
+        run_invariants, _effective_config_path = build_run_invariants(
+            resolved_data_scope=resolved_data_scope,
+            health_gate_enabled=agent_input.health_gate_enabled,
+            health_gate_files=agent_input.health_gate_files,
+            health_checks_config=health_checks_config_source,
+            workspace=workspace,
+        )
+        health_config_sha256 = run_invariants.health_config_sha256
+        if _effective_config_path is not None:
             # Path swap: every downstream path-based loader (gate lookup,
             # evaluation, output persistence) now reads the materialized
             # effective config through the existing plumbing.
-            agent_input.health_checks_config = effective_path
+            agent_input.health_checks_config = _effective_config_path
+        # Run-invariants lock (DS6b): an existing lock is validated NOW so a
+        # mismatched configuration fails before any hardware/LLM/sandbox
+        # work. CREATION on a lock-less workspace is deferred until the
+        # workspace's existing history has been stamp-validated (see the
+        # get_summary() site) — a legacy workspace is never silently locked
+        # before its records are checked against this run's invariants.
+        _lock_was_present = load_run_invariants(workspace) is not None
+        if _lock_was_present:
+            validate_run_invariants(workspace, run_invariants)
         if scope_is_partial:
             print(
                 f"[DATASCOPE] Partial scope active: files={resolved_data_scope} "
@@ -1568,6 +1588,21 @@ class HyperparamTuningAgent:
                 f"[RESUME] Found {completed_rounds}/{max_rounds} completed "
                 f"round(s) and {total_attempts} prior attempt(s); continuing."
             )
+        # DS6b — ingress validation + deferred lock creation. On a lock-less
+        # workspace, every restored final record's invariant stamps are
+        # checked BEFORE the lock is stamped (error records deliberately
+        # carry no stamps — DS5b — and are skipped). Still before any LLM
+        # call: the first plan call happens inside the round loop below.
+        if not _lock_was_present:
+            for _rec in existing_history:
+                if _rec.get("status") in {"success", "failed_mode_collapse"}:
+                    validate_stamped_invariants(
+                        _rec,
+                        run_invariants,
+                        full_scope=list(range(DATASET_CONFIG.num_files)),
+                        source=(f"workspace summary record {_rec.get('exp_id') or '(no exp_id)'}"),
+                    )
+        ensure_run_invariants(workspace, run_invariants)
         consecutive_fails = 0
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state

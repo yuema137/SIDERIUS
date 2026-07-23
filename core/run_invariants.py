@@ -208,3 +208,121 @@ def ensure_run_invariants(workspace: str, expected: RunInvariants) -> str:
     except FileExistsError:
         validate_run_invariants(workspace, expected)
         return "validated"
+
+
+def build_run_invariants(
+    resolved_data_scope: list[int],
+    health_gate_enabled: bool,
+    health_gate_files: list[int] | None,
+    health_checks_config: str | None,
+    workspace: str,
+) -> tuple[RunInvariants, str | None]:
+    """Compute a run's invariants — the ONE shared path for every entry point.
+
+    Materializes and hashes the effective HealthGate config FIRST (when
+    gates are enabled), then constructs ``RunInvariants`` from the result,
+    so the sha in the lock always describes the exact config the run will
+    read. Workflow startup and the standalone tuner both call this — never
+    duplicate the normalization/hashing logic at a call site.
+
+    Args:
+        resolved_data_scope: Already-resolved sorted file indices (the
+            caller runs its scope validation — e.g.
+            ``validate_runtime_config`` — before this).
+        health_gate_enabled: The run's HealthGate switch.
+        health_gate_files: Run-level shared monitored-file list
+            (``None`` = YAML defaults; only legal with a full scope).
+        health_checks_config: Operator-supplied HealthGate YAML path, or
+            ``None`` for the shipped default.
+        workspace: Directory receiving ``health_checks_effective.yaml``.
+
+    Returns:
+        ``(invariants, effective_config_path)`` — the path is ``None`` when
+        gates are disabled (no effective config exists for disabled runs).
+    """
+    # Imported here, not at module top: keeps this generic module importable
+    # without the health-check package for consumers that only need the
+    # lock primitives (and avoids widening core→execute_tools coupling to
+    # every importer of the lock).
+    from execute_tools.health_checks.config import materialize_effective_config
+
+    if health_gate_enabled:
+        effective_path, sha = materialize_effective_config(
+            health_checks_config,
+            health_gate_files,
+            workspace,
+            resolved_scope=resolved_data_scope,
+        )
+    else:
+        effective_path, sha = None, None
+    return (
+        RunInvariants(
+            resolved_data_scope=list(resolved_data_scope),
+            health_gate_enabled=health_gate_enabled,
+            health_config_sha256=sha,
+        ),
+        effective_path,
+    )
+
+
+def validate_stamped_invariants(
+    stamped: dict,
+    expected: RunInvariants,
+    *,
+    full_scope: list[int],
+    source: str,
+) -> None:
+    """Check one persisted record/output's invariant stamps against a run.
+
+    Legacy-aware ingress validation for restored history and seed evidence:
+
+    - ``resolved_data_scope`` missing → the record predates DataScope and
+      was necessarily produced under the FULL scope (compared against
+      ``full_scope``).
+    - ``health_gate_enabled`` missing → the record predates the disabled
+      mode and was produced with gates active — compatible ONLY with an
+      enabled run.
+    - ``health_config_sha256`` missing → predates the policy lock; the sha
+      comparison is skipped (scope + enabled remain enforced).
+
+    Raises:
+        RunInvariantsViolation: any present-or-assumed stamp contradicts
+            ``expected``; the message names ``source`` and the field.
+    """
+    problems: list[str] = []
+
+    record_scope = stamped.get("resolved_data_scope")
+    effective_scope = full_scope if record_scope is None else sorted(record_scope)
+    if effective_scope != list(expected.resolved_data_scope):
+        origin = "unstamped (legacy = full scope)" if record_scope is None else "stamped"
+        problems.append(
+            f"resolved_data_scope: record is {origin} {effective_scope} vs "
+            f"this run's {list(expected.resolved_data_scope)}"
+        )
+
+    record_enabled = stamped.get("health_gate_enabled")
+    effective_enabled = True if record_enabled is None else record_enabled
+    if effective_enabled != expected.health_gate_enabled:
+        origin = (
+            "unstamped (legacy = gates active)" if record_enabled is None else "stamped"
+        )
+        problems.append(
+            f"health_gate_enabled: record is {origin} {effective_enabled} vs "
+            f"this run's {expected.health_gate_enabled}"
+        )
+
+    record_sha = stamped.get("health_config_sha256")
+    if record_sha is not None and record_sha != expected.health_config_sha256:
+        problems.append(
+            f"health_config_sha256: record pinned {record_sha[:12]}… vs "
+            f"this run's {(expected.health_config_sha256 or 'None')[:12]}…"
+        )
+
+    if problems:
+        detail = "\n".join(f"  - {p}" for p in problems)
+        raise RunInvariantsViolation(
+            f"ingress evidence from {source} is incompatible with this run's "
+            f"invariants:\n{detail}\n"
+            f"  Records are only comparable within one invariant set — start "
+            f"a new workspace, or seed with matching-scope evidence."
+        )

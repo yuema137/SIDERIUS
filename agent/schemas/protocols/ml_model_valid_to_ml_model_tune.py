@@ -25,6 +25,7 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_exp
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
+from execute_tools.dataset_config import DataScope
 
 
 def local_validated_model(
@@ -33,6 +34,11 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     health_checks_config: str | None = None,
+    # --- DataScope + HealthGate subsystem (DS6b) — defaults preserve
+    #     full-scope, gates-enabled behavior ---
+    data_scope: DataScope | None = None,
+    health_gate_enabled: bool = True,
+    health_gate_files: list[int] | None = None,
     file_index: int = 6,
     llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
@@ -108,6 +114,11 @@ def local_validated_model(
       - max_rounds    : tuning budget (caller-supplied, default 50)
       - health_checks_config : optional HealthGate YAML override; None keeps
         the tuner's shipped default.
+      - data_scope / health_gate_enabled / health_gate_files : DataScope +
+        HealthGate subsystem inputs (DS6b). ``data_scope=None`` normalizes
+        to the explicit full scope; the tuner's startup
+        ``validate_runtime_config`` + run-invariants lock enforce the rest.
+        See docs/design/enable_partial_file_list.md.
       - file_index    : data split index (caller-supplied, default 6; ignored when is_trial=True)
       - llm_provider  : planner-call provider (caller-supplied, default gemini)
       - llm_model_id  : planner-call model ID (caller-supplied)
@@ -195,6 +206,11 @@ def local_validated_model(
         file_index=file_index,
         max_rounds=max_rounds,
         health_checks_config=health_checks_config,
+        # DS6b — None normalizes to the full scope here (not in the schema)
+        # so the input always carries an explicit DataScope object.
+        data_scope=data_scope if data_scope is not None else DataScope.default(),
+        health_gate_enabled=health_gate_enabled,
+        health_gate_files=health_gate_files,
         expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
