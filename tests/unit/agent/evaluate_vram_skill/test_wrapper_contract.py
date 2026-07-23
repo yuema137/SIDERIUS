@@ -321,7 +321,10 @@ def test_cpu_only_host_short_circuits_with_success():
 def test_training_vram_over_budget_produces_vram_killer():
     """When training peak exceeds the cap but intensity passes, the
     wrapper must route to ``render_vram_report``: ``memory_killer.binding_cap
-    == 'vram'``, ``feasible=False``, ``status='schema_violation'``."""
+    == 'vram'``, ``feasible=False``, ``status='success'`` (transport status
+    is success — the verdict is infeasible; ``schema_violation`` is reserved
+    for real ValidationErrors so the tuner's Phase-D.4 branch never swallows
+    over-budget verdicts)."""
     with _Patches() as p:
         # Huge autograd tape → training peak blows the cap regardless of
         # the 32 GB context.
@@ -335,7 +338,7 @@ def test_training_vram_over_budget_produces_vram_killer():
         )
         out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(32.0), **_run_kwargs())
     assert out["feasible"] is False
-    assert out["status"] == "schema_violation"
+    assert out["status"] == "success"
     assert out["memory_killer"] is not None
     assert isinstance(out["memory_killer"], dict)
     assert out["memory_killer"]["binding_cap"] == "vram"

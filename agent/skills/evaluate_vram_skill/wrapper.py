@@ -657,7 +657,13 @@ def run_skill(sandbox, **kwargs):
         print("    Feasible   : NO")
 
         return {
-            "status": report.status,  # "schema_violation"
+            # Transport status is "success": the skill executed fine and the
+            # VERDICT is infeasible (feasible=False). The tuner's branch
+            # order (error → schema_violation → not-feasible) relies on this
+            # so over-budget verdicts reach the skipped_oom_risk path with
+            # PhysicalRejection capture — "schema_violation" is reserved for
+            # real ValidationErrors (_schema_violation_response above).
+            "status": "success",
             "feasible": False,
             "verdict": report.verdict,
             "suggestion": report.suggestion,

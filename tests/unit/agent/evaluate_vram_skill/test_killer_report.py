@@ -361,8 +361,11 @@ def test_killer_report_model_dump_matches_wrapper_flatten_contract():
     layers = [_leaf("layer", "Any", 1_000_000)]
     report = render_vram_report(_probe(layers), 10_000_000_000, 5 * 1024**3, 32 * 1024**3)
     dumped = report.model_dump()
-    assert set(dumped.keys()) == {"status", "verdict", "memory_killer", "suggestion"}
-    assert dumped["status"] == "schema_violation"
+    # No transport "status" key — the report is a verdict payload; the
+    # wrapper's infeasible path sets status="success" + feasible=False
+    # itself. (A hardcoded status="schema_violation" here previously made
+    # the tuner swallow over-budget verdicts as schema violations.)
+    assert set(dumped.keys()) == {"verdict", "memory_killer", "suggestion"}
     # memory_killer is a dict (§3.7 declares it dict | null):
     assert isinstance(dumped["memory_killer"], dict)
     assert set(dumped["memory_killer"].keys()) >= {
