@@ -12,6 +12,27 @@ Two layers:
    instead of file-local normalization. This makes scores from trial mode
    (sparse sampling) directly comparable to formal mode (all 20 files).
 
+3. AGGREGATION STANDARD: score_vector() returns a SINGLE canonical scalar
+   per (model, scope) — the linear grand mean over EVERY sampled segment
+   across every sampled file, then log_5.27:
+
+       denoising_score = log_5.27( Σ_{f,i} per_segment[f,i] / Σ_f |S_f| )
+
+   Equivalent for uniform per-file segment counts: log_5.27 of the mean
+   of ``file_vector``. This is the ONE number reported per run.
+
+   The following are NOT valid aggregations and MUST NOT be substituted:
+     * mean of per-file log scores    — Jensen's inequality gap
+     * mean of per-band log scores    — same reason
+     * mean of per-band linear means  — silently reweights unequal
+                                        partitions (e.g. 4/6/5/5)
+
+   If a diagnostic breakdown is needed, expose the per-file linear vector
+   ``file_vector`` unchanged, or call score_vector on a scoped SampleSet —
+   never average pre-aggregated log scores. CLAUDE.md's "aggregate scalars
+   are only comparable within one scope" enforces the same rule for
+   cross-run comparison.
+
 All functions operate on raw HDF5 data and are stateless.
 
 LEGACY PARITY: every function here is a byte-strict transcription of the
@@ -512,7 +533,10 @@ def score_vector(
           where ``grand_mean = Σ_{f,i} (snr_sg/s_max_used · snr_squid)
           / Σ_f |S_f|``. For uniform ``|S_f|`` this equals the mean
           of ``file_vector`` entries; for non-uniform sampling the grand
-          mean is the legacy-compatible aggregation.
+          mean is the legacy-compatible aggregation. See the module
+          docstring section 3 for the canonical aggregation contract —
+          in particular, callers MUST NOT re-aggregate this scalar by
+          averaging per-band or per-subset scores.
 
     Health-check separation (commit-5a): ``score_vector`` is pure
     scoring — no health-check code. The previous embedded Phase 0
