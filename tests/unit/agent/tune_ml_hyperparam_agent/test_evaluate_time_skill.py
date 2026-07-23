@@ -253,7 +253,7 @@ def test_run_skill_falls_back_to_static_when_warmup_returns_none(monkeypatch):
         FakeSandbox(),
         **_base_kwargs(data_dir="/any/path"),
     )
-    assert result["breakdown"]["source"] == "static_formula_phase_b"
+    assert result["breakdown"]["source"] == "static_uncalibrated"
 
 
 def test_run_skill_skips_warmup_without_data_dir(monkeypatch):
@@ -268,7 +268,7 @@ def test_run_skill_skips_warmup_without_data_dir(monkeypatch):
     monkeypatch.setattr(ts, "_measure_ms_per_step", _should_not_be_called)
     result = ts.run_skill(FakeSandbox(), **_base_kwargs())
     assert calls == []
-    assert result["breakdown"]["source"] == "static_formula_phase_b"
+    assert result["breakdown"]["source"] == "static_uncalibrated"
 
 
 # ---------------------------------------------------------------------------

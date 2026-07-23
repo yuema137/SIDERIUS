@@ -34,7 +34,6 @@ See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 2.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import torch
@@ -70,6 +69,16 @@ _STATIC_MS_PER_FLOP: float = 3e-9
 # + DataLoader fetch cost ~1-3 ms per step regardless of model size. Without
 # this floor, tiny models get sub-millisecond estimates that undercount the
 # fixed overhead by 10-100x.
+#
+# RT1 rev 4 (docs/design/runtime_estimation_and_watchdog.md §1): the static
+# formula is a PRELIMINARY RISK SCREEN only — its output is stamped
+# ``formal_execution_eligible: False``. The 2026-07-23 V18 incident measured
+# 44.3 ms/step where this path priced 2.00 ms/step (22x under): per-step
+# overhead is environment-specific (GPU, driver, torch version, sync
+# behaviour, batch/seg regime) and MUST NOT be a hardcoded constant. The
+# final runtime prediction for formal execution comes exclusively from an
+# adaptive warm-up measurement of the actual configuration (RT2); no
+# silent static fallback is permitted on formal paths.
 _MIN_MS_PER_STEP: float = 2.0
 
 
@@ -167,19 +176,47 @@ def _total_train_steps(
     sample_set: dict[str, list[int]],
     seg_size: int,
     batch_size: int,
-    train_portion: float,
+    train_portion: float | None,
     epochs: int,
 ) -> int:
-    """Total fwd+bwd step count across the whole training run. Matches
-    ``evaluate_time_skill.wrapper._total_train_steps`` exactly."""
-    n_psd = sum(len(v) for v in sample_set.values())
+    """Total fwd+bwd step count across the whole training run.
+
+    RT1 step-count resolver: mirrors the trainer's realized step math
+    exactly (``execute_tools.train_engine_sandbox``) instead of the old
+    global ``ceil(n_psd × ml × portion / bs)`` approximation:
+
+    - ``train_portion`` is applied PER FILE as
+      ``max(1, round(portion × len(scope_segments)))``
+      (``TIDMADEpochDataset.__init__``) — the ``max(1, ·)`` floor means
+      many-small-file scopes yield far more samples than the global
+      product suggests (up to 1/portion× more), which the old formula
+      undercounted.
+    - The per-epoch step count is ``DataLoader(drop_last=True)``'s
+      ``total_samples // batch_size`` floor, not a ceil.
+
+    The subsample is re-drawn each epoch but ``n_keep`` is deterministic,
+    so every epoch has the same step count.
+    """
     ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
-    per_epoch = math.ceil(n_psd * ml_per_psd * train_portion / batch_size)
+    n_psd = 0
+    for scope_segments in sample_set.values():
+        if train_portion is not None and train_portion < 1.0:
+            n_psd += max(1, round(train_portion * len(scope_segments)))
+        else:
+            n_psd += len(scope_segments)
+    per_epoch = (n_psd * ml_per_psd) // batch_size
     return per_epoch * epochs
 
 
 def _static_ms_per_step(num_params: int, seg_size: int, batch_size: int) -> float:
-    """Coarse static estimate of ms per training step. Order-of-magnitude only."""
+    """Coarse static estimate of ms per training step — uncalibrated prior.
+
+    Order-of-magnitude only; known to underestimate sync-bound tiny-batch
+    regimes by >20x (V18 incident). Serves as a cheap preliminary risk
+    screen and warm-up-safety check — NEVER as the final runtime
+    prediction for formal execution (rev 4 contract; the caller must
+    check ``formal_execution_eligible`` on the breakdown).
+    """
     return max(num_params * seg_size * batch_size * _STATIC_MS_PER_FLOP, _MIN_MS_PER_STEP)
 
 
@@ -228,7 +265,9 @@ def estimate_wall_time_seconds(
 
     Args:
         ms_per_step:   Warmup-measured ms per fwd+bwd step. ``None`` → static
-                       fallback (``num_params × seg × bs × 6e-10``), k=1.0.
+                       prior (``max(params × seg × bs × _STATIC_MS_PER_FLOP,
+                       _MIN_MS_PER_STEP)``, k=1.0) — stamped
+                       ``formal_execution_eligible: False`` (rev 4).
         gpu_name:      CUDA device name (e.g. ``"NVIDIA RTX 5090"``). Only
                        consulted with the warmup path; static fallback keeps
                        k=1.0 regardless.
@@ -258,7 +297,7 @@ def estimate_wall_time_seconds(
         if num_params is None:
             num_params = _count_params(model_type, model_config, loss_type)
         ms_per_step = _static_ms_per_step(num_params, seg_size, batch_size)
-        ms_source = "static_formula_phase_b"
+        ms_source = "static_uncalibrated"
         k = 1.0
 
     total_ms = total_steps * ms_per_step * k * SAFETY_MULTIPLIER
@@ -271,6 +310,11 @@ def estimate_wall_time_seconds(
             "total_train_steps": total_steps,
             "ms_per_step": round(ms_per_step, 4),
             "ms_source": ms_source,
+            # rev 4 contract: only a measured (warm-up) step time may back
+            # the runtime prediction that admits a formal execution. The
+            # static prior is a risk screen — enforcement lands in RT2/RT3;
+            # this field is the interface they consume.
+            "formal_execution_eligible": ms_source == "real_dataset_warmup",
             "k_correction": round(k, 4),
             "safety_multiplier": SAFETY_MULTIPLIER,
             "gpu_name": gpu_name,

@@ -32,8 +32,12 @@ Warmup -> per-phase ms/step derivation:
                            num_workers, from core/server_configs/{hostname}.py.
   * Fallback: if warmup fails / no CUDA / no data_dir, each estimator
     falls back to its own static formula; static ms/step for training
-    uses ``num_params × seg × bs × 6e-10`` (Phase B behaviour,
-    breakdown.source == "static_formula_phase_b").
+    uses ``max(num_params × seg × bs × 3e-9, 2.0)``
+    (breakdown.source == "static_uncalibrated"). Rev 4 contract: a
+    static-backed estimate is stamped
+    ``formal_execution_eligible: False`` — it is a preliminary risk
+    screen, never the runtime prediction that admits a formal
+    execution (enforcement wired in RT2/RT3).
 
 Breakdown contract:
   The flat ``breakdown`` dict in the return preserves the pre-K.2.5
@@ -657,6 +661,9 @@ def run_skill(sandbox, **kwargs) -> dict:
         "train_minutes": round(training["seconds"] / 60.0, 2),
         "num_params": num_params,
         "source": tbd["ms_source"],
+        # Rev 4: fail-closed — a breakdown that doesn't declare eligibility
+        # (legacy shape, stubbed estimator) is NOT formal-eligible.
+        "formal_execution_eligible": tbd.get("formal_execution_eligible", False),
         "gpu_name": tbd["gpu_name"],
         "warmup_aggregator": warmup_breakdown.get("aggregator"),
         "warmup_n_warmup_batches": warmup_breakdown.get("n_warmup_batches", 0),
