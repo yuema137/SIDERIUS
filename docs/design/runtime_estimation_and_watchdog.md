@@ -76,7 +76,7 @@ Runtime-Control Implementation
 [x] RT2-E   — scoring + orchestration accounting (0cca7bf; contribution-based policy per operator decision)
 [x] RT2-F   — observation store + historical priors (9a6f0a0; built before RT2-E — no dependency on its decision)
 [x] RT2-G   — formal admission wiring + pseudo integration (c5ec268)
-[ ] RT3     — trigger policy + provenance fields
+[x] RT3     — trigger policy + provenance fields (3dba462)
 [ ] RT4     — runtime watchdog
 [ ] RT5     — guardrails
 [ ] RT6     — chain/CLI/docs wiring
@@ -1623,3 +1623,29 @@ Built:
   tests + worked example 3; legacy records →
   `TestRecordVerifiedUnderContributionPolicy` + RT2-A §7.3 matrix;
   tuner-level routing → the RT2-G harness suite.
+
+### RT3 — trigger policy + estimator-output provenance ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `3dba462`.
+- **Checkpoint** (targeted): 15 new tests (full §3 policy matrix incl.
+  boundary values and the exact 3.0x ratio; wrapper store-reuse /
+  fall-through wiring pinned against the real static prior); tuner dir
+  652 passed; ruff + format clean; pyright 0 errors.
+
+Built:
+
+- [x] `evaluate_time_skill/trigger_policy.py`: the §3 non-formal table
+  as a pure decision function (valid exact-§6a-key store hit + steps ≤
+  50k + batch ∈ [4,512] + seg ∈ [2500,40000] + static-store agreement
+  ≤ 3x → reuse; every violated row an accumulated reason; provisional
+  thresholds overridable). Formal rounds never consult it.
+- [x] Wrapper wiring: store-reuse decision before warm-up; reuse skips
+  the warm-up and stamps `source="store"` +
+  `formal_execution_eligible=False` (a historical prior is never
+  live-verified); store problems degrade to warm-up (the policy can
+  only skip work, never fabricate). Planner-visible breakdown
+  provenance: `store_reuse` / `store_lookup_status` / `store_key` /
+  `store_policy_reasons`; success records surface
+  `memory.training_ms_source` + `time_store_reuse`.
+- [x] Tuner passes `allow_store_reuse=plan.is_trial` + the store root
+  to the time gate.
