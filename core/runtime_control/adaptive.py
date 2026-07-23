@@ -223,7 +223,7 @@ class AdaptiveUnitVerification:
             steady_median = statistics.median(steady)
 
             # Pathological checks apply ONLY after declaration — warm-up
-            # transients (measured 82x on H100 step 0) are B1's business.
+            # transients are B1's business (measured on H100: step 0 at 82x).
             if unit_ms > self.config.pathological_factor * steady_median:
                 self._failure_reason = (
                     f"pathological unit: {unit_ms:.1f} ms > "
