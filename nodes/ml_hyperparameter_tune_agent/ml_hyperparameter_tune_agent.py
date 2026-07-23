@@ -1278,6 +1278,212 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+def _evaluate_step_guardrails(
+    *,
+    n_steps: int | None,
+    batch_size: int,
+    is_formal: bool,
+    max_steps_per_attempt: int | None,
+    min_formal_batch_size: int | None,
+    allow_extreme_steps: bool,
+) -> list[str]:
+    """§5 secondary guardrails (RT5) — defense-in-depth only.
+
+    The primary admission criterion is predicted total runtime (the
+    in-subprocess verification); these catch degenerate counts even
+    when the estimator claims they are cheap. The operator override
+    (``allow_extreme_steps``) bypasses both checks — it is a schema
+    field recorded in provenance, never a prompt instruction.
+    """
+    if allow_extreme_steps:
+        return []
+    violations: list[str] = []
+    if (
+        max_steps_per_attempt is not None
+        and n_steps is not None
+        and n_steps > max_steps_per_attempt
+    ):
+        violations.append(
+            f"resolved optimizer steps {n_steps} exceed max_steps_per_attempt "
+            f"{max_steps_per_attempt} (§5)"
+        )
+    if is_formal and min_formal_batch_size is not None and batch_size < min_formal_batch_size:
+        violations.append(
+            f"formal batch_size {batch_size} below min_formal_batch_size "
+            f"{min_formal_batch_size} (§5 launch-overhead pathology — V18 incident shape)"
+        )
+    return violations
+
+
+def _resolve_guardrail_steps(
+    train_sample_set: dict | None,
+    model_config: dict,
+    train_cfg: dict,
+    train_portion: float | None,
+) -> int | None:
+    """Resolved step count for the §5 guardrails. Best-effort: a
+    resolver failure returns None (the guardrail is defense-in-depth —
+    the primary runtime criterion still protects the attempt)."""
+    if train_sample_set is None:
+        return None  # single-file legacy mode — no scoped workload to resolve
+    try:
+        from execute_tools.workload_resolvers import resolve_training_workload
+
+        return resolve_training_workload(
+            train_sample_set,
+            seg_size=int(model_config.get("segmentation_size", 1000)),
+            batch_size=int(train_cfg.get("batch_size", 1)),
+            train_portion=train_portion,
+            epochs=int(train_cfg.get("epochs", 1)),
+        ).unit_count
+    except Exception as exc:
+        print(f"[guardrails] step resolution failed (non-fatal): {exc}")
+        return None
+
+
+def _build_guardrail_rejection_record(
+    *,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+    violations: list[str],
+    n_steps: int | None,
+    agent_input,
+) -> dict:
+    """Planner-visible §5 guardrail rejection (existing skipped_time_risk
+    vocabulary; ``verification_stage="guardrail"`` distinguishes it).
+    Config provenance is recorded on the record itself."""
+    return {
+        "exp_id": exp_id,
+        "status": "skipped_time_risk",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": "Skipped by §5 guardrails: " + "; ".join(violations),
+            "discovery": (
+                f"resolved_steps={n_steps}; guardrail config: "
+                f"max_steps_per_attempt={agent_input.max_steps_per_attempt}, "
+                f"min_formal_batch_size={agent_input.min_formal_batch_size}, "
+                f"allow_extreme_steps={agent_input.allow_extreme_steps}"
+            ),
+            "memory_update": (
+                "Reduce the step count (higher batch_size / segmentation_size, "
+                "lower portions/epochs) or raise the formal batch size. The "
+                "operator can override with allow_extreme_steps=True."
+            ),
+            "time_mode": "trial" if is_trial else "formal",
+            "verification_stage": "guardrail",
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+    }
+
+
+def _check_and_record_guardrail_skip(
+    *,
+    sandbox,
+    agent_input,
+    plan,
+    trial_config,
+    train_sample_set: dict | None,
+    model_config: dict,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """Run the §5 guardrails; on violation save the planner-visible
+    record and return True (the attempt loop `continue`s). Single call
+    site keeps run() under the analyzer's complexity ceiling."""
+    n_steps = _resolve_guardrail_steps(
+        train_sample_set, model_config, plan.train_cfg, trial_config.train_portion
+    )
+    violations = _evaluate_step_guardrails(
+        n_steps=n_steps,
+        batch_size=int(plan.train_cfg.get("batch_size", 1)),
+        is_formal=not plan.is_trial,
+        max_steps_per_attempt=agent_input.max_steps_per_attempt,
+        min_formal_batch_size=agent_input.min_formal_batch_size,
+        allow_extreme_steps=agent_input.allow_extreme_steps,
+    )
+    if not violations:
+        return False
+    print("  [Guardrails §5] SKIPPED: " + "; ".join(violations))
+    record = _build_guardrail_rejection_record(
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        is_trial=plan.is_trial,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        violations=violations,
+        n_steps=n_steps,
+        agent_input=agent_input,
+    )
+    ExperimentRecord.model_validate(record)
+    sandbox.save_record(record)
+    return True
+
+
+def _handle_in_subprocess_rejection(
+    train_status: dict,
+    *,
+    sandbox,
+    run_name: str,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """RT2-G: a clean in-subprocess rejection — real setup was paid, so
+    it CONSUMES an attempt (unlike the free pre-flight screen). Saves
+    the record + appends the observation; returns True to `continue`."""
+    if train_status.get("status") != "rejected_time_risk":
+        return False
+    rv_block = train_status.get("runtime_verification") or {}
+    print("  In-subprocess runtime verification REJECTED the attempt (consumes one attempt).")
+    reject_record = _build_in_subprocess_rejection_record(
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        is_trial=is_trial,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        rv_block=rv_block,
+        fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
+    )
+    ExperimentRecord.model_validate(reject_record)
+    sandbox.save_record(reject_record)
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    return True
+
+
 class WallClockTimeoutError(RuntimeError):
     """A watchdog deadline kill (RT4, §4). Carries the §4 timeout
     provenance so the attempt_failure record can surface
@@ -1900,7 +2106,7 @@ class HyperparamTuningAgent:
                     # with the "no prior round yet" fallback. See
                     # docs/aggregated_score_table_awareness.md §9.1.
                     best_score_table_md: str | None = None
-                    _records_with_table = [
+                    _records_with_table: list[dict] = [
                         r
                         for r in memory_history
                         if is_valid_candidate(r)
@@ -2158,6 +2364,28 @@ class HyperparamTuningAgent:
                         "train_config": plan.train_cfg,
                         "loss_config": plan.loss_cfg,
                     }
+
+                    # RT5 §5 guardrails — cheapest pre-flight check, before
+                    # any VRAM/time probe. Defense-in-depth only; the primary
+                    # criterion stays the in-subprocess runtime verification.
+                    failure_stage = "guardrails"
+                    if _check_and_record_guardrail_skip(
+                        sandbox=sandbox,
+                        agent_input=agent_input,
+                        plan=plan,
+                        trial_config=trial_config,
+                        train_sample_set=train_sample_set,
+                        model_config=model_config,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
+                        continue
 
                     # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
                     # which ceiling applies for THIS round; the unselected one is
@@ -2540,34 +2768,20 @@ class HyperparamTuningAgent:
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
                     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
-                    if train_status.get("status") == "rejected_time_risk":
-                        # RT2-G: clean in-subprocess rejection — real setup was
-                        # paid, so this CONSUMES an attempt (unlike the free
-                        # pre-flight screen above). Record shape built by
-                        # _build_in_subprocess_rejection_record.
-                        rv_block = train_status.get("runtime_verification") or {}
-                        print(
-                            "  In-subprocess runtime verification REJECTED the "
-                            "attempt (consumes one attempt)."
-                        )
-                        reject_record = _build_in_subprocess_rejection_record(
-                            exp_id=exp_id,
-                            model_type=model_type,
-                            file_index=file_index,
-                            record_params=record_params,
-                            expert_advice_str=expert_advice_str,
-                            hypothesis=hypothesis,
-                            is_trial=plan.is_trial,
-                            round_index=round_index,
-                            attempt_in_round=attempt_in_round,
-                            rv_block=rv_block,
-                            fallback_message=train_status.get(
-                                "message", "runtime verification rejected the attempt"
-                            ),
-                        )
-                        ExperimentRecord.model_validate(reject_record)
-                        sandbox.save_record(reject_record)
-                        _append_runtime_observation(sandbox, run_name, rv_block)
+                    if _handle_in_subprocess_rejection(
+                        train_status,
+                        sandbox=sandbox,
+                        run_name=run_name,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        is_trial=plan.is_trial,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
                         continue
                     if train_status.get("status") == "error":
                         # DataScope DS5 — scope violations are non-retryable
@@ -3022,7 +3236,7 @@ class HyperparamTuningAgent:
 
                     current_score = score_results.get("denoising_score")
                     current_loss_type = active_params["loss_config"].get("loss_type")
-                    successful = [
+                    successful: list[dict] = [
                         r
                         for r in memory_history
                         if r.get("status") == "success" and r.get("denoising_score") is not None
