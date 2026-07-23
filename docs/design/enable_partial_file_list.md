@@ -1131,7 +1131,7 @@ functional campaign identity).
   health_gate_enabled=..., health_gate_files=...)`; resolve once; pre-flight
   `validate_runtime_config` equivalents (fail before iteration 1's LLM calls).
   *(DS6b)*
-- [ ] **Atomic run-invariants lock**: `{workspace}/run_invariants_lock.json`
+- [x] **Atomic run-invariants lock**: `{workspace}/run_invariants_lock.json`
   created via same-directory temp file + `os.link` (first writer wins;
   losing writer re-reads and validates. Corrected from the round-4 text's
   `os.rename`, which silently overwrites on POSIX — i.e. LAST writer wins;
@@ -1148,9 +1148,10 @@ functional campaign identity).
   the same workspace, and `core/resume.restore_prior_state` read-and-validate,
   fail fast on mismatch (scope change, enabled flip, or policy-content drift
   each produce a distinct error message).
-  *(DS6b — done for workflow startup, standalone tuner, and
-  `restore_prior_state`; the box is ticked when the chain CLI threads
-  `expected_invariants` in DS6c)*
+  *(DS6b — workflow startup, standalone tuner, `restore_prior_state`;
+  ticked in DS6c: `run_one_iteration.compute_expected_invariants` now
+  threads `expected_invariants` into `restore_prior_state` in production,
+  computed BEFORE restore so a violation mutates nothing)*
 - [ ] **Ingress validation**: seed summaries / seed_records / restored outputs /
   `run_comparison.seed_agent_memory` — compare each record's
   `resolved_data_scope` (missing = full scope) against the run scope; mismatch
@@ -1161,33 +1162,52 @@ functional campaign identity).
   `run_comparison.seed_agent_memory` remain for DS6c/DS6d)*
 - [x] `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — thread
   `data_scope` + `health_gate_enabled` + `health_gate_files`. *(DS6b)*
-- [ ] `sdsc_submission_scripts/run_one_iteration.py` + `_chain_common.sh` +
+- [x] `sdsc_submission_scripts/run_one_iteration.py` + `_chain_common.sh` +
   `run_chain.sh` — `--data_scope "4-9"` / `--health_gate_enabled|--no-...` /
-  `--health_gate_files "4,7,9"` (parsed via `DataScope.from_cli`).
+  `--health_gate_files "4,7,9"` (parsed via `DataScope.from_cli`). *(DS6c —
+  both range and list forms per the resolved open question;
+  `run_chain.sh` sources `_chain_common.sh`, so the shell change is
+  single-sited; the three flags joined the §3.2 CONTRACT_FLAGS parity
+  contract)*
 - [ ] Iteration manifest + `core/campaign_artifacts.py` — resolved scope in
   manifest; **functional reuse check**: `decide_phase1_reuse` / campaign
   validation adds `"data_scope mismatch"` error (pattern of
   `campaign_artifacts.py:80`); reuse never proceeds on mismatch.
+  *(DS6c — manifest half done: completed manifests stamp
+  `resolved_data_scope` + `health_gate_enabled` + `health_config_sha256`
+  from the tune output; the campaign_artifacts functional reuse check
+  remains for DS6d)*
 - [ ] `scripts/run_comparison.py` — `--data_scope` forwarded to baseline
   builders (baseline SampleSet built within scope, per round-3 §11) and the
   agent subprocess; effective-config materialization at campaign startup;
   v17_pregate override pin.
 
 **Tests**:
-- [ ] Unit: atomic lock (concurrent create race simulated → single winner,
+- [x] Unit: atomic lock (concurrent create race simulated → single winner,
   loser validates; equality ignores timestamps); lock-violation matrix —
   scope change / `health_gate_enabled` flip / `health_config_sha256` drift
   each fail with their distinct message; ingress validation
   (stamped-match, stamped-mismatch, legacy-unstamped=full); protocol
   threading; CLI parsing round-trip
-  *(DS6b — all done except the chain-CLI parsing round-trip (DS6c):
-  `test_run_invariants.py` 27, `test_resume.py::TestRunInvariantsIngress`
-  6, protocol `TestDataScopeThreading` 3, workflow
-  `test_data_scope_preflight.py` 8)*
+  *(DS6b — `test_run_invariants.py` 27,
+  `test_resume.py::TestRunInvariantsIngress` 6, protocol
+  `TestDataScopeThreading` 3, workflow `test_data_scope_preflight.py` 8.
+  DS6c completes the bullet: chain-CLI round-trip + wiring + manifest
+  stamps in `test_run_one_iteration.py` (+10: both spec forms
+  canonicalize identically, malformed → parser error,
+  `compute_expected_invariants` 3 cases, main() wiring 2 incl.
+  conflicting-second-invocation crash-before-workflow, manifest stamp
+  1); parity contract extended to the three new flags)*
 - [ ] Campaign: manifest with mismatched scope → `ValidationReport` error;
   matching scope → reuse allowed
-- [ ] Pseudo-mode workflow test: one-iteration `run_workflow` with partial
+- [x] Pseudo-mode workflow test: one-iteration `run_workflow` with partial
   scope on stubs — lock written, tuner input carries scope, manifest stamped
+  *(covered by three targeted tests instead of one full pseudo loop:
+  lock-written via the pre-flight sentinel test, input-carries-scope via
+  the protocol threading test, manifest stamp via
+  `TestManifestInvariantStamps`; the full end-to-end chain pseudo smoke
+  is the verification-checklist item below, deferred to the DS-series
+  end per the amended test policy)*
 - [x] Pseudo-mode: seeded workflow with full-scope legacy seeds + partial scope
   → fails at ingress with the documented error *(DS6b —
   `test_data_scope_preflight.py::test_legacy_full_scope_seed_vs_partial_run`;
@@ -1271,6 +1291,31 @@ wiring; operator invariants 1–5 recorded in this session's directions):
   `tests/integration/ -m "not real_run"` **124 passed** / 1 failed
   (FU-7 vocab only — pre-existing on master) / 1 skipped / 129
   deselected (9:42); ruff check + format clean; pyright clean.
+
+**Implementation notes** (2026-07-23, DS6c — chain CLI + restore threading
++ manifest stamps; verified per the amended targeted-suite policy):
+- `run_one_iteration.py`: three flags (specs parsed in `normalize_args`
+  via `DataScope.from_cli`, malformed → `parser.error`); new
+  `compute_expected_invariants(args)` calls the shared
+  `build_run_invariants` BEFORE `restore_prior_state` (invariant
+  computation failure or `RunInvariantsViolation` → crashed manifest +
+  exit 1, zero resume mutation); the three params thread into
+  `run_workflow`; completed manifests stamp `resolved_data_scope` /
+  `health_gate_enabled` / `health_config_sha256`.
+- `_chain_common.sh` (single-sited — `run_chain.sh` sources it):
+  `DATA_SCOPE` / `HEALTH_GATE_ENABLED` / `HEALTH_GATE_FILES` defaults,
+  case arms (boolean pair mirrors `FORCE_FORMAL_ROUND`), APP_ARGS
+  forwarding (only `--no-health_gate_enabled` forwarded, matching the
+  Python default), summary echo. Flags added to the §3.2 CONTRACT_FLAGS
+  parity contract.
+- FU-8 closed with the opposite resolution (see tracker): the attempted
+  `n_recent` opt-out was correctly rejected by DS6b ingress (legacy
+  unstamped seeds are gates-enabled-only) and reverted — a live
+  validation of the ingress rule.
+- **Tests (DS6c)**: `test_run_one_iteration.py` 53/53 (+10);
+  `test_chain_consistency.py` parity green with the extended contract;
+  `n_recent` 2/2 after revert; ruff + format + pyright clean; `bash -n`
+  clean on both shell scripts.
 - Operator audit rider (2026-07-23): backward-compat audit delivered —
   behavioral identity holds for default configs; deliberate breaks are
   workspace policy immutability, legacy-resume-with-disabled-gates
@@ -1489,10 +1534,17 @@ standard.
 - **FU-7** — `test_vocab_accumulation.py:541` NoneType subscript on the
   degraded-interpreter path (pre-existing, unrelated to DataScope; the one
   unrepaired workflows-suite failure). File as issue in DS8.
-- **FU-8** — `n_recent` also needs its Option C `health_gate_enabled=False`
-  once DS6 plumbs the flag through `run_workflow` (currently passing
-  because its choreography doesn't reach gate-dependent rounds; add the
-  flag in DS6 for consistency and future-proofing).
+- **FU-8** — ~~`n_recent` also needs its Option C `health_gate_enabled=False`
+  once DS6 plumbs the flag through `run_workflow`.~~ **Closed (DS6c,
+  2026-07-23) with the opposite resolution**: applying the flag was tried
+  and DS6b's ingress validation correctly REJECTED it — `n_recent` seeds
+  legacy unstamped tuning outputs, which are by design compatible only
+  with gates-enabled runs. A workflow-level Option C opt-out requires
+  seeds stamped `health_gate_enabled=false`. `n_recent` stays
+  gates-enabled (its choreography never reaches gate-dependent rounds —
+  why it passes today); l_fail/k9 are unaffected (they construct tuner
+  inputs directly, no workflow ingress). The failed attempt doubled as a
+  live validation of the DS6b ingress rule.
 - **FU-10** — `plan_overrides` fail-fast hardening (operator-approved
   2026-07-23, separate small commit after DS6b): unknown keys fail at
   schema validation; overrides merge over every LLM plan and the

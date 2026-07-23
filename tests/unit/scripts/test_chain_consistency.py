@@ -156,6 +156,10 @@ CONTRACT_FLAGS = [
     "is_pseudo_training",
     "llm_config",
     "health_checks_config",
+    # DS6c — DataScope + HealthGate subsystem
+    "data_scope",
+    "health_gate_enabled",
+    "health_gate_files",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse

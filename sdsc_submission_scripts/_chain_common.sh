@@ -60,6 +60,9 @@ BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
+DATA_SCOPE=""                       # DS6c: '4-9' / '4,5,6,7,8,9' / mixed; empty = complete dataset
+HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables the subsystem
+HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 0.02)
@@ -186,6 +189,10 @@ parse_chain_args() {
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --health_checks_config)   HEALTH_CHECKS_CONFIG="$2"; shift 2 ;;
+        --data_scope)             DATA_SCOPE="$2"; shift 2 ;;
+        --health_gate_enabled)    HEALTH_GATE_ENABLED=1; shift ;;
+        --no-health_gate_enabled) HEALTH_GATE_ENABLED=0; shift ;;
+        --health_gate_files)      HEALTH_GATE_FILES="$2"; shift 2 ;;
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
@@ -340,6 +347,18 @@ build_app_args() {
     if [ -n "$HEALTH_CHECKS_CONFIG" ]; then
         APP_ARGS+=(--health_checks_config "$HEALTH_CHECKS_CONFIG")
     fi
+    # DS6c — DataScope + HealthGate subsystem. HEALTH_GATE_ENABLED default 1
+    # matches the Python default; only the disabling form is forwarded
+    # (mirrors FORCE_FORMAL_ROUND).
+    if [ -n "$DATA_SCOPE" ]; then
+        APP_ARGS+=(--data_scope "$DATA_SCOPE")
+    fi
+    if [ "$HEALTH_GATE_ENABLED" -eq 0 ]; then
+        APP_ARGS+=(--no-health_gate_enabled)
+    fi
+    if [ -n "$HEALTH_GATE_FILES" ]; then
+        APP_ARGS+=(--health_gate_files "$HEALTH_GATE_FILES")
+    fi
     if [ -n "$REFLECT_PROVIDER" ]; then
         APP_ARGS+=(--reflect_provider "$REFLECT_PROVIDER")
     fi
@@ -408,6 +427,8 @@ print_chain_header() {
         echo "  LLM config       : $LLM_CONFIG"
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
+    echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
+    echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi

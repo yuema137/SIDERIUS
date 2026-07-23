@@ -43,6 +43,12 @@ from dotenv import load_dotenv
 
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.resume import ResumeError, restore_prior_state
+from core.run_invariants import (
+    RunInvariants,
+    RunInvariantsViolation,
+    build_run_invariants,
+)
+from execute_tools.dataset_config import TIDMAD, DataScope
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 
@@ -352,6 +358,10 @@ def write_manifest(
             ),
             "completed_rounds": tune_output.completed_rounds,
             "health_checks_config": getattr(tune_output, "health_checks_config", None),
+            # DS6c — invariant stamps (scalar comparability boundary).
+            "resolved_data_scope": getattr(tune_output, "resolved_data_scope", None),
+            "health_gate_enabled": getattr(tune_output, "health_gate_enabled", None),
+            "health_config_sha256": getattr(tune_output, "health_config_sha256", None),
             "formal_reference_score": getattr(tune_output, "formal_reference_score", None),
             "resolved_skip_formal_threshold": getattr(
                 tune_output, "resolved_skip_formal_threshold", None
@@ -687,6 +697,39 @@ def build_parser() -> argparse.ArgumentParser:
             "None preserves the shipped default configuration."
         ),
     )
+    # --- DataScope + HealthGate subsystem (DS6c) ---
+    parser.add_argument(
+        "--data_scope",
+        type=str,
+        default=None,
+        help=(
+            "Restrict the chain to a file subset: '4-9', '4,5,6,7,8,9', or "
+            "mixed '0-3,7' (both forms canonicalize to one sorted deduplicated "
+            "list). Omitted = complete dataset. Pinned per workspace by the "
+            "run-invariants lock. See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "HealthGate subsystem switch (default: enabled). "
+            "--no-health_gate_enabled disables gate evaluation entirely; "
+            "successful finite-score records then count as valid candidates. "
+            "Pinned per workspace by the run-invariants lock."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_files",
+        type=str,
+        default=None,
+        help=(
+            "Run-level shared monitored-file list for ALL HealthGate checks "
+            "(same spec format as --data_scope). Omitted + full scope = YAML "
+            "defaults; omitted + partial scope = startup error."
+        ),
+    )
     parser.add_argument(
         "--advice",
         type=str,
@@ -852,6 +895,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
+    """DS6c — compute this run's invariants via the ONE shared path.
+
+    Materializes + hashes the effective HealthGate config into the chain
+    workspace root (idempotent — ``run_workflow``'s pre-flight recomputes
+    the identical body sha) and returns the ``RunInvariants`` used for
+    both ``restore_prior_state`` validation and, transitively, the
+    workspace lock. Called BEFORE any resume mutation or LLM work.
+    """
+    run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
+    resolved_scope = run_scope.resolve(TIDMAD)
+    invariants, _ = build_run_invariants(
+        resolved_data_scope=resolved_scope,
+        health_gate_enabled=args.health_gate_enabled,
+        health_gate_files=args.health_gate_files,
+        health_checks_config=args.health_checks_config,
+        workspace=args.workspace,
+    )
+    return invariants
+
+
 def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     """Resolve the ``--start_iteration`` / ``--iteration`` alias and load
     deferred config (human advice file, plan overrides JSON) into ``args``.
@@ -949,6 +1013,18 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         args.plan_overrides = json.loads(args.plan_overrides)
     else:
         args.plan_overrides = None
+
+    # DS6c — parse DataScope specs. Both '4-9' and '4,5,6,7,8,9' (and mixed)
+    # canonicalize to one sorted deduplicated list inside DataScope.
+    try:
+        args.data_scope = DataScope.from_cli(args.data_scope) if args.data_scope else None
+        args.health_gate_files = (
+            DataScope.from_cli(args.health_gate_files).file_indices
+            if args.health_gate_files
+            else None
+        )
+    except ValueError as e:
+        parser.error(str(e))
 
     return args
 
@@ -1098,13 +1174,24 @@ def main():
     # it is a no-op that returns resolved_seeds verbatim. There is no
     # separate --resume flag — start_iteration > 1 IS resume. See
     # docs/phase68_orchestrator_memory_and_resume.md §3.3.
+    # DS6c — compute the run's invariants (materialize + hash the effective
+    # HealthGate config) BEFORE restore, so a contradicting workspace lock
+    # or incompatible restored history fails with zero resume mutation.
+    try:
+        expected_invariants = compute_expected_invariants(args)
+    except ValueError as e:
+        print(f"FAIL: run-invariants computation refused to start: {e}")
+        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        sys.exit(1)
+
     try:
         state = restore_prior_state(
             workspace=args.workspace,
             current_iter=args.start_iteration,
             seed_paths=resolved_seeds,
+            expected_invariants=expected_invariants,
         )
-    except ResumeError as e:
+    except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
         write_manifest(iter_dir, run_name, results=[], crashed=True)
         sys.exit(1)
@@ -1181,6 +1268,9 @@ def main():
             run_id=run_id,
             llm_config=llm_config,
             health_checks_config=args.health_checks_config,
+            data_scope=args.data_scope,
+            health_gate_enabled=args.health_gate_enabled,
+            health_gate_files=args.health_gate_files,
             max_iterations=1,
             start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,
