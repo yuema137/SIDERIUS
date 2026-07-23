@@ -77,7 +77,7 @@ Runtime-Control Implementation
 [x] RT2-F   — observation store + historical priors (9a6f0a0; built before RT2-E — no dependency on its decision)
 [x] RT2-G   — formal admission wiring + pseudo integration (c5ec268)
 [x] RT3     — trigger policy + provenance fields (3dba462)
-[ ] RT4     — runtime watchdog
+[x] RT4     — runtime watchdog (60c654f)
 [ ] RT5     — guardrails
 [ ] RT6     — chain/CLI/docs wiring
 [ ] Gate 1  — real LLM + pseudo training
@@ -1649,3 +1649,29 @@ Built:
   `memory.training_ms_source` + `time_store_reuse`.
 - [x] Tuner passes `allow_store_reuse=plan.is_trial` + the store root
   to the time gate.
+
+### RT4 — runtime watchdog ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `60c654f`.
+- **Checkpoint** (targeted): 13 new tests — orphan-free kill-tree
+  (children of children die; TERM-trapping child escalated to KILL
+  with zero survivors), §4 deadline-formula matrix incl. MID-FLIGHT
+  tightening from a real live sidecar and the configurable floor,
+  executor kill handling (partial-artifact cleanup, provenance
+  triplet, disabled → plain-run parity), tuner
+  `attempt_failure/wall_clock_timeout` record shape + store append.
+  Affected suites 896 passed / 1 pre-existing skip; ruff + format
+  clean; pyright 0 errors. Rejection/watchdog unified reporting (§3
+  rev 5.2) holds: both paths carry the same `RuntimeObservation`.
+- **Realization notes**: the §4 component-deadline interface is
+  realized by reading the attempt's LIVE observation sidecar (RT2
+  event log) from the parent — the deadline tightens the moment the
+  in-subprocess verification lands predictions, without any new
+  channel. `WatchdogConfig` (enabled/grace/poll/floor) lives on
+  `RuntimeControlPolicy` — disabled by default, so RT4 is zero
+  behavior change until the chain enables it (RT6/Gate 2). Found and
+  fixed en route: the attempt-failure path persisted `model_dump()`,
+  silently dropping extra keys — validation remains the gate, the raw
+  dict persists (matches every other record path). Scoring-phase
+  watchdog remains §4 "phase 2" (in-process workers — out of RT4
+  scope by design).
