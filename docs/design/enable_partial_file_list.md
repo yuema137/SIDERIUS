@@ -1126,8 +1126,16 @@ functional campaign identity).
   health_gate_enabled=..., health_gate_files=...)`; resolve once; pre-flight
   `validate_runtime_config` equivalents (fail before iteration 1's LLM calls).
 - [ ] **Atomic run-invariants lock**: `{workspace}/run_invariants_lock.json`
-  created via same-directory temp file + `os.rename` (first writer wins;
-  losing writer re-reads and validates). Content: canonical resolved scope +
+  created via same-directory temp file + `os.link` (first writer wins;
+  losing writer re-reads and validates. Corrected from the round-4 text's
+  `os.rename`, which silently overwrites on POSIX — i.e. LAST writer wins;
+  `os.link` is equally atomic and fails with `FileExistsError` on an
+  existing lock, which is exactly the intended semantics). Implemented as
+  the generic module `core/run_invariants.py` (operator decision
+  2026-07-23: run invariants are a distinct responsibility from campaign
+  artifacts; generic API `write_run_invariants` / `load_run_invariants` /
+  `validate_run_invariants` / `ensure_run_invariants` so future immutable
+  run-level fields join without redesign). Content: canonical resolved scope +
   `health_gate_enabled` + `health_config_sha256` (null when disabled) +
   `created_at`. **Equality = the three canonical fields only**; timestamps
   excluded. Later iterations, `--resume` paths, standalone tuner runs against
@@ -1174,7 +1182,25 @@ functional campaign identity).
 
 **Test gate**: unit only.
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-23, DS6a — lock module):
+- `core/run_invariants.py`: `RunInvariants` (frozen Pydantic;
+  `resolved_data_scope` + `health_gate_enabled` + `health_config_sha256`
+  canonical, `created_at` provenance-only), `RunInvariantsViolation`,
+  `write_run_invariants` (temp + `os.link`; see the corrected bullet
+  above), `load_run_invariants` (absent → None; corrupted → violation,
+  never silently regenerated), `validate_run_invariants` (drift report
+  names each drifted field with locked vs attempted values),
+  `ensure_run_invariants` (create-or-validate startup entry, returns
+  `"created"` / `"validated"`).
+- Tests: `tests/unit/core/test_run_invariants.py` — 14 tests: round-trip,
+  timestamp excluded from equality, first-writer-wins + loser-validates,
+  violation matrix (scope / enabled flip / sha drift each name only the
+  drifted field), corrupted-lock refusal, no stray temp files, flat
+  hand-inspectable JSON shape. 14/14 (1.4s); ruff + format + pyright
+  clean.
+- Wiring into workflow startup / standalone tuner / resume / campaign
+  validation lands in the subsequent DS6 commits; bullets stay unticked
+  until then.
 
 ---
 
