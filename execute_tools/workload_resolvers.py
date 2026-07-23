@@ -225,3 +225,49 @@ def resolve_formal_workloads(
             num_workers=scoring_num_workers,
         ),
     }
+
+
+def scoring_prediction_from_server_config(
+    workload: ResolvedPhaseWorkload,
+    *,
+    per_psd_segment_seconds: float,
+    hostname: str,
+    num_workers: int,
+):
+    """Historically-calibrated scoring prediction (§2.7, RT2-E).
+
+    The per-host ``ServerConfig.per_psd_segment_seconds`` (measured
+    single-process sequential scoring throughput) is the §2.7
+    "historically_calibrated" evidence class. Individually never
+    formal-eligible; admissible into a formal total only through the
+    contribution-based share rule (operator decision 2026-07-23).
+
+    The parallel model assumes linear speedup across ``num_workers`` —
+    recorded explicitly in the evidence so the assumption is auditable
+    (§2.9: aggregation logic explicit and testable).
+
+    Raises:
+        ValueError: non-positive throughput or workers.
+    """
+    from core.runtime_control.total_assembly import evidence_backed_prediction
+
+    if per_psd_segment_seconds <= 0:
+        raise ValueError(
+            f"per_psd_segment_seconds must be positive; got {per_psd_segment_seconds!r}."
+        )
+    if num_workers <= 0:
+        raise ValueError(f"num_workers must be positive; got {num_workers!r}.")
+    predicted = workload.unit_count * per_psd_segment_seconds / num_workers
+    return evidence_backed_prediction(
+        predicted_seconds=predicted,
+        source="historical_observation_prior",
+        confidence="medium",
+        unit_count=workload.unit_count,
+        evidence={
+            "classification": "historically_calibrated",
+            "per_psd_segment_seconds": per_psd_segment_seconds,
+            "hostname": hostname,
+            "num_workers": num_workers,
+            "parallel_model": "linear_speedup_assumed",
+        },
+    )

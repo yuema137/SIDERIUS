@@ -395,8 +395,13 @@ def record_is_formal_verified(record: dict[str, Any]) -> bool:
 
     A legacy record (no verification metadata), an unparsed block, or an
     observation without an admitted decision is NEVER treated as
-    verified (§7.3).
+    verified (§7.3). Total eligibility follows the contribution-based
+    policy (RT2-E, operator decision 2026-07-23): live-verified major
+    phases + evidence-backed historical phases within the recorded
+    share limit.
     """
+    from core.runtime_control.total_assembly import observation_formal_eligible
+
     try:
         obs = extract_runtime_observation(record)
     except Exception:
@@ -405,8 +410,7 @@ def record_is_formal_verified(record: dict[str, Any]) -> bool:
         return False
     if obs.admission.decision != "admitted":
         return False
-    predictions = [c.prediction for c in obs.components.values() if c.prediction is not None]
-    return bool(predictions) and all(p.formal_execution_eligible for p in predictions)
+    return observation_formal_eligible(obs.components, obs.runtime_policy)
 
 
 def observation_totals_from_components(

@@ -54,11 +54,21 @@ from core.runtime_control.steady_state import (
     SteadyStateDetector,
     detect_steady_state,
 )
+from core.runtime_control.total_assembly import (
+    DEFAULT_HISTORICAL_SHARE_LIMIT,
+    HISTORICAL_EVIDENCE_SOURCES,
+    TotalAssessment,
+    assemble_total,
+    classify_prediction_source,
+    evidence_backed_prediction,
+)
 from core.runtime_control.verifier import RuntimePhaseVerifier
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 __all__ = [
     "ADMISSION_STAGE_POST_SETUP",
+    "DEFAULT_HISTORICAL_SHARE_LIMIT",
+    "HISTORICAL_EVIDENCE_SOURCES",
     "MEASUREMENT_BACKED_SOURCES",
     "RUNTIME_PHASES",
     "RUNTIME_VERIFICATION_RECORD_KEY",
@@ -84,13 +94,17 @@ __all__ = [
     "SteadyStateConfig",
     "SteadyStateDetection",
     "SteadyStateDetector",
+    "TotalAssessment",
     "TotalRecord",
     "VerificationResult",
+    "assemble_total",
     "calibration_key",
     "capture_environment_provenance",
     "capture_storage_provenance",
     "classify_cache_state",
+    "classify_prediction_source",
     "detect_steady_state",
+    "evidence_backed_prediction",
     "extract_runtime_observation",
     "observation_totals_from_components",
     "record_is_formal_verified",

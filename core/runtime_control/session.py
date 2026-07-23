@@ -56,6 +56,12 @@ from core.runtime_control.records import (
     PredictionSource,
     RuntimeObservation,
     RuntimePrediction,
+    TotalRecord,
+)
+from core.runtime_control.total_assembly import (
+    DEFAULT_HISTORICAL_SHARE_LIMIT,
+    TotalAssessment,
+    assemble_total,
 )
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
@@ -90,6 +96,16 @@ class RuntimeControlPolicy(BaseModel):
     verification: AdaptiveVerificationConfig = Field(
         default_factory=AdaptiveVerificationConfig,
         description="Adaptive stopping policy for phase verification (§2.5/§2.12/§5).",
+    )
+    historical_phase_share_limit: float = Field(
+        default=DEFAULT_HISTORICAL_SHARE_LIMIT,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Maximum admissible Σ(historically estimated phases) ÷ total "
+            "predicted runtime (RT2-E contribution-based policy). "
+            "Exceeding it escalates those phases to live verification."
+        ),
     )
 
 
@@ -128,6 +144,7 @@ class RuntimeVerificationSession:
         self._verification_seconds: float = 0.0
         self._verification_failures: dict[str, str] = {}
         self._calibration_context: dict[str, Any] = {}
+        self._total: TotalRecord | None = None
 
         self._setup_start = time.perf_counter()
         self._io_bytes_at_start = read_process_read_bytes()
@@ -261,6 +278,7 @@ class RuntimeVerificationSession:
         session._storage = dict(previous.storage)
         session._admission = previous.admission
         session._calibration_context = dict(previous.calibration_context)
+        session._total = previous.total
         session._chain_id = chain_id or previous.chain_id
         session._attempt_id = attempt_id or previous.attempt_id
         setup = previous.components.get("setup")
@@ -456,6 +474,36 @@ class RuntimeVerificationSession:
         self._write_sidecar()
         return self._admission
 
+    def assess_total(self, required_phases: tuple[RuntimePhase, ...]) -> TotalAssessment:
+        """Assemble the derived total under the contribution policy (RT2-E).
+
+        The assessment's ``TotalRecord`` is stored on the observation.
+        Every prediction-bearing component must be in
+        ``required_phases`` — the derived total must account for every
+        prediction the observation carries (§6.1 exact-sum invariant).
+
+        Raises:
+            ValueError: a prediction-bearing phase is missing from
+                ``required_phases``.
+        """
+        predicted_phases = {p for p, c in self._components.items() if c.prediction is not None}
+        unaccounted = predicted_phases - set(required_phases)
+        if unaccounted:
+            raise ValueError(
+                f"phases with predictions not in required_phases: {sorted(unaccounted)} — "
+                "the derived total must account for every recorded prediction (§6.1)."
+            )
+        assessment = assemble_total(
+            self._components,
+            required_phases=required_phases,
+            historical_phase_share_limit=self.policy.historical_phase_share_limit,
+            safety_factor=self.policy.safety_factor,
+            operator_budget_seconds=self.policy.operator_budget_seconds,
+        )
+        self._total = assessment.total
+        self._write_sidecar()
+        return assessment
+
     def record_phase_actual(self, phase: RuntimePhase, actual_seconds: float) -> None:
         """Attach a phase's ACTUAL production runtime to the observation.
 
@@ -491,6 +539,7 @@ class RuntimeVerificationSession:
             storage=dict(self._storage),
             calibration_context=dict(self._calibration_context),
             components=dict(self._components),
+            total=self._total,
             admission=self._admission,
             final_status=self._final_status,
         )
