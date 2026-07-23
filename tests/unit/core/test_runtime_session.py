@@ -12,6 +12,7 @@ complete observation is still a valid RuntimeObservation.
 from __future__ import annotations
 
 import json
+from typing import ClassVar
 
 import pytest
 from pydantic import ValidationError
@@ -401,6 +402,123 @@ class TestResumeAcrossSubprocesses:
         assert adm.decision == "rejected"
         assert adm.avoided_predicted_runtime_seconds is not None
         assert adm.avoided_predicted_runtime_seconds > 7000.0
+
+
+class TestStorePriorConsumption:
+    """RT2-G: verifiers consume historical priors from the store."""
+
+    _CONTEXT: ClassVar[dict] = {
+        "precision": "float32",
+        "optimizer_type": "adam",
+        "model_family": "wavenet",
+        "param_count": 100_000,
+        "seg_size": 1000,
+        "batch_size": 1,
+    }
+
+    def _store_with_observation(self, tmp_path, session) -> None:
+        """Persist one CLEAN observation matching the session's key.
+
+        §6c eligibility demands a steady measurement, so the donor runs
+        a real verified verification (not just an actual) before its
+        actual is recorded — exactly what a production attempt leaves
+        behind.
+        """
+        from core.runtime_control.adaptive import AdaptiveVerificationConfig
+        from core.runtime_control.observation_store import ObservationStore
+        from core.runtime_control.steady_state import SteadyStateConfig
+
+        donor = RuntimeVerificationSession(
+            str(tmp_path / "donor.json"),
+            policy=RuntimeControlPolicy(
+                verification=AdaptiveVerificationConfig(
+                    steady=SteadyStateConfig(window=4, stable_windows=3, rel_spread_tol=0.10),
+                    min_timed_steps=5,
+                    min_timed_ms=0.0,
+                    max_steps=50,
+                )
+            ),
+        )
+        donor.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=1000
+            ),
+        )
+        donor.set_calibration_context(self._CONTEXT)
+        verifier = donor.start_phase_verification("training", unit="optimizer_step")
+        for t in [40.0] * 30:
+            verifier.feed(t)
+            if verifier.is_terminal:
+                break
+        donor.complete_phase_verification("training", verifier, source="real_training_verification")
+        donor.record_phase_actual("training", 40.0)  # realized 40 ms/step × 1000
+        # Match the donor's environment to the consuming session's so the
+        # §6b env checks pass deterministically in any test environment.
+        donor._environment = dict(session._environment)
+        obs = donor.finalize("completed")
+        ObservationStore(str(tmp_path / "store")).append(obs, writer_id="donor")
+
+    def test_lookup_phase_prior_round_trip(self, tmp_path):
+        session = RuntimeVerificationSession(
+            str(tmp_path / "rv.json"),
+            policy=RuntimeControlPolicy(observation_store_root=str(tmp_path / "store")),
+        )
+        session.complete_setup(storage_provenance=_STORAGE)
+        session.set_calibration_context(self._CONTEXT)
+        self._store_with_observation(tmp_path, session)
+        prior = session.lookup_phase_prior("training")
+        assert prior == pytest.approx(40.0)
+
+    def test_no_store_root_or_context_yields_none(self, tmp_path):
+        no_root = RuntimeVerificationSession(str(tmp_path / "a.json"))
+        no_root.set_calibration_context(self._CONTEXT)
+        assert no_root.lookup_phase_prior("training") is None
+
+        no_ctx = RuntimeVerificationSession(
+            str(tmp_path / "b.json"),
+            policy=RuntimeControlPolicy(observation_store_root=str(tmp_path / "store")),
+        )
+        assert no_ctx.lookup_phase_prior("training") is None
+
+    def test_prior_enables_verified_match_early_exit(self, tmp_path):
+        from core.runtime_control.adaptive import AdaptiveVerificationConfig
+        from core.runtime_control.steady_state import SteadyStateConfig
+
+        policy = RuntimeControlPolicy(
+            observation_store_root=str(tmp_path / "store"),
+            verification=AdaptiveVerificationConfig(
+                steady=SteadyStateConfig(window=4, stable_windows=3, rel_spread_tol=0.10),
+                min_timed_steps=5,
+                min_timed_ms=0.0,
+                max_steps=50,
+            ),
+        )
+        session = RuntimeVerificationSession(str(tmp_path / "rv.json"), policy=policy)
+        session.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=100
+            ),
+        )
+        session.set_calibration_context(self._CONTEXT)
+        self._store_with_observation(tmp_path, session)
+
+        verifier = session.start_phase_verification(
+            "training",
+            unit="optimizer_step",
+            prior_expected_unit_ms=session.lookup_phase_prior("training"),
+        )
+        for t in [40.0] * 30:  # matches the 40 ms prior
+            verifier.feed(t)
+            if verifier.is_terminal:
+                break
+        assert verifier.prior_agreement == "verified_match"
+        prediction = session.complete_phase_verification(
+            "training", verifier, source="real_training_verification"
+        )
+        assert prediction is not None
+        assert prediction.prior_agreement_ratio == pytest.approx(1.0, rel=0.05)
 
 
 class TestAtomicWrite:

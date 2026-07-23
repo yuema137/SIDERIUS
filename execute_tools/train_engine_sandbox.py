@@ -655,9 +655,15 @@ def run_experiment_streaming(
             # measured during setup are the ones formal training uses. The
             # first production steps double as the adaptive training
             # verification (RT2-C, §2.5): timed with explicit CUDA sync
-            # until a terminal verdict, untimed afterwards.
+            # until a terminal verdict, untimed afterwards. The historical
+            # prior (RT2-F store, RT2-G wiring) enables §2.5 early exit on
+            # verified_match — never a verification substitute.
             t_train_start = time.perf_counter()
-            verifier = runtime_session.start_phase_verification("training", unit="optimizer_step")
+            verifier = runtime_session.start_phase_verification(
+                "training",
+                unit="optimizer_step",
+                prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
+            )
 
         batch_losses = []
         rejected_mid_epoch = False

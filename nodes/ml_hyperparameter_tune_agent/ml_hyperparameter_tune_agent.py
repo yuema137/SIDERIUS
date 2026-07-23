@@ -1278,6 +1278,86 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+def _build_in_subprocess_rejection_record(
+    *,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+    rv_block: dict,
+    fallback_message: str,
+) -> dict:
+    """Attempt record for a clean in-subprocess runtime-verification
+    rejection (RT2-G). Existing ``skipped_time_risk`` vocabulary reused
+    (§2.11); ``memory.verification_stage`` distinguishes it from the
+    free pre-flight screen — this rejection paid real setup and
+    CONSUMES an attempt (operator decision 2026-07-23)."""
+    admission = rv_block.get("admission") or {}
+    reject_reason = admission.get("reason") or fallback_message
+    return {
+        "exp_id": exp_id,
+        "status": "skipped_time_risk",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": (
+                f"Rejected by IN-SUBPROCESS runtime verification after real setup: {reject_reason}"
+            ),
+            "discovery": (
+                f"admission stage={admission.get('stage')}; "
+                f"setup_cost_s={admission.get('setup_cost_seconds')}; "
+                f"verification_cost_s={admission.get('verification_cost_seconds')}; "
+                f"avoided_predicted_s={admission.get('avoided_predicted_runtime_seconds')}"
+            ),
+            "memory_update": (
+                "The measured runtime prediction exceeded the budget (or "
+                "verification failed). Reduce the workload (steps, "
+                "segmentation_size, portions, model size) — this rejection "
+                "consumed an attempt, unlike pre-flight skips."
+            ),
+            "time_mode": "trial" if is_trial else "formal",
+            "verification_stage": "in_subprocess",
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+        "runtime_verification": rv_block or None,
+    }
+
+
+def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -> None:
+    """Append a finalized runtime observation to the run's store (RT2-G).
+
+    Best-effort by design: the observation store is calibration
+    evidence, and a store I/O problem must never break the attempt loop
+    (§6.3 — store failures fail safely). Absent/None blocks are the
+    explicit legacy shape and are skipped silently.
+    """
+    if not rv_block:
+        return
+    try:
+        import re as _re
+
+        from core.runtime_control.observation_store import ObservationStore
+        from core.runtime_control.records import RuntimeObservation
+
+        writer = _re.sub(r"[^A-Za-z0-9._-]", "_", run_name)[:128] or "run"
+        ObservationStore(os.path.join(sandbox.base_dir, "runtime_observations")).append(
+            RuntimeObservation.model_validate(rv_block), writer_id=writer
+        )
+    except Exception as exc:
+        print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -2388,11 +2468,58 @@ class HyperparamTuningAgent:
                             sandbox.save_record(time_record)
                             continue
 
+                    # RT2-G: operator runtime policy for the in-subprocess
+                    # verification session (§2.1/§3). Formal rounds enforce
+                    # the operator budget (the in-subprocess measured
+                    # verification is the sole formal authority; the
+                    # pre-flight gate above stays as the cheap screen);
+                    # trial rounds run record-only so observations and
+                    # priors accrue with zero behavior change.
+                    active_params["runtime_policy"] = {
+                        "operator_budget_seconds": (
+                            chosen_time_budget * 60.0
+                            if (not plan.is_trial and chosen_time_budget is not None)
+                            else None
+                        ),
+                        "observation_store_root": os.path.join(
+                            sandbox.base_dir, "runtime_observations"
+                        ),
+                    }
+
                     failure_stage = "training"
                     print("\n[Step 1/3] Training...")
                     t0 = time.time()
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
+                    if train_status.get("status") == "rejected_time_risk":
+                        # RT2-G: clean in-subprocess rejection — real setup was
+                        # paid, so this CONSUMES an attempt (unlike the free
+                        # pre-flight screen above). Record shape built by
+                        # _build_in_subprocess_rejection_record.
+                        rv_block = train_status.get("runtime_verification") or {}
+                        print(
+                            "  In-subprocess runtime verification REJECTED the "
+                            "attempt (consumes one attempt)."
+                        )
+                        reject_record = _build_in_subprocess_rejection_record(
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            file_index=file_index,
+                            record_params=record_params,
+                            expert_advice_str=expert_advice_str,
+                            hypothesis=hypothesis,
+                            is_trial=plan.is_trial,
+                            round_index=round_index,
+                            attempt_in_round=attempt_in_round,
+                            rv_block=rv_block,
+                            fallback_message=train_status.get(
+                                "message", "runtime verification rejected the attempt"
+                            ),
+                        )
+                        ExperimentRecord.model_validate(reject_record)
+                        sandbox.save_record(reject_record)
+                        _append_runtime_observation(sandbox, run_name, rv_block)
+                        continue
                     if train_status.get("status") == "error":
                         # DataScope DS5 — scope violations are non-retryable
                         # configuration/invariant failures: terminate the run.
@@ -3163,8 +3290,21 @@ class HyperparamTuningAgent:
                         if trial_config.trial_strategy == "target":
                             final_record["target_files"] = trial_config.target_files
 
+                    # RT2-G (§7.3 additive): the attempt's runtime observation.
+                    # The inference-side block is the most complete (it RESUMED
+                    # the training subprocess's observation — RT2-D); fall back
+                    # to the training-side block; explicit None otherwise.
+                    final_record["runtime_verification"] = (
+                        (inf_status or {}).get("runtime_verification")
+                        or train_status.get("runtime_verification")
+                        or None
+                    )
+
                     ExperimentRecord.model_validate(final_record)
                     sandbox.save_record(final_record)
+                    _append_runtime_observation(
+                        sandbox, run_name, final_record["runtime_verification"]
+                    )
 
                     # Phase F post-flight: update per-GPU calibration from this
                     # successful run. Only runs when the gate used the real-dataset

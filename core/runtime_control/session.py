@@ -107,6 +107,15 @@ class RuntimeControlPolicy(BaseModel):
             "Exceeding it escalates those phases to live verification."
         ),
     )
+    observation_store_root: str | None = Field(
+        default=None,
+        description=(
+            "Root of the run's append-only observation store (RT2-F). "
+            "When set, verifiers consume historical priors from it "
+            "(§2.5 prior comparison) — never as a verification "
+            "substitute, only for early-exit/drift classification."
+        ),
+    )
 
 
 class RuntimeVerificationSession:
@@ -307,6 +316,39 @@ class RuntimeVerificationSession:
         existing = self._components.get(phase, PhaseComponentRecord())
         self._components[phase] = existing.model_copy(update={"workload": workload})
         self._write_sidecar()
+
+    def lookup_phase_prior(self, phase: RuntimePhase) -> float | None:
+        """Historical unit-time prior for ``phase`` from the store (RT2-G).
+
+        Uses the observation's own calibration context + current
+        environment; only a ``valid`` lookup yields a prior (stale/
+        drift-evicted/mismatched → ``None`` → ``new_configuration``,
+        §6b). Best-effort: store problems never affect execution.
+        """
+        root = self.policy.observation_store_root
+        if not root or not self._calibration_context:
+            return None
+        try:
+            from core.runtime_control.observation_store import (
+                ObservationStore,
+                observation_calibration_key,
+            )
+
+            key = observation_calibration_key(self.observation, phase)
+            if key is None:
+                return None
+            lookup = ObservationStore(root).lookup_prior(
+                key,
+                phase,
+                current_gpu_name=self._environment.get("gpu_name"),
+                current_torch_version=self._environment.get("torch_version"),
+            )
+            if lookup.status == "valid":
+                return lookup.prior_unit_ms
+            return None
+        except Exception as exc:
+            print(f"[runtime_control] prior lookup failed (non-fatal): {exc}")
+            return None
 
     def start_phase_verification(
         self,
