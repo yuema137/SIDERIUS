@@ -69,7 +69,7 @@ Runtime-Control Implementation
 
 [x] RT1     — step resolver + static-prior demotion (788487f)
 [x] Rev 5   — golden-plan design unification (this document)
-[ ] RT2-A   — runtime data model + workload contracts (stop-and-show approved 2026-07-23; commits pending)
+[x] RT2-A   — runtime data model + workload contracts (a93963d, a4e4a52)
 [ ] RT2-B   — in-subprocess setup measurement
 [ ] RT2-C   — generic adaptive phase verification (training)
 [ ] RT2-D   — inference verification
@@ -1146,7 +1146,14 @@ steady-state detector becomes the RT2-C stabilization engine; the
   its two deferred decisions for RT2-E/RT2-G); (2) tracker tick
   discipline adopted (§0 rev 5.2) — RT2-A ticked only after its
   implementation commits exist.
-- **Committed implementation**: pending (hashes recorded here on land).
+- **Committed implementation**: ✅ 2026-07-23 — `e473e07` (design rev
+  5/5.1/5.2), `a93963d` (core framework + steady-state detector + RT2a/
+  model suites), `a4e4a52` (workload resolvers + estimator delegation).
+  Final checkpoint: full unit tree 4063 passed / 1 pre-existing
+  environment skip / 3 xfailed (includes the guardrail suites; one
+  comment rewrapped in `steady_state.py` so the H100 provenance marker
+  and literal share a line — production logic untouched); ruff check +
+  format clean; pyright 0 errors.
 
 - [x] New `core/runtime_control/` package (task-agnostic framework):
   `phases.py` (`RuntimePhase`, `RUNTIME_PHASES`); `workload.py`
