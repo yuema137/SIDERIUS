@@ -125,7 +125,12 @@ class TestGateCoverageRound7:
             model_name="wavenet",
             run_name="round_7_healthy",
             round_index=7,
-            denoised_paths={12: str(d0)},
+            # The healthy file must be present at the indices the blocking
+            # gates actually peek (configs/health_checks.yaml
+            # peek_file_indices: [3, 10, 17]) — unresolved peeks fail
+            # closed by design, so a fixture that misses the configured
+            # peek coverage can never pass regardless of output quality.
+            denoised_paths={3: str(d0), 10: str(d0), 17: str(d0)},
             file_vector=[None] * 12 + [5.9, 3.7, 6.0, 7.5, 7.0, 10.0, 1.6, 0.5],
             denoising_score=1.05,
         )
