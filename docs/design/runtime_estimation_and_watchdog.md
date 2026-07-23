@@ -82,8 +82,8 @@ Runtime-Control Implementation
 [x] RT6     — chain/CLI/docs wiring (0db5e25)
 [x] Pre-Gate A — full non-real sweep (unit 4239 green; pseudo integration 124 passed + known FU-7 only)
 [x] Pre-Gate B — small real-GPU validation (4/4 scenarios green post-fix; findings F1-F3 fixed; evidence in docs/design/pregate_evidence/)
-[ ] Gate 1  — real LLM + pseudo training
-[ ] Gate 2  — operator-approved real training (incl. pathological case)
+[x] Gate 1  — real LLM + pseudo training (PASSED 2026-07-23; guardrails caught real LLM's 1M-step/batch-1 plans)
+[ ] Gate 2  — operator-approved real training (incl. pathological case) — BUDGET DISCUSSION WITH OPERATOR FIRST
 ```
 
 **Per-commit checkpoint philosophy (rev 5.1)**: every commit ends with a
@@ -1813,3 +1813,32 @@ preserved in `docs/design/pregate_evidence/`.
   steps, instrumentation ≈ sub-second sidecar writes — overhead ≈ 0
   wasted compute. Rejected path: ~20 s real cost to avoid 2013 s
   predicted — the §2.12 principle holds with measured numbers.
+
+### Gate 1 — real LLM + pseudo training ✅ PASSED 2026-07-23
+
+- **Command**: `run_one_iteration.py --workspace /tmp/gate1_rc
+  --run_name gate1_rt --start_iteration 1 --max_rounds 2
+  --is_pseudo_training --llm_config llm_configs/openai_tiered_v1.json
+  --is_trial --trial_portion 0.02 --train_portion 0.02
+  --eval_portion 0.02` (real OpenAI tiered config; StubSandbox).
+- **Cost**: 15 LLM calls, 202,889 tokens, 5 m 45 s wall.
+- **Standard pass criteria**: all LLM calls completed; every output
+  passed Pydantic validation (plan → ExperimentPlan, records →
+  ExperimentRecord); the implementor's invented plugin
+  (`causal_wavenet_spectral_baseline`) compiled and instantiated;
+  graceful manifest exit.
+- **Headline evidence**: the real LLM planned the V18 failure shapes —
+  1,000,000 steps and formal batch_size 1 — and the §5 GUARDRAILS
+  caught both live (`skipped_time_risk` /
+  `verification_stage="guardrail"`, planner-visible), after which the
+  planner visibly adapted (subsequent plan 250k steps). First
+  real-LLM demonstration of the protection feedback loop.
+- Other paths exercised: two rounds scored (stub) and classified by
+  the HealthGate machinery (`failed_mode_collapse` — stub-score
+  artifact class); two attempts failed in the PRE-EXISTING Phase-K
+  VRAM forward-pass probe (its own 60 s timeout, actionable message —
+  the invented model loops over the time dimension). Scored records
+  carry the additive `runtime_verification` key (explicit None under
+  the stub, §7.3 shape).
+- No runtime-control structural defects. Iteration outcome
+  `no_records` is the correct behavior for this attempt set.
