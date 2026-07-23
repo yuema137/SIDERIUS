@@ -1278,6 +1278,46 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+class WallClockTimeoutError(RuntimeError):
+    """A watchdog deadline kill (RT4, §4). Carries the §4 timeout
+    provenance so the attempt_failure record can surface
+    ``{elapsed_s, deadline_s, estimate_source}`` to the planner."""
+
+    def __init__(self, message: str, watchdog: dict, rv_block: dict | None):
+        super().__init__(message)
+        self.watchdog = dict(watchdog or {})
+        self.rv_block = rv_block
+
+
+def _raise_if_wall_clock_timeout(status: dict, sandbox, run_name: str) -> None:
+    """RT4: convert an executor watchdog kill into the §4 attempt-failure
+    path (the shared except-handler records it with
+    failure_type='wall_clock_timeout'). The partial observation is
+    appended to the store first — a killed attempt is still evidence
+    (§6c excludes it from calibration; the ledger keeps it visible)."""
+    if status.get("status") != "wall_clock_timeout":
+        return
+    rv_block = status.get("runtime_verification")
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    raise WallClockTimeoutError(
+        status.get("message", "watchdog wall-clock timeout"),
+        status.get("watchdog") or {},
+        rv_block,
+    )
+
+
+def _apply_watchdog_failure_fields(record: dict, exc: Exception) -> None:
+    """Stamp §4 timeout provenance onto an attempt_failure record."""
+    if not isinstance(exc, WallClockTimeoutError):
+        return
+    record["watchdog"] = exc.watchdog
+    record["runtime_verification"] = exc.rv_block
+    memory = record["memory"]
+    memory["watchdog_elapsed_s"] = exc.watchdog.get("elapsed_s")
+    memory["watchdog_deadline_s"] = exc.watchdog.get("deadline_s")
+    memory["watchdog_estimate_source"] = exc.watchdog.get("estimate_source")
+
+
 def _build_in_subprocess_rejection_record(
     *,
     exp_id: str,
@@ -2499,6 +2539,7 @@ class HyperparamTuningAgent:
                     t0 = time.time()
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
+                    _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
                     if train_status.get("status") == "rejected_time_risk":
                         # RT2-G: clean in-subprocess rejection — real setup was
                         # paid, so this CONSUMES an attempt (unlike the free
@@ -2583,6 +2624,7 @@ class HyperparamTuningAgent:
                         t0 = time.time()
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
                         inference_time = round(time.time() - t0, 1)
+                        _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
                         if inf_status.get("status") == "error":
                             # DataScope DS5 — non-retryable: terminate the run.
                             if inf_status.get("error_type") == "scope_violation":
@@ -3399,7 +3441,9 @@ class HyperparamTuningAgent:
                     traceback.print_exc()
                     failure_reason = str(e)
                     failure_type = (
-                        "model_forward_error"
+                        "wall_clock_timeout"  # §4 status-audit decision (RT4)
+                        if isinstance(e, WallClockTimeoutError)
+                        else "model_forward_error"
                         if failure_stage == "vram_structural_probe" and isinstance(e, RuntimeError)
                         else type(e).__name__
                     )
@@ -3437,9 +3481,14 @@ class HyperparamTuningAgent:
                             "attempt_in_round": attempt_in_round,
                         },
                     }
+                    _apply_watchdog_failure_fields(failure_record, e)
                     try:
-                        validated_failure = ExperimentRecord.model_validate(failure_record)
-                        sandbox.save_record(validated_failure.model_dump())
+                        ExperimentRecord.model_validate(failure_record)
+                        # Save the RAW dict (validation is the gate, not the
+                        # serializer): model_dump() drops extra keys, which
+                        # would silently lose the §4 watchdog provenance —
+                        # every other record path also saves the raw dict.
+                        sandbox.save_record(failure_record)
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")

@@ -69,6 +69,35 @@ ADMISSION_STAGE_POST_SETUP = "post_setup_runtime_verification"
 ADMISSION_STAGE_POST_PHASE = "post_{phase}_verification"
 
 
+class WatchdogConfig(BaseModel):
+    """Runtime-watchdog policy (RT4, §4).
+
+    Deadline = ``max(floor, min(operator_budget, verified_estimate ×
+    safety_factor))`` — every number here is a schema-level input
+    recorded in provenance, never a protocol constant. Disabled by
+    default: enabling is an explicit operator/chain decision (RT6).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = Field(default=False)
+    grace_seconds: float = Field(
+        default=10.0,
+        ge=0.0,
+        description="TERM → KILL escalation grace (§4 kill sequence).",
+    )
+    poll_seconds: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Deadline-check cadence while the subprocess runs.",
+    )
+    floor_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        description="Configurable deadline floor — prevents degenerate deadlines for near-zero estimates (§4).",
+    )
+
+
 class RuntimeControlPolicy(BaseModel):
     """Operator runtime policy in force for one execution attempt.
 
@@ -115,6 +144,10 @@ class RuntimeControlPolicy(BaseModel):
             "(§2.5 prior comparison) — never as a verification "
             "substitute, only for early-exit/drift classification."
         ),
+    )
+    watchdog: WatchdogConfig = Field(
+        default_factory=WatchdogConfig,
+        description="Runtime-watchdog policy (RT4, §4). Disabled by default.",
     )
 
 

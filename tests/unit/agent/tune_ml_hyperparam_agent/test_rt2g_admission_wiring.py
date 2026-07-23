@@ -334,3 +334,52 @@ class TestSuccessPathAttachment:
         successes = [r for r in saved if r.get("status") in ("success", "failed_mode_collapse")]
         assert successes
         assert successes[0]["runtime_verification"] is None  # explicit absence
+
+
+class TestWatchdogTimeoutRouting:
+    """RT4: a watchdog kill surfaces as attempt_failure /
+    wall_clock_timeout with the §4 provenance triplet, counts toward
+    the attempt budget, and appends the partial observation."""
+
+    def test_timeout_records_attempt_failure_with_provenance(self, harness, tmp_path):
+        with tempfile.TemporaryDirectory() as obs_dir:
+            import os
+
+            session = RuntimeVerificationSession(os.path.join(obs_dir, "rv.json"))
+            session.complete_setup(storage_provenance={"expected_raw_bytes": 1})
+            partial_block = session.observation.model_dump(mode="json")
+        timeout = {
+            "status": "wall_clock_timeout",
+            "message": "watchdog killed training after 12.0s",
+            "watchdog": {
+                "elapsed_s": 12.0,
+                "deadline_s": 10.0,
+                "estimate_source": "verified_components",
+                "escalated_to_kill": False,
+                "survivors_detected": False,
+            },
+            "runtime_verification": partial_block,
+        }
+        agent, saved, _seen_params, workspace, cleanup = harness(timeout, {"status": "error"})
+        try:
+            agent.run(_make_input(tmp_path))
+            import os
+
+            observations = ObservationStore(
+                os.path.join(workspace, "runtime_observations")
+            ).read_all()
+        finally:
+            cleanup()
+
+        failures = [r for r in saved if r.get("record_type") == "attempt_failure"]
+        assert len(failures) == 1, f"statuses: {[r.get('status') for r in saved]}"
+        rec = failures[0]
+        assert rec["failure_type"] == "wall_clock_timeout"  # §4 decision
+        assert rec["failure_stage"] == "training"
+        assert rec["counts_toward_attempt_budget"] is True
+        assert rec["watchdog"]["elapsed_s"] == 12.0
+        assert rec["watchdog"]["deadline_s"] == 10.0
+        assert rec["memory"]["watchdog_estimate_source"] == "verified_components"
+        # Partial observation of the killed attempt is store evidence
+        # (§6c keeps it OUT of calibration; the ledger keeps it visible).
+        assert len(observations) == 1

@@ -3,6 +3,7 @@ import json
 import os
 import random
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -404,6 +405,121 @@ def _ensure_dir(path: str) -> None:
         )
 
 
+def _watchdog_deadline_provider(
+    policy: "RuntimeControlPolicy", rv_sidecar_path: str
+) -> Callable[[], tuple[float | None, str]]:
+    """§4 deadline: ``max(floor, min(operator_budget, verified × safety))``.
+
+    The verified estimate comes from the attempt's LIVE observation
+    sidecar (the RT2 event log) — the deadline tightens mid-flight as
+    soon as the in-subprocess verification lands component predictions.
+    Returns a provider yielding ``(deadline_seconds | None,
+    estimate_source)``; ``None`` disables the deadline (nothing to
+    enforce yet).
+    """
+
+    def provider() -> tuple[float | None, str]:
+        candidates: list[tuple[float, str]] = []
+        if policy.operator_budget_seconds is not None:
+            candidates.append((policy.operator_budget_seconds, "operator_budget"))
+        block = _read_runtime_observation_sidecar(rv_sidecar_path)
+        if block:
+            predicted = [
+                c.get("prediction", {}).get("predicted_seconds")
+                for c in (block.get("components") or {}).values()
+                if c.get("prediction") is not None
+            ]
+            if predicted:
+                estimate = sum(predicted) * policy.safety_factor
+                candidates.append((estimate, "verified_components"))
+        if not candidates:
+            return None, "none"
+        deadline, source = min(candidates, key=lambda t: t[0])
+        return max(deadline, policy.watchdog.floor_seconds), source
+
+    return provider
+
+
+def _run_subprocess_with_watchdog(
+    cmd: list[str],
+    *,
+    env: dict,
+    preexec_fn: Callable[[], None] | None,
+    capture_stdout: bool,
+    deadline_provider: Callable[[], tuple[float | None, str]],
+    grace_seconds: float,
+    poll_seconds: float,
+    label: str,
+) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
+    """Run ``cmd`` in its OWN process group under a §4 deadline.
+
+    Natural exit → ``(CompletedProcess, None)`` (non-zero exit codes are
+    raised as ``CalledProcessError`` to mirror ``subprocess.run(...,
+    check=True)``). Deadline hit → the whole process GROUP gets
+    SIGTERM, ``grace_seconds``, then SIGKILL; the survivors check
+    asserts the group is gone; returns ``(None, kill_info)``.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE if capture_stdout else None,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=os.getcwd(),
+        env=env,
+        preexec_fn=preexec_fn,
+        start_new_session=True,  # own process group — killpg reaches every child
+    )
+    t_start = time.perf_counter()
+    stdout, stderr = "", ""
+    while True:
+        try:
+            stdout, stderr = proc.communicate(timeout=poll_seconds)
+            break  # natural exit
+        except subprocess.TimeoutExpired:
+            elapsed = time.perf_counter() - t_start
+            deadline, source = deadline_provider()
+            if deadline is None or elapsed <= deadline:
+                continue
+            # §4 kill sequence: TERM the group → grace → KILL the group.
+            pgid = os.getpgid(proc.pid)
+            print(
+                f"--- Watchdog [{label}] deadline exceeded "
+                f"({elapsed:.1f}s > {deadline:.1f}s, source={source}) — "
+                f"killing process group {pgid} ---"
+            )
+            escalated = False
+            os.killpg(pgid, signal.SIGTERM)
+            try:
+                stdout, stderr = proc.communicate(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                escalated = True
+                os.killpg(pgid, signal.SIGKILL)
+                stdout, stderr = proc.communicate()
+            # Orphan check: the group must be gone (§4 "verify no
+            # surviving pids"). killpg(0) probes without sending.
+            try:
+                os.killpg(pgid, 0)
+                print(f"--- Watchdog [{label}] WARNING: process group {pgid} survived ---")
+                survivors = True
+            except ProcessLookupError:
+                survivors = False
+            return None, {
+                "elapsed_s": round(elapsed, 3),
+                "deadline_s": round(deadline, 3),
+                "estimate_source": source,
+                "escalated_to_kill": escalated,
+                "survivors_detected": survivors,
+                "stdout_tail": (stdout or "")[-2000:],
+                "stderr_tail": (stderr or "")[-2000:],
+            }
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
+    return (
+        subprocess.CompletedProcess(cmd, proc.returncode, stdout=stdout, stderr=stderr),
+        None,
+    )
+
+
 def _read_runtime_observation_sidecar(path: str) -> dict[str, Any] | None:
     """Read + validate the subprocess's runtime-verification sidecar (RT2-B).
 
@@ -590,6 +706,9 @@ class TidmadSandbox:
             os.path.join(self.dirs["configs"], f"runtime_verification_{exp_id}.json")
         )
         try:
+            policy_obj = (
+                RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
+            )
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
 
             paths = {
@@ -647,26 +766,67 @@ class TidmadSandbox:
                 if os.path.isfile(rv_sidecar_path):
                     os.remove(rv_sidecar_path)
                 cmd.extend(["--runtime_observation_out", rv_sidecar_path])
-                if runtime_policy is not None:
-                    validated_policy = RuntimeControlPolicy(**runtime_policy)
+                if policy_obj is not None:
                     rp_path = os.path.abspath(
                         os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
                     )
                     with open(rp_path, "w") as f:
-                        json.dump(validated_policy.model_dump(), f)
+                        json.dump(policy_obj.model_dump(), f)
                     cmd.extend(["--runtime_policy_json", rp_path])
 
             print(f">>> [Executor] Running training for {exp_id}...")
-            result = subprocess.run(
-                cmd,
-                check=True,
-                stdout=None if self.progress_bar else subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
-                preexec_fn=_limited_preexec(_subprocess_rss_gb("training")),
-            )
+            env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
+            preexec = _limited_preexec(_subprocess_rss_gb("training"))
+            if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
+                # RT4 (§4): process-group launch + deadline kill. The
+                # deadline tightens mid-flight from the live observation
+                # sidecar (component-deadline interface).
+                result, kill_info = _run_subprocess_with_watchdog(
+                    cmd,
+                    env=env,
+                    preexec_fn=preexec,
+                    capture_stdout=not self.progress_bar,
+                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    grace_seconds=policy_obj.watchdog.grace_seconds,
+                    poll_seconds=policy_obj.watchdog.poll_seconds,
+                    label="training",
+                )
+                if kill_info is not None:
+                    # §4 partial-artifact cleanup: the killed attempt's
+                    # checkpoint/sentinel/results must not survive.
+                    for partial in (
+                        os.path.join(self.dirs["models"], f"model_{model_type}_{exp_id}_agent.pth"),
+                        os.path.join(self.dirs["models"], f"_OK_{exp_id}"),
+                        os.path.join(
+                            self.dirs["records"],
+                            run_name,
+                            f"experiment_results_{model_type}_{exp_id}.json",
+                        ),
+                    ):
+                        if os.path.isfile(partial):
+                            os.remove(partial)
+                    return {
+                        "status": "wall_clock_timeout",
+                        "message": (
+                            f"watchdog killed training after {kill_info['elapsed_s']}s "
+                            f"(deadline {kill_info['deadline_s']}s, "
+                            f"source={kill_info['estimate_source']})"
+                        ),
+                        "watchdog": kill_info,
+                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                    }
+            else:
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=None if self.progress_bar else subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd=os.getcwd(),
+                    env=env,
+                    preexec_fn=preexec,
+                )
+            assert result is not None
 
             if not self.progress_bar and result.stdout:
                 print(f"--- Train Script Output ---\n{result.stdout}")
@@ -808,6 +968,7 @@ class TidmadSandbox:
                              observation is attached to the result as
                              ``runtime_verification``.
         """
+        policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
         l_path = os.path.abspath(os.path.join(self.dirs["configs"], f"loss_config_{exp_id}.json"))
@@ -887,28 +1048,66 @@ class TidmadSandbox:
             # RT2-D: resume the attempt's runtime observation (training
             # components stay — the sidecar is NEVER deleted here).
             cmd.extend(["--runtime_observation_out", rv_sidecar_path])
-            if runtime_policy is not None:
-                validated_policy = RuntimeControlPolicy(**runtime_policy)
+            if policy_obj is not None:
                 rp_path = os.path.abspath(
                     os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
                 )
                 with open(rp_path, "w") as f:
-                    json.dump(validated_policy.model_dump(), f)
+                    json.dump(policy_obj.model_dump(), f)
                 cmd.extend(["--runtime_policy_json", rp_path])
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             t_subprocess_start = time.perf_counter()
-            result = subprocess.run(
-                cmd,
-                check=True,
-                stdout=None if self.progress_bar else subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=os.getcwd(),
-                env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
-                preexec_fn=_limited_preexec(_subprocess_rss_gb("inference")),
-            )
+            env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
+            preexec = _limited_preexec(_subprocess_rss_gb("inference"))
+            if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
+                result, kill_info = _run_subprocess_with_watchdog(
+                    cmd,
+                    env=env,
+                    preexec_fn=preexec,
+                    capture_stdout=not self.progress_bar,
+                    deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
+                    grace_seconds=policy_obj.watchdog.grace_seconds,
+                    poll_seconds=policy_obj.watchdog.poll_seconds,
+                    label="inference",
+                )
+                if kill_info is not None:
+                    # §4 partial-artifact cleanup — the killed attempt's
+                    # denoised outputs (mirrors --cleanup_denoised).
+                    import glob as _glob
+
+                    pattern = os.path.join(
+                        self.base_dir,
+                        f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_*.h5",
+                    )
+                    for partial in _glob.glob(pattern):
+                        os.remove(partial)
+                    return {
+                        "status": "wall_clock_timeout",
+                        "message": (
+                            f"watchdog killed inference after {kill_info['elapsed_s']}s "
+                            f"(deadline {kill_info['deadline_s']}s, "
+                            f"source={kill_info['estimate_source']})"
+                        ),
+                        "watchdog": kill_info,
+                        "per_file_timings_ms": [],
+                        "process_startup_ms": None,
+                        "subprocess_wall_ms": None,
+                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                    }
+            else:
+                result = subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=None if self.progress_bar else subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd=os.getcwd(),
+                    env=env,
+                    preexec_fn=preexec,
+                )
+            assert result is not None
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
             if not self.progress_bar and result.stdout:
                 print(f"--- Inference Output ---\n{result.stdout}")
