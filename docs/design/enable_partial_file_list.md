@@ -1576,11 +1576,11 @@ Per `docs/gates/gate_testing_standard.md`. Both gates need user approval
 **What changed LLM-facing**: fixed-params scope disclosure (DS5), proposer
 `data_scope` context (DS7).
 
-- [ ] Run the planner path with a real LLM (`llm_configs/openai_tiered_v1.json`)
+- [x] Run the planner path with a real LLM (`llm_configs/openai_tiered_v1.json`)
   under `data_scope=[4..9]`: plan completes, validates into `ExperimentPlan`,
   and after normalization the effective strategies are `snapshot` (provenance
   fields populated when normalization occurred)
-- [ ] Run the proposer with a partial-scope `ProposalInput`: output passes
+- [x] Run the proposer with a partial-scope `ProposalInput`: output passes
   schema validation; proposal text does not reference out-of-scope files as
   available data; preflight estimate uses the in-scope synthetic sample set
 - [ ] Cost/time: ~$0.05–0.20, ~2–5 min
@@ -1588,7 +1588,24 @@ Per `docs/gates/gate_testing_standard.md`. Both gates need user approval
 **Pass criteria**: LLM calls complete; outputs pass Pydantic validation; no
 crash in the normalization/disclosure path.
 
-- [ ] Gate 1 result recorded here: *(date, model ids, outcome)*
+- [x] Gate 1 result recorded here: **PASS — 2026-07-23**, run as one
+  real-LLM + pseudo-training chain iteration (`run_one_iteration.py
+  --is_pseudo_training --data_scope 4-9 --health_gate_files 4,7,9
+  --llm_config llm_configs/openai_tiered_v1.json`, cold start, 2 rounds;
+  models: gpt-5.4 / gpt-5.4-mini / gpt-5.4-nano / deepseek-v4-pro tiers).
+  Exit 0; 17 LLM calls / 128k tokens. Evidence: `[DATASCOPE]` banner at
+  workflow pre-flight AND tuner startup (files=[4..9],
+  monitored=[4,7,9]); real proposer output (`gated_dilated_tcn_denoiser`)
+  passed schema with ZERO out-of-scope file references and no
+  all-20-files phrasing; implementor + validator consumed it; planner
+  chose `snapshot` outright both rounds (disclosure effective —
+  `planned_trial_strategy=snapshot`, `strategy_normalization_reason=None`,
+  i.e. nothing to normalize); final records stamped
+  `resolved_data_scope=[4..9]`. Rounds ended `failed_mode_collapse` /
+  `no_records` because StubSandbox writes no denoised HDF5s and the
+  blocking gates fail closed — expected under pseudo training and outside
+  Gate 1's criteria (no crash anywhere in the normalization/disclosure
+  path).
 
 ### Gate 2 — Real LLM + real training (smoke, two scenarios)
 
