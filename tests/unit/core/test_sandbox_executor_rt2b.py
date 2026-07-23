@@ -202,7 +202,12 @@ class TestPolicyForwarding:
         assert seen["rv_path"] is not None
         assert seen["rp_path"] is not None
         with open(seen["rp_path"]) as f:
-            assert json.load(f) == {"operator_budget_seconds": 120.0}
+            written = json.load(f)
+        # Validated full-policy dump: the budget survives verbatim and the
+        # RT2-C stopping-policy defaults are materialized alongside it.
+        assert written["operator_budget_seconds"] == 120.0
+        assert written["safety_factor"] == 1.0
+        assert "verification" in written
 
     def test_invalid_policy_rejected_before_launch(self, sandbox, monkeypatch):
         launched = {"n": 0}

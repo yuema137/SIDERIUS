@@ -547,6 +547,32 @@ def run_experiment_streaming(
     base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
     history = []
     t_train_start: float | None = None
+    verifier = None
+    epoch0_dataset_seconds = 0.0
+    use_cuda_sync = device.type == "cuda"
+
+    def _finish_training_verification(decide_admission: bool) -> bool:
+        """Record the training verification; optionally decide admission.
+
+        Returns True when the admission decision REJECTED the attempt.
+        The (epochs-1) × epoch-0 dataset-construction term is the
+        engine's per-epoch reconstruction cost (audit finding) — an
+        explicit additive prediction term, never hidden in unit time.
+        """
+        assert runtime_session is not None and verifier is not None
+        runtime_session.complete_phase_verification(
+            "training",
+            verifier,
+            source="real_training_verification",
+            extra_predicted_seconds=(train_cfg.epochs - 1) * epoch0_dataset_seconds,
+            extra_detail={"epoch0_dataset_seconds": epoch0_dataset_seconds},
+        )
+        if decide_admission:
+            adm = runtime_session.decide_admission(stage="post_training_verification")
+            if adm.decision == "rejected":
+                print(f"[runtime_control] REJECTED after training verification: {adm.reason}")
+                return True
+        return False
 
     for ep in range(train_cfg.epochs):
         model.train()
@@ -556,6 +582,7 @@ def run_experiment_streaming(
         # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
         epoch_seed = base_seed if freeze_subsample else base_seed + ep
         epoch_rng = random.Random(epoch_seed)
+        t_dataset = time.perf_counter()
         dataset = TIDMADEpochDataset(
             data_dir=data_dir,
             sample_set=sample_set,
@@ -564,6 +591,8 @@ def run_experiment_streaming(
             rng=epoch_rng,
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
+        if ep == 0:
+            epoch0_dataset_seconds = time.perf_counter() - t_dataset
 
         if runtime_session is not None and ep == 0:
             # RT2-B post-setup boundary (§2.1/§2.2): everything up to here —
@@ -592,6 +621,7 @@ def run_experiment_streaming(
                         "train_portion": train_portion,
                     },
                 ),
+                detail={"dataset_construction_seconds": epoch0_dataset_seconds},
             )
             admission = runtime_session.decide_admission()
             if admission.decision == "rejected":
@@ -602,15 +632,25 @@ def run_experiment_streaming(
                 gc.collect()
                 return None
             # Admitted: continue directly into THIS loop — the very objects
-            # measured during setup are the ones formal training uses.
+            # measured during setup are the ones formal training uses. The
+            # first production steps double as the adaptive training
+            # verification (RT2-C, §2.5): timed with explicit CUDA sync
+            # until a terminal verdict, untimed afterwards.
             t_train_start = time.perf_counter()
+            verifier = runtime_session.start_phase_verification("training", unit="optimizer_step")
 
         batch_losses = []
+        rejected_mid_epoch = False
         for input_batch, target_batch in tqdm(
             loader,
             desc=f"Epoch {ep}",
             file=sys.stdout,
         ):
+            if verifier is not None:
+                if use_cuda_sync:
+                    torch.cuda.synchronize()
+                t_step = time.perf_counter()
+
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
@@ -627,8 +667,34 @@ def run_experiment_streaming(
             optimizer.step()
             batch_losses.append(loss.item())
 
+            if verifier is not None:
+                if use_cuda_sync:
+                    torch.cuda.synchronize()
+                state = verifier.feed(max((time.perf_counter() - t_step) * 1000.0, 1e-6))
+                if state in ("verified", "failed_no_steady_state", "failed_pathological_unit"):
+                    rejected_mid_epoch = _finish_training_verification(decide_admission=True)
+                    verifier = None
+                    if rejected_mid_epoch:
+                        break
+
+        if verifier is not None:
+            # Epoch-0 loader exhausted before a verdict: resolve from the
+            # evidence collected. With a single epoch the training work is
+            # already DONE — record evidence only; with more epochs ahead,
+            # the admission decision still protects them.
+            rejected_mid_epoch = _finish_training_verification(
+                decide_admission=train_cfg.epochs > 1
+            )
+            verifier = None
+
         del dataset, loader
         gc.collect()
+
+        if rejected_mid_epoch:
+            del model, optimizer, criterion
+            torch.cuda.empty_cache()
+            gc.collect()
+            return None
 
         avg_loss = np.mean(batch_losses) if batch_losses else float("nan")
         history.append(float(avg_loss))
