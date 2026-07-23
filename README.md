@@ -206,6 +206,34 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
 Operational runbook (workspace conventions, restart from failed iter, SDSC memory rule):
 [`docs/running_chain_test.md`](docs/running_chain_test.md).
 
+### Scoped run — restrict a chain to a file subset (DataScope)
+
+`--data_scope` restricts everything a run touches — training, inference,
+scoring, and HealthGate peeks — to a validation-file subset, enforced at the
+sample-set builder and the sandbox I/O boundary (never by prompts). Both
+`4-9` and `4,5,6,7,8,9` (and mixed `0-3,7`) spec forms canonicalize to one
+sorted, deduplicated list. Partial scopes are snapshot-only and require an
+explicit in-scope `--health_gate_files` monitored list when gates are on:
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    [... usual args ...] \
+    --data_scope 4-9 --health_gate_files 4,7,9
+```
+
+To disable the HealthGate subsystem entirely (successful finite-score
+records then count as valid candidates):
+
+```bash
+    --no-health_gate_enabled
+```
+
+The resolved scope + gate policy are pinned per workspace by
+`run_invariants_lock.json` — re-running or resuming a workspace with a
+different scope or gate config fails at startup, and aggregate scalars are
+only comparable within one scope. Full design:
+[`docs/design/enable_partial_file_list.md`](docs/design/enable_partial_file_list.md).
+
 ### Literature-review-augmented chain
 
 Add `--ml_lit_review_enabled` to enable the literature-review agent. It runs once per

@@ -1,7 +1,9 @@
 # Design: Enable Partial-File Training via `DataScope` (`enable_partial_file_list`)
 
-**Status**: In progress — design approved through four audit rounds
-(2026-07-22); DS1–DS5c landed; DS6–DS8 + Checkpoint DS pending
+**Status**: DS1–DS8 complete (2026-07-23) — implementation + docs +
+final suites done. Pending: Checkpoint DS Gates 1 & 2 (operator-approved
+real-LLM / real-training validation; Gate 2 needs a GPU + TIDMAD data),
+then PR
 **Author**: Yue Ma
 **Created**: 2026-07-22
 **Revised**: 2026-07-22 (round 3: HealthGate enable flag, materialized effective
@@ -1228,14 +1230,25 @@ functional campaign identity).
   fails before the lock is stamped, no LLM stubs needed)*
 
 **Verification checklist**:
-- [ ] Chain smoke in pseudo mode (`run_one_iteration.py` with `--pseudo` +
+- [x] Chain smoke in pseudo mode (`run_one_iteration.py` with `--pseudo` +
   `--data_scope 4-9 --health_gate_files 4,7,9`) completes; second invocation
   with a different scope against the same workspace **fails at startup**
-  *(deferred to the DS-series end per the amended test policy; the
-  second-invocation-fails half is already unit-pinned at the wiring layer
-  by `TestDataScopeChainWiring`)*
-- [ ] Full unit + pseudo integration suites green; ruff + pyright clean
-  *(deferred to the DS-series end per the amended test policy)*
+  *(DS8, 2026-07-23 — `--is_pseudo_llm --is_pseudo_training` cold start,
+  exit 0 with graceful `no_records` manifest (stub sandbox, no scored
+  records on this box); `run_invariants_lock.json` written with
+  `[4..9]` + enabled + sha, `health_checks_effective.yaml` materialized
+  at the chain root. Negative matrix all exit 1: conflicting
+  `--health_gate_files` → materialized-config immutability guard;
+  `--no-health_gate_enabled` + files → schema inconsistency; different
+  scope with gates disabled → run-invariants lock violation raised from
+  `restore_prior_state` (the DS6c `expected_invariants` threading
+  proven in production), each with a crashed manifest)*
+- [x] Full unit + pseudo integration suites green; ruff + pyright clean
+  *(DS8, 2026-07-23 — `tests/unit/` **3998 passed** / 1 skipped /
+  3 xfailed (4:29); `tests/integration/ -m "not real_run"` **124
+  passed** / 1 failed (only FU-7 vocab, filed as issue #129) / 1
+  skipped / 129 deselected (9:28); ruff check + format clean repo-wide;
+  pyright clean repo-wide)*
 
 **Test gate**: unit only.
 
@@ -1486,36 +1499,70 @@ deprecations; targeted-suite policy):
 **Goal**: docs and code in lock-step; graph-level audit before the checkpoint.
 
 **Code / docs**:
-- [ ] `CLAUDE.md` — amend the health-YAML invariant wording (YAML = checks /
+- [x] `CLAUDE.md` — amend the health-YAML invariant wording (YAML = checks /
   thresholds / actions / **default** file placement; per-run enable +
   monitored files = run-level inputs; effective config materialized to the
   workspace); add a *Subsystem Invariants* entry for `DataScope`
   (constructive + boundary + direct-access enforcement; scalar
   scope-homogeneity rule; snapshot-only under partial scope; behavioral
-  identity of the default).
-- [ ] `README.md` — short section under *Common workflows*: scoped run example
+  identity of the default). *(DS8 — also refreshed the ephemeral Current
+  State section (was 9 days stale) and re-synced the byte-identical
+  AGENTS.md)*
+- [x] `README.md` — short section under *Common workflows*: scoped run example
   (`--data_scope 4-9 --health_gate_files 4,7,9`), plus the disabled-gate
-  example (`--no-health_gate_enabled`).
-- [ ] `docs/design/v18_priorities.md` — note: chain-wide best-valid-formal
-  incumbent must be **scope-keyed**.
-- [ ] File GitHub issue: pre-existing peek-vs-eval-coverage latent bug (full
+  example (`--no-health_gate_enabled`). *(DS8)*
+- [x] `docs/design/v18_priorities.md` — note: chain-wide best-valid-formal
+  incumbent must be **scope-keyed**. *(DS8 — added to §3.4)*
+- [x] File GitHub issue: pre-existing peek-vs-eval-coverage latent bug (full
   scope + LLM `eval_strategy="target"` → spurious blocking-gate failures);
-  reference this doc's audit section.
-- [ ] **Connection audit** (step-7 style): every field required by
+  reference this doc's audit section. *(DS8 — filed as
+  [#128](https://github.com/Galileo-Sandbox/SIDERIUS/issues/128); FU-7's
+  vocab test defect filed as
+  [#129](https://github.com/Galileo-Sandbox/SIDERIUS/issues/129))*
+- [x] **Connection audit** (step-7 style): every field required by
   `HyperparamTuningInput` / `ProposalInput` present in upstream protocol
   sources; scope + health fields mapped by `local_validated_model` and
   `local_full_context` with no silent defaults; pseudo-data shapes match
-  schemas.
+  schemas. *(DS8 — scripted audit passed: three DataScope/HealthGate
+  fields present on tuner input + protocol; `data_scope` on proposer
+  input + protocol with explicit mapping; output/record stamps present;
+  dead fields absent from both inputs; pseudo-data untouched by design
+  — canned payloads mirror live ExperimentPlan outputs)*
 
 **Verification checklist**:
-- [ ] `uv run pytest tests/unit/ -q` and `uv run pytest tests/integration/ -q`
-  (pseudo) — full green
-- [ ] ruff check + ruff format --check + pyright — clean repo-wide
-- [ ] Doc cross-references resolve (paths exist)
+- [x] `uv run pytest tests/unit/ -q` and `uv run pytest tests/integration/ -q`
+  (pseudo) — full green *(DS8 — unit 3998 passed; integration pseudo 124
+  passed with only the pre-existing FU-7/issue-#129 failure)*
+- [x] ruff check + ruff format --check + pyright — clean repo-wide *(DS8)*
+- [x] Doc cross-references resolve (paths exist) *(DS8 — all 23
+  referenced paths verified present)*
 
 **Test gate**: unit only.
 
 **Implementation notes**: *(fill in as work lands)*
+
+**Implementation notes** (2026-07-23, DS8 — docs, issues, audits, final
+suites; executed under the operator's autonomy grant):
+- CLAUDE.md: HealthGate config invariant reworded (YAML = policy +
+  default file placement; enable flag + monitored files = run-level
+  inputs; effective config materialized per workspace), new DataScope
+  Subsystem Invariants entry, ephemeral Current State refreshed
+  (was 9 days stale); AGENTS.md re-synced byte-identical.
+- README: scoped-run section under Common workflows (both CLI spec
+  forms, disabled-gate example, lock semantics).
+- v18_priorities §3.4: incumbent must be scope-keyed.
+- Issues filed: [#128] FU-1 peek-vs-eval-coverage latent bug;
+  [#129] FU-7 vocab-accumulation NoneType test defect.
+- Connection audit: scripted — three DataScope/HealthGate fields present
+  on tuner input + protocol signature; `data_scope` on proposer input +
+  protocol with explicit mapping; output/record stamps present; dead
+  fields absent from both inputs. All 23 doc-referenced paths exist.
+- Chain pseudo smoke + negative matrix: see the DS6 verification
+  checklist entry (positive exit 0 + lock/effective-config artifacts;
+  three distinct startup guards each exit 1).
+- Final suites: unit 3998 passed / 1 skipped / 3 xfailed; integration
+  pseudo 124 passed / 1 failed (FU-7 = #129 only); ruff + format +
+  pyright clean repo-wide.
 
 ---
 

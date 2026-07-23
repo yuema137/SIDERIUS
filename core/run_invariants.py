@@ -303,9 +303,7 @@ def validate_stamped_invariants(
     record_enabled = stamped.get("health_gate_enabled")
     effective_enabled = True if record_enabled is None else record_enabled
     if effective_enabled != expected.health_gate_enabled:
-        origin = (
-            "unstamped (legacy = gates active)" if record_enabled is None else "stamped"
-        )
+        origin = "unstamped (legacy = gates active)" if record_enabled is None else "stamped"
         problems.append(
             f"health_gate_enabled: record is {origin} {effective_enabled} vs "
             f"this run's {expected.health_gate_enabled}"

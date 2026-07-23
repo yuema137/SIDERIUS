@@ -124,7 +124,12 @@ chain_best_valid_formal_record: provenance | None
 ```
 
 Only formal, HealthGate-valid results are eligible. Loss and architecture
-chains maintain independent incumbents. The incumbent is reconstructed from
+chains maintain independent incumbents. **The incumbent must be scope-keyed
+(DataScope, DS8 note 2026-07-23): aggregate scalars are only comparable
+within one resolved `data_scope`, so an incumbent recorded under scope A
+must never serve as the comparison reference for a chain running scope B —
+key the committed state by the resolved scope (or equivalently by the
+run-invariants lock identity).** The incumbent is reconstructed from
 committed prior-iteration manifests and tuner outputs, frozen at iteration
 start, and updated only after a successful iteration commit; the new value
 becomes active in the next iteration. Raw scores remain separately preserved.
