@@ -78,7 +78,7 @@ Runtime-Control Implementation
 [x] RT2-G   — formal admission wiring + pseudo integration (c5ec268)
 [x] RT3     — trigger policy + provenance fields (3dba462)
 [x] RT4     — runtime watchdog (60c654f)
-[ ] RT5     — guardrails
+[x] RT5     — guardrails (5d11fe1; schema defaults None — operational §5 values land with RT6 chain wiring)
 [ ] RT6     — chain/CLI/docs wiring
 [ ] Gate 1  — real LLM + pseudo training
 [ ] Gate 2  — operator-approved real training (incl. pathological case)
@@ -1675,3 +1675,37 @@ Built:
   dict persists (matches every other record path). Scoring-phase
   watchdog remains §4 "phase 2" (in-process workers — out of RT4
   scope by design).
+
+### RT5 — guardrails ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `5d11fe1`.
+- **Checkpoint** (targeted): 15 new tests (guardrail matrix, resolver
+  step resolution, rejection record with config provenance,
+  schema-defaults pin); full tuner dir 665 passed; ruff + format
+  clean; pyright 0 errors.
+- **Documented deviation (operator review requested)**: §5 names
+  provisional in-schema defaults (150k / 4); RT5 ships SCHEMA defaults
+  of None (disabled) and defers the provisional values to the RT6
+  chain/CLI launch wiring as operator-visible configuration. Rationale:
+  active schema defaults would silently change behavior for every
+  existing programmatic caller pre-Gate (and the V18-shape batch floor
+  would have flipped 8 existing hermetic test fixtures) — violating
+  the zero-behavior-change discipline every RT stage has kept.
+  Functionality is complete and fully tested either way; Gate 2's
+  pathological case runs with the guardrails explicitly set (and
+  force-disabled for the watchdog variant, per §8).
+- Built: input fields `max_steps_per_attempt` /
+  `min_formal_batch_size` / `allow_extreme_steps` (§5 explicit
+  override, provenance-recorded, never a prompt); tuner fires the
+  guardrails as the cheapest pre-flight via the production step
+  resolver (best-effort), formal-only batch floor naming the V18
+  shape; violations save a planner-visible `skipped_time_risk` record
+  with `verification_stage="guardrail"` + full config provenance.
+  Side effect: collapsing the RT2-G/RT5 branches to single call sites
+  brought `run()` back under pyright's complexity ceiling, unmasking
+  and fixing two pre-existing untyped-record lambdas and a
+  single-file-mode `None` hole.
+- **PhysicalRejection note**: §5 mentions the Phase-K machinery; its
+  `binding_cap` Literal is VRAM-specific, so widening it for guardrail
+  rejections would touch proposer rendering — left for a follow-up;
+  planner visibility is provided via the record memory instead.
