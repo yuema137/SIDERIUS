@@ -902,36 +902,56 @@ pseudo-data.)*
   deliberately ignores `file_index`, matching its documented semantics).
   Health materialization + `validate_health_scope` happen right after it at
   tuner startup (DS5b). *(DS5a)*
-- [ ] Effective-config path swap: `agent_input.health_checks_config` replaced
-  by the materialized path for the run; `run_config_{run_name}.json` records
+- [x] Startup block in `run()` (right after workspace extraction, before any
+  LLM/sandbox/hardware work): `validate_runtime_config` → materialization
+  (when enabled) → path swap: `agent_input.health_checks_config` replaced by
+  the materialized path; `run_config_{run_name}.json` records
   `health_checks_config_source` + `health_checks_config_effective` +
-  `resolved_data_scope` + `health_gate_enabled` (`:1455-1470`).
-- [ ] Disabled mode: skip the gate block (`:2446-2485`); the three
-  `is_valid_candidate` sites (`:176, :1657, :3188`) pass
-  `required_gate_ids=frozenset()`; `_merge_score_validity_failure` untouched.
-- [ ] Plan boundary (after `plan_overrides` merge and
-  `_apply_mode_override_chain`, before `TrialConfig` at `:1792`): under
-  partial scope, normalize plan `trial_strategy`/`eval_strategy` → `snapshot`;
-  persist `planned_*`/`effective_*`/`strategy_normalization_reason` on the
-  round record; loud log line.
-- [ ] `_resolve_sample_set_cfg` / `build_sample_set` call sites (`:1820,:1827`)
-  pass the resolved scope; sandbox constructed with `data_scope`.
-- [ ] **`scope_violation` is non-retryable (DS3 follow-through)**: when an
-  executor result carries `error_type == "scope_violation"` (or
-  `ScopeViolationError` escapes `score_vector`), the tuner must treat it as
-  a configuration/invariant failure — a bug in scope plumbing, deterministic
-  on retry — and **terminate the run immediately** (fail-fast abort with the
-  scope-violation message), never consuming normal proposal/training attempt
-  retries or waiting for `max_fail_rounds`. Unit test: a stubbed
-  scope-violation result aborts the run on first occurrence.
+  `health_config_sha256` + `resolved_data_scope` + `health_gate_enabled`.
+  **Materialization is uniform when enabled — full-scope runs also get the
+  effective file** (uniform provenance + a sha for the DS6 lock). *(DS5b)*
+- [x] Disabled mode: gate block wrapped in `if agent_input.health_gate_enabled`
+  (disabled branch: no evaluation, `health_gate_results=[]`,
+  `gate_action=None`, `resolved_action=CONTINUE`);
+  `_merge_score_validity_failure` untouched. **Eligibility mechanism =
+  Option B (approved 2026-07-22)**: records self-describe via a
+  `health_gate_enabled: false` stamp and `classify_candidate_health` returns
+  VALID for successful finite-score disabled records — one change in
+  `candidate_eligibility.py`, no parameter threading through
+  `_best_trial_winner`'s five call sites, works for every current and future
+  call site. *(DS5b)*
+- [x] Plan boundary (after `_apply_mode_override_chain`, before the
+  `max_epochs` clamp): under partial scope, normalize plan
+  `trial_strategy`/`eval_strategy` → `snapshot`; loud `[DATASCOPE]` log.
+  **Provenance fields**: the record's existing `trial_strategy` /
+  `eval_strategy` hold the EFFECTIVE strategies; new `planned_trial_strategy`
+  / `planned_eval_strategy` / `strategy_normalization_reason` record the
+  pre-normalization plan (no duplicated `effective_*` fields). *(DS5b)*
+- [x] `build_sample_set` call sites pass `scope=agent_input.data_scope`;
+  sandbox constructed with `data_scope` (StubSandbox/RecordingSandbox
+  factories accept it — DS3 param / `**kwargs`). *(DS5b)*
+- [x] **`scope_violation` is non-retryable (DS3 follow-through)**: detection
+  at all three surfaces — training error dict, inference error dict, and
+  `except ScopeViolationError` ahead of the generic scoring handler — sets a
+  flag mirroring the `_gate_aborted` pattern, breaks both loops before any
+  retry/fail-round bookkeeping, and `_compute_termination_state` gained
+  precedence-0 → `("failed", "scope_violation")`;
+  `HyperparamTuningOutput.termination_reason` Literal extended accordingly.
+  *(DS5b)*
 - [ ] `agent/prompts.py` `_format_fixed_params_block` (`:706`) — when scope is
-  partial, disclose the allowed files and the snapshot-only rule.
-- [ ] Scope stamps: `ExperimentRecord` + `HyperparamTuningOutput` gain
-  `resolved_data_scope: list[int]` (+ the strategy-provenance fields above).
+  partial, disclose the allowed files and the snapshot-only rule. *(DS5c)*
+- [x] Scope stamps: `ExperimentRecord` + `HyperparamTuningOutput` gain
+  `resolved_data_scope` + `health_gate_enabled` (+ record provenance fields;
+  output also `health_checks_config_source` + `health_config_sha256`).
+  Stamps are written on final records (success / failed_mode_collapse) —
+  the only records that participate in eligibility and scalar comparison;
+  error records keep their minimal shape. *(DS5b)*
 - [ ] Tuner CLI: `--data_scope`, `--health_gate_enabled/--no-health_gate_enabled`,
-  `--health_gate_files`.
-- [ ] `tests/pseudo_data/` — update canned tuner inputs/outputs for the new
-  schema fields (two-file rule).
+  `--health_gate_files`. *(DS5c)*
+- [x] `tests/pseudo_data/` two-file rule evaluated: canned files mirror LLM
+  responses and subprocess results only — no file mirrors
+  `ExperimentRecord`/`HyperparamTuningOutput`, and all new schema fields
+  default to `None`, so no pseudo-data changes are required for DS5b. *(DS5b)*
 
 **Tests**:
 - [x] Schema: internal-consistency validators only (disabled+files → error;
@@ -944,17 +964,33 @@ pseudo-data.)*
   fails with distinct messages; disabled+partial passes without files;
   trial mode ignores `file_index` *(DS5a; the health-files subset check is
   `validate_health_scope`'s job at materialization — DS5b)*
-- [ ] Normalization: plan with `target` under partial scope → effective
-  snapshot + provenance fields persisted + logged; full scope → no
-  normalization, reason `None`
-- [ ] Disabled mode (pseudo): full loop with `health_gate_enabled=False` —
-  no gate results, successful finite records classify VALID, best-valid
-  tracking populated, output records `health_gate_enabled=False`
-- [ ] Pseudo-mode integration (`@dual_mode`): full tuner loop with
-  `data_scope=[4..9]` + `health_gate_files=[4,7,9]` on `StubSandbox` — every
-  built SampleSet ⊆ scope, output stamped, run completes
-- [ ] Behavioral-identity regression: default-scope pseudo loop produces the
-  same scores/records as before (new metadata fields excepted)
+- [x] Normalization: plan with `target`+`anchors` under partial scope →
+  effective snapshot + provenance fields persisted + logged; snapshot plan
+  under partial scope → reason `None`
+  *(DS5b — `test_data_scope_tuner_pseudo.py`)*
+- [x] Disabled mode (pseudo): full loop with `health_gate_enabled=False` —
+  `evaluate_and_persist_health_gates` provably never called (monkeypatched
+  to raise), records carry `health_gate_enabled=False` +
+  `health_gate_results=[]` + `gate_action=None`, best-valid tracking
+  populated via Option B, no effective config materialized *(DS5b)*
+- [x] Pseudo-mode integration: full tuner loop with `data_scope=[4..9]` +
+  `health_gate_files=[4,7,9]` on the Recording stack — normalization
+  provenance on every record, output + run_config + records stamped,
+  effective config materialized in the workspace, gate machinery reachable
+  each round. (SampleSet ⊆ scope is guaranteed by the DS2/DS3 layers'
+  unit tests; RecordingSandbox does not capture sample-set kwargs.) *(DS5b)*
+- [x] Scope-violation abort (pseudo): canned training scope-violation result
+  → `status="failed"`, `termination_reason="scope_violation"`, exactly ONE
+  plan call and ONE training call despite `attempts_per_round=3` (no
+  retries) *(DS5b)*
+- [x] Behavioral-identity regression: default-scope pseudo loop completes
+  with full-scope stamps and no normalization; new metadata artifacts
+  (effective config) expected *(DS5b; plus eligibility suite 18/18 and
+  gate-integration 48/48)*
+- [x] Eligibility Option B unit tests (`test_candidate_eligibility.py`, +5):
+  disabled-run success → VALID; failed status / non-finite score still
+  INVALID; explicit True and legacy None take the normal gate-requirement
+  path *(DS5b — 18/18)*
 
 **Verification checklist**:
 - [ ] `run_config_{run_name}.json` from a pseudo run contains
@@ -969,7 +1005,36 @@ pseudo-data.)*
 **Test gate**: unit only (prompt change is disclosure-only; Gate 1 deferred to
 Checkpoint DS).
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-22/23, DS5b):
+- `termination_reason` Literal extended with `"scope_violation"` — caught by
+  the new abort pseudo test (serialization fell into the DEGRADED partial-
+  output path until extended).
+- **Regression audit of `tests/integration/workflows/` (7 failures)**: 6
+  confirmed **pre-existing on master** via a clean master worktree —
+  `vocab` (NoneType, degraded interp path), `score_table` +
+  `cognitive_alignment` (test-local `RecordingOpenAIBridge` missed the
+  `label=` kwarg fix `54412af`; hidden in keyless CI because the tests
+  skip), `l_fail`/`k9`/`n_recent` (two-layer: H100-inflated VRAM estimates
+  vs 0.1 GB fixture budgets, PLUS the **M9 pseudo-gate gap** — since PR
+  #116 made blocking gates fire every round, a pseudo test that neither
+  patches the gate fns nor produces denoised HDF5s cannot record a
+  `success` round; master with the budget fixed fails the identical
+  success-count assertion, 97s run). 1 failure was **DS5b's**:
+  `test_healthgate_ten_collapse_continuation` monkeypatched
+  `get_gates_for_position` as a single-arg lambda — stale test double
+  (production behavior by design); fixed with `**_kwargs` + a DS5 comment.
+- Ten-collapse test reduced 10 → `N_ROUNDS = 4` rounds (operator decision
+  2026-07-23): 4 = one past `max_fail_rounds=3`, the minimal count proving
+  collapsed-but-completed rounds don't increment the failure brake; rounds
+  5–10 were ~4 min of repetition per run with no added coverage. Verified
+  passing alone: 1/1 in 2:54 (was ~8 min).
+- One 10-round verification run flaked via **CPU contention** (concurrent
+  pytest → VRAM structural probe exceeded its 60s timeout → an extra
+  attempt drained the canned responses). Lesson recorded: verify heavy
+  pseudo loops serially on this box.
+- **Test results (DS5b)**: `test_data_scope_tuner_pseudo.py` 5/5;
+  eligibility 18/18; gate-integration 48/48; ten-collapse 1/1 (4-round);
+  ruff + pyright clean.
 
 ---
 

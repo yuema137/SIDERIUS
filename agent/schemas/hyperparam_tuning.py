@@ -401,6 +401,42 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="File indices sampled (only for 'target' strategy).",
     )
+    # --- DataScope stamps + strategy-normalization provenance (DS5) ---
+    # The existing ``trial_strategy`` / ``eval_strategy`` fields above hold
+    # the EFFECTIVE (executed) strategies; the ``planned_*`` fields record
+    # what the LLM plan proposed before any partial-scope normalization.
+    resolved_data_scope: list[int] | None = Field(
+        default=None,
+        description=(
+            "The run's resolved DataScope (sorted allowed file indices). "
+            "None on legacy records = full scope. Scope-homogeneity ingress "
+            "checks compare this stamp."
+        ),
+    )
+    health_gate_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the HealthGate subsystem was enabled for this run. "
+            "False makes candidate eligibility waive the gate requirement "
+            "(self-describing record — see candidate_eligibility). "
+            "None on legacy records = enabled."
+        ),
+    )
+    planned_trial_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
+        default=None,
+        description="LLM-planned training strategy before normalization.",
+    )
+    planned_eval_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
+        default=None,
+        description="LLM-planned eval strategy before normalization.",
+    )
+    strategy_normalization_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the planned strategies were normalized to the effective "
+            "ones (e.g. 'partial_data_scope'). None = no normalization."
+        ),
+    )
     file_vector: list[float | None] | None = Field(
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
@@ -1653,8 +1689,42 @@ class HyperparamTuningOutput(BaseModel):
     health_checks_config: str | None = Field(
         default=None,
         description=(
-            "HealthGate YAML override consumed by this tuner invocation. "
-            "None means the shipped default configuration was used."
+            "EFFECTIVE HealthGate YAML consumed by this tuner invocation "
+            "(the per-workspace materialized path since DS5; the operator's "
+            "source path is in health_checks_config_source). None means the "
+            "shipped default configuration was used pre-DS5, or the "
+            "subsystem was disabled."
+        ),
+    )
+    # --- DataScope + HealthGate subsystem stamps (DS5) ---
+    resolved_data_scope: list[int] | None = Field(
+        default=None,
+        description=(
+            "The run's resolved DataScope (sorted allowed file indices). "
+            "None on legacy outputs = full scope. Ingress scope-homogeneity "
+            "checks compare this stamp."
+        ),
+    )
+    health_gate_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the HealthGate subsystem participated in this run. "
+            "None on legacy outputs = enabled."
+        ),
+    )
+    health_checks_config_source: str | None = Field(
+        default=None,
+        description=(
+            "Operator-supplied HealthGate config path before materialization "
+            "(None = shipped default, or subsystem disabled)."
+        ),
+    )
+    health_config_sha256: str | None = Field(
+        default=None,
+        description=(
+            "sha256 of the materialized effective config body — the value "
+            "the run-invariants lock pins. None when the subsystem is "
+            "disabled or on legacy outputs."
         ),
     )
     formal_reference_score: float | None = Field(
@@ -1844,7 +1914,9 @@ class HyperparamTuningOutput(BaseModel):
             "loop aborted via the consecutive-failure brake."
         ),
     )
-    termination_reason: Literal["completed", "aborted_fail_rounds", "aborted_by_gate"] = Field(
+    termination_reason: Literal[
+        "completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation"
+    ] = Field(
         default="completed",
         description=(
             "Why the loop exited. 'completed' = reached max_rounds successful "
@@ -1852,7 +1924,9 @@ class HyperparamTuningOutput(BaseModel):
             "rounds exhausted their attempt budgets; 'aborted_by_gate' = a "
             "health-check gate action (SKIP_ITER) broke the while loop "
             "before max_rounds — see docs/design/pluggable_health_checks.md "
-            "§4."
+            "§4; 'scope_violation' = a DataScope violation reached an "
+            "executor (non-retryable configuration/invariant failure, "
+            "status='failed' — docs/design/enable_partial_file_list.md DS5)."
         ),
     )
 

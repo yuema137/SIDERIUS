@@ -87,3 +87,36 @@ def test_legacy_record_without_metadata_is_unknown() -> None:
 @pytest.mark.parametrize("score", [math.nan, math.inf, -math.inf, None])
 def test_non_finite_or_missing_score_is_invalid(score: float | None) -> None:
     assert _classify(_record(denoising_score=score)) is CandidateHealthValidity.INVALID
+
+
+# ---------------------------------------------------------------------------
+# DataScope DS5 — self-describing disabled-mode records (Option B)
+# ---------------------------------------------------------------------------
+
+
+def test_disabled_run_success_record_is_valid_without_gates() -> None:
+    """health_gate_enabled=False stamped on the record waives the gate
+    requirement — successful finite-score records are VALID."""
+    record = _record(health_gate_results=[], health_gate_enabled=False)
+    assert _classify(record) is CandidateHealthValidity.VALID
+
+
+def test_disabled_run_failed_status_still_invalid() -> None:
+    record = _record(status="error_training", health_gate_enabled=False)
+    assert _classify(record) is CandidateHealthValidity.INVALID
+
+
+def test_disabled_run_non_finite_score_still_invalid() -> None:
+    record = _record(denoising_score=math.inf, health_gate_enabled=False)
+    assert _classify(record) is CandidateHealthValidity.INVALID
+
+
+def test_enabled_true_stamp_takes_normal_path() -> None:
+    """Explicit True behaves exactly like the legacy absent/None stamp."""
+    record = _record(health_gate_results=[], health_gate_enabled=True)
+    assert _classify(record) is CandidateHealthValidity.UNKNOWN
+
+
+def test_legacy_none_stamp_takes_normal_path() -> None:
+    record = _record(health_gate_results=[], health_gate_enabled=None)
+    assert _classify(record) is CandidateHealthValidity.UNKNOWN

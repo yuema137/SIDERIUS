@@ -31,7 +31,11 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
     )
 
     monkeypatch.setattr(tuner_module.time, "sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(tuner_module, "get_gates_for_position", lambda _round: ["collapse"])
+    # DS5: the tuner now always passes config_path= (the materialized
+    # effective config) when the HealthGate subsystem is enabled.
+    monkeypatch.setattr(
+        tuner_module, "get_gates_for_position", lambda _round, **_kwargs: ["collapse"]
+    )
 
     def failed_continue(_gate_id, ctx):
         check = HealthCheckResult(
