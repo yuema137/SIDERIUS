@@ -303,6 +303,106 @@ class TestPhaseVerificationIntegration:
         )
 
 
+class TestResumeAcrossSubprocesses:
+    """RT2-D: the inference subprocess continues the attempt's observation."""
+
+    def test_resume_preserves_previous_components(self, tmp_path):
+        path = str(tmp_path / "rv.json")
+        first = RuntimeVerificationSession(path, attempt_id="exp_r")
+        first.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=100
+            ),
+        )
+        first.decide_admission()
+        first.record_phase_actual("training", 12.0)
+
+        resumed = RuntimeVerificationSession.resume_or_start(
+            path, attempt_id="exp_r", resumed_status="inference_started"
+        )
+        obs = resumed.observation
+        assert obs.final_status == "inference_started"
+        assert "setup" in obs.components and "training" in obs.components
+        assert obs.components["training"].actual_seconds == pytest.approx(12.0)
+        assert obs.storage["dataset_root"] == "/data"
+        assert obs.admission is not None and obs.admission.decision == "admitted"
+        # Setup window NOT restarted: restored from the setup actual.
+        assert resumed.decide_admission().decision == "admitted"
+
+    def test_resume_without_sidecar_starts_fresh(self, tmp_path):
+        resumed = RuntimeVerificationSession.resume_or_start(
+            str(tmp_path / "absent.json"), attempt_id="exp_f"
+        )
+        assert resumed.observation.components == {}
+
+    def test_resume_malformed_starts_fresh(self, tmp_path):
+        path = tmp_path / "rv.json"
+        path.write_text("{broken")
+        resumed = RuntimeVerificationSession.resume_or_start(str(path))
+        assert resumed.observation.components == {}
+
+    def test_record_phase_workload_merges(self, tmp_path):
+        session = RuntimeVerificationSession(str(tmp_path / "rv.json"))
+        session.record_phase_workload(
+            "inference",
+            ResolvedPhaseWorkload(phase="inference", unit="inference_batch", unit_count=120),
+        )
+        inference = session.observation.components["inference"]
+        assert inference.workload is not None
+        assert inference.workload.unit_count == 120
+
+    def test_inference_dominated_worked_example(self, tmp_path):
+        # §11 RT2-D checkpoint: the V18 lesson — training fits the budget
+        # but inference independently blows it; the component-wise total
+        # catches what a training-only estimate cannot.
+        from core.runtime_control.adaptive import AdaptiveVerificationConfig
+        from core.runtime_control.steady_state import SteadyStateConfig
+
+        policy = RuntimeControlPolicy(
+            operator_budget_seconds=3600.0,
+            verification=AdaptiveVerificationConfig(
+                steady=SteadyStateConfig(window=4, stable_windows=3, rel_spread_tol=0.10),
+                min_timed_steps=5,
+                min_timed_ms=0.0,
+                max_steps=50,
+            ),
+        )
+        session = RuntimeVerificationSession(str(tmp_path / "rv.json"), policy=policy)
+        session.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=30_000
+            ),
+        )
+        # Training: 30k steps × 10 ms = 300 s — comfortably within budget.
+        trainer = session.start_phase_verification("training", unit="optimizer_step")
+        for t in [10.0] * 30:
+            trainer.feed(t)
+            if trainer.is_terminal:
+                break
+        session.complete_phase_verification(
+            "training", trainer, source="real_training_verification"
+        )
+        assert session.decide_admission("post_training_verification").decision == "admitted"
+
+        # Inference: 1200 batches × 6 s = 7200 s — inference-dominated.
+        session.record_phase_workload(
+            "inference",
+            ResolvedPhaseWorkload(phase="inference", unit="inference_batch", unit_count=1200),
+        )
+        inf = session.start_phase_verification("inference", unit="inference_batch")
+        for t in [6000.0] * 30:
+            inf.feed(t)
+            if inf.is_terminal:
+                break
+        session.complete_phase_verification("inference", inf, source="real_inference_verification")
+        adm = session.decide_admission("post_inference_verification")
+        assert adm.decision == "rejected"
+        assert adm.avoided_predicted_runtime_seconds is not None
+        assert adm.avoided_predicted_runtime_seconds > 7000.0
+
+
 class TestAtomicWrite:
     def test_no_tmp_file_left_behind(self, tmp_path):
         path = tmp_path / "rv.json"

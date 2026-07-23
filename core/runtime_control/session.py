@@ -215,6 +215,68 @@ class RuntimeVerificationSession:
         self._write_sidecar()
         return setup_seconds
 
+    @classmethod
+    def resume_or_start(
+        cls,
+        observation_path: str,
+        policy: RuntimeControlPolicy | None = None,
+        chain_id: str | None = None,
+        attempt_id: str | None = None,
+        resumed_status: str = "resumed",
+    ) -> RuntimeVerificationSession:
+        """Continue an attempt's observation from a later subprocess (RT2-D).
+
+        The component-first observation is per ATTEMPT (§6.1): the
+        training subprocess records setup + training, and the inference
+        subprocess CONTINUES the same sidecar rather than opening a
+        parallel one. An absent or unreadable sidecar starts fresh —
+        the later phases still record their evidence (absence of the
+        earlier components stays explicit).
+
+        The setup window is NOT restarted on resume: setup belongs to
+        the subprocess that materialized the dataset. This process's
+        own preparation cost is the resuming phase's business (§2.6
+        inference setup lives inside the inference component).
+        """
+        # Read BEFORE constructing: __init__ writes the initial sidecar,
+        # which would clobber the previous subprocess's evidence.
+        previous: RuntimeObservation | None = None
+        try:
+            with open(observation_path, encoding="utf-8") as f:
+                previous = RuntimeObservation.model_validate(json.load(f))
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            print(f"[runtime_control] resume failed ({observation_path}): {exc} — starting fresh")
+        session = cls(observation_path, policy=policy, chain_id=chain_id, attempt_id=attempt_id)
+        if previous is None:
+            # Fresh start still carries the caller's stage label — a
+            # resuming subprocess owns no setup window, so leaving
+            # "setup_started" on the observation would be misleading.
+            session._final_status = resumed_status
+            session._write_sidecar()
+            return session
+        session._components = dict(previous.components)
+        session._storage = dict(previous.storage)
+        session._admission = previous.admission
+        session._chain_id = chain_id or previous.chain_id
+        session._attempt_id = attempt_id or previous.attempt_id
+        setup = previous.components.get("setup")
+        session._setup_seconds = setup.actual_seconds if setup is not None else None
+        session._final_status = resumed_status
+        session._write_sidecar()
+        return session
+
+    def record_phase_workload(self, phase: RuntimePhase, workload: ResolvedPhaseWorkload) -> None:
+        """Record a phase's resolved production workload (§1.2).
+
+        Overwrites any earlier workload for the phase (the later, more
+        materialized resolution wins); other component fields survive.
+        """
+        existing = self._components.get(phase, PhaseComponentRecord())
+        self._components[phase] = existing.model_copy(update={"workload": workload})
+        self._write_sidecar()
+
     def start_phase_verification(
         self,
         phase: RuntimePhase,
