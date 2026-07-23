@@ -70,7 +70,7 @@ Runtime-Control Implementation
 [x] RT1     — step resolver + static-prior demotion (788487f)
 [x] Rev 5   — golden-plan design unification (this document)
 [x] RT2-A   — runtime data model + workload contracts (a93963d, a4e4a52)
-[ ] RT2-B   — in-subprocess setup measurement
+[x] RT2-B   — in-subprocess setup measurement (746c592, 8646751)
 [ ] RT2-C   — generic adaptive phase verification (training)
 [ ] RT2-D   — inference verification
 [ ] RT2-E   — scoring + orchestration accounting
@@ -516,6 +516,27 @@ prediction; missing live verification. Step-count and batch-size
 guardrails (§5) remain defense-in-depth only — the primary criterion is
 total predicted runtime.
 
+**Rejection attempt-accounting (rev 5.2, operator decision)**: two
+rejection classes with different budget semantics. *Static pre-flight
+rejections* (schema validation, VRAM screen, static time screen)
+consume essentially no execution resources and keep the current
+behavior — they do NOT consume an attempt. *In-subprocess runtime-
+verification rejections* have already paid for sandbox launch, real
+dataset construction, model/CUDA initialization, and setup time — they
+COUNT AS ONE ATTEMPT, so the planner cannot repeatedly submit
+pathological proposals at near-zero search-budget cost. The tuner-side
+bookkeeping wiring lands at RT2-G.
+
+**Unified stop reporting (rev 5.2, operator decision)**: a
+verification rejection and a watchdog termination produce the SAME
+`RuntimeObservation` structure — identical schema, provenance,
+prediction, measurement, partial actuals, cleanup, and planner
+feedback; they differ only in `admission.decision` / `admission.stage`
+("rejected" @ verification) vs `watchdog_status` + `final_status`
+("terminated" @ the phase the watchdog fired in). RT4 must reuse the
+RT2-B session/event-log machinery rather than introducing a parallel
+report shape.
+
 Non-formal paths (trial/smoke) keep the existing screening behavior:
 
 | Condition (non-formal) | Action |
@@ -653,6 +674,15 @@ component-wise prediction errors, final status, calibration
 eligibility. The global store receives an immutable finalized record
 (or immutable event sequence); partially written shared records must
 never appear complete.
+
+**RT2-B realization (rev 5.2)**: `RuntimeVerificationSession`
+(`core/runtime_control/session.py`) implements this lifecycle as an
+event log: the observation is created when in-subprocess setup BEGINS
+and the sidecar is atomically rewritten (`tmp` + `os.replace`) at every
+stage transition — `setup_started → setup_complete →
+admitted | rejected → completed` — so a crash at any point leaves the
+last completed stage's evidence (setup timing, environment/storage
+provenance, partial state) on disk rather than nothing.
 
 ### 6.3 Concurrent writes (rev 5)
 
@@ -1212,3 +1242,168 @@ steady-state detector becomes the RT2-C stabilization engine; the
   format clean; pyright 0 errors. No behavior change to any existing
   path (estimator delegation is math-identical, verified by the RT1
   suite).
+
+### RT2-B — architectural audit 🔍 2026-07-23 (read-only; stop-and-show pending review)
+
+Pre-implementation audit of the execution lifecycle (no code modified).
+Durable findings, verified against source:
+
+- **Lifecycle** (proposal → formal training): tuner process —
+  `brain.plan` → `ExperimentPlan.with_defaults` (:1836) → overrides
+  (:1841/:1846) → trial/formal mode decision (:1888-1893) →
+  `TrialConfig` (:1929) → `active_params` (:2019) → VRAM preflight
+  (:2062) → time preflight `evaluate_time_skill` (:2277, runs the
+  CURRENT warm-up IN THE TUNER PROCESS — the §2.1 audit finding) →
+  feasibility gate / formal bypass / `skipped_time_risk` reject
+  (:2299-2389) → `training_skill` (:2394, parent wall-times it
+  :2393-2395) → `sandbox.execute_training`
+  (`core/sandbox_executor.py:528`) → `subprocess.run` (:602, RLIMIT_AS
+  40 GiB :610) → `train_engine_sandbox.main` (:599) → streaming path
+  `run_experiment_streaming` (:459): model→device FIRST CUDA touch
+  (:508/:510) → criterion (:513) → optimizer (:516-523) → epoch loop
+  (:529): per-epoch `TIDMADEpochDataset` (:537) + `DataLoader` (:544)
+  → batch loop (:547) = formal training.
+- **Dataset ownership**: streaming mode constructs the epoch dataset
+  INSIDE the epoch loop (:537) and destroys it per epoch (:568);
+  it re-reads HDF5 every epoch even under `freeze_subsample=True`.
+  Construct-once → verify → reuse → formal is achievable WITHOUT
+  redesign by making verification the first production steps of
+  epoch 0 on the same dataset object. Multi-epoch caveat: with
+  `epochs > 1` the per-epoch dataset reconstruction cost recurs and
+  must enter the prediction (epoch-0 setup measurement × epochs);
+  moot under the paper-spec `--max_epochs 1`.
+- **Model ownership**: model/criterion/optimizer built once before the
+  epoch loop (:503-523); NO LR scheduler exists anywhere in the
+  trainer; CUDA context lives for the process lifetime. All naturally
+  survive verification; nothing needs reconstruction on admit.
+- **Timing instrumentation**: the trainer has NONE (`time` not even
+  imported) — only tqdm. Inference already has per-file
+  `perf_counter` timing + a sidecar
+  (`inference_timing_{exp_id}.json`, `core/sandbox_executor.py:
+  728-731/:807-814`) — the plumbing precedent for RT2-B.
+- **Result plumbing (proposed)**: subprocess assembles the RT2-A
+  `RuntimeObservation` and writes a
+  `runtime_verification_{exp_id}.json` sidecar (mirror of the
+  inference sidecar); `execute_training` reads it back and attaches
+  it under `RUNTIME_VERIFICATION_RECORD_KEY`; the tuner stamps it
+  into attempt records (success `final_record` next to the existing
+  time-context block ~:3068-3139; mirrored on skip/error records).
+  `StubSandbox` mirrors the new keys for pseudo-mode.
+- **Rejection path (proposed)**: reject → write sidecar with
+  `admission.decision="rejected"` (+ §2.1 cost fields) → standard
+  cleanup (`del model/optimizer/criterion`, `empty_cache`, `gc`) →
+  exit 0 WITHOUT `.pth`/`_OK_` sentinel. HAZARD identified:
+  exit-0-without-sentinel is today classified as a silent training
+  crash (`core/sandbox_executor.py:633-642`) — the executor must
+  check the sidecar's admission decision BEFORE the sentinel check
+  and return a structured rejection status instead.
+- **Overhead**: admitted runs ≈ <1 s added (timing wraps + provenance
+  + sidecar; verification steps ARE production steps of epoch 0);
+  rejected runs pay real setup (~1-2 min at incident scale, scales
+  with scope) + seconds of verification — the explicit §2.1 cost.
+- **Open decisions flagged for review** (rule-6): (1) rejected-attempt
+  bookkeeping — pre-flight `skipped_time_risk` today does `continue`
+  without consuming a round; should an in-subprocess rejection (which
+  costs real setup minutes) follow the same bookkeeping or count
+  differently? (2) RT2-B scope — instrument the streaming path only
+  (the formal-admission path); legacy single-file `run_experiment`
+  stays untouched.
+- **Audit review outcome (2026-07-23)**: architecture APPROVED with
+  five refinements — verification is literally the first production
+  steps of formal execution (zero reinitialization after admission);
+  in-subprocess rejection CONSUMES an attempt while static pre-flight
+  rejections stay free (recorded in §3); streaming-path-only scope
+  confirmed; `RuntimeObservation` begins at setup as an event log
+  (recorded in §6.2); rejection and watchdog termination share one
+  observation structure differing only in decision/stage (recorded in
+  §3, binds RT4).
+
+### RT2-B — in-subprocess setup measurement
+
+- **Design approval**: rev 5 §2.1/§2.2 + architectural-audit approval
+  with five refinements, 2026-07-23 (entry above).
+- **Stop-and-show review**: superseded by the operator autonomy grant
+  (2026-07-23): proceed continuously through the RT series incl.
+  commits; stop only for destructive actions, unanswerable questions,
+  or Gate launches. Stop-and-show content posted as progress reports.
+- **Committed implementation**: ✅ 2026-07-23 — `746c592` (core:
+  provenance + session event log + observation storage field),
+  `8646751` (wiring: trainer preamble + executor sidecar plumbing).
+- **Checkpoint**: RT2-B suites 39 passed (session, provenance,
+  streaming preamble incl. tiny-dataset admitted/rejected round-trips,
+  executor plumbing); full unit tree 4102 passed / 1 pre-existing
+  environment skip / 3 xfailed (run before the operator's
+  targeted-tests-only policy landed; subsequent stages run targeted
+  suites, full suites again only before the Gates); ruff check + format
+  clean; pyright 0 errors (venv interpreter).
+- **Overhead (measured at tiny scale)**: admitted-path session overhead
+  is timing wraps + provenance reads + a handful of sidecar writes —
+  sub-second; rejected-path cost = real setup + teardown, recorded in
+  the observation's §2.1 cost fields. Representative-scale numbers land
+  with RT2-C's micro-verification checkpoint.
+
+Built:
+
+- [x] `core/runtime_control/provenance.py` — §2.2 provenance capture:
+  environment snapshot (host, platform, Python/torch/CUDA, GPU name —
+  all read from the live environment, none hardcoded), storage identity
+  (dataset root, file count, on-disk bytes, filesystem type via
+  `/proc/mounts` longest-prefix), process counters (`/proc/self/io`
+  `read_bytes`, `VmRSS`), and MEASURED cold/warm cache classification
+  (storage-layer read bytes vs expected bytes; anything unmeasurable →
+  explicit `"unknown"`, never fabricated).
+- [x] `core/runtime_control/session.py` — `RuntimeControlPolicy`
+  (Pydantic; RT2-B carries `operator_budget_seconds` only) +
+  `RuntimeVerificationSession` (§6.2 event log, atomic sidecar writes,
+  stage vocabulary `setup_started/setup_complete/admitted/rejected/
+  completed`). Setup component: measurement-backed
+  (`real_dataset_setup`, formal-eligible, prediction ≡ measurement so
+  error = 0 by construction §2.2). Admission (RT2-B): reject exactly
+  when measured setup ALONE exceeds the operator budget (conservative
+  §3 lower bound — the total can only be larger); otherwise admitted
+  with explicit "training verification pending (RT2-C)" / "record-only"
+  reason and the §2.1 cost fields. `RuntimeObservation` gains the
+  additive `storage` field (§2.2 provenance home).
+- [x] `execute_tools/train_engine_sandbox.py` — streaming path ONLY:
+  new argv `--runtime_observation_out` / `--runtime_policy_json`;
+  session created at `main()` entry (setup window covers config load →
+  epoch-0 dataset + DataLoader ready; process import cost is
+  orchestration, RT2-E); the post-setup boundary sits INSIDE the
+  epoch-0 iteration after the existing unchanged dataset/loader
+  construction — admitted execution falls straight through into the
+  same batch loop with the same dataset/model/optimizer/criterion/CUDA
+  context (no reinitialization of any kind); rejection does the
+  standard cleanup and returns `None` (no `.pth`, no `_OK_` sentinel,
+  no results JSON, exit 0). Training workload recorded from the
+  MATERIALIZED epoch-0 loader (`len(loader) × epochs` — production
+  ground truth; resolver cross-check is RT2-C/G ledger material);
+  training ACTUAL spans admission → last step (includes epoch ≥ 1
+  dataset reconstructions, the audit caveat). Legacy `run_experiment`
+  untouched.
+- [x] `core/sandbox_executor.py` — `execute_training(runtime_policy=)`
+  (validated via `RuntimeControlPolicy` BEFORE launch); stale sidecar
+  removed pre-launch; sidecar read back after exit with the REJECTION
+  CHECK BEFORE the silent-crash sentinel check (the audit hazard);
+  rejection returns `status="rejected_time_risk"` + the observation;
+  success/silent-crash/subprocess-error dicts all carry
+  `runtime_verification` (partial evidence from crashed runs preserved
+  — §6.2); missing/malformed sidecar degrades to `None` (exact legacy
+  behavior). `StubSandbox` mirrors the signature with explicit
+  `runtime_verification=None` (pseudo parity, §7.3 fail-closed shape).
+- [x] Tests (39 across four suites): `test_runtime_session.py` (policy
+  validation, event-log staging with schema validity at EVERY stage,
+  admission matrix incl. reject-on-budget + admission-before-setup
+  raise, atomic-write + never-raise contracts);
+  `test_runtime_provenance.py` (explicit-degradation, cache
+  classification); `test_rt2b_streaming_preamble.py` (tiny synthetic
+  1-segment HDF5 + minimal CPU wavenet, seconds: admitted path with
+  instrumented SINGLE dataset construction + sentinel + finalized
+  observation with actuals; rejected path with clean exit, no
+  model/sentinel, retained setup evidence; `runtime_session=None`
+  pre-RT2-B parity; `main()` argv wiring incl. rejection skipping the
+  results JSON); `test_sandbox_executor_rt2b.py` (fake-subprocess
+  plumbing: clean rejection NOT misclassified as silent crash, cost
+  model surfaced, observation attached on success, legacy no-sidecar
+  parity, stale-sidecar removal, crash surfacing partial observation,
+  malformed-sidecar degradation, policy validation/forwarding with
+  invalid-policy fail-before-launch, stub parity).
