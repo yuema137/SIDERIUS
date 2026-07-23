@@ -38,6 +38,7 @@ from typing import Any
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
+from execute_tools.dataset_config import DataScope
 from execute_tools.sample_set_builder import build_sample_set
 
 # The synthesised default ``sample_set`` mirrors the tuner's trial-mode
@@ -52,17 +53,21 @@ def _synthesise_default_sample_set(
     *,
     trial_portion: float = _DEFAULT_TRIAL_PORTION,
     seed: int = _DEFAULT_SAMPLING_SEED,
+    scope: DataScope | None = None,
 ) -> dict[int, list[int]]:
     """Build a representative sample_set without touching disk.
 
-    20 files × ceil(trial_portion × 200) segments each. Matches what the
-    tuner would build in trial/snapshot mode.
+    Every in-scope file × ceil(trial_portion × 200) segments each. Matches
+    what the tuner would build in trial/snapshot mode — under a partial
+    DataScope (DS7b) the synthetic set covers exactly the scope files, so
+    the wall-time estimate reflects what the tuner will actually run.
     """
     return build_sample_set(
         is_trial=True,
         trial_strategy="snapshot",
         trial_portion=trial_portion,
         seed=seed,
+        scope=scope,
     )
 
 
@@ -82,6 +87,7 @@ def estimate_proposal_time(
     sample_set: dict[Any, list[int]] | None = None,
     train_portion: float = _DEFAULT_TRAIN_PORTION,
     trial_portion: float = _DEFAULT_TRIAL_PORTION,
+    data_scope: DataScope | None = None,
 ) -> dict[str, Any]:
     """Estimate wall-time for a draft proposal, CPU-only.
 
@@ -139,7 +145,7 @@ def estimate_proposal_time(
         raise ValueError(f"time_budget_minutes must be positive; got {time_budget_minutes!r}.")
 
     if sample_set is None:
-        sample_set = _synthesise_default_sample_set(trial_portion=trial_portion)
+        sample_set = _synthesise_default_sample_set(trial_portion=trial_portion, scope=data_scope)
 
     loss_type = loss_config.get("loss_type", "ce")
 

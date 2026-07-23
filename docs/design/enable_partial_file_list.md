@@ -1390,13 +1390,18 @@ deprecate CLI flags per the `--source_paths` precedent
   (`proposal.py:689,702`) — confirmed consumed by nobody (round-3 audit;
   re-verified by fresh grep before deletion). Keep `is_trial` /
   `trial_portion` / `train_portion` (live). *(DS7a)*
-- [ ] Add `ProposalInput.data_scope`; `local_full_context` maps it from the
+- [x] Add `ProposalInput.data_scope`; `local_full_context` maps it from the
   workflow's resolved scope; proposer prompt context renders the allowed-file
-  list + snapshot-only note when partial.
-- [ ] `agent/utils/proposer_preflight.py` —
+  list + snapshot-only note when partial. *(DS7b — `[DATA SCOPE]` block
+  rendered in BOTH prompt paths: legacy `_build_reasoning_prompt` and the
+  pipeline-mode user prompts incl. the preflight retry path; empty string
+  for full scope so pre-DataScope prompts are byte-identical)*
+- [x] `agent/utils/proposer_preflight.py` —
   `_synthesise_default_sample_set(trial_portion, scope)` builds the synthetic
   snapshot **within scope** (`:61-64`; delivers what the dead fields'
   docstrings promised: the estimate matches what the tuner will run).
+  *(DS7b — `estimate_proposal_time(data_scope=...)` threads it; proposer
+  passes `inp.data_scope`)*
 - [x] `workflows/model_exploration.py` — drop the now-unused
   `trial_strategy`/`target_files`/`eval_strategy` kwargs from the tuner and
   proposer paths; keep accepting them at CLI level as deprecated no-ops.
@@ -1409,17 +1414,22 @@ deprecate CLI flags per the `--source_paths` precedent
 - [x] `_chain_common.sh` — stop forwarding the deprecated flags (`:304,:332`);
   still parse them so existing invocations don't break. *(DS7a — defaults +
   case arms kept, so the §3.2 parity contract still holds)*
-- [ ] `tests/pseudo_data/` — update canned `ProposalInput` payloads.
+- [x] `tests/pseudo_data/` — update canned `ProposalInput` payloads.
+  *(DS7 — no-op verified: canned payloads mirror LLM outputs, not
+  ProposalInput; grep found zero pseudo-data references to the removed
+  fields, and `data_scope` has a schema default)*
 
 **Tests**:
 - [x] Old serialized `HyperparamTuningInput` / `ProposalInput` JSON (with
   removed keys) still validates (extras ignored) *(DS7a —
   `test_hyperparam_schemas.py::TestTrialFieldsInput` rewritten for the
   post-DS7 contract incl. the compat case)*
-- [ ] Preflight: partial scope → synthetic sample set keys ⊆ scope; estimate
-  path unchanged for full scope
-- [ ] Proposer pseudo test: partial-scope `ProposalInput` renders the file
-  list; full-scope renders unchanged framing
+- [x] Preflight: partial scope → synthetic sample set keys ⊆ scope; estimate
+  path unchanged for full scope *(DS7b — plus a strictly-cheaper-estimate
+  assertion for a 6-of-20-file scope)*
+- [x] Proposer pseudo test: partial-scope `ProposalInput` renders the file
+  list; full-scope renders unchanged framing *(DS7b —
+  `TestDataScopeBlock` in `test_prompt_context_surfacing.py`)*
 - [x] CLI deprecation: invoking with `--trial_strategy target` warns and does
   not alter behavior *(DS7a — runner `TestDeprecatedStrategyFlags` 3, tuner
   CLI `TestDeprecatedStrategyFlagsTunerCLI` 2, workflow
@@ -1451,6 +1461,15 @@ deprecations; targeted-suite policy):
 - `tests/pseudo_data/` untouched by design: canned payloads mirror LLM
   plan outputs (`ExperimentPlan`, live), not the deleted input fields —
   two-file rule satisfied vacuously.
+- **DS7b (2026-07-23)** — `ProposalInput.data_scope` (schema default =
+  full); `local_full_context(data_scope=...)` mapping; workflow passes its
+  run scope; `_synthesise_default_sample_set(scope=)` +
+  `estimate_proposal_time(data_scope=)` so the pre-flight wall-time gate
+  prices exactly the in-scope training cost; `_render_data_scope_block`
+  injected beside the hardware block in both prompt paths + the
+  pipeline retry path. Tests: prompt-block 3, scoped-synthesis 3,
+  protocol pass-through 2; affected sweep (protocols + proposer + utils +
+  schemas + workflows) 907/907; ruff + format + pyright clean.
 - Tests: 12 pre-rewrite failures repaired across
   `test_hyperparam_schemas.py` (class rewritten for the post-DS7
   contract + serialization-compat case) and both protocol test files

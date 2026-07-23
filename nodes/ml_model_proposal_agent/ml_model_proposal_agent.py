@@ -165,6 +165,7 @@ def _run_preflight_check(
         time_budget_minutes=budget,
         train_portion=inp.train_portion,
         trial_portion=inp.trial_portion,
+        data_scope=inp.data_scope,
     )
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
@@ -379,6 +380,30 @@ def _render_cold_start_block(cold_start: bool) -> str:
         "experiment grounded in the task contract, the available model and loss "
         "registries (listed below as available options, not past results), the "
         "advice, and the resource constraints."
+    )
+
+
+def _render_data_scope_block(scope) -> str:
+    """Render the ``[DATA SCOPE]`` prompt block (DS7b).
+
+    Returns ``""`` for a full scope — pre-DataScope prompts are
+    byte-for-byte unchanged. Under a partial scope the proposer is told
+    which files exist for this run and that sampling is snapshot-only, so
+    drafts are not designed around out-of-scope data. Disclosure only —
+    enforcement is the tuner/sandbox's job.
+    """
+    from execute_tools.dataset_config import TIDMAD as _TIDMAD
+
+    if scope is None or scope.is_full(_TIDMAD):
+        return ""
+    resolved = scope.resolve(_TIDMAD)
+    return (
+        "[DATA SCOPE]\n"
+        f"This run is restricted to validation files {resolved} — the ONLY\n"
+        "files any training, inference, or scoring may access. Sampling is\n"
+        "snapshot-only under this restriction (anchors/target strategies are\n"
+        "normalized away). Design the proposal for THESE files' data; do not\n"
+        "reason about, or optimize for, out-of-scope files."
     )
 
 
@@ -768,6 +793,9 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     hw_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
     if hw_block:
         lines += [hw_block, ""]
+    scope_block = _render_data_scope_block(inp.data_scope)
+    if scope_block:
+        lines += [scope_block, ""]
 
     lines += [
         "## Interpretation Summary",
@@ -1246,6 +1274,7 @@ class MLModelProposalAgent:
         # (pre-P-d these were rendered only in legacy mode at _build_reasoning_prompt
         # so production runs never saw them — dangling pointers in the system prompts).
         hardware_block = _render_hardware_context_block(inp.hardware_context, inp.vram_budget_gb)
+        data_scope_block = _render_data_scope_block(inp.data_scope)
         constraints_block = _render_constraints_block(inp.constraints, inp.existing_model_types)
         agent_cards_block = render_agent_cards(inp.agent_cards)
         expert_context_block = render_expert_context(inp.expert_context)
@@ -1375,6 +1404,8 @@ class MLModelProposalAgent:
                 user_prompt_parts.append(cold_start_block)
             if hardware_block:
                 user_prompt_parts.append(hardware_block)
+            if data_scope_block:
+                user_prompt_parts.append(data_scope_block)
             if constraints_block:
                 user_prompt_parts.append(constraints_block)
             if agent_cards_block:
@@ -1466,6 +1497,8 @@ class MLModelProposalAgent:
                             retry_parts: list[str] = []
                             if hardware_block:
                                 retry_parts.append(hardware_block)
+                            if data_scope_block:
+                                retry_parts.append(data_scope_block)
                             if constraints_block:
                                 retry_parts.append(constraints_block)
                             if agent_cards_block:

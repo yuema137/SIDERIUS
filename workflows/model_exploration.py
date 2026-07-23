@@ -2099,6 +2099,7 @@ def run_workflow(
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
                     is_trial=is_trial,
+                    data_scope=data_scope,
                     trial_portion=trial_portion,
                     train_portion=train_portion,
                     sampling_seed=sampling_seed,

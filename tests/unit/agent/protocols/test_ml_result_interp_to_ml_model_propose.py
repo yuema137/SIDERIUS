@@ -422,3 +422,21 @@ class TestDatabaseFullContext:
         output = make_interpretation_output(["punet"])
         with pytest.raises(NotImplementedError):
             database_full_context(output, storage)
+
+
+# ---------------------------------------------------------------------------
+# DS7b — data_scope pass-through
+# ---------------------------------------------------------------------------
+
+from execute_tools.dataset_config import DataScope
+
+
+class TestDataScopePassThrough:
+    def test_scope_passes_through(self, storage, interp_output):
+        scope = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+        result = local_full_context(interp_output, storage, data_scope=scope)
+        assert result.data_scope == scope
+
+    def test_default_full_scope_when_omitted(self, storage, interp_output):
+        result = local_full_context(interp_output, storage)
+        assert result.data_scope == DataScope.default()

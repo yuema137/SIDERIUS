@@ -24,6 +24,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.dataset_config import DataScope
 
 # ---------------------------------------------------------------------------
 # Phase B schemas — three-stage reasoning pipeline
@@ -685,6 +686,19 @@ class ProposalInput(BaseModel):
         description="Whether the run uses trial (sparse) sampling. Forwarded to "
         "build_sample_set inside the proposer's evaluate_time_skill gate "
         "so it matches what the tuner will run.",
+    )
+    data_scope: DataScope = Field(
+        default_factory=DataScope.default,
+        description=(
+            "Which subset of the dataset this run may access (DS7b). Two "
+            "consumers: (a) the pre-flight wall-time gate synthesises its "
+            "sample set WITHIN this scope so the estimate matches what the "
+            "tuner will actually run; (b) the proposer prompt disclosure "
+            "renders the allowed-file list + snapshot-only rule under a "
+            "partial scope so drafts are not designed for out-of-scope "
+            "data. Enforcement lives tuner/sandbox side — this field is "
+            "informative for the proposer. Default = complete dataset."
+        ),
     )
     trial_portion: float = Field(
         default=0.1,

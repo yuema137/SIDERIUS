@@ -502,3 +502,33 @@ class TestNConfirmedLinksTemplateVar:
         inp = _pipeline_input(tmp_path, interp, vocab_seed=vocab_seed, exploration_mode="exploit")
         sys_prompt = self._stage1_system_prompt(agent, mock, inp)
         assert "2 confirmed" in sys_prompt
+
+
+# ---------------------------------------------------------------------------
+# DS7b — [DATA SCOPE] disclosure block
+# ---------------------------------------------------------------------------
+
+from execute_tools.dataset_config import DataScope
+from nodes.ml_model_proposal_agent import _render_data_scope_block
+
+
+class TestDataScopeBlock:
+    def test_full_scope_renders_empty(self):
+        assert _render_data_scope_block(DataScope.default()) == ""
+        assert _render_data_scope_block(None) == ""
+        assert _render_data_scope_block(DataScope(file_indices=list(range(20)))) == ""
+
+    def test_partial_scope_lists_files_and_snapshot_rule(self):
+        block = _render_data_scope_block(DataScope(file_indices=[4, 5, 6, 7, 8, 9]))
+        assert "[DATA SCOPE]" in block
+        assert "[4, 5, 6, 7, 8, 9]" in block
+        assert "snapshot-only" in block
+
+    def test_reasoning_prompt_carries_block_only_when_partial(self, tmp_path):
+        inp = _minimal_input(tmp_path, _minimal_interp())
+        assert "[DATA SCOPE]" not in _build_reasoning_prompt(inp)
+        scoped = _minimal_input(tmp_path, _minimal_interp())
+        scoped.data_scope = DataScope(file_indices=[4, 5, 6])
+        prompt = _build_reasoning_prompt(scoped)
+        assert "[DATA SCOPE]" in prompt
+        assert "[4, 5, 6]" in prompt
