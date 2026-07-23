@@ -13,6 +13,12 @@ from core.runtime_control.adaptive import (
     AdaptiveUnitVerification,
     AdaptiveVerificationConfig,
 )
+from core.runtime_control.observation_store import (
+    ObservationStore,
+    PriorLookup,
+    PriorPolicy,
+    calibration_key,
+)
 from core.runtime_control.phases import RUNTIME_PHASES, RuntimePhase
 from core.runtime_control.provenance import (
     capture_environment_provenance,
@@ -60,11 +66,14 @@ __all__ = [
     "AdaptiveVerificationConfig",
     "AdmissionRecord",
     "Confidence",
+    "ObservationStore",
     "PhaseComponentRecord",
     "PhaseMeasurement",
     "PredictionError",
     "PredictionSource",
     "PriorAgreement",
+    "PriorLookup",
+    "PriorPolicy",
     "ResolvedPhaseWorkload",
     "RuntimeControlPolicy",
     "RuntimeObservation",
@@ -77,6 +86,7 @@ __all__ = [
     "SteadyStateDetector",
     "TotalRecord",
     "VerificationResult",
+    "calibration_key",
     "capture_environment_provenance",
     "capture_storage_provenance",
     "classify_cache_state",

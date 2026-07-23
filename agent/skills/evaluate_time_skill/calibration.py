@@ -192,6 +192,39 @@ def update_k(table: dict, entry: dict) -> dict:
     return table
 
 
+def to_legacy_prior_entries(table: dict) -> list[dict]:
+    """§6.4 legacy-calibration adapter (RT2-F) — read-only view.
+
+    Exposes this table's history entries in the generic runtime-control
+    prior shape so the observation store can serve them as
+    ``legacy_calibration_prior`` evidence. Old files are never mutated
+    or required to be rewritten; legacy priors never bypass live
+    verification (``formal_execution_eligible_without_live_verification``
+    is always ``False``).
+    """
+    entries: list[dict] = []
+    for e in table.get("history") or []:
+        actual_ms = e.get("actual_ms_per_step")
+        if not isinstance(actual_ms, int | float) or actual_ms <= 0:
+            continue  # unusable as a unit-time prior; skip, never guess
+        entries.append(
+            {
+                "prior_source": "legacy_calibration_prior",
+                "provenance_quality": "historical",
+                "formal_execution_eligible_without_live_verification": False,
+                "phase": "training",
+                "unit": "optimizer_step",
+                "unit_ms": float(actual_ms),
+                "gpu_name": e.get("gpu_name", table.get("gpu_name")),
+                "model_family": e.get("model_type"),
+                "seg_size": e.get("seg_size"),
+                "batch_size": e.get("batch_size"),
+                "timestamp": e.get("timestamp"),
+            }
+        )
+    return entries
+
+
 def detect_drift(table: dict, last_n: int = 3) -> str | None:
     """Warning string when the last ``last_n`` history entries all violated
     their estimates — a signal the EMA can't track smoothly (driver upgrade,

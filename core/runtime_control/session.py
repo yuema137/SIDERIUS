@@ -127,6 +127,7 @@ class RuntimeVerificationSession:
         self._storage: dict[str, Any] = {}
         self._verification_seconds: float = 0.0
         self._verification_failures: dict[str, str] = {}
+        self._calibration_context: dict[str, Any] = {}
 
         self._setup_start = time.perf_counter()
         self._io_bytes_at_start = read_process_read_bytes()
@@ -259,6 +260,7 @@ class RuntimeVerificationSession:
         session._components = dict(previous.components)
         session._storage = dict(previous.storage)
         session._admission = previous.admission
+        session._calibration_context = dict(previous.calibration_context)
         session._chain_id = chain_id or previous.chain_id
         session._attempt_id = attempt_id or previous.attempt_id
         setup = previous.components.get("setup")
@@ -266,6 +268,17 @@ class RuntimeVerificationSession:
         session._final_status = resumed_status
         session._write_sidecar()
         return session
+
+    def set_calibration_context(self, context: dict[str, Any]) -> None:
+        """Record the §6a calibration-key inputs for this attempt.
+
+        The engine that KNOWS the facts records them (precision,
+        optimizer, model family, parameter count, seg/batch size,
+        runtime flags). Without a context the observation remains
+        evidence but never feeds calibration (RT2-F).
+        """
+        self._calibration_context = dict(context)
+        self._write_sidecar()
 
     def record_phase_workload(self, phase: RuntimePhase, workload: ResolvedPhaseWorkload) -> None:
         """Record a phase's resolved production workload (§1.2).
@@ -476,6 +489,7 @@ class RuntimeVerificationSession:
             },
             runtime_policy=self.policy.model_dump(),
             storage=dict(self._storage),
+            calibration_context=dict(self._calibration_context),
             components=dict(self._components),
             admission=self._admission,
             final_status=self._final_status,

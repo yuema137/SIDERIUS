@@ -623,6 +623,26 @@ def run_experiment_streaming(
                 ),
                 detail={"dataset_construction_seconds": epoch0_dataset_seconds},
             )
+            # §6a calibration-key inputs — recorded by the engine that
+            # knows them. runtime_flags are literal facts of THIS loop
+            # (no workers / pinning / accumulation / compile); flipping
+            # any of them must update this record (§6a reserved field).
+            runtime_session.set_calibration_context(
+                {
+                    "precision": str(next(model.parameters()).dtype).replace("torch.", ""),
+                    "optimizer_type": train_cfg.optimizer_type,
+                    "model_family": model_cfg.model_type,
+                    "param_count": sum(p.numel() for p in model.parameters() if p.requires_grad),
+                    "seg_size": seg_size,
+                    "batch_size": train_cfg.batch_size,
+                    "runtime_flags": {
+                        "num_workers": 0,
+                        "pin_memory": False,
+                        "grad_accumulation": False,
+                        "torch_compile": False,
+                    },
+                }
+            )
             admission = runtime_session.decide_admission()
             if admission.decision == "rejected":
                 print(f"[runtime_control] REJECTED before formal training: {admission.reason}")

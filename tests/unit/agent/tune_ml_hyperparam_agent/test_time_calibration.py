@@ -325,3 +325,50 @@ def test_detect_drift_only_inspects_last_n_entries():
         "gpu_name": "g",
     }
     assert cal.detect_drift(table, last_n=3) is None
+
+
+# ── RT2-F §6.4 legacy adapter ────────────────────────────────────────────────
+
+
+class TestLegacyPriorAdapter:
+    """to_legacy_prior_entries: read-only view, files never mutated."""
+
+    def test_history_entries_exposed_as_legacy_priors(self):
+        entry = cal.make_entry(
+            gpu_name="NVIDIA H100",
+            model_type="wavenet",
+            seg_size=1250,
+            batch_size=2,
+            total_steps=480_000,
+            warmup_ms_per_step=40.0,
+            actual_ms_per_step=44.3,
+            estimated_minutes=320.0,
+            actual_minutes=354.0,
+        )
+        table = {"gpu_name": "NVIDIA H100", "k_values": {}, "history": [entry]}
+        priors = cal.to_legacy_prior_entries(table)
+        assert len(priors) == 1
+        p = priors[0]
+        assert p["prior_source"] == "legacy_calibration_prior"
+        assert p["provenance_quality"] == "historical"
+        assert p["formal_execution_eligible_without_live_verification"] is False
+        assert p["phase"] == "training"
+        assert p["unit_ms"] == 44.3
+        assert p["model_family"] == "wavenet"
+        assert p["gpu_name"] == "NVIDIA H100"
+
+    def test_table_not_mutated_and_bad_entries_skipped(self):
+        table = {
+            "gpu_name": "g",
+            "k_values": {"wavenet": 1.2},
+            "history": [{"actual_ms_per_step": 0.0}, {"no_ms": True}],
+        }
+        import copy
+
+        snapshot = copy.deepcopy(table)
+        assert cal.to_legacy_prior_entries(table) == []
+        assert table == snapshot  # read-only adapter (§6.4)
+
+    def test_empty_table(self):
+        assert cal.to_legacy_prior_entries({"history": []}) == []
+        assert cal.to_legacy_prior_entries({}) == []

@@ -336,6 +336,15 @@ class RuntimeObservation(BaseModel):
     )
     historical_prior: dict[str, Any] | None = None
     prior_agreement: PriorAgreement | None = None
+    calibration_context: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "§6a key inputs recorded at measurement time (precision, "
+            "optimizer_type, model_family, param_count, seg_size, "
+            "batch_size, runtime_flags). Empty → the observation stays "
+            "evidence but never feeds calibration."
+        ),
+    )
 
     components: dict[RuntimePhase, PhaseComponentRecord] = Field(default_factory=dict)
     total: TotalRecord | None = None
