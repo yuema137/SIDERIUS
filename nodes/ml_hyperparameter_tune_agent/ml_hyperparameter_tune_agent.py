@@ -2760,6 +2760,8 @@ class HyperparamTuningAgent:
                         "observation_store_root": os.path.join(
                             sandbox.base_dir, "runtime_observations"
                         ),
+                        # RT6: §4 watchdog enable is an operator input.
+                        "watchdog": {"enabled": agent_input.runtime_watchdog_enabled},
                     }
 
                     failure_stage = "training"
@@ -4310,6 +4312,39 @@ def main() -> int:
             "in the round loop). Default None = no clamp (LLM plan unchanged)."
         ),
     )
+    # --- RT6: runtime-control operator surface (design §4/§5) ---
+    # The CLI carries the §5 PROVISIONAL operational defaults (150k / 4);
+    # the schema defaults stay None so programmatic callers keep pre-RT5
+    # behavior. Pass 0 to disable a numeric guardrail.
+    parser.add_argument(
+        "--max_steps_per_attempt",
+        type=int,
+        default=150_000,
+        help="§5 guardrail: skip plans whose resolved optimizer-step count "
+        "exceeds this (planner-visible record). 0 disables. Default 150000 "
+        "(provisional §5 value).",
+    )
+    parser.add_argument(
+        "--min_formal_batch_size",
+        type=int,
+        default=4,
+        help="§5 guardrail: skip FORMAL rounds planned below this batch size "
+        "(the V18 launch-overhead pathology; trial rounds exempt). 0 "
+        "disables. Default 4 (provisional §5 value).",
+    )
+    parser.add_argument(
+        "--allow_extreme_steps",
+        action="store_true",
+        help="§5 operator override: bypass both step/batch guardrails "
+        "(recorded in run provenance).",
+    )
+    parser.add_argument(
+        "--runtime_watchdog",
+        action="store_true",
+        help="§4 runtime watchdog: run training/inference subprocesses in "
+        "their own process group under the deadline max(floor, "
+        "min(budget, verified_estimate x safety)). Default off.",
+    )
 
     args = parser.parse_args()
 
@@ -4410,6 +4445,12 @@ def main() -> int:
     input_dict["attempts_per_round"] = args.attempts_per_round
     input_dict["attempts_per_formal_round"] = args.attempts_per_formal_round
     input_dict["max_fail_rounds"] = args.max_fail_rounds
+
+    # RT6 — runtime-control operator surface. 0 → None (guardrail disabled).
+    input_dict["max_steps_per_attempt"] = args.max_steps_per_attempt or None
+    input_dict["min_formal_batch_size"] = args.min_formal_batch_size or None
+    input_dict["allow_extreme_steps"] = args.allow_extreme_steps
+    input_dict["runtime_watchdog_enabled"] = args.runtime_watchdog
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

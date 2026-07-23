@@ -769,6 +769,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Wall-time budget (minutes) for formal-mode time gate. None disables.",
     )
+    # --- Runtime-control operator surface (RT6, runtime design §4/§5) ---
+    # The chain is the OPERATIONAL surface: §5 provisional defaults live
+    # here (schema defaults stay None). Pass 0 to disable a guardrail.
+    parser.add_argument(
+        "--max_steps_per_attempt",
+        type=int,
+        default=150_000,
+        help="§5 guardrail: skip plans above this resolved optimizer-step "
+        "count. 0 disables. Default 150000 (provisional §5 value).",
+    )
+    parser.add_argument(
+        "--min_formal_batch_size",
+        type=int,
+        default=4,
+        help="§5 guardrail: skip FORMAL rounds planned below this batch "
+        "size (V18 pathology; trial exempt). 0 disables. Default 4.",
+    )
+    parser.add_argument(
+        "--allow_extreme_steps",
+        action="store_true",
+        help="§5 operator override: bypass both step/batch guardrails.",
+    )
+    parser.add_argument(
+        "--runtime_watchdog",
+        action="store_true",
+        help="§4 runtime watchdog: deadline-kill training/inference "
+        "subprocess groups. Default off.",
+    )
     parser.add_argument(
         "--data_dir",
         type=str,
@@ -1313,6 +1341,11 @@ def main():
             attempts_per_round=args.attempts_per_round,
             attempts_per_formal_round=args.attempts_per_formal_round,
             max_fail_rounds=args.max_fail_rounds,
+            # Runtime-control operator surface (RT6). 0 → None (disabled).
+            max_steps_per_attempt=args.max_steps_per_attempt or None,
+            min_formal_batch_size=args.min_formal_batch_size or None,
+            allow_extreme_steps=args.allow_extreme_steps,
+            runtime_watchdog_enabled=args.runtime_watchdog,
             # Advice
             human_advice_interpret=args.human_advice_interpret,
             human_advice_propose=args.human_advice_propose,

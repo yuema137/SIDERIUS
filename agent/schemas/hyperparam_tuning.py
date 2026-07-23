@@ -1163,6 +1163,15 @@ class HyperparamTuningInput(BaseModel):
             "provenance — never a prompt instruction."
         ),
     )
+    runtime_watchdog_enabled: bool = Field(
+        default=False,
+        description=(
+            "§4 runtime watchdog (RT4/RT6): when True, training/inference "
+            "subprocesses run in their own process group under the "
+            "deadline max(floor, min(operator_budget, verified_estimate x "
+            "safety)). Disabled by default; Gate 2 enables it explicitly."
+        ),
+    )
 
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the

@@ -84,6 +84,13 @@ FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
 FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
+# §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
+# Defaults synced to run_one_iteration.py (§5 provisional operational
+# values); 0 disables a numeric guardrail; booleans forwarded when 1.
+MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
+MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
+ALLOW_EXTREME_STEPS=0
+RUNTIME_WATCHDOG=0
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -196,6 +203,10 @@ parse_chain_args() {
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
+        --max_steps_per_attempt)  MAX_STEPS_PER_ATTEMPT="$2"; shift 2 ;;
+        --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
+        --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
+        --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
@@ -379,6 +390,16 @@ build_app_args() {
     fi
     if [ -n "$FORMAL_TIME_BUDGET_MINUTES" ]; then
         APP_ARGS+=(--formal_time_budget_minutes "$FORMAL_TIME_BUDGET_MINUTES")
+    fi
+    # RT6 runtime-control surface: numeric flags always forwarded (they
+    # carry §5 operational defaults on both layers); booleans only when 1.
+    APP_ARGS+=(--max_steps_per_attempt "$MAX_STEPS_PER_ATTEMPT")
+    APP_ARGS+=(--min_formal_batch_size "$MIN_FORMAL_BATCH_SIZE")
+    if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
+        APP_ARGS+=(--allow_extreme_steps)
+    fi
+    if [ "$RUNTIME_WATCHDOG" -eq 1 ]; then
+        APP_ARGS+=(--runtime_watchdog)
     fi
     # FORCE_FORMAL_ROUND default 1 preserves prior chain behavior; only forward
     # the negation explicitly when set to 0 (run_one_iteration.py's argparse

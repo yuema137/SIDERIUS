@@ -1404,6 +1404,11 @@ def run_workflow(
     attempts_per_round: int = 3,
     attempts_per_formal_round: int = 5,
     max_fail_rounds: int = 3,
+    # --- Runtime-control operator surface (RT5/RT6, runtime design §4/§5) ---
+    max_steps_per_attempt: int | None = None,
+    min_formal_batch_size: int | None = None,
+    allow_extreme_steps: bool = False,
+    runtime_watchdog_enabled: bool = False,
     # --- Reasoning pipeline ---
     exploration_mode: ExplorationMode = "auto",
     minimum_boldness: float = 0.05,
@@ -2423,6 +2428,10 @@ def run_workflow(
             attempts_per_round=attempts_per_round,
             attempts_per_formal_round=attempts_per_formal_round,
             max_fail_rounds=max_fail_rounds,
+            max_steps_per_attempt=max_steps_per_attempt,
+            min_formal_batch_size=min_formal_batch_size,
+            allow_extreme_steps=allow_extreme_steps,
+            runtime_watchdog_enabled=runtime_watchdog_enabled,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
