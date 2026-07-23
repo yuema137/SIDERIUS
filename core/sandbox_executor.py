@@ -10,6 +10,8 @@ from collections.abc import Callable
 from typing import Any
 
 from core.inference_defaults import inference_batch_for
+from core.runtime_control.records import RuntimeObservation
+from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
@@ -402,6 +404,27 @@ def _ensure_dir(path: str) -> None:
         )
 
 
+def _read_runtime_observation_sidecar(path: str) -> dict[str, Any] | None:
+    """Read + validate the subprocess's runtime-verification sidecar (RT2-B).
+
+    Returns the observation as a plain dict, or ``None`` when the sidecar
+    is absent (legacy subprocess, non-streaming mode) or malformed. A
+    malformed sidecar is reported and treated as absent — verification
+    evidence degrades to "no evidence", it never breaks the training
+    result path (fail-open here is safe: absence of evidence is already
+    the fail-closed default everywhere it is consumed, §7.3).
+    """
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+        return RuntimeObservation.model_validate(raw).model_dump(mode="json")
+    except Exception as exc:
+        print(f"[Executor] runtime-verification sidecar unreadable ({path}): {exc}")
+        return None
+
+
 def _scope_violation_result(e: ScopeViolationError) -> dict[str, Any]:
     """Convert a ScopeViolationError into the executor error-dict shape.
 
@@ -536,6 +559,7 @@ class TidmadSandbox:
         sample_set: dict | None = None,
         train_portion: float | None = None,
         train_base_seed: int | None = None,
+        runtime_policy: dict | None = None,
     ):
         """Executes the training physical script.
 
@@ -546,7 +570,25 @@ class TidmadSandbox:
                              Passed via --train_portion.
             train_base_seed: Base seed for per-epoch subsampling reproducibility.
                              Passed via --train_base_seed.
+            runtime_policy:  Optional RT2-B runtime policy dict (validated
+                             against ``RuntimeControlPolicy`` before launch).
+                             Streaming mode only. When the in-subprocess
+                             admission decision rejects the attempt, the
+                             return is ``{"status": "rejected_time_risk",
+                             "runtime_verification": <observation>}`` —
+                             distinguishable from every error path.
+
+        The returned dict carries ``runtime_verification`` (the subprocess's
+        observation sidecar as a dict, or ``None``) on success, rejection,
+        and subprocess-error paths alike — a partially written observation
+        from a crashed run is still evidence (§6.2 event log).
         """
+        # Sidecar the subprocess writes its runtime observation to (RT2-B).
+        # Computed up front so every return path (including exception
+        # handlers) can attach whatever the subprocess managed to record.
+        rv_sidecar_path = os.path.abspath(
+            os.path.join(self.dirs["configs"], f"runtime_verification_{exp_id}.json")
+        )
         try:
             vm, vt, vl = self._validate_configs(model_type, m_cfg, t_cfg, l_cfg, exp_id, run_name)
 
@@ -598,6 +640,22 @@ class TidmadSandbox:
                 if train_base_seed is not None:
                     cmd.extend(["--train_base_seed", str(train_base_seed)])
 
+                # RT2-B: in-subprocess runtime verification (streaming mode
+                # only). Remove any stale sidecar from a previous attempt with
+                # this exp_id so a pre-launch crash can never resurface old
+                # evidence as current.
+                if os.path.isfile(rv_sidecar_path):
+                    os.remove(rv_sidecar_path)
+                cmd.extend(["--runtime_observation_out", rv_sidecar_path])
+                if runtime_policy is not None:
+                    validated_policy = RuntimeControlPolicy(**runtime_policy)
+                    rp_path = os.path.abspath(
+                        os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
+                    )
+                    with open(rp_path, "w") as f:
+                        json.dump(validated_policy.model_dump(), f)
+                    cmd.extend(["--runtime_policy_json", rp_path])
+
             print(f">>> [Executor] Running training for {exp_id}...")
             result = subprocess.run(
                 cmd,
@@ -612,6 +670,24 @@ class TidmadSandbox:
 
             if not self.progress_bar and result.stdout:
                 print(f"--- Train Script Output ---\n{result.stdout}")
+
+            # RT2-B: a clean runtime-verification REJECTION exits 0 without a
+            # model or _OK_ sentinel — it must be recognized BEFORE the
+            # silent-crash sentinel check below, or every rejection would be
+            # misclassified as a crash. Distinguishable by the sidecar's
+            # admission decision.
+            runtime_verification = _read_runtime_observation_sidecar(rv_sidecar_path)
+            if (
+                runtime_verification is not None
+                and (runtime_verification.get("admission") or {}).get("decision") == "rejected"
+            ):
+                reason = (runtime_verification.get("admission") or {}).get("reason", "")
+                print(f"--- Runtime Verification Rejected ---\n{reason}")
+                return {
+                    "status": "rejected_time_risk",
+                    "message": f"runtime verification rejected the attempt: {reason}",
+                    "runtime_verification": runtime_verification,
+                }
 
             # Phase 6.7 Fix 3 — silent-crash detection. The trainer-side
             # ``_save_with_sentinel`` (Commit 3) writes ``_OK_<exp_id>`` only
@@ -639,7 +715,11 @@ class TidmadSandbox:
                     f"--- stderr tail (last 20 lines) ---\n{stderr_tail}"
                 )
                 print(f"--- Train Silent Crash ---\n{silent_msg}")
-                return {"status": "error", "message": silent_msg}
+                return {
+                    "status": "error",
+                    "message": silent_msg,
+                    "runtime_verification": runtime_verification,
+                }
 
             # Read the training-result JSON written by train_engine_sandbox.py
             # so the caller gets final_loss / loss_history / model_params.
@@ -654,7 +734,12 @@ class TidmadSandbox:
             if os.path.isfile(train_json_path):
                 with open(train_json_path) as f:
                     results = json.load(f)
-            return {"status": "success", "message": "Training finished.", "results": results}
+            return {
+                "status": "success",
+                "message": "Training finished.",
+                "results": results,
+                "runtime_verification": runtime_verification,
+            }
 
         except ScopeViolationError as e:
             # Before subprocess launch — no file I/O happened. Must precede
@@ -664,7 +749,13 @@ class TidmadSandbox:
             error_msg = _format_subprocess_error(e, "Train")
             print(f"--- Train Script Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
-            return {"status": status, "message": error_msg}
+            # A crashed subprocess may still have staged partial observation
+            # evidence (setup timing, provenance) — attach it (§6.2).
+            return {
+                "status": status,
+                "message": error_msg,
+                "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+            }
         except Exception as e:
             print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
@@ -1034,11 +1125,16 @@ class StubSandbox(TidmadSandbox):
         sample_set: dict | None = None,
         train_portion: float | None = None,
         train_base_seed: int | None = None,
+        runtime_policy: dict | None = None,
     ) -> dict[str, Any]:
         """Synthesise a successful training result. No subprocess launch.
 
         DataScope parity with the production executor: pseudo-mode tests
         must exercise the boundary invariant, not bypass it.
+        ``runtime_policy`` is accepted for signature parity (RT2-B); the
+        stub never runs verification, so the result carries
+        ``runtime_verification=None`` — the explicit-absence shape
+        downstream consumers already fail closed on (§7.3).
         """
         if sample_set is not None:
             try:
@@ -1056,6 +1152,7 @@ class StubSandbox(TidmadSandbox):
             "status": "success",
             "message": "stub_training_ok",
             "results": results,
+            "runtime_verification": None,
         }
 
     def execute_inference(
