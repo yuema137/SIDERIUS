@@ -80,7 +80,7 @@ Runtime-Control Implementation
 [x] RT4     — runtime watchdog (60c654f)
 [x] RT5     — guardrails (5d11fe1; schema defaults None — operational §5 values land with RT6 chain wiring)
 [x] RT6     — chain/CLI/docs wiring (0db5e25)
-[ ] Pre-Gate A — full non-real sweep (unit + pseudo integration)
+[x] Pre-Gate A — full non-real sweep (unit 4239 green; pseudo integration 124 passed + known FU-7 only)
 [ ] Pre-Gate B — small real-GPU validation (4 scenarios; operator-reviewed launch plan)
 [ ] Gate 1  — real LLM + pseudo training
 [ ] Gate 2  — operator-approved real training (incl. pathological case)
@@ -1733,4 +1733,31 @@ Built:
 **RT series complete (RT1 → RT6).** Remaining: the pre-Gate full-suite
 sweep (operator test policy), then Gate 1 (real LLM + pseudo training)
 and Gate 2 (operator-approved real training incl. the pathological
-case) — both operator-approved launches.
+case) — both operator-approved launches. **Gate-2 precondition
+(operator, 2026-07-23): budgets are discussed with the operator using
+the pre-Gate prediction-quality evidence before Gate 2 is configured.**
+
+### Pre-Gate A — full non-real sweep 🔍 2026-07-23
+
+- **Commands**: `.venv/bin/python -m pytest tests/unit -q` and
+  `.venv/bin/python -m pytest tests/integration/ -q -m "not real_run"`.
+- **Unit (first pass)**: 4238 passed / 1 failed / 1 skipped / 3
+  xfailed, 5 m 15 s. The failure:
+  `test_no_hardcoded_device_literals[core]` — the RT2-C comment
+  "(measured 82x on H100 step 0)" broke the contiguous "measured on"
+  provenance marker. Assessment (recorded before change): test
+  correct, comment phrasing at fault; production logic untouched.
+  Fixed in `f53924b`; guardrail suite re-verified green; **clean full
+  unit re-run: 4239 passed / 1 pre-existing skip / 3 xfailed, 5 m 07 s
+  — GREEN.**
+- **Pseudo integration**: 124 passed / 1 failed / 1 skipped / 129
+  deselected (`real_run`), 10 m 16 s. The failure:
+  `test_vocab_accumulation.py::test_vocab_candidate_promotion_across_
+  three_iterations` — `TypeError: 'NoneType' object is not
+  subscriptable`. Assessment: the KNOWN pre-existing FU-7 defect
+  (vocab-accumulation NoneType test bug, filed during DataScope DS8;
+  listed in CLAUDE.md open issues) — unrelated to runtime-control; no
+  runtime-control regression. Left for the FU-7 owner.
+- **Environment skips**: 1 unit skip = the pre-existing
+  `test_scoring_helpers.py` Path-A reference-data absence; 1
+  integration skip = environment-dependent (pre-existing).
