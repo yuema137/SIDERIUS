@@ -322,6 +322,14 @@ class RuntimeObservation(BaseModel):
     attempt_id: str | None = None
     hardware: dict[str, Any] = Field(default_factory=dict)
     software: dict[str, Any] = Field(default_factory=dict)
+    storage: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Dataset/storage provenance of the setup measurement (§2.2): "
+            "dataset root, filesystem, expected vs actually-read bytes, "
+            "cache state, host memory before/after."
+        ),
+    )
     runtime_policy: dict[str, Any] = Field(
         default_factory=dict,
         description="Environment-scoped thresholds in force (§5).",

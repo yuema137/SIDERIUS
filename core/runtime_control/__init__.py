@@ -10,6 +10,11 @@ production engines (`execute_tools/workload_resolvers.py`).
 """
 
 from core.runtime_control.phases import RUNTIME_PHASES, RuntimePhase
+from core.runtime_control.provenance import (
+    capture_environment_provenance,
+    capture_storage_provenance,
+    classify_cache_state,
+)
 from core.runtime_control.records import (
     MEASUREMENT_BACKED_SOURCES,
     RUNTIME_VERIFICATION_RECORD_KEY,
@@ -28,6 +33,11 @@ from core.runtime_control.records import (
     observation_totals_from_components,
     record_is_formal_verified,
 )
+from core.runtime_control.session import (
+    ADMISSION_STAGE_POST_SETUP,
+    RuntimeControlPolicy,
+    RuntimeVerificationSession,
+)
 from core.runtime_control.steady_state import (
     SteadyStateConfig,
     SteadyStateDetection,
@@ -38,6 +48,7 @@ from core.runtime_control.verifier import RuntimePhaseVerifier
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 __all__ = [
+    "ADMISSION_STAGE_POST_SETUP",
     "MEASUREMENT_BACKED_SOURCES",
     "RUNTIME_PHASES",
     "RUNTIME_VERIFICATION_RECORD_KEY",
@@ -49,15 +60,20 @@ __all__ = [
     "PredictionSource",
     "PriorAgreement",
     "ResolvedPhaseWorkload",
+    "RuntimeControlPolicy",
     "RuntimeObservation",
     "RuntimePhase",
     "RuntimePhaseVerifier",
     "RuntimePrediction",
+    "RuntimeVerificationSession",
     "SteadyStateConfig",
     "SteadyStateDetection",
     "SteadyStateDetector",
     "TotalRecord",
     "VerificationResult",
+    "capture_environment_provenance",
+    "capture_storage_provenance",
+    "classify_cache_state",
     "detect_steady_state",
     "extract_runtime_observation",
     "observation_totals_from_components",
