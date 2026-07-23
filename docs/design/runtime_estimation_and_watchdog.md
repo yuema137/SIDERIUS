@@ -1,6 +1,6 @@
 # Design: Calibrated Runtime Estimation + Watchdog (`runtime_control`)
 
-**Status**: Design for approval — NOT implemented. Motivated by the
+**Status**: rev 2 — operator review of 2026-07-23 incorporated (framework-not-constants watchdog, prediction-accuracy objective + error ledger, audited calibration key, runtime-primary guardrails, store lifecycle, calibration eligibility, fixed fresh-restart decision). Approved direction; implementation may begin per the RT series. Motivated by the
 2026-07-23 V18 incident: the static estimator priced a 480,000-step
 formal attempt at 2.00 ms/step (16 min train est, 61.1 min total vs
 120-min budget → passed) while reality was 44.3 ms/step → 5.9 h training,
@@ -46,6 +46,34 @@ total_estimate    = training_estimate + inference_estimate + scoring_estimate
 
 ## 2. Warm-up calibration (Phase 4)
 
+**Objective (rev 2): accurately predict the TOTAL runtime of the
+proposed execution.** Measuring ms/step is the mechanism, not the goal;
+every implementation detail below serves prediction accuracy and may be
+tuned without changing the contract.
+
+### 2a. Prediction-accuracy contract
+
+- **Acceptance criterion**: for production attempts, the predicted total
+  phase time must satisfy `|log(actual / predicted)| ≤ log(F)` for at
+  least P% of attempts, with provisional targets `F = 1.5, P = 90`
+  (configurable; to be revised from data — same principle as §4's
+  safety factor).
+- **Evaluation loop**: every completed (or watchdog-killed) attempt
+  persists `{predicted_s, actual_s, estimate_source}` — the
+  **prediction-error ledger** — on its record and aggregated per run.
+  This ledger is the feedback signal that (a) evaluates calibration
+  quality continuously, (b) drives safety-factor revision, and (c)
+  triggers store invalidation on drift (§6).
+- **Calibration success** = a warm-up whose measured step time is stable
+  (jitter within the configured bound) AND whose resulting prediction,
+  once actuals exist for that key, meets the acceptance criterion.
+- **Fallback**: if warm-up fails, is unstable, or its key's ledger shows
+  repeated criterion violations, the estimator falls back to the MOST
+  CONSERVATIVE available estimate (max of static and store values, with
+  the elevated safety factor) — never to the optimistic one.
+
+### 2b. Mechanism (implementation choices serving §2a — tunable)
+
 A pre-execution skill (`calibrate_step_time`) that runs the ACTUAL
 proposed configuration briefly, inside the same sandbox contract as
 training:
@@ -54,10 +82,11 @@ training:
    configs, on the actual device, production precision/path.
 2. Data: a small in-RAM tensor batch replicated from one real PSD segment
    (representative dtype/shape; no full dataset load).
-3. **20 untimed warm-up steps** (cudnn autotune, allocator, JIT settle) —
-   first-step numbers are never used.
-4. **Timed steps: adaptive** — keep stepping until ≥ 50 timed steps AND
-   ≥ 1 s of timed wall, hard cap 60 s total; explicit
+3. **Untimed warm-up steps** (provisional default 20 — cudnn autotune,
+   allocator, JIT settle); first-step numbers are never used.
+4. **Timed steps: adaptive** (provisional: until ≥ 50 timed steps AND
+   ≥ 1 s of timed wall, hard cap 60 s total) — all counts tunable in
+   service of the §2a criterion; explicit
    `torch.cuda.synchronize()` before and after the timed region (and the
    region is timed as a block, so intra-step async is irrelevant).
 5. Statistic: **median** ms/step; report MAD; if max_step > 10× median
@@ -95,13 +124,22 @@ Wraps every training and inference subprocess (scoring is in-process
 parallel workers — phase 2 of watchdog work; start with the two
 subprocess phases that caused the incident).
 
-- **Deadline** = `min(operator_phase_budget × 2.0, predicted_phase_time ×
-  3.0)`, floor 5 min. Rationale: the operator budget stays the contract
-  (×2 slack absorbs estimator noise + contention), the calibrated
-  estimate bounds pathological cases tighter when it is the smaller
-  term. The exact constants are operator-tunable input fields; this
-  formula ships as default only after the trial/formal-budget
-  interaction tests in §6 pass.
+- **Deadline framework (rev 2 — constants are NOT part of the
+  protocol)**:
+
+  ```
+  deadline = min( operator_hard_budget,
+                  calibrated_estimate × safety_factor )
+  ```
+
+  `safety_factor` is a configurable input field (schema-level, recorded
+  in run_config provenance), NOT a hardcoded constant. It ships with a
+  deliberately conservative provisional default and is expected to be
+  revised as the prediction-error ledger (§2b) accumulates calibration
+  data — the framework must remain stable across any future change to
+  the numeric value. A configurable floor prevents degenerate deadlines
+  for near-zero estimates. The trial/formal-budget interaction is
+  audited by the §7 tests before any default is finalized.
 - Mechanism: subprocesses already run via `core/sandbox_executor`; launch
   in their own process group (`start_new_session=True`), watchdog
   `killpg` TERM → 10 s → KILL on deadline; verify no surviving pids and
@@ -124,17 +162,21 @@ subprocess phases that caused the incident).
   toward the attempt budget; the round continues to its next attempt
   (existing brake machinery unchanged).
 
-## 5. Guardrails against pathological step counts (Phase 7)
+## 5. Guardrails (Phase 7) — runtime estimate is PRIMARY (rev 2)
 
 Runtime/schema — not prompts (prompt disclosure added separately as §3
 estimator-output rendering):
 
-- `max_steps_per_attempt` on `HyperparamTuningInput` (default 150,000 —
-  ≈1.8 h at the worst observed 44 ms/step): resolved-step-count above it
-  → plan rejected pre-training with a structured `PhysicalRejection`
-  (existing Phase-K machinery — reuse, don't invent), planner-visible.
-- `min_formal_batch_size` (default 4) enforced at the formal plan
-  boundary the same way.
+- **Primary criterion: predicted runtime.** A plan whose calibrated
+  predicted phase time exceeds the operator budget is rejected at
+  pre-flight (structured `PhysicalRejection` via the existing Phase-K
+  machinery, planner-visible). 100k cheap steps may pass; 80k expensive
+  steps must fail — the decision is time, not count.
+- **Secondary sanity checks** (demoted, rev 2): `max_steps_per_attempt`
+  (provisional default 150k) catches degenerate counts even when the
+  estimator claims they are cheap (defense-in-depth against estimator
+  bugs); `min_formal_batch_size` (provisional default 4) encodes the
+  known launch-overhead pathology directly. Both configurable.
 - Operator override: explicit input field (`allow_extreme_steps=True`)
   — never a prompt instruction; recorded in run_config provenance.
 
@@ -142,15 +184,60 @@ estimator-output rendering):
 
 `core/server_configs/step_time_calibrations.json` (audited: this dir
 already holds per-server configuration; `core/hardware_context` already
-fingerprints the GPU — reuse its identity fields). Entry key:
-`(gpu_name, torch_version_major, precision, optimizer_type,
-model_family_fingerprint, log2_param_bucket, seg_size_bucket,
-batch_size)`; value: median ms/step, MAD, n_steps_measured, timestamp,
-host, driver. Lookup requires exact gpu_name + torch major match —
-never silently cross-hardware. Entries are appended with provenance;
-staleness: entries older than the recorded torch/driver combo are
-ignored. Warm-ups write back automatically so repeated configurations
-skip calibration.
+fingerprints the GPU — reuse its identity fields).
+
+### 6a. Key audit (rev 2 — every factor justified)
+
+Included: `gpu_name`, `torch_version_major`, `precision`,
+`optimizer_type`, `model_family_fingerprint`, `log2_param_bucket`,
+`seg_size_bucket`, `batch_size` (all demonstrably move per-step time),
+plus `phase ∈ {training, inference}` — inference calibrates per-psd-seg
+with its own table, never sharing training entries.
+
+Evaluated and EXCLUDED, with rationale (each becomes an inclusion the
+moment the production trainer starts varying it — a reserved
+`runtime_flags` dict field in every entry records the state at
+measurement time so future divergence is detectable):
+- **DataLoader workers**: production trainer is fixed `num_workers=0`;
+  not a plan variable. Recorded in `runtime_flags`, excluded from key.
+- **pin_memory / non_blocking**: not used by the trainer; recorded,
+  excluded. (If the §Part-5 loop-hygiene optimization ever lands, this
+  flips the flag and invalidates old entries automatically.)
+- **Gradient accumulation**: no accumulation path exists in the loop;
+  excluded; `n_steps` resolver would change first if it appeared.
+- **torch.compile / CUDA Graphs**: not used anywhere in the trainer;
+  recorded as flags, excluded from key.
+- **Scoring**: CPU-parallel in-process; out of calibration-store scope
+  (conservative static estimate retained).
+
+### 6b. Lifecycle: invalidation & refresh (rev 2)
+
+Every entry records full provenance (`gpu_name, driver, cuda, torch,
+host, timestamp, runtime_flags, source_run`). An entry is INVALID and
+ignored when any of:
+1. gpu_name / precision / phase key mismatch (never cross-applied);
+2. torch major, CUDA, or driver version differs from the entry's;
+3. `runtime_flags` at lookup differ from the entry's;
+4. **drift**: the prediction-error ledger (§2a) shows the key violating
+   the acceptance criterion on N consecutive attempts (provisional
+   N=3) → entry evicted, next attempt forces re-warm-up;
+5. **age**: entries older than a configurable max age (provisional 90
+   days) require refresh on next use — reused only with the elevated
+   safety factor until refreshed.
+Refresh = the forced warm-up writes a new entry; old entries are kept
+append-only with a `superseded_by` pointer (auditability).
+
+### 6c. Eligibility — which runs may feed calibration (rev 2)
+
+Calibration entries may be written ONLY from: (a) dedicated warm-up
+runs, and (b) completed production attempts that finished
+`success`/`failed_mode_collapse` WITHOUT watchdog intervention and with
+plausible per-step timing (within jitter bounds of their own warm-up).
+Explicitly excluded: watchdog-killed attempts, pathological/rejected
+configurations, and the **archived pre-fix V18 Wave-1 workspaces** —
+those remain debugging/reporting provenance only. Ledger rows from
+excluded runs still count for DRIFT DETECTION (they are evidence of
+misprediction) but never as calibration values.
 
 ## 7. Validation plan before V18 restart (Phase 9)
 
@@ -172,7 +259,8 @@ end-to-end wall time provably < ~15 min.
 
 ## 8. Restart strategy (Phase 10)
 
-**Recommendation: four FRESH workspaces; archive the halted ones.**
+**FIXED operator decision (2026-07-23, not subject to re-evaluation):
+four FRESH workspaces; the halted ones are archived provenance.**
 Rationale: (a) the estimator/watchdog change alters which attempts run —
 mixing pre-fix and post-fix iterations in one workspace makes timing,
 token, and exploration-dynamics analyses bimodal, and the
