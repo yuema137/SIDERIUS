@@ -10,9 +10,10 @@
   across Python sources.
 
 ## Environment
-- **Always use the project virtualenv**: every Python command must use
-  `/home/yuema137/SIDERIUS/.venv/bin/python` (or activate `.venv/bin/activate`
-  first). Never use the system `python` or `python3` — they are Python 3.8 and
+- **Always use the project virtualenv**: every Python command must use the
+  repo's `.venv/bin/python` (e.g. `/workspace/REPO/SIDERIUS/.venv/bin/python`
+  on the H100 box, `/home/yuema137/SIDERIUS/.venv/bin/python` on lilab) or
+  activate `.venv/bin/activate` first. Never use the system `python` or `python3` — they are Python 3.8 and
   will fail on f-strings and other modern syntax.
 - **`run_comparison.py` lives at `scripts/run_comparison.py`** (moved from repo
   root in commit `13c34fa`). If you see a `SIDERIUS_ROOT` bug where subprocess
@@ -121,7 +122,7 @@ complete.
 | Step | Artefact | Location |
 |------|----------|----------|
 | 0 | **Graph placement** — decide which existing nodes feed into this node (upstream) and which nodes consume its output (downstream). Draw or write out the directed edges explicitly: `A → new_node → B`. Confirm the input schema can be fully populated from the upstream node's output schema, and that the output schema covers everything the downstream node needs. No file is generated at this step. | (design only) |
-| 1 | Node implementation | `nodes/{node_name}.py` |
+| 1 | Node implementation | `nodes/{node_name}/{node_name}.py` (one directory per node) |
 | 2 | Protocol(s) for each edge this node participates in | `agent/schemas/protocols/{source}_to_{target}.py` |
 | 3 | Node unit tests (mocked LLM) | `tests/unit/agent/{node_name}/test_{node_name}.py` |
 | 4 | Protocol unit tests | `tests/unit/agent/protocols/test_{source}_to_{target}.py` |
@@ -158,7 +159,7 @@ across modules; `ml_code_validator_agent` is correct because it is explicitly
 scoped to the ML pipeline.
 
 **Protocol naming convention**: one file per directed edge, named
-`{source_code}_to_{target_code}.py`. Node codes: `ml_model_tune`,
+`{source_code}_to_{target_code}.py`. Node codes: `ml_literature_review` (full name), `ml_model_tune`,
 `ml_result_interp`, `ml_model_propose`, `ml_model_impl`, `ml_model_valid`.
 Functions inside the file: `{transport}_{data_scope}` (e.g.
 `local_all_records`, `database_full_context`). Always add a `database_*`

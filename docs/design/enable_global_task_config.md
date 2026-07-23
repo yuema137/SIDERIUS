@@ -1,6 +1,6 @@
 # Design: Enable Global Task Config (`enable_global_task_config`)
 
-**Status**: Draft  
+**Status**: SHIPPED (see the sign-off checkpoint doc referenced below; header updated 2026-07-23)  
 **Author**: Yue Ma  
 **Created**: 2026-06-13  
 **Branch**: (new branch, to be created)  
