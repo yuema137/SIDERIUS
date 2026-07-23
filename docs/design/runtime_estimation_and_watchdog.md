@@ -1,6 +1,6 @@
 # Design: Calibrated Runtime Estimation + Watchdog (`runtime_control`)
 
-**Status**: rev 2 — operator review of 2026-07-23 incorporated (framework-not-constants watchdog, prediction-accuracy objective + error ledger, audited calibration key, runtime-primary guardrails, store lifecycle, calibration eligibility, fixed fresh-restart decision). Approved direction; implementation may begin per the RT series. Motivated by the
+**Status**: rev 3 — second operator review incorporated (component-wise error ledger; append-only raw-observation store with derived calibrations; RT evaluation contract). Implementation approved (framework-not-constants watchdog, prediction-accuracy objective + error ledger, audited calibration key, runtime-primary guardrails, store lifecycle, calibration eligibility, fixed fresh-restart decision). Approved direction; implementation may begin per the RT series. Motivated by the
 2026-07-23 V18 incident: the static estimator priced a 480,000-step
 formal attempt at 2.00 ms/step (16 min train est, 61.1 min total vs
 120-min budget → passed) while reality was 44.3 ms/step → 5.9 h training,
@@ -59,8 +59,15 @@ tuned without changing the contract.
   (configurable; to be revised from data — same principle as §4's
   safety factor).
 - **Evaluation loop**: every completed (or watchdog-killed) attempt
-  persists `{predicted_s, actual_s, estimate_source}` — the
-  **prediction-error ledger** — on its record and aggregated per run.
+  persists the **prediction-error ledger** on its record and aggregated
+  per run — **component-wise, not only totals (rev 3)**:
+  `{training: {predicted_s, actual_s}, inference: {predicted_s,
+  actual_s}, scoring: {predicted_s, actual_s}, total: {predicted_s,
+  actual_s}, estimate_source}`. Rationale: totals can mask a drifting
+  component (accurate training + slowly degrading inference can still
+  sum to "acceptable"); per-component history localizes exactly where
+  prediction quality degrades without requiring separate estimators
+  up front.
   This ledger is the feedback signal that (a) evaluates calibration
   quality continuously, (b) drives safety-factor revision, and (c)
   triggers store invalidation on drift (§6).
@@ -227,6 +234,21 @@ ignored when any of:
 Refresh = the forced warm-up writes a new entry; old entries are kept
 append-only with a `superseded_by` pointer (auditability).
 
+### 6b-bis. Raw observations, derived calibrations (rev 3)
+
+The store is an **append-only observation log**, not a table of current
+values. Each row preserves the raw evidence:
+`{timestamp, gpu_name, driver, cuda, torch, host, runtime_flags,
+config_key_fields, phase, warmup_ms_per_step (if any), predicted_s,
+actual_s, prediction_error, accepted: bool, watchdog_involved: bool,
+source_run}`. Calibrated values used by the estimator are DERIVED from
+eligible rows at lookup time (`raw observations → calibration model →
+runtime prediction`), never stored as the only artifact. Benefits:
+calibration evolution is fully traceable, regressions and drift are
+diagnosable retrospectively, and future calibration algorithms can
+re-derive from history without information loss. (Ineligible rows —
+§6c — remain in the log flagged `accepted=false` for drift analysis.)
+
 ### 6c. Eligibility — which runs may feed calibration (rev 2)
 
 Calibration entries may be written ONLY from: (a) dedicated warm-up
@@ -275,7 +297,22 @@ at operator preference). Scientific validity of the archived scores is
 unaffected (scoring semantics unchanged); they are simply a separate,
 labeled campaign.
 
-## 9. Proposed commit breakdown (RT series — pending approval)
+## 9. RT-series evaluation contract (rev 3)
+
+Every RT stop-and-show answers TWO independent questions:
+1. **Correctness** — does the implementation behave as designed
+   (tests, negative cases, provenance shapes)?
+2. **Prediction quality** — does it measurably improve runtime
+   prediction versus the previous system? Evidence: predicted-vs-actual
+   comparisons on representative configurations, including the archived
+   incident configuration (old system: 61.1 min predicted / ~8 h
+   actual; the new system's prediction for the same config is the
+   benchmark to beat and report).
+Final validation must demonstrate BOTH that pathological runs are
+prevented AND that prediction error on normal configurations has
+significantly improved.
+
+## 10. Proposed commit breakdown (RT series — approved direction)
 
 | Commit | Content |
 |---|---|
