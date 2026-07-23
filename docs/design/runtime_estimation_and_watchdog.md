@@ -80,6 +80,8 @@ Runtime-Control Implementation
 [x] RT4     — runtime watchdog (60c654f)
 [x] RT5     — guardrails (5d11fe1; schema defaults None — operational §5 values land with RT6 chain wiring)
 [x] RT6     — chain/CLI/docs wiring (0db5e25)
+[ ] Pre-Gate A — full non-real sweep (unit + pseudo integration)
+[ ] Pre-Gate B — small real-GPU validation (4 scenarios; operator-reviewed launch plan)
 [ ] Gate 1  — real LLM + pseudo training
 [ ] Gate 2  — operator-approved real training (incl. pathological case)
 ```
