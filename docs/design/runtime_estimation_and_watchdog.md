@@ -71,7 +71,7 @@ Runtime-Control Implementation
 [x] Rev 5   — golden-plan design unification (this document)
 [x] RT2-A   — runtime data model + workload contracts (a93963d, a4e4a52)
 [x] RT2-B   — in-subprocess setup measurement (746c592, 8646751)
-[ ] RT2-C   — generic adaptive phase verification (training)
+[x] RT2-C   — generic adaptive phase verification (training) (d1b3c1e, 061bc27)
 [ ] RT2-D   — inference verification
 [ ] RT2-E   — scoring + orchestration accounting
 [ ] RT2-F   — observation store + historical priors
@@ -1407,3 +1407,58 @@ Built:
   parity, stale-sidecar removal, crash surfacing partial observation,
   malformed-sidecar degradation, policy validation/forwarding with
   invalid-policy fail-before-launch, stub parity).
+
+### RT2-C — generic adaptive phase verification (training first) ✅ 2026-07-23
+
+- **Design approval**: rev 5 §2.5/§2.11/§2.12 + §5; operator autonomy
+  grant in force (progress reports instead of stop-and-show waits).
+- **Committed implementation**: ✅ 2026-07-23 — `d1b3c1e` (adaptive
+  driver + session admission generalization), `061bc27` (epoch-0 loop
+  instrumentation + micro-verification).
+- **Checkpoint** (targeted per the operator's test-scope policy):
+  RT2-C suites 28 (synthetic-trace matrix) + 7 (session verification)
+  + 4 (trainer integration) new tests; affected dirs
+  (`tests/unit/core` + `tests/unit/execute_tools`) 821 passed / 1
+  pre-existing skip; ruff + format clean; pyright 0 errors. Real
+  micro-verification (tiny CPU wavenet, 30 steps): steady
+  97.5 ms/step from 3 steady steps; verification cost 0.66 s;
+  predicted 2.92 s vs actual 3.18 s → ratio 1.088, inside the §2.10
+  F=1.5 contract; cache state measured `warm_page_cache`; overhead
+  2.9% at toy scale with 0 wasted work (verified steps ARE the first
+  production training steps).
+
+Built:
+
+- [x] `core/runtime_control/adaptive.py`: incremental
+  `AdaptiveUnitVerification` (production loop owns execution; driver
+  consumes per-unit durations) — RT2a detector with re-arm; §2.5
+  stopping rule (declaration must survive `min_timed_steps` steady
+  observations AND `min_timed_ms` steady measurement; slow units
+  verify from few observations); pathological units (relative factor +
+  §5 absolute environment-scoped threshold), never applied to warm-up
+  transients; prior comparison `verified_match` (exit at minimums) /
+  `verified_drift` (sticky; extends measurement ×`drift_extra_factor`)
+  / `new_configuration`; failed verification → measurement evidence,
+  NO prediction (§2.11). `AdaptiveVerificationConfig` = every
+  cap/tolerance, reached via `RuntimeControlPolicy.verification`.
+- [x] Session: `RuntimeControlPolicy` gains `safety_factor` +
+  `verification`; `start_phase_verification` /
+  `complete_phase_verification` (evidence recorded regardless of
+  outcome); `decide_admission(stage)` generalized to the KNOWN-COST
+  lower-bound rule (Σ present component predictions × safety vs
+  budget; fail-closed on verification failures with a budget in
+  force; record-only without); admission carries real
+  `verification_cost_seconds`. Later decisions supersede earlier
+  (stage recorded).
+- [x] Trainer: epoch-0 loop instrumented (explicit
+  `torch.cuda.synchronize` around timed steps on CUDA; zero
+  instrumentation after the verdict); mid-epoch rejection with
+  standard cleanup; loader-exhausted resolution via `finalize()`
+  (single epoch → record-only, work already done); per-epoch dataset
+  reconstruction as an EXPLICIT additive prediction term
+  ((epochs−1) × measured epoch-0 construction seconds).
+- **Scope note (§11 deviation, documented)**: environment-scoped
+  thresholds flow through `RuntimeControlPolicy` (the §5 "equivalent
+  runtime-policy surface"), not `core/server_configs/` —
+  `ServerConfig` is a measured-constants registry, and per-host
+  policy overrides belong to the §5 guardrail wiring (RT5).
