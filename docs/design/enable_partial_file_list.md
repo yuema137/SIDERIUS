@@ -1642,6 +1642,17 @@ bash sdsc_submission_scripts/run_chain.sh \
 0.02`, `--trial_time_budget_minutes 5`, `--no-force_formal_round`,
 `openai_tiered_v1.json`, no `tee`.)
 
+*Optional speed knobs (operator-approved 2026-07-23): append
+`--formal_portion 0.02 --formal_train_portion 0.02
+--formal_eval_portion 0.02 --formal_time_budget_minutes 10` — belt-and-
+braces caps so even an LLM-chosen (non-forced) formal round stays cheap.
+`formal_eval_portion < 1.0` is smoke-only (Phase R); production scalars
+need the 1.0 default. Do NOT cut `--num_iterations` below 2: the
+iter-1→iter-2 handoff is where manifest stamps, `restore_prior_state`
+ingress validation, and lock VALIDATION (vs creation) actually execute.
+Realistic wall time on an H100 with these caps: ~10–20 min per scenario
+(PR #123's comparable Gate 2 measured 859 s).*
+
 - [ ] Chain exits 0
 - [ ] **Scope invariant**: every `train_sample_set` / `eval_sample_set` in
   round records has keys ⊆ `{4..9}`; the run workspace contains **no**
