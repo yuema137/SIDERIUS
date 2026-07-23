@@ -191,13 +191,15 @@ class RecordingOpenAIBridge(LLMBridge):
         super().__init__(**kw)
         self.calls: list = []
 
-    def generate(self, system_prompt, user_prompt):
-        resp = super().generate(system_prompt, user_prompt)
+    def generate(self, system_prompt, user_prompt, **kwargs):
+        # **kwargs mirrors 54412af on the shared RecordingLLMBridge —
+        # production callers pass label=/components= for token auditing.
+        resp = super().generate(system_prompt, user_prompt, **kwargs)
         self.calls.append(("generate", system_prompt, user_prompt, resp))
         return resp
 
-    def generate_text(self, system_prompt, user_prompt):
-        resp = super().generate_text(system_prompt, user_prompt)
+    def generate_text(self, system_prompt, user_prompt, **kwargs):
+        resp = super().generate_text(system_prompt, user_prompt, **kwargs)
         self.calls.append(("generate_text", system_prompt, user_prompt, resp))
         return resp
 

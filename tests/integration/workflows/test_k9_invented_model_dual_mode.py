@@ -11,7 +11,7 @@ Choreography under Phase L (see the pseudo-data folder's README and
 ``docs/resource_estimator_implement.md`` §11.8 for full rationale):
   Round 1, attempt 1: planner picks ``hidden_dim=2048`` → VRAM gate
            emits the K.2.5-8 warning AND verdicts over budget
-           (~151 MB > 100 MB) → record saved as ``skipped_oom_risk``;
+           (over the 0.3 GB ceiling) → record saved as ``skipped_oom_risk``;
            sandbox never reached. Round 1 is NOT yet a success — the
            inner attempt budget continues.
   Round 1, attempt 2: planner reacts by collapsing to ``hidden_dim=128``
@@ -113,7 +113,7 @@ def _mock_cuda(monkeypatch):
     over/under-budget verdict path is only reachable when
     ``device == "cuda"`` AND ``torch.cuda.is_available()`` is True.
     The 0.8 × 20 GB = 16 GB defensive cap never binds against the
-    operator budget (0.1 GB), so this mock keeps the test
+    operator budget (0.3 GB), so this mock keeps the test
     deterministic on machines without a real GPU.
     """
     import torch
@@ -182,12 +182,25 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         train_portion=0.1,
         eval_strategy="snapshot",
         eval_portion=0.05,
-        # 0.1 GB ceiling is the binding budget; round 1's hidden_dim=2048
-        # busts it, round 2's hidden_dim=128 fits. See the K.9.0 README
+        # Ceiling between the two fixture estimates: round 1's
+        # hidden_dim=2048 must bust the budget, round 2's hidden_dim=128
+        # must fit. Estimates are environment-dependent — on the H100 dev
+        # box (2026-07) they are ~0.24 / ~0.4+ GB, so 0.3 splits them;
+        # the original 0.1 was calibrated for the lilab-era stack and
+        # rejected everything here. If this test fails on a new
+        # environment with the wrong verdict split, re-derive the two
+        # estimates and pick a ceiling between them. See the K.9.0 README
         # for the param-count math.
-        trial_vram_budget_gb=0.1,
+        trial_vram_budget_gb=0.3,
         # Time gate kept disabled — K.9 is about VRAM/K.2.5-8, not time.
         trial_time_budget_minutes=None,
+        # HealthGate subsystem OFF — K.9 exercises the VRAM-gate fallback
+        # path and planner-reaction choreography, not gate behavior. The
+        # pseudo stack writes no denoised HDF5s, so real gates would
+        # invalidate every round (the M9 pseudo-gate gap). Explicit
+        # opt-out via the DS5 operator switch is the correct test
+        # configuration, not a workaround.
+        health_gate_enabled=False,
         llm_provider="openai",
         llm_model_id="gpt-5-mini",
         storage=StorageConfig(
@@ -241,22 +254,18 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
     # ------------------------------------------------------------------
     # Layer 1 — gate stdout (capsys). Both modes.
     # ------------------------------------------------------------------
-    # The K.2.5-8 warning fires unconditionally for unregistered model_type;
-    # the verdict line follows when the gate runs to completion (no crash).
-    # This block is positioned before any record-count assertion so a
-    # hard-fail regression in the inference estimator (which would return
-    # zero records) surfaces first as a clear K.2.5-8 contract violation.
+    # A.8 (8b6c4ba, 2026-04-23) intentionally removed the K.2.5-8
+    # fallback-warning/uncalibrated surface: the deterministic wrapper
+    # rewrite structurally probes every batch, so unregistered model types
+    # no longer take an "uncalibrated" table-fallback path and the
+    # ``!!! [evaluate_vram_skill]`` warning no longer exists. The invented-
+    # model choreography below (gate verdicts, OOM-skip taxonomy, planner
+    # reaction, Phase-K budget fields, formal promotion) remains the value
+    # of this test.
     stdout = capsys.readouterr().out
-    assert "!!! [evaluate_vram_skill]" in stdout, (
-        "K.2.5-8 warning line missing — fallback path not exercised."
-    )
-    assert _PLUGIN_MODEL_TYPE in stdout, (
-        f"Warning line should cite the invented model_type {_PLUGIN_MODEL_TYPE!r}."
-    )
-    assert "(25)" in stdout, "Warning should cite the runtime fallback inference_batch (25)."
-    # Verdict line printed by the wrapper after the warning. Both 'YES' (round 2
-    # fits) and 'NO' (round 1 over budget) outcomes are reachable here.
-    assert "Feasible" in stdout, "Gate should print a verdict line after the warning."
+    # Verdict line printed by the wrapper. Both 'YES' (round 2 fits) and
+    # 'NO' (round 1 over budget) outcomes are reachable here.
+    assert "Feasible" in stdout, "Gate should print a verdict line."
 
     # ------------------------------------------------------------------
     # Layer 2 — per-record memory. Pseudo mode only (real-LLM may diverge).
@@ -282,21 +291,23 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         success_record = success_records[0]
 
         # K.2.5-8 flag — set on every gate-touched record for an unregistered model_type.
-        assert oom_record.memory.inference_batch_uncalibrated is True
-        assert success_record.memory.inference_batch_uncalibrated is True
+        # (inference_batch_uncalibrated assertions removed — the flag was
+        # retired by the A.8 wrapper rewrite; see the Layer-1 comment.)
 
         # vram_budget_gb is the binding ceiling = min(operator_budget, 0.8×free).
-        # Mocked free=20 GB so the cap=16 GB never binds; operator's 0.1 GB wins.
-        assert oom_record.memory.vram_budget_gb == pytest.approx(0.1)
-        assert success_record.memory.vram_budget_gb == pytest.approx(0.1)
+        # Mocked free=20 GB so the cap=16 GB never binds; operator's 0.3 GB wins.
+        assert oom_record.memory.vram_budget_gb == pytest.approx(0.3)
+        assert success_record.memory.vram_budget_gb == pytest.approx(0.3)
 
-        # vram_estimate_gb populated on both records; round 1 over, round 2 under.
+        # vram_estimate_gb populated on both records; round 1 over, round 2
+        # under the 0.3 GB ceiling (thresholds match trial_vram_budget_gb —
+        # see the budget comment on the input for the per-GPU estimates).
         assert oom_record.memory.vram_estimate_gb is not None
         assert success_record.memory.vram_estimate_gb is not None
-        assert oom_record.memory.vram_estimate_gb > 0.1, (
+        assert oom_record.memory.vram_estimate_gb > 0.3, (
             f"Round 1 should be over budget; got {oom_record.memory.vram_estimate_gb} GB."
         )
-        assert success_record.memory.vram_estimate_gb < 0.1, (
+        assert success_record.memory.vram_estimate_gb < 0.3, (
             f"Round 2 should fit; got {success_record.memory.vram_estimate_gb} GB."
         )
 
@@ -321,7 +332,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
         # gate (trial_time_budget_minutes=None) so ``time_mode`` is never set
         # and ``last_mode`` is legitimately None here. We don't assert on it.
         attempt_2_kwargs = plan_calls[1][4]
-        assert attempt_2_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
+        assert attempt_2_kwargs["trial_vram_budget_gb"] == pytest.approx(0.3)
         assert attempt_2_kwargs["last_vram_estimate_gb"] is not None
         assert attempt_2_kwargs["last_vram_estimate_gb"] == pytest.approx(
             oom_record.memory.vram_estimate_gb
@@ -347,7 +358,7 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
             f"got {len(plan_calls)}."
         )
         formal_kwargs = plan_calls[2][4]
-        assert formal_kwargs["trial_vram_budget_gb"] == pytest.approx(0.1)
+        assert formal_kwargs["trial_vram_budget_gb"] == pytest.approx(0.3)
 
         # Canned planner reaction: attempt 2 lowers hidden_dim from 2048 → 128
         # in response to attempt 1's over-budget verdict (within round 1).
