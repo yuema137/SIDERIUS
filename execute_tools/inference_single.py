@@ -10,8 +10,10 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
 
@@ -132,6 +134,23 @@ def get_parser():
             "only after validating both int8 channels and expected length."
         ),
     )
+    parser.add_argument(
+        "--runtime_observation_out",
+        type=str,
+        default=None,
+        help="RT2-D: per-attempt runtime-observation sidecar (trial mode "
+        "only). When set, this subprocess RESUMES the attempt's "
+        "observation (training components preserved) and records the "
+        "inference component: workload, steady-state batch verification, "
+        "output-write cost, and the phase actual.",
+    )
+    parser.add_argument(
+        "--runtime_policy_json",
+        type=str,
+        default=None,
+        help="RT2-D: RuntimeControlPolicy JSON. Only meaningful together "
+        "with --runtime_observation_out.",
+    )
     return parser
 
 
@@ -200,6 +219,7 @@ def main():
     # 1. Parse arguments locally to avoid NameError scope issues
     parser = get_parser()
     args = parser.parse_args()
+    t_process_start = time.perf_counter()
 
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
@@ -271,11 +291,32 @@ def main():
 
     model.eval()
 
+    # RT2-D (§2.6): everything up to here — config load, model
+    # construction, weight load, device transfer — is the INFERENCE
+    # setup, accounted inside the inference component (the attempt's
+    # "setup" component belongs to the training subprocess).
+    inference_setup_seconds = time.perf_counter() - t_process_start
+
     # 3. Load sample set if provided (trial mode)
     sample_set = None
     if args.sample_set_json:
         with open(args.sample_set_json) as f:
             sample_set = json.load(f)
+
+    # RT2-D: resume the attempt's observation (trial mode only).
+    runtime_session = None
+    verifier = None
+    if args.runtime_observation_out and sample_set is not None:
+        policy = None
+        if args.runtime_policy_json:
+            with open(args.runtime_policy_json) as f:
+                policy = RuntimeControlPolicy(**json.load(f))
+        runtime_session = RuntimeVerificationSession.resume_or_start(
+            args.runtime_observation_out,
+            policy=policy,
+            attempt_id=args.exp_id,
+            resumed_status="inference_started",
+        )
 
     # PSD_SEGMENT_LENGTH imported from dataset_config
 
@@ -283,6 +324,53 @@ def main():
         # --- TRIAL MODE: denoise specific segments from multiple files ---
         out_dir = args.output_dir if args.output_dir else args.data_dir
         per_file_timings_ms: list[dict] = []
+        use_cuda_sync = torch.cuda.is_available()
+        write_seconds_per_psd: list[float] = []
+        total_psd_planned = sum(len(v) for v in sample_set.values())
+        verification_completed = False
+        if runtime_session is not None:
+            runtime_session.record_phase_workload(
+                "inference",
+                resolve_inference_workload(
+                    sample_set,
+                    seg_size=input_size,
+                    inference_batch_size=args.inference_batch_size,
+                ),
+            )
+            verifier = runtime_session.start_phase_verification("inference", unit="inference_batch")
+
+        def _complete_inference_verification() -> None:
+            """Assemble the inference prediction once evidence suffices.
+
+            §2.6 prediction = resolved batches × steady batch time
+            + inference setup + output-write term. The write term is
+            extrapolated per PSD segment from measured file writes so
+            output cost is priced separately from compute, never hidden
+            inside it.
+            """
+            nonlocal verification_completed
+            assert runtime_session is not None and verifier is not None
+            write_per_psd = (
+                sum(write_seconds_per_psd) / len(write_seconds_per_psd)
+                if write_seconds_per_psd
+                else 0.0
+            )
+            runtime_session.complete_phase_verification(
+                "inference",
+                verifier,
+                source="real_inference_verification",
+                extra_predicted_seconds=(
+                    inference_setup_seconds + write_per_psd * total_psd_planned
+                ),
+                extra_detail={
+                    "inference_setup_seconds": inference_setup_seconds,
+                    "output_write_seconds_per_psd": write_per_psd,
+                    "output_write_files_measured": len(write_seconds_per_psd),
+                    "total_psd_planned": total_psd_planned,
+                },
+            )
+            verification_completed = True
+
         for file_index_str, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index_str)
             out_name = os.path.join(
@@ -360,6 +448,11 @@ def main():
                 range(0, dim1, bs),
                 desc=f"Inference file {file_index} ({len(psd_segment_indices)} PSD segs)",
             ):
+                timing_this_batch = verifier is not None and not verifier.is_terminal
+                if timing_this_batch:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    t_batch = time.perf_counter()
                 batch_in = train_loader[i : i + bs]
                 batch_tgt = target_loader[i : i + bs]
                 _, dn, ij = process_batch(
@@ -368,6 +461,18 @@ def main():
                 actual_n = batch_in.shape[0]
                 denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
                 injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
+                if timing_this_batch:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    assert verifier is not None
+                    verifier.feed(max((time.perf_counter() - t_batch) * 1000.0, 1e-6))
+                    if verifier.is_terminal and write_seconds_per_psd:
+                        # Terminal AND at least one measured file write →
+                        # the §2.6 component split is complete. (Terminal
+                        # WITHOUT a write yet: stop timing, hold completion
+                        # until the first write cost is measured below.)
+                        _complete_inference_verification()
+                        verifier = None
 
             if os.path.exists(out_name):
                 os.remove(out_name)
@@ -383,13 +488,28 @@ def main():
             del train_loader, target_loader, all_input, all_target, input_chunks, target_chunks
             gc.collect()
 
+            t_write = time.perf_counter()
             create_abra_file(
                 out_name,
                 denoised.flatten().astype(np.int8),
                 injected.flatten().astype(np.int8),
                 indexed=False,
             )
+            write_seconds_per_psd.append(
+                (time.perf_counter() - t_write) / max(len(psd_segment_indices), 1)
+            )
             print(f"Trial inference saved: {out_name}")
+
+            if (
+                runtime_session is not None
+                and not verification_completed
+                and verifier is not None
+                and verifier.is_terminal
+            ):
+                # Verification went terminal mid-file before any write was
+                # measured — complete now that the first write cost exists.
+                _complete_inference_verification()
+                verifier = None
 
             del denoised, injected
             gc.collect()
@@ -406,6 +526,18 @@ def main():
         if args.timing_out_json:
             with open(args.timing_out_json, "w") as f:
                 json.dump(per_file_timings_ms, f)
+
+        if runtime_session is not None:
+            if not verification_completed and verifier is not None:
+                # Files exhausted before a verdict (tiny scopes, reused
+                # outputs): resolve from the collected evidence — a failed
+                # verification still records its measurement (§6.2).
+                _complete_inference_verification()
+                verifier = None
+            # The inference ACTUAL covers this subprocess's real work:
+            # setup + all file loops + output writes (§2.6).
+            runtime_session.record_phase_actual("inference", time.perf_counter() - t_process_start)
+            runtime_session.finalize("inference_complete")
 
     else:
         # --- NORMAL MODE: denoise all segments of a single file ---

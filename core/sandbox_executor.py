@@ -782,6 +782,7 @@ class TidmadSandbox:
         l_cfg: dict,
         sample_set: dict | None = None,
         inference_batch: int | None = None,
+        runtime_policy: dict | None = None,
     ):
         """Executes the inference physical script.
 
@@ -798,6 +799,14 @@ class TidmadSandbox:
                              callers not yet wired through the tuner keep running.
                              A.9 will remove the fallback once every caller has
                              been migrated.
+            runtime_policy:  Optional RT2-D runtime policy dict (validated
+                             against ``RuntimeControlPolicy``). Trial mode
+                             only. The subprocess RESUMES the attempt's
+                             observation sidecar (training components
+                             preserved — never deleted here) and records
+                             the inference component; the updated
+                             observation is attached to the result as
+                             ``runtime_verification``.
         """
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
         m_path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_config_{exp_id}.json"))
@@ -818,6 +827,11 @@ class TidmadSandbox:
         # an iteration so concurrent rounds don't clobber each other.
         timing_out = os.path.abspath(
             os.path.join(self.dirs["configs"], f"inference_timing_{exp_id}.json")
+        )
+        # RT2-D: the SAME per-attempt observation sidecar the training
+        # subprocess wrote — the inference subprocess resumes it.
+        rv_sidecar_path = os.path.abspath(
+            os.path.join(self.dirs["configs"], f"runtime_verification_{exp_id}.json")
         )
 
         cmd = [
@@ -870,6 +884,18 @@ class TidmadSandbox:
             # measurement-driven gate path (see refine_inference_time_estimator.md).
             cmd.extend(["--timing_out_json", timing_out])
 
+            # RT2-D: resume the attempt's runtime observation (training
+            # components stay — the sidecar is NEVER deleted here).
+            cmd.extend(["--runtime_observation_out", rv_sidecar_path])
+            if runtime_policy is not None:
+                validated_policy = RuntimeControlPolicy(**runtime_policy)
+                rp_path = os.path.abspath(
+                    os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
+                )
+                with open(rp_path, "w") as f:
+                    json.dump(validated_policy.model_dump(), f)
+                cmd.extend(["--runtime_policy_json", rp_path])
+
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
             t_subprocess_start = time.perf_counter()
@@ -910,6 +936,7 @@ class TidmadSandbox:
                 "per_file_timings_ms": per_file_timings_ms,
                 "process_startup_ms": process_startup_ms,
                 "subprocess_wall_ms": subprocess_wall_ms,
+                "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
             }
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Inference")
@@ -921,6 +948,7 @@ class TidmadSandbox:
                 "per_file_timings_ms": [],
                 "process_startup_ms": None,
                 "subprocess_wall_ms": None,
+                "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
             }
 
     def score_vector(
@@ -1164,11 +1192,14 @@ class StubSandbox(TidmadSandbox):
         l_cfg: dict,
         sample_set: dict | None = None,
         inference_batch: int | None = None,
+        runtime_policy: dict | None = None,
     ) -> dict[str, Any]:
         """Synthesise a successful inference result. No subprocess launch.
 
         DataScope parity with the production executor (error-dict shape
         mirrors ``TidmadSandbox.execute_inference``, timing fields included).
+        ``runtime_policy`` accepted for RT2-D signature parity;
+        ``runtime_verification=None`` is the explicit-absence shape.
         """
         if sample_set is not None:
             try:
@@ -1186,6 +1217,7 @@ class StubSandbox(TidmadSandbox):
             "per_file_timings_ms": [],
             "process_startup_ms": 10.0,
             "subprocess_wall_ms": 10.0,
+            "runtime_verification": None,
         }
 
     def execute_scoring(
