@@ -556,11 +556,16 @@ validated — the operator sets it knowingly for the scoped run).
 
 ## Commit plan
 
-Commit prefix: **DS** (DataScope). Every commit leaves
+Commit prefix: **DS** (DataScope). ~~Every commit leaves
 `uv run pytest tests/unit/ -q` and `tests/integration/ -q` (pseudo mode)
-green, ruff + pyright clean. Any schema change updates the matching
-`tests/pseudo_data/` files in the same commit (two-file rule,
-`tests/pseudo_data/README.md`).
+green, ruff + pyright clean.~~ **Amended (operator decision 2026-07-23,
+during DS6):** per-commit verification = targeted/affected suites + ruff +
+pyright; the FULL unit + pseudo-integration suites run only at the end of
+the DS series (DS8 completion, before Checkpoint DS). Commits DS1–DS6b and
+FU-10 predate the amendment and were verified against full suites (all
+green; results recorded in their implementation notes). Any schema change
+updates the matching `tests/pseudo_data/` files in the same commit
+(two-file rule, `tests/pseudo_data/README.md`).
 
 ---
 
@@ -1498,6 +1503,23 @@ standard.
   python-name key normalization included. No new strategy-lock fields —
   `plan_overrides` + the fixed-params disclosure block remain the
   preferred strategy-locking abstraction.
+  *Implemented 2026-07-23*: schema `field_validator` on
+  `HyperparamTuningInput.plan_overrides` rejects unknown keys at input
+  construction and normalizes python names → aliases (`model_cfg` →
+  `model_config`; passing both forms of one field is rejected as
+  ambiguous — this also fixes a latent alias bug where a python-name
+  override merged into the `by_alias` dump ADDED a stray key instead of
+  replacing the field, and the natural alias spelling was warned as
+  "unknown"). New `PlanOverridesError(ValueError)` raised by the
+  extracted `_apply_plan_overrides` helper; re-raised untouched by the
+  attempt handler (folded `isinstance` guard — a separate `except`
+  clause pushed `run()` past pyright's complexity ceiling; also
+  extracted `_validate_history_and_lock` while reducing). Disclosure
+  path unchanged (`_format_fixed_params_block`). Tests:
+  `test_plan_overrides_failfast.py` — 5 schema-key tests + a pseudo run
+  proving an invalid value terminates after exactly ONE plan call with
+  no `attempt_failure` record (the lock is never silently released).
+  6/6; adjacent suites 123/123; ruff + format + pyright clean.
 
 ## Non-goals (explicit out of scope)
 

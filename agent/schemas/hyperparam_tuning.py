@@ -1184,10 +1184,13 @@ class HyperparamTuningInput(BaseModel):
         default_factory=dict,
         description=(
             "Hard overrides applied to every ExperimentPlan after the LLM "
-            "produces it. Keys must be valid ExperimentPlan field names "
-            "(e.g. trial_portion, train_portion). The merged result is "
-            "re-validated through Pydantic, so invalid values are caught. "
-            "Empty dict (default) = LLM has full control."
+            "produces it. Keys must be valid ExperimentPlan field names or "
+            "aliases (e.g. trial_portion, model_config) — unknown keys fail "
+            "schema validation, and keys are normalized to alias form. The "
+            "merged plan is re-validated every round; an invalid effective "
+            "plan raises PlanOverridesError and terminates the run (FU-10 — "
+            "the operator lock is never silently released). Empty dict "
+            "(default) = LLM has full control."
         ),
     )
     data_scope: DataScope = Field(
@@ -1408,6 +1411,60 @@ class HyperparamTuningInput(BaseModel):
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",
     )
+
+    @field_validator("plan_overrides")
+    @classmethod
+    def _validate_plan_override_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """FU-10 — operator overrides are a contract, validated at the
+        earliest possible point (input construction).
+
+        Unknown keys are a hard error, not a per-round warning. Keys are
+        normalized to the alias form that ``ExperimentPlan.model_dump(
+        by_alias=True)`` emits (``model_cfg`` → ``model_config``, …), so
+        the tuner's merge REPLACES the intended field instead of adding a
+        stray key next to its aliased twin. Passing both a field's python
+        name and its alias is ambiguous and rejected.
+
+        Value validation needs the complete plan (cross-field validators)
+        and therefore happens at each round's merge — where an invalid
+        effective plan raises ``PlanOverridesError`` instead of falling
+        back to the unclamped LLM plan.
+        """
+        if not v:
+            return v
+        key_map: dict[str, str] = {}
+        for name, field in ExperimentPlan.model_fields.items():
+            canonical = field.alias or name
+            key_map[name] = canonical
+            if field.alias:
+                key_map[field.alias] = canonical
+        unknown = sorted(k for k in v if k not in key_map)
+        if unknown:
+            raise ValueError(
+                f"plan_overrides contains unknown ExperimentPlan field(s): "
+                f"{unknown}. Valid keys: {sorted(set(key_map))}"
+            )
+        normalized: dict[str, Any] = {}
+        for k, val in v.items():
+            canonical = key_map[k]
+            if canonical in normalized:
+                raise ValueError(
+                    f"plan_overrides sets {canonical!r} twice (python name "
+                    f"and alias both given) — pass exactly one."
+                )
+            normalized[canonical] = val
+        return normalized
+
+
+class PlanOverridesError(ValueError):
+    """Operator-supplied ``plan_overrides`` produced an invalid effective plan.
+
+    Raised at the per-round merge (FU-10): the override lock is a contract,
+    so an effective plan that fails validation terminates the run instead
+    of silently releasing the lock and continuing with the LLM's unclamped
+    plan. Deterministic on retry — the tuner must never catch this in its
+    attempt-retry machinery.
+    """
 
 
 def validate_runtime_config(

@@ -34,6 +34,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
     PhysicalRejection,
+    PlanOverridesError,
     TrialConfig,
     serialize_expert_advice,
     validate_runtime_config,
@@ -50,6 +51,7 @@ from agent.utils.architectural_pattern_tagger import (
 )
 from core.hardware_context import get_or_create
 from core.run_invariants import (
+    RunInvariants,
     build_run_invariants,
     ensure_run_invariants,
     load_run_invariants,
@@ -1194,6 +1196,58 @@ def _render_gate_exhaustion_trigger_b_summary(
 # ---------------------------------------------------------------------------
 
 
+def _validate_history_and_lock(
+    workspace: str,
+    run_invariants: RunInvariants,
+    existing_history: list[dict[str, Any]],
+    lock_was_present: bool,
+) -> None:
+    """DS6b — ingress validation + deferred lock creation.
+
+    On a lock-less workspace, every restored FINAL record's invariant stamps
+    are checked BEFORE the lock is stamped (error records deliberately carry
+    no stamps — DS5b — and are skipped), so a legacy workspace is never
+    silently locked. A lock-present workspace was already validated at
+    startup; its records were produced under that lock.
+    """
+    if not lock_was_present:
+        for rec in existing_history:
+            if rec.get("status") in {"success", "failed_mode_collapse"}:
+                validate_stamped_invariants(
+                    rec,
+                    run_invariants,
+                    full_scope=list(range(DATASET_CONFIG.num_files)),
+                    source=f"workspace summary record {rec.get('exp_id') or '(no exp_id)'}",
+                )
+    ensure_run_invariants(workspace, run_invariants)
+
+
+def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> ExperimentPlan:
+    """Merge operator ``plan_overrides`` over the LLM plan and revalidate.
+
+    FU-10 — the override lock is a contract: keys were validated and
+    alias-normalized at schema level (`HyperparamTuningInput`), so the merge
+    over the ``by_alias`` dump replaces exactly the intended fields. An
+    effective plan that fails validation raises ``PlanOverridesError``
+    (run-terminating, never retried) — the lock is never silently released
+    back to the unclamped LLM plan. Empty overrides return the plan as-is.
+    """
+    if not overrides:
+        return plan
+    merged = plan.model_dump(by_alias=True) | overrides
+    try:
+        effective = ExperimentPlan.model_validate(merged)
+    except Exception as e:
+        raise PlanOverridesError(
+            f"plan_overrides produced an invalid effective plan: {e}\n"
+            f"  overrides={overrides}\n"
+            f"  Fix the operator configuration and rerun — the override "
+            f"lock is never silently released."
+        ) from e
+    print(f"  Plan overrides applied: {list(overrides.keys())}")
+    return effective
+
+
 def _resume_progress(
     existing_history: list[dict[str, Any]],
     *,
@@ -1588,21 +1642,9 @@ class HyperparamTuningAgent:
                 f"[RESUME] Found {completed_rounds}/{max_rounds} completed "
                 f"round(s) and {total_attempts} prior attempt(s); continuing."
             )
-        # DS6b — ingress validation + deferred lock creation. On a lock-less
-        # workspace, every restored final record's invariant stamps are
-        # checked BEFORE the lock is stamped (error records deliberately
-        # carry no stamps — DS5b — and are skipped). Still before any LLM
-        # call: the first plan call happens inside the round loop below.
-        if not _lock_was_present:
-            for _rec in existing_history:
-                if _rec.get("status") in {"success", "failed_mode_collapse"}:
-                    validate_stamped_invariants(
-                        _rec,
-                        run_invariants,
-                        full_scope=list(range(DATASET_CONFIG.num_files)),
-                        source=(f"workspace summary record {_rec.get('exp_id') or '(no exp_id)'}"),
-                    )
-        ensure_run_invariants(workspace, run_invariants)
+        # DS6b — ingress validation + deferred lock creation, still before
+        # any LLM call (the first plan call happens in the round loop below).
+        _validate_history_and_lock(workspace, run_invariants, existing_history, _lock_was_present)
         consecutive_fails = 0
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state
@@ -1792,27 +1834,10 @@ class HyperparamTuningAgent:
                     # Validate LLM output into ExperimentPlan (with fallback)
                     plan = ExperimentPlan.with_defaults(decision)
 
-                    # Apply hard overrides from operator config (before other overrides).
-                    # Unknown keys are warned and skipped; invalid values are warned
-                    # and skipped — the run continues with the LLM's original value.
-                    if agent_input.plan_overrides:
-                        valid_fields = set(ExperimentPlan.model_fields.keys())
-                        unknown = set(agent_input.plan_overrides) - valid_fields
-                        if unknown:
-                            print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
-                        safe_overrides = {
-                            k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields
-                        }
-                        if safe_overrides:
-                            try:
-                                merged = plan.model_dump(by_alias=True) | safe_overrides
-                                plan = ExperimentPlan.model_validate(merged)
-                                print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
-                            except Exception as e:
-                                print(
-                                    f"  [WARN] plan_overrides validation failed ({e}); "
-                                    f"using LLM plan as-is"
-                                )
+                    # Apply hard overrides from operator config (before other
+                    # overrides). FU-10 — an invalid effective plan raises
+                    # PlanOverridesError (run-terminating); see the helper.
+                    plan = _apply_plan_overrides(plan, agent_input.plan_overrides)
 
                     # Override chain: trial-allowed lockout + last-round override
                     # + forced-formal hyperparameter inheritance gated on
@@ -3202,6 +3227,15 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    if isinstance(e, PlanOverridesError):
+                        # FU-10 — deterministic operator-configuration error;
+                        # retrying cannot change it and recording it as an
+                        # attempt failure would burn the retry budget.
+                        # Propagate out of run(). (Folded into this handler
+                        # rather than an own except clause: one more clause
+                        # on this try pushes run() past pyright's
+                        # complexity-analysis ceiling.)
+                        raise
                     print(f"Loop Error: {e}")
                     traceback.print_exc()
                     failure_reason = str(e)
