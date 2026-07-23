@@ -1842,3 +1842,76 @@ preserved in `docs/design/pregate_evidence/`.
   the stub, §7.3 shape).
 - No runtime-control structural defects. Iteration outcome
   `no_records` is the correct behavior for this attempt set.
+
+### Gate 2 — scope & budget audit 🔍 2026-07-23 (read-only; NOT launched)
+
+**Code-traced portion semantics** (no flag-name inference):
+
+- `_resolve_sample_set_cfg` (tuner): formal rounds map
+  `formal_strategy/formal_portion/formal_train_portion/
+  formal_eval_portion` into the round's config; eval strategy locked
+  to snapshot.
+- `build_sample_set` (`execute_tools/sample_set_builder.py`):
+  snapshot samples per file `max(1, round(portion ×
+  SEGMENTS_PER_FILE))` with `SEGMENTS_PER_FILE = 200`; per-file floor
+  of 1; DataScope constructive.
+- Trainer per-epoch subsample (RT1): per file
+  `max(1, round(train_portion × len(scope_segments)))`, then
+  `drop_last` floor `// batch_size`, × epochs.
+- **Effective fractions (confirmed)**: training PSD/file =
+  `max(1, round(ftp × max(1, round(fp × 200))))` — double rounding +
+  floors, ≈ `formal_portion × formal_train_portion`. **Eval is
+  INDEPENDENT of formal_portion**: eval PSD/file =
+  `max(1, round(formal_eval_portion × 200))` — the naive
+  `fp × fep` formula is WRONG.
+- Inference: `Σ ceil(n_psd × (10M//seg) / inference_batch)` per file
+  (RT2-A resolver, mirrors `inference_single`); `inference_batch`
+  from the VRAM skill or `inference_batch_for` registry. Scoring:
+  unit = PSD; `score_vector` default `num_workers=8`; per-host
+  `per_psd_segment_seconds=2.21` (ligroup value — UNKNOWN-HOST
+  fallback on this container, flagged as extrapolation).
+- Budgets/guardrails/watchdog surfaces: RT6 lock-step chain (schema →
+  protocol → workflow → chain runner → shell → run_comparison →
+  tuner CLI); §5 operational defaults live on the CLI surfaces.
+
+**Option matrix** (empirical, production `build_sample_set` +
+resolvers; measured H100 bands 25–100 ms/step for an unknown LLM
+model, 19–44 ms/inference batch incl. contention; setup ≈ 12 s +
+0.25 s/PSD; orchestration ≈ 50 s for two subprocess startups):
+
+| Option | scope/fp/ftp/fep | steps | inf batches | score PSD | total est | scoring share |
+|---|---|---|---|---|---|---|
+| O1 minimal | 4 / .03 / 1.0 / .01 | 750 | 80 | 2 | 1.4–2.4 min | 0.7% |
+| O2 balanced | 4-9 / .02 / 1.0 / .01 | 3000 | 480 | 12 | 2.6–6.6 min | 2.1% |
+| O3 near-formal | 4-9 / .10 / 1.0 / .05 | 15000 | 2400 | 60 | 9–29 min | 3.1% |
+| O4 full (reference only) | 4-9 / 1.0 / 1.0 / 1.0 | 150000 | 48000 | 1200 | 93–164 min | 6.0% |
+
+**Scoring-share resolution**: with the code-actual `num_workers=8`
+and per-chain 6-file scopes, scoring stays **≤ 6% even at full formal
+eval** — under the 0.10 `historical_phase_share_limit` at every
+option. The earlier 40%-share alarm used wrong constants (4 workers,
+20 files); no policy change needed, historical-estimate scoring
+remains admissible for the V18 relaunch.
+
+**Pathological variants**: B1 guardrail-only — already evidenced live
+in Gate 1 (real LLM planned 1M steps / formal batch 1; guardrails
+caught both; seconds). B2 live-verification rejection with guardrails
+overridden — the EXACT incident shape (scope 4-9, fp 0.1, seg 1250,
+batch 2 → 480,000 steps, resolver-exact): predicted 203–365 min vs
+the PRODUCTION 120-min budget → rejection guaranteed; wall = setup
+≈ 42 s + verification ≈ 2 s + startup ≈ 25 s ≈ **1.5–2 min** ≪ 15-min
+requirement. B3 watchdog — REDUNDANT (pre-Gate S3's real CUDA kill);
+recommended omitted.
+
+**Not repeated in Gate 2** (pre-Gate evidence stands): real
+no-LLM lifecycle (S1), real in-subprocess rejection (S2), real
+watchdog kill + cleanup (S3), prior round trip + changed-key
+isolation (S4), process/GPU cleanup.
+
+**Recommended Gate 2** (awaiting operator approval; NOTHING
+launched): Scenario A = O2 via the chain with a FORCED formal round
+(deliberate, recorded deviation from the trial-only smoke standard —
+runtime-control's Gate 2 must exercise real formal admission), real
+LLM (openai_tiered_v1), `--runtime_watchdog`, Gate-specific
+`formal_time_budget_minutes=30` (production stays 120); Scenario B =
+B2 via the deterministic driver (no LLM). Total ≈ 35–50 min, ≈ $1–1.5.
