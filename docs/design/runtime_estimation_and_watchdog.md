@@ -79,7 +79,7 @@ Runtime-Control Implementation
 [x] RT3     — trigger policy + provenance fields (3dba462)
 [x] RT4     — runtime watchdog (60c654f)
 [x] RT5     — guardrails (5d11fe1; schema defaults None — operational §5 values land with RT6 chain wiring)
-[ ] RT6     — chain/CLI/docs wiring
+[x] RT6     — chain/CLI/docs wiring (0db5e25)
 [ ] Gate 1  — real LLM + pseudo training
 [ ] Gate 2  — operator-approved real training (incl. pathological case)
 ```
@@ -1709,3 +1709,26 @@ Built:
   `binding_cap` Literal is VRAM-specific, so widening it for guardrail
   rejections would touch proposer rendering — left for a follow-up;
   planner visibility is provided via the record memory instead.
+
+### RT6 — chain/CLI/docs wiring ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `0db5e25`.
+- **Checkpoint** (targeted): shell-parity suite 15 passed incl. the
+  `run_chain.sh --dry-run` end-to-end smoke; scripts + protocol +
+  guardrail suites 177 passed; ruff + format clean; pyright 0 errors
+  across all six wired layers.
+- Built: `--max_steps_per_attempt` / `--min_formal_batch_size` /
+  `--allow_extreme_steps` / `--runtime_watchdog` wired in lock-step
+  through schema (`runtime_watchdog_enabled`) → protocol
+  (`local_validated_model`, no silent drops) → workflow → chain runner
+  → shell wrapper (`CONTRACT_FLAGS` enforced) → `run_comparison` →
+  tuner CLI. §5 operational defaults (150k / 4) live on the
+  OPERATIONAL surfaces (tuner CLI + chain), default-synced; schema/
+  programmatic defaults stay None per the RT5 decision. The tuner's
+  `runtime_policy` now carries `watchdog.enabled` from the operator
+  input.
+
+**RT series complete (RT1 → RT6).** Remaining: the pre-Gate full-suite
+sweep (operator test policy), then Gate 1 (real LLM + pseudo training)
+and Gate 2 (operator-approved real training incl. the pathological
+case) — both operator-approved launches.
