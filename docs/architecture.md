@@ -487,6 +487,12 @@ test suite.
 
 ## Data Paths (current)
 
+Roots are machine-specific and resolved by the config layer
+(`tidmad_data_config.yaml` → `execute_tools/data_paths.py`; PR #125/#127
+made scoring reference data committed + package-relative, so a new server
+needs config edits only). lilab example below; on the H100 box the roots
+are `/workspace/DATA/TIDMAD_DATA/` and `/workspace/DATA/SIDERIUS_DATA/`.
+
 ```
 /home/klz/Data/TIDMAD/                          # raw input data (read-only)
 /home/klz/Data/SIDEREIS_DATA/
@@ -498,10 +504,40 @@ test suite.
 │       ├── run_output_{run_name}.json          # validated HyperparamTuningOutput
 │       ├── records/{run_name}/                 # per-experiment detail JSONs
 │       ├── configs/                            # model/train/loss configs per exp_id
-│       └── cached_models/                      # trained model checkpoints (.pth)
+│       ├── cached_models/                      # trained model checkpoints (.pth)
+│       ├── run_invariants_lock.json            # immutable run invariants (scope + gate policy)
+│       └── health_checks_effective.yaml        # materialized HealthGate config (sha lock-pinned)
 └── raw_baseline/
     └── raw_baseline_score_file_{index:04d}.json  # undenoised reference scores
 ```
+
+---
+
+## Data Scoping (partial-file runs — shipped 2026-07)
+
+`DataScope` (`execute_tools/dataset_config.py`) restricts a run to a
+validation-file subset (`--data_scope 4-9` or `4,5,6,7,8,9`). Enforcement
+is layered and never prompt-based:
+
+1. **Constructive** — `build_sample_set(scope=…)` only produces in-scope
+   SampleSets; partial scopes are snapshot-only (operator config errors at
+   startup; LLM plans normalize with recorded provenance).
+2. **Boundary** — `validate_sample_set` runs at the sandbox before ALL
+   file I/O (train / inference / `score_vector`); a violation terminates
+   the run, non-retryable.
+3. **Direct access** — HealthGate monitored files (`--health_gate_files`)
+   must be ⊆ scope; the effective config is materialized per workspace.
+
+**Run-invariants lock** (`core/run_invariants.py`,
+`{workspace}/run_invariants_lock.json`): resolved scope +
+`health_gate_enabled` + effective-config sha256 are immutable per
+workspace; every resume/seed/reuse entry point validates against it (and
+legacy history is stamp-checked before a lock-less workspace is ever
+locked). **Aggregate scalars are comparable only within one scope**;
+cross-scope analysis uses per-file vectors. Default (no scope) is
+behaviorally identical to pre-feature runs. Full design:
+`docs/design/enable_partial_file_list.md`; split-mode campaign tooling:
+`docs/v18_split_run_plan.md`.
 
 ---
 
@@ -783,62 +819,29 @@ The system will natively map the **Schema Layer** to LLM Tool-Calling formats (O
 
 ---
 
-## Planned Refactor: Node Directory Structure
+## Node Directory Structure (refactor DONE)
 
-**Current state:** nodes are flat Python files in `nodes/`:
-
-```
-nodes/
-├── ml_hyperparameter_tune_agent.py
-├── ml_result_interpretation_agent.py
-├── ml_model_proposal_agent.py
-├── ml_model_implementor.py
-└── ml_code_validator_agent.py
-```
-
-**Target state:** each node is a self-contained directory with its own documentation:
+Nodes are one-directory-per-node (landed after this section was first
+written; the layout differs slightly from the original plan — the module
+keeps the node's own name instead of `agent.py`):
 
 ```
 nodes/
 ├── ml_hyperparameter_tune_agent/
-│   ├── __init__.py          (re-exports HyperparamTuningAgent)
-│   ├── agent.py             (the run() logic)
-│   └── README.md            (dependency chain, config format, replay instructions)
-├── ml_result_interpretation_agent/
-│   ├── __init__.py
-│   ├── agent.py
-│   └── README.md
+│   ├── __init__.py                        (re-exports the agent class)
+│   ├── ml_hyperparameter_tune_agent.py    (the run() logic)
+│   └── ml_hyperparameter_tune_agent.md    (node documentation)
+├── result_interpretation_agent/
 ├── ml_model_proposal_agent/
-│   ├── __init__.py
-│   ├── agent.py
-│   └── README.md
 ├── ml_model_implementor/
-│   ├── __init__.py
-│   ├── agent.py
-│   └── README.md
-└── ml_code_validator_agent/
-    ├── __init__.py
-    ├── agent.py
-    └── README.md
+├── ml_code_validator_agent/
+├── ml_literature_review/
+└── (shared helpers at package root: agent_data_stream.py,
+     interpretation_helpers.py, proposal_helpers.py, scoring_reference.py
+     — candidates for relocation, see the repo audit 2026-07-23)
 ```
 
-**Why:** as nodes grow more complex (e.g. the tuning agent now has trial/formal
-modes, streaming training, SampleSet management, seed reproducibility), a flat file
-can't hold both implementation and documentation. A directory per node keeps the
-README co-located with the code and allows future splitting (e.g. helpers, prompts).
-
-**Migration plan:**
-1. For each node, create a directory with `__init__.py` that re-exports the agent class.
-2. Move the `.py` file into the directory as `agent.py`.
-3. Update all imports (`from nodes.ml_hyperparameter_tune_agent import ...`
-   → unchanged, because `__init__.py` re-exports).
-4. Move any existing `.md` file into the directory as `README.md`.
-5. Verify all tests pass after each node migration.
-
-**Current interim state:** `ml_hyperparameter_tune_agent.md` lives alongside the
-`.py` file in `nodes/`. This will become `README.md` inside the directory when the
-refactor happens.
-
-**Priority:** Low — no functional impact. Do this when adding significant new
-documentation to any node, or when the flat structure becomes confusing.
-- **Dynamic Tool Injection**: Based on the research goal, the Orchestrator can dynamically "mount" new scientific tools into the LLM's context window by fetching their Schemas from the Registry without restarting the system.
+Convention for new nodes: `nodes/{node_name}/{node_name}.py` with
+`__init__.py` re-exporting the class (imports stay
+`from nodes.{node_name} import …`), documentation co-located in the same
+directory.
