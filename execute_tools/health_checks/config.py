@@ -13,6 +13,7 @@ shape and §5 for the schema-side design principles.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import tempfile
@@ -382,9 +383,16 @@ def materialize_effective_config(
     )
     path = os.path.join(workspace, EFFECTIVE_CONFIG_BASENAME)
 
-    if os.path.exists(path):
+    # Read-then-fallback rather than exists-then-open: the existence check
+    # would race with a concurrent materializer (TOCTOU) and is fooled by
+    # test environments that stub os.path.exists globally.
+    try:
         with open(path) as f:
             existing = f.read()
+    except FileNotFoundError:
+        existing = None
+
+    if existing is not None:
         existing_sha = _header_value(existing, "# sha256:")
         if existing_sha == sha:
             return path, sha
@@ -419,7 +427,7 @@ def materialize_effective_config(
             f.write(header + body)
         os.rename(tmp_path, path)
     except BaseException:
-        if os.path.exists(tmp_path):
+        with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp_path)
         raise
     return path, sha
