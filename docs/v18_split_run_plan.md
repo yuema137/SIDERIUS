@@ -40,15 +40,23 @@ identity propagates from those two inputs.
 Wave 1 (4 chains) → automatic summary → manual review → operator approval → Wave 2
 ```
 
-After all four Wave-1 chains have exited, generate the review packet:
+After all four Wave-1 chains have exited, generate the review packet in
+STRICT mode (final-checkpoint semantics — exit 0 required before Wave 2):
 
 ```bash
-.venv/bin/python scripts/v18_wave_summary.py \
+.venv/bin/python scripts/v18_wave_summary.py --strict --exit-dir /tmp \
     /workspace/DATA/SIDERIUS_DATA/v18_loss_04_09 \
     /workspace/DATA/SIDERIUS_DATA/v18_arch_04_09 \
     /workspace/DATA/SIDERIUS_DATA/v18_loss_10_14 \
     /workspace/DATA/SIDERIUS_DATA/v18_arch_10_14
 ```
+
+Strict mode hard-checks: exit markers CONTAIN `EXIT=0` (not merely
+exist; the launcher removes stale markers pre-launch), locks readable
+and matching the scope encoded in each run name, effective HealthGate
+config == locked scope for every check, manifest scopes == lock, gate
+file-requests ⊆ scope, no out-of-scope denoised artifacts, no failed
+manifests. Scores render grouped by scope — never ranked across scopes.
 
 Per chain it reports: best raw + HealthGate-valid scores, best proposal,
 completed/no_records/failed iteration counts, total completed rounds,
@@ -110,45 +118,20 @@ stack is scope-aware:
   segment, globally comparable). The V18 chain-wide incumbent must be
   scope-keyed (`docs/design/v18_priorities.md` §3.4).
 
-## Wave-1 launch commands (final; dry-run verified)
+## Wave-1 launch (final; committed script)
 
-One screen session + log + exit marker per chain, per the V17 §13
-wrapper pattern. `WS_ROOT=/workspace/DATA/SIDERIUS_DATA`.
+Use the committed audited launcher (stale-marker cleanup, fresh-vs-resume
+guard via `V18_RESUME`, duplicate-session guard, session-start
+verification, preflight):
 
 ```bash
-# ---- v18_loss_04_09 ----
-bash sdsc_submission_scripts/run_chain.sh \
-  --mode lilab \
-  --workspace "$WS_ROOT/v18_loss_04_09" \
-  --run_name v18_loss_04_09 \
-  --num_iterations 20 --auto_resume --max_rounds 3 --max_epochs 1 \
-  --data_scope 4-9 --health_gate_files 4,5,6,7,8,9 \
-  --skip_formal_min_delta 0.0 --bypass_formal_time_budget_min_delta 0.5 \
-  --trial_time_budget_minutes 12 --formal_time_budget_minutes 120 \
-  --trial_vram_budget_gb 10 --formal_vram_budget_gb 12 \
-  --formal_strategy snapshot --formal_round_strategy inherit_best_trial \
-  --exploration_mode explore --ml_lit_review_enabled \
-  --llm_config llm_configs/openai_tiered_v1.json \
-  --advice advice/workflow/v17_loss_explorer.json \
-  --health_checks_config configs/health_checks_baseline_observe_mode.yaml
-
-# ---- v18_arch_04_09: same, with ----
-#   --workspace "$WS_ROOT/v18_arch_04_09" --run_name v18_arch_04_09
-#   --advice advice/workflow/v17_arch_explorer.json
-
-# ---- v18_loss_10_14: same as loss_04_09, with ----
-#   --workspace "$WS_ROOT/v18_loss_10_14" --run_name v18_loss_10_14
-#   --data_scope 10-14 --health_gate_files 10,11,12,13,14
-
-# ---- v18_arch_10_14: same, with ----
-#   --workspace "$WS_ROOT/v18_arch_10_14" --run_name v18_arch_10_14
-#   --data_scope 10-14 --health_gate_files 10,11,12,13,14
-#   --advice advice/workflow/v17_arch_explorer.json
+bash sdsc_submission_scripts/launch_v18_wave1.sh --dry-run   # verify
+bash sdsc_submission_scripts/launch_v18_wave1.sh             # launch (operator approval required)
 ```
 
-Wave 2 = the same four shapes with `0-3`/`0,1,2,3` (`v18_*_00_03`) and
-`15-19`/`15,16,17,18,19` (`v18_*_15_19`) — launched only after the
-Wave-1 checkpoint is approved.
+Wave 2 uses the same script pattern with the `00_03` / `15_19` roster
+(a `launch_v18_wave2.sh` clone to be created at the Wave-1 checkpoint,
+after its parameters are confirmed unchanged).
 
 ## Preconditions before Wave 1
 

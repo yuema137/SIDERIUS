@@ -1678,26 +1678,53 @@ Realistic wall time on an H100 with these caps: ~10–20 min per scenario
   (`planned_*` vs `effective_*` + reason) and logged; planner rounds after
   round 1 do not repeatedly propose `target`/`anchors` (disclosure working)
 - [ ] **Negative startup checks** (cheap, before/after the run, no LLM cost):
-  - [ ] same command **without** `--health_gate_files` → startup error naming
+  - [x] same command **without** `--health_gate_files` → startup error naming
     gates with default `[3,10,17]` ⊄ scope; exits non-zero before any LLM call
-  - [ ] re-invoking the same workspace with `--data_scope 5-9` → lock
-    startup error (scope field)
-  - [ ] re-invoking the same workspace with `--health_gate_files 5,8` →
+    *(2026-07-23: exit 1, "HealthGate monitored files violate the DataScope")*
+  - [x] re-invoking the same workspace with `--data_scope 5-9` → lock
+    startup error (scope field) *(exit 1, RunInvariantsViolation naming
+    resolved_data_scope)*
+  - [x] re-invoking the same workspace with `--health_gate_files 5,8` →
     lock startup error (policy sha256 field) — resume cannot silently change
-    HealthGate semantics
-  - [ ] re-invoking the same workspace with `--no-health_gate_enabled` →
-    lock startup error (enabled field)
-  - [ ] `--data_scope 4-9` + canonical full-scope `--seed_paths` → ingress
-    validation error naming the seed file
-  - [ ] `--no-health_gate_enabled --health_gate_files 4,7,9` → schema
-    validation error (internally inconsistent input)
+    HealthGate semantics *(exit 1 — fires at the materialized-config
+    immutability guard, the earlier of the two protections)*
+  - [x] re-invoking the same workspace with `--no-health_gate_enabled` →
+    lock startup error (enabled field) *(exit 1, RunInvariantsViolation)*
+  - [x] `--data_scope 4-9` + canonical full-scope `--seed_paths` → ingress
+    validation error naming the seed file *(exit 1, "ingress evidence …
+    incompatible", legacy = full scope)*
+  - [x] `--no-health_gate_enabled --health_gate_files 4,7,9` → schema
+    validation error (internally inconsistent input) *(exit 1, verified
+    2026-07-23 in the chain-smoke negative matrix)*
 
 **Estimated wall/cost**: Scenario A ~30–60 min / ~$1.50–2.50; Scenario B
 similar or less (6-file scope shrinks I/O). Failure handling per the gate
 standard.
 
-- [ ] Gate 2 Scenario A result recorded here: *(date, outcome)*
-- [ ] Gate 2 Scenario B result recorded here: *(date, outcome)*
+- [x] Gate 2 Scenario A result recorded here: **PASS — 2026-07-23** (run
+  on the H100 box, real training). Deviation disclosed: canonical lilab
+  seeds do not exist on this box → Scenario A ran SEEDLESS (PR #126
+  path); seeds are not load-bearing for any Scenario-A criterion. Exit 0,
+  2 iterations; manifests + records stamped `resolved_data_scope=[0..19]`;
+  gates evaluated every applicable round (blocking peeks `[3,10,17]`,
+  recording checks all-20 fallback — correct full-scope behavior;
+  4× `invalidate_round` on genuine tiny-training collapse, statuses
+  `failed_mode_collapse`/`skipped_time_risk`); ZERO phantom-5.5762670
+  records; zero scope violations; `--cleanup_denoised` left no artifacts.
+- [x] Gate 2 Scenario B result recorded here: **PASS — 2026-07-23**
+  (seedless cold start, `--data_scope 4-9 --health_gate_files 4,7,9`,
+  real training, speed knobs `formal 0.02/1.0/0.02 + 10 min`). Exit 0,
+  2 iterations. Lock `[4..9]` + enabled + sha `7adbed7c…`; 4×
+  `[DATASCOPE]` banners (workflow pre-flight + tuner startup × 2 iters);
+  **every gate — blocking AND recording — requested exactly `[4,7,9]`**
+  (DS4 universal override proven under real training; no `range(20)`
+  fallback); planner chose snapshot outright
+  (`planned_trial_strategy=snapshot`, `strategy_normalization_reason=
+  None`); records stamped `[4..9]`; zero phantom records, zero scope
+  violations, no denoised artifacts on disk (cleanup) and none
+  out-of-scope. Collapse rounds correctly gated (`invalidate_round`) →
+  `no_records` manifests — acceptable per the gate standard ("scores
+  finite or gated").
 
 ---
 
