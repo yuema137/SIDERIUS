@@ -1642,10 +1642,21 @@ bash sdsc_submission_scripts/run_chain.sh \
 0.02`, `--trial_time_budget_minutes 5`, `--no-force_formal_round`,
 `openai_tiered_v1.json`, no `tee`.)
 
-*Optional speed knobs (operator-approved 2026-07-23): append
-`--formal_portion 0.02 --formal_train_portion 0.02
---formal_eval_portion 0.02 --formal_time_budget_minutes 10` — belt-and-
-braces caps so even an LLM-chosen (non-forced) formal round stays cheap.
+*Speed knobs (operator-approved 2026-07-23; parser/dry-run-verified):
+append `--formal_portion 0.02 --formal_train_portion 1.0
+--formal_eval_portion 0.02 --formal_time_budget_minutes 10` to BOTH
+scenarios — belt-and-braces caps so even an LLM-chosen (non-forced)
+formal round stays cheap. Semantics verified in
+`_resolve_sample_set_cfg`: `formal_portion` selects the training SCOPE
+(0.02 → 4 segments/file), `formal_train_portion` is the per-epoch
+fraction OF that scope (1.0 → iterate all 4; they multiply — no
+precedence conflict; an earlier 0.02×0.02 suggestion was over-shrunk and
+is superseded). Dry-run verification (2026-07-23, `run_chain.sh
+--dry-run` → emitted argv → `run_one_iteration` parser): both scenarios
+emit 2 iteration commands; resolved formal_portion=0.02,
+formal_train_portion=1.0, formal_eval_portion=0.02,
+formal_time_budget=10.0 min; effective formal train scope = eval scope =
+4 segments/file over 20 files (A) / 6 files (B).
 `formal_eval_portion < 1.0` is smoke-only (Phase R); production scalars
 need the 1.0 default. Do NOT cut `--num_iterations` below 2: the
 iter-1→iter-2 handoff is where manifest stamps, `restore_prior_state`
