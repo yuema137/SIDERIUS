@@ -1,14 +1,14 @@
 # Pluggable Health Check System — HealthGates
 
-**Status:** Design proposal (rev 4). Supersedes revs 1–3 which had the
-wrong mental model (health checks running after every round). See §13
-change log for the pivot rationale. **This is a design doc, not a
-description of shipped code.** The current implementation on
-`feat/v16-fixes` (`execute_tools/health_checks/`) still follows the rev-3
-model; migrating to the HealthGate design here is future work.
-
-**Branch:** design lives on `feat/v16-fixes`; implementation to follow on
-a new branch.
+**Status:** SHIPPED — the HealthGate migration landed in PR #101
+(rev-6 implementation; this document's rev-4 text is the design it was
+built from). Since then: PR #119 added the three recording-only checks +
+observe-mode config; PR #124 added HealthGate-valid candidate selection;
+the DataScope feature (`docs/design/enable_partial_file_list.md`) made
+`health_gate_enabled` / `health_gate_files` run-level inputs with a
+per-workspace materialized effective config pinned by the run-invariants
+lock. `configs/health_checks.yaml` + `execute_tools/health_checks/` are
+the shipped source of truth; supersedes revs 1–3 (see §13 change log).
 
 ---
 

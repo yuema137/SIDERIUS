@@ -446,3 +446,47 @@ class TestNoGpuNoDisk:
             time_budget_minutes=20.0,
         )
         assert out["estimated_minutes"] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# DS7b — pre-flight synthesis within the DataScope
+# ---------------------------------------------------------------------------
+
+from agent.utils.proposer_preflight import (
+    _synthesise_default_sample_set,
+)
+from execute_tools.dataset_config import DataScope
+
+
+class TestScopedSynthesis:
+    def test_full_scope_unchanged(self):
+        default = _synthesise_default_sample_set()
+        explicit_full = _synthesise_default_sample_set(scope=DataScope.default())
+        assert default == explicit_full
+        assert sorted(default.keys()) == list(range(20))
+
+    def test_partial_scope_covers_exactly_scope_files(self):
+        scoped = _synthesise_default_sample_set(scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]))
+        assert sorted(scoped.keys()) == [4, 5, 6, 7, 8, 9]
+        # Same per-file segment count as the full-scope set — only the file
+        # universe shrinks, so the estimate reflects the true training cost.
+        full = _synthesise_default_sample_set()
+        assert len(scoped[4]) == len(full[4])
+
+    def test_estimate_uses_scoped_set(self):
+        from agent.utils.proposer_preflight import estimate_proposal_time
+
+        kwargs = dict(
+            model_type="x",
+            model_config={"segmentation_size": 4000},
+            train_config={"batch_size": 8, "epochs": 1},
+            loss_config={"loss_type": "focal"},
+            num_params=1_000_000,
+            time_budget_minutes=20.0,
+        )
+        full = estimate_proposal_time(**kwargs)
+        scoped = estimate_proposal_time(
+            **kwargs, data_scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+        )
+        # 6 of 20 files → strictly cheaper estimate.
+        assert scoped["estimated_minutes"] < full["estimated_minutes"]

@@ -7,7 +7,7 @@
 SIDERIUS today has two test classes:
 
 - **Unit tests** (`tests/unit/`): mocked LLM, no GPU, no real data, run in CI on every commit. Fast and narrow. They cover one function or one class at a time.
-- **Integration tests** (`tests/integration/nodes/`, `tests/integration/protocols/`, `tests/integration/workflows/`): real LLM API calls, real subprocesses, real GPU. Slow, expensive, and gated behind `pytest.mark.real_run` so they never run in CI.
+- **Integration tests** (`tests/integration/nodes/`, `tests/integration/protocols/`, `tests/integration/workflows/`): real LLM API calls, real subprocesses, real GPU. Slow, expensive, and gated behind `pytest.mark.real_run`. Since 2026-07-23 (`tests/conftest.py::pytest_collection_modifyitems`) the opt-in is ENFORCED, not just documented: without an explicit real-mode flag (`--real-llm` / `--real-training` / `--real-api-call`), every `real_run` test is skipped at collection time regardless of API-key availability — a bare `pytest` can never launch real-API/GPU tests, on any machine.
 
 There is no middle tier. The orchestration glue — prompt assembly, record building, persistence, the wiring between agent code and its dependencies — is exercised either narrowly (one function at a time) or only by burning real API quota and GPU time. As soon as we touch a node's orchestration logic (e.g. the just-landed Phase A `regime_scores` wiring), we get to choose between writing five separate unit tests that each cover a tiny slice OR running a 5-minute real-API integration test that costs Gemini quota every time.
 
@@ -352,7 +352,7 @@ A pytest fixture decides which factories to inject based on a CLI flag, and the 
 | Concept | Mechanism | What it means |
 |---|---|---|
 | **Test category — dual-mode** | `pytest.mark.dual_mode` | "This test supports BOTH pseudo and real modes. By default (no flag) it runs in pseudo mode; with `--real-api-call` it runs in real mode against the real API." Almost every integration test in the future will be marked this way. |
-| **Test category — real-only** | `pytest.mark.real_run` | "This test ONLY works in real mode — it has no pseudo equivalent (e.g. it asserts on actual LLM output structure that no canned response could meaningfully validate)." Reserved for the rare case where pseudo mode genuinely cannot validate the thing. Skipped by default; needs both `-m real_run` AND `--real-api-call`. |
+| **Test category — real-only** | `pytest.mark.real_run` | "This test ONLY works in real mode — it has no pseudo equivalent (e.g. it asserts on actual LLM output structure that no canned response could meaningfully validate)." Reserved for the rare case where pseudo mode genuinely cannot validate the thing. Skipped by default — ENFORCED by a collection hook in `tests/conftest.py` (2026-07-23): running requires an explicit real-mode flag (`--real-api-call`, or `--real-llm`/`--real-training`); the `-m real_run` selector alone yields all-skipped. |
 | **Execution mode** | `--real-api-call` CLI flag | "When pytest runs today, use the real `LLMBridge` / `TidmadSandbox` instead of the recording fakes." Pseudo mode is the default; real mode requires explicit opt-in. Affects `dual_mode` tests (switches them from pseudo to real) and is required for `real_run` tests to actually execute. |
 
 These axes are independent. A test can be:

@@ -66,6 +66,15 @@ def classify_candidate_health(
     if not isinstance(score, int | float) or isinstance(score, bool) or not math.isfinite(score):
         return CandidateHealthValidity.INVALID
 
+    # DataScope DS5 — self-describing disabled-mode records: a run that
+    # explicitly disabled the HealthGate subsystem (health_gate_enabled=False
+    # stamped on the record; policy is workspace-immutable, so mixed
+    # histories cannot occur) waives the gate requirement — successful
+    # finite-score records are VALID. Legacy records (field absent/None)
+    # take the normal gate-requirement path below.
+    if data.get("health_gate_enabled") is False:
+        return CandidateHealthValidity.VALID
+
     required = frozenset(
         required_blocking_gate_ids() if required_gate_ids is None else required_gate_ids
     )

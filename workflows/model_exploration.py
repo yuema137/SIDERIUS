@@ -62,6 +62,7 @@ import json
 import os
 import shutil
 import time
+import warnings
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
@@ -89,6 +90,13 @@ from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_f
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import get_or_create as get_or_create_hardware_context
+from core.run_invariants import (
+    build_run_invariants,
+    ensure_run_invariants,
+    validate_stamped_invariants,
+)
+from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
+from execute_tools.dataset_config import DataScope
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_literature_review import MLLiteratureReviewAgent
@@ -127,8 +135,8 @@ def _log_rss(step: str) -> None:
 # Defined here so the four strategy kwargs threaded through ``run_workflow`` /
 # ``_get_reasoning_pipeline`` carry the same narrow types as their downstream
 # consumers (``ReasoningPipelineConfig.exploration_mode``,
-# ``local_full_context.trial_strategy``, ``local_validated_model.{trial,eval,
-# formal,formal_round}_strategy``) without per-call casts.
+# ``local_validated_model.{formal,formal_round}_strategy``) without
+# per-call casts. (DS7 removed the trial/eval strategy threading.)
 ExplorationMode = Literal["auto", "explore", "exploit"]
 StrategyMode = Literal["snapshot", "anchors", "target"]
 FormalRoundStrategy = Literal[
@@ -1333,6 +1341,11 @@ def run_workflow(
     file_index: int = 6,
     llm_config: WorkflowLLMConfig | None = None,
     health_checks_config: str | None = None,
+    # --- DataScope + HealthGate subsystem (DS6b) — defaults preserve
+    #     full-scope, gates-enabled behavior ---
+    data_scope: DataScope | None = None,
+    health_gate_enabled: bool = True,
+    health_gate_files: list[int] | None = None,
     human_advice_interpret: str | None = None,
     human_advice_propose: str | None = None,
     human_advice_implement: str | None = None,
@@ -1341,6 +1354,12 @@ def run_workflow(
     human_advice_mindset: str | None = None,
     # --- Trial mode (optional — defaults preserve single-file behavior) ---
     is_trial: bool = False,
+    # DS7 — trial_strategy / target_files / eval_strategy are DEPRECATED
+    # no-ops: the input fields they fed were dead at both ends and deleted.
+    # Accepted so existing callers don't break; a non-default value warns
+    # and is ignored (removal tracked as FU-2). Use data_scope to restrict
+    # data; per-round strategy is the LLM plan's (normalized under a
+    # partial scope).
     trial_strategy: StrategyMode = "snapshot",
     trial_portion: float = 0.1,
     target_files: list[int] | None = None,
@@ -1502,17 +1521,27 @@ def run_workflow(
             own built-in default. See WorkflowLLMConfig for details.
         health_checks_config: Optional HealthGate YAML override forwarded to
             every tuner invocation. None preserves the tuner's shipped default.
+        data_scope: DataScope restricting every component of this run to a
+            file subset (DS6b). None = complete dataset. Partial scopes
+            require formal_strategy='snapshot' and, when gates are enabled,
+            an explicit health_gate_files. Pinned per workspace by the
+            run-invariants lock. See docs/design/enable_partial_file_list.md.
+        health_gate_enabled: HealthGate subsystem switch, forwarded to every
+            tuner invocation and pinned by the run-invariants lock.
+        health_gate_files: Run-level shared monitored-file list for ALL
+            HealthGate checks (None = YAML defaults; only legal with a full
+            scope when gates are enabled).
         human_advice_interpret: Human guidance for interpretation steps.
         human_advice_propose: Human guidance for proposal steps.
         human_advice_implement: Human guidance for implementation steps.
         human_advice_validate: Human guidance for validation steps.
         human_advice_tune: Human guidance for tuning steps.
         is_trial: Enable trial mode for the tuning agent.
-        trial_strategy: Sampling strategy ('snapshot', 'anchors', 'target').
+        trial_strategy: DEPRECATED no-op (DS7) — warns when non-default.
         trial_portion: Fraction of segments per file for training scope.
-        target_files: File indices for 'target' strategy.
+        target_files: DEPRECATED no-op (DS7) — warns when non-default.
         train_portion: Per-epoch subsample from training scope.
-        eval_strategy: Sampling strategy for validation.
+        eval_strategy: DEPRECATED no-op (DS7) — warns when non-default.
         eval_portion: Fraction of segments per file for validation.
         train_validation_align: When True, train and eval scopes share segment indices.
         sampling_seed: Seed for SampleSet construction.
@@ -1540,6 +1569,22 @@ def run_workflow(
     """
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
+
+    # DS7 — deprecated no-op strategy params (removal tracked as FU-2).
+    for _name, _val, _default in (
+        ("trial_strategy", trial_strategy, "snapshot"),
+        ("target_files", target_files, None),
+        ("eval_strategy", eval_strategy, "snapshot"),
+    ):
+        if _val not in (_default, []):
+            warnings.warn(
+                f"run_workflow({_name}=...) is deprecated and IGNORED (DS7): "
+                f"the input field it fed was dead at both ends and has been "
+                f"removed. Use data_scope to restrict data; per-round "
+                f"strategy belongs to the LLM plan.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     # 52 GB OOM forensics — see _log_rss docstring above.
     _log_rss("post-import (run_workflow entry)")
@@ -1658,6 +1703,59 @@ def run_workflow(
         f"  Loaded {len(tuning_outputs)} tuning outputs "
         f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n"
     )
+
+    # --- DataScope + HealthGate pre-flight (DS6b) ---
+    # Fails BEFORE iteration 1's LLM calls. Ordering is deliberate:
+    # (1) resolve + operator-config contract checks, (2) materialize the
+    # effective HealthGate config and hash it (build_run_invariants — the
+    # same shared path the tuner runs, so both compute identical invariant
+    # values), (3) validate every piece of ingress evidence against the
+    # invariants, and only then (4) create-or-validate the workspace lock —
+    # a legacy workspace is never silently locked before its restored
+    # history is checked. Per-iteration tuner startup re-validates the full
+    # input via validate_runtime_config; this pre-flight mirrors only the
+    # subset needed to fail fast.
+    _run_scope = data_scope if data_scope is not None else DataScope.default()
+    _resolved_scope = _run_scope.resolve(_DATASET_CONFIG)
+    _scope_is_partial = _resolved_scope != list(range(_DATASET_CONFIG.num_files))
+    if _scope_is_partial and formal_strategy != "snapshot":
+        raise ValueError(
+            f"partial data_scope requires formal_strategy='snapshot' "
+            f"(got {formal_strategy!r}). Operator configuration is a "
+            f"contract — it is never normalized."
+        )
+    if health_gate_enabled and _scope_is_partial and health_gate_files is None:
+        raise ValueError(
+            "partial data_scope with HealthGates enabled requires an "
+            "explicit health_gate_files list (there is no automatic "
+            "default). Pass health_gate_files ⊆ the scope, or disable "
+            "the subsystem with health_gate_enabled=False."
+        )
+    _run_invariants, _ = build_run_invariants(
+        resolved_data_scope=_resolved_scope,
+        health_gate_enabled=health_gate_enabled,
+        health_gate_files=health_gate_files,
+        health_checks_config=health_checks_config,
+        workspace=workspace,
+    )
+    for _output in tuning_outputs:
+        validate_stamped_invariants(
+            {
+                "resolved_data_scope": getattr(_output, "resolved_data_scope", None),
+                "health_gate_enabled": getattr(_output, "health_gate_enabled", None),
+                "health_config_sha256": getattr(_output, "health_config_sha256", None),
+            },
+            _run_invariants,
+            full_scope=list(range(_DATASET_CONFIG.num_files)),
+            source=f"seed/restored output '{_output.run_name}' ({_output.model_type})",
+        )
+    ensure_run_invariants(workspace, _run_invariants)
+    if _scope_is_partial:
+        print(
+            f"[DATASCOPE] Workflow scope: files={_resolved_scope} "
+            f"| health_gate_enabled={health_gate_enabled} "
+            f"| monitored={health_gate_files}"
+        )
 
     # Track all model types seen (for duplicate name guard)
     all_model_types = list({o.model_type for o in tuning_outputs})
@@ -2001,9 +2099,8 @@ def run_workflow(
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
                     is_trial=is_trial,
-                    trial_strategy=trial_strategy,
+                    data_scope=data_scope,
                     trial_portion=trial_portion,
-                    target_files=target_files,
                     train_portion=train_portion,
                     sampling_seed=sampling_seed,
                     trial_time_budget_minutes=trial_time_budget_minutes,
@@ -2290,17 +2387,17 @@ def run_workflow(
             tuning_storage,
             max_rounds=max_rounds,
             health_checks_config=health_checks_config,
+            data_scope=data_scope,
+            health_gate_enabled=health_gate_enabled,
+            health_gate_files=health_gate_files,
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             is_trial=is_trial,
-            trial_strategy=trial_strategy,
             trial_portion=trial_portion,
-            target_files=target_files,
             train_portion=train_portion,
-            eval_strategy=eval_strategy,
             eval_portion=eval_portion,
             train_validation_align=train_validation_align,
             sampling_seed=sampling_seed,

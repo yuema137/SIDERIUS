@@ -32,7 +32,14 @@ from agent.schemas.hyperparam_tuning import (
     PhysicalRejection,
 )
 from agent.schemas.proposal import VocabEntry
+from core.run_invariants import (
+    RunInvariants,
+    load_run_invariants,
+    validate_run_invariants,
+    validate_stamped_invariants,
+)
 from core.sandbox_executor import get_plugin_dir
+from execute_tools.dataset_config import TIDMAD
 from workflows.model_exploration import _add_plugin_to_registries
 
 # ---------------------------------------------------------------------------
@@ -567,6 +574,7 @@ def restore_prior_state(
     workspace: str,
     current_iter: int,
     seed_paths: Sequence[str],
+    expected_invariants: RunInvariants | None = None,
 ) -> RestoredState:
     """Restore every prior iter's plugin classes and assemble the
     source-paths list for ``run_workflow``.
@@ -582,6 +590,15 @@ def restore_prior_state(
         seed_paths: caller's seed source paths (e.g. baseline punet/wavenet
             run_output JSONs). Prepended to the resolved list in original
             order. May be empty if the caller has no seeds.
+        expected_invariants: this run's computed ``RunInvariants`` (DS6b).
+            When provided, an existing workspace lock is validated up front,
+            and every prior iter's parsed run_output has its invariant
+            stamps checked BEFORE that iter's plugin is registered — a
+            mismatch fails fast with zero registry mutation. ``None`` skips
+            both checks (legacy callers; the chain runner threads this once
+            its DataScope CLI lands — DS6c). Seed-path contents are NOT
+            parsed here and are validated by ``run_workflow``'s pre-flight
+            instead.
 
     Returns:
         :class:`RestoredState` with ``resolved_source_paths``,
@@ -626,6 +643,13 @@ def restore_prior_state(
     if not os.path.isdir(abs_workspace):
         raise ResumeError(f"workspace does not exist: {abs_workspace}")
 
+    # DS6b — fail on a contradicting workspace lock before touching any
+    # prior iter (no plugin registration, no state accumulation). Lock
+    # CREATION is not this function's job (run_workflow's pre-flight
+    # creates it after all ingress evidence is validated).
+    if expected_invariants is not None and load_run_invariants(abs_workspace) is not None:
+        validate_run_invariants(abs_workspace, expected_invariants)
+
     # Strict ascending order — prior iters must be processed chronologically
     # so the source_paths list mirrors what an in-process run would build,
     # and so any plugin shadow-warnings happen in the same order.
@@ -645,6 +669,20 @@ def restore_prior_state(
             continue
         output_path = manifest["output_path"]
         parsed = _validate_run_output(output_path, iter_idx)
+
+        # DS6b — invariant-stamp check BEFORE this iter's plugin is
+        # registered, so a scope/policy mismatch mutates nothing.
+        if expected_invariants is not None:
+            validate_stamped_invariants(
+                {
+                    "resolved_data_scope": getattr(parsed, "resolved_data_scope", None),
+                    "health_gate_enabled": getattr(parsed, "health_gate_enabled", None),
+                    "health_config_sha256": getattr(parsed, "health_config_sha256", None),
+                },
+                expected_invariants,
+                full_scope=list(range(TIDMAD.num_files)),
+                source=f"restored iter {iter_idx:03d} run_output {output_path}",
+            )
 
         run_name = _iter_run_name(iter_idx)
         plugin_dir = get_plugin_dir(abs_workspace, run_name)

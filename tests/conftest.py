@@ -103,6 +103,35 @@ def pytest_configure(config):
     )
 
 
+def pytest_collection_modifyitems(config, items):
+    """Enforce the real_run opt-in contract (docs/pseudo_test_infra.md §4C).
+
+    ``real_run`` tests make real LLM API calls and/or run real training —
+    slow and billable. Their in-test guards only skip when API keys are
+    ABSENT, so on a machine with keys configured a bare ``pytest tests/``
+    would silently launch them. This hook closes that gap: without an
+    explicit real-mode flag (``--real-llm``, ``--real-training``, or the
+    deprecated ``--real-api-call``), every ``real_run`` test is skipped at
+    collection time regardless of key availability.
+    """
+    real_mode = (
+        config.getoption("--real-llm")
+        or config.getoption("--real-training")
+        or config.getoption("--real-api-call")
+    )
+    if real_mode:
+        return
+    skip_real = pytest.mark.skip(
+        reason=(
+            "real_run tests need an explicit real-mode flag: "
+            "--real-api-call (or --real-llm / --real-training)"
+        )
+    )
+    for item in items:
+        if "real_run" in item.keywords:
+            item.add_marker(skip_real)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

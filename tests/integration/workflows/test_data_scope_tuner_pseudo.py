@@ -1,0 +1,243 @@
+"""Pseudo-integration coverage for DataScope tuner wiring (DS5b).
+
+Covers, on the RecordingLLMBridge + RecordingSandbox pseudo stack:
+  * partial-scope LLM-plan normalization with persisted provenance
+    (planned_* vs effective strategies + reason) and run-invariant stamps;
+  * materialized effective HealthGate config in the workspace + run_config
+    stamps;
+  * disabled-mode runs: no gate evaluation, empty gate results, records
+    self-describe (health_gate_enabled=False) and classify VALID
+    (best_valid_* populated);
+  * scope_violation results terminate the run on FIRST occurrence
+    (status="failed", termination_reason="scope_violation" — no retries,
+    no max_fail_rounds wait).
+
+Sample-set scoping itself is guaranteed by the constructive layer
+(test_sample_set_builder) and the sandbox boundary (test_sandbox_scope);
+this file asserts the tuner-level glue. See
+docs/design/enable_partial_file_list.md (Commit DS5b).
+"""
+
+from __future__ import annotations
+
+import copy
+import importlib
+import json
+import os
+
+import pytest
+
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.dataset_config import DataScope
+from execute_tools.health_checks.config import EFFECTIVE_CONFIG_BASENAME
+from execute_tools.health_checks.schemas import GateAction
+from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.recording_llm_bridge import RecordingLLMBridge
+from tests.helpers.recording_sandbox import RecordingSandbox
+
+TUNER_MODULE = "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
+PSEUDO = "tests/pseudo_data"
+
+
+def _load_json(path):
+    with open(path) as handle:
+        return json.load(handle)
+
+
+def _canned(n: int, score=None):
+    training = _load_json(f"{PSEUDO}/train_outputs/punet/execute_training.json")
+    inference = _load_json(f"{PSEUDO}/train_outputs/punet/execute_inference.json")
+    score = score or {"file_vector": [None] * 20, "scalar": 2.5}
+    return {
+        "execute_training": [copy.deepcopy(training) for _ in range(n)],
+        "execute_inference": [copy.deepcopy(inference) for _ in range(n)],
+        "score_vector": [copy.deepcopy(score) for _ in range(n)],
+    }
+
+
+def _bridge(n: int, plan_overlay: dict | None = None) -> RecordingLLMBridge:
+    plan = _load_json(f"{PSEUDO}/api_call_outputs/ml_hyperparameter_tune_agent/generate.json")
+    plan.update({"is_trial": True, "train_portion": 0.1})
+    plan["train_config"].update({"epochs": 1, "device": "cpu"})
+    if plan_overlay:
+        plan.update(plan_overlay)
+    reflection = _load_json(f"{PSEUDO}/api_call_outputs/ml_hyperparameter_tune_agent/reflect.json")
+    return RecordingLLMBridge(
+        responses={
+            "generate": [copy.deepcopy(plan) for _ in range(n)],
+            "reflect": [copy.deepcopy(reflection) for _ in range(n)],
+        }
+    )
+
+
+def _agent(bridge, sandbox) -> HyperparamTuningAgent:
+    return HyperparamTuningAgent(
+        bridge_factory=lambda **_kwargs: bridge,
+        sandbox_factory=lambda **_kwargs: sandbox,
+    )
+
+
+def _input(tmp_path, run_name: str, rounds: int, **overrides) -> HyperparamTuningInput:
+    base = dict(
+        model_type="punet",
+        max_rounds=rounds,
+        attempts_per_round=1,
+        attempts_per_formal_round=1,
+        max_fail_rounds=3,
+        force_formal_round=False,
+        max_epochs=1,
+        is_trial=True,
+        trial_portion=0.05,
+        train_portion=0.1,
+        eval_portion=0.05,
+        trial_time_budget_minutes=None,
+        trial_vram_budget_gb=1000.0,
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path), run_name=run_name),
+        ),
+        progress_bar=False,
+    )
+    base.update(overrides)
+    return HyperparamTuningInput(**base)
+
+
+@pytest.fixture
+def _fast(monkeypatch):
+    tuner = importlib.import_module(TUNER_MODULE)
+    monkeypatch.setattr(tuner.time, "sleep", lambda *_a, **_k: None)
+    return tuner
+
+
+@pytest.fixture
+def _gates_pass(monkeypatch, _fast):
+    """Neutral pass-through gate adapter (real peeks would I/O-fail on the
+    pseudo stack); asserts gate machinery is reachable via call count."""
+    calls = {"n": 0}
+
+    def _adapter(ctx, **_kwargs):
+        calls["n"] += 1
+        return [], [], GateAction.CONTINUE
+
+    monkeypatch.setattr(_fast, "evaluate_and_persist_health_gates", _adapter)
+    return calls
+
+
+class TestPartialScopeNormalizationAndStamps:
+    def test_llm_target_plan_normalized_with_provenance(self, tmp_path, _gates_pass):
+        bridge = _bridge(
+            2,
+            plan_overlay={
+                "trial_strategy": "target",
+                "target_files": [3, 11],
+                "eval_strategy": "anchors",
+            },
+        )
+        sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="scoped", canned=_canned(2))
+        inp = _input(
+            tmp_path,
+            "scoped",
+            rounds=2,
+            data_scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
+            health_gate_files=[4, 7, 9],
+        )
+        output = _agent(bridge, sandbox).run(inp)
+
+        assert output.status == "completed"
+        assert output.resolved_data_scope == [4, 5, 6, 7, 8, 9]
+        assert output.health_gate_enabled is True
+        assert output.health_config_sha256
+        for record in output.all_records:
+            assert record.trial_strategy == "snapshot"
+            assert record.eval_strategy == "snapshot"
+            assert record.planned_trial_strategy == "target"
+            assert record.planned_eval_strategy == "anchors"
+            assert record.strategy_normalization_reason == "partial_data_scope"
+            assert record.resolved_data_scope == [4, 5, 6, 7, 8, 9]
+            assert record.health_gate_enabled is True
+        assert _gates_pass["n"] == 2  # gate machinery reachable each round
+
+        # Materialized effective config + run_config stamps on disk.
+        effective = os.path.join(str(tmp_path), EFFECTIVE_CONFIG_BASENAME)
+        assert os.path.exists(effective)
+        assert output.health_checks_config == effective
+        run_config = _load_json(os.path.join(str(tmp_path), "run_config_scoped.json"))
+        assert run_config["resolved_data_scope"] == [4, 5, 6, 7, 8, 9]
+        assert run_config["health_gate_enabled"] is True
+        assert run_config["health_checks_config_effective"] == effective
+        assert run_config["health_config_sha256"] == output.health_config_sha256
+
+    def test_snapshot_plan_under_partial_scope_no_normalization(self, tmp_path, _gates_pass):
+        bridge = _bridge(1)  # pseudo plan defaults to snapshot
+        sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="clean", canned=_canned(1))
+        inp = _input(
+            tmp_path,
+            "clean",
+            rounds=1,
+            data_scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
+            health_gate_files=[4, 7, 9],
+        )
+        output = _agent(bridge, sandbox).run(inp)
+        record = output.all_records[0]
+        assert record.strategy_normalization_reason is None
+        assert record.planned_trial_strategy == "snapshot"
+
+    def test_full_scope_default_behavior(self, tmp_path, _gates_pass):
+        """Default scope: full stamps, no normalization, effective config
+        materialized from the shipped default (uniform provenance)."""
+        bridge = _bridge(1)
+        sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="full", canned=_canned(1))
+        output = _agent(bridge, sandbox).run(_input(tmp_path, "full", rounds=1))
+        assert output.resolved_data_scope == list(range(20))
+        assert output.all_records[0].strategy_normalization_reason is None
+        assert os.path.exists(os.path.join(str(tmp_path), EFFECTIVE_CONFIG_BASENAME))
+
+
+class TestDisabledMode:
+    def test_no_gate_evaluation_and_valid_candidates(self, tmp_path, monkeypatch, _fast):
+        def _boom(*_a, **_k):  # pragma: no cover — the assert is that it never runs
+            raise AssertionError("evaluate_and_persist_health_gates called while disabled")
+
+        monkeypatch.setattr(_fast, "evaluate_and_persist_health_gates", _boom)
+
+        bridge = _bridge(2)
+        sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="nogates", canned=_canned(2))
+        inp = _input(tmp_path, "nogates", rounds=2, health_gate_enabled=False)
+        output = _agent(bridge, sandbox).run(inp)
+
+        assert output.status == "completed"
+        assert output.health_gate_enabled is False
+        assert output.health_config_sha256 is None
+        assert not os.path.exists(os.path.join(str(tmp_path), EFFECTIVE_CONFIG_BASENAME))
+        for record in output.all_records:
+            assert record.health_gate_enabled is False
+            assert record.health_gate_results == []
+            assert record.gate_action is None
+            assert record.status == "success"
+        # Option B: disabled-mode success records are VALID candidates.
+        assert output.best_valid_exp_id is not None
+        assert output.best_valid_denoising_score == output.best_denoising_score
+
+
+class TestScopeViolationAbort:
+    def test_training_scope_violation_terminates_run(self, tmp_path, _gates_pass):
+        violation = {
+            "status": "error",
+            "error_type": "scope_violation",
+            "message": "error_scope_violation: SampleSet file_index 2 is outside the DataScope",
+        }
+        canned = _canned(3)
+        canned["execute_training"] = [violation] * 3
+        bridge = _bridge(3)
+        sandbox = RecordingSandbox(base_dir=str(tmp_path), run_name="abort", canned=canned)
+        # attempts_per_round=3 would normally retry twice more.
+        inp = _input(tmp_path, "abort", rounds=3, attempts_per_round=3)
+        output = _agent(bridge, sandbox).run(inp)
+
+        assert output.status == "failed"
+        assert output.termination_reason == "scope_violation"
+        assert output.completed_rounds == 0
+        # Non-retryable: exactly one planning attempt, one training call.
+        assert len([c for c in bridge.calls if c[0] == "plan"]) == 1
+        assert len([c for c in sandbox.calls if c[0] == "execute_training"]) == 1

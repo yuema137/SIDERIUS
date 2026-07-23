@@ -24,14 +24,27 @@ def _load_json(path):
         return json.load(handle)
 
 
+# One past max_fail_rounds=3 — the minimal count proving that collapsed-but-
+# COMPLETED rounds never increment the consecutive-failure brake (if they
+# did, the run would abort at round 3). Historically 10 ("ten collapses",
+# the v15/v16 forensic narrative); reduced 2026-07-23 — rounds 5..10 added
+# ~4 min of pure repetition per run with no additional coverage.
+N_ROUNDS = 4
+
+
 def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkeypatch):
-    """Ten HealthGate failures with CONTINUE remain completed experiments."""
+    """Collapsed rounds beyond max_fail_rounds with CONTINUE stay completed
+    experiments and never terminate the loop."""
     tuner_module = importlib.import_module(
         "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
     )
 
     monkeypatch.setattr(tuner_module.time, "sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(tuner_module, "get_gates_for_position", lambda _round: ["collapse"])
+    # DS5: the tuner now always passes config_path= (the materialized
+    # effective config) when the HealthGate subsystem is enabled.
+    monkeypatch.setattr(
+        tuner_module, "get_gates_for_position", lambda _round, **_kwargs: ["collapse"]
+    )
 
     def failed_continue(_gate_id, ctx):
         check = HealthCheckResult(
@@ -82,17 +95,17 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
 
     bridge = RecordingLLMBridge(
         responses={
-            "generate": [copy.deepcopy(plan) for _ in range(10)],
-            "reflect": [copy.deepcopy(reflection) for _ in range(10)],
+            "generate": [copy.deepcopy(plan) for _ in range(N_ROUNDS)],
+            "reflect": [copy.deepcopy(reflection) for _ in range(N_ROUNDS)],
         }
     )
     sandbox = RecordingSandbox(
         base_dir=str(tmp_path),
         run_name="ten_collapses",
         canned={
-            "execute_training": [copy.deepcopy(training) for _ in range(10)],
-            "execute_inference": [copy.deepcopy(inference) for _ in range(10)],
-            "score_vector": [copy.deepcopy(collapsed_score) for _ in range(10)],
+            "execute_training": [copy.deepcopy(training) for _ in range(N_ROUNDS)],
+            "execute_inference": [copy.deepcopy(inference) for _ in range(N_ROUNDS)],
+            "score_vector": [copy.deepcopy(collapsed_score) for _ in range(N_ROUNDS)],
         },
     )
     agent = HyperparamTuningAgent(
@@ -101,7 +114,7 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
     )
     agent_input = HyperparamTuningInput(
         model_type="punet",
-        max_rounds=10,
+        max_rounds=N_ROUNDS,
         attempts_per_round=1,
         attempts_per_formal_round=1,
         max_fail_rounds=3,
@@ -122,13 +135,13 @@ def test_ten_collapsed_rounds_are_recorded_and_do_not_terminate(tmp_path, monkey
 
     output = agent.run(agent_input)
 
-    assert output.completed_rounds == 10
-    assert output.total_attempts == 10
+    assert output.completed_rounds == N_ROUNDS
+    assert output.total_attempts == N_ROUNDS
     assert output.consecutive_fail_rounds_at_exit == 0
     assert output.termination_reason == "completed"
-    assert len(output.all_records) == 10
-    assert len(sandbox.saved_records) == 10
-    assert len([call for call in bridge.calls if call[0] == "plan"]) == 10
+    assert len(output.all_records) == N_ROUNDS
+    assert len(sandbox.saved_records) == N_ROUNDS
+    assert len([call for call in bridge.calls if call[0] == "plan"]) == N_ROUNDS
     assert all(record.status == "failed_mode_collapse" for record in output.all_records)
     assert all(record.failure_reason for record in output.all_records)
     assert all(record.gate_action == "continue" for record in output.all_records)

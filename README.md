@@ -72,10 +72,15 @@ trigger automatic retry with error feedback.
   iterations are tagged and forwarded as `disallowed_architectural_patterns`. The proposer
   won't re-propose them. See [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md).
 - **Pluggable HealthGates** — YAML-configured check-and-route gates (`configs/health_checks.yaml`)
-  fire at specific rounds; `OutputDiversityCheck` + `AmplitudeCollapseCheck` catch mode-collapse
-  before it burns compute, routing to one of `continue` / `skip_iter` / `skip_to_formal` /
-  `invalidate_round`. Skills live under `execute_tools/health_checks/`; the tuner integrates all
-  four `GateAction`s. See [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md).
+  fire at tuner round boundaries. Six shipped checks: three blocking
+  (`output_diversity`, `output_std`, `amplitude_collapse` — catch mode-collapse before it burns
+  compute) and three recording-only (`pearson_dispersion`, `spectral_peak_ratio`,
+  `per_file_output_std`), routing to one of `continue` / `skip_iter` / `skip_to_formal` /
+  `invalidate_round`. Two run-level inputs (not YAML): `--health_gate_enabled` and
+  `--health_gate_files` (shared monitored-file list; the effective config is materialized per
+  workspace and pinned by the run-invariants lock). Skills live under
+  `execute_tools/health_checks/`. See
+  [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md).
 - **Cross-iteration knowledge accumulation** — runtime vocab, key findings, per-model knowledge
   cache, negative feedback (physical rejections + gate exhaustions), and the previous iter's
   proposal are all carried forward by `sdsc_submission_scripts/run_one_iteration.py` and injected
@@ -146,7 +151,10 @@ Everything else adapts automatically:
   node, pick one with `CUDA_VISIBLE_DEVICES` (honored externally).
 - **Scoring anchor map** — committed at `reference_data/segment_anchors.json`
   and used by default (resolved relative to the package, independent of the
-  working directory). Override with `--anchor_map` only to use a different map.
+  working directory). The run entry points always use the committed map;
+  an `--anchor_map` override exists only on the reference-generation and
+  standalone scoring scripts (`scripts/compute_ground_truth.py`,
+  `scripts/compute_raw_baseline.py`, `execute_tools/denoising_score_single.py`).
 
 Optional, not required to run:
 
@@ -182,10 +190,11 @@ The planner/reflector split (`--reflect_provider` / `--reflect_model_id`) cuts t
 quota use roughly in half. See [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md).
 Trial-mode details (sampling strategies, portions, time / VRAM budgets) are in
 [`docs/small_sample_trial.md`](docs/small_sample_trial.md). Delta-based skip-formal and
-bypass-time-budget gates (`--skip_formal_min_delta`, `--bypass_formal_time_budget_min_delta`)
-suppress spurious formal promotions when a new plan's trial score barely moves — see the
-`HyperparamTuningInput` schema docstring in `agent/schemas/hyperparam_tuning.py` for
-semantics.
+bypass-time-budget gates suppress spurious formal promotions when a new plan's trial score
+barely moves; their flags (`--skip_formal_min_delta`, `--bypass_formal_time_budget_min_delta`)
+live on the CHAIN entry points (`run_chain.sh` / `run_one_iteration.py`), not on the
+single-tuner CLI — see the `HyperparamTuningInput` schema docstring in
+`agent/schemas/hyperparam_tuning.py` for semantics.
 
 ### Multi-iteration exploration chain
 
@@ -205,6 +214,34 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
 
 Operational runbook (workspace conventions, restart from failed iter, SDSC memory rule):
 [`docs/running_chain_test.md`](docs/running_chain_test.md).
+
+### Scoped run — restrict a chain to a file subset (DataScope)
+
+`--data_scope` restricts everything a run touches — training, inference,
+scoring, and HealthGate peeks — to a validation-file subset, enforced at the
+sample-set builder and the sandbox I/O boundary (never by prompts). Both
+`4-9` and `4,5,6,7,8,9` (and mixed `0-3,7`) spec forms canonicalize to one
+sorted, deduplicated list. Partial scopes are snapshot-only and require an
+explicit in-scope `--health_gate_files` monitored list when gates are on:
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    [... usual args ...] \
+    --data_scope 4-9 --health_gate_files 4,7,9
+```
+
+To disable the HealthGate subsystem entirely (successful finite-score
+records then count as valid candidates):
+
+```bash
+    --no-health_gate_enabled
+```
+
+The resolved scope + gate policy are pinned per workspace by
+`run_invariants_lock.json` — re-running or resuming a workspace with a
+different scope or gate config fails at startup, and aggregate scalars are
+only comparable within one scope. Full design:
+[`docs/design/enable_partial_file_list.md`](docs/design/enable_partial_file_list.md).
 
 ### Literature-review-augmented chain
 
@@ -228,7 +265,8 @@ validation: [`docs/search_quality_validation.md`](docs/search_quality_validation
 
 ```bash
 # Baseline comparison across built-in models (raw / model / ceiling)
-python scripts/run_comparison.py --models punet,wavenet,fcnet --is_trial
+# one architecture per invocation (--model is single-valued)
+python scripts/run_comparison.py --model punet --is_trial
 
 # Dashboard (Plotly + FastAPI)
 cp dashboard_config.example.yaml dashboard_config.yaml   # then edit root_data_dir

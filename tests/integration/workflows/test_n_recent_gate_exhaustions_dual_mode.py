@@ -321,13 +321,22 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
 #             bridge.generate.call_args_list inspection, since the debug dump
 #             captures only the system prompt).
 #
-# `num_params` calibration — the static formula is
-# `num_params × seg × batch × 6e-10` for ms/step (training) plus an inference
-# scaled by 1/3; scoring is an additive constant. At seg=40000, batch=1,
-# epochs=10, train_portion=0.1, budget=20min:
-#   * 50_000_000 params → factor ≈ 143.4× (OVER BUDGET, ~460× above the gate)
-#   *    100_000 params → factor ≈ 0.31×  (FEASIBLE, ~3× below the gate)
-# The ~460× spread gives deterministic verdict flips with wide headroom.
+# `num_params` calibration — this test covers recent-history choreography
+# (gate exhaustion → blacklist → pre-flight rejection/revision flow), NOT
+# estimator accuracy. The pre-flight chain runs for real end to end (real
+# time estimation, real budget comparison, real gate decision, real
+# revision control flow); only the fixture is calibrated so the two drafts
+# land deterministically on opposite sides of the gate. The estimate is
+# machine-independent (static formulas; the scoring term falls back to the
+# ligroup server constants on unknown hosts). Verified 2026-07-23 against
+# the current estimator constants at seg=40000, batch=1, epochs=1,
+# train_portion=0.1, budget=20min:
+#   * 50_000_000 params → factor ≈ 335×   (OVER BUDGET)
+#   *    100_000 params → factor ≈ 0.76×  (FEASIBLE)
+# The ~440× spread gives deterministic verdict flips. If this test starts
+# failing with an extra revision call, re-derive these factors first —
+# estimator-constant drift moved the feasible draft from 0.31× to 1.93×
+# once before (fixture designed at epochs=10 against older constants).
 
 _SCAN_OVER_T_ENGLISH = (
     "Avoid selective-scan / SSM / Mamba-style sequential state recurrence over the time dimension"
@@ -370,7 +379,12 @@ def _make_fake_proposing(
             "model_config": {"segmentation_size": 40000},
             "train_config": {
                 "lr": 1e-4,
-                "epochs": 10,
+                # epochs=1 (was 10): recalibrated 2026-07-23 — estimator
+                # constants evolved after this fixture was designed, and
+                # at epochs=10 the deliberately-feasible draft crept to
+                # factor 1.93x (> gate). See the num_params calibration
+                # comment above for current factors.
+                "epochs": 1,
                 "batch_size": 1,
                 "optimizer_type": "adamw",
                 "weight_decay": 1e-5,
@@ -558,10 +572,12 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         "Fix 2 broken: rejection block missing num_params substitution "
         f"({_OVERBUDGET_PARAM_COUNT:,})."
     )
-    # factor ≈ 143.4×; the rendered "{factor:.1f}x" is "143.4x".
-    assert "143.4x" in fourth_call_user_prompt, (
-        "Fix 2 broken: rejection block missing factor=143.4x substitution "
-        "(derived from 50M params × seg=40000 × 10 epochs vs 20-min budget)."
+    # factor ≈ 335.1×; the rendered "{factor:.1f}x" is "335.1x" (see the
+    # num_params calibration comment — recalibrated 2026-07-23 for the
+    # current estimator constants at epochs=1).
+    assert "335.1x" in fourth_call_user_prompt, (
+        "Fix 2 broken: rejection block missing factor=335.1x substitution "
+        "(derived from 50M params × seg=40000 × 1 epoch vs 20-min budget)."
     )
     assert f"{_PREFLIGHT_TRIAL_BUDGET_MIN:.1f} min budget" in fourth_call_user_prompt, (
         "Fix 2 broken: rejection block missing budget_minutes substitution "

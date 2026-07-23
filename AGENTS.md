@@ -10,9 +10,10 @@
   across Python sources.
 
 ## Environment
-- **Always use the project virtualenv**: every Python command must use
-  `/home/yuema137/SIDERIUS/.venv/bin/python` (or activate `.venv/bin/activate`
-  first). Never use the system `python` or `python3` — they are Python 3.8 and
+- **Always use the project virtualenv**: every Python command must use the
+  repo's `.venv/bin/python` (e.g. `/workspace/REPO/SIDERIUS/.venv/bin/python`
+  on the H100 box, `/home/yuema137/SIDERIUS/.venv/bin/python` on lilab) or
+  activate `.venv/bin/activate` first. Never use the system `python` or `python3` — they are Python 3.8 and
   will fail on f-strings and other modern syntax.
 - **`run_comparison.py` lives at `scripts/run_comparison.py`** (moved from repo
   root in commit `13c34fa`). If you see a `SIDERIUS_ROOT` bug where subprocess
@@ -121,7 +122,7 @@ complete.
 | Step | Artefact | Location |
 |------|----------|----------|
 | 0 | **Graph placement** — decide which existing nodes feed into this node (upstream) and which nodes consume its output (downstream). Draw or write out the directed edges explicitly: `A → new_node → B`. Confirm the input schema can be fully populated from the upstream node's output schema, and that the output schema covers everything the downstream node needs. No file is generated at this step. | (design only) |
-| 1 | Node implementation | `nodes/{node_name}.py` |
+| 1 | Node implementation | `nodes/{node_name}/{node_name}.py` (one directory per node) |
 | 2 | Protocol(s) for each edge this node participates in | `agent/schemas/protocols/{source}_to_{target}.py` |
 | 3 | Node unit tests (mocked LLM) | `tests/unit/agent/{node_name}/test_{node_name}.py` |
 | 4 | Protocol unit tests | `tests/unit/agent/protocols/test_{source}_to_{target}.py` |
@@ -158,7 +159,7 @@ across modules; `ml_code_validator_agent` is correct because it is explicitly
 scoped to the ML pipeline.
 
 **Protocol naming convention**: one file per directed edge, named
-`{source_code}_to_{target_code}.py`. Node codes: `ml_model_tune`,
+`{source_code}_to_{target_code}.py`. Node codes: `ml_literature_review` (full name), `ml_model_tune`,
 `ml_result_interp`, `ml_model_propose`, `ml_model_impl`, `ml_model_valid`.
 Functions inside the file: `{transport}_{data_scope}` (e.g.
 `local_all_records`, `database_full_context`). Always add a `database_*`
@@ -220,10 +221,16 @@ SIDERIUS uses a rev-6 **HealthGate** system to catch model failures during
 tuning without polluting the scoring pipeline. Migration landed in PR #101
 (commits 1-6).
 
-- **Config**: `configs/health_checks.yaml` — single source of truth for gate
-  configuration (which check runs at which round, with what parameters, and
-  what `GateAction` to take on failure). Edit this file, not code, to change
-  gate behavior.
+- **Config**: `configs/health_checks.yaml` — source of truth for gate
+  POLICY (which check runs at which round, thresholds, `GateAction` on
+  failure, and the DEFAULT monitored-file placement). Edit this file, not
+  code, to change gate behavior. Two things are run-level INPUTS, not YAML
+  (DataScope feature, DS4-DS6): `health_gate_enabled` (subsystem switch)
+  and `health_gate_files` (shared monitored-file list overriding every
+  check's `peek_file_indices`). At startup the run materializes the
+  EFFECTIVE config to `{workspace}/health_checks_effective.yaml` (sha256
+  pinned by the run-invariants lock) and every path-based loader reads
+  that file — never override the config in memory.
 - **Skills**: `execute_tools/health_checks/` — each check is a
   `HealthCheckSkill` conforming to `run(ctx, config) -> HealthCheckResult`.
   Built-in checks: `OutputDiversityCheck`, `AmplitudeCollapseCheck`. Add new
@@ -288,6 +295,21 @@ TIDMAD's `network.py:FocalLoss1D`.
 - **Focal loss implementation** (`ml_models/loss_models_sandbox.py:135-168`)
   is line-for-line identical to TIDMAD's `network.py:FocalLoss1D`. If you
   change the loss math, verify against the paper implementation first.
+- **DataScope (partial-file runs) is enforced in layers — never by prompts.**
+  `DataScope` (`execute_tools/dataset_config.py`) restricts a run to a file
+  subset (`--data_scope 4-9` or `4,5,6,7,8,9`). Enforcement: constructive
+  (`build_sample_set(scope=)`), boundary (`validate_sample_set` at the
+  sandbox before ALL file I/O — train/inference/`score_vector`; violations
+  terminate the run, non-retryable), and direct-access
+  (`health_gate_files` ⊆ scope validated at startup). Under a partial
+  scope only `snapshot` sampling is legal: operator config errors at
+  startup; LLM plans are normalized with recorded provenance. **Aggregate
+  scalars are only comparable within one scope** — the resolved scope +
+  `health_gate_enabled` + effective-config sha256 are pinned per workspace
+  by `{workspace}/run_invariants_lock.json` (`core/run_invariants.py`);
+  mismatched resumes/seeds/reuse fail at startup. Default (no scope) is
+  behaviorally identical to pre-feature runs. See
+  `docs/design/enable_partial_file_list.md`.
 
 ## Reference Project Guidelines
 
@@ -300,19 +322,22 @@ TIDMAD's `network.py:FocalLoss1D`.
   module.
 - Prioritize modern, PEP 8, and modular standards for SIDERIUS.
 
-## Current State (as of 2026-07-14)
+## Current State (as of 2026-07-23)
 
 *Ephemeral section — update as work progresses.*
 
-- **Active PR**: [#101](https://github.com/Galileo-Sandbox/SIDERIUS/pull/101) —
-  pluggable HealthGate system rev-6 migration (commits 1-6). Pending Gate 2
-  validation after wavenet + punet seed regeneration completes.
-- **Seed regeneration in progress**:
-  - Wavenet `healthgate_baseline_v1` replacing the contaminated
-    `small_sample_trial_v0` (v0 had phantom class-127 collapse scores of
-    5.576267012107649; new run uses paper-aligned focal `alpha=0.5` and
-    `lr=5e-4`).
-  - Punet regeneration will follow after wavenet completes.
-- **Open issues**: #102-#107 (new, from PR #101 follow-up audit) — collapse
-  signal propagation, Gate 2 validation, seed path documentation, etc.
-  Existing carry-forward issues: #91, #93, #94, #95, #97, #100.
+- **Active branch**: `feat/enable-partial-file-list` — DataScope feature
+  (scoped runs on a partial file list), DS1-DS8 complete per
+  `docs/design/enable_partial_file_list.md`. Pending: Checkpoint DS
+  Gates 1 & 2 (operator-approved real-LLM / real-training validation),
+  then PR. Includes the FU-10 `plan_overrides` fail-fast hardening, the
+  `real_run` pytest opt-in enforcement (bare `pytest` can no longer
+  launch real-API tests), and the `test_gate_coverage_round_7` fixture
+  repair.
+- **Master CI**: red at `9e503ea` (PR #127 merged over a stale shell-parity
+  expectation); fixed by `a84203a` on this branch — lands with the PR.
+- **Open issues**: carry-forward #91, #93, #94, #95, #97, #100, plus the
+  PR #101 follow-ups still open (#103, #105, #107, #110, #111, #113) and
+  the DS8-filed issues (FU-1 peek-vs-eval-coverage latent bug, FU-7
+  vocab-accumulation NoneType test defect — see the design doc's
+  follow-up tracker).

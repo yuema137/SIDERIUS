@@ -777,6 +777,7 @@ class LLMBridge:
         force_formal_round: bool = True,
         plan_overrides: dict | None = None,
         max_epochs: int | None = None,
+        resolved_data_scope: list[int] | None = None,
         # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
         trial_vram_budget_gb: float | None = None,
         formal_vram_budget_gb: float | None = None,
@@ -887,6 +888,7 @@ class LLMBridge:
             force_formal_round=force_formal_round,
             plan_overrides=plan_overrides,
             max_epochs=max_epochs,
+            resolved_data_scope=resolved_data_scope,
             trial_vram_budget_gb=trial_vram_budget_gb,
             formal_vram_budget_gb=formal_vram_budget_gb,
             trial_time_budget_minutes=trial_time_budget_minutes,

@@ -11,6 +11,7 @@ from typing import Any
 
 from core.inference_defaults import inference_batch_for
 from execute_tools.data_paths import TIDMAD_DATA_DIR
+from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
@@ -401,6 +402,20 @@ def _ensure_dir(path: str) -> None:
         )
 
 
+def _scope_violation_result(e: ScopeViolationError) -> dict[str, Any]:
+    """Convert a ScopeViolationError into the executor error-dict shape.
+
+    ``error_type="scope_violation"`` is the structured classification the
+    tuner keys on (non-retryable configuration/invariant failure — see
+    docs/design/enable_partial_file_list.md, DS5). The
+    ``error_scope_violation:`` message prefix follows the existing
+    ``error_training:`` prefix convention for greppability.
+    """
+    msg = f"error_scope_violation: {e}"
+    print(f"--- Scope Violation ---\n{msg}")
+    return {"status": "error", "error_type": "scope_violation", "message": msg}
+
+
 class TidmadSandbox:
     def __init__(
         self,
@@ -410,7 +425,12 @@ class TidmadSandbox:
         workspace: str = "./siderius_workspace",
         progress_bar: bool = False,
         file_index: int = 6,
+        data_scope: DataScope | None = None,
     ):
+        # Boundary DataScope invariant: every SampleSet is validated against
+        # this scope before any file I/O (train / inference / score_vector).
+        # Default = complete dataset (behavior identical to pre-scope code).
+        self.data_scope = data_scope or DataScope.default()
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
@@ -566,7 +586,7 @@ class TidmadSandbox:
 
             # Validate and write data scope SampleSet to JSON
             if sample_set is not None:
-                sample_set = validate_sample_set(sample_set)
+                sample_set = validate_sample_set(sample_set, scope=self.data_scope)
                 ss_path = os.path.abspath(
                     os.path.join(self.dirs["configs"], f"train_sample_set_{exp_id}.json")
                 )
@@ -636,6 +656,10 @@ class TidmadSandbox:
                     results = json.load(f)
             return {"status": "success", "message": "Training finished.", "results": results}
 
+        except ScopeViolationError as e:
+            # Before subprocess launch — no file I/O happened. Must precede
+            # the generic handler (ScopeViolationError is a ValueError).
+            return _scope_violation_result(e)
         except subprocess.CalledProcessError as e:
             error_msg = _format_subprocess_error(e, "Train")
             print(f"--- Train Script Error ---\n{error_msg}")
@@ -730,9 +754,20 @@ class TidmadSandbox:
             str(self.file_index),
         ]
 
-        # Validate and write eval SampleSet to JSON
+        # Validate and write eval SampleSet to JSON. The scope check happens
+        # here, before the subprocess try-block — no file I/O has occurred.
+        # Result keys mirror this method's error-dict shape (timing fields
+        # included).
         if sample_set is not None:
-            sample_set = validate_sample_set(sample_set)
+            try:
+                sample_set = validate_sample_set(sample_set, scope=self.data_scope)
+            except ScopeViolationError as e:
+                return {
+                    **_scope_violation_result(e),
+                    "per_file_timings_ms": [],
+                    "process_startup_ms": None,
+                    "subprocess_wall_ms": None,
+                }
             ss_path = os.path.abspath(
                 os.path.join(self.dirs["configs"], f"eval_sample_set_{exp_id}.json")
             )
@@ -816,9 +851,18 @@ class TidmadSandbox:
 
         Returns:
             (file_vector, final_scalar_score)
+
+        Raises:
+            ValueError: On an invalid or out-of-scope ``sample_set``
+                (``ScopeViolationError``, a ValueError subclass, for scope
+                violations) — this method's established exception contract,
+                unlike the error-dict contract of ``execute_training`` /
+                ``execute_inference``. The invariant is uniform (rejection
+                before any file I/O); only the outward error shape differs.
         """
         from execute_tools.scoring_utils import score_vector as _score_vector
 
+        sample_set = validate_sample_set(sample_set, scope=self.data_scope)
         return _score_vector(
             data_dir=self.base_dir,
             sample_set=sample_set,
@@ -950,6 +994,7 @@ class StubSandbox(TidmadSandbox):
         progress_bar: bool = False,
         file_index: int = 6,
         run_id: str | None = None,
+        data_scope: DataScope | None = None,
     ):
         super().__init__(
             metadata_source=metadata_source,
@@ -958,6 +1003,7 @@ class StubSandbox(TidmadSandbox):
             workspace=workspace,
             progress_bar=progress_bar,
             file_index=file_index,
+            data_scope=data_scope,
         )
         self._run_id: str = run_id or run_name
         self._rng = random.Random(self._run_id)
@@ -989,7 +1035,16 @@ class StubSandbox(TidmadSandbox):
         train_portion: float | None = None,
         train_base_seed: int | None = None,
     ) -> dict[str, Any]:
-        """Synthesise a successful training result. No subprocess launch."""
+        """Synthesise a successful training result. No subprocess launch.
+
+        DataScope parity with the production executor: pseudo-mode tests
+        must exercise the boundary invariant, not bypass it.
+        """
+        if sample_set is not None:
+            try:
+                validate_sample_set(sample_set, scope=self.data_scope)
+            except ScopeViolationError as e:
+                return _scope_violation_result(e)
         final_loss = self._rng.uniform(0.5, 5.0)
         results = {
             "final_loss": final_loss,
@@ -1013,7 +1068,21 @@ class StubSandbox(TidmadSandbox):
         sample_set: dict | None = None,
         inference_batch: int | None = None,
     ) -> dict[str, Any]:
-        """Synthesise a successful inference result. No subprocess launch."""
+        """Synthesise a successful inference result. No subprocess launch.
+
+        DataScope parity with the production executor (error-dict shape
+        mirrors ``TidmadSandbox.execute_inference``, timing fields included).
+        """
+        if sample_set is not None:
+            try:
+                validate_sample_set(sample_set, scope=self.data_scope)
+            except ScopeViolationError as e:
+                return {
+                    **_scope_violation_result(e),
+                    "per_file_timings_ms": [],
+                    "process_startup_ms": None,
+                    "subprocess_wall_ms": None,
+                }
         return {
             "status": "success",
             "message": "stub_inference_ok",
@@ -1081,7 +1150,13 @@ class StubSandbox(TidmadSandbox):
 
         Returns:
             (file_vector, final_scalar)
+
+        Raises:
+            ValueError: On an invalid or out-of-scope ``sample_set`` —
+                DataScope parity with the production ``score_vector``
+                exception contract.
         """
+        validate_sample_set(sample_set, scope=self.data_scope)
         file_vector = [self._rng.uniform(-3.0, -2.0) for _ in range(9)]
         final_scalar = self._rng.uniform(-3.0, -2.0)
         return file_vector, final_scalar

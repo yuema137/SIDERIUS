@@ -76,7 +76,10 @@ stubs print a deprecation warning and delegate here unchanged.
 |---|---|
 | `--mode {lilab,sdsc}` | Backend selector. **No default — must be set.** `lilab` runs each iteration as a foreground subprocess; `sdsc` submits each iter as a `sbatch` job with `--dependency=afterany` on the previous iter's job ID. |
 | `--workspace DIR` | Chain workspace root. Iter NNN's artifacts land under `${WORKSPACE}/iter_NNN/`. |
-| `--seed_paths P [P …]` | One or more seed `run_output_*.json` files. Greedy slurp until the next `--flag`. |
+| `--seed_paths P [P …]` | One or more seed `run_output_*.json` files. Greedy slurp until the next `--flag`. Seeds must match the run's DataScope (unstamped legacy seeds = full scope); partial-scope runs are normally seedless. |
+| `--data_scope S` | Restrict the chain to a file subset (`4-9`, `4,5,6,7,8,9`, or mixed). Omitted = complete dataset. Pinned per workspace by `run_invariants_lock.json`. |
+| `--health_gate_files L` | Run-level shared monitored-file list for ALL HealthGate checks (same spec format). Mandatory under a partial scope when gates are enabled. |
+| `--health_gate_enabled` / `--no-health_gate_enabled` | HealthGate subsystem switch (default enabled). |
 
 ### Resume / safety flags (Commit 13.B)
 | Flag | Default | Purpose |
@@ -97,8 +100,10 @@ idempotent rerun is the expected behaviour for cron-driven chains.
 | `--num_iterations N` | 2 | Total iters to walk. |
 
 ### §3.2 flags (full input contract)
-The full set of `--max_rounds`, `--max_proposal_attempts`, `--trial_strategy`,
-`--data_dir`, `--target_files`, etc. is the §3.2 contract; defaults match
+The full set of `--max_rounds`, `--max_proposal_attempts`,
+`--data_dir`, etc. is the §3.2 contract (`--trial_strategy` and
+`--target_files` are DEPRECATED no-ops since DS7 — parsed, warned,
+ignored; use `--data_scope`); defaults match
 both Python entries (`run_one_iteration.py` and `run_exploration_adaptive.py`)
 and are enforced by `tests/unit/scripts/test_chain_consistency.py` (Gate A
 three-way parity test). See the design doc

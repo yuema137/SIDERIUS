@@ -24,6 +24,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.dataset_config import DataScope
 
 # ---------------------------------------------------------------------------
 # Phase B schemas — three-stage reasoning pipeline
@@ -675,22 +676,29 @@ class ProposalInput(BaseModel):
     # See docs/resource_estimator_implement.md §2.7.2. These fields originate at the
     # workflow/CLI entry point and fan out to both this node and the tuner so
     # the proposer can call build_sample_set + evaluate_time_skill on its own
-    # baseline before emitting. The training-side trial-mode set mirrors
-    # HyperparamTuningInput exactly so both gates see identical sample_sets;
-    # legacy single_file mode (file_index, is_trial=False) is deliberately not
-    # surfaced here — modern usage is is_trial=True with trial_strategy='target'
-    # + target_files=[N] when a single file is wanted.
+    # baseline before emitting.
+    # DS7 — the mirrored ``trial_strategy`` / ``target_files`` fields were
+    # deleted: consumed by nobody (the round-3 audit found the pre-flight
+    # synthesizes its sample set with a hardcoded snapshot strategy, and no
+    # prompt template reads them). Old serialized inputs still validate.
     is_trial: bool = Field(
         default=False,
         description="Whether the run uses trial (sparse) sampling. Forwarded to "
         "build_sample_set inside the proposer's evaluate_time_skill gate "
         "so it matches what the tuner will run.",
     )
-    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy for training data: 'snapshot' (all 20 files), "
-        "'anchors' (files 0/10/19), 'target' (caller-specified files). "
-        "Mirrors HyperparamTuningInput.trial_strategy.",
+    data_scope: DataScope = Field(
+        default_factory=DataScope.default,
+        description=(
+            "Which subset of the dataset this run may access (DS7b). Two "
+            "consumers: (a) the pre-flight wall-time gate synthesises its "
+            "sample set WITHIN this scope so the estimate matches what the "
+            "tuner will actually run; (b) the proposer prompt disclosure "
+            "renders the allowed-file list + snapshot-only rule under a "
+            "partial scope so drafts are not designed for out-of-scope "
+            "data. Enforcement lives tuner/sandbox side — this field is "
+            "informative for the proposer. Default = complete dataset."
+        ),
     )
     trial_portion: float = Field(
         default=0.1,
@@ -698,11 +706,6 @@ class ProposalInput(BaseModel):
         le=1.0,
         description="Fraction of segments per file for the training scope. "
         "Mirrors HyperparamTuningInput.trial_portion.",
-    )
-    target_files: list[int] = Field(
-        default_factory=list,
-        description="File indices to sample from. Required when trial_strategy='target'. "
-        "Mirrors HyperparamTuningInput.target_files.",
     )
     train_portion: float = Field(
         default=0.1,

@@ -1171,3 +1171,164 @@ class TestLitReviewCLI:
         configs/lit_review_config.yaml path."""
         args = runner.build_parser().parse_args(self._argv())
         assert args.ml_lit_review_config == "configs/lit_review_config.yaml"
+
+
+# ===========================================================================
+# DS6c — DataScope + HealthGate chain CLI
+# ===========================================================================
+
+from core.run_invariants import RunInvariants  # noqa: E402
+from execute_tools.dataset_config import DataScope  # noqa: E402
+
+_BASE = ["--workspace", "WS", "--start_iteration", "1", "--run_name", "iter_001"]
+
+
+def _normalized(*extra):
+    return runner.normalize_args(runner.build_parser().parse_args([*_BASE, *extra]))
+
+
+class TestDataScopeCLI:
+    def test_defaults(self):
+        args = _normalized()
+        assert args.data_scope is None
+        assert args.health_gate_enabled is True
+        assert args.health_gate_files is None
+
+    def test_range_and_list_forms_canonicalize_identically(self):
+        a = _normalized("--data_scope", "4-9")
+        b = _normalized("--data_scope", "4,5,6,7,8,9")
+        assert a.data_scope == b.data_scope == DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+
+    def test_mixed_form_and_files_parse(self):
+        args = _normalized(
+            "--data_scope", "0-3,7", "--health_gate_files", "1,3", "--no-health_gate_enabled"
+        )
+        assert args.data_scope.file_indices == [0, 1, 2, 3, 7]
+        assert args.health_gate_files == [1, 3]
+        assert args.health_gate_enabled is False
+
+    def test_malformed_scope_is_a_parser_error(self, capsys):
+        with pytest.raises(SystemExit) as e:
+            _normalized("--data_scope", "4-x")
+        assert e.value.code == 2
+        assert "malformed" in capsys.readouterr().err
+
+
+class TestComputeExpectedInvariants:
+    def test_default_full_scope_materializes(self, tmp_path):
+        args = _normalized()
+        args.workspace = str(tmp_path)
+        inv = runner.compute_expected_invariants(args)
+        assert isinstance(inv, RunInvariants)
+        assert inv.resolved_data_scope == list(range(20))
+        assert inv.health_gate_enabled is True
+        assert inv.health_config_sha256 is not None
+        assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
+
+    def test_disabled_gates_null_sha_no_file(self, tmp_path):
+        args = _normalized("--no-health_gate_enabled", "--data_scope", "4-9")
+        args.workspace = str(tmp_path)
+        inv = runner.compute_expected_invariants(args)
+        assert inv.resolved_data_scope == [4, 5, 6, 7, 8, 9]
+        assert inv.health_config_sha256 is None
+        assert not os.path.exists(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
+
+    def test_partial_scope_without_files_fails(self, tmp_path):
+        args = _normalized("--data_scope", "4-9")
+        args.workspace = str(tmp_path)
+        with pytest.raises(ValueError):
+            runner.compute_expected_invariants(args)
+
+
+class TestDataScopeChainWiring:
+    """DS6c wiring through main(): invariants computed before restore, the
+    three params reach run_workflow, and a conflicting second invocation
+    fails at startup with a crashed manifest."""
+
+    def _main(self, tmp_path, *extra):
+        argv = [
+            "--workspace",
+            str(tmp_path),
+            "--start_iteration",
+            "1",
+            "--run_name",
+            "iter_001",
+            *extra,
+        ]
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            code = _run_main(argv)
+        return code, mock_wf
+
+    def test_scope_and_gates_reach_workflow(self, tmp_path):
+        code, mock_wf = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+        assert code == 0
+        kwargs = mock_wf.call_args.kwargs
+        assert kwargs["data_scope"] == DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+        assert kwargs["health_gate_enabled"] is True
+        assert kwargs["health_gate_files"] == [4, 7, 9]
+        # Invariants were materialized into the chain root pre-restore.
+        assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
+
+    def test_conflicting_second_invocation_crashes_before_workflow(self, tmp_path):
+        code, _ = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+        assert code == 0
+        # Same workspace, different monitored files → the materialized-config
+        # immutability guard fires inside compute_expected_invariants, before
+        # restore/run_workflow; the runner writes a crashed manifest.
+        code2, mock_wf2 = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "5,8")
+        assert code2 == 1
+        mock_wf2.assert_not_called()
+        manifest = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())
+        assert manifest["status"] == "failed"
+
+
+class TestManifestInvariantStamps:
+    def test_completed_manifest_carries_stamps(self, tmp_path):
+        stub = _StubResult("c8_test_arch_a")
+        stub.resolved_data_scope = [4, 5, 6, 7, 8, 9]
+        stub.health_gate_enabled = True
+        stub.health_config_sha256 = "e" * 64
+        iter_dir = tmp_path / "iter_001"
+        iter_dir.mkdir()
+        manifest = runner.write_manifest(str(iter_dir), "iter_001", results=[stub])
+        assert manifest["resolved_data_scope"] == [4, 5, 6, 7, 8, 9]
+        assert manifest["health_gate_enabled"] is True
+        assert manifest["health_config_sha256"] == "e" * 64
+
+
+class TestDeprecatedStrategyFlags:
+    """DS7 — --trial_strategy / --target_files are accepted no-ops: warn
+    when non-default, never reach run_workflow."""
+
+    def test_non_default_values_warn(self):
+        with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+            _normalized("--trial_strategy", "anchors")
+        with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+            _normalized("--target_files", "3", "7")
+
+    def test_defaults_do_not_warn(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            _normalized()
+
+    def test_deprecated_values_never_reach_run_workflow(self, tmp_path):
+        argv = [
+            "--workspace",
+            str(tmp_path),
+            "--start_iteration",
+            "1",
+            "--run_name",
+            "iter_001",
+            "--trial_strategy",
+            "anchors",
+        ]
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            with pytest.warns(DeprecationWarning):
+                code = _run_main(argv)
+        assert code == 0
+        kwargs = mock_wf.call_args.kwargs
+        assert "trial_strategy" not in kwargs
+        assert "target_files" not in kwargs
+        assert "eval_strategy" not in kwargs

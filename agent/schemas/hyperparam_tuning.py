@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
 # ---------------------------------------------------------------------------
@@ -399,6 +400,42 @@ class ExperimentRecord(BaseModel):
     target_files: list[int] | None = Field(
         default=None,
         description="File indices sampled (only for 'target' strategy).",
+    )
+    # --- DataScope stamps + strategy-normalization provenance (DS5) ---
+    # The existing ``trial_strategy`` / ``eval_strategy`` fields above hold
+    # the EFFECTIVE (executed) strategies; the ``planned_*`` fields record
+    # what the LLM plan proposed before any partial-scope normalization.
+    resolved_data_scope: list[int] | None = Field(
+        default=None,
+        description=(
+            "The run's resolved DataScope (sorted allowed file indices). "
+            "None on legacy records = full scope. Scope-homogeneity ingress "
+            "checks compare this stamp."
+        ),
+    )
+    health_gate_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the HealthGate subsystem was enabled for this run. "
+            "False makes candidate eligibility waive the gate requirement "
+            "(self-describing record — see candidate_eligibility). "
+            "None on legacy records = enabled."
+        ),
+    )
+    planned_trial_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
+        default=None,
+        description="LLM-planned training strategy before normalization.",
+    )
+    planned_eval_strategy: Literal["snapshot", "anchors", "target"] | None = Field(
+        default=None,
+        description="LLM-planned eval strategy before normalization.",
+    )
+    strategy_normalization_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the planned strategies were normalized to the effective "
+            "ones (e.g. 'partial_data_scope'). None = no normalization."
+        ),
     )
     file_vector: list[float | None] | None = Field(
         default=None,
@@ -796,19 +833,18 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # Training data
-    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy for training: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files).",
-    )
+    # DS7 — the operator-side ``trial_strategy`` / ``target_files`` /
+    # ``eval_strategy`` input fields were deleted: dead at both ends
+    # (threaded from CLI into this schema but never read by the tuner loop —
+    # per-round strategy comes from the LLM plan, normalized under a partial
+    # DataScope). Old serialized inputs carrying the removed keys still
+    # validate (no ``extra="forbid"``). Per-round provenance lives on
+    # ``ExperimentRecord``; data restriction is ``data_scope``'s job.
     trial_portion: float = Field(
         default=0.1,
         ge=0.0,
         le=1.0,
         description="Fraction of segments per file for the training scope.",
-    )
-    target_files: list[int] = Field(
-        default_factory=list,
-        description="File indices to sample from. Required when trial_strategy='target'.",
     )
     train_portion: float = Field(
         default=0.1,
@@ -818,10 +854,6 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # Validation data
-    eval_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy for validation.",
-    )
     eval_portion: float = Field(
         default=0.1,
         ge=0.0,
@@ -1147,19 +1179,66 @@ class HyperparamTuningInput(BaseModel):
         default_factory=dict,
         description=(
             "Hard overrides applied to every ExperimentPlan after the LLM "
-            "produces it. Keys must be valid ExperimentPlan field names "
-            "(e.g. trial_portion, train_portion). The merged result is "
-            "re-validated through Pydantic, so invalid values are caught. "
-            "Empty dict (default) = LLM has full control."
+            "produces it. Keys must be valid ExperimentPlan field names or "
+            "aliases (e.g. trial_portion, model_config) — unknown keys fail "
+            "schema validation, and keys are normalized to alias form. The "
+            "merged plan is re-validated every round; an invalid effective "
+            "plan raises PlanOverridesError and terminates the run (FU-10 — "
+            "the operator lock is never silently released). Empty dict "
+            "(default) = LLM has full control."
+        ),
+    )
+    data_scope: DataScope = Field(
+        default_factory=DataScope.default,
+        description=(
+            "Which subset of the dataset this run may access. Default = the "
+            "complete dataset (behavior identical to pre-scope runs). Under "
+            "a partial scope only 'snapshot' sampling is legal; enforcement "
+            "is constructive (build_sample_set) + the sandbox boundary "
+            "invariant — never prompts. Dataset-resolved validation (is the "
+            "scope partial? is file_index inside it?) happens at startup via "
+            "validate_runtime_config(), NOT in schema validators. "
+            "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    health_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether the HealthGate subsystem participates in this run. "
+            "False = no gate evaluation, no gate persistence, and candidate "
+            "eligibility waives the gate requirement (successful finite-"
+            "score records are VALID). Score-validity classification of "
+            "non-finite scores stays active regardless."
+        ),
+    )
+    health_gate_files: list[int] | None = Field(
+        default=None,
+        description=(
+            "Run-level shared monitored-file list for ALL file-accessing "
+            "HealthGate checks (v1: uniform across blocking + recording-"
+            "only). None + full scope = YAML defaults; None + partial scope "
+            "= startup error (an explicit in-scope list is required — no "
+            "automatic default, no intersection). Requires "
+            "health_gate_enabled=True."
         ),
     )
 
     @model_validator(mode="after")
-    def _validate_trial_fields(self):
-        """Cross-field validation for trial mode parameters."""
-        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
+    def _validate_health_gate_consistency(self):
+        """Dataset-independent internal consistency only (see the schema/
+        runtime validation split in docs/design/enable_partial_file_list.md
+        — anything requiring dataset resolution lives in
+        ``validate_runtime_config``)."""
+        if not self.health_gate_enabled and self.health_gate_files is not None:
             raise ValueError(
-                "target_files must be non-empty when is_trial=True and trial_strategy='target'."
+                "health_gate_files must be None when health_gate_enabled=False "
+                "— a disabled HealthGate subsystem monitors nothing."
+            )
+        if self.health_gate_files is not None and not self.health_gate_files:
+            raise ValueError(
+                "health_gate_files must be non-empty when provided — to "
+                "monitor nothing, set health_gate_enabled=False (or use an "
+                "observe/disabled gate config), never an empty file list."
             )
         return self
 
@@ -1238,13 +1317,10 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Seeding ---
-    seed_records: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Pre-existing experiment records injected into the agent's memory before round 1. "
-            "Typically contains the baseline result so the agent knows what benchmark to beat."
-        ),
-    )
+    # DS7 — ``seed_records`` deleted: schema-only with zero consumers
+    # (discovered during DS6d). Seeding flows through
+    # ``run_comparison.seed_agent_memory`` → summary file →
+    # ``sandbox.get_summary()``, which the DS6b ingress validation covers.
 
     # --- LLM (planner) ---
     llm_provider: Literal["gemini", "openai", "deepseek"] = Field(
@@ -1318,6 +1394,113 @@ class HyperparamTuningInput(BaseModel):
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",
     )
+
+    @field_validator("plan_overrides")
+    @classmethod
+    def _validate_plan_override_keys(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """FU-10 — operator overrides are a contract, validated at the
+        earliest possible point (input construction).
+
+        Unknown keys are a hard error, not a per-round warning. Keys are
+        normalized to the alias form that ``ExperimentPlan.model_dump(
+        by_alias=True)`` emits (``model_cfg`` → ``model_config``, …), so
+        the tuner's merge REPLACES the intended field instead of adding a
+        stray key next to its aliased twin. Passing both a field's python
+        name and its alias is ambiguous and rejected.
+
+        Value validation needs the complete plan (cross-field validators)
+        and therefore happens at each round's merge — where an invalid
+        effective plan raises ``PlanOverridesError`` instead of falling
+        back to the unclamped LLM plan.
+        """
+        if not v:
+            return v
+        key_map: dict[str, str] = {}
+        for name, field in ExperimentPlan.model_fields.items():
+            canonical = field.alias or name
+            key_map[name] = canonical
+            if field.alias:
+                key_map[field.alias] = canonical
+        unknown = sorted(k for k in v if k not in key_map)
+        if unknown:
+            raise ValueError(
+                f"plan_overrides contains unknown ExperimentPlan field(s): "
+                f"{unknown}. Valid keys: {sorted(set(key_map))}"
+            )
+        normalized: dict[str, Any] = {}
+        for k, val in v.items():
+            canonical = key_map[k]
+            if canonical in normalized:
+                raise ValueError(
+                    f"plan_overrides sets {canonical!r} twice (python name "
+                    f"and alias both given) — pass exactly one."
+                )
+            normalized[canonical] = val
+        return normalized
+
+
+class PlanOverridesError(ValueError):
+    """Operator-supplied ``plan_overrides`` produced an invalid effective plan.
+
+    Raised at the per-round merge (FU-10): the override lock is a contract,
+    so an effective plan that fails validation terminates the run instead
+    of silently releasing the lock and continuing with the LLM's unclamped
+    plan. Deterministic on retry — the tuner must never catch this in its
+    attempt-retry machinery.
+    """
+
+
+def validate_runtime_config(
+    agent_input: HyperparamTuningInput,
+    dataset: DatasetConfig = TIDMAD,
+) -> list[int]:
+    """Dataset-resolved startup validation for a tuner run.
+
+    The second stage of the schema/runtime validation split
+    (docs/design/enable_partial_file_list.md): schema validators check
+    dataset-independent internal consistency; this function resolves the
+    DataScope against the dataset definition and validates everything that
+    depends on that resolution. Called at tuner ``run()`` entry and workflow
+    pre-flight, BEFORE any LLM call or file I/O. Pure — no I/O; the
+    subsequent health-config materialization (``materialize_effective_config``
+    + ``validate_health_scope``) performs the monitored-file subset check.
+
+    Returns:
+        The resolved scope (sorted list of allowed file indices).
+
+    Raises:
+        ValueError: Out-of-range scope; partial scope with a non-snapshot
+            ``formal_strategy`` (illegal operator configuration); partial
+            scope with gates enabled but no explicit ``health_gate_files``;
+            single-file mode with ``file_index`` outside the scope.
+    """
+    resolved = agent_input.data_scope.resolve(dataset)
+    is_partial = resolved != list(range(dataset.num_files))
+    if not is_partial:
+        return resolved
+
+    if agent_input.formal_strategy != "snapshot":
+        raise ValueError(
+            f"formal_strategy={agent_input.formal_strategy!r} is not allowed "
+            f"under a partial DataScope {resolved} — only 'snapshot' may be "
+            f"used when the scope is a subset of the dataset. Operator "
+            f"configuration is a contract: fix the flag, it is not "
+            f"normalized."
+        )
+    if agent_input.health_gate_enabled and agent_input.health_gate_files is None:
+        raise ValueError(
+            f"A partial DataScope {resolved} with HealthGate enabled requires "
+            f"an explicit --health_gate_files list (the YAML default "
+            f"monitored files are full-dataset placements; there is no "
+            f"automatic default and no intersection). Pass in-scope files, "
+            f"or disable the subsystem with --no-health_gate_enabled."
+        )
+    if not agent_input.is_trial and agent_input.file_index not in resolved:
+        raise ValueError(
+            f"file_index={agent_input.file_index} (single-file mode) is "
+            f"outside the DataScope {resolved}."
+        )
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -1546,8 +1729,42 @@ class HyperparamTuningOutput(BaseModel):
     health_checks_config: str | None = Field(
         default=None,
         description=(
-            "HealthGate YAML override consumed by this tuner invocation. "
-            "None means the shipped default configuration was used."
+            "EFFECTIVE HealthGate YAML consumed by this tuner invocation "
+            "(the per-workspace materialized path since DS5; the operator's "
+            "source path is in health_checks_config_source). None means the "
+            "shipped default configuration was used pre-DS5, or the "
+            "subsystem was disabled."
+        ),
+    )
+    # --- DataScope + HealthGate subsystem stamps (DS5) ---
+    resolved_data_scope: list[int] | None = Field(
+        default=None,
+        description=(
+            "The run's resolved DataScope (sorted allowed file indices). "
+            "None on legacy outputs = full scope. Ingress scope-homogeneity "
+            "checks compare this stamp."
+        ),
+    )
+    health_gate_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the HealthGate subsystem participated in this run. "
+            "None on legacy outputs = enabled."
+        ),
+    )
+    health_checks_config_source: str | None = Field(
+        default=None,
+        description=(
+            "Operator-supplied HealthGate config path before materialization "
+            "(None = shipped default, or subsystem disabled)."
+        ),
+    )
+    health_config_sha256: str | None = Field(
+        default=None,
+        description=(
+            "sha256 of the materialized effective config body — the value "
+            "the run-invariants lock pins. None when the subsystem is "
+            "disabled or on legacy outputs."
         ),
     )
     formal_reference_score: float | None = Field(
@@ -1737,7 +1954,9 @@ class HyperparamTuningOutput(BaseModel):
             "loop aborted via the consecutive-failure brake."
         ),
     )
-    termination_reason: Literal["completed", "aborted_fail_rounds", "aborted_by_gate"] = Field(
+    termination_reason: Literal[
+        "completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation"
+    ] = Field(
         default="completed",
         description=(
             "Why the loop exited. 'completed' = reached max_rounds successful "
@@ -1745,7 +1964,9 @@ class HyperparamTuningOutput(BaseModel):
             "rounds exhausted their attempt budgets; 'aborted_by_gate' = a "
             "health-check gate action (SKIP_ITER) broke the while loop "
             "before max_rounds — see docs/design/pluggable_health_checks.md "
-            "§4."
+            "§4; 'scope_violation' = a DataScope violation reached an "
+            "executor (non-retryable configuration/invariant failure, "
+            "status='failed' — docs/design/enable_partial_file_list.md DS5)."
         ),
     )
 

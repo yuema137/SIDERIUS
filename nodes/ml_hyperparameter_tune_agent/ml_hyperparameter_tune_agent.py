@@ -19,6 +19,7 @@ import math
 import os
 import time
 import traceback
+import warnings
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -34,8 +35,10 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
     HyperparamTuningOutput,
     PhysicalRejection,
+    PlanOverridesError,
     TrialConfig,
     serialize_expert_advice,
+    validate_runtime_config,
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
@@ -48,10 +51,19 @@ from agent.utils.architectural_pattern_tagger import (
     tag_architecture,
 )
 from core.hardware_context import get_or_create
+from core.run_invariants import (
+    RunInvariants,
+    build_run_invariants,
+    ensure_run_invariants,
+    load_run_invariants,
+    validate_run_invariants,
+    validate_stamped_invariants,
+)
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
@@ -661,10 +673,15 @@ def _compute_termination_state(
     consecutive_fails: int,
     max_fail_rounds: int,
     gate_aborted: bool,
+    scope_violation_reason: str | None = None,
 ) -> tuple[str, str]:
     """Compute ``(run_status, termination_reason)`` from loop-exit state.
 
     Precedence (highest → lowest):
+      0. ``scope_violation_reason`` set (DataScope DS5) → ``("failed",
+         "scope_violation")``. A configuration/invariant failure —
+         deterministic on retry, so it outranks even the deliberate gate
+         abort: nothing about this run's results is trustworthy.
       1. ``gate_aborted=True`` (SKIP_ITER from a health gate) →
          ``("partial", "aborted_by_gate")``. Wins over every other
          condition because the gate signal is a deliberate abort, not a
@@ -677,6 +694,8 @@ def _compute_termination_state(
     See ``docs/design/pluggable_health_checks.md`` §4 and the audit
     Gap #3 fix in the follow-up to commit-5b.
     """
+    if scope_violation_reason:
+        return "failed", "scope_violation"
     if gate_aborted:
         return "partial", "aborted_by_gate"
     if completed_rounds >= max_rounds:
@@ -1178,6 +1197,58 @@ def _render_gate_exhaustion_trigger_b_summary(
 # ---------------------------------------------------------------------------
 
 
+def _validate_history_and_lock(
+    workspace: str,
+    run_invariants: RunInvariants,
+    existing_history: list[dict[str, Any]],
+    lock_was_present: bool,
+) -> None:
+    """DS6b — ingress validation + deferred lock creation.
+
+    On a lock-less workspace, every restored FINAL record's invariant stamps
+    are checked BEFORE the lock is stamped (error records deliberately carry
+    no stamps — DS5b — and are skipped), so a legacy workspace is never
+    silently locked. A lock-present workspace was already validated at
+    startup; its records were produced under that lock.
+    """
+    if not lock_was_present:
+        for rec in existing_history:
+            if rec.get("status") in {"success", "failed_mode_collapse"}:
+                validate_stamped_invariants(
+                    rec,
+                    run_invariants,
+                    full_scope=list(range(DATASET_CONFIG.num_files)),
+                    source=f"workspace summary record {rec.get('exp_id') or '(no exp_id)'}",
+                )
+    ensure_run_invariants(workspace, run_invariants)
+
+
+def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> ExperimentPlan:
+    """Merge operator ``plan_overrides`` over the LLM plan and revalidate.
+
+    FU-10 — the override lock is a contract: keys were validated and
+    alias-normalized at schema level (`HyperparamTuningInput`), so the merge
+    over the ``by_alias`` dump replaces exactly the intended fields. An
+    effective plan that fails validation raises ``PlanOverridesError``
+    (run-terminating, never retried) — the lock is never silently released
+    back to the unclamped LLM plan. Empty overrides return the plan as-is.
+    """
+    if not overrides:
+        return plan
+    merged = plan.model_dump(by_alias=True) | overrides
+    try:
+        effective = ExperimentPlan.model_validate(merged)
+    except Exception as e:
+        raise PlanOverridesError(
+            f"plan_overrides produced an invalid effective plan: {e}\n"
+            f"  overrides={overrides}\n"
+            f"  Fix the operator configuration and rerun — the override "
+            f"lock is never silently released."
+        ) from e
+    print(f"  Plan overrides applied: {list(overrides.keys())}")
+    return effective
+
+
 def _resume_progress(
     existing_history: list[dict[str, Any]],
     *,
@@ -1306,6 +1377,47 @@ class HyperparamTuningAgent:
         workspace = storage_local.workspace
         run_name = storage_local.run_name
 
+        # --- DataScope + HealthGate startup validation (DS5) ---
+        # Dataset-resolved checks (schema validators cover only internal
+        # consistency), then health-config materialization — all BEFORE any
+        # LLM call, sandbox construction, or file I/O. See
+        # docs/design/enable_partial_file_list.md.
+        resolved_data_scope = validate_runtime_config(agent_input)
+        scope_is_partial = resolved_data_scope != list(range(DATASET_CONFIG.num_files))
+        health_checks_config_source = agent_input.health_checks_config
+        # DS6b — build_run_invariants is the ONE shared path (tuner +
+        # workflow) that materializes/hashes the effective config and then
+        # constructs the invariants from the result, so the sha in the lock
+        # always describes the exact config this run reads.
+        run_invariants, _effective_config_path = build_run_invariants(
+            resolved_data_scope=resolved_data_scope,
+            health_gate_enabled=agent_input.health_gate_enabled,
+            health_gate_files=agent_input.health_gate_files,
+            health_checks_config=health_checks_config_source,
+            workspace=workspace,
+        )
+        health_config_sha256 = run_invariants.health_config_sha256
+        if _effective_config_path is not None:
+            # Path swap: every downstream path-based loader (gate lookup,
+            # evaluation, output persistence) now reads the materialized
+            # effective config through the existing plumbing.
+            agent_input.health_checks_config = _effective_config_path
+        # Run-invariants lock (DS6b): an existing lock is validated NOW so a
+        # mismatched configuration fails before any hardware/LLM/sandbox
+        # work. CREATION on a lock-less workspace is deferred until the
+        # workspace's existing history has been stamp-validated (see the
+        # get_summary() site) — a legacy workspace is never silently locked
+        # before its records are checked against this run's invariants.
+        _lock_was_present = load_run_invariants(workspace) is not None
+        if _lock_was_present:
+            validate_run_invariants(workspace, run_invariants)
+        if scope_is_partial:
+            print(
+                f"[DATASCOPE] Partial scope active: files={resolved_data_scope} "
+                f"| health_gate_enabled={agent_input.health_gate_enabled} "
+                f"| monitored={agent_input.health_gate_files}"
+            )
+
         # Per-run hardware manifest (Phase 6.6 §3.9) — file IPC with sandbox children.
         hardware_context = get_or_create(Path(workspace), run_name)
         print(
@@ -1384,6 +1496,7 @@ class HyperparamTuningAgent:
             workspace=workspace,
             progress_bar=agent_input.progress_bar,
             file_index=file_index,
+            data_scope=agent_input.data_scope,
         )
 
         # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
@@ -1462,6 +1575,14 @@ class HyperparamTuningAgent:
             "formal_reference_score": formal_reference_score,
             "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
             "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            # DataScope + HealthGate subsystem stamps (DS5).
+            "resolved_data_scope": resolved_data_scope,
+            "health_gate_enabled": agent_input.health_gate_enabled,
+            "health_checks_config_source": health_checks_config_source,
+            "health_checks_config_effective": agent_input.health_checks_config
+            if agent_input.health_gate_enabled
+            else None,
+            "health_config_sha256": health_config_sha256,
             "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
@@ -1522,12 +1643,20 @@ class HyperparamTuningAgent:
                 f"[RESUME] Found {completed_rounds}/{max_rounds} completed "
                 f"round(s) and {total_attempts} prior attempt(s); continuing."
             )
+        # DS6b — ingress validation + deferred lock creation, still before
+        # any LLM call (the first plan call happens in the round loop below).
+        _validate_history_and_lock(workspace, run_invariants, existing_history, _lock_was_present)
         consecutive_fails = 0
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state
         # to distinguish gate-driven aborts from fail-round-driven aborts
         # and healthy completions (audit Gap #3, follow-up to commit-5b).
         _gate_aborted = False
+        # DataScope DS5 — non-retryable configuration/invariant failure flag.
+        # A scope violation reaching an executor means the scope plumbing has
+        # a bug; it is deterministic on retry, so the run terminates instead
+        # of consuming attempt retries or waiting for max_fail_rounds.
+        _scope_violation_reason: str | None = None
         # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
         # Appended to on every evaluate_vram_skill feasible=False event.
         # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
@@ -1680,6 +1809,8 @@ class HyperparamTuningAgent:
                         force_formal_round=agent_input.force_formal_round,
                         plan_overrides=agent_input.plan_overrides,
                         max_epochs=agent_input.max_epochs,
+                        # DS5c — partial-scope disclosure (None = full scope).
+                        resolved_data_scope=resolved_data_scope if scope_is_partial else None,
                         trial_vram_budget_gb=trial_vram_budget,
                         formal_vram_budget_gb=formal_vram_budget,
                         trial_time_budget_minutes=trial_time_budget,
@@ -1704,27 +1835,10 @@ class HyperparamTuningAgent:
                     # Validate LLM output into ExperimentPlan (with fallback)
                     plan = ExperimentPlan.with_defaults(decision)
 
-                    # Apply hard overrides from operator config (before other overrides).
-                    # Unknown keys are warned and skipped; invalid values are warned
-                    # and skipped — the run continues with the LLM's original value.
-                    if agent_input.plan_overrides:
-                        valid_fields = set(ExperimentPlan.model_fields.keys())
-                        unknown = set(agent_input.plan_overrides) - valid_fields
-                        if unknown:
-                            print(f"  [WARN] plan_overrides: ignoring unknown keys: {unknown}")
-                        safe_overrides = {
-                            k: v for k, v in agent_input.plan_overrides.items() if k in valid_fields
-                        }
-                        if safe_overrides:
-                            try:
-                                merged = plan.model_dump(by_alias=True) | safe_overrides
-                                plan = ExperimentPlan.model_validate(merged)
-                                print(f"  Plan overrides applied: {list(safe_overrides.keys())}")
-                            except Exception as e:
-                                print(
-                                    f"  [WARN] plan_overrides validation failed ({e}); "
-                                    f"using LLM plan as-is"
-                                )
+                    # Apply hard overrides from operator config (before other
+                    # overrides). FU-10 — an invalid effective plan raises
+                    # PlanOverridesError (run-terminating); see the helper.
+                    plan = _apply_plan_overrides(plan, agent_input.plan_overrides)
 
                     # Override chain: trial-allowed lockout + last-round override
                     # + forced-formal hyperparameter inheritance gated on
@@ -1737,6 +1851,29 @@ class HyperparamTuningAgent:
                         formal_round_strategy=agent_input.formal_round_strategy,
                         memory_history=memory_history,
                     )
+
+                    # DataScope DS5 — normalize LLM-planned strategies under a
+                    # partial scope. LLM plans are proposals (normalized with
+                    # persisted provenance, not failed); operator config was
+                    # already validated at startup; the sandbox boundary
+                    # still fails hard if anything slips through.
+                    planned_trial_strategy = plan.trial_strategy
+                    planned_eval_strategy = plan.eval_strategy
+                    strategy_normalization_reason: str | None = None
+                    if (
+                        scope_is_partial
+                        and plan.is_trial
+                        and (plan.trial_strategy != "snapshot" or plan.eval_strategy != "snapshot")
+                    ):
+                        print(
+                            f"  [DATASCOPE] normalized strategies: "
+                            f"trial {plan.trial_strategy} → snapshot, "
+                            f"eval {plan.eval_strategy} → snapshot "
+                            f"(partial scope {resolved_data_scope})"
+                        )
+                        plan.trial_strategy = "snapshot"
+                        plan.eval_strategy = "snapshot"
+                        strategy_normalization_reason = "partial_data_scope"
 
                     # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
                     if agent_input.max_epochs is not None:
@@ -1823,6 +1960,7 @@ class HyperparamTuningAgent:
                             trial_portion=trial_config.trial_portion,
                             target_files=trial_config.target_files or None,
                             seed=trial_config.train_sampling_seed,
+                            scope=agent_input.data_scope,
                         )
                         eval_sample_set = build_sample_set(
                             is_trial=True,
@@ -1830,6 +1968,7 @@ class HyperparamTuningAgent:
                             trial_portion=trial_config.eval_portion,
                             target_files=trial_config.target_files or None,
                             seed=trial_config.eval_sampling_seed,
+                            scope=agent_input.data_scope,
                         )
                         print(
                             f"  {trial_config.mode.capitalize()} mode: "
@@ -2255,6 +2394,13 @@ class HyperparamTuningAgent:
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
                     if train_status.get("status") == "error":
+                        # DataScope DS5 — scope violations are non-retryable
+                        # configuration/invariant failures: terminate the run.
+                        if train_status.get("error_type") == "scope_violation":
+                            _scope_violation_reason = train_status.get(
+                                "message", "scope violation in training"
+                            )
+                            break
                         error_msg = train_status.get("message", "Unknown training error")
                         is_oom = (
                             "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
@@ -2303,6 +2449,12 @@ class HyperparamTuningAgent:
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
                         inference_time = round(time.time() - t0, 1)
                         if inf_status.get("status") == "error":
+                            # DataScope DS5 — non-retryable: terminate the run.
+                            if inf_status.get("error_type") == "scope_violation":
+                                _scope_violation_reason = inf_status.get(
+                                    "message", "scope violation in inference"
+                                )
+                                break
                             error_msg = inf_status.get("message", "Unknown inference error")
                             is_oom = (
                                 "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
@@ -2442,51 +2594,65 @@ class HyperparamTuningAgent:
                                 def _target_fn(i: int, _base: str = TIDMAD_DATA_DIR) -> str:
                                     return os.path.join(_base, f"abra_validation_{i:04d}.h5")
 
-                                _gate_ids = (
-                                    get_gates_for_position(
-                                        round_index,
-                                        config_path=agent_input.health_checks_config,
+                                if agent_input.health_gate_enabled:
+                                    _gate_ids = (
+                                        get_gates_for_position(
+                                            round_index,
+                                            config_path=agent_input.health_checks_config,
+                                        )
+                                        if agent_input.health_checks_config
+                                        else get_gates_for_position(round_index)
                                     )
-                                    if agent_input.health_checks_config
-                                    else get_gates_for_position(round_index)
-                                )
-                                _sandbox_dirs = getattr(sandbox, "dirs", {})
-                                _models_dir = (
-                                    _sandbox_dirs.get("models")
-                                    if isinstance(_sandbox_dirs, dict)
-                                    else None
-                                )
-                                _checkpoint_path = (
-                                    os.path.join(
-                                        _models_dir,
-                                        f"model_{model_type}_{exp_id}_agent.pth",
+                                    _sandbox_dirs = getattr(sandbox, "dirs", {})
+                                    _models_dir = (
+                                        _sandbox_dirs.get("models")
+                                        if isinstance(_sandbox_dirs, dict)
+                                        else None
                                     )
-                                    if _gate_ids and _models_dir
-                                    else None
-                                )
-                                _hc_ctx = HealthCheckContext(
-                                    model_name=model_type,
-                                    run_name=run_name,
-                                    round_index=round_index,
-                                    denoised_filename_fn=_denoised_fn,
-                                    target_path_fn=_target_fn,
-                                    checkpoint_path=_checkpoint_path,
-                                    file_vector=file_vector,
-                                    denoising_score=final_scalar,
-                                )
-                                _gate_results, _persisted_gate_results, resolved_action = (
-                                    evaluate_and_persist_health_gates(
-                                        _hc_ctx,
-                                        config_path=agent_input.health_checks_config,
-                                        production_config_path=os.path.join(
-                                            SIDERIUS_ROOT, "configs", "health_checks.yaml"
-                                        ),
-                                        gate_ids=_gate_ids,
+                                    _checkpoint_path = (
+                                        os.path.join(
+                                            _models_dir,
+                                            f"model_{model_type}_{exp_id}_agent.pth",
+                                        )
+                                        if _gate_ids and _models_dir
+                                        else None
                                     )
-                                )
-                                is_degenerate, failure_reason, _gate_action_str = (
-                                    _gate_results_to_score_meta(_gate_results, resolved_action)
-                                )
+                                    _hc_ctx = HealthCheckContext(
+                                        model_name=model_type,
+                                        run_name=run_name,
+                                        round_index=round_index,
+                                        denoised_filename_fn=_denoised_fn,
+                                        target_path_fn=_target_fn,
+                                        checkpoint_path=_checkpoint_path,
+                                        file_vector=file_vector,
+                                        denoising_score=final_scalar,
+                                    )
+                                    _gate_results, _persisted_gate_results, resolved_action = (
+                                        evaluate_and_persist_health_gates(
+                                            _hc_ctx,
+                                            config_path=agent_input.health_checks_config,
+                                            production_config_path=os.path.join(
+                                                SIDERIUS_ROOT, "configs", "health_checks.yaml"
+                                            ),
+                                            gate_ids=_gate_ids,
+                                        )
+                                    )
+                                    is_degenerate, failure_reason, _gate_action_str = (
+                                        _gate_results_to_score_meta(_gate_results, resolved_action)
+                                    )
+                                else:
+                                    # DataScope DS5 — HealthGate subsystem
+                                    # explicitly disabled: no gate evaluation,
+                                    # no gate persistence. Score-validity
+                                    # classification (the merge below) stays
+                                    # active regardless.
+                                    _persisted_gate_results = []
+                                    resolved_action = GateAction.CONTINUE
+                                    is_degenerate, failure_reason, _gate_action_str = (
+                                        False,
+                                        None,
+                                        None,
+                                    )
                                 is_degenerate, failure_reason = _merge_score_validity_failure(
                                     final_scalar,
                                     is_degenerate=is_degenerate,
@@ -2511,6 +2677,13 @@ class HyperparamTuningAgent:
                                 score_res = _run_skill(
                                     "denoising_score_skill", sandbox, **active_params
                                 )
+                        except ScopeViolationError as e:
+                            # DataScope DS5 — non-retryable: terminate the run
+                            # (must precede the generic handler below, which
+                            # would otherwise convert this into a retried
+                            # error_scoring record).
+                            _scope_violation_reason = f"error_scope_violation: {e}"
+                            break
                         except Exception as e:
                             scoring_time = round(time.time() - t0, 1)
                             probe_memory(
@@ -2967,6 +3140,13 @@ class HyperparamTuningAgent:
                     # Phase L — round bookkeeping for the per-round budget audit.
                     final_record["memory"]["round_index"] = round_index
                     final_record["memory"]["attempt_in_round"] = attempt_in_round
+                    # DataScope DS5 — run-invariant stamps (scope-homogeneity
+                    # ingress checks + self-describing disabled-mode records
+                    # for candidate eligibility) and strategy-normalization
+                    # provenance. The existing trial_strategy / eval_strategy
+                    # fields below hold the EFFECTIVE strategies.
+                    final_record["resolved_data_scope"] = resolved_data_scope
+                    final_record["health_gate_enabled"] = agent_input.health_gate_enabled
                     # Trial context
                     if trial_config.is_trial:
                         final_record["is_trial"] = True
@@ -2975,6 +3155,11 @@ class HyperparamTuningAgent:
                         final_record["eval_strategy"] = trial_config.eval_strategy
                         final_record["eval_portion"] = trial_config.eval_portion
                         final_record["train_portion"] = trial_config.train_portion
+                        final_record["planned_trial_strategy"] = planned_trial_strategy
+                        final_record["planned_eval_strategy"] = planned_eval_strategy
+                        final_record["strategy_normalization_reason"] = (
+                            strategy_normalization_reason
+                        )
                         if trial_config.trial_strategy == "target":
                             final_record["target_files"] = trial_config.target_files
 
@@ -3043,6 +3228,15 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    if isinstance(e, PlanOverridesError):
+                        # FU-10 — deterministic operator-configuration error;
+                        # retrying cannot change it and recording it as an
+                        # attempt failure would burn the retry budget.
+                        # Propagate out of run(). (Folded into this handler
+                        # rather than an own except clause: one more clause
+                        # on this try pushes run() past pyright's
+                        # complexity-analysis ceiling.)
+                        raise
                     print(f"Loop Error: {e}")
                     traceback.print_exc()
                     failure_reason = str(e)
@@ -3092,6 +3286,16 @@ class HyperparamTuningAgent:
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
                     time.sleep(5)
+
+            # DataScope DS5 — a scope violation is deterministic on retry:
+            # terminate the run immediately, before any retry/fail-round
+            # bookkeeping.
+            if _scope_violation_reason:
+                print(
+                    f"  [DATASCOPE] Non-retryable scope violation — terminating "
+                    f"run: {_scope_violation_reason}"
+                )
+                break
 
             # Phase L — inner attempt loop ended without a successful
             # break. Bump the consecutive-failure counter so the outer
@@ -3158,6 +3362,7 @@ class HyperparamTuningAgent:
             consecutive_fails=consecutive_fails,
             max_fail_rounds=max_fail_rounds_setting,
             gate_aborted=_gate_aborted,
+            scope_violation_reason=_scope_violation_reason,
         )
         all_records = sandbox.get_summary()
         successful_records = [
@@ -3225,6 +3430,11 @@ class HyperparamTuningAgent:
             "model_type": model_type_setting,
             "file_index": file_index,
             "health_checks_config": agent_input.health_checks_config,
+            # DataScope + HealthGate subsystem stamps (DS5).
+            "resolved_data_scope": resolved_data_scope,
+            "health_gate_enabled": agent_input.health_gate_enabled,
+            "health_checks_config_source": health_checks_config_source,
+            "health_config_sha256": health_config_sha256,
             "formal_reference_score": formal_reference_score,
             "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
             "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
@@ -3470,7 +3680,7 @@ def main() -> int:
         type=str,
         default="snapshot",
         choices=["snapshot", "anchors", "target"],
-        help="Training sampling strategy (default: snapshot).",
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--trial_portion",
@@ -3483,7 +3693,7 @@ def main() -> int:
         type=str,
         default="snapshot",
         choices=["snapshot", "anchors", "target"],
-        help="Validation sampling strategy (default: snapshot).",
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--eval_portion",
@@ -3576,6 +3786,39 @@ def main() -> int:
         type=str,
         default=None,
         help="Optional HealthGate YAML override; omitted uses configs/health_checks.yaml.",
+    )
+    # --- DataScope + HealthGate subsystem (DS5c) ---
+    parser.add_argument(
+        "--data_scope",
+        type=str,
+        default=None,
+        help=(
+            "Restrict the run to a file subset: '4-9', '4,5,6,7,8,9', or "
+            "mixed '0-3,7'. Omitted = complete dataset. Under a partial "
+            "scope only 'snapshot' sampling is legal and "
+            "--health_gate_files is required when gates are enabled. "
+            "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "HealthGate subsystem switch (default: enabled). "
+            "--no-health_gate_enabled disables gate evaluation entirely; "
+            "successful finite-score records then count as valid candidates."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_files",
+        type=str,
+        default=None,
+        help=(
+            "Run-level shared monitored-file list for ALL HealthGate checks "
+            "(same spec format as --data_scope). Omitted + full scope = "
+            "YAML defaults; omitted + partial scope = startup error."
+        ),
     )
     parser.add_argument(
         "--resume",
@@ -3671,6 +3914,15 @@ def main() -> int:
         "file_index": args.file_index,
         "max_rounds": args.max_rounds,
         "health_checks_config": args.health_checks_config,
+        # DS5c — DataScope + HealthGate subsystem. from_cli parses "4-9" /
+        # "4,5,6,7,8,9" / mixed; schema + validate_runtime_config do the rest.
+        "data_scope": DataScope.from_cli(args.data_scope)
+        if args.data_scope
+        else DataScope.default(),
+        "health_gate_enabled": args.health_gate_enabled,
+        "health_gate_files": DataScope.from_cli(args.health_gate_files).file_indices
+        if args.health_gate_files
+        else None,
         "resume": args.resume,
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,
@@ -3685,12 +3937,19 @@ def main() -> int:
         "cleanup_denoised": args.cleanup_denoised,
         "is_trial": args.is_trial,
     }
+    # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
+    if args.trial_strategy != "snapshot" or args.eval_strategy != "snapshot":
+        warnings.warn(
+            "--trial_strategy / --eval_strategy are deprecated and IGNORED "
+            "(DS7): the input fields they fed were dead at both ends and "
+            "have been removed. Use --data_scope to restrict data.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if args.is_trial:
         input_dict.update(
             {
-                "trial_strategy": args.trial_strategy,
                 "trial_portion": args.trial_portion,
-                "eval_strategy": args.eval_strategy,
                 "eval_portion": args.eval_portion,
                 "train_portion": args.train_portion,
             }

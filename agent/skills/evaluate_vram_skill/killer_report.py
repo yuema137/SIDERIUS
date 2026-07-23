@@ -85,13 +85,25 @@ class MemoryKillerDetails(BaseModel):
 
 class KillerReport(BaseModel):
     """Full verdict payload. The wrapper flattens this into its own return
-    dict via ``.model_dump()`` per §3.7, so ``status`` / ``verdict`` /
-    ``memory_killer`` / ``suggestion`` become top-level keys in the
-    Proposer-facing response."""
+    dict per §3.7, so ``verdict`` / ``memory_killer`` / ``suggestion``
+    become top-level keys in the Proposer-facing response.
+
+    Deliberately carries NO transport ``status`` field: the report is a
+    feasibility *verdict/attribution* payload, and the wrapper's transport
+    status for an over-budget verdict is ``"success"`` (the skill ran fine;
+    the verdict is ``feasible=False``). A previous hardcoded
+    ``status="schema_violation"`` here was passed through by the wrapper's
+    infeasible path, which made the tuner's Phase-D.4 branch swallow every
+    over-budget verdict as ``skipped_schema_violation`` — silently starving
+    the ``skipped_oom_risk`` path, the B.3 PhysicalRejection buffer, the
+    K.7 gate-exhaustion triggers, and the Phase-K record fields
+    (2026-05 → 2026-07 regression; see the status-flow audit in the
+    2026-07-23 bugfix commit). ``"schema_violation"`` is reserved for real
+    ``ValidationError``s via ``_schema_violation_response``.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    status: Literal["schema_violation"] = "schema_violation"
     verdict: str
     memory_killer: MemoryKillerDetails
     suggestion: str

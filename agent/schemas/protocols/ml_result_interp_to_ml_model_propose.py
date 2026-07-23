@@ -22,7 +22,6 @@ database_full_context   DB-backed transfer: interp agent writes the interpretati
 """
 
 from collections.abc import Sequence
-from typing import Literal
 
 from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
@@ -38,6 +37,7 @@ from agent.schemas.proposal import (
     VocabEntry,
 )
 from agent.schemas.storage import StorageConfig
+from execute_tools.dataset_config import DataScope
 
 
 def local_full_context(
@@ -50,10 +50,12 @@ def local_full_context(
     mindset: str | None = None,
     agent_cards: list[AgentCard] | None = None,
     # --- Run-level data + time-budget context (workflow-supplied) ---
+    # DS7 — trial_strategy / target_files params deleted alongside the dead
+    # ProposalInput fields they fed (consumed by nobody at either end);
+    # data_scope added (DS7b) for pre-flight synthesis + prompt disclosure.
     is_trial: bool | None = None,
-    trial_strategy: Literal["snapshot", "anchors", "target"] | None = None,
+    data_scope: "DataScope | None" = None,
     trial_portion: float | None = None,
-    target_files: list[int] | None = None,
     train_portion: float | None = None,
     sampling_seed: int | None = None,
     trial_time_budget_minutes: float | None = None,
@@ -87,7 +89,7 @@ def local_full_context(
       - human_advice         : legacy human advice — wrapped into ExpertContextItem if provided
       - mindset              : optional free-text injected into the causal reasoning stage prompt
       - agent_cards          : optional list of external agent self-descriptions (Contributors block)
-      - is_trial / trial_strategy / trial_portion / target_files / train_portion /
+      - is_trial / trial_portion / train_portion /
         sampling_seed         : run-level data-sampling parameters that mirror
                                 HyperparamTuningInput exactly. Forwarded so the proposer's
                                 evaluate_time_skill gate constructs the same SampleSet the
@@ -120,7 +122,7 @@ def local_full_context(
       - reasoning_pipeline   : pipeline configuration
       - mindset              : passed through when provided
       - agent_cards          : passed through when provided
-      - is_trial / trial_strategy / trial_portion / target_files / train_portion /
+      - is_trial / trial_portion / train_portion /
         sampling_seed / trial_time_budget_minutes / formal_time_budget_minutes /
         data_dir : passed through when provided; otherwise the ProposalInput
         schema defaults apply.
@@ -207,19 +209,17 @@ def local_full_context(
     # Run-level fields for the proposer's evaluate_time_skill gate. Each is
     # only included when the caller supplied it; otherwise ProposalInput's
     # schema default takes effect (mirrors HyperparamTuningInput defaults:
-    # is_trial=False, trial_strategy="snapshot", trial_portion=0.1,
-    # target_files=[], train_portion=0.1, sampling_seed=None,
-    # trial_time_budget_minutes=None, formal_time_budget_minutes=None,
-    # data_dir=None). Phase I splits the single budget into two so each mode
-    # has its own ceiling; both are independently optional.
+    # is_trial=False, trial_portion=0.1, train_portion=0.1,
+    # sampling_seed=None, trial_time_budget_minutes=None,
+    # formal_time_budget_minutes=None, data_dir=None). Phase I splits the
+    # single budget into two so each mode has its own ceiling; both are
+    # independently optional.
     if is_trial is not None:
         result["is_trial"] = is_trial
-    if trial_strategy is not None:
-        result["trial_strategy"] = trial_strategy
+    if data_scope is not None:
+        result["data_scope"] = data_scope
     if trial_portion is not None:
         result["trial_portion"] = trial_portion
-    if target_files is not None:
-        result["target_files"] = target_files
     if train_portion is not None:
         result["train_portion"] = train_portion
     if sampling_seed is not None:

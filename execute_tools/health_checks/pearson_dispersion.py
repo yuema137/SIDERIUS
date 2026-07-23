@@ -57,7 +57,7 @@ class PearsonDispersionCheck:
                 metrics={"peek_samples_requested": peek_samples},
             )
 
-        files = self._resolve_files(ctx)
+        files = self._resolve_files(ctx, cfg)
         if not files:
             return HealthCheckResult(
                 check_name=self.name,
@@ -148,13 +148,18 @@ class PearsonDispersionCheck:
         )
 
     @staticmethod
-    def _resolve_files(ctx: HealthCheckContext) -> list[int]:
+    def _resolve_files(ctx: HealthCheckContext, cfg: dict[str, Any]) -> list[int]:
         """File-index set to measure.
 
-        Priority: (1) explicit keys in ``ctx.denoised_paths``, (2) fall
-        back to a fixed 0..19 range via ``ctx.denoised_filename_fn``,
-        (3) empty list when neither is available.
+        Priority: (1) explicit ``peek_file_indices`` in the check config —
+        the run-level monitored-file set (DataScope-aware; see
+        docs/design/enable_partial_file_list.md), (2) explicit keys in
+        ``ctx.denoised_paths``, (3) fall back to a fixed 0..19 range via
+        ``ctx.denoised_filename_fn``, (4) empty list when none is available.
         """
+        configured = cfg.get("peek_file_indices")
+        if configured:
+            return sorted({int(i) for i in configured})
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:

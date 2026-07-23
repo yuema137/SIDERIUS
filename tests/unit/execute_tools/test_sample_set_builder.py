@@ -4,8 +4,13 @@ Unit tests for execute_tools/sample_set_builder.py
 Pure logic tests — no I/O, no real data.
 """
 
+import hashlib
+import json
+from typing import ClassVar
+
 import pytest
 
+from execute_tools.dataset_config import DataScope
 from execute_tools.sample_set_builder import (
     ANCHOR_FILES,
     build_sample_set,
@@ -218,3 +223,92 @@ class TestEdgeCases:
                 trial_strategy="invalid",
                 seed=42,
             )
+
+
+# ---------------------------------------------------------------------------
+# DataScope (DS2 — docs/design/enable_partial_file_list.md)
+# ---------------------------------------------------------------------------
+
+
+def _sha16(ss) -> str:
+    return hashlib.sha256(json.dumps(ss, sort_keys=True).encode()).hexdigest()[:16]
+
+
+class TestDataScopeBehavioralIdentity:
+    """Full scope + fixed seed must reproduce the pre-DataScope SampleSets.
+
+    Golden sha16 digests captured from the pre-change builder at commit
+    56a54b8^ with seed=42, trial_portion=0.05.
+    """
+
+    GOLDEN: ClassVar[dict[str, str]] = {
+        "snapshot": "7a4c15ebefb59d55",
+        "anchors": "e025a270e0b1acc1",
+        "target": "99cf2acc582d1e17",
+    }
+    GOLDEN_FIRST_FILE_SEGS: ClassVar[list[int]] = [6, 26, 28, 35, 57]
+
+    @pytest.mark.parametrize("scope", [None, DataScope.default()])
+    @pytest.mark.parametrize("strategy", ["snapshot", "anchors", "target"])
+    def test_golden_digests(self, strategy, scope):
+        kw = {"target_files": [3, 11]} if strategy == "target" else {}
+        ss = build_sample_set(
+            is_trial=True,
+            trial_strategy=strategy,
+            trial_portion=0.05,
+            seed=42,
+            scope=scope,
+            **kw,
+        )
+        assert _sha16(ss) == self.GOLDEN[strategy]
+        assert ss[sorted(ss)[0]][:5] == self.GOLDEN_FIRST_FILE_SEGS
+
+    def test_explicit_full_range_scope_matches_none(self):
+        full = DataScope(file_indices=list(range(NUM_FILES)))
+        ss_none = build_sample_set(is_trial=True, trial_portion=0.05, seed=42)
+        ss_full = build_sample_set(is_trial=True, trial_portion=0.05, seed=42, scope=full)
+        assert ss_none == ss_full
+
+
+class TestDataScopePartial:
+    SCOPE = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
+
+    def test_snapshot_keys_equal_scope_exactly(self):
+        ss = build_sample_set(
+            is_trial=True, trial_strategy="snapshot", trial_portion=0.1, seed=42, scope=self.SCOPE
+        )
+        assert sorted(ss.keys()) == [4, 5, 6, 7, 8, 9]
+
+    def test_snapshot_segment_counts_unchanged(self):
+        ss = build_sample_set(
+            is_trial=True, trial_strategy="snapshot", trial_portion=0.1, seed=42, scope=self.SCOPE
+        )
+        expected = max(1, round(0.1 * SEGMENTS_PER_FILE))
+        for _fi, segs in ss.items():
+            assert len(segs) == expected
+
+    def test_anchors_rejected(self):
+        with pytest.raises(ValueError, match="not allowed under a partial DataScope"):
+            build_sample_set(is_trial=True, trial_strategy="anchors", seed=42, scope=self.SCOPE)
+
+    def test_target_rejected_even_when_subset_of_scope(self):
+        with pytest.raises(ValueError, match="not allowed under a partial DataScope"):
+            build_sample_set(
+                is_trial=True,
+                trial_strategy="target",
+                target_files=[4, 5],
+                seed=42,
+                scope=self.SCOPE,
+            )
+
+    def test_deterministic_with_seed(self):
+        kw = dict(is_trial=True, trial_portion=0.1, seed=42, scope=self.SCOPE)
+        assert build_sample_set(**kw) == build_sample_set(**kw)
+
+    def test_normal_mode_in_scope_passes(self):
+        ss = build_sample_set(is_trial=False, file_index=6, scope=self.SCOPE)
+        assert list(ss.keys()) == [6]
+
+    def test_normal_mode_out_of_scope_raises(self):
+        with pytest.raises(ValueError, match="file_index=2 is outside the DataScope"):
+            build_sample_set(is_trial=False, file_index=2, scope=self.SCOPE)

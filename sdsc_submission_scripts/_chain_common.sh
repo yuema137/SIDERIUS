@@ -60,6 +60,9 @@ BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
+DATA_SCOPE=""                       # DS6c: '4-9' / '4,5,6,7,8,9' / mixed; empty = complete dataset
+HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables the subsystem
+HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
 TRIAL_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 0.02)
@@ -91,7 +94,7 @@ MAX_FAIL_ROUNDS=3                   # consecutive-failure brake for outer loop
 MAX_PROPOSAL_ATTEMPTS=3             # retry budget for propose→implement→validate
 MAX_IMPL_ATTEMPTS=3                 # implementation retries per proposal
 # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
-TRIAL_STRATEGY="snapshot"           # choices: snapshot|anchors|target
+TRIAL_STRATEGY="snapshot"           # DEPRECATED no-op (DS7); parsed, not forwarded
 FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
 FORMAL_PORTION=0.1                  # segments per file for formal training scope
 FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
@@ -99,7 +102,7 @@ FORMAL_ROUND_STRATEGY="full_clone"  # canonical: full_clone|hybrid_params|indepe
 # §3.2 — Degenerate-output reaction policy (paired with execute_tools.squid_health_checks)
 DEGENERATE_PENALTY_SCORE=""                 # empty → omit flag → schema default None (null score on collapse)
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
-TARGET_FILES=()                     # int list; passed only when non-empty
+TARGET_FILES=()                     # DEPRECATED no-op (DS7); parsed, not forwarded
 SAMPLING_SEED=""                    # empty == omit == Python None
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
@@ -186,6 +189,10 @@ parse_chain_args() {
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --health_checks_config)   HEALTH_CHECKS_CONFIG="$2"; shift 2 ;;
+        --data_scope)             DATA_SCOPE="$2"; shift 2 ;;
+        --health_gate_enabled)    HEALTH_GATE_ENABLED=1; shift ;;
+        --no-health_gate_enabled) HEALTH_GATE_ENABLED=0; shift ;;
+        --health_gate_files)      HEALTH_GATE_FILES="$2"; shift 2 ;;
         --data_dir)               DATA_DIR="$2"; shift 2 ;;
         --trial_time_budget_minutes) TRIAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
         --formal_time_budget_minutes) FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
@@ -301,7 +308,6 @@ build_app_args() {
         --max_proposal_attempts "$MAX_PROPOSAL_ATTEMPTS"
         --max_impl_attempts "$MAX_IMPL_ATTEMPTS"
         --max_failed_iterations "$MAX_FAILED_ITERATIONS"
-        --trial_strategy "$TRIAL_STRATEGY"
         --formal_strategy "$FORMAL_STRATEGY"
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
@@ -328,9 +334,8 @@ build_app_args() {
     if [ "$IS_PSEUDO_TRAINING" -eq 1 ]; then
         APP_ARGS+=(--is_pseudo_training)
     fi
-    if [ ${#TARGET_FILES[@]} -gt 0 ]; then
-        APP_ARGS+=(--target_files "${TARGET_FILES[@]}")
-    fi
+    # DS7 — --trial_strategy / --target_files are deprecated no-ops: still
+    # parsed (so existing invocations don't break) but no longer forwarded.
     if [ -n "$SAMPLING_SEED" ]; then
         APP_ARGS+=(--sampling_seed "$SAMPLING_SEED")
     fi
@@ -339,6 +344,18 @@ build_app_args() {
     fi
     if [ -n "$HEALTH_CHECKS_CONFIG" ]; then
         APP_ARGS+=(--health_checks_config "$HEALTH_CHECKS_CONFIG")
+    fi
+    # DS6c — DataScope + HealthGate subsystem. HEALTH_GATE_ENABLED default 1
+    # matches the Python default; only the disabling form is forwarded
+    # (mirrors FORCE_FORMAL_ROUND).
+    if [ -n "$DATA_SCOPE" ]; then
+        APP_ARGS+=(--data_scope "$DATA_SCOPE")
+    fi
+    if [ "$HEALTH_GATE_ENABLED" -eq 0 ]; then
+        APP_ARGS+=(--no-health_gate_enabled)
+    fi
+    if [ -n "$HEALTH_GATE_FILES" ]; then
+        APP_ARGS+=(--health_gate_files "$HEALTH_GATE_FILES")
     fi
     if [ -n "$REFLECT_PROVIDER" ]; then
         APP_ARGS+=(--reflect_provider "$REFLECT_PROVIDER")
@@ -408,6 +425,8 @@ print_chain_header() {
         echo "  LLM config       : $LLM_CONFIG"
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
+    echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
+    echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
     if [ -n "$MODE" ]; then
         echo "  Mode             : $MODE"
     fi

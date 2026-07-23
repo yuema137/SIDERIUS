@@ -170,10 +170,23 @@ def test_fail_round_abort_triggers_phase_l_termination(tmp_path, request, monkey
         train_portion=0.1,
         eval_strategy="snapshot",
         eval_portion=0.05,
-        # 0.1 GB ceiling — hidden_dim=128 fits, hidden_dim=2048 busts.
-        trial_vram_budget_gb=0.1,
+        # Ceiling between the two fixture estimates: hidden_dim=128 must
+        # fit, hidden_dim=2048 must bust. Estimates are environment-
+        # dependent — on the H100 dev box (2026-07) they are ~0.2 /
+        # ~0.4 GB, so 0.3 splits them; the original 0.1 was calibrated
+        # for the lilab-era stack (~0.03 / ~0.15) and rejected everything
+        # here. If this test fails on a new environment with all attempts
+        # gate-rejected (or none), re-derive the two estimates and pick a
+        # ceiling between them.
+        trial_vram_budget_gb=0.3,
         # Time gate disabled — L.8 is about VRAM/abort, not time.
         trial_time_budget_minutes=None,
+        # HealthGate subsystem OFF — this test exercises round/budget/abort
+        # choreography, not gate behavior. The pseudo stack writes no
+        # denoised HDF5s, so real gates would invalidate every round
+        # (the M9 pseudo-gate gap). Explicit opt-out via the DS5 operator
+        # switch is the correct test configuration, not a workaround.
+        health_gate_enabled=False,
         llm_provider="openai",
         llm_model_id="gpt-5-mini",
         storage=StorageConfig(
