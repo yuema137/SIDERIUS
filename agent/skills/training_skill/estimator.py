@@ -39,7 +39,6 @@ from typing import Any
 import torch
 
 from agent.skills.evaluate_time_skill import calibration
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 
 # ── constants (mirror the legacy wrapper verbatim) ───────────────────────────
 
@@ -182,30 +181,21 @@ def _total_train_steps(
     """Total fwd+bwd step count across the whole training run.
 
     RT1 step-count resolver: mirrors the trainer's realized step math
-    exactly (``execute_tools.train_engine_sandbox``) instead of the old
-    global ``ceil(n_psd × ml × portion / bs)`` approximation:
-
-    - ``train_portion`` is applied PER FILE as
-      ``max(1, round(portion × len(scope_segments)))``
-      (``TIDMADEpochDataset.__init__``) — the ``max(1, ·)`` floor means
-      many-small-file scopes yield far more samples than the global
-      product suggests (up to 1/portion× more), which the old formula
-      undercounted.
-    - The per-epoch step count is ``DataLoader(drop_last=True)``'s
-      ``total_samples // batch_size`` floor, not a ceil.
-
-    The subsample is re-drawn each epoch but ``n_keep`` is deterministic,
-    so every epoch has the same step count.
+    exactly (per-file ``max(1, round(portion × n))`` subsample +
+    ``drop_last`` floor). RT2-A colocated the authoritative math with
+    the production engine — this delegates to
+    ``execute_tools.workload_resolvers.resolve_training_workload`` so
+    there is exactly ONE resolver (§1.2 of the runtime-control design).
     """
-    ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
-    n_psd = 0
-    for scope_segments in sample_set.values():
-        if train_portion is not None and train_portion < 1.0:
-            n_psd += max(1, round(train_portion * len(scope_segments)))
-        else:
-            n_psd += len(scope_segments)
-    per_epoch = (n_psd * ml_per_psd) // batch_size
-    return per_epoch * epochs
+    from execute_tools.workload_resolvers import resolve_training_workload
+
+    return resolve_training_workload(
+        sample_set,
+        seg_size=seg_size,
+        batch_size=batch_size,
+        train_portion=train_portion,
+        epochs=epochs,
+    ).unit_count
 
 
 def _static_ms_per_step(num_params: int, seg_size: int, batch_size: int) -> float:
