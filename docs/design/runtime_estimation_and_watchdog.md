@@ -72,7 +72,7 @@ Runtime-Control Implementation
 [x] RT2-A   — runtime data model + workload contracts (a93963d, a4e4a52)
 [x] RT2-B   — in-subprocess setup measurement (746c592, 8646751)
 [x] RT2-C   — generic adaptive phase verification (training) (d1b3c1e, 061bc27)
-[ ] RT2-D   — inference verification
+[x] RT2-D   — inference verification (734592b, 2ad6222)
 [ ] RT2-E   — scoring + orchestration accounting
 [ ] RT2-F   — observation store + historical priors
 [ ] RT2-G   — formal admission wiring + pseudo integration
@@ -1462,3 +1462,39 @@ Built:
   runtime-policy surface"), not `core/server_configs/` —
   `ServerConfig` is a measured-constants registry, and per-host
   policy overrides belong to the §5 guardrail wiring (RT5).
+
+### RT2-D — inference verification ✅ 2026-07-23
+
+- **Committed implementation**: ✅ 2026-07-23 — `734592b` (session
+  resume + phase-workload recording), `2ad6222` (inference-engine
+  instrumentation + executor plumbing).
+- **Checkpoint** (targeted): 12 new session-level tests (resume matrix
+  + the §11 inference-dominated worked example: training 300 s
+  admitted, inference 7200 s vs 3600 s budget REJECTED at
+  `post_inference_verification`) + 3 in-process tiny-scope engine
+  round-trips + 5 executor plumbing tests; affected dirs 834 passed /
+  1 pre-existing skip; ruff + format clean; pyright 0 errors.
+
+Built:
+
+- [x] `session.resume_or_start` (§6.1): one observation per ATTEMPT —
+  the inference subprocess CONTINUES the training subprocess's sidecar
+  (components/storage/admission restored; file read BEFORE the
+  constructor's initial write so it cannot be clobbered; setup window
+  never restarted on resume). `record_phase_workload` generalizes
+  workload recording to any phase.
+- [x] `inference_single.py` trial mode: inference setup (config load,
+  model construction, weight load, device transfer) measured as the
+  §2.6 setup term; resolver workload recorded
+  (`resolve_inference_workload`, the colocated RT2-A authority);
+  per-batch steady-state verification with explicit CUDA sync (early
+  calls excluded; timing stops at the verdict); output-write cost
+  timed per file, extrapolated per PSD segment, priced SEPARATELY
+  from compute; prediction = batches × steady batch time + setup +
+  write term; phase actual + error at exit. No admission enforcement
+  in the inference subprocess — mid-inference overruns are RT4
+  watchdog business.
+- [x] Executor: `execute_inference(runtime_policy=)`; the per-attempt
+  sidecar forwarded and NEVER deleted here (it carries the training
+  components); updated observation attached to success and error
+  results; `StubSandbox` parity.
