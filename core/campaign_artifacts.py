@@ -75,10 +75,24 @@ def validate_phase1_baseline(
     expected_training_files: list[str],
     configured_gate_ids: list[str],
     expected_output_paths: list[str],
+    expected_resolved_data_scope: list[int] | None = None,
 ) -> ValidationReport:
     errors = validate_experiment_completeness(record, configured_gate_ids=configured_gate_ids)
     if record.get("campaign_run_name") != campaign_name:
         errors.append("campaign_run_name mismatch")
+    # DS6d — functional campaign identity: reuse never crosses a DataScope
+    # boundary. A record without a stamp predates the feature and was
+    # necessarily produced under the full scope. None skips the check
+    # (legacy callers).
+    if expected_resolved_data_scope is not None:
+        from execute_tools.dataset_config import TIDMAD
+
+        record_scope = record.get("resolved_data_scope")
+        effective_scope = (
+            list(range(TIDMAD.num_files)) if record_scope is None else sorted(record_scope)
+        )
+        if effective_scope != sorted(expected_resolved_data_scope):
+            errors.append("data_scope mismatch")
     if record.get("model_type") != model_type:
         errors.append("model_type mismatch")
     actual_params = record.get("params") or {}
@@ -111,6 +125,7 @@ def decide_phase1_reuse(
     expected_training_files: list[str],
     configured_gate_ids: list[str],
     expected_output_paths: list[str],
+    expected_resolved_data_scope: list[int] | None = None,
 ) -> Phase1ReuseDecision:
     """Choose training, reuse, or inference regeneration without side effects."""
     if record is None:
@@ -123,6 +138,7 @@ def decide_phase1_reuse(
         expected_training_files=expected_training_files,
         configured_gate_ids=configured_gate_ids,
         expected_output_paths=expected_output_paths,
+        expected_resolved_data_scope=expected_resolved_data_scope,
     )
     if not report.valid:
         return Phase1ReuseDecision(action="train", validation=report)

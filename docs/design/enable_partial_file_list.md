@@ -1152,14 +1152,18 @@ functional campaign identity).
   ticked in DS6c: `run_one_iteration.compute_expected_invariants` now
   threads `expected_invariants` into `restore_prior_state` in production,
   computed BEFORE restore so a violation mutates nothing)*
-- [ ] **Ingress validation**: seed summaries / seed_records / restored outputs /
+- [x] **Ingress validation**: seed summaries / seed_records / restored outputs /
   `run_comparison.seed_agent_memory` — compare each record's
   `resolved_data_scope` (missing = full scope) against the run scope; mismatch
   → startup `ValueError` naming the offending record path.
-  *(DS6b — seed summaries + restored outputs done via
+  *(DS6b — seed summaries + restored outputs via
   `validate_stamped_invariants` in `run_workflow` pre-flight,
-  `restore_prior_state`, and tuner resume-history; `seed_records` and
-  `run_comparison.seed_agent_memory` remain for DS6c/DS6d)*
+  `restore_prior_state`, and tuner resume-history. DS6d —
+  `seed_agent_memory` validated at seeding time (plus re-validated at
+  consumption by the tuner). `seed_records` discovered DEAD during DS6d:
+  schema-only, zero consumers — actual seeding flows through
+  `seed_agent_memory` → summary file → `get_summary()`; nothing to
+  validate, field slated for DS7 dead-field removal)*
 - [x] `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — thread
   `data_scope` + `health_gate_enabled` + `health_gate_files`. *(DS6b)*
 - [x] `sdsc_submission_scripts/run_one_iteration.py` + `_chain_common.sh` +
@@ -1169,18 +1173,26 @@ functional campaign identity).
   `run_chain.sh` sources `_chain_common.sh`, so the shell change is
   single-sited; the three flags joined the §3.2 CONTRACT_FLAGS parity
   contract)*
-- [ ] Iteration manifest + `core/campaign_artifacts.py` — resolved scope in
+- [x] Iteration manifest + `core/campaign_artifacts.py` — resolved scope in
   manifest; **functional reuse check**: `decide_phase1_reuse` / campaign
   validation adds `"data_scope mismatch"` error (pattern of
   `campaign_artifacts.py:80`); reuse never proceeds on mismatch.
-  *(DS6c — manifest half done: completed manifests stamp
-  `resolved_data_scope` + `health_gate_enabled` + `health_config_sha256`
-  from the tune output; the campaign_artifacts functional reuse check
-  remains for DS6d)*
-- [ ] `scripts/run_comparison.py` — `--data_scope` forwarded to baseline
+  *(DS6c — completed manifests stamp `resolved_data_scope` +
+  `health_gate_enabled` + `health_config_sha256`; DS6d —
+  `validate_phase1_baseline` / `decide_phase1_reuse` gain
+  `expected_resolved_data_scope` (None = legacy skip; unstamped record =
+  full scope), the campaign manifest carries the three invariants, and
+  reuse-path expected outputs iterate the resolved scope)*
+- [x] `scripts/run_comparison.py` — `--data_scope` forwarded to baseline
   builders (baseline SampleSet built within scope, per round-3 §11) and the
   agent subprocess; effective-config materialization at campaign startup;
-  v17_pregate override pin.
+  v17_pregate override pin. *(DS6d — baseline sample sets + sandbox scoped;
+  baseline record stamps invariants; disabled mode mirrors the tuner (no
+  gate evaluation, empty results); raw spec strings forwarded verbatim to
+  the tuner CLI — one parser, no drift; campaign startup materializes +
+  path-swaps and locks the baseline workspace with the deferred
+  legacy-history check; v17_pregate additionally forbids
+  --health_gate_files / --no-health_gate_enabled)*
 
 **Tests**:
 - [x] Unit: atomic lock (concurrent create race simulated → single winner,
@@ -1198,8 +1210,10 @@ functional campaign identity).
   `compute_expected_invariants` 3 cases, main() wiring 2 incl.
   conflicting-second-invocation crash-before-workflow, manifest stamp
   1); parity contract extended to the three new flags)*
-- [ ] Campaign: manifest with mismatched scope → `ValidationReport` error;
-  matching scope → reuse allowed
+- [x] Campaign: manifest with mismatched scope → `ValidationReport` error;
+  matching scope → reuse allowed *(DS6d — `test_campaign_artifacts.py` +5:
+  legacy-unstamped vs full/partial, stamped match/mismatch, None-skip
+  back-compat)*
 - [x] Pseudo-mode workflow test: one-iteration `run_workflow` with partial
   scope on stubs — lock written, tuner input carries scope, manifest stamped
   *(covered by three targeted tests instead of one full pseudo loop:
@@ -1217,7 +1231,11 @@ functional campaign identity).
 - [ ] Chain smoke in pseudo mode (`run_one_iteration.py` with `--pseudo` +
   `--data_scope 4-9 --health_gate_files 4,7,9`) completes; second invocation
   with a different scope against the same workspace **fails at startup**
+  *(deferred to the DS-series end per the amended test policy; the
+  second-invocation-fails half is already unit-pinned at the wiring layer
+  by `TestDataScopeChainWiring`)*
 - [ ] Full unit + pseudo integration suites green; ruff + pyright clean
+  *(deferred to the DS-series end per the amended test policy)*
 
 **Test gate**: unit only.
 
@@ -1316,6 +1334,33 @@ wiring; operator invariants 1–5 recorded in this session's directions):
   `test_chain_consistency.py` parity green with the extended contract;
   `n_recent` 2/2 after revert; ruff + format + pyright clean; `bash -n`
   clean on both shell scripts.
+
+**Implementation notes** (2026-07-23, DS6d — run_comparison + campaign
+identity; targeted-suite policy):
+- `run_comparison.py`: three CLI flags; spec parse + v17_pregate override
+  pin (forbids `--health_gate_files` / `--no-health_gate_enabled`) fire at
+  `main()` startup, before the source-config policy check and any phase
+  work. Campaign startup materializes the effective config into the
+  baseline workspace, path-swaps `args.health_checks_config`, validates
+  existing baseline summary records (deferred-lock pattern), and
+  `ensure_run_invariants`s the baseline workspace. `run_baseline_trial`
+  gains `data_scope` / `health_gate_enabled` / `health_config_sha256`:
+  sample sets built with `scope=`, sandbox constructed with `data_scope=`,
+  disabled mode skips gate evaluation (mirrors the tuner), record stamps
+  the three invariants; reuse-path expected outputs iterate the resolved
+  scope. `seed_agent_memory` ingress-validated at seeding time. `run_agent`
+  forwards the operator's raw spec strings verbatim to the tuner CLI.
+- `campaign_artifacts.py`: `expected_resolved_data_scope` param on
+  `validate_phase1_baseline` / `decide_phase1_reuse` → `"data_scope
+  mismatch"` error; unstamped records = full scope; None = legacy skip.
+- `seed_records` found dead (schema-only, zero consumers) → DS7 removal
+  list; ingress for it is vacuous.
+- **Tests (DS6d)**: `test_campaign_artifacts.py` 12/12 (+5);
+  `test_run_comparison_data_scope.py` 6/6 (startup guards ×3, subprocess
+  forwarding ×3 — completion verification's `sys.exit(2)` on the empty
+  test workspace is the PR #121 partial-exit contract, absorbed by the
+  harness); completion + v17_advice suites 16/16 unchanged; ruff +
+  format + pyright clean.
 - Operator audit rider (2026-07-23): backward-compat audit delivered —
   behavioral identity holds for default configs; deliberate breaks are
   workspace policy immutability, legacy-resume-with-disabled-gates
@@ -1336,6 +1381,10 @@ deprecate CLI flags per the `--source_paths` precedent
 - [ ] Delete `HyperparamTuningInput.trial_strategy` / `eval_strategy` /
   `target_files` (+ their validator, `:1157-1164`) — serialization-safe (no
   `extra="forbid"`, not in `run_config` dump). `ExperimentRecord` copies stay.
+- [ ] Delete `HyperparamTuningInput.seed_records` — discovered dead during
+  DS6d (schema-only, zero consumers anywhere; seeding actually flows
+  through `run_comparison.seed_agent_memory` → summary file →
+  `sandbox.get_summary()`). Same serialization-safety argument.
 - [ ] Delete `ProposalInput.trial_strategy` / `target_files`
   (`proposal.py:689,702`) — confirmed consumed by nobody (round-3 audit).
   Keep `is_trial` / `trial_portion` / `train_portion` (live).

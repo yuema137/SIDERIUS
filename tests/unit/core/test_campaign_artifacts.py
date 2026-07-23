@@ -129,3 +129,63 @@ def test_completeness_rejects_non_continue_observe_action():
     }
     errors = validate_experiment_completeness(record, configured_gate_ids=[GATE_IDS[0]])
     assert errors == [f"gate {GATE_IDS[0]}: observe action is not continue"]
+
+
+# ---------------------------------------------------------------------------
+# DS6d — functional campaign identity: data_scope joins campaign_run_name
+# ---------------------------------------------------------------------------
+
+_FULL_SCOPE = list(range(20))
+_PARTIAL_SCOPE = [4, 5, 6, 7, 8, 9]
+
+
+def _scoped_decision(record, outputs, expected_scope):
+    return decide_phase1_reuse(
+        record,
+        campaign_name="v17_pregate_baseline",
+        model_type="wavenet",
+        expected_params=PARAMS,
+        expected_training_files=TRAINING_FILES,
+        configured_gate_ids=GATE_IDS,
+        expected_output_paths=outputs,
+        expected_resolved_data_scope=expected_scope,
+    )
+
+
+def test_legacy_unstamped_record_matches_full_scope(tmp_path):
+    outputs = [str(tmp_path / f"out_{i:04d}.h5") for i in range(2)]
+    record = _complete_record(tmp_path, outputs)
+    assert _scoped_decision(record, outputs, _FULL_SCOPE).action == "reuse"
+
+
+def test_legacy_unstamped_record_rejected_under_partial_scope(tmp_path):
+    outputs = [str(tmp_path / f"out_{i:04d}.h5") for i in range(2)]
+    record = _complete_record(tmp_path, outputs)
+    decision = _scoped_decision(record, outputs, _PARTIAL_SCOPE)
+    assert decision.action == "train"
+    assert "data_scope mismatch" in decision.validation.errors
+
+
+def test_stamped_matching_scope_is_reused(tmp_path):
+    outputs = [str(tmp_path / f"out_{i:04d}.h5") for i in range(2)]
+    record = _complete_record(tmp_path, outputs)
+    record["resolved_data_scope"] = _PARTIAL_SCOPE
+    assert _scoped_decision(record, outputs, _PARTIAL_SCOPE).action == "reuse"
+
+
+def test_stamped_mismatched_scope_is_rejected(tmp_path):
+    outputs = [str(tmp_path / f"out_{i:04d}.h5") for i in range(2)]
+    record = _complete_record(tmp_path, outputs)
+    record["resolved_data_scope"] = _PARTIAL_SCOPE
+    decision = _scoped_decision(record, outputs, _FULL_SCOPE)
+    assert decision.action == "train"
+    assert "data_scope mismatch" in decision.validation.errors
+
+
+def test_none_expected_scope_skips_check(tmp_path):
+    """Back-compat: legacy callers that don't pass the scope get the
+    pre-DS6d behavior."""
+    outputs = [str(tmp_path / f"out_{i:04d}.h5") for i in range(2)]
+    record = _complete_record(tmp_path, outputs)
+    record["resolved_data_scope"] = _PARTIAL_SCOPE
+    assert _decision(record, outputs).action == "reuse"

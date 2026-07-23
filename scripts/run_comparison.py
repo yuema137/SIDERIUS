@@ -42,12 +42,20 @@ from core.campaign_artifacts import (
     validate_phase1_baseline,
     write_campaign_manifest,
 )
+from core.run_invariants import (
+    build_run_invariants,
+    ensure_run_invariants,
+    load_run_invariants,
+    validate_run_invariants,
+    validate_stamped_invariants,
+)
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
+from execute_tools.dataset_config import TIDMAD, DataScope
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
-from execute_tools.health_checks.schemas import HealthCheckContext
+from execute_tools.health_checks.schemas import GateAction, HealthCheckContext
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import score_vector
 
@@ -303,6 +311,9 @@ def run_baseline_trial(
     health_checks_config: str | None = None,
     campaign_run_name: str | None = None,
     existing_record: dict | None = None,
+    data_scope: DataScope | None = None,
+    health_gate_enabled: bool = True,
+    health_config_sha256: str | None = None,
 ) -> dict:
     """
     Runs baseline with the TIDMAD paper config using the trial pipeline:
@@ -342,12 +353,18 @@ def run_baseline_trial(
     t_cfg = dict(t_cfg)
     t_cfg["epochs"] = max_epochs
 
+    # DS6d — scoped baselines: sample sets are built within the scope and the
+    # sandbox boundary enforces it before any file I/O.
+    scope = data_scope if data_scope is not None else DataScope.default()
+    resolved_scope = scope.resolve(TIDMAD)
+
     sandbox = TidmadSandbox(
         metadata_source="local",
         run_name=run_name,
         workspace=baseline_workspace,
         progress_bar=progress_bar,
         file_index=6,  # unused in trial mode but required by TidmadSandbox
+        data_scope=scope,
     )
 
     print(f"\n{'=' * 60}")
@@ -356,22 +373,24 @@ def run_baseline_trial(
     print(f"  model_cfg   : {m_cfg}")
     print(f"  train_cfg   : {t_cfg}")
     print(f"  loss_cfg    : {l_cfg}")
-    print("  train scope : all 20 files, portion=1.0, train_portion=0.1/epoch")
-    print("  eval scope  : all 20 files, all segments")
+    print(f"  train scope : files {resolved_scope}, portion=1.0, train_portion=0.1/epoch")
+    print(f"  eval scope  : files {resolved_scope}, all segments")
     print()
 
-    # Build SampleSets — full coverage, deterministic seed
+    # Build SampleSets — full coverage of the scope, deterministic seed
     train_sample_set = build_sample_set(
         is_trial=True,
         trial_strategy="snapshot",
         trial_portion=1.0,
         seed=0,
+        scope=scope,
     )
     eval_sample_set = build_sample_set(
         is_trial=True,
         trial_strategy="snapshot",
         trial_portion=1.0,
         seed=0,
+        scope=scope,
     )
 
     # --- Train (streaming, all 20 files, 10% subsample/epoch) ---
@@ -445,11 +464,16 @@ def run_baseline_trial(
         file_vector=file_vector,
         denoising_score=final_scalar,
     )
-    gate_results, persisted_gate_results, gate_action = evaluate_and_persist_health_gates(
-        health_context,
-        config_path=health_checks_config,
-        production_config_path=HEALTH_CHECKS_PATH,
-    )
+    if health_gate_enabled:
+        gate_results, persisted_gate_results, gate_action = evaluate_and_persist_health_gates(
+            health_context,
+            config_path=health_checks_config,
+            production_config_path=HEALTH_CHECKS_PATH,
+        )
+    else:
+        # DS6d — disabled mode mirrors the tuner: no evaluation, no
+        # persistence; the record self-describes via health_gate_enabled.
+        gate_results, persisted_gate_results, gate_action = [], [], GateAction.CONTINUE
     failed_gates = [result for result in gate_results if not result.passed]
     failure_reason = (
         " | ".join(f"[{result.gate_id}] {result.failure_reason}" for result in failed_gates) or None
@@ -495,6 +519,10 @@ def run_baseline_trial(
         "health_gate_results": [item.model_dump(mode="json") for item in persisted_gate_results],
         "checkpoint_path": checkpoint_path,
         "checkpoint_sha256": sha256_file(checkpoint_path),
+        # DS6d — invariant stamps (scalar comparability boundary).
+        "resolved_data_scope": resolved_scope,
+        "health_gate_enabled": health_gate_enabled,
+        "health_config_sha256": health_config_sha256,
         "training_files": sorted(glob.glob(os.path.join(DATA_DIR, "abra_training_????.h5"))),
         "training_sample_set": train_sample_set,
         "evaluation_sample_set": eval_sample_set,
@@ -617,10 +645,18 @@ def run_agent(
     formal_time_budget_minutes: float | None = None,
     health_checks_config: str | None = None,
     resume: bool = False,
+    data_scope_spec: str | None = None,
+    health_gate_enabled: bool = True,
+    health_gate_files_spec: str | None = None,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
     model_type, for max_rounds rounds.
+
+    DS6d: ``data_scope_spec`` / ``health_gate_files_spec`` are the operator's
+    raw CLI spec strings, forwarded verbatim to the tuner's own
+    ``--data_scope`` / ``--health_gate_files`` flags (the tuner parses and
+    validates them itself — one parser, no drift).
 
     The tuner makes two distinct LLM calls per round (planner + reflector).
     By default both use the same provider+model. Pass `reflect_provider`
@@ -685,6 +721,13 @@ def run_agent(
         cmd.extend(["--formal_time_budget_minutes", str(formal_time_budget_minutes)])
     if health_checks_config:
         cmd.extend(["--health_checks_config", health_checks_config])
+    # DS6d — DataScope + HealthGate subsystem forwarding.
+    if data_scope_spec:
+        cmd.extend(["--data_scope", data_scope_spec])
+    if not health_gate_enabled:
+        cmd.append("--no-health_gate_enabled")
+    if health_gate_files_spec:
+        cmd.extend(["--health_gate_files", health_gate_files_spec])
     if resume:
         cmd.append("--resume")
 
@@ -833,6 +876,37 @@ def main():
         default=None,
         help="Optional HealthGate YAML override; omitted preserves the default.",
     )
+    # --- DataScope + HealthGate subsystem (DS6d) ---
+    parser.add_argument(
+        "--data_scope",
+        type=str,
+        default=None,
+        help=(
+            "Restrict the campaign (baseline + agent) to a file subset: "
+            "'4-9', '4,5,6,7,8,9', or mixed '0-3,7'. Omitted = complete "
+            "dataset. Pinned per workspace by the run-invariants lock. "
+            "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "HealthGate subsystem switch for baseline gate evaluation and "
+            "the agent phase (default: enabled)."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_files",
+        type=str,
+        default=None,
+        help=(
+            "Run-level shared monitored-file list for ALL HealthGate checks "
+            "(same spec format as --data_scope). Omitted + full scope = YAML "
+            "defaults; omitted + partial scope = startup error."
+        ),
+    )
     parser.add_argument(
         "--baseline_workspace",
         type=str,
@@ -901,6 +975,30 @@ def main():
         ),
     )
     args = parser.parse_args()
+
+    # DS6d — parse DataScope specs ('4-9' / '4,5,6,7,8,9' / mixed canonicalize
+    # to one sorted deduplicated list).
+    try:
+        data_scope = DataScope.from_cli(args.data_scope) if args.data_scope else DataScope.default()
+        health_gate_files = (
+            DataScope.from_cli(args.health_gate_files).file_indices
+            if args.health_gate_files
+            else None
+        )
+    except ValueError as e:
+        raise SystemExit(f"[ERROR] {e}") from e
+    resolved_data_scope = data_scope.resolve(TIDMAD)
+
+    # DS6d — v17_pregate override pin: that campaign's policy file is the
+    # contract; run-level HealthGate overrides are not allowed for it.
+    if args.run_name == "v17_pregate_baseline" and (
+        args.health_gate_files is not None or not args.health_gate_enabled
+    ):
+        raise SystemExit(
+            "[ERROR] v17_pregate_baseline pins its HealthGate policy file: "
+            "--health_gate_files / --no-health_gate_enabled are not allowed "
+            "for this campaign."
+        )
 
     if args.health_checks_config:
         args.health_checks_config = os.path.abspath(args.health_checks_config)
@@ -986,6 +1084,39 @@ def main():
     os.makedirs(baseline_workspace, exist_ok=True)
     os.makedirs(agent_workspace, exist_ok=True)
 
+    # --- DS6d — campaign invariants (materialize + hash BEFORE any phase) ---
+    # The v17 pin above ran against the SOURCE config; from here on the
+    # materialized effective config is the single path both baseline gate
+    # evaluation and the agent subprocess read. Existing baseline history is
+    # stamp-validated before a lock-less workspace is locked (never silently).
+    run_invariants, _effective_health_config = build_run_invariants(
+        resolved_data_scope=resolved_data_scope,
+        health_gate_enabled=args.health_gate_enabled,
+        health_gate_files=health_gate_files,
+        health_checks_config=args.health_checks_config,
+        workspace=baseline_workspace,
+    )
+    if _effective_health_config is not None:
+        args.health_checks_config = _effective_health_config
+    if load_run_invariants(baseline_workspace) is not None:
+        validate_run_invariants(baseline_workspace, run_invariants)
+    else:
+        for _summary_path in glob.glob(os.path.join(baseline_workspace, "summary_*.json")):
+            try:
+                with open(_summary_path, encoding="utf-8") as _f:
+                    _history = json.load(_f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            for _rec in _history:
+                if _rec.get("status") in {"success", "failed_mode_collapse"}:
+                    validate_stamped_invariants(
+                        _rec,
+                        run_invariants,
+                        full_scope=list(range(TIDMAD.num_files)),
+                        source=f"baseline summary record {_rec.get('exp_id')} ({_summary_path})",
+                    )
+    ensure_run_invariants(baseline_workspace, run_invariants)
+
     print(f"\n{'#' * 60}")
     print(f"  SIDERIUS Comparison Run — {model_type.upper()}")
     print(f"  Baseline  : {baseline_workspace}")
@@ -1022,7 +1153,7 @@ def main():
                         baseline_workspace,
                         f"abra_validation_denoised_{model_type}_{baseline_run_name}_{exp_id}_{i:04d}.h5",
                     )
-                    for i in range(20)
+                    for i in resolved_data_scope
                 ]
                 gate_ids = [
                     gate.id
@@ -1039,6 +1170,7 @@ def main():
                     ),
                     configured_gate_ids=gate_ids,
                     expected_output_paths=expected_outputs,
+                    expected_resolved_data_scope=resolved_data_scope,
                 )
                 validation = decision.validation
                 if decision.action != "train":
@@ -1082,6 +1214,9 @@ def main():
             health_checks_config=args.health_checks_config,
             campaign_run_name=args.run_name,
             existing_record=baseline_record,
+            data_scope=data_scope,
+            health_gate_enabled=args.health_gate_enabled,
+            health_config_sha256=run_invariants.health_config_sha256,
         )
     elif not baseline_done:
         if args.is_trial:
@@ -1092,6 +1227,9 @@ def main():
                 max_epochs=(args.max_epochs if args.max_epochs is not None else 1),
                 health_checks_config=args.health_checks_config,
                 campaign_run_name=args.run_name,
+                data_scope=data_scope,
+                health_gate_enabled=args.health_gate_enabled,
+                health_config_sha256=run_invariants.health_config_sha256,
             )
         else:
             baseline_record = run_baseline(
@@ -1121,7 +1259,7 @@ def main():
                 baseline_workspace,
                 f"abra_validation_denoised_{model_type}_{baseline_run_name}_{baseline_exp_id}_{i:04d}.h5",
             )
-            for i in range(20)
+            for i in resolved_data_scope
         ]
         gate_ids = [
             gate.id
@@ -1138,6 +1276,7 @@ def main():
             ),
             configured_gate_ids=gate_ids,
             expected_output_paths=expected_outputs,
+            expected_resolved_data_scope=resolved_data_scope,
         )
         if not validation.valid or validation.missing_inference_outputs:
             problems = [
@@ -1153,6 +1292,11 @@ def main():
             {
                 "campaign_run_name": args.run_name,
                 "model_type": model_type,
+                # DS6d — functional campaign identity: scope + policy join
+                # campaign_run_name; reuse decisions verify them explicitly.
+                "resolved_data_scope": resolved_data_scope,
+                "health_gate_enabled": args.health_gate_enabled,
+                "health_config_sha256": run_invariants.health_config_sha256,
                 "baseline": {
                     "workspace": baseline_workspace,
                     "record": os.path.join(
@@ -1190,6 +1334,15 @@ def main():
         print(f"  Diagnostic run metadata written: {path}")
 
     # --- Phase 2: Seed agent memory ---
+    # DS6d — ingress validation at seeding time: the baseline record must
+    # carry this campaign's invariants before it enters the agent's memory
+    # (the tuner re-validates at consumption; failing here is earlier).
+    validate_stamped_invariants(
+        baseline_record,
+        run_invariants,
+        full_scope=list(range(TIDMAD.num_files)),
+        source=f"baseline record {baseline_record.get('exp_id')}",
+    )
     seed_agent_memory(baseline_record, agent_workspace, agent_run_name)
 
     # --- Write tuner-level run metadata before launching the agent ---
@@ -1265,6 +1418,9 @@ def main():
         formal_time_budget_minutes=args.formal_time_budget_minutes,
         health_checks_config=args.health_checks_config,
         resume=args.resume,
+        data_scope_spec=args.data_scope,
+        health_gate_enabled=args.health_gate_enabled,
+        health_gate_files_spec=args.health_gate_files,
     )
 
     print(f"\n{'#' * 60}")
