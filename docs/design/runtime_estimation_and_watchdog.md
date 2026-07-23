@@ -73,7 +73,7 @@ Runtime-Control Implementation
 [x] RT2-B   — in-subprocess setup measurement (746c592, 8646751)
 [x] RT2-C   — generic adaptive phase verification (training) (d1b3c1e, 061bc27)
 [x] RT2-D   — inference verification (734592b, 2ad6222)
-[ ] RT2-E   — scoring + orchestration accounting (awaiting operator decision on minor-phase sources — §2.8)
+[x] RT2-E   — scoring + orchestration accounting (0cca7bf; contribution-based policy per operator decision)
 [x] RT2-F   — observation store + historical priors (9a6f0a0; built before RT2-E — no dependency on its decision)
 [ ] RT2-G   — formal admission wiring + pseudo integration
 [ ] RT3     — trigger policy + provenance fields
@@ -420,25 +420,27 @@ cases:
   is therefore eligible even though it is "derived"; a total containing
   any prior-backed component is not.
 
-Two deliberately-open decisions deferred to later stages (fail-closed
-in the interim — the strict rule applies until decided):
+Deferred-decision status:
 
-1. **Minor-phase sources (decide at RT2-E)**: §2.7 permits scoring
-   `historically_calibrated`/`bounded_negligible` and environment-scoped
-   historical orchestration estimates; the strict component rule above
-   would exclude such records from formal eligibility. RT2-E must decide
-   whether these minor-phase sources may participate in a formally
-   eligible total (e.g. bounded evidence + share-of-total cap) or
-   whether all five phases require live measurement; the §2.8 example
-   record above is illustrative of the record SHAPE, not an admission
-   precedent.
+1. **Minor-phase sources — RESOLVED at RT2-E (operator decision
+   2026-07-23, contribution-based policy)**: verification strategy is
+   determined by runtime CONTRIBUTION, never phase names. Live-verified
+   phases carry measurement-backed predictions; evidence-backed
+   historical estimates (`historical_observation_prior`,
+   `historical_orchestration`, `legacy_calibration_prior`,
+   `bounded_negligible`) are admissible into a formally eligible total
+   while their combined share stays below the configurable
+   `historical_phase_share_limit` (provisional default 0.10); exceeding
+   it AUTOMATICALLY escalates those phases to live verification. The
+   individual-eligibility schema invariant is unchanged — historical
+   predictions are never individually eligible; their participation is
+   total-level only (`core/runtime_control/total_assembly.py`).
 2. **Required-phase completeness (decide at RT2-G)**: the schema layer
    is phase-extensible and does not know which phases a given run
-   requires; `record_is_formal_verified` currently accepts any
-   non-empty all-eligible component set. The admission wiring (RT2-G)
-   must define the required-phase set per execution class and enforce
-   §3's "incomplete component prediction is never sufficient" against
-   it.
+   requires; `assemble_total` takes the required set from its caller.
+   The admission wiring (RT2-G) must define the required-phase set per
+   execution class and enforce §3's "incomplete component prediction is
+   never sufficient" against it.
 
 ### 2.9 Confidence and uncertainty
 
@@ -1537,3 +1539,45 @@ Built:
   observations (executor post-attempt) and where verifiers consume
   `lookup_prior` (the `prior_expected_unit_ms` argument is already
   plumbed through `start_phase_verification`).
+
+### RT2-E — scoring + orchestration accounting ✅ 2026-07-23
+
+- **Operator decision implemented**: contribution-based policy
+  (Option A strengthened) — see the §2.8 resolution note. Verification
+  strategy by runtime contribution, never phase names; evidence-backed
+  historical estimates admissible under the configurable
+  `historical_phase_share_limit` (provisional 0.10) with AUTOMATIC
+  escalation above it.
+- **Committed implementation**: ✅ 2026-07-23 — `0cca7bf`.
+- **Checkpoint** (targeted): 17 new tests incl. the three §11 worked
+  examples — (1) normal run: 3% historical share, eligible,
+  safety-adjusted 150 min within 180 min budget → admit; (2)
+  scoring-dominated: 75% share → automatic escalation, ineligible
+  regardless of budget; (3) incident shape: all-live complete,
+  eligible, 28,854 s ≫ 7,200 s budget → reject. Affected dirs 872
+  passed / 1 pre-existing skip; ruff + format clean; pyright 0 errors.
+
+Built:
+
+- [x] `core/runtime_control/total_assembly.py`: source-based
+  classification (`live_verified | historical_estimate |
+  inadmissible`); `assemble_total` (completeness vs the caller's
+  required set §3, inadmissible-source rejection, share limit +
+  largest-first escalation list, §2.9 conservative aggregation: exact
+  sum × safety factor, min component confidence);
+  `evidence_backed_prediction` (individually never eligible — RT2-A
+  invariant untouched); `observation_formal_eligible` +
+  `record_is_formal_verified` under the recorded policy limit
+  (fail-closed fallback).
+- [x] Policy: `historical_phase_share_limit` on
+  `RuntimeControlPolicy`; `session.assess_total(required_phases)`
+  stores the derived `TotalRecord` on the observation (§6.1 exact-sum
+  guard).
+- [x] Scoring (§2.7 `historically_calibrated`):
+  `scoring_prediction_from_server_config` — ServerConfig's measured
+  `per_psd_segment_seconds` (ligroup: 2.21 s) × resolver unit count ÷
+  workers, linear-speedup assumption recorded in the evidence.
+  Orchestration uses the same `evidence_backed_prediction` constructor
+  with `historical_orchestration` (env-scoped, provenance-recorded);
+  live orchestration actuals accrue via the store once RT2-G wires
+  appends.
