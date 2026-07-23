@@ -9,6 +9,10 @@ lifecycle. Task-specific workload RESOLUTION lives colocated with the
 production engines (`execute_tools/workload_resolvers.py`).
 """
 
+from core.runtime_control.adaptive import (
+    AdaptiveUnitVerification,
+    AdaptiveVerificationConfig,
+)
 from core.runtime_control.phases import RUNTIME_PHASES, RuntimePhase
 from core.runtime_control.provenance import (
     capture_environment_provenance,
@@ -52,6 +56,8 @@ __all__ = [
     "MEASUREMENT_BACKED_SOURCES",
     "RUNTIME_PHASES",
     "RUNTIME_VERIFICATION_RECORD_KEY",
+    "AdaptiveUnitVerification",
+    "AdaptiveVerificationConfig",
     "AdmissionRecord",
     "Confidence",
     "PhaseComponentRecord",

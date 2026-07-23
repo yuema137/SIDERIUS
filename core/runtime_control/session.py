@@ -15,15 +15,18 @@ complete.
 Stage progression (``RuntimeObservation.final_status``):
 
     setup_started → setup_complete → admitted | rejected
-                  → completed | failed_<stage>
+                  → verifying_<phase> → verified_<phase> | verification_failed_<phase>
+                  → admitted | rejected → completed
 
-RT2-B admission semantics: the only measured component is setup, so the
-session rejects exactly when the MEASURED setup alone already exceeds
-the operator budget — a conservative lower bound on the total (§3:
-the full total prediction can only be larger). Everything else is
-admitted with an explicit "training verification pending" reason; the
-live training/inference verifiers (RT2-C/D) tighten this decision
-without changing the session contract.
+Admission semantics (RT2-B/C): the KNOWN-COST lower bound — the sum of
+every component prediction present (setup's prediction equals its
+measured actual; verified phases contribute measurement-backed
+predictions) — can only grow as more phases verify, so exceeding the
+operator budget at any stage is a final rejection (§3). With a budget
+in force a failed verification rejects (fail closed, §2.11); without
+one the session is record-only and always admits. Later stages'
+decisions supersede earlier ones (``AdmissionRecord.stage`` records
+where the final decision was made).
 """
 
 from __future__ import annotations
@@ -35,6 +38,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.runtime_control.adaptive import (
+    AdaptiveUnitVerification,
+    AdaptiveVerificationConfig,
+)
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.provenance import (
     capture_environment_provenance,
@@ -46,12 +53,14 @@ from core.runtime_control.records import (
     AdmissionRecord,
     PhaseComponentRecord,
     PhaseMeasurement,
+    PredictionSource,
     RuntimeObservation,
     RuntimePrediction,
 )
 from core.runtime_control.workload import ResolvedPhaseWorkload
 
 ADMISSION_STAGE_POST_SETUP = "post_setup_runtime_verification"
+ADMISSION_STAGE_POST_PHASE = "post_{phase}_verification"
 
 
 class RuntimeControlPolicy(BaseModel):
@@ -69,6 +78,18 @@ class RuntimeControlPolicy(BaseModel):
         default=None,
         gt=0.0,
         description="Wall-clock budget for the attempt. None → record-only (no enforcement).",
+    )
+    safety_factor: float = Field(
+        default=1.0,
+        ge=1.0,
+        description=(
+            "Multiplier applied to the known-cost sum at admission time "
+            "(§2.10 — revised from the error ledger once RT2-F lands)."
+        ),
+    )
+    verification: AdaptiveVerificationConfig = Field(
+        default_factory=AdaptiveVerificationConfig,
+        description="Adaptive stopping policy for phase verification (§2.5/§2.12/§5).",
     )
 
 
@@ -104,6 +125,8 @@ class RuntimeVerificationSession:
         self._admission: AdmissionRecord | None = None
         self._final_status: str = "setup_started"
         self._storage: dict[str, Any] = {}
+        self._verification_seconds: float = 0.0
+        self._verification_failures: dict[str, str] = {}
 
         self._setup_start = time.perf_counter()
         self._io_bytes_at_start = read_process_read_bytes()
@@ -192,15 +215,97 @@ class RuntimeVerificationSession:
         self._write_sidecar()
         return setup_seconds
 
-    def decide_admission(self) -> AdmissionRecord:
-        """RT2-B admission decision at the post-setup boundary.
+    def start_phase_verification(
+        self,
+        phase: RuntimePhase,
+        unit: str,
+        prior_expected_unit_ms: float | None = None,
+    ) -> AdaptiveUnitVerification:
+        """Begin adaptive verification of one phase (RT2-C, §2.5).
 
-        Reject exactly when the measured setup ALONE exceeds the
-        operator budget (the total can only be larger — conservative
-        §3 lower bound). ``complete_setup`` must have been called.
+        Returns the incremental driver the production loop feeds unit
+        timings into. The stopping policy comes from
+        ``policy.verification``; the historical prior arrives with the
+        RT2-F store (``None`` → ``new_configuration``).
+        """
+        self._final_status = f"verifying_{phase}"
+        self._write_sidecar()
+        return AdaptiveUnitVerification(
+            unit=unit,
+            config=self.policy.verification,
+            prior_expected_unit_ms=prior_expected_unit_ms,
+        )
 
-        Returns:
-            The recorded :class:`AdmissionRecord`.
+    def complete_phase_verification(
+        self,
+        phase: RuntimePhase,
+        verifier: AdaptiveUnitVerification,
+        *,
+        source: PredictionSource,
+        extra_predicted_seconds: float = 0.0,
+        extra_detail: dict[str, Any] | None = None,
+    ) -> RuntimePrediction | None:
+        """Record a phase verification's evidence and prediction.
+
+        The measurement is recorded REGARDLESS of outcome (§6.2 event
+        log); the prediction exists only when the verification VERIFIED
+        (§2.11 fail closed — a failed verification never yields a
+        formal-eligible prediction). Verification cost accrues into the
+        §2.1 admission cost model.
+
+        Raises:
+            RuntimeError: the phase has no recorded workload (the
+                trainer must record it at ``complete_setup``) while the
+                verifier verified — a prediction cannot be assembled.
+        """
+        if not verifier.is_terminal:
+            verifier.finalize()
+        self._verification_seconds += verifier.verification_seconds
+
+        existing = self._components.get(phase, PhaseComponentRecord())
+        prediction: RuntimePrediction | None = None
+        if verifier.state == "verified":
+            if existing.workload is None:
+                raise RuntimeError(
+                    f"phase {phase!r} verified but has no recorded workload — "
+                    "record it at complete_setup before verification."
+                )
+            prediction = verifier.prediction(
+                existing.workload,
+                source,
+                safety_factor=self.policy.safety_factor,
+                extra_predicted_seconds=extra_predicted_seconds,
+                extra_detail=extra_detail,
+            )
+        else:
+            self._verification_failures[str(phase)] = (
+                verifier.failure_reason or f"verification ended in state {verifier.state}"
+            )
+
+        self._components[phase] = PhaseComponentRecord(
+            workload=existing.workload,
+            prediction=prediction,
+            measurement=verifier.measurement(),
+            actual_seconds=existing.actual_seconds,
+            prediction_error=None,
+        )
+        self._final_status = (
+            f"verified_{phase}" if prediction is not None else f"verification_failed_{phase}"
+        )
+        self._write_sidecar()
+        return prediction
+
+    def decide_admission(self, stage: str = ADMISSION_STAGE_POST_SETUP) -> AdmissionRecord:
+        """Admission decision from the evidence available at ``stage``.
+
+        Conservative §3 lower-bound rule: the KNOWN-COST sum (every
+        component prediction present — setup's prediction equals its
+        measured actual) can only grow as more phases verify, so
+        exceeding the budget at any stage is final. With a budget in
+        force, a failed verification rejects (fail closed §2.11);
+        without one the session is record-only and always admits. The
+        LATEST decision is the authoritative one (stage records where
+        it was made).
 
         Raises:
             RuntimeError: called before ``complete_setup``.
@@ -208,29 +313,69 @@ class RuntimeVerificationSession:
         if self._setup_seconds is None:
             raise RuntimeError("decide_admission requires complete_setup to have run first.")
         budget = self.policy.operator_budget_seconds
-        if budget is not None and self._setup_seconds > budget:
+        safety = self.policy.safety_factor
+        known_cost = sum(
+            c.prediction.predicted_seconds
+            for c in self._components.values()
+            if c.prediction is not None
+        )
+        adjusted = known_cost * safety
+        cost_fields = {
+            "setup_cost_seconds": self._setup_seconds,
+            "verification_cost_seconds": self._verification_seconds,
+        }
+
+        if budget is None:
+            self._admission = AdmissionRecord(
+                decision="admitted",
+                stage=stage,
+                reason=(
+                    "record-only: no operator budget in force"
+                    + (
+                        f" (verification failures recorded: {sorted(self._verification_failures)})"
+                        if self._verification_failures
+                        else ""
+                    )
+                ),
+                **cost_fields,
+            )
+            self._final_status = "admitted"
+        elif self._verification_failures:
+            failures = "; ".join(
+                f"{phase}: {reason}"
+                for phase, reason in sorted(self._verification_failures.items())
+            )
             self._admission = AdmissionRecord(
                 decision="rejected",
-                stage=ADMISSION_STAGE_POST_SETUP,
-                setup_cost_seconds=self._setup_seconds,
-                verification_cost_seconds=0.0,
+                stage=stage,
+                avoided_predicted_runtime_seconds=adjusted,
+                reason=f"verification failed — fail closed for formal (§2.11): {failures}",
+                **cost_fields,
+            )
+            self._final_status = "rejected"
+        elif adjusted > budget:
+            self._admission = AdmissionRecord(
+                decision="rejected",
+                stage=stage,
+                avoided_predicted_runtime_seconds=adjusted,
                 reason=(
-                    f"measured setup {self._setup_seconds:.1f}s alone exceeds the "
-                    f"operator budget {budget:.1f}s — total prediction can only be larger."
+                    f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "
+                    f"{adjusted:.1f}s) exceeds the operator budget {budget:.1f}s — "
+                    "the full total can only be larger."
                 ),
+                **cost_fields,
             )
             self._final_status = "rejected"
         else:
             self._admission = AdmissionRecord(
                 decision="admitted",
-                stage=ADMISSION_STAGE_POST_SETUP,
-                setup_cost_seconds=self._setup_seconds,
-                verification_cost_seconds=0.0,
+                stage=stage,
                 reason=(
-                    "setup within budget; live training verification pending (RT2-C)"
-                    if budget is not None
-                    else "record-only: no operator budget in force"
+                    f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "
+                    f"{adjusted:.1f}s) within budget {budget:.1f}s; unverified phases "
+                    "remain pending"
                 ),
+                **cost_fields,
             )
             self._final_status = "admitted"
         self._write_sidecar()

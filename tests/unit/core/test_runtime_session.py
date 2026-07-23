@@ -152,7 +152,7 @@ class TestAdmissionSemantics:
         session.complete_setup(storage_provenance=_STORAGE)
         adm = session.decide_admission()
         assert adm.decision == "admitted"
-        assert adm.reason is not None and "RT2-C" in adm.reason
+        assert adm.reason is not None and "pending" in adm.reason
 
     def test_admission_before_setup_raises(self, tmp_path):
         session = RuntimeVerificationSession(str(tmp_path / "rv.json"))
@@ -164,7 +164,143 @@ class TestAdmissionSemantics:
             str(tmp_path / "rv.json"),
             policy=RuntimeControlPolicy(operator_budget_seconds=120.0),
         )
-        assert session.observation.runtime_policy == {"operator_budget_seconds": 120.0}
+        recorded = session.observation.runtime_policy
+        assert recorded["operator_budget_seconds"] == 120.0
+        # Full validated policy is recorded (§5): safety factor + the
+        # RT2-C verification stopping policy materialize alongside.
+        assert recorded["safety_factor"] == 1.0
+        assert "verification" in recorded
+
+
+class TestPhaseVerificationIntegration:
+    """RT2-C: session-level verification lifecycle + admission."""
+
+    @staticmethod
+    def _policy(**overrides) -> RuntimeControlPolicy:
+        from core.runtime_control.adaptive import AdaptiveVerificationConfig
+        from core.runtime_control.steady_state import SteadyStateConfig
+
+        verification = AdaptiveVerificationConfig(
+            steady=SteadyStateConfig(window=4, stable_windows=3, rel_spread_tol=0.10),
+            min_timed_steps=5,
+            min_timed_ms=0.0,
+            max_steps=50,
+        )
+        return RuntimeControlPolicy(verification=verification, **overrides)
+
+    def _session_with_setup(self, tmp_path, *, unit_count: int, **policy_overrides):
+        session = RuntimeVerificationSession(
+            str(tmp_path / "rv.json"), policy=self._policy(**policy_overrides)
+        )
+        session.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=unit_count
+            ),
+        )
+        return session
+
+    def _run_verification(self, session, trace):
+        verifier = session.start_phase_verification("training", unit="optimizer_step")
+        for t in trace:
+            verifier.feed(t)
+            if verifier.is_terminal:
+                break
+        return session.complete_phase_verification(
+            "training", verifier, source="real_training_verification"
+        )
+
+    def test_verified_prediction_recorded_and_admitted(self, tmp_path):
+        session = self._session_with_setup(tmp_path, unit_count=100, operator_budget_seconds=3600.0)
+        prediction = self._run_verification(session, [10.0] * 30)
+        assert prediction is not None
+        assert prediction.source == "real_training_verification"
+
+        adm = session.decide_admission(stage="post_training_verification")
+        assert adm.decision == "admitted"
+        assert adm.stage == "post_training_verification"
+        assert adm.verification_cost_seconds is not None
+        assert adm.verification_cost_seconds > 0.0
+
+        training = session.observation.components["training"]
+        assert training.prediction is not None
+        assert training.measurement is not None
+        assert training.workload is not None  # preserved from setup
+
+    def test_budget_exceeding_prediction_rejects(self, tmp_path):
+        # 480k steps × 10 ms = 4800 s ≫ 120 s budget (the incident shape).
+        session = self._session_with_setup(
+            tmp_path, unit_count=480_000, operator_budget_seconds=120.0
+        )
+        prediction = self._run_verification(session, [10.0] * 30)
+        assert prediction is not None
+        adm = session.decide_admission(stage="post_training_verification")
+        assert adm.decision == "rejected"
+        assert adm.avoided_predicted_runtime_seconds is not None
+        assert adm.avoided_predicted_runtime_seconds > 4000.0
+
+    def test_safety_factor_tightens_admission(self, tmp_path):
+        # 100 steps × 10 ms = 1 s; budget 1.5 s → admitted at safety 1.0,
+        # rejected at safety 2.0.
+        admitted = self._session_with_setup(tmp_path, unit_count=100, operator_budget_seconds=1.5)
+        self._run_verification(admitted, [10.0] * 30)
+        assert admitted.decide_admission().decision == "admitted"
+
+        rejected = RuntimeVerificationSession(
+            str(tmp_path / "rv2.json"),
+            policy=self._policy(operator_budget_seconds=1.5, safety_factor=2.0),
+        )
+        rejected.complete_setup(
+            storage_provenance=_STORAGE,
+            training_workload=ResolvedPhaseWorkload(
+                phase="training", unit="optimizer_step", unit_count=100
+            ),
+        )
+        self._run_verification(rejected, [10.0] * 30)
+        assert rejected.decide_admission().decision == "rejected"
+
+    def test_failed_verification_fails_closed_with_budget(self, tmp_path):
+        session = self._session_with_setup(tmp_path, unit_count=100, operator_budget_seconds=3600.0)
+        prediction = self._run_verification(session, [10.0 * (1.2**i) for i in range(60)])
+        assert prediction is None
+        adm = session.decide_admission(stage="post_training_verification")
+        assert adm.decision == "rejected"
+        assert adm.reason is not None and "2.11" in adm.reason
+
+    def test_failed_verification_record_only_admits(self, tmp_path):
+        session = self._session_with_setup(tmp_path, unit_count=100)  # no budget
+        prediction = self._run_verification(session, [10.0 * (1.2**i) for i in range(60)])
+        assert prediction is None
+        adm = session.decide_admission(stage="post_training_verification")
+        assert adm.decision == "admitted"
+        assert adm.reason is not None and "record-only" in adm.reason
+        # Evidence retained despite the failure (§6.2).
+        training = session.observation.components["training"]
+        assert training.measurement is not None
+        assert training.prediction is None
+
+    def test_verified_without_workload_raises(self, tmp_path):
+        session = RuntimeVerificationSession(str(tmp_path / "rv.json"), policy=self._policy())
+        session.complete_setup(storage_provenance=_STORAGE)  # no training workload
+        verifier = session.start_phase_verification("training", unit="optimizer_step")
+        for t in [10.0] * 30:
+            verifier.feed(t)
+            if verifier.is_terminal:
+                break
+        with pytest.raises(RuntimeError, match="workload"):
+            session.complete_phase_verification(
+                "training", verifier, source="real_training_verification"
+            )
+
+    def test_actual_after_verification_derives_error(self, tmp_path):
+        session = self._session_with_setup(tmp_path, unit_count=100)
+        self._run_verification(session, [10.0] * 30)
+        session.record_phase_actual("training", 1.5)
+        training = session.observation.components["training"]
+        assert training.prediction_error is not None
+        assert training.prediction_error.ratio == pytest.approx(
+            1.5 / training.prediction.predicted_seconds  # type: ignore[union-attr]
+        )
 
 
 class TestAtomicWrite:
