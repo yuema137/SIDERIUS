@@ -73,8 +73,8 @@ Runtime-Control Implementation
 [x] RT2-B   — in-subprocess setup measurement (746c592, 8646751)
 [x] RT2-C   — generic adaptive phase verification (training) (d1b3c1e, 061bc27)
 [x] RT2-D   — inference verification (734592b, 2ad6222)
-[ ] RT2-E   — scoring + orchestration accounting
-[ ] RT2-F   — observation store + historical priors
+[ ] RT2-E   — scoring + orchestration accounting (awaiting operator decision on minor-phase sources — §2.8)
+[x] RT2-F   — observation store + historical priors (9a6f0a0; built before RT2-E — no dependency on its decision)
 [ ] RT2-G   — formal admission wiring + pseudo integration
 [ ] RT3     — trigger policy + provenance fields
 [ ] RT4     — runtime watchdog
@@ -1498,3 +1498,42 @@ Built:
   sidecar forwarded and NEVER deleted here (it carries the training
   components); updated observation attached to success and error
   results; `StubSandbox` parity.
+
+### RT2-F — observation store + historical priors ✅ 2026-07-23
+
+*Sequenced before RT2-E deliberately: RT2-E owns the deferred
+minor-phase-sources operator decision (§2.8), while the store has no
+dependency on it.*
+
+- **Committed implementation**: ✅ 2026-07-23 — `9a6f0a0`.
+- **Checkpoint** (targeted): 26 new tests incl. a 4-process
+  concurrent-append test (100/100 records visible, none torn);
+  affected dirs (`core` + `execute_tools` + calibration suite) 889
+  passed / 1 pre-existing skip; ruff + format clean; pyright 0 errors.
+
+Built:
+
+- [x] `core/runtime_control/observation_store.py`: per-writer JSONL
+  append-only store (§6.3 — one file per chain, merged validated
+  reads, malformed lines fail safe, no update/delete surface); §6a
+  calibration key (log2 param bucket; seg_size kept EXACT — documented
+  choice: operator-chosen discrete values, bucketing would alias
+  meaningfully different sizes); §6c eligibility filter; realized
+  unit time (actual ÷ unit_count) preferred over the verification-
+  window median; §6b lookup invalidation (env mismatch never
+  cross-applied; drift eviction at N consecutive §2.10 violations;
+  age staleness usable only with elevated safety). `PriorPolicy`
+  carries the provisional F=1.5 / N=3 / 90-day parameters.
+- [x] `RuntimeObservation.calibration_context` (additive §6a field);
+  trainer records it at the post-setup boundary (precision from the
+  live parameter dtype, optimizer, family, param count, seg/batch,
+  literal `runtime_flags` of the current loop); session
+  `set_calibration_context` + resume propagation.
+- [x] §6.4 legacy adapter: `calibration.to_legacy_prior_entries`
+  (extended, not orphaned) — read-only view of existing per-GPU
+  tables as `legacy_calibration_prior` evidence; files never mutated;
+  never bypasses live verification.
+- **Deferred to RT2-G**: production wiring — who appends finalized
+  observations (executor post-attempt) and where verifiers consume
+  `lookup_prior` (the `prior_expected_unit_ms` argument is already
+  plumbed through `start_phase_verification`).
