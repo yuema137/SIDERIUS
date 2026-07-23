@@ -1,7 +1,7 @@
 # Design: Enable Partial-File Training via `DataScope` (`enable_partial_file_list`)
 
-**Status**: Draft — design approved through three audit rounds (2026-07-22),
-implementation not started
+**Status**: In progress — design approved through four audit rounds
+(2026-07-22); DS1–DS5c landed; DS6–DS8 + Checkpoint DS pending
 **Author**: Yue Ma
 **Created**: 2026-07-22
 **Revised**: 2026-07-22 (round 3: HealthGate enable flag, materialized effective
@@ -10,7 +10,7 @@ behavioral-identity guarantee, atomic lock, functional campaign identity;
 round 4: HealthGate policy lock — `data_scope_lock.json` generalized to
 `run_invariants_lock.json` pinning scope + `health_gate_enabled` +
 effective-config sha256, so resume cannot silently change HealthGate semantics)
-**Branch**: (new branch, to be created)
+**Branch**: `feat/enable-partial-file-list`
 **Depends on**: nothing (builds on committed anchor map from PR #127 and
 seedless cold-start from PR #126)
 **Unblocks**: scope-restricted exploration campaigns; V18 scope-keyed incumbent
@@ -938,7 +938,7 @@ pseudo-data.)*
   precedence-0 → `("failed", "scope_violation")`;
   `HyperparamTuningOutput.termination_reason` Literal extended accordingly.
   *(DS5b)*
-- [ ] `agent/prompts.py` `_format_fixed_params_block` (`:706`) — when scope is
+- [x] `agent/prompts.py` `_format_fixed_params_block` (`:706`) — when scope is
   partial, disclose the allowed files and the snapshot-only rule. *(DS5c)*
 - [x] Scope stamps: `ExperimentRecord` + `HyperparamTuningOutput` gain
   `resolved_data_scope` + `health_gate_enabled` (+ record provenance fields;
@@ -946,7 +946,7 @@ pseudo-data.)*
   Stamps are written on final records (success / failed_mode_collapse) —
   the only records that participate in eligibility and scalar comparison;
   error records keep their minimal shape. *(DS5b)*
-- [ ] Tuner CLI: `--data_scope`, `--health_gate_enabled/--no-health_gate_enabled`,
+- [x] Tuner CLI: `--data_scope`, `--health_gate_enabled/--no-health_gate_enabled`,
   `--health_gate_files`. *(DS5c)*
 - [x] `tests/pseudo_data/` two-file rule evaluated: canned files mirror LLM
   responses and subprocess results only — no file mirrors
@@ -993,14 +993,26 @@ pseudo-data.)*
   path *(DS5b — 18/18)*
 
 **Verification checklist**:
-- [ ] `run_config_{run_name}.json` from a pseudo run contains
+- [x] `run_config_{run_name}.json` from a pseudo run contains
   `resolved_data_scope`, `health_gate_enabled`, source + effective config paths
-- [ ] Startup failure paths verified fail **before round 1**
-- [ ] `grep -n "load_health_gates_config" nodes/ml_hyperparameter_tune_agent/`
+  *(asserted on disk by `test_data_scope_tuner_pseudo.py:161-169`)*
+- [x] Startup failure paths verified fail **before round 1**
+  *(DS5c: `TestStartupFailsBeforeRound1`, 2 tests — `run()` with partial
+  scope + missing/out-of-scope `health_gate_files` raises with the LLM
+  bridge provably never constructed)*
+- [x] `grep -n "load_health_gates_config" nodes/ml_hyperparameter_tune_agent/`
   → all call sites reachable in a run use `agent_input.health_checks_config`
   (i.e. the swapped effective path); none hardcodes the shipped config except
   the documented eligibility/production-policy sites
-- [ ] Full unit + pseudo integration suites green; ruff + pyright clean
+  *(verified 2026-07-23: zero direct `load_health_gates_config` calls in the
+  tuner; every site reads the input field swapped at `:1338`)*
+- [x] Full unit + pseudo integration suites green; ruff + pyright clean
+  *(2026-07-23: `tests/unit/` 3917 passed / 1 skipped / 3 xfailed;
+  `tests/integration/ -m "not real_run"` 123 passed / 1 skipped /
+  129 deselected / 2 failed — both failures confirmed pre-existing on
+  master `9e503ea` and unrelated to DataScope: `test_vocab_accumulation`
+  (FU-7) and `test_gate_coverage_round_7` (FU-9, broken since its
+  introducing commit `ed1de46`); ruff check + format clean; pyright clean)*
 
 **Test gate**: unit only (prompt change is disclosure-only; Gate 1 deferred to
 Checkpoint DS).
@@ -1035,6 +1047,71 @@ Checkpoint DS).
 - **Test results (DS5b)**: `test_data_scope_tuner_pseudo.py` 5/5;
   eligibility 18/18; gate-integration 48/48; ten-collapse 1/1 (4-round);
   ruff + pyright clean.
+- **Interlude before DS5c (2026-07-23, commits `91efb07` + `c382733`)** —
+  resolving the regression-audit findings before resuming, per operator
+  direction:
+  - **Production bugfix `91efb07`**: peeling the l_fail layers exposed a
+    2-month-old production bug — `KillerReport` hardcoded
+    `status="schema_violation"` and the VRAM wrapper's infeasible path
+    passed it through, so the tuner's D.4 branch swallowed every
+    over-budget verdict as `skipped_schema_violation`, starving
+    `skipped_oom_risk`, the B.3 PhysicalRejection buffer, the K.7
+    gate-exhaustion triggers, and the Phase-K record fields (full
+    status-flow audit in the commit message). Fixed: over-budget →
+    `status="success"`, `feasible=False` (the evaluate_time_skill
+    sibling convention); `schema_violation` reserved for real
+    ValidationErrors. VRAM suite 128/128.
+  - **Test-repair `c382733`** (all six failures pre-existing on master):
+    label-kwargs bridges (score_table, cognitive_alignment); l_fail/k9
+    budgets 0.1→0.3 GB (H100-era estimates) + `health_gate_enabled=False`
+    (Option C — choreography tests opt out via the DS5 switch; the flag's
+    first production-style consumers); k9 stale K.2.5-8 assertions removed
+    (surface retired by A.8 `8b6c4ba`); n_recent fixture epochs 10→1 +
+    factor 143.4x→335.1x (estimator-constant drift; real pre-flight chain
+    untouched); ten-collapse `N_ROUNDS=4`.
+  - Serial verification: ten_collapse, l_fail, k9, n_recent(2),
+    score_table green; cognitive_alignment green in a prior run (remaining
+    failure = real-LLM output variance, documented). `vocab`'s NoneType
+    remains the one confirmed-unrelated defect → issue to file in DS8
+    (FU-7).
+
+**Implementation notes** (2026-07-23, DS5c):
+- Prompt disclosure: `_format_fixed_params_block` takes
+  `resolved_data_scope` (None = full scope → block unchanged); partial
+  scope renders the allowed-file line, two forced-snapshot lines, and a
+  control-surface bullet without `target_files`. Tuner passes
+  `resolved_data_scope if scope_is_partial else None`; `LLMBridge.plan`
+  threads the kwarg.
+- CLI: `--data_scope` / `--health_gate_files` parse via
+  `DataScope.from_cli` (empty-list schema guard unreachable from CLI by
+  construction); `--health_gate_enabled` via `BooleanOptionalAction`.
+- Tests: `test_data_scope_cli_and_prompt.py` — 4 CLI + 6 prompt +
+  2 startup-fails-before-round-1 (LLM bridge provably never
+  constructed). 12/12.
+- **DS5b regression fixed** (own commit): `materialize_effective_config`
+  exists-then-open crashed 19 `test_tuning_agent.py` tests whose
+  fixtures patch `os.path.exists` globally; replaced with
+  read-then-fallback (`try/except FileNotFoundError`, also removes the
+  TOCTOU race). Root cause of the escape: DS5b verified targeted suites
+  only — full unit suite must be re-run after any startup-path change.
+- **`real_run` opt-in enforced** (own commit, operator-approved
+  Option A): bare `pytest tests/integration/` with keys in `.env` ran
+  real-LLM + real-training tests, contradicting
+  `docs/pseudo_test_infra.md` §4C. New `pytest_collection_modifyitems`
+  hook in `tests/conftest.py` skips `real_run` items unless
+  `--real-llm` / `--real-training` / `--real-api-call` is passed.
+- **Pre-existing broken test found + repaired** (own commit):
+  `test_gate_coverage_round_7.py::test_healthy_output_at_round_7_still_passes`
+  fails since its introducing commit `ed1de46` (verified on clean
+  extracts of `ed1de46` and `9e503ea`): fixture put the healthy file at
+  index 12 while the M9 YAML peeks `[3,10,17]` → all peeks unresolved →
+  fail-closed `any_pass` correctly fails. Test-side repair: fixture maps
+  the healthy file at the configured peek indices.
+- **Test results (DS5c)**: `tests/unit/` 3917 passed / 1 skipped /
+  3 xfailed; `tests/integration/ -m "not real_run"` 123 passed /
+  1 skipped / 2 failed (FU-7 vocab + the gate-coverage test above, both
+  pre-existing on master; latter repaired in the follow-up commit);
+  ruff check + format clean; pyright clean.
 
 ---
 
@@ -1307,6 +1384,13 @@ standard.
   HealthGate policy change with an operator-acknowledged flag + recorded
   transition). v1 policy: new policy = new workspace; add only if an
   operational need appears.
+- **FU-7** — `test_vocab_accumulation.py:541` NoneType subscript on the
+  degraded-interpreter path (pre-existing, unrelated to DataScope; the one
+  unrepaired workflows-suite failure). File as issue in DS8.
+- **FU-8** — `n_recent` also needs its Option C `health_gate_enabled=False`
+  once DS6 plumbs the flag through `run_workflow` (currently passing
+  because its choreography doesn't reach gate-dependent rounds; add the
+  flag in DS6 for consistency and future-proofing).
 
 ## Non-goals (explicit out of scope)
 
@@ -1324,8 +1408,11 @@ standard.
 
 ## Open questions
 
-1. CLI spelling: `--data_scope 4-9` (range shorthand) vs explicit list only —
-   DS1 implements both; confirm preference before DS6 lands.
+1. ~~CLI spelling: `--data_scope 4-9` (range shorthand) vs explicit list only —
+   DS1 implements both; confirm preference before DS6 lands.~~
+   **Resolved (operator, 2026-07-23): support both forms** — `4-9` and
+   `4,5,6,7,8,9` (and mixed) — canonicalized internally to one sorted,
+   deduplicated resolved list (already `DataScope`'s validator behavior).
 
 *(Resolved in round 3: scoped `run_comparison` baselines are supported — DS6;
 HealthGate override applies one shared list to all gates — v1 simplification;

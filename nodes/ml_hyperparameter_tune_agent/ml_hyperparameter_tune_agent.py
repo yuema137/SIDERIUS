@@ -53,7 +53,7 @@ from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.dataset_config import ScopeViolationError
+from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
 from execute_tools.health_checks.config import materialize_effective_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
@@ -1731,6 +1731,8 @@ class HyperparamTuningAgent:
                         force_formal_round=agent_input.force_formal_round,
                         plan_overrides=agent_input.plan_overrides,
                         max_epochs=agent_input.max_epochs,
+                        # DS5c — partial-scope disclosure (None = full scope).
+                        resolved_data_scope=resolved_data_scope if scope_is_partial else None,
                         trial_vram_budget_gb=trial_vram_budget,
                         formal_vram_budget_gb=formal_vram_budget,
                         trial_time_budget_minutes=trial_time_budget,
@@ -3715,6 +3717,39 @@ def main() -> int:
         default=None,
         help="Optional HealthGate YAML override; omitted uses configs/health_checks.yaml.",
     )
+    # --- DataScope + HealthGate subsystem (DS5c) ---
+    parser.add_argument(
+        "--data_scope",
+        type=str,
+        default=None,
+        help=(
+            "Restrict the run to a file subset: '4-9', '4,5,6,7,8,9', or "
+            "mixed '0-3,7'. Omitted = complete dataset. Under a partial "
+            "scope only 'snapshot' sampling is legal and "
+            "--health_gate_files is required when gates are enabled. "
+            "See docs/design/enable_partial_file_list.md."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "HealthGate subsystem switch (default: enabled). "
+            "--no-health_gate_enabled disables gate evaluation entirely; "
+            "successful finite-score records then count as valid candidates."
+        ),
+    )
+    parser.add_argument(
+        "--health_gate_files",
+        type=str,
+        default=None,
+        help=(
+            "Run-level shared monitored-file list for ALL HealthGate checks "
+            "(same spec format as --data_scope). Omitted + full scope = "
+            "YAML defaults; omitted + partial scope = startup error."
+        ),
+    )
     parser.add_argument(
         "--resume",
         action="store_true",
@@ -3809,6 +3844,15 @@ def main() -> int:
         "file_index": args.file_index,
         "max_rounds": args.max_rounds,
         "health_checks_config": args.health_checks_config,
+        # DS5c — DataScope + HealthGate subsystem. from_cli parses "4-9" /
+        # "4,5,6,7,8,9" / mixed; schema + validate_runtime_config do the rest.
+        "data_scope": DataScope.from_cli(args.data_scope)
+        if args.data_scope
+        else DataScope.default(),
+        "health_gate_enabled": args.health_gate_enabled,
+        "health_gate_files": DataScope.from_cli(args.health_gate_files).file_indices
+        if args.health_gate_files
+        else None,
         "resume": args.resume,
         "expert_advice": args.expert_advice,
         "llm_provider": args.provider,

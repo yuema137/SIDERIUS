@@ -703,21 +703,32 @@ of your retry attempts. Pick valid values now.
 """
 
 
-def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
+def _format_fixed_params_block(plan_overrides=None, max_epochs=None, resolved_data_scope=None):
     """
     Render a SYSTEM-FIXED PARAMETERS block for the planner prompt when the
-    operator has frozen any plan fields via ``plan_overrides`` or capped
-    ``max_epochs``. Returns an empty string when nothing is set, so the prompt
-    is unchanged for runs that do not use overrides.
+    operator has frozen any plan fields via ``plan_overrides``, capped
+    ``max_epochs``, or restricted the run to a partial DataScope. Returns an
+    empty string when nothing is set, so the prompt is unchanged for runs
+    that do not use overrides.
 
     The block tells the LLM (a) which fields it does NOT control this run, and
     (b) that the standard prompt's phase-progression / "increase trial_portion"
     advice does not apply when those knobs are frozen. Without this, the LLM
     wastes reasoning on knobs the workflow silently overrides.
+
+    Args:
+        resolved_data_scope: Sorted allowed file indices when the run's
+            DataScope is PARTIAL; the caller passes ``None`` for a
+            full-scope run. Disclosure only — enforcement is constructive
+            (build_sample_set) + the sandbox boundary; plans proposing
+            ``anchors``/``target`` under a partial scope are normalized to
+            ``snapshot`` with recorded provenance. See
+            docs/design/enable_partial_file_list.md.
     """
     overrides = dict(plan_overrides) if plan_overrides else {}
     has_max_epochs = max_epochs is not None
-    if not overrides and not has_max_epochs:
+    has_partial_scope = resolved_data_scope is not None
+    if not overrides and not has_max_epochs and not has_partial_scope:
         return ""
 
     lines = []
@@ -744,8 +755,24 @@ def _format_fixed_params_block(plan_overrides=None, max_epochs=None):
             lines.append(f"  {k:16s} = {v}")
     if has_max_epochs:
         lines.append(f"  epochs (cap)     ≤ {max_epochs}      ← higher values are clamped")
+    if has_partial_scope:
+        lines.append(
+            f"  data_scope       = files {resolved_data_scope}   "
+            f"← the ONLY files this run may access"
+        )
+        lines.append(
+            "  trial_strategy   = snapshot   ← forced under a partial data_scope "
+            "(anchors/target are normalized to snapshot)"
+        )
+        lines.append("  eval_strategy    = snapshot   ← forced under a partial data_scope")
 
     fixed_lines = "\n".join(lines)
+    strategy_surface = (
+        "  - train_validation_align (trial_strategy/eval_strategy are FIXED to snapshot\n"
+        "    over the data_scope files; target_files is unavailable this run)"
+        if has_partial_scope
+        else "  - trial_strategy + target_files; eval_strategy; train_validation_align"
+    )
     return f"""
 ### SYSTEM-FIXED PARAMETERS (operator-set; do NOT vary):
 The operator has frozen these plan fields. Any other value you pick will be silently
@@ -758,7 +785,7 @@ Your control surface this run:
   - model_type + model_config (architecture, segmentation_size, channel widths, …)
   - loss_config (loss_type)
   - train_config (lr, batch_size; epochs is capped)
-  - trial_strategy + target_files; eval_strategy; train_validation_align
+{strategy_surface}
 
 NOTE: Standard guidance below mentions varying trial_portion/epochs (phase-progression,
 "increase trial_portion if scores are poor"). Those instructions do not apply this run
@@ -829,6 +856,7 @@ def get_planner_user_prompt(
     force_formal_round=True,
     plan_overrides=None,
     max_epochs=None,
+    resolved_data_scope=None,
     # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
     trial_vram_budget_gb=None,
     formal_vram_budget_gb=None,
@@ -864,6 +892,13 @@ def get_planner_user_prompt(
                         a SYSTEM-FIXED PARAMETERS block is rendered so the LLM
                         does not waste reasoning on overridden knobs.
         max_epochs:     Hard cap on epochs. Rendered alongside plan_overrides.
+        resolved_data_scope:
+                        Sorted allowed file indices when the run's DataScope
+                        is partial (None = full scope, no disclosure).
+                        Rendered in the SYSTEM-FIXED PARAMETERS block with
+                        the snapshot-only rule so the planner does not
+                        propose anchors/target or reason about out-of-scope
+                        files. Disclosure only — enforcement is post-hoc.
 
         trial_vram_budget_gb,
         formal_vram_budget_gb,
@@ -1048,7 +1083,7 @@ def get_planner_user_prompt(
                 "- Use trial mode for fast exploration; switch to formal when you want a definitive score.\n"
             )
 
-    fixed_params_block = _format_fixed_params_block(plan_overrides, max_epochs)
+    fixed_params_block = _format_fixed_params_block(plan_overrides, max_epochs, resolved_data_scope)
 
     # Phase K (K.6) — per-round numeric resource block + static guidance.
     # Both blocks are blank-string when no budgets/estimates are configured,
