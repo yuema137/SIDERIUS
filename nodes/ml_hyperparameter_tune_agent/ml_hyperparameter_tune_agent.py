@@ -19,6 +19,7 @@ import math
 import os
 import time
 import traceback
+import warnings
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -3679,7 +3680,7 @@ def main() -> int:
         type=str,
         default="snapshot",
         choices=["snapshot", "anchors", "target"],
-        help="Training sampling strategy (default: snapshot).",
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--trial_portion",
@@ -3692,7 +3693,7 @@ def main() -> int:
         type=str,
         default="snapshot",
         choices=["snapshot", "anchors", "target"],
-        help="Validation sampling strategy (default: snapshot).",
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--eval_portion",
@@ -3936,12 +3937,19 @@ def main() -> int:
         "cleanup_denoised": args.cleanup_denoised,
         "is_trial": args.is_trial,
     }
+    # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
+    if args.trial_strategy != "snapshot" or args.eval_strategy != "snapshot":
+        warnings.warn(
+            "--trial_strategy / --eval_strategy are deprecated and IGNORED "
+            "(DS7): the input fields they fed were dead at both ends and "
+            "have been removed. Use --data_scope to restrict data.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if args.is_trial:
         input_dict.update(
             {
-                "trial_strategy": args.trial_strategy,
                 "trial_portion": args.trial_portion,
-                "eval_strategy": args.eval_strategy,
                 "eval_portion": args.eval_portion,
                 "train_portion": args.train_portion,
             }

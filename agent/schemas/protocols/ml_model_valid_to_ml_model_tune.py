@@ -45,12 +45,11 @@ def local_validated_model(
     reflect_provider: Literal["gemini", "openai", "deepseek"] | None = None,
     reflect_model_id: str | None = None,
     # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    # DS7 — trial_strategy / target_files / eval_strategy params deleted
+    # alongside the dead HyperparamTuningInput fields they fed.
     is_trial: bool = False,
-    trial_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     trial_portion: float = 0.1,
-    target_files: list[int] | None = None,
     train_portion: float = 0.1,
-    eval_strategy: Literal["snapshot", "anchors", "target"] = "snapshot",
     eval_portion: float = 0.1,
     train_validation_align: bool = True,
     sampling_seed: int | None = None,
@@ -218,11 +217,8 @@ def local_validated_model(
         reflect_model_id=reflect_model_id,
         storage=storage,
         is_trial=is_trial,
-        trial_strategy=trial_strategy,
         trial_portion=trial_portion,
-        target_files=target_files or [],
         train_portion=train_portion,
-        eval_strategy=eval_strategy,
         eval_portion=eval_portion,
         train_validation_align=train_validation_align,
         sampling_seed=sampling_seed,

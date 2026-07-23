@@ -94,7 +94,7 @@ MAX_FAIL_ROUNDS=3                   # consecutive-failure brake for outer loop
 MAX_PROPOSAL_ATTEMPTS=3             # retry budget for propose→implement→validate
 MAX_IMPL_ATTEMPTS=3                 # implementation retries per proposal
 # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
-TRIAL_STRATEGY="snapshot"           # choices: snapshot|anchors|target
+TRIAL_STRATEGY="snapshot"           # DEPRECATED no-op (DS7); parsed, not forwarded
 FORMAL_STRATEGY="snapshot"          # choices: snapshot|anchors|target
 FORMAL_PORTION=0.1                  # segments per file for formal training scope
 FORMAL_TRAIN_PORTION=1.0            # per-epoch iteration fraction for formal training
@@ -102,7 +102,7 @@ FORMAL_ROUND_STRATEGY="full_clone"  # canonical: full_clone|hybrid_params|indepe
 # §3.2 — Degenerate-output reaction policy (paired with execute_tools.squid_health_checks)
 DEGENERATE_PENALTY_SCORE=""                 # empty → omit flag → schema default None (null score on collapse)
 # §3.2 — Data slicing / reproducibility (13.C-bis; None-default → omit when empty)
-TARGET_FILES=()                     # int list; passed only when non-empty
+TARGET_FILES=()                     # DEPRECATED no-op (DS7); parsed, not forwarded
 SAMPLING_SEED=""                    # empty == omit == Python None
 # §3.2 — Debugging (action=store_true; 1 emits the flag)
 DEBUG_DUMP_PROMPTS=0
@@ -308,7 +308,6 @@ build_app_args() {
         --max_proposal_attempts "$MAX_PROPOSAL_ATTEMPTS"
         --max_impl_attempts "$MAX_IMPL_ATTEMPTS"
         --max_failed_iterations "$MAX_FAILED_ITERATIONS"
-        --trial_strategy "$TRIAL_STRATEGY"
         --formal_strategy "$FORMAL_STRATEGY"
         --formal_portion "$FORMAL_PORTION"
         --formal_train_portion "$FORMAL_TRAIN_PORTION"
@@ -335,9 +334,8 @@ build_app_args() {
     if [ "$IS_PSEUDO_TRAINING" -eq 1 ]; then
         APP_ARGS+=(--is_pseudo_training)
     fi
-    if [ ${#TARGET_FILES[@]} -gt 0 ]; then
-        APP_ARGS+=(--target_files "${TARGET_FILES[@]}")
-    fi
+    # DS7 — --trial_strategy / --target_files are deprecated no-ops: still
+    # parsed (so existing invocations don't break) but no longer forwarded.
     if [ -n "$SAMPLING_SEED" ]; then
         APP_ARGS+=(--sampling_seed "$SAMPLING_SEED")
     fi

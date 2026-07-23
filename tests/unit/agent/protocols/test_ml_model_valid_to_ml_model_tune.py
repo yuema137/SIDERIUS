@@ -170,50 +170,32 @@ class TestLocalValidatedModel:
         proposal_output,
         storage,
     ):
-        """All trial-mode knobs land on the downstream input together —
-        kept as a single multi-field assertion because the 8 fields are
-        semantically one trial-config payload, not 8 unrelated kwargs."""
+        """All live trial-mode knobs land on the downstream input together —
+        kept as a single multi-field assertion because the fields are
+        semantically one trial-config payload. (DS7 removed the
+        trial_strategy / target_files / eval_strategy threading — data
+        restriction is data_scope's job.)"""
         result = local_validated_model(
             validator_output,
             proposal_output,
             storage,
             is_trial=True,
-            trial_strategy="snapshot",
             trial_portion=0.2,
             train_portion=0.15,
-            eval_strategy="anchors",
             eval_portion=0.5,
             train_validation_align=False,
             sampling_seed=42,
             train_base_seed=99,
         )
         assert result.is_trial is True
-        assert result.trial_strategy == "snapshot"
         assert result.trial_portion == 0.2
         assert result.train_portion == 0.15
-        assert result.eval_strategy == "anchors"
         assert result.eval_portion == 0.5
         assert result.train_validation_align is False
         assert result.sampling_seed == 42
         assert result.train_base_seed == 99
-
-    def test_target_files_in_trial_target_mode(
-        self,
-        validator_output,
-        proposal_output,
-        storage,
-    ):
-        """target_files travels with the trial_strategy='target' sub-path
-        (distinct payload from snapshot trial config)."""
-        result = local_validated_model(
-            validator_output,
-            proposal_output,
-            storage,
-            is_trial=True,
-            trial_strategy="target",
-            target_files=[0, 5, 10],
-        )
-        assert result.target_files == [0, 5, 10]
+        assert not hasattr(result, "trial_strategy")
+        assert not hasattr(result, "target_files")
 
 
 # ---------------------------------------------------------------------------

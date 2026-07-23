@@ -527,6 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="snapshot",
         choices=["snapshot", "anchors", "target"],
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--trial_portion",
@@ -748,7 +749,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         nargs="+",
         default=None,
-        help="File indices for --trial_strategy=target.",
+        help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
     parser.add_argument(
         "--sampling_seed",
@@ -1014,6 +1015,16 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     else:
         args.plan_overrides = None
 
+    # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
+    if args.trial_strategy != "snapshot" or args.target_files is not None:
+        warnings.warn(
+            "--trial_strategy / --target_files are deprecated and IGNORED "
+            "(DS7): the input fields they fed were dead at both ends and have "
+            "been removed. Use --data_scope to restrict data.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     # DS6c — parse DataScope specs. Both '4-9' and '4,5,6,7,8,9' (and mixed)
     # canonicalize to one sorted deduplicated list inside DataScope.
     try:
@@ -1276,11 +1287,8 @@ def main():
             max_rounds=args.max_rounds,
             max_proposal_attempts=args.max_proposal_attempts,
             is_trial=args.is_trial or True,  # default to trial mode
-            trial_strategy=args.trial_strategy,
             trial_portion=args.trial_portion,
-            target_files=args.target_files,
             train_portion=args.train_portion,
-            eval_strategy=args.trial_strategy,
             eval_portion=args.eval_portion,
             sampling_seed=args.sampling_seed,
             # Phase M — formal-mode training levers; Phase R — eval scope.

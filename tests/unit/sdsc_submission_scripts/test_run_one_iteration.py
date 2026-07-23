@@ -1295,3 +1295,40 @@ class TestManifestInvariantStamps:
         assert manifest["resolved_data_scope"] == [4, 5, 6, 7, 8, 9]
         assert manifest["health_gate_enabled"] is True
         assert manifest["health_config_sha256"] == "e" * 64
+
+
+class TestDeprecatedStrategyFlags:
+    """DS7 — --trial_strategy / --target_files are accepted no-ops: warn
+    when non-default, never reach run_workflow."""
+
+    def test_non_default_values_warn(self):
+        with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+            _normalized("--trial_strategy", "anchors")
+        with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+            _normalized("--target_files", "3", "7")
+
+    def test_defaults_do_not_warn(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            _normalized()
+
+    def test_deprecated_values_never_reach_run_workflow(self, tmp_path):
+        argv = [
+            "--workspace",
+            str(tmp_path),
+            "--start_iteration",
+            "1",
+            "--run_name",
+            "iter_001",
+            "--trial_strategy",
+            "anchors",
+        ]
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            with pytest.warns(DeprecationWarning):
+                code = _run_main(argv)
+        assert code == 0
+        kwargs = mock_wf.call_args.kwargs
+        assert "trial_strategy" not in kwargs
+        assert "target_files" not in kwargs
+        assert "eval_strategy" not in kwargs

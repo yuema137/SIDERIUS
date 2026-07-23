@@ -833,19 +833,18 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # Training data
-    trial_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy for training: 'snapshot' (all 20 files), 'anchors' (files 0/10/19), 'target' (specific files).",
-    )
+    # DS7 — the operator-side ``trial_strategy`` / ``target_files`` /
+    # ``eval_strategy`` input fields were deleted: dead at both ends
+    # (threaded from CLI into this schema but never read by the tuner loop —
+    # per-round strategy comes from the LLM plan, normalized under a partial
+    # DataScope). Old serialized inputs carrying the removed keys still
+    # validate (no ``extra="forbid"``). Per-round provenance lives on
+    # ``ExperimentRecord``; data restriction is ``data_scope``'s job.
     trial_portion: float = Field(
         default=0.1,
         ge=0.0,
         le=1.0,
         description="Fraction of segments per file for the training scope.",
-    )
-    target_files: list[int] = Field(
-        default_factory=list,
-        description="File indices to sample from. Required when trial_strategy='target'.",
     )
     train_portion: float = Field(
         default=0.1,
@@ -855,10 +854,6 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # Validation data
-    eval_strategy: Literal["snapshot", "anchors", "target"] = Field(
-        default="snapshot",
-        description="Sampling strategy for validation.",
-    )
     eval_portion: float = Field(
         default=0.1,
         ge=0.0,
@@ -1248,15 +1243,6 @@ class HyperparamTuningInput(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_trial_fields(self):
-        """Cross-field validation for trial mode parameters."""
-        if self.is_trial and self.trial_strategy == "target" and not self.target_files:
-            raise ValueError(
-                "target_files must be non-empty when is_trial=True and trial_strategy='target'."
-            )
-        return self
-
-    @model_validator(mode="after")
     def _validate_seed_plugin_path(self):
         """Validate that ``seed_plugin_path`` (if set) points at a real plugin
         file whose declared ``PLUGIN_MODEL_TYPE`` matches ``model_type``.
@@ -1331,13 +1317,10 @@ class HyperparamTuningInput(BaseModel):
     )
 
     # --- Seeding ---
-    seed_records: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description=(
-            "Pre-existing experiment records injected into the agent's memory before round 1. "
-            "Typically contains the baseline result so the agent knows what benchmark to beat."
-        ),
-    )
+    # DS7 — ``seed_records`` deleted: schema-only with zero consumers
+    # (discovered during DS6d). Seeding flows through
+    # ``run_comparison.seed_agent_memory`` → summary file →
+    # ``sandbox.get_summary()``, which the DS6b ingress validation covers.
 
     # --- LLM (planner) ---
     llm_provider: Literal["gemini", "openai", "deepseek"] = Field(

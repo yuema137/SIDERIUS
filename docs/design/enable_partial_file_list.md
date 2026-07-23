@@ -1378,16 +1378,18 @@ deprecate CLI flags per the `--source_paths` precedent
 (`run_one_iteration.py:447`).
 
 **Code**:
-- [ ] Delete `HyperparamTuningInput.trial_strategy` / `eval_strategy` /
+- [x] Delete `HyperparamTuningInput.trial_strategy` / `eval_strategy` /
   `target_files` (+ their validator, `:1157-1164`) — serialization-safe (no
   `extra="forbid"`, not in `run_config` dump). `ExperimentRecord` copies stay.
-- [ ] Delete `HyperparamTuningInput.seed_records` — discovered dead during
+  *(DS7a)*
+- [x] Delete `HyperparamTuningInput.seed_records` — discovered dead during
   DS6d (schema-only, zero consumers anywhere; seeding actually flows
   through `run_comparison.seed_agent_memory` → summary file →
-  `sandbox.get_summary()`). Same serialization-safety argument.
-- [ ] Delete `ProposalInput.trial_strategy` / `target_files`
-  (`proposal.py:689,702`) — confirmed consumed by nobody (round-3 audit).
-  Keep `is_trial` / `trial_portion` / `train_portion` (live).
+  `sandbox.get_summary()`). Same serialization-safety argument. *(DS7a)*
+- [x] Delete `ProposalInput.trial_strategy` / `target_files`
+  (`proposal.py:689,702`) — confirmed consumed by nobody (round-3 audit;
+  re-verified by fresh grep before deletion). Keep `is_trial` /
+  `trial_portion` / `train_portion` (live). *(DS7a)*
 - [ ] Add `ProposalInput.data_scope`; `local_full_context` maps it from the
   workflow's resolved scope; proposer prompt context renders the allowed-file
   list + snapshot-only note when partial.
@@ -1395,25 +1397,34 @@ deprecate CLI flags per the `--source_paths` precedent
   `_synthesise_default_sample_set(trial_portion, scope)` builds the synthetic
   snapshot **within scope** (`:61-64`; delivers what the dead fields'
   docstrings promised: the estimate matches what the tuner will run).
-- [ ] `workflows/model_exploration.py` — drop the now-unused
+- [x] `workflows/model_exploration.py` — drop the now-unused
   `trial_strategy`/`target_files`/`eval_strategy` kwargs from the tuner and
   proposer paths; keep accepting them at CLI level as deprecated no-ops.
-- [ ] Tuner CLI `--trial_strategy` / `--eval_strategy` and chain CLI
+  *(DS7a — run_workflow keeps the params as deprecated no-ops that warn on
+  non-default values, so in-process callers don't break; both protocol
+  forwarding sites dropped)*
+- [x] Tuner CLI `--trial_strategy` / `--eval_strategy` and chain CLI
   `--trial_strategy` / `--target_files`: accepted, warn, ignored. Removal
-  scheduled after the next stable chain run (FU-2).
-- [ ] `_chain_common.sh` — stop forwarding the deprecated flags (`:304,:332`);
-  still parse them so existing invocations don't break.
+  scheduled after the next stable chain run (FU-2). *(DS7a)*
+- [x] `_chain_common.sh` — stop forwarding the deprecated flags (`:304,:332`);
+  still parse them so existing invocations don't break. *(DS7a — defaults +
+  case arms kept, so the §3.2 parity contract still holds)*
 - [ ] `tests/pseudo_data/` — update canned `ProposalInput` payloads.
 
 **Tests**:
-- [ ] Old serialized `HyperparamTuningInput` / `ProposalInput` JSON (with
-  removed keys) still validates (extras ignored)
+- [x] Old serialized `HyperparamTuningInput` / `ProposalInput` JSON (with
+  removed keys) still validates (extras ignored) *(DS7a —
+  `test_hyperparam_schemas.py::TestTrialFieldsInput` rewritten for the
+  post-DS7 contract incl. the compat case)*
 - [ ] Preflight: partial scope → synthetic sample set keys ⊆ scope; estimate
   path unchanged for full scope
 - [ ] Proposer pseudo test: partial-scope `ProposalInput` renders the file
   list; full-scope renders unchanged framing
-- [ ] CLI deprecation: invoking with `--trial_strategy target` warns and does
-  not alter behavior
+- [x] CLI deprecation: invoking with `--trial_strategy target` warns and does
+  not alter behavior *(DS7a — runner `TestDeprecatedStrategyFlags` 3, tuner
+  CLI `TestDeprecatedStrategyFlagsTunerCLI` 2, workflow
+  `TestDeprecatedStrategyParams` 1; deprecated values provably never reach
+  `run_workflow` kwargs)*
 
 **Verification checklist**:
 - [ ] `grep -rn "trial_strategy" agent/schemas/hyperparam_tuning.py` — only
@@ -1425,7 +1436,29 @@ deprecate CLI flags per the `--source_paths` precedent
 **Test gate**: unit only + **Gate 1** (proposer prompt context changed — may be
 batched with Checkpoint DS Gate 1).
 
-**Implementation notes**: *(fill in as work lands)*
+**Implementation notes** (2026-07-23, DS7a — dead-field removal +
+deprecations; targeted-suite policy):
+- Deleted after a fresh zero-consumer grep re-confirmed the audit:
+  `HyperparamTuningInput.{trial_strategy,eval_strategy,target_files,
+  seed_records}` (+ the `_validate_trial_fields` cross-field validator) and
+  `ProposalInput.{trial_strategy,target_files}`. `ExperimentPlan` /
+  `TrialConfig` / `ExperimentRecord` copies are live and untouched.
+- Threading dropped at both protocols (`local_validated_model`,
+  `local_full_context`) and both `run_workflow` call sites;
+  `run_workflow` keeps the three params as deprecated no-ops (warn on
+  non-default). Runner + tuner CLIs warn-and-ignore; `_chain_common.sh`
+  parses but no longer forwards (§3.2 parity intact).
+- `tests/pseudo_data/` untouched by design: canned payloads mirror LLM
+  plan outputs (`ExperimentPlan`, live), not the deleted input fields —
+  two-file rule satisfied vacuously.
+- Tests: 12 pre-rewrite failures repaired across
+  `test_hyperparam_schemas.py` (class rewritten for the post-DS7
+  contract + serialization-compat case) and both protocol test files
+  (dead-field cases dropped, `not hasattr` pins added); +6 new
+  deprecation tests (runner 3, tuner CLI 2, workflow 1). Affected
+  suites: protocols + schemas 209/209; runner + chain-parity +
+  workflows 296/296; broad affected sweep 2942 passed pre-fix with only
+  the 12 known failures; ruff + format clean repo-wide.
 
 ---
 

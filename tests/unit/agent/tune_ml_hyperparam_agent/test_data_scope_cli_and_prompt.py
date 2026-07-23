@@ -147,3 +147,30 @@ class TestStartupFailsBeforeRound1:
         with pytest.raises(ValueError, match="DataScope"):
             HyperparamTuningAgent().run(inp)
         mock_bridge_cls.assert_not_called()
+
+
+class TestDeprecatedStrategyFlagsTunerCLI:
+    """DS7 — tuner CLI --trial_strategy / --eval_strategy are accepted
+    no-ops: warn when non-default, and the input dict never carries the
+    removed keys."""
+
+    @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
+    def test_non_default_warns_and_is_ignored(self, mock_agent_cls, tmp_path):
+        mock_agent_cls.return_value = MagicMock()
+        argv = _argv(tmp_path, "--is_trial", "--trial_strategy", "target")
+        with patch.object(sys, "argv", argv):
+            with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+                main()
+        inp = mock_agent_cls.return_value.run.call_args[0][0]
+        assert not hasattr(inp, "trial_strategy")
+        assert inp.is_trial is True
+
+    @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
+    def test_defaults_do_not_warn(self, mock_agent_cls, tmp_path):
+        import warnings as _warnings
+
+        mock_agent_cls.return_value = MagicMock()
+        with patch.object(sys, "argv", _argv(tmp_path)):
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("error", DeprecationWarning)
+                main()

@@ -133,13 +133,9 @@ class TestTimeBudgetContextFields:
         "kwarg, value, expected_attr, expected_value, side_check",
         [
             pytest.param("is_trial", True, "is_trial", True, None, id="is_trial"),
-            pytest.param(
-                "trial_strategy", "target", "trial_strategy", "target", None, id="trial_strategy"
-            ),
+            # DS7 — trial_strategy / target_files cases removed with the
+            # dead fields they exercised.
             pytest.param("trial_portion", 0.25, "trial_portion", 0.25, None, id="trial_portion"),
-            pytest.param(
-                "target_files", [3, 7, 11], "target_files", [3, 7, 11], None, id="target_files"
-            ),
             pytest.param("train_portion", 0.5, "train_portion", 0.5, None, id="train_portion"),
             pytest.param("sampling_seed", 1234, "sampling_seed", 1234, None, id="sampling_seed"),
             pytest.param(
@@ -207,9 +203,7 @@ class TestTimeBudgetContextFields:
             interp_output,
             storage,
             is_trial=True,
-            trial_strategy="target",
             trial_portion=0.5,
-            target_files=[6],
             train_portion=0.5,
             sampling_seed=42,
             trial_time_budget_minutes=30.0,
@@ -217,9 +211,7 @@ class TestTimeBudgetContextFields:
             data_dir="/mnt/tidmad",
         )
         assert result.is_trial is True
-        assert result.trial_strategy == "target"
         assert result.trial_portion == 0.5
-        assert result.target_files == [6]
         assert result.train_portion == 0.5
         assert result.sampling_seed == 42
         assert result.trial_time_budget_minutes == 30.0
@@ -229,20 +221,19 @@ class TestTimeBudgetContextFields:
     def test_defaults_when_caller_omits(self, storage, interp_output):
         """When the caller passes none of the new kwargs, ProposalInput's
         schema defaults must take effect (mirroring HyperparamTuningInput:
-        is_trial=False, trial_strategy='snapshot', trial_portion=0.1,
-        target_files=[], train_portion=0.1, sampling_seed=None,
-        trial_time_budget_minutes=None, formal_time_budget_minutes=None,
-        data_dir=None)."""
+        is_trial=False, trial_portion=0.1, train_portion=0.1,
+        sampling_seed=None, trial_time_budget_minutes=None,
+        formal_time_budget_minutes=None, data_dir=None)."""
         result = local_full_context(interp_output, storage)
         assert result.is_trial is False
-        assert result.trial_strategy == "snapshot"
         assert result.trial_portion == 0.1
-        assert result.target_files == []
         assert result.train_portion == 0.1
         assert result.sampling_seed is None
         assert result.trial_time_budget_minutes is None
         assert result.formal_time_budget_minutes is None
         assert result.data_dir is None
+        assert not hasattr(result, "trial_strategy")
+        assert not hasattr(result, "target_files")
 
     def test_partial_kwargs_only_overrides_supplied_fields(self, storage, interp_output):
         """Caller supplies trial_time_budget_minutes only — every other
@@ -253,9 +244,7 @@ class TestTimeBudgetContextFields:
         assert result.trial_time_budget_minutes == 60.0
         assert result.formal_time_budget_minutes is None
         assert result.is_trial is False
-        assert result.trial_strategy == "snapshot"
         assert result.trial_portion == 0.1
-        assert result.target_files == []
         assert result.train_portion == 0.1
         assert result.sampling_seed is None
         assert result.data_dir is None

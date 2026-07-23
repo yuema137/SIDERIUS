@@ -1066,83 +1066,48 @@ class TestHyperparamTuningOutput:
 
 
 class TestTrialFieldsInput:
-    """Verify trial fields on HyperparamTuningInput are optional and default
-    to normal mode."""
+    """DS7 — the operator-side ``trial_strategy`` / ``eval_strategy`` /
+    ``target_files`` / ``seed_records`` input fields were deleted (dead at
+    both ends). Live trial fields (is_trial + portions) keep their
+    defaults, and old serialized inputs carrying the removed keys still
+    validate with the keys ignored."""
 
     def test_defaults_to_normal_mode(self, valid_input_dict):
-        """Pre-trial-feature callers don't pass trial fields and get the
-        documented normal-mode defaults. Replaces two flat tests
-        (defaults_to_normal_mode + existing_input_without_trial_fields_validates)."""
         assert "is_trial" not in valid_input_dict
         inp = HyperparamTuningInput.model_validate(valid_input_dict)
         assert inp.is_trial is False
         assert inp.trial_portion == 0.1
-        assert inp.trial_strategy == "snapshot"
-        assert inp.target_files == []
         assert inp.train_validation_align is True
+        assert not hasattr(inp, "trial_strategy")
+        assert not hasattr(inp, "target_files")
+        assert not hasattr(inp, "eval_strategy")
+        assert not hasattr(inp, "seed_records")
 
-    @pytest.mark.parametrize(
-        "overrides, key_check",
-        [
-            pytest.param(
-                {"is_trial": True, "trial_strategy": "snapshot", "trial_portion": 0.2},
-                lambda inp: (
-                    inp.is_trial is True
-                    and inp.trial_strategy == "snapshot"
-                    and inp.trial_portion == 0.2
-                ),
-                id="trial_mode_with_snapshot",
-            ),
-            pytest.param(
-                {"is_trial": True, "trial_strategy": "target", "target_files": [0, 1, 2, 3]},
-                lambda inp: inp.target_files == [0, 1, 2, 3],
-                id="trial_mode_with_target",
-            ),
-            pytest.param(
-                # target strategy + is_trial=False is allowed — the strategy is
-                # ignored without trial mode and no validation fires.
-                {"is_trial": False, "trial_strategy": "target", "target_files": []},
-                lambda inp: inp.is_trial is False,
-                id="target_strategy_without_trial_mode_ok",
-            ),
-        ],
-    )
-    def test_valid_trial_configurations(self, valid_input_dict, overrides, key_check):
-        valid_input_dict.update(overrides)
+    def test_old_serialized_input_with_removed_keys_validates(self, valid_input_dict):
+        """Serialization compatibility: pre-DS7 JSON round-trips (no
+        ``extra=\"forbid\"``); removed keys are ignored, not errors."""
+        valid_input_dict.update(
+            {
+                "is_trial": True,
+                "trial_strategy": "target",
+                "target_files": [0, 1, 2, 3],
+                "eval_strategy": "anchors",
+                "seed_records": [{"exp_id": "baseline_x"}],
+            }
+        )
         inp = HyperparamTuningInput.model_validate(valid_input_dict)
-        assert key_check(inp)
+        assert inp.is_trial is True
+        assert not hasattr(inp, "trial_strategy")
 
-    @pytest.mark.parametrize(
-        "overrides, error_match",
-        [
-            pytest.param(
-                {"trial_strategy": "invalid_strategy"},
-                None,
-                id="invalid_trial_strategy",
-            ),
-            pytest.param(
-                {"is_trial": True, "trial_strategy": "target", "target_files": []},
-                "target_files must be non-empty",
-                id="target_strategy_with_empty_files",
-            ),
-            pytest.param(
-                {"trial_portion": 1.5},
-                None,
-                id="trial_portion_out_of_range",
-            ),
-        ],
-    )
-    def test_trial_field_rejections(self, valid_input_dict, overrides, error_match):
-        """Defensive shield: each business-rule rejection in the trial-mode
-        family (closed-Literal strategy, target_files non-empty cross-field
-        invariant, trial_portion <=1.0 bound)."""
-        valid_input_dict.update(overrides)
-        if error_match is None:
-            with pytest.raises(ValidationError):
-                HyperparamTuningInput.model_validate(valid_input_dict)
-        else:
-            with pytest.raises(ValidationError, match=error_match):
-                HyperparamTuningInput.model_validate(valid_input_dict)
+    def test_trial_mode_with_live_fields(self, valid_input_dict):
+        valid_input_dict.update({"is_trial": True, "trial_portion": 0.2})
+        inp = HyperparamTuningInput.model_validate(valid_input_dict)
+        assert inp.is_trial is True and inp.trial_portion == 0.2
+
+    def test_trial_portion_out_of_range_rejected(self, valid_input_dict):
+        valid_input_dict.update({"trial_portion": 1.5})
+        with pytest.raises(ValidationError):
+            HyperparamTuningInput.model_validate(valid_input_dict)
 
 
 class TestTrialFieldsExperimentRecord:

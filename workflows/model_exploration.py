@@ -62,6 +62,7 @@ import json
 import os
 import shutil
 import time
+import warnings
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
@@ -134,8 +135,8 @@ def _log_rss(step: str) -> None:
 # Defined here so the four strategy kwargs threaded through ``run_workflow`` /
 # ``_get_reasoning_pipeline`` carry the same narrow types as their downstream
 # consumers (``ReasoningPipelineConfig.exploration_mode``,
-# ``local_full_context.trial_strategy``, ``local_validated_model.{trial,eval,
-# formal,formal_round}_strategy``) without per-call casts.
+# ``local_validated_model.{formal,formal_round}_strategy``) without
+# per-call casts. (DS7 removed the trial/eval strategy threading.)
 ExplorationMode = Literal["auto", "explore", "exploit"]
 StrategyMode = Literal["snapshot", "anchors", "target"]
 FormalRoundStrategy = Literal[
@@ -1353,6 +1354,12 @@ def run_workflow(
     human_advice_mindset: str | None = None,
     # --- Trial mode (optional — defaults preserve single-file behavior) ---
     is_trial: bool = False,
+    # DS7 — trial_strategy / target_files / eval_strategy are DEPRECATED
+    # no-ops: the input fields they fed were dead at both ends and deleted.
+    # Accepted so existing callers don't break; a non-default value warns
+    # and is ignored (removal tracked as FU-2). Use data_scope to restrict
+    # data; per-round strategy is the LLM plan's (normalized under a
+    # partial scope).
     trial_strategy: StrategyMode = "snapshot",
     trial_portion: float = 0.1,
     target_files: list[int] | None = None,
@@ -1530,11 +1537,11 @@ def run_workflow(
         human_advice_validate: Human guidance for validation steps.
         human_advice_tune: Human guidance for tuning steps.
         is_trial: Enable trial mode for the tuning agent.
-        trial_strategy: Sampling strategy ('snapshot', 'anchors', 'target').
+        trial_strategy: DEPRECATED no-op (DS7) — warns when non-default.
         trial_portion: Fraction of segments per file for training scope.
-        target_files: File indices for 'target' strategy.
+        target_files: DEPRECATED no-op (DS7) — warns when non-default.
         train_portion: Per-epoch subsample from training scope.
-        eval_strategy: Sampling strategy for validation.
+        eval_strategy: DEPRECATED no-op (DS7) — warns when non-default.
         eval_portion: Fraction of segments per file for validation.
         train_validation_align: When True, train and eval scopes share segment indices.
         sampling_seed: Seed for SampleSet construction.
@@ -1562,6 +1569,22 @@ def run_workflow(
     """
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
+
+    # DS7 — deprecated no-op strategy params (removal tracked as FU-2).
+    for _name, _val, _default in (
+        ("trial_strategy", trial_strategy, "snapshot"),
+        ("target_files", target_files, None),
+        ("eval_strategy", eval_strategy, "snapshot"),
+    ):
+        if _val not in (_default, []):
+            warnings.warn(
+                f"run_workflow({_name}=...) is deprecated and IGNORED (DS7): "
+                f"the input field it fed was dead at both ends and has been "
+                f"removed. Use data_scope to restrict data; per-round "
+                f"strategy belongs to the LLM plan.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
     # 52 GB OOM forensics — see _log_rss docstring above.
     _log_rss("post-import (run_workflow entry)")
@@ -2076,9 +2099,7 @@ def run_workflow(
                     reasoning_pipeline=reasoning_pipeline,
                     human_advice=human_advice_propose,
                     is_trial=is_trial,
-                    trial_strategy=trial_strategy,
                     trial_portion=trial_portion,
-                    target_files=target_files,
                     train_portion=train_portion,
                     sampling_seed=sampling_seed,
                     trial_time_budget_minutes=trial_time_budget_minutes,
@@ -2374,11 +2395,8 @@ def run_workflow(
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             is_trial=is_trial,
-            trial_strategy=trial_strategy,
             trial_portion=trial_portion,
-            target_files=target_files,
             train_portion=train_portion,
-            eval_strategy=eval_strategy,
             eval_portion=eval_portion,
             train_validation_align=train_validation_align,
             sampling_seed=sampling_seed,

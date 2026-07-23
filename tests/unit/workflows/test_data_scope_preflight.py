@@ -163,3 +163,15 @@ class TestPreflightPass:
                 data_scope=DataScope(file_indices=[5, 6, 7, 8, 9]),
                 health_gate_enabled=False,
             )
+
+
+class TestDeprecatedStrategyParams:
+    """DS7 — run_workflow's trial_strategy / target_files / eval_strategy
+    params are accepted no-ops that warn when non-default."""
+
+    def test_non_default_warns_before_any_work(self, tmp_path):
+        with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
+            with pytest.raises(ValueError):
+                # Combined with an invalid scope config so the run stops at
+                # pre-flight right after warning — no stubs needed.
+                _run(tmp_path, trial_strategy="target", data_scope=PARTIAL)
