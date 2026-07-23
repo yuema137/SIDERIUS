@@ -1,0 +1,319 @@
+{
+  "scenario": 2,
+  "started": "2026-07-23T23:08:58+0000",
+  "gpu_before": {
+    "memory_used_mib": 59979
+  },
+  "attempt": {
+    "train_status": "rejected_time_risk",
+    "train_message": "runtime verification rejected the attempt: known-cost lower bound 2012.6s (safety x1 -> 2012.6s) exceeds the operator budget 300.0s \u2014 the full total can only be larger.",
+    "train_wall_s": 47.34,
+    "train_watchdog": null,
+    "inference_status": null,
+    "inference_wall_s": null,
+    "inference_watchdog": null,
+    "sidecar_stage_progression": [
+      "setup_started",
+      "verifying_training",
+      "rejected"
+    ],
+    "observation": {
+      "schema_version": 1,
+      "timestamp": "2026-07-23T23:09:44+0000",
+      "chain_id": null,
+      "attempt_id": "s2_reject",
+      "hardware": {
+        "hostname": "94cdab4290e0",
+        "gpu_name": "NVIDIA H100 80GB HBM3",
+        "cuda_version": "12.8"
+      },
+      "software": {
+        "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+        "python_version": "3.12.3",
+        "torch_version": "2.10.0+cu128"
+      },
+      "storage": {
+        "dataset_root": "/workspace/DATA/TIDMAD_DATA",
+        "file_count": 2,
+        "files_present": 2,
+        "expected_raw_bytes": 600000000,
+        "total_file_bytes": 4106824432,
+        "filesystem_type": "fuse",
+        "bytes_read_from_storage": 0,
+        "cache_state": "warm_page_cache",
+        "rss_bytes_before_setup": 555503616,
+        "rss_bytes_after_setup": 1172213760
+      },
+      "runtime_policy": {
+        "operator_budget_seconds": 300.0,
+        "safety_factor": 1.0,
+        "verification": {
+          "steady": {
+            "window": 8,
+            "stable_windows": 4,
+            "rel_spread_tol": 0.1,
+            "max_steps": 200
+          },
+          "min_timed_steps": 5,
+          "min_timed_ms": 500.0,
+          "max_steps": 200,
+          "max_wall_ms": 60000.0,
+          "pathological_factor": 10.0,
+          "max_unit_ms": null,
+          "prior_match_tol": 0.25,
+          "drift_extra_factor": 2.0
+        },
+        "historical_phase_share_limit": 0.1,
+        "observation_store_root": "/tmp/pregate_rc/runtime_observations",
+        "watchdog": {
+          "enabled": false,
+          "grace_seconds": 10.0,
+          "poll_seconds": 1.0,
+          "floor_seconds": 60.0
+        }
+      },
+      "historical_prior": null,
+      "prior_agreement": null,
+      "calibration_context": {
+        "precision": "float32",
+        "optimizer_type": "adam",
+        "model_family": "wavenet",
+        "param_count": 302784,
+        "seg_size": 1250,
+        "batch_size": 2,
+        "runtime_flags": {
+          "num_workers": 0,
+          "pin_memory": false,
+          "grad_accumulation": false,
+          "torch_compile": false
+        }
+      },
+      "components": {
+        "setup": {
+          "workload": null,
+          "prediction": {
+            "predicted_seconds": 17.320253996178508,
+            "source": "real_dataset_setup",
+            "formal_execution_eligible": true,
+            "steady_state": true,
+            "verification": "passed",
+            "confidence": "high",
+            "ms_per_unit": 17320.253996178508,
+            "n_steady_units": 1,
+            "unit_count": 1,
+            "safety_factor": 1.0,
+            "prior_expected_seconds": null,
+            "prior_agreement_ratio": null,
+            "detail": {}
+          },
+          "measurement": {
+            "unit": "setup_pass",
+            "n_measured_units": 1,
+            "n_stabilization_units": 0,
+            "unit_time_ms_median": 17320.253996178508,
+            "unit_time_ms_mad": null,
+            "steady_state_reached": true,
+            "total_measurement_seconds": 17.320253996178508,
+            "raw_timings_ms": [
+              17320.253996178508
+            ],
+            "detail": {
+              "dataset_construction_seconds": 3.4475294463336468
+            }
+          },
+          "actual_seconds": 17.320253996178508,
+          "prediction_error": {
+            "predicted_seconds": 17.320253996178508,
+            "actual_seconds": 17.320253996178508,
+            "ratio": 1.0,
+            "log_error": 0.0
+          }
+        },
+        "training": {
+          "workload": {
+            "phase": "training",
+            "unit": "optimizer_step",
+            "unit_count": 80000,
+            "detail": {
+              "source": "materialized_epoch0_loader",
+              "steps_per_epoch": 80000,
+              "epochs": 1,
+              "epoch0_samples": 160000,
+              "batch_size": 2,
+              "train_portion": 1.0
+            }
+          },
+          "prediction": {
+            "predicted_seconds": 1995.2961802482605,
+            "source": "real_training_verification",
+            "formal_execution_eligible": true,
+            "steady_state": true,
+            "verification": "passed",
+            "confidence": "medium",
+            "ms_per_unit": 24.941202253103256,
+            "n_steady_units": 21,
+            "unit_count": 80000,
+            "safety_factor": 1.0,
+            "prior_expected_seconds": null,
+            "prior_agreement_ratio": null,
+            "detail": {
+              "measured_unit_ms": 24.941202253103256,
+              "unit_count": 80000,
+              "extra_predicted_seconds": 0.0,
+              "verification_seconds": 1.4021074380725622,
+              "prior_agreement": "new_configuration",
+              "epoch0_dataset_seconds": 3.4475294463336468
+            }
+          },
+          "measurement": {
+            "unit": "optimizer_step",
+            "n_measured_units": 21,
+            "n_stabilization_units": 23,
+            "unit_time_ms_median": 24.941202253103256,
+            "unit_time_ms_mad": 1.355595886707306,
+            "steady_state_reached": true,
+            "total_measurement_seconds": 1.4021074380725622,
+            "raw_timings_ms": [
+              538.9497857540846,
+              9.962162002921104,
+              7.791317999362946,
+              8.424587547779083,
+              7.901262491941452,
+              8.293326944112778,
+              8.75782035291195,
+              9.155241772532463,
+              9.496202692389488,
+              9.899023920297623,
+              10.615279898047447,
+              10.718202218413353,
+              13.682138174772263,
+              52.2736981511116,
+              14.146536588668823,
+              18.053095787763596,
+              17.836593091487885,
+              17.94104091823101,
+              20.32921463251114,
+              20.137229934334755,
+              20.279571413993835,
+              20.170191302895546,
+              20.41894569993019,
+              22.50208891928196,
+              22.569650784134865,
+              26.296798139810562,
+              25.58799646794796,
+              24.941202253103256,
+              24.90312233567238,
+              22.481361404061317,
+              22.477468475699425,
+              22.294024005532265,
+              24.869157001376152,
+              24.84302408993244,
+              24.97253380715847,
+              24.96953122317791,
+              24.80284497141838,
+              24.965807795524597,
+              27.2957943379879,
+              24.833010509610176,
+              27.267633005976677,
+              29.525337740778923,
+              27.261679992079735,
+              27.21490152180195
+            ],
+            "detail": {
+              "state": "verified",
+              "failure_reason": null,
+              "prior_agreement": "new_configuration",
+              "prior_expected_unit_ms": null,
+              "rolling_medians_ms": [
+                8.591203950345516,
+                8.591203950345516,
+                8.591203950345516,
+                8.956531062722206,
+                9.325722232460976,
+                9.697613306343555,
+                10.257151909172535,
+                10.6667410582304,
+                12.200170196592808,
+                13.914337381720543,
+                15.991564840078354,
+                17.888817004859447,
+                17.997068352997303,
+                19.095162861049175,
+                19.095162861049175,
+                20.15371061861515,
+                20.22488135844469,
+                20.304393023252487,
+                20.374080166220665,
+                21.460517309606075,
+                22.535869851708412,
+                23.73638655990362,
+                23.73638655990362,
+                23.73638655990362,
+                23.73638655990362,
+                24.886139668524265,
+                24.856090545654297,
+                24.856090545654297,
+                24.856090545654297,
+                24.82293453067541,
+                24.856090545654297,
+                24.917482398450375,
+                24.917482398450375,
+                24.967669509351254,
+                24.97103251516819,
+                26.115605607628822,
+                27.23829075694084
+              ]
+            }
+          },
+          "actual_seconds": null,
+          "prediction_error": null
+        }
+      },
+      "total": null,
+      "admission": {
+        "decision": "rejected",
+        "stage": "post_training_verification",
+        "setup_cost_seconds": 17.320253996178508,
+        "verification_cost_seconds": 1.4021074380725622,
+        "avoided_predicted_runtime_seconds": 2012.616434244439,
+        "reason": "known-cost lower bound 2012.6s (safety x1 -> 2012.6s) exceeds the operator budget 300.0s \u2014 the full total can only be larger."
+      },
+      "watchdog_status": null,
+      "final_status": "rejected",
+      "calibration_eligible": false
+    },
+    "component_table": {
+      "setup": {
+        "predicted_s": 17.320253996178508,
+        "source": "real_dataset_setup",
+        "actual_s": 17.320253996178508,
+        "ratio_actual_over_predicted": 1.0
+      },
+      "training": {
+        "predicted_s": 1995.2961802482605,
+        "source": "real_training_verification",
+        "actual_s": null,
+        "ratio_actual_over_predicted": null
+      }
+    },
+    "admission": {
+      "decision": "rejected",
+      "stage": "post_training_verification",
+      "setup_cost_seconds": 17.320253996178508,
+      "verification_cost_seconds": 1.4021074380725622,
+      "avoided_predicted_runtime_seconds": 2012.616434244439,
+      "reason": "known-cost lower bound 2012.6s (safety x1 -> 2012.6s) exceeds the operator budget 300.0s \u2014 the full total can only be larger."
+    }
+  },
+  "artifacts": {
+    "checkpoint_exists": false,
+    "sentinel_exists": false,
+    "denoised_files": []
+  },
+  "gpu_after": {
+    "memory_used_mib": 59979
+  },
+  "process_residue": [],
+  "store_observation_count": 5,
+  "finished": "2026-07-23T23:09:45+0000"
+}

@@ -81,7 +81,7 @@ Runtime-Control Implementation
 [x] RT5     — guardrails (5d11fe1; schema defaults None — operational §5 values land with RT6 chain wiring)
 [x] RT6     — chain/CLI/docs wiring (0db5e25)
 [x] Pre-Gate A — full non-real sweep (unit 4239 green; pseudo integration 124 passed + known FU-7 only)
-[ ] Pre-Gate B — small real-GPU validation (4 scenarios; operator-reviewed launch plan)
+[x] Pre-Gate B — small real-GPU validation (4/4 scenarios green post-fix; findings F1-F3 fixed; evidence in docs/design/pregate_evidence/)
 [ ] Gate 1  — real LLM + pseudo training
 [ ] Gate 2  — operator-approved real training (incl. pathological case)
 ```
@@ -1761,3 +1761,55 @@ the pre-Gate prediction-quality evidence before Gate 2 is configured.**
 - **Environment skips**: 1 unit skip = the pre-existing
   `test_scoring_helpers.py` Path-A reference-data absence; 1
   integration skip = environment-dependent (pre-existing).
+
+### Pre-Gate B — small real-GPU validation ✅ 2026-07-23
+
+Operator-approved launch; H100 80 GB (CONTENDED: a neighbor process
+held ~60 GB throughout — concurrency recorded in provenance and itself
+useful drift evidence); real TIDMAD data; driver
+`scripts/pregate_runtime_control_validation.py` (no LLM). All four
+scenarios GREEN on the post-fix code; raw reports + observation store
+preserved in `docs/design/pregate_evidence/`.
+
+- **S1 admitted end-to-end** (88 s wall): stages `setup_started →
+  verifying_training → admitted → completed → verifying_inference →
+  inference_complete`; admission `post_training_verification`,
+  known-cost 37.8 s ≤ 1800 s, verification cost ~1.1 s. Prediction vs
+  actual: setup 1.0 (by construction); training 1.02 (run 1) / 1.24
+  (run 2, under contention drift) — both inside F=1.5; inference 1.59
+  at toy scale — residual analyzed as per-run ORCHESTRATION constants
+  (session/config machinery ≈ 1.5 s, matching the parent-measured
+  `process_startup_ms` class; <3% at trial scale). Artifacts valid;
+  zero process residue; GPU memory delta 0.
+- **S2 incident-shaped rejection** (~48 s wall): 80,000 steps (seg
+  1250 / batch 2) measured LIVE at ~25 ms/step → predicted ≈ 2013 s ≫
+  300 s budget → REJECTED at `post_training_verification` with the
+  §2.1 cost model (setup ≈ 18 s, verification ≈ 1.6 s, avoided 2013 s
+  — 41x leverage). No checkpoint/sentinel; NOT misclassified as a
+  silent crash; stored observation excluded from calibration (§6c).
+- **S3 real watchdog kill** (~110 s wall): training admitted +
+  completed (checkpoint + sentinel PRESERVED); inference (3200
+  batches) killed at the 60.0 s deadline (source
+  `verified_components` — tightened from the LIVE sidecar), SIGTERM
+  sufficed, ZERO survivors, GPU memory at baseline, partial denoised
+  outputs removed; observation frozen at `verifying_inference`.
+  Contention evidence: batches ran ~44 ms vs the 19.4 ms verified in
+  S1 — live drift, the watchdog's raison d'être.
+- **S4 prior round trip** (3 sub-runs): valid prior found and consumed
+  (cross-scenario from S1's stored observation — same §6a key);
+  `verified_match` at ratio 0.979 on runs 1-2 (run 2 was falsely
+  `verified_drift` pre-fix — F3); changed key (batch 16) →
+  `new_configuration`, prior never cross-applied; live verification
+  ran in every case.
+- **Findings, all fixed + re-validated on GPU (fix commit + driver
+  fixes)**: F1 inference I/O pricing (input-read + per-file residual
+  terms added to the §2.6 split); F2 scoped `expected_raw_bytes`
+  (whole-file sizes kept as `total_file_bytes`); F3 non-sticky prior
+  drift (agreement recomputed from the current steady median). Driver
+  defects found live: `Thread._stop` shadowing; residue-detector false
+  positive; S3 eval-scope resize after measured batch speed.
+- **Verification overhead (admitted path)**: setup 14.9 s (would occur
+  anyway), stabilization+timed ≈ 1.1 s of steps that ARE production
+  steps, instrumentation ≈ sub-second sidecar writes — overhead ≈ 0
+  wasted compute. Rejected path: ~20 s real cost to avoid 2013 s
+  predicted — the §2.12 principle holds with measured numbers.

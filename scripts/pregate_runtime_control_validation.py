@@ -80,7 +80,9 @@ def _process_residue() -> list[str]:
         return [
             line.strip()
             for line in out.stdout.splitlines()
-            if ("train_engine_sandbox" in line or "inference_single" in line) and "grep" not in line
+            if ("train_engine_sandbox" in line or "inference_single" in line)
+            and "grep" not in line
+            and "bash -c" not in line  # the driver's own wrapper shell mentions the names
         ]
     except Exception as exc:
         return [f"ps failed: {exc}"]
