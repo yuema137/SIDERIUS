@@ -464,6 +464,71 @@ def _measure_ms_per_step(
 # ── public entry point ───────────────────────────────────────────────────────
 
 
+def _store_reuse_decision(
+    *,
+    store_root: str,
+    model_type: str,
+    train_config: dict,
+    sample_set: dict,
+    train_portion: float,
+    seg_size: int,
+    batch_size: int,
+    num_params: int,
+    gpu_name: str | None,
+):
+    """§3 store-reuse decision for a trial round (RT3). Best-effort:
+    any store/lookup problem degrades to warm-up-required — the policy
+    can only ever SKIP work, never fabricate an estimate.
+
+    Returns ``(decision | None, lookup_status | None, key | None)``.
+    """
+    from agent.skills.evaluate_time_skill.trigger_policy import decide_nonformal_estimation
+
+    try:
+        import torch
+
+        from core.runtime_control.observation_store import ObservationStore, calibration_key
+        from execute_tools.workload_resolvers import resolve_training_workload
+
+        key = calibration_key(
+            "training",
+            gpu_name=gpu_name,
+            torch_version=torch.__version__,
+            precision="float32",  # the production trainer's default dtype
+            optimizer_type=str(train_config.get("optimizer_type", "adamw")),
+            model_family=model_type,
+            param_count=num_params,
+            seg_size=seg_size,
+            batch_size=batch_size,
+        )
+        lookup = ObservationStore(store_root).lookup_prior(
+            key,
+            "training",
+            current_gpu_name=gpu_name,
+            current_torch_version=torch.__version__,
+        )
+        prior_ms = lookup.prior_unit_ms if lookup.status == "valid" else None
+        n_steps = resolve_training_workload(
+            sample_set,
+            seg_size=seg_size,
+            batch_size=batch_size,
+            train_portion=train_portion,
+            epochs=int(train_config.get("epochs", 1)),
+        ).unit_count
+        decision = decide_nonformal_estimation(
+            is_trial_round=True,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            seg_size=seg_size,
+            store_prior_unit_ms=prior_ms,
+            static_ms_per_step=_training_est._static_ms_per_step(num_params, seg_size, batch_size),
+        )
+        return decision, lookup.status, key
+    except Exception as exc:
+        print(f"    [TimeEval] store-reuse check failed (non-fatal, warming up): {exc}")
+        return None, None, None
+
+
 def run_skill(sandbox, **kwargs) -> dict:
     """Estimate wall-time (training + inference + scoring) for the proposed
     config and gate against the time budget.
@@ -514,8 +579,31 @@ def run_skill(sandbox, **kwargs) -> dict:
 
     try:
         num_params = _count_params(model_type, model_config, loss_type)
+        gpu_name = _detect_gpu_name()
 
-        # Real-dataset warmup — only with CUDA + data_dir. Feeds the
+        # RT3 (§3 table): NON-formal rounds may reuse a stored unit time
+        # instead of warming up — only on a valid exact-key store hit
+        # within the §3 bounds. Formal rounds never take this path (the
+        # tuner only passes allow_store_reuse for trial rounds; their
+        # authority is the in-subprocess verification, §2.1/§3).
+        store_decision = None
+        store_lookup_status = None
+        store_key = None
+        if kwargs.get("allow_store_reuse") and kwargs.get("observation_store_root"):
+            store_decision, store_lookup_status, store_key = _store_reuse_decision(
+                store_root=str(kwargs["observation_store_root"]),
+                model_type=model_type,
+                train_config=train_config,
+                sample_set=sample_set,
+                train_portion=train_portion,
+                seg_size=seg_size,
+                batch_size=batch_size,
+                num_params=num_params,
+                gpu_name=gpu_name,
+            )
+
+        # Real-dataset warmup — only with CUDA + data_dir, and only when
+        # the §3 policy did not authorize store reuse. Feeds the
         # training estimator directly and the inference estimator after
         # scaling by _INFERENCE_VS_TRAINING_RATIO. Phase 6.7 Fix 1: the
         # warmup also returns a structured breakdown so the audit log
@@ -528,7 +616,15 @@ def run_skill(sandbox, **kwargs) -> dict:
             "timings_ms": [],
             "aggregator": None,
         }
-        if data_dir:
+        store_reused = store_decision is not None and store_decision.action == "reuse_store"
+        if store_reused:
+            assert store_decision is not None
+            measured = store_decision.store_unit_ms
+            print(
+                f"    [TimeEval] §3 store reuse: {measured:.2f} ms/step from the "
+                f"observation store (key hit, warm-up skipped)."
+            )
+        elif data_dir:
             measured, warmup_breakdown = _measure_ms_per_step(
                 model_type=model_type,
                 model_config=model_config,
@@ -537,7 +633,6 @@ def run_skill(sandbox, **kwargs) -> dict:
                 data_dir=data_dir,
                 sample_set=sample_set,
             )
-        gpu_name = _detect_gpu_name()
 
         training = _training_est.estimate_wall_time_seconds(
             model_type,
@@ -550,6 +645,13 @@ def run_skill(sandbox, **kwargs) -> dict:
             num_params=num_params,
             loss_type=loss_type,
         )
+        if store_reused:
+            # RT3 provenance correction: the estimator stamps a passed
+            # ms_per_step as the warm-up source; a store-reused value is
+            # a HISTORICAL prior — never formal-eligible (§3 non-formal
+            # table; formal admission is the in-subprocess verification).
+            training["breakdown"]["ms_source"] = "store"
+            training["breakdown"]["formal_execution_eligible"] = False
 
         # refine_inference_time_estimator.md Commit D — three-branch
         # inference-ms derivation, in priority order:
@@ -672,6 +774,14 @@ def run_skill(sandbox, **kwargs) -> dict:
         "inference_ms_source": inference_ms_source,
         "slack_applied": slack_applied,
         "effective_budget_minutes": round(effective_budget_min, 2),
+        # RT3 planner-visible provenance: how the §3 non-formal policy
+        # resolved (absent keys when the policy was never consulted).
+        "store_reuse": store_reused,
+        "store_lookup_status": store_lookup_status,
+        "store_key": store_key,
+        "store_policy_reasons": (
+            list(store_decision.reasons) if store_decision is not None else None
+        ),
     }
 
     slack_note = (

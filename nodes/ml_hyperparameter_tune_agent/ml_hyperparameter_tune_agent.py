@@ -2361,6 +2361,14 @@ class HyperparamTuningAgent:
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
                             inference_per_psd_seg_ms_hint=inference_hint,
+                            # RT3 (§3 table): trial rounds may reuse a valid
+                            # store hit instead of warming up; formal rounds
+                            # never (their authority is the in-subprocess
+                            # verification).
+                            allow_store_reuse=plan.is_trial,
+                            observation_store_root=os.path.join(
+                                sandbox.base_dir, "runtime_observations"
+                            ),
                         )
                         if time_check.get("status") == "error":
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
@@ -3216,6 +3224,16 @@ class HyperparamTuningAgent:
                         final_record["memory"]["inference_ms_source"] = (
                             time_check.get("breakdown") or {}
                         ).get("inference_ms_source")
+                        # RT3 — planner-visible training-estimate provenance:
+                        # which §3 branch produced the pre-flight training
+                        # ms/step (real_dataset_warmup | store |
+                        # static_uncalibrated) and whether the store-reuse
+                        # policy fired.
+                        final_record["memory"]["training_ms_source"] = (
+                            time_check.get("breakdown") or {}
+                        ).get("source")
+                        if (time_check.get("breakdown") or {}).get("store_reuse"):
+                            final_record["memory"]["time_store_reuse"] = True
                     # Phase K — surface pre-flight VRAM-estimator context to the
                     # planner the same way Phase J surfaces time context. Only
                     # added when the gate ran with a budget (chosen_vram_budget
