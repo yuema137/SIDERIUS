@@ -1,5 +1,13 @@
 # Proposal: Physics-Anchored Multi-Fidelity Tuning for TIDMAD
 
+> **DS7 note (2026-07-23):** the operator-side `trial_strategy` /
+> `eval_strategy` / `target_files` INPUT fields and CLI flags described
+> below were removed (dead at both ends) — per-round strategy belongs to
+> the LLM plan (`ExperimentPlan`), and data restriction belongs to
+> `--data_scope` (`docs/design/enable_partial_file_list.md`). Under a
+> partial scope, sampling is snapshot-only. The plan-level and
+> record-level strategy fields in this doc remain accurate.
+
 ## Status: Phase 4b complete — streaming loader, DatasetConfig, reproducible seeds, parallel scoring
 
 ---
