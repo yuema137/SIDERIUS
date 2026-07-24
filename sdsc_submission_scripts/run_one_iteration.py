@@ -805,6 +805,20 @@ def build_parser() -> argparse.ArgumentParser:
         "Default 1.0 (schema-mirroring); V18 production posture 1.5.",
     )
     parser.add_argument(
+        "--runtime_trial_safety_factor",
+        type=float,
+        default=None,
+        help="Phase-specific factor for TRIAL attempts; wins over "
+        "--runtime_safety_factor when set. V18 posture 2.0.",
+    )
+    parser.add_argument(
+        "--runtime_formal_safety_factor",
+        type=float,
+        default=None,
+        help="Phase-specific factor for FORMAL attempts; wins over "
+        "--runtime_safety_factor when set.",
+    )
+    parser.add_argument(
         "--runtime_watchdog_floor_seconds",
         type=float,
         default=60.0,
@@ -1361,6 +1375,8 @@ def main():
             allow_extreme_steps=args.allow_extreme_steps,
             runtime_watchdog_enabled=args.runtime_watchdog,
             runtime_safety_factor=args.runtime_safety_factor,
+            runtime_trial_safety_factor=args.runtime_trial_safety_factor,
+            runtime_formal_safety_factor=args.runtime_formal_safety_factor,
             runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
             # Advice
             human_advice_interpret=args.human_advice_interpret,

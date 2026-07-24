@@ -119,7 +119,27 @@ class RuntimeControlPolicy(BaseModel):
         ge=1.0,
         description=(
             "Multiplier applied to the known-cost sum at admission time "
-            "(§2.10 — revised from the error ledger once RT2-F lands)."
+            "(§2.10 — revised from the error ledger once RT2-F lands). "
+            "This is the EFFECTIVE per-attempt value: callers resolve any "
+            "trial/formal phase split before constructing the policy; "
+            "enforcement (admission + watchdog) reads this field only."
+        ),
+    )
+    trial_safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "Provenance only: the operator's trial-phase factor as "
+            "configured (Wave-1A split, 2026-07-24). Never read by "
+            "enforcement — the caller resolves it into safety_factor."
+        ),
+    )
+    formal_safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "Provenance only: the operator's formal-phase factor as "
+            "configured. Never read by enforcement — see trial_safety_factor."
         ),
     )
     verification: AdaptiveVerificationConfig = Field(

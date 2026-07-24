@@ -1181,7 +1181,31 @@ class HyperparamTuningInput(BaseModel):
             "deadline. Schema default 1.0 preserves programmatic-caller "
             "behavior; the V18 production posture (1.5) is passed "
             "explicitly by the launch configuration (Gate 2 wiring, "
-            "2026-07-24)."
+            "2026-07-24). Phase-specific overrides: "
+            "runtime_trial_safety_factor / runtime_formal_safety_factor "
+            "take precedence for their phase when provided."
+        ),
+    )
+    runtime_trial_safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "§2.10 phase-specific safety factor for TRIAL attempts. "
+            "Precedence: this value when provided → runtime_safety_factor "
+            "→ its schema default. Wave-1A diagnostic (2026-07-24): trial "
+            "attempts of novel architectures ran a systematic 1.54-1.61x "
+            "past stable verification under 2-way concurrency, so the V18 "
+            "production posture is 2.0 for trials while formals keep 1.5."
+        ),
+    )
+    runtime_formal_safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "§2.10 phase-specific safety factor for FORMAL attempts. "
+            "Precedence: this value when provided → runtime_safety_factor "
+            "→ its schema default. None keeps formal admission on the "
+            "calibrated base factor."
         ),
     )
     runtime_watchdog_floor_seconds: float = Field(

@@ -1404,13 +1404,30 @@ def _build_runtime_policy(
     ``runtime_policy`` provenance. Extracted as a helper so the exact
     policy the tuner ships is unit-testable against the launch
     configuration.
+
+    Safety-factor resolution (Wave-1A split, 2026-07-24): the
+    phase-specific factor (trial/formal) wins when provided, else the
+    legacy ``runtime_safety_factor``. ``safety_factor`` in the returned
+    dict is the EFFECTIVE value for this attempt's phase — enforcement
+    reads only it; both configured phase values ride along as
+    provenance.
     """
+    phase_specific = (
+        agent_input.runtime_trial_safety_factor
+        if is_trial
+        else agent_input.runtime_formal_safety_factor
+    )
+    effective_safety = (
+        phase_specific if phase_specific is not None else agent_input.runtime_safety_factor
+    )
     return {
         "operator_budget_seconds": (
             chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
         ),
         "observation_store_root": os.path.join(base_dir, "runtime_observations"),
-        "safety_factor": agent_input.runtime_safety_factor,
+        "safety_factor": effective_safety,
+        "trial_safety_factor": agent_input.runtime_trial_safety_factor,
+        "formal_safety_factor": agent_input.runtime_formal_safety_factor,
         "watchdog": {
             "enabled": agent_input.runtime_watchdog_enabled,
             "floor_seconds": agent_input.runtime_watchdog_floor_seconds,
@@ -4376,6 +4393,22 @@ def main() -> int:
         "posture is 1.5, passed explicitly by the launch config.",
     )
     parser.add_argument(
+        "--runtime_trial_safety_factor",
+        type=float,
+        default=None,
+        help="§2.10 phase-specific factor for TRIAL attempts; wins over "
+        "--runtime_safety_factor when set. V18 posture 2.0 (Wave-1A "
+        "diagnostic: systematic 1.54-1.61x post-verification drift).",
+    )
+    parser.add_argument(
+        "--runtime_formal_safety_factor",
+        type=float,
+        default=None,
+        help="§2.10 phase-specific factor for FORMAL attempts; wins over "
+        "--runtime_safety_factor when set. Default None keeps formals "
+        "on the base factor.",
+    )
+    parser.add_argument(
         "--runtime_watchdog_floor_seconds",
         type=float,
         default=60.0,
@@ -4489,6 +4522,8 @@ def main() -> int:
     input_dict["allow_extreme_steps"] = args.allow_extreme_steps
     input_dict["runtime_watchdog_enabled"] = args.runtime_watchdog
     input_dict["runtime_safety_factor"] = args.runtime_safety_factor
+    input_dict["runtime_trial_safety_factor"] = args.runtime_trial_safety_factor
+    input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)

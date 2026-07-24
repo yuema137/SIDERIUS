@@ -655,6 +655,8 @@ def run_agent(
     allow_extreme_steps: bool = False,
     runtime_watchdog: bool = False,
     runtime_safety_factor: float | None = None,
+    runtime_trial_safety_factor: float | None = None,
+    runtime_formal_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float | None = None,
 ):
     """
@@ -749,6 +751,10 @@ def run_agent(
         cmd.append("--runtime_watchdog")
     if runtime_safety_factor is not None:
         cmd.extend(["--runtime_safety_factor", str(runtime_safety_factor)])
+    if runtime_trial_safety_factor is not None:
+        cmd.extend(["--runtime_trial_safety_factor", str(runtime_trial_safety_factor)])
+    if runtime_formal_safety_factor is not None:
+        cmd.extend(["--runtime_formal_safety_factor", str(runtime_formal_safety_factor)])
     if runtime_watchdog_floor_seconds is not None:
         cmd.extend(["--runtime_watchdog_floor_seconds", str(runtime_watchdog_floor_seconds)])
     if resume:
@@ -1030,6 +1036,20 @@ def main():
         default=None,
         help="Forwarded to the tuner when set. §2.10 safety multiplier; "
         "V18 production posture 1.5. Default None = tuner default (1.0).",
+    )
+    parser.add_argument(
+        "--runtime_trial_safety_factor",
+        type=float,
+        default=None,
+        help="Forwarded when set: phase-specific TRIAL factor (wins over "
+        "--runtime_safety_factor for trials). V18 posture 2.0.",
+    )
+    parser.add_argument(
+        "--runtime_formal_safety_factor",
+        type=float,
+        default=None,
+        help="Forwarded when set: phase-specific FORMAL factor (wins over "
+        "--runtime_safety_factor for formals).",
     )
     parser.add_argument(
         "--runtime_watchdog_floor_seconds",
@@ -1490,6 +1510,8 @@ def main():
         allow_extreme_steps=args.allow_extreme_steps,
         runtime_watchdog=args.runtime_watchdog,
         runtime_safety_factor=args.runtime_safety_factor,
+        runtime_trial_safety_factor=args.runtime_trial_safety_factor,
+        runtime_formal_safety_factor=args.runtime_formal_safety_factor,
         runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
     )
 
