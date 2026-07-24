@@ -1908,10 +1908,30 @@ no-LLM lifecycle (S1), real in-subprocess rejection (S2), real
 watchdog kill + cleanup (S3), prior round trip + changed-key
 isolation (S4), process/GPU cleanup.
 
-**Recommended Gate 2** (awaiting operator approval; NOTHING
-launched): Scenario A = O2 via the chain with a FORCED formal round
-(deliberate, recorded deviation from the trial-only smoke standard —
-runtime-control's Gate 2 must exercise real formal admission), real
-LLM (openai_tiered_v1), `--runtime_watchdog`, Gate-specific
-`formal_time_budget_minutes=30` (production stays 120); Scenario B =
-B2 via the deterministic driver (no LLM). Total ≈ 35–50 min, ≈ $1–1.5.
+**Recommended Gate 2** (operator-APPROVED 2026-07-23: Lite Plan;
+Scenario B first, stop-and-show, then Scenario A on explicit
+approval): Scenario A = O2/Lite via the chain with a FORCED formal
+round, real LLM (openai_tiered_v1), `--runtime_watchdog`,
+Gate-specific `formal_time_budget_minutes=30` (production stays 120);
+Scenario B = the exact incident config via the deterministic driver
+(no LLM).
+
+**Gate 2 execution tracker:**
+
+- [x] Scenario B launch preparation (fresh code re-read 2026-07-23:
+  trainer rejection path, executor `rejected_time_risk`-before-
+  sentinel, policy defaults — safety/watchdog must be passed
+  EXPLICITLY for production posture; guardrails confirmed tuner-side
+  only → structurally absent in the direct-executor driver = the §8
+  local force-disable, no chain/schema default touched). Driver
+  scenario 5 added; resolution CONFIRMED empirically: files 4-9 ×
+  20 PSD (production `build_sample_set`, fp 0.10, seed 42), seg 1250,
+  batch 2, 1 epoch → **exactly 480,000 optimizer steps**; policy =
+  budget 7200 s + safety 1.5 + watchdog armed (floor 120) + store
+  root; predicted ≈ 18,000 s safety-adjusted ≫ 7,200 s. Command:
+  `.venv/bin/python scripts/pregate_runtime_control_validation.py
+  --scenario 5 --workspace /tmp/gate2_b`
+- [ ] Gate 2 Scenario B
+- [ ] Gate 2 Scenario A (LAUNCH ONLY on explicit operator approval
+  after the Scenario B stop-and-show)
+- [ ] Gate 2 (verdict)

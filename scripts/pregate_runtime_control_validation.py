@@ -224,7 +224,7 @@ def _artifact_state(sandbox: TidmadSandbox, run_name: str, exp_id: str, model_ty
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", type=int, required=True, choices=[1, 2, 3, 4])
+    parser.add_argument("--scenario", type=int, required=True, choices=[1, 2, 3, 4, 5])
     parser.add_argument("--workspace", type=str, required=True)
     args = parser.parse_args()
 
@@ -241,7 +241,9 @@ def main() -> int:
         run_name=run_name,
         workspace=args.workspace,
         progress_bar=False,
-        data_scope=DataScope.from_cli("0-1"),
+        # Scenario 5 (Gate 2-B) reproduces the incident's 4-9 scope; the
+        # pre-Gate scenarios use 0-1.
+        data_scope=DataScope.from_cli("4-9" if scenario == 5 else "0-1"),
     )
     base_policy = {"observation_store_root": store_root}
 
@@ -307,6 +309,51 @@ def main() -> int:
             report=report,
         )
         report["artifacts"] = _artifact_state(sandbox, run_name, "s3_watchdog", "wavenet")
+
+    elif scenario == 5:
+        # Gate 2 Scenario B (operator-approved): THE V18 incident
+        # configuration — DataScope 4-9, formal_portion 0.10 (production
+        # build_sample_set, seeded), seg 1250, batch 2, 1 epoch →
+        # resolver-exact 480,000 optimizer steps — against the
+        # PRODUCTION policy (120-min budget, safety 1.5, watchdog armed
+        # with production floor). Guardrails are structurally absent in
+        # this direct-executor path (they live in the tuner pre-flight);
+        # that is the §8 "guardrails force-disabled" condition, LOCAL to
+        # this test — no chain/schema default is modified. Expected:
+        # real setup + live verification → prediction ≫ budget →
+        # rejected_time_risk at post_training_verification in minutes.
+        from execute_tools.sample_set_builder import build_sample_set
+
+        incident_train = build_sample_set(
+            is_trial=True,
+            trial_strategy="snapshot",
+            trial_portion=0.10,
+            seed=42,
+            scope=DataScope.from_cli("4-9"),
+        )
+        report["attempt"] = _run_attempt(
+            sandbox,
+            exp_id="gate2b_incident",
+            run_name=run_name,
+            model_cfg={**WAVENET_SMALL, "segmentation_size": 1250},
+            train_cfg={"epochs": 1, "batch_size": 2, "optimizer_type": "adam", "lr": 5e-4},
+            train_ss=incident_train,
+            eval_ss={"4": [0]},  # never reached — rejection precedes inference
+            policy={
+                **base_policy,
+                "operator_budget_seconds": 7200.0,  # production 120-min budget
+                "safety_factor": 1.5,  # production policy
+                "watchdog": {
+                    "enabled": True,  # production posture — armed, expected silent
+                    "grace_seconds": 10.0,
+                    "poll_seconds": 1.0,
+                    "floor_seconds": 120.0,
+                },
+            },
+            run_inference=False,
+            report=report,
+        )
+        report["artifacts"] = _artifact_state(sandbox, run_name, "gate2b_incident", "wavenet")
 
     elif scenario == 4:
         # Prior round trip: identical run twice (2nd should find a valid
