@@ -120,7 +120,7 @@ launch_one() {
         --formal_strategy snapshot --formal_round_strategy inherit_best_trial \
         --exploration_mode explore --ml_lit_review_enabled \
         --llm_config llm_configs/openai_tiered_v1.json \
-        --advice "advice/workflow/v17_${FLAVOR}_explorer.json" \
+        --advice "advice/workflow/v18r_${FLAVOR}_explorer.json" \
         --health_checks_config configs/health_checks_baseline_observe_mode.yaml \
         | grep -E "Data scope|HealthGate       |DRY-RUN COMPLETE" )
     return 0
@@ -160,7 +160,7 @@ launch_one() {
       --exploration_mode explore \
       --ml_lit_review_enabled \
       --llm_config llm_configs/openai_tiered_v1.json \
-      --advice 'advice/workflow/v17_${FLAVOR}_explorer.json' \
+      --advice 'advice/workflow/v18r_${FLAVOR}_explorer.json' \
       --health_checks_config configs/health_checks_baseline_observe_mode.yaml
     status=\$?
     set -e
