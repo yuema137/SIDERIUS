@@ -1931,7 +1931,27 @@ Scenario B = the exact incident config via the deterministic driver
   root; predicted ≈ 18,000 s safety-adjusted ≫ 7,200 s. Command:
   `.venv/bin/python scripts/pregate_runtime_control_validation.py
   --scenario 5 --workspace /tmp/gate2_b`
-- [ ] Gate 2 Scenario B
+- [x] Gate 2 Scenario B ✅ 2026-07-24 — THE incident config REJECTED
+  by live in-subprocess verification in **1 m 31 s total wall**
+  (subprocess 88 s), on an IDLE H100 (GPU 0 MiB before/after — the
+  earlier neighbor job had ended). Evidence
+  (`docs/design/pregate_evidence/report_gate2_scenarioB.json`):
+  resolver-exact **480,000 steps** (960,000 samples, batch 2, seg
+  1250, files 4-9 × 20 PSD); setup 43.7 s (3.6 GB scoped read, warm
+  page cache); live verification 3.78 s, steady TRUE over 19 steady
+  steps at **27.53 ms/step** (vs the incident's 44.3 and the static
+  lie of 2.00); predicted training 13,217 s = 3.67 h; known-cost
+  13,260 s × safety 1.5 = **19,891 s avoided (5.5 h) vs the 7,200 s
+  production budget** → `rejected_time_risk` @
+  `post_training_verification`; stage progression `setup_started →
+  verifying_training → rejected`; NO checkpoint/sentinel; NOT a
+  silent crash or generic failure; watchdog armed, silent; zero
+  process residue; GPU memory 0 → 0; observation stored and
+  calibration-INELIGIBLE (§6c confirmed programmatically).
+  Attempt-accounting evidence: `rejected_time_risk` routing consumes
+  an attempt per the pinned RT2-G harness tests
+  (`test_rt2g_admission_wiring.py`) — the tuner-side contract this
+  status feeds.
 - [ ] Gate 2 Scenario A (LAUNCH ONLY on explicit operator approval
   after the Scenario B stop-and-show)
 - [ ] Gate 2 (verdict)
