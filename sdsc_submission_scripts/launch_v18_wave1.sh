@@ -115,7 +115,7 @@ launch_one() {
         --trial_time_budget_minutes 20 --formal_time_budget_minutes 120 \
         --trial_vram_budget_gb 16 --formal_vram_budget_gb 16 \
         --runtime_watchdog --runtime_safety_factor 1.5 \
-        --runtime_trial_safety_factor 2.0 \
+        --runtime_trial_safety_factor 3.0 \
         --runtime_watchdog_floor_seconds 120 \
         --formal_strategy snapshot --formal_round_strategy inherit_best_trial \
         --exploration_mode explore --ml_lit_review_enabled \
@@ -153,7 +153,7 @@ launch_one() {
       --formal_vram_budget_gb 16 \
       --runtime_watchdog \
       --runtime_safety_factor 1.5 \
-      --runtime_trial_safety_factor 2.0 \
+      --runtime_trial_safety_factor 3.0 \
       --runtime_watchdog_floor_seconds 120 \
       --formal_strategy snapshot \
       --formal_round_strategy inherit_best_trial \
