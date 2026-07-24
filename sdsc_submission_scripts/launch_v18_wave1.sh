@@ -1,11 +1,18 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# V18 Wave-1 launcher — 4 split-scope chains (docs/v18_split_run_plan.md,
-# reports/v18_20260723.md). Audited per the 2026-07-23 pre-launch audit.
+# V18r Wave-1 launcher — scientific Wave 1 in TWO execution phases
+# (reports/v18_20260724.md; operator decision 2026-07-24: two-way
+# parallelism to bound dynamic GPU timing contention).
+#
+#   Phase 1a: v18r_loss_04_09 + v18r_arch_04_09   (scope 4-9)
+#   Phase 1b: v18r_loss_10_14 + v18r_arch_10_14   (scope 10-14;
+#             launch ONLY after the Wave-1A checkpoint is approved)
 #
 # Usage:
-#   bash sdsc_submission_scripts/launch_v18_wave1.sh --dry-run   # verify only
-#   bash sdsc_submission_scripts/launch_v18_wave1.sh             # LAUNCH
+#   bash sdsc_submission_scripts/launch_v18_wave1.sh 1a --dry-run  # verify
+#   bash sdsc_submission_scripts/launch_v18_wave1.sh 1a            # LAUNCH 1a
+#   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b --dry-run
+#   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b            # LAUNCH 1b
 #
 # Environment overrides:
 #   WS_ROOT      (default /workspace/DATA/SIDERIUS_DATA)
@@ -28,18 +35,30 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WS_ROOT="${WS_ROOT:-/workspace/DATA/SIDERIUS_DATA}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 DATE="$(date +%Y%m%d_%H%M)"
-DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
-
-# Wave-1 roster: run_name : scope : monitored(all in-scope) : advice flavor
-WAVE1=(
-  "v18_loss_04_09:4-9:4,5,6,7,8,9:loss"
-  "v18_arch_04_09:4-9:4,5,6,7,8,9:arch"
-  "v18_loss_10_14:10-14:10,11,12,13,14:loss"
-  "v18_arch_10_14:10-14:10,11,12,13,14:arch"
-)
 
 fail() { echo "[LAUNCH-ABORT] $*" >&2; exit 1; }
+
+# Phase argument is REQUIRED — there is no all-four invocation.
+PHASE="${1:-}"
+DRY_RUN=0
+[ "${2:-}" = "--dry-run" ] && DRY_RUN=1
+
+# Rosters: run_name : scope : monitored(all in-scope) : advice flavor
+# v18r_* = fresh relaunch campaign under the runtime-control protocol
+# (reports/v18_20260724.md); the halted campaign is archived as legacy_v18_*.
+WAVE1A=(
+  "v18r_loss_04_09:4-9:4,5,6,7,8,9:loss"
+  "v18r_arch_04_09:4-9:4,5,6,7,8,9:arch"
+)
+WAVE1B=(
+  "v18r_loss_10_14:10-14:10,11,12,13,14:loss"
+  "v18r_arch_10_14:10-14:10,11,12,13,14:arch"
+)
+case "$PHASE" in
+  1a) ROSTER=("${WAVE1A[@]}") ;;
+  1b) ROSTER=("${WAVE1B[@]}") ;;
+  *)  fail "usage: launch_v18_wave1.sh {1a|1b} [--dry-run] — phase 1b requires an approved Wave-1A checkpoint" ;;
+esac
 
 preflight() {
   # screen is only needed for a real launch (documented prerequisite:
@@ -93,8 +112,10 @@ launch_one() {
         --num_iterations 20 --auto_resume --max_rounds 3 --max_epochs 1 \
         --data_scope "$SCOPE" --health_gate_files "$FILES" \
         --skip_formal_min_delta 0.0 --bypass_formal_time_budget_min_delta 0.5 \
-        --trial_time_budget_minutes 12 --formal_time_budget_minutes 120 \
-        --trial_vram_budget_gb 10 --formal_vram_budget_gb 12 \
+        --trial_time_budget_minutes 20 --formal_time_budget_minutes 120 \
+        --trial_vram_budget_gb 16 --formal_vram_budget_gb 16 \
+        --runtime_watchdog --runtime_safety_factor 1.5 \
+        --runtime_watchdog_floor_seconds 120 \
         --formal_strategy snapshot --formal_round_strategy inherit_best_trial \
         --exploration_mode explore --ml_lit_review_enabled \
         --llm_config llm_configs/openai_tiered_v1.json \
@@ -125,10 +146,13 @@ launch_one() {
       --health_gate_files '$FILES' \
       --skip_formal_min_delta 0.0 \
       --bypass_formal_time_budget_min_delta 0.5 \
-      --trial_time_budget_minutes 12 \
+      --trial_time_budget_minutes 20 \
       --formal_time_budget_minutes 120 \
-      --trial_vram_budget_gb 10 \
-      --formal_vram_budget_gb 12 \
+      --trial_vram_budget_gb 16 \
+      --formal_vram_budget_gb 16 \
+      --runtime_watchdog \
+      --runtime_safety_factor 1.5 \
+      --runtime_watchdog_floor_seconds 120 \
       --formal_strategy snapshot \
       --formal_round_strategy inherit_best_trial \
       --exploration_mode explore \
@@ -148,12 +172,12 @@ launch_one() {
 }
 
 preflight
-for spec in "${WAVE1[@]}"; do
+for spec in "${ROSTER[@]}"; do
   IFS=: read -r RUN SCOPE FILES FLAVOR <<< "$spec"
   launch_one "$RUN" "$SCOPE" "$FILES" "$FLAVOR"
-  if [ "$DRY_RUN" = 0 ] && [ "$spec" != "${WAVE1[-1]}" ]; then
+  if [ "$DRY_RUN" = 0 ] && [ "$spec" != "${ROSTER[-1]}" ]; then
     echo "[stagger] 90 s before next launch"
     sleep 90
   fi
 done
-if [ "$DRY_RUN" = 1 ]; then echo "[done] wave-1 dry-run complete"; else echo "[done] wave-1 launch complete"; fi
+if [ "$DRY_RUN" = 1 ]; then echo "[done] wave-$PHASE dry-run complete"; else echo "[done] wave-$PHASE launch complete"; fi
