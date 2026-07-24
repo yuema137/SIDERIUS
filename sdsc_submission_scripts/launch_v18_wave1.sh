@@ -14,6 +14,14 @@
 #   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b --dry-run
 #   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b            # LAUNCH 1b
 #
+# !!! VRAM REQUIREMENT (portability audit 2026-07-24) !!!
+#   Each chain carries --trial_vram_budget_gb 16 / --formal_vram_budget_gb 16.
+#   Running both phases concurrently (rolling 4-way, the V18r topology) needs
+#   4 x 16 GB = 64 GB of GPU memory — sized for the H100 80GB box. Do NOT
+#   launch this unmodified on a smaller GPU (e.g. RTX 5090 32 GB): lower the
+#   VRAM budgets and/or the concurrency first. The live free-VRAM gate will
+#   clamp attempts, but the campaign as designed will not fit.
+#
 # Environment overrides:
 #   WS_ROOT      (default /workspace/DATA/SIDERIUS_DATA)
 #   EXIT_DIR     (default /tmp)

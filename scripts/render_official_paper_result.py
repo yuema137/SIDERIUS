@@ -27,9 +27,9 @@ import json
 import math
 from pathlib import Path
 
-DEFAULT_SUMMARY_DIR = Path("/workspace/DATA/SIDERIUS_DATA/tidmad_official_banded")
-DEFAULT_OUT_DIR = Path("/workspace/REPO/SIDERIUS/reference_data/official_paper_result")
-
+# Both locations are server-specific and deliberately have NO defaults —
+# pass them explicitly (portability audit 2026-07-24). Typical out-dir is
+# the repo's reference_data/official_paper_result/.
 MODEL_ORDER = ["fcnet", "punet", "rnn", "transformer"]
 LOG_BASE = 5.27
 RAW_FLOOR = 1.0007
@@ -40,8 +40,18 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(__doc__ or "Render official paper results").splitlines()[0]
     )
-    p.add_argument("--summary-dir", type=Path, default=DEFAULT_SUMMARY_DIR)
-    p.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
+    p.add_argument(
+        "--summary-dir",
+        type=Path,
+        required=True,
+        help="Directory with the banded-scoring summary JSONs (server-specific, required).",
+    )
+    p.add_argument(
+        "--out-dir",
+        type=Path,
+        required=True,
+        help="Output directory for the rendered Markdown (server-specific, required).",
+    )
     return p.parse_args()
 
 

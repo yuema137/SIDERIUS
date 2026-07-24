@@ -65,9 +65,10 @@ from execute_tools.dataset_config import NUM_FILES, SEGMENTS_PER_FILE
 from execute_tools.scoring_helpers import file_vector_to_log_space
 from execute_tools.scoring_utils import score_vector
 
-TIDMAD_REPO = Path("/workspace/REPO/TIDMAD")
-CHECKPOINT_DIR = Path("/workspace/DATA/TIDMAD_OFFICIAL_MODELS/TIDMAD_Model")
-DEFAULT_WORK_DIR = Path("/workspace/DATA/SIDERIUS_DATA/tidmad_official_banded")
+# Server-specific locations (TIDMAD reference repo, official checkpoints,
+# work dir) are deliberately NOT defaulted — pass --tidmad-repo,
+# --checkpoint-dir, and --work-dir explicitly (portability audit 2026-07-24:
+# hardcoded /workspace paths only existed on the H100 box).
 
 MODEL_SEGMENT_SIZE = 40_000
 EXPECTED_S_MAX = 295715680.14248306
@@ -161,14 +162,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tidmad-repo",
         type=Path,
-        default=TIDMAD_REPO,
-        help="Read-only TIDMAD reference repository (provides network.py).",
+        required=True,
+        help="Read-only TIDMAD reference repository (provides network.py). "
+        "Required — server-specific, no default.",
     )
     parser.add_argument(
         "--checkpoint-dir",
         type=Path,
-        default=CHECKPOINT_DIR,
-        help="Directory holding the official {Model}_{low}_{high}.pth files.",
+        required=True,
+        help="Directory holding the official {Model}_{low}_{high}.pth files. "
+        "Required — server-specific, no default.",
     )
     parser.add_argument(
         "--data-dir",
@@ -185,8 +188,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--work-dir",
         type=Path,
-        default=DEFAULT_WORK_DIR,
-        help="Parent directory for temporary HDF5 outputs and summary JSONs.",
+        required=True,
+        help="Parent directory for temporary HDF5 outputs and summary JSONs. "
+        "Required — server-specific, no default.",
     )
     parser.add_argument(
         "--batch-size",
