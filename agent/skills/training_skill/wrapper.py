@@ -12,4 +12,7 @@ def run_skill(sandbox, **kwargs):
         sample_set=kwargs.get("sample_set"),
         train_portion=kwargs.get("train_portion"),
         train_base_seed=kwargs.get("train_base_seed"),
+        # RT2-G: operator runtime policy for in-subprocess verification
+        # (validated against RuntimeControlPolicy at the executor).
+        runtime_policy=kwargs.get("runtime_policy"),
     )

@@ -1,0 +1,111 @@
+"""
+core/runtime_control — generic runtime-verification framework (RT2).
+
+Design: docs/design/runtime_estimation_and_watchdog.md (rev 5). The
+framework is task-agnostic: phase identifiers, the Prediction /
+Measurement / Actual data model, the component-first observation
+schema, steady-state detection, and the `RuntimePhaseVerifier`
+lifecycle. Task-specific workload RESOLUTION lives colocated with the
+production engines (`execute_tools/workload_resolvers.py`).
+"""
+
+from core.runtime_control.adaptive import (
+    AdaptiveUnitVerification,
+    AdaptiveVerificationConfig,
+)
+from core.runtime_control.observation_store import (
+    ObservationStore,
+    PriorLookup,
+    PriorPolicy,
+    calibration_key,
+)
+from core.runtime_control.phases import RUNTIME_PHASES, RuntimePhase
+from core.runtime_control.provenance import (
+    capture_environment_provenance,
+    capture_storage_provenance,
+    classify_cache_state,
+)
+from core.runtime_control.records import (
+    MEASUREMENT_BACKED_SOURCES,
+    RUNTIME_VERIFICATION_RECORD_KEY,
+    AdmissionRecord,
+    Confidence,
+    PhaseComponentRecord,
+    PhaseMeasurement,
+    PredictionError,
+    PredictionSource,
+    PriorAgreement,
+    RuntimeObservation,
+    RuntimePrediction,
+    TotalRecord,
+    VerificationResult,
+    extract_runtime_observation,
+    observation_totals_from_components,
+    record_is_formal_verified,
+)
+from core.runtime_control.session import (
+    ADMISSION_STAGE_POST_SETUP,
+    RuntimeControlPolicy,
+    RuntimeVerificationSession,
+)
+from core.runtime_control.steady_state import (
+    SteadyStateConfig,
+    SteadyStateDetection,
+    SteadyStateDetector,
+    detect_steady_state,
+)
+from core.runtime_control.total_assembly import (
+    DEFAULT_HISTORICAL_SHARE_LIMIT,
+    HISTORICAL_EVIDENCE_SOURCES,
+    TotalAssessment,
+    assemble_total,
+    classify_prediction_source,
+    evidence_backed_prediction,
+)
+from core.runtime_control.verifier import RuntimePhaseVerifier
+from core.runtime_control.workload import ResolvedPhaseWorkload
+
+__all__ = [
+    "ADMISSION_STAGE_POST_SETUP",
+    "DEFAULT_HISTORICAL_SHARE_LIMIT",
+    "HISTORICAL_EVIDENCE_SOURCES",
+    "MEASUREMENT_BACKED_SOURCES",
+    "RUNTIME_PHASES",
+    "RUNTIME_VERIFICATION_RECORD_KEY",
+    "AdaptiveUnitVerification",
+    "AdaptiveVerificationConfig",
+    "AdmissionRecord",
+    "Confidence",
+    "ObservationStore",
+    "PhaseComponentRecord",
+    "PhaseMeasurement",
+    "PredictionError",
+    "PredictionSource",
+    "PriorAgreement",
+    "PriorLookup",
+    "PriorPolicy",
+    "ResolvedPhaseWorkload",
+    "RuntimeControlPolicy",
+    "RuntimeObservation",
+    "RuntimePhase",
+    "RuntimePhaseVerifier",
+    "RuntimePrediction",
+    "RuntimeVerificationSession",
+    "SteadyStateConfig",
+    "SteadyStateDetection",
+    "SteadyStateDetector",
+    "TotalAssessment",
+    "TotalRecord",
+    "VerificationResult",
+    "assemble_total",
+    "calibration_key",
+    "capture_environment_provenance",
+    "capture_storage_provenance",
+    "classify_cache_state",
+    "classify_prediction_source",
+    "detect_steady_state",
+    "evidence_backed_prediction",
+    "extract_runtime_observation",
+    "observation_totals_from_components",
+    "record_is_formal_verified",
+]

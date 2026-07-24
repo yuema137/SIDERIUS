@@ -1278,6 +1278,360 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+def _evaluate_step_guardrails(
+    *,
+    n_steps: int | None,
+    batch_size: int,
+    is_formal: bool,
+    max_steps_per_attempt: int | None,
+    min_formal_batch_size: int | None,
+    allow_extreme_steps: bool,
+) -> list[str]:
+    """§5 secondary guardrails (RT5) — defense-in-depth only.
+
+    The primary admission criterion is predicted total runtime (the
+    in-subprocess verification); these catch degenerate counts even
+    when the estimator claims they are cheap. The operator override
+    (``allow_extreme_steps``) bypasses both checks — it is a schema
+    field recorded in provenance, never a prompt instruction.
+    """
+    if allow_extreme_steps:
+        return []
+    violations: list[str] = []
+    if (
+        max_steps_per_attempt is not None
+        and n_steps is not None
+        and n_steps > max_steps_per_attempt
+    ):
+        violations.append(
+            f"resolved optimizer steps {n_steps} exceed max_steps_per_attempt "
+            f"{max_steps_per_attempt} (§5)"
+        )
+    if is_formal and min_formal_batch_size is not None and batch_size < min_formal_batch_size:
+        violations.append(
+            f"formal batch_size {batch_size} below min_formal_batch_size "
+            f"{min_formal_batch_size} (§5 launch-overhead pathology — V18 incident shape)"
+        )
+    return violations
+
+
+def _resolve_guardrail_steps(
+    train_sample_set: dict | None,
+    model_config: dict,
+    train_cfg: dict,
+    train_portion: float | None,
+) -> int | None:
+    """Resolved step count for the §5 guardrails. Best-effort: a
+    resolver failure returns None (the guardrail is defense-in-depth —
+    the primary runtime criterion still protects the attempt)."""
+    if train_sample_set is None:
+        return None  # single-file legacy mode — no scoped workload to resolve
+    try:
+        from execute_tools.workload_resolvers import resolve_training_workload
+
+        return resolve_training_workload(
+            train_sample_set,
+            seg_size=int(model_config.get("segmentation_size", 1000)),
+            batch_size=int(train_cfg.get("batch_size", 1)),
+            train_portion=train_portion,
+            epochs=int(train_cfg.get("epochs", 1)),
+        ).unit_count
+    except Exception as exc:
+        print(f"[guardrails] step resolution failed (non-fatal): {exc}")
+        return None
+
+
+def _build_guardrail_rejection_record(
+    *,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+    violations: list[str],
+    n_steps: int | None,
+    agent_input,
+) -> dict:
+    """Planner-visible §5 guardrail rejection (existing skipped_time_risk
+    vocabulary; ``verification_stage="guardrail"`` distinguishes it).
+    Config provenance is recorded on the record itself."""
+    return {
+        "exp_id": exp_id,
+        "status": "skipped_time_risk",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": "Skipped by §5 guardrails: " + "; ".join(violations),
+            "discovery": (
+                f"resolved_steps={n_steps}; guardrail config: "
+                f"max_steps_per_attempt={agent_input.max_steps_per_attempt}, "
+                f"min_formal_batch_size={agent_input.min_formal_batch_size}, "
+                f"allow_extreme_steps={agent_input.allow_extreme_steps}"
+            ),
+            "memory_update": (
+                "Reduce the step count (higher batch_size / segmentation_size, "
+                "lower portions/epochs) or raise the formal batch size. The "
+                "operator can override with allow_extreme_steps=True."
+            ),
+            "time_mode": "trial" if is_trial else "formal",
+            "verification_stage": "guardrail",
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+    }
+
+
+def _build_runtime_policy(
+    agent_input, *, chosen_time_budget: float | None, is_trial: bool, base_dir: str
+) -> dict:
+    """Assemble the attempt's RuntimeControlPolicy dict (RT2-G/RT6).
+
+    Formal rounds enforce the operator budget; trial rounds run
+    record-only (None budget). Operator-visible policy values —
+    safety factor and watchdog enable/floor — come from the input
+    schema (Gate 2 wiring, 2026-07-24); watchdog grace/poll keep
+    their WatchdogConfig schema defaults (10 s / 1 s), which the
+    executor validates and every observation records in
+    ``runtime_policy`` provenance. Extracted as a helper so the exact
+    policy the tuner ships is unit-testable against the launch
+    configuration.
+    """
+    return {
+        "operator_budget_seconds": (
+            chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
+        ),
+        "observation_store_root": os.path.join(base_dir, "runtime_observations"),
+        "safety_factor": agent_input.runtime_safety_factor,
+        "watchdog": {
+            "enabled": agent_input.runtime_watchdog_enabled,
+            "floor_seconds": agent_input.runtime_watchdog_floor_seconds,
+        },
+    }
+
+
+def _check_and_record_guardrail_skip(
+    *,
+    sandbox,
+    agent_input,
+    plan,
+    trial_config,
+    train_sample_set: dict | None,
+    model_config: dict,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """Run the §5 guardrails; on violation save the planner-visible
+    record and return True (the attempt loop `continue`s). Single call
+    site keeps run() under the analyzer's complexity ceiling."""
+    n_steps = _resolve_guardrail_steps(
+        train_sample_set, model_config, plan.train_cfg, trial_config.train_portion
+    )
+    violations = _evaluate_step_guardrails(
+        n_steps=n_steps,
+        batch_size=int(plan.train_cfg.get("batch_size", 1)),
+        is_formal=not plan.is_trial,
+        max_steps_per_attempt=agent_input.max_steps_per_attempt,
+        min_formal_batch_size=agent_input.min_formal_batch_size,
+        allow_extreme_steps=agent_input.allow_extreme_steps,
+    )
+    if not violations:
+        return False
+    print("  [Guardrails §5] SKIPPED: " + "; ".join(violations))
+    record = _build_guardrail_rejection_record(
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        is_trial=plan.is_trial,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        violations=violations,
+        n_steps=n_steps,
+        agent_input=agent_input,
+    )
+    ExperimentRecord.model_validate(record)
+    sandbox.save_record(record)
+    return True
+
+
+def _handle_in_subprocess_rejection(
+    train_status: dict,
+    *,
+    sandbox,
+    run_name: str,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """RT2-G: a clean in-subprocess rejection — real setup was paid, so
+    it CONSUMES an attempt (unlike the free pre-flight screen). Saves
+    the record + appends the observation; returns True to `continue`."""
+    if train_status.get("status") != "rejected_time_risk":
+        return False
+    rv_block = train_status.get("runtime_verification") or {}
+    print("  In-subprocess runtime verification REJECTED the attempt (consumes one attempt).")
+    reject_record = _build_in_subprocess_rejection_record(
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        is_trial=is_trial,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        rv_block=rv_block,
+        fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
+    )
+    ExperimentRecord.model_validate(reject_record)
+    sandbox.save_record(reject_record)
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    return True
+
+
+class WallClockTimeoutError(RuntimeError):
+    """A watchdog deadline kill (RT4, §4). Carries the §4 timeout
+    provenance so the attempt_failure record can surface
+    ``{elapsed_s, deadline_s, estimate_source}`` to the planner."""
+
+    def __init__(self, message: str, watchdog: dict, rv_block: dict | None):
+        super().__init__(message)
+        self.watchdog = dict(watchdog or {})
+        self.rv_block = rv_block
+
+
+def _raise_if_wall_clock_timeout(status: dict, sandbox, run_name: str) -> None:
+    """RT4: convert an executor watchdog kill into the §4 attempt-failure
+    path (the shared except-handler records it with
+    failure_type='wall_clock_timeout'). The partial observation is
+    appended to the store first — a killed attempt is still evidence
+    (§6c excludes it from calibration; the ledger keeps it visible)."""
+    if status.get("status") != "wall_clock_timeout":
+        return
+    rv_block = status.get("runtime_verification")
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    raise WallClockTimeoutError(
+        status.get("message", "watchdog wall-clock timeout"),
+        status.get("watchdog") or {},
+        rv_block,
+    )
+
+
+def _apply_watchdog_failure_fields(record: dict, exc: Exception) -> None:
+    """Stamp §4 timeout provenance onto an attempt_failure record."""
+    if not isinstance(exc, WallClockTimeoutError):
+        return
+    record["watchdog"] = exc.watchdog
+    record["runtime_verification"] = exc.rv_block
+    memory = record["memory"]
+    memory["watchdog_elapsed_s"] = exc.watchdog.get("elapsed_s")
+    memory["watchdog_deadline_s"] = exc.watchdog.get("deadline_s")
+    memory["watchdog_estimate_source"] = exc.watchdog.get("estimate_source")
+
+
+def _build_in_subprocess_rejection_record(
+    *,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    is_trial: bool,
+    round_index: int,
+    attempt_in_round: int,
+    rv_block: dict,
+    fallback_message: str,
+) -> dict:
+    """Attempt record for a clean in-subprocess runtime-verification
+    rejection (RT2-G). Existing ``skipped_time_risk`` vocabulary reused
+    (§2.11); ``memory.verification_stage`` distinguishes it from the
+    free pre-flight screen — this rejection paid real setup and
+    CONSUMES an attempt (operator decision 2026-07-23)."""
+    admission = rv_block.get("admission") or {}
+    reject_reason = admission.get("reason") or fallback_message
+    return {
+        "exp_id": exp_id,
+        "status": "skipped_time_risk",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": (
+                f"Rejected by IN-SUBPROCESS runtime verification after real setup: {reject_reason}"
+            ),
+            "discovery": (
+                f"admission stage={admission.get('stage')}; "
+                f"setup_cost_s={admission.get('setup_cost_seconds')}; "
+                f"verification_cost_s={admission.get('verification_cost_seconds')}; "
+                f"avoided_predicted_s={admission.get('avoided_predicted_runtime_seconds')}"
+            ),
+            "memory_update": (
+                "The measured runtime prediction exceeded the budget (or "
+                "verification failed). Reduce the workload (steps, "
+                "segmentation_size, portions, model size) — this rejection "
+                "consumed an attempt, unlike pre-flight skips."
+            ),
+            "time_mode": "trial" if is_trial else "formal",
+            "verification_stage": "in_subprocess",
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+        "runtime_verification": rv_block or None,
+    }
+
+
+def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -> None:
+    """Append a finalized runtime observation to the run's store (RT2-G).
+
+    Best-effort by design: the observation store is calibration
+    evidence, and a store I/O problem must never break the attempt loop
+    (§6.3 — store failures fail safely). Absent/None blocks are the
+    explicit legacy shape and are skipped silently.
+    """
+    if not rv_block:
+        return
+    try:
+        import re as _re
+
+        from core.runtime_control.observation_store import ObservationStore
+        from core.runtime_control.records import RuntimeObservation
+
+        writer = _re.sub(r"[^A-Za-z0-9._-]", "_", run_name)[:128] or "run"
+        ObservationStore(os.path.join(sandbox.base_dir, "runtime_observations")).append(
+            RuntimeObservation.model_validate(rv_block), writer_id=writer
+        )
+    except Exception as exc:
+        print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -1780,7 +2134,7 @@ class HyperparamTuningAgent:
                     # with the "no prior round yet" fallback. See
                     # docs/aggregated_score_table_awareness.md §9.1.
                     best_score_table_md: str | None = None
-                    _records_with_table = [
+                    _records_with_table: list[dict] = [
                         r
                         for r in memory_history
                         if is_valid_candidate(r)
@@ -2039,6 +2393,28 @@ class HyperparamTuningAgent:
                         "loss_config": plan.loss_cfg,
                     }
 
+                    # RT5 §5 guardrails — cheapest pre-flight check, before
+                    # any VRAM/time probe. Defense-in-depth only; the primary
+                    # criterion stays the in-subprocess runtime verification.
+                    failure_stage = "guardrails"
+                    if _check_and_record_guardrail_skip(
+                        sandbox=sandbox,
+                        agent_input=agent_input,
+                        plan=plan,
+                        trial_config=trial_config,
+                        train_sample_set=train_sample_set,
+                        model_config=model_config,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
+                        continue
+
                     # Phase K: per-mode VRAM-budget pick. plan.is_trial decides
                     # which ceiling applies for THIS round; the unselected one is
                     # ignored. When the chosen budget is None the skill still runs
@@ -2281,6 +2657,14 @@ class HyperparamTuningAgent:
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
                             inference_per_psd_seg_ms_hint=inference_hint,
+                            # RT3 (§3 table): trial rounds may reuse a valid
+                            # store hit instead of warming up; formal rounds
+                            # never (their authority is the in-subprocess
+                            # verification).
+                            allow_store_reuse=plan.is_trial,
+                            observation_store_root=os.path.join(
+                                sandbox.base_dir, "runtime_observations"
+                            ),
                         )
                         if time_check.get("status") == "error":
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
@@ -2388,11 +2772,41 @@ class HyperparamTuningAgent:
                             sandbox.save_record(time_record)
                             continue
 
+                    # RT2-G: operator runtime policy for the in-subprocess
+                    # verification session (§2.1/§3). Formal rounds enforce
+                    # the operator budget (the in-subprocess measured
+                    # verification is the sole formal authority; the
+                    # pre-flight gate above stays as the cheap screen);
+                    # trial rounds run record-only so observations and
+                    # priors accrue with zero behavior change.
+                    active_params["runtime_policy"] = _build_runtime_policy(
+                        agent_input,
+                        chosen_time_budget=chosen_time_budget,
+                        is_trial=plan.is_trial,
+                        base_dir=sandbox.base_dir,
+                    )
+
                     failure_stage = "training"
                     print("\n[Step 1/3] Training...")
                     t0 = time.time()
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
+                    _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
+                    if _handle_in_subprocess_rejection(
+                        train_status,
+                        sandbox=sandbox,
+                        run_name=run_name,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        is_trial=plan.is_trial,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
+                        continue
                     if train_status.get("status") == "error":
                         # DataScope DS5 — scope violations are non-retryable
                         # configuration/invariant failures: terminate the run.
@@ -2448,6 +2862,7 @@ class HyperparamTuningAgent:
                         t0 = time.time()
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
                         inference_time = round(time.time() - t0, 1)
+                        _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
                         if inf_status.get("status") == "error":
                             # DataScope DS5 — non-retryable: terminate the run.
                             if inf_status.get("error_type") == "scope_violation":
@@ -2845,7 +3260,7 @@ class HyperparamTuningAgent:
 
                     current_score = score_results.get("denoising_score")
                     current_loss_type = active_params["loss_config"].get("loss_type")
-                    successful = [
+                    successful: list[dict] = [
                         r
                         for r in memory_history
                         if r.get("status") == "success" and r.get("denoising_score") is not None
@@ -3089,6 +3504,16 @@ class HyperparamTuningAgent:
                         final_record["memory"]["inference_ms_source"] = (
                             time_check.get("breakdown") or {}
                         ).get("inference_ms_source")
+                        # RT3 — planner-visible training-estimate provenance:
+                        # which §3 branch produced the pre-flight training
+                        # ms/step (real_dataset_warmup | store |
+                        # static_uncalibrated) and whether the store-reuse
+                        # policy fired.
+                        final_record["memory"]["training_ms_source"] = (
+                            time_check.get("breakdown") or {}
+                        ).get("source")
+                        if (time_check.get("breakdown") or {}).get("store_reuse"):
+                            final_record["memory"]["time_store_reuse"] = True
                     # Phase K — surface pre-flight VRAM-estimator context to the
                     # planner the same way Phase J surfaces time context. Only
                     # added when the gate ran with a budget (chosen_vram_budget
@@ -3163,8 +3588,21 @@ class HyperparamTuningAgent:
                         if trial_config.trial_strategy == "target":
                             final_record["target_files"] = trial_config.target_files
 
+                    # RT2-G (§7.3 additive): the attempt's runtime observation.
+                    # The inference-side block is the most complete (it RESUMED
+                    # the training subprocess's observation — RT2-D); fall back
+                    # to the training-side block; explicit None otherwise.
+                    final_record["runtime_verification"] = (
+                        (inf_status or {}).get("runtime_verification")
+                        or train_status.get("runtime_verification")
+                        or None
+                    )
+
                     ExperimentRecord.model_validate(final_record)
                     sandbox.save_record(final_record)
+                    _append_runtime_observation(
+                        sandbox, run_name, final_record["runtime_verification"]
+                    )
 
                     # Phase F post-flight: update per-GPU calibration from this
                     # successful run. Only runs when the gate used the real-dataset
@@ -3241,7 +3679,9 @@ class HyperparamTuningAgent:
                     traceback.print_exc()
                     failure_reason = str(e)
                     failure_type = (
-                        "model_forward_error"
+                        "wall_clock_timeout"  # §4 status-audit decision (RT4)
+                        if isinstance(e, WallClockTimeoutError)
+                        else "model_forward_error"
                         if failure_stage == "vram_structural_probe" and isinstance(e, RuntimeError)
                         else type(e).__name__
                     )
@@ -3279,9 +3719,14 @@ class HyperparamTuningAgent:
                             "attempt_in_round": attempt_in_round,
                         },
                     }
+                    _apply_watchdog_failure_fields(failure_record, e)
                     try:
-                        validated_failure = ExperimentRecord.model_validate(failure_record)
-                        sandbox.save_record(validated_failure.model_dump())
+                        ExperimentRecord.model_validate(failure_record)
+                        # Save the RAW dict (validation is the gate, not the
+                        # serializer): model_dump() drops extra keys, which
+                        # would silently lose the §4 watchdog provenance —
+                        # every other record path also saves the raw dict.
+                        sandbox.save_record(failure_record)
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
@@ -3889,6 +4334,54 @@ def main() -> int:
             "in the round loop). Default None = no clamp (LLM plan unchanged)."
         ),
     )
+    # --- RT6: runtime-control operator surface (design §4/§5) ---
+    # The CLI carries the §5 PROVISIONAL operational defaults (150k / 4);
+    # the schema defaults stay None so programmatic callers keep pre-RT5
+    # behavior. Pass 0 to disable a numeric guardrail.
+    parser.add_argument(
+        "--max_steps_per_attempt",
+        type=int,
+        default=150_000,
+        help="§5 guardrail: skip plans whose resolved optimizer-step count "
+        "exceeds this (planner-visible record). 0 disables. Default 150000 "
+        "(provisional §5 value).",
+    )
+    parser.add_argument(
+        "--min_formal_batch_size",
+        type=int,
+        default=4,
+        help="§5 guardrail: skip FORMAL rounds planned below this batch size "
+        "(the V18 launch-overhead pathology; trial rounds exempt). 0 "
+        "disables. Default 4 (provisional §5 value).",
+    )
+    parser.add_argument(
+        "--allow_extreme_steps",
+        action="store_true",
+        help="§5 operator override: bypass both step/batch guardrails "
+        "(recorded in run provenance).",
+    )
+    parser.add_argument(
+        "--runtime_watchdog",
+        action="store_true",
+        help="§4 runtime watchdog: run training/inference subprocesses in "
+        "their own process group under the deadline max(floor, "
+        "min(budget, verified_estimate x safety)). Default off.",
+    )
+    parser.add_argument(
+        "--runtime_safety_factor",
+        type=float,
+        default=1.0,
+        help="§2.10 safety multiplier for admission and the watchdog "
+        "deadline. Default 1.0 (schema-mirroring); V18 production "
+        "posture is 1.5, passed explicitly by the launch config.",
+    )
+    parser.add_argument(
+        "--runtime_watchdog_floor_seconds",
+        type=float,
+        default=60.0,
+        help="§4 watchdog deadline floor. Default 60.0 "
+        "(schema-mirroring); V18 production posture is 120.0.",
+    )
 
     args = parser.parse_args()
 
@@ -3989,6 +4482,14 @@ def main() -> int:
     input_dict["attempts_per_round"] = args.attempts_per_round
     input_dict["attempts_per_formal_round"] = args.attempts_per_formal_round
     input_dict["max_fail_rounds"] = args.max_fail_rounds
+
+    # RT6 — runtime-control operator surface. 0 → None (guardrail disabled).
+    input_dict["max_steps_per_attempt"] = args.max_steps_per_attempt or None
+    input_dict["min_formal_batch_size"] = args.min_formal_batch_size or None
+    input_dict["allow_extreme_steps"] = args.allow_extreme_steps
+    input_dict["runtime_watchdog_enabled"] = args.runtime_watchdog
+    input_dict["runtime_safety_factor"] = args.runtime_safety_factor
+    input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 

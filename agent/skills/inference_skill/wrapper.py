@@ -20,4 +20,7 @@ def run_skill(sandbox: TidmadSandbox, **kwargs):
         l_cfg=kwargs["loss_config"],
         sample_set=kwargs.get("eval_sample_set"),
         inference_batch=kwargs.get("inference_batch"),
+        # RT2-G: the inference subprocess RESUMES the attempt's runtime
+        # observation under the same policy (RT2-D).
+        runtime_policy=kwargs.get("runtime_policy"),
     )

@@ -59,6 +59,7 @@ def _stub_phase(phase_name: str, seconds: float) -> dict:
             "k_correction": 1.0,
             "safety_multiplier": 2.0,
             "ms_source": "fake_stub",
+            "formal_execution_eligible": False,
             "gpu_name": "test_gpu",
             "total_inference_steps": 100,
             "inference_batch": _inf_est.inference_batch_for("rnn"),

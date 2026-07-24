@@ -1125,6 +1125,77 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- Step/batch guardrails (RT5, runtime-control design §5) ---
+    # Defense-in-depth SECONDARY sanity checks — the primary admission
+    # criterion is predicted total runtime (in-subprocess verification).
+    # These catch degenerate counts even when the estimator claims they
+    # are cheap. Schema defaults are None (disabled) so programmatic
+    # callers keep pre-RT5 behavior; the §5 PROVISIONAL operational
+    # values (150k steps / batch 4) are applied by the chain/CLI launch
+    # wiring (RT6), where they are operator-visible configuration.
+    max_steps_per_attempt: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "§5 guardrail: a plan whose resolved optimizer-step count "
+            "exceeds this is skipped pre-flight (planner-visible record) "
+            "unless allow_extreme_steps is set. None disables "
+            "(provisional operational value: 150,000 — set by the chain "
+            "launch wiring)."
+        ),
+    )
+    min_formal_batch_size: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "§5 guardrail: formal rounds with batch_size below this are "
+            "skipped pre-flight — encodes the known launch-overhead "
+            "pathology (V18 incident: batch=2). Trial rounds are exempt. "
+            "None disables (provisional operational value: 4 — set by "
+            "the chain launch wiring)."
+        ),
+    )
+    allow_extreme_steps: bool = Field(
+        default=False,
+        description=(
+            "§5 operator override: bypass BOTH step/batch guardrails for "
+            "this run. An explicit schema field recorded in run_config "
+            "provenance — never a prompt instruction."
+        ),
+    )
+    runtime_watchdog_enabled: bool = Field(
+        default=False,
+        description=(
+            "§4 runtime watchdog (RT4/RT6): when True, training/inference "
+            "subprocesses run in their own process group under the "
+            "deadline max(floor, min(operator_budget, verified_estimate x "
+            "safety)). Disabled by default; Gate 2 enables it explicitly."
+        ),
+    )
+    runtime_safety_factor: float = Field(
+        default=1.0,
+        ge=1.0,
+        description=(
+            "§2.10 safety multiplier applied to the known-cost sum at "
+            "admission time and to the verified estimate in the watchdog "
+            "deadline. Schema default 1.0 preserves programmatic-caller "
+            "behavior; the V18 production posture (1.5) is passed "
+            "explicitly by the launch configuration (Gate 2 wiring, "
+            "2026-07-24)."
+        ),
+    )
+    runtime_watchdog_floor_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        description=(
+            "§4 watchdog deadline floor. Schema default 60.0 mirrors "
+            "WatchdogConfig; the V18 production posture (120.0 — covers "
+            "the measured 20-25 s subprocess startup that verified "
+            "components do not include) is passed explicitly by the "
+            "launch configuration."
+        ),
+    )
+
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the
     # right one per round via plan.is_trial. Each is independently optional:

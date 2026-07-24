@@ -326,14 +326,25 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
-- **Active branch**: `feat/enable-partial-file-list` — DataScope feature
-  (scoped runs on a partial file list), DS1-DS8 complete per
-  `docs/design/enable_partial_file_list.md`. Pending: Checkpoint DS
-  Gates 1 & 2 (operator-approved real-LLM / real-training validation),
-  then PR. Includes the FU-10 `plan_overrides` fail-fast hardening, the
-  `real_run` pytest opt-in enforcement (bare `pytest` can no longer
-  launch real-API tests), and the `test_gate_coverage_round_7` fixture
-  repair.
+- **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
+  system, RT1 → RT6 COMPLETE per
+  `docs/design/runtime_estimation_and_watchdog.md` (§0 tracker; §12
+  per-stage evidence): exact workload resolvers, P/M/A data model,
+  in-subprocess setup measurement + adaptive training/inference
+  verification (verification = the first production steps), append-only
+  observation store + priors, contribution-based total eligibility
+  (`historical_phase_share_limit`), tuner admission wiring
+  (in-subprocess rejection consumes an attempt), §3 trigger policy,
+  §4 watchdog (process-group deadline kill, disabled by default), §5
+  guardrails, and the full chain/CLI operator surface
+  (`--max_steps_per_attempt --min_formal_batch_size
+  --allow_extreme_steps --runtime_watchdog`). Pending: pre-Gate full
+  test sweep, then operator-approved Gate 1 (real LLM + pseudo) and
+  Gate 2 (real training incl. the incident pathological case). A
+  parallel session is committing scoring work on this branch
+  (`d0aa0b6`, `cb8b857`, `82b40e9`).
+- **Previous feature**: `feat/enable-partial-file-list` — DataScope
+  DS1-DS8 complete; DS Gates 1 & 2 + PR still pending.
 - **Master CI**: red at `9e503ea` (PR #127 merged over a stale shell-parity
   expectation); fixed by `a84203a` on this branch — lands with the PR.
 - **Open issues**: carry-forward #91, #93, #94, #95, #97, #100, plus the

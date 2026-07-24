@@ -127,6 +127,66 @@ The following are explicitly NOT pass/fail criteria for Gate 2:
 
 **Needs user approval**: yes (real LLM + real training cost and time).
 
+---
+
+### Gate 2 parameter plans (Lite / Regular)
+
+Added 2026-07-23 from the runtime-control Gate 2 audit (design doc
+§12, commit `cb1b6b0`). Two vetted combinations. Guiding policy:
+**be generous on GPU VRAM, stingy on wall time** — a VRAM-gate
+rejection wastes a whole Gate attempt, while time is controlled by
+portions and budgets.
+
+**Portion semantics crib (code-traced — do not infer from names):**
+
+- Training scope: per file `max(1, round(formal_portion × 200))` PSD;
+  per-epoch subsample `max(1, round(formal_train_portion × scope))`;
+  steps = `(ΣPSD × (10M//seg)) // batch × epochs`.
+- **Eval scope is INDEPENDENT of `formal_portion`**: per file
+  `max(1, round(formal_eval_portion × 200))` PSD — drives inference
+  AND scoring. The naive `formal_portion × formal_eval_portion`
+  intuition is wrong.
+- Per-file floors of 1 PSD mean many-file scopes never go below
+  1 PSD/file regardless of portion.
+- Scoring = eval PSD × per-host `per_psd_segment_seconds` ÷ 8 workers
+  — ≤ ~6% of total even at `formal_eval_portion=1.0` on a 6-file
+  scope, so it stays a historical-estimate phase under the 0.10
+  share limit.
+
+| Parameter | **Lite Plan** (~30-45 min, ~$1) | **Regular Plan** (~45-90 min, ~$1.5-2.5) |
+|---|---|---|
+| Purpose | fastest full-lifecycle proof incl. ONE forced formal round | tighter runtime-prediction statistics + multi-iteration LLM loop |
+| `--num_iterations` / `--start_iteration` | 1 | 2 |
+| `--max_rounds` | 2 (1 trial + 1 forced formal) | 2 |
+| `--max_proposal_attempts` | 3 | 3 |
+| `--data_scope` | `4-9` (6 files) | `4-9` |
+| `--trial_portion / --train_portion / --eval_portion` | 0.02 / 1.0 / 0.01 | 0.02 / 1.0 / 0.01 |
+| `--formal_portion / --formal_train_portion / --formal_eval_portion` | 0.02 / 1.0 / 0.01 (→ 3,000 steps @ seg 10k b8; 12 eval PSD) | 0.10 / 1.0 / 0.05 (→ 15,000 steps; 60 eval PSD) |
+| `--max_epochs` | 1 | 1 |
+| `--trial_time_budget_minutes` | 5 | 5 |
+| `--formal_time_budget_minutes` | 30 (Gate-specific; production policy stays 120) | 45 |
+| `--trial_vram_budget_gb / --formal_vram_budget_gb` | 24 / 24 (GENEROUS — never let the VRAM gate eat a Gate attempt) | 24 / 24 |
+| `--runtime_watchdog` | on (passive validation) | on |
+| Guardrails | defaults (150k / batch≥4) | defaults |
+| force_formal_round | **default ON** (deviation from the trial-only smoke — required when the feature under test must exercise real formal admission; use `--no-force_formal_round` for features that don't) | default ON |
+| `--llm_config` | `openai_tiered_v1.json` | `openai_tiered_v1.json` |
+
+Notes:
+
+- The trial-only smoke (canonical command above) remains correct for
+  features that don't touch the formal path; the plans here add the
+  formal-round variant with SMALL formal portions instead of the
+  dangerous full-dataset formal that motivated
+  `--no-force_formal_round`.
+- Estimated single-formal-round compute at Lite scale: setup ~20 s +
+  training 1-5 min (unknown LLM-invented model, 25-100 ms/step band)
+  + inference ~10-25 s + scoring ~3 s + ~50 s subprocess startups.
+- Pathological/rejection demonstrations should NOT run the workload:
+  drive the executor directly (e.g.
+  `scripts/pregate_runtime_control_validation.py`-style, no LLM) with
+  guardrails overridden and the production budget — rejection arrives
+  in ~2 min (setup + live verification only).
+
 **Failure handling**:
 - If all proposals fail validation → LLM quality issue, not a feature bug.
   Check that `--llm_config openai_tiered_v1.json` is set (not certify_minimal).

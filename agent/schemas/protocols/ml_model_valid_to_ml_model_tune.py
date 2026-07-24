@@ -92,6 +92,15 @@ def local_validated_model(
     attempts_per_round: int = 3,
     attempts_per_formal_round: int = 5,
     max_fail_rounds: int = 3,
+    # --- Runtime-control operator surface (RT5/RT6, runtime design §4/§5) ---
+    # Defaults mirror the schema (guardrails disabled, watchdog off); the
+    # chain/CLI layers supply the §5 provisional operational values.
+    max_steps_per_attempt: int | None = None,
+    min_formal_batch_size: int | None = None,
+    allow_extreme_steps: bool = False,
+    runtime_watchdog_enabled: bool = False,
+    runtime_safety_factor: float = 1.0,
+    runtime_watchdog_floor_seconds: float = 60.0,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -244,6 +253,12 @@ def local_validated_model(
         attempts_per_round=attempts_per_round,
         attempts_per_formal_round=attempts_per_formal_round,
         max_fail_rounds=max_fail_rounds,
+        max_steps_per_attempt=max_steps_per_attempt,
+        min_formal_batch_size=min_formal_batch_size,
+        allow_extreme_steps=allow_extreme_steps,
+        runtime_watchdog_enabled=runtime_watchdog_enabled,
+        runtime_safety_factor=runtime_safety_factor,
+        runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
     )
 
 

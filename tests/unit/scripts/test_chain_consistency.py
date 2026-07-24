@@ -160,6 +160,17 @@ CONTRACT_FLAGS = [
     "data_scope",
     "health_gate_enabled",
     "health_gate_files",
+    # RT6 — runtime-control operator surface (runtime design §4/§5).
+    # Numeric guardrails carry the §5 provisional operational defaults on
+    # both layers; the booleans are shell 0/1 forwarded-when-set.
+    "max_steps_per_attempt",
+    "min_formal_batch_size",
+    "allow_extreme_steps",
+    "runtime_watchdog",
+    # Gate 2 wiring (2026-07-24) — production-posture policy values are
+    # passed explicitly by launch configs; defaults schema-mirroring.
+    "runtime_safety_factor",
+    "runtime_watchdog_floor_seconds",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse

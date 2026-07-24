@@ -210,7 +210,7 @@ class TestEstimateWallTimeSeconds:
         )
         assert out["seconds"] == pytest.approx(1560.0, rel=1e-3)
         assert out["breakdown"]["total_train_steps"] == 250_000
-        assert out["breakdown"]["ms_source"] == "static_formula_phase_b"
+        assert out["breakdown"]["ms_source"] == "static_uncalibrated"
         assert out["breakdown"]["k_correction"] == 1.0
 
     def test_ms_per_step_passthrough_no_gpu(self):

@@ -360,19 +360,26 @@ class TestDefaultSampleSet:
 
     def test_estimate_proposal_time_respects_trial_portion(self):
         """estimate_proposal_time must thread ``trial_portion`` into the
-        synthesised sample_set so the wall-time estimate scales linearly
-        with the caller's actual scope.
+        synthesised sample_set so the wall-time estimate scales with the
+        caller's actual scope.
 
-        Total wall-time is dominated by ``total_steps × ms_per_step``
-        with ``total_steps ∝ trial_portion`` (via ``ceil(p × 200)``
-        segments per file × 20 files). So at fixed model_config /
-        train_config, halving trial_portion should ~halve estimated
-        minutes, and ``trial_portion=0.02`` (Gate 2's scope) should land
-        at ~0.2× the default 0.1 estimate.
+        Expected ratio under the RT1 trainer-mirroring resolver
+        (train_engine_sandbox per-file ``max(1, round(portion × n))`` +
+        drop_last floor), with ``train_portion=0.1`` applied on top of the
+        synthesised set:
+          default: 20 files × ceil(0.1 × 200) = 20 segs/file
+                   → keep round(0.1 × 20) = 2/file → 40 PSD trained
+          small:   20 files × ceil(0.02 × 200) = 4 segs/file
+                   → keep max(1, round(0.4)) = 1/file → 20 PSD trained
+        Training scales ×0.5 (NOT the naive ×0.2 — the trainer's
+        ``max(1, ·)`` per-file floor keeps one PSD per file, and the old
+        global-product estimator under-predicted exactly this case);
+        inference + scoring scale with the sample_set itself (×0.2). The
+        blended ratio therefore lands strictly inside (0.2, 0.5).
 
         Regression target: pre-fix, trial_portion was ignored — a
-        trial_portion=0.02 run was over-projected by ~5× because the
-        gate always synthesised snapshot@0.1.
+        trial_portion=0.02 run was over-projected because the gate always
+        synthesised snapshot@0.1 (ratio would be ~1.0).
         """
         kwargs = dict(
             model_type="tcn",
@@ -385,13 +392,12 @@ class TestDefaultSampleSet:
         out_default = estimate_proposal_time(**kwargs)  # trial_portion=0.1
         out_small = estimate_proposal_time(**kwargs, trial_portion=0.02)
 
-        # ceil(0.1 × 200) = 20 segs/file vs ceil(0.02 × 200) = 4 segs/file → exact 1/5.
-        expected_ratio = 0.2
         actual_ratio = out_small["estimated_minutes"] / out_default["estimated_minutes"]
-        assert abs(actual_ratio - expected_ratio) < 0.05, (
-            f"trial_portion=0.02 should give ~{expected_ratio:.2f}× the default "
-            f"estimate; got {actual_ratio:.3f} ("
-            f"{out_small['estimated_minutes']:.2f} / {out_default['estimated_minutes']:.2f} min)"
+        assert 0.2 < actual_ratio < 0.5, (
+            f"trial_portion=0.02 should land between the inference-scaling "
+            f"bound (0.2) and the training max(1,·)-floor bound (0.5); got "
+            f"{actual_ratio:.3f} ({out_small['estimated_minutes']:.2f} / "
+            f"{out_default['estimated_minutes']:.2f} min)"
         )
 
 

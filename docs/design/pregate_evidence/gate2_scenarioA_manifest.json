@@ -1,0 +1,26 @@
+{
+  "status": "no_records",
+  "iteration_dir": "/tmp/gate2_rc/iter_001",
+  "output_path": null,
+  "model_name": "causal_wavenet_spectral_baseline",
+  "best_score": null,
+  "raw_best_score": null,
+  "best_valid_score": null,
+  "raw_best_formal_score": null,
+  "best_valid_formal_score": null,
+  "completed_rounds": 2,
+  "health_checks_config": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/health_checks_effective.yaml",
+  "resolved_data_scope": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "health_gate_enabled": true,
+  "health_config_sha256": "92af7fbfd4a88d4c65564563d19c18a0ee6a0e66338d4f9efc03f7a3e4b16bfb",
+  "formal_reference_score": 0.0,
+  "resolved_skip_formal_threshold": -1.0,
+  "resolved_bypass_formal_threshold": 0.0
+}

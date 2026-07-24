@@ -94,7 +94,7 @@ def test_static_formula_uses_patched_constants():
         )
 
     bd = result["breakdown"]
-    assert bd["ms_source"] == "static_formula_phase_b"
+    assert bd["ms_source"] == "static_uncalibrated"
     assert bd["safety_multiplier"] == 1.3
     # ms_per_step should be max(num_params * seg * bs * 3e-9, 2.0)
     expected_ms = max(num_params * seg * bs * 3e-9, 2.0)

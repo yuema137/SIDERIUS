@@ -4,6 +4,7 @@ import json
 import os
 import random
 import sys
+import time
 from typing import Any, cast
 
 import h5py
@@ -12,6 +13,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from core.runtime_control.provenance import capture_storage_provenance
+from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
+from core.runtime_control.workload import ResolvedPhaseWorkload
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
@@ -467,6 +471,7 @@ def run_experiment_streaming(
     train_portion: float | None = None,
     freeze_subsample: bool = False,
     train_base_seed: int | None = None,
+    runtime_session: RuntimeVerificationSession | None = None,
 ):
     """
     Streaming training: process one file at a time, never hold multiple files in RAM.
@@ -495,6 +500,22 @@ def run_experiment_streaming(
                            ``train_base_seed + n`` (or just ``train_base_seed`` if
                            ``freeze_subsample=True``). When None, derived from
                            ``hash(exp_id)``.
+        runtime_session:   Optional in-subprocess runtime-verification session
+                           (RT2-B, design §2.1). When provided, the epoch-0
+                           dataset/DataLoader construction closes the measured
+                           setup window, the post-setup admission decision is
+                           made, and a rejection cleans up and returns ``None``
+                           WITHOUT saving a model or sentinel. When admitted,
+                           execution continues directly into this same epoch-0
+                           loop with the same dataset/model/optimizer/CUDA
+                           context — verification is the first part of formal
+                           execution, never a separate pass. ``None`` →
+                           behavior identical to pre-RT2-B code.
+
+    Returns:
+        The result summary dict, or ``None`` when the runtime-verification
+        admission decision rejected the attempt (the structured rejection
+        lives in the session's observation sidecar).
     """
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     seg_size = model_cfg.segmentation_size
@@ -525,6 +546,33 @@ def run_experiment_streaming(
     # Deterministic base seed for reproducible per-epoch subsampling
     base_seed = train_base_seed if train_base_seed is not None else hash(exp_id) % (2**31)
     history = []
+    t_train_start: float | None = None
+    verifier = None
+    epoch0_dataset_seconds = 0.0
+    use_cuda_sync = device.type == "cuda"
+
+    def _finish_training_verification(decide_admission: bool) -> bool:
+        """Record the training verification; optionally decide admission.
+
+        Returns True when the admission decision REJECTED the attempt.
+        The (epochs-1) × epoch-0 dataset-construction term is the
+        engine's per-epoch reconstruction cost (audit finding) — an
+        explicit additive prediction term, never hidden in unit time.
+        """
+        assert runtime_session is not None and verifier is not None
+        runtime_session.complete_phase_verification(
+            "training",
+            verifier,
+            source="real_training_verification",
+            extra_predicted_seconds=(train_cfg.epochs - 1) * epoch0_dataset_seconds,
+            extra_detail={"epoch0_dataset_seconds": epoch0_dataset_seconds},
+        )
+        if decide_admission:
+            adm = runtime_session.decide_admission(stage="post_training_verification")
+            if adm.decision == "rejected":
+                print(f"[runtime_control] REJECTED after training verification: {adm.reason}")
+                return True
+        return False
 
     for ep in range(train_cfg.epochs):
         model.train()
@@ -534,6 +582,7 @@ def run_experiment_streaming(
         # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
         epoch_seed = base_seed if freeze_subsample else base_seed + ep
         epoch_rng = random.Random(epoch_seed)
+        t_dataset = time.perf_counter()
         dataset = TIDMADEpochDataset(
             data_dir=data_dir,
             sample_set=sample_set,
@@ -542,13 +591,99 @@ def run_experiment_streaming(
             rng=epoch_rng,
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
+        if ep == 0:
+            epoch0_dataset_seconds = time.perf_counter() - t_dataset
+
+        if runtime_session is not None and ep == 0:
+            # RT2-B post-setup boundary (§2.1/§2.2): everything up to here —
+            # config load, model/optimizer/criterion init, CUDA context, the
+            # epoch-0 dataset and DataLoader — is the measured setup. The
+            # steps-per-epoch count comes from the MATERIALIZED loader
+            # (drop_last floor), the production ground truth; ``n_keep`` is
+            # deterministic per epoch, so every epoch runs the same count.
+            steps_per_epoch = len(loader)
+            file_paths = [
+                os.path.join(data_dir, f"abra_training_{int(k):04d}.h5")
+                for k in sorted(sample_set.keys(), key=int)
+            ]
+            # Scoped read volume (pre-Gate F2): the setup reads only the
+            # scope's PSD slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
+            n_psd_scoped = sum(len(v) for v in sample_set.values())
+            runtime_session.complete_setup(
+                storage_provenance=capture_storage_provenance(
+                    data_dir,
+                    file_paths,
+                    scoped_bytes=n_psd_scoped * PSD_SEGMENT_LENGTH * 3,
+                ),
+                training_workload=ResolvedPhaseWorkload(
+                    phase="training",
+                    unit="optimizer_step",
+                    unit_count=steps_per_epoch * train_cfg.epochs,
+                    detail={
+                        "source": "materialized_epoch0_loader",
+                        "steps_per_epoch": steps_per_epoch,
+                        "epochs": train_cfg.epochs,
+                        "epoch0_samples": len(dataset),
+                        "batch_size": train_cfg.batch_size,
+                        "train_portion": train_portion,
+                    },
+                ),
+                detail={"dataset_construction_seconds": epoch0_dataset_seconds},
+            )
+            # §6a calibration-key inputs — recorded by the engine that
+            # knows them. runtime_flags are literal facts of THIS loop
+            # (no workers / pinning / accumulation / compile); flipping
+            # any of them must update this record (§6a reserved field).
+            runtime_session.set_calibration_context(
+                {
+                    "precision": str(next(model.parameters()).dtype).replace("torch.", ""),
+                    "optimizer_type": train_cfg.optimizer_type,
+                    "model_family": model_cfg.model_type,
+                    "param_count": sum(p.numel() for p in model.parameters() if p.requires_grad),
+                    "seg_size": seg_size,
+                    "batch_size": train_cfg.batch_size,
+                    "runtime_flags": {
+                        "num_workers": 0,
+                        "pin_memory": False,
+                        "grad_accumulation": False,
+                        "torch_compile": False,
+                    },
+                }
+            )
+            admission = runtime_session.decide_admission()
+            if admission.decision == "rejected":
+                print(f"[runtime_control] REJECTED before formal training: {admission.reason}")
+                del dataset, loader
+                del model, optimizer, criterion
+                torch.cuda.empty_cache()
+                gc.collect()
+                return None
+            # Admitted: continue directly into THIS loop — the very objects
+            # measured during setup are the ones formal training uses. The
+            # first production steps double as the adaptive training
+            # verification (RT2-C, §2.5): timed with explicit CUDA sync
+            # until a terminal verdict, untimed afterwards. The historical
+            # prior (RT2-F store, RT2-G wiring) enables §2.5 early exit on
+            # verified_match — never a verification substitute.
+            t_train_start = time.perf_counter()
+            verifier = runtime_session.start_phase_verification(
+                "training",
+                unit="optimizer_step",
+                prior_expected_unit_ms=runtime_session.lookup_phase_prior("training"),
+            )
 
         batch_losses = []
+        rejected_mid_epoch = False
         for input_batch, target_batch in tqdm(
             loader,
             desc=f"Epoch {ep}",
             file=sys.stdout,
         ):
+            if verifier is not None:
+                if use_cuda_sync:
+                    torch.cuda.synchronize()
+                t_step = time.perf_counter()
+
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
@@ -565,12 +700,44 @@ def run_experiment_streaming(
             optimizer.step()
             batch_losses.append(loss.item())
 
+            if verifier is not None:
+                if use_cuda_sync:
+                    torch.cuda.synchronize()
+                state = verifier.feed(max((time.perf_counter() - t_step) * 1000.0, 1e-6))
+                if state in ("verified", "failed_no_steady_state", "failed_pathological_unit"):
+                    rejected_mid_epoch = _finish_training_verification(decide_admission=True)
+                    verifier = None
+                    if rejected_mid_epoch:
+                        break
+
+        if verifier is not None:
+            # Epoch-0 loader exhausted before a verdict: resolve from the
+            # evidence collected. With a single epoch the training work is
+            # already DONE — record evidence only; with more epochs ahead,
+            # the admission decision still protects them.
+            rejected_mid_epoch = _finish_training_verification(
+                decide_admission=train_cfg.epochs > 1
+            )
+            verifier = None
+
         del dataset, loader
         gc.collect()
+
+        if rejected_mid_epoch:
+            del model, optimizer, criterion
+            torch.cuda.empty_cache()
+            gc.collect()
+            return None
 
         avg_loss = np.mean(batch_losses) if batch_losses else float("nan")
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
+
+    if runtime_session is not None and t_train_start is not None:
+        # The training ACTUAL spans admission → last optimizer step. It
+        # includes epoch ≥ 1 dataset reconstructions — they are part of
+        # what training costs in this engine (audit finding, §12 RT2-B).
+        runtime_session.record_phase_actual("training", time.perf_counter() - t_train_start)
 
     # Result summary
     summary = {
@@ -584,6 +751,9 @@ def run_experiment_streaming(
     )
     _save_with_sentinel(model.state_dict(), save_path, exp_id)
     print(f"Model saved to: {save_path}")
+
+    if runtime_session is not None:
+        runtime_session.finalize("completed")
 
     del model, optimizer, criterion
     torch.cuda.empty_cache()
@@ -638,7 +808,36 @@ def main():
         help="Base seed for per-epoch subsampling. Epoch n uses seed = base + n. "
         "When None, derived from exp_id hash.",
     )
+    parser.add_argument(
+        "--runtime_observation_out",
+        type=str,
+        default=None,
+        help="RT2-B: path for the runtime-verification observation sidecar "
+        "(streaming mode only). When set, the in-subprocess verification "
+        "session records setup/admission/actuals progressively to this file.",
+    )
+    parser.add_argument(
+        "--runtime_policy_json",
+        type=str,
+        default=None,
+        help="RT2-B: path to a RuntimeControlPolicy JSON (operator budget). "
+        "Only meaningful together with --runtime_observation_out.",
+    )
     args = parser.parse_args()
+
+    # RT2-B: create the verification session FIRST so the measured setup
+    # window covers config load and everything after — main() entry is the
+    # earliest in-subprocess point (§2.2; process import cost is the
+    # orchestration phase, RT2-E).
+    runtime_session = None
+    if args.runtime_observation_out:
+        policy = None
+        if args.runtime_policy_json:
+            with open(args.runtime_policy_json) as f:
+                policy = RuntimeControlPolicy(**json.load(f))
+        runtime_session = RuntimeVerificationSession(
+            args.runtime_observation_out, policy=policy, attempt_id=args.exp_id
+        )
 
     # Resolve defaults from config file
     if args.data_dir is None:
@@ -691,7 +890,15 @@ def main():
             train_portion=args.train_portion,
             freeze_subsample=args.freeze_subsample,
             train_base_seed=args.train_base_seed,
+            runtime_session=runtime_session,
         )
+        if results is None:
+            # Runtime verification rejected the attempt: the structured
+            # provenance lives in the observation sidecar; deliberately no
+            # results JSON, no model, no _OK_ sentinel. Clean exit 0 — the
+            # parent distinguishes rejection from crash via the sidecar.
+            print("[runtime_control] attempt rejected — no experiment results written.")
+            return
     else:
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
         dataset = TIDMADDataset(
