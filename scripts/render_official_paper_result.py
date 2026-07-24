@@ -37,7 +37,9 @@ GT_CEILING = 10.1134
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(
+        description=(__doc__ or "Render official paper results").splitlines()[0]
+    )
     p.add_argument("--summary-dir", type=Path, default=DEFAULT_SUMMARY_DIR)
     p.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     return p.parse_args()

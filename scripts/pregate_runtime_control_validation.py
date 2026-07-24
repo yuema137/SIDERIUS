@@ -178,10 +178,11 @@ def _run_attempt(
     watcher.stop()
     watcher.join(timeout=2)
 
-    final_block = None
+    final_block: dict | None = None
     for status in (inf_status, train_status):
-        if status and status.get("runtime_verification"):
-            final_block = status["runtime_verification"]
+        candidate = status.get("runtime_verification") if status else None
+        if isinstance(candidate, dict):
+            final_block = candidate
             break
     if final_block:
         try:
