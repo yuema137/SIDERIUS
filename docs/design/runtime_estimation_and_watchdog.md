@@ -2009,3 +2009,31 @@ Scenario B = the exact incident config via the deterministic driver
   that architecture's genuinely unstable step times — bounded by
   budget/watchdog and the drift class the §2.10 error ledger + §6b
   prior invalidation absorb across attempts.
+- [x] **Wave-1A production incident + trial/formal safety split**
+  (operator decision, 2026-07-24). First production hours of
+  `v18r_loss_04_09` (master `23c638c`): 8 trial attempts
+  watchdog-killed at `verified × 1.5`, every one within 0.1–0.9 s of
+  its deadline. Diagnostic (observation store + logs, all 8 + 2
+  survivors): verification rock-stable (MAD 0.03–0.11 ms on most),
+  yet actual/predicted = **1.54–1.61 across a 50× param range, seg
+  1250–10000, batch 1–8, adam/adamw** — a systematic
+  post-verification environment slowdown (sustained-load clock decay
+  + 2-way neighbor contention; same 1.6 signature as Gate 2-A's
+  inference ratio), NOT model drift: attempts that priced under the
+  120 s floor survived and one scored (−4.12). Watchdog executed its
+  contract exactly; the margin was wrong for trials. Decision:
+  phase-specific factors — **trial 2.0 / formal 1.5** — via
+  `runtime_trial_safety_factor` / `runtime_formal_safety_factor`
+  (schema → CLI → protocol → workflow → tuner → policy → shell,
+  parity-pinned; precedence phase-specific → legacy
+  `runtime_safety_factor` → schema default; both configured values
+  recorded in runtime-policy provenance; enforcement reads only the
+  resolved effective `safety_factor`). Loss chain paused at a safe
+  boundary and archived (`halted_v18r_loss_04_09_trialSF15/`,
+  HALT_RECORD.md) for restart from a fresh workspace under the
+  split; arch chain (0 kills) continues under its original policy
+  untouched. Tests: `test_trial_formal_safety_split.py` (trial 2.0,
+  formal fallback 1.5, formal-specific override, provenance, legacy
+  compat, real deadline-provider math per phase) + parity
+  CONTRACT_FLAGS extension; targeted suites 1,645 passed; pyright
+  0/0.
