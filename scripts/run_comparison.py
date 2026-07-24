@@ -654,6 +654,8 @@ def run_agent(
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
     runtime_watchdog: bool = False,
+    runtime_safety_factor: float | None = None,
+    runtime_watchdog_floor_seconds: float | None = None,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
@@ -745,6 +747,10 @@ def run_agent(
         cmd.append("--allow_extreme_steps")
     if runtime_watchdog:
         cmd.append("--runtime_watchdog")
+    if runtime_safety_factor is not None:
+        cmd.extend(["--runtime_safety_factor", str(runtime_safety_factor)])
+    if runtime_watchdog_floor_seconds is not None:
+        cmd.extend(["--runtime_watchdog_floor_seconds", str(runtime_watchdog_floor_seconds)])
     if resume:
         cmd.append("--resume")
 
@@ -1017,6 +1023,20 @@ def main():
         action="store_true",
         help="Forwarded to the tuner: enable the §4 runtime watchdog "
         "(process-group deadline kill on training/inference).",
+    )
+    parser.add_argument(
+        "--runtime_safety_factor",
+        type=float,
+        default=None,
+        help="Forwarded to the tuner when set. §2.10 safety multiplier; "
+        "V18 production posture 1.5. Default None = tuner default (1.0).",
+    )
+    parser.add_argument(
+        "--runtime_watchdog_floor_seconds",
+        type=float,
+        default=None,
+        help="Forwarded to the tuner when set. §4 watchdog floor; V18 "
+        "production posture 120. Default None = tuner default (60).",
     )
     args = parser.parse_args()
 
@@ -1469,6 +1489,8 @@ def main():
         min_formal_batch_size=args.min_formal_batch_size,
         allow_extreme_steps=args.allow_extreme_steps,
         runtime_watchdog=args.runtime_watchdog,
+        runtime_safety_factor=args.runtime_safety_factor,
+        runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
     )
 
     print(f"\n{'#' * 60}")

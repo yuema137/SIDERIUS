@@ -798,6 +798,20 @@ def build_parser() -> argparse.ArgumentParser:
         "subprocess groups. Default off.",
     )
     parser.add_argument(
+        "--runtime_safety_factor",
+        type=float,
+        default=1.0,
+        help="§2.10 safety multiplier for admission + watchdog deadline. "
+        "Default 1.0 (schema-mirroring); V18 production posture 1.5.",
+    )
+    parser.add_argument(
+        "--runtime_watchdog_floor_seconds",
+        type=float,
+        default=60.0,
+        help="§4 watchdog deadline floor. Default 60.0 (schema-mirroring); "
+        "V18 production posture 120.0.",
+    )
+    parser.add_argument(
         "--data_dir",
         type=str,
         default=None,
@@ -1346,6 +1360,8 @@ def main():
             min_formal_batch_size=args.min_formal_batch_size or None,
             allow_extreme_steps=args.allow_extreme_steps,
             runtime_watchdog_enabled=args.runtime_watchdog,
+            runtime_safety_factor=args.runtime_safety_factor,
+            runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
             # Advice
             human_advice_interpret=args.human_advice_interpret,
             human_advice_propose=args.human_advice_propose,

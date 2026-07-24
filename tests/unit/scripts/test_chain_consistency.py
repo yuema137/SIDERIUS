@@ -167,6 +167,10 @@ CONTRACT_FLAGS = [
     "min_formal_batch_size",
     "allow_extreme_steps",
     "runtime_watchdog",
+    # Gate 2 wiring (2026-07-24) — production-posture policy values are
+    # passed explicitly by launch configs; defaults schema-mirroring.
+    "runtime_safety_factor",
+    "runtime_watchdog_floor_seconds",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse

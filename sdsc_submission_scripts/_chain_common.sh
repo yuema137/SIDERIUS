@@ -91,6 +91,8 @@ MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
 MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=0
+RUNTIME_SAFETY_FACTOR=1.0           # §3.2: matches Python default; V18 posture 1.5
+RUNTIME_WATCHDOG_FLOOR_SECONDS=60.0 # §3.2: matches Python default; V18 posture 120
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -207,6 +209,8 @@ parse_chain_args() {
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
         --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
+        --runtime_safety_factor)  RUNTIME_SAFETY_FACTOR="$2"; shift 2 ;;
+        --runtime_watchdog_floor_seconds) RUNTIME_WATCHDOG_FLOOR_SECONDS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
@@ -395,6 +399,8 @@ build_app_args() {
     # carry §5 operational defaults on both layers); booleans only when 1.
     APP_ARGS+=(--max_steps_per_attempt "$MAX_STEPS_PER_ATTEMPT")
     APP_ARGS+=(--min_formal_batch_size "$MIN_FORMAL_BATCH_SIZE")
+    APP_ARGS+=(--runtime_safety_factor "$RUNTIME_SAFETY_FACTOR")
+    APP_ARGS+=(--runtime_watchdog_floor_seconds "$RUNTIME_WATCHDOG_FLOOR_SECONDS")
     if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
         APP_ARGS+=(--allow_extreme_steps)
     fi
