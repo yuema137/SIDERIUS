@@ -83,7 +83,7 @@ Runtime-Control Implementation
 [x] Pre-Gate A — full non-real sweep (unit 4239 green; pseudo integration 124 passed + known FU-7 only)
 [x] Pre-Gate B — small real-GPU validation (4/4 scenarios green post-fix; findings F1-F3 fixed; evidence in docs/design/pregate_evidence/)
 [x] Gate 1  — real LLM + pseudo training (PASSED 2026-07-23; guardrails caught real LLM's 1M-step/batch-1 plans)
-[ ] Gate 2  — operator-approved real training (incl. pathological case) — BUDGET DISCUSSION WITH OPERATOR FIRST
+[x] Gate 2  — PASSED WITH NON-BLOCKING LIMITATIONS (2026-07-24; incident config rejected in 91 s / 5.5 h avoided; real-LLM formal lifecycle under production posture)
 ```
 
 **Per-commit checkpoint philosophy (rev 5.1)**: every commit ends with a
@@ -1999,5 +1999,13 @@ Scenario B = the exact incident config via the deterministic driver
   insufficiency. The finite-score criterion was NOT met this run —
   model quality, not framework (gate standard: "LLM quality issue,
   not a feature bug").
-- [ ] Gate 2 (verdict — OPERATOR decision pending: the finite-score
-  criterion miss is the one open item; all framework criteria met)
+- [x] Gate 2 (verdict): **PASSED WITH NON-BLOCKING LIMITATIONS**
+  (operator decision, 2026-07-24). All runtime-control and framework
+  criteria demonstrated on real execution. Non-blocking limitations
+  recorded: (1) no finite score this run — the LLM-invented model
+  collapsed at the 0.02 Gate data volume, correctly detected and
+  invalidated by the HealthGates (gate-standard outcome 3b; model
+  quality, not a feature bug); (2) training prediction ratio 3.09 on
+  that architecture's genuinely unstable step times — bounded by
+  budget/watchdog and the drift class the §2.10 error ledger + §6b
+  prior invalidation absorb across attempts.
