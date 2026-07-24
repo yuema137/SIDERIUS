@@ -71,8 +71,10 @@ def render_per_model(summary: dict, out_path: Path) -> None:
     lines.append("## Headline")
     lines.append("")
     lines.append(f"**Canonical `denoising_score` = {fmt(score)}**  ")
-    lines.append(f"(log base {LOG_BASE}; raw-baseline floor = {RAW_FLOOR}, "
-                 f"ground-truth ceiling = {GT_CEILING})")
+    lines.append(
+        f"(log base {LOG_BASE}; raw-baseline floor = {RAW_FLOOR}, "
+        f"ground-truth ceiling = {GT_CEILING})"
+    )
     lines.append("")
     lines.append("Definition (from `execute_tools/scoring_utils.py` §3):")
     lines.append("")
@@ -80,10 +82,12 @@ def render_per_model(summary: dict, out_path: Path) -> None:
     lines.append(f"denoising_score = log_{LOG_BASE}( Σ_(f,i) per_segment[f,i] / Σ_f |S_f| )")
     lines.append("```")
     lines.append("")
-    lines.append("Grand mean over every sampled segment across every sampled file, "
-                 "then log. **Per-band or per-subset aggregates are NOT reported** — "
-                 "they are not comparable to this scalar and averaging them is not a "
-                 "valid substitute (see §3 for the three excluded patterns).")
+    lines.append(
+        "Grand mean over every sampled segment across every sampled file, "
+        "then log. **Per-band or per-subset aggregates are NOT reported** — "
+        "they are not comparable to this scalar and averaging them is not a "
+        "valid substitute (see §3 for the three excluded patterns)."
+    )
     lines.append("")
     lines.append("## Run configuration")
     lines.append("")
@@ -92,15 +96,19 @@ def render_per_model(summary: dict, out_path: Path) -> None:
     lines.append(f"- Batch size: {summary['batch_size']}")
     lines.append(f"- Device: `{summary['device']}`")
     lines.append(f"- s_max: {summary['s_max']:.6f} (canonical `segment_anchors.json`)")
-    lines.append(f"- Inference wall time: {sum(inf_sec.values()) / 60.0:.1f} min "
-                 f"({sum(inf_sec.values()):.0f} s)")
+    lines.append(
+        f"- Inference wall time: {sum(inf_sec.values()) / 60.0:.1f} min "
+        f"({sum(inf_sec.values()):.0f} s)"
+    )
     lines.append(f"- Computed at: {summary['computed_at']}")
     lines.append("")
     lines.append("## Per-file breakdown")
     lines.append("")
-    lines.append("`linear` = `file_vector_linear[f]` = `mean_i(per_segment[f,i])` "
-                 "(200 segments/file). `log` = `log_5.27(linear)`. These are the atomic "
-                 "diagnostic values — not aggregated in any way.")
+    lines.append(
+        "`linear` = `file_vector_linear[f]` = `mean_i(per_segment[f,i])` "
+        "(200 segments/file). `log` = `log_5.27(linear)`. These are the atomic "
+        "diagnostic values — not aggregated in any way."
+    )
     lines.append("")
     lines.append("| file | checkpoint | inference (s) | linear | log_5.27 |")
     lines.append("|-----:|:-----------|--------------:|-------:|---------:|")
@@ -122,9 +130,11 @@ def render_per_model(summary: dict, out_path: Path) -> None:
     lines.append("  --work-dir /workspace/DATA/SIDERIUS_DATA/tidmad_official_banded")
     lines.append("```")
     lines.append("")
-    lines.append("Source summary JSON: "
-                 f"`{Path(summary.get('data_dir', ''))}` (raw inputs), "
-                 f"`tidmad_official_{key}_banded_score.json` (this run's outputs).")
+    lines.append(
+        "Source summary JSON: "
+        f"`{Path(summary.get('data_dir', ''))}` (raw inputs), "
+        f"`tidmad_official_{key}_banded_score.json` (this run's outputs)."
+    )
     lines.append("")
     out_path.write_text("\n".join(lines))
 
@@ -133,9 +143,11 @@ def render_readme(summaries: dict[str, dict | None], out_path: Path) -> None:
     lines: list[str] = []
     lines.append("# TIDMAD Official Paper-Model Denoising Scores")
     lines.append("")
-    lines.append("Denoising scores for the official band-split TIDMAD paper "
-                 "checkpoints, evaluated with the SIDERIUS `score_vector` pipeline "
-                 "on the canonical anchor map.")
+    lines.append(
+        "Denoising scores for the official band-split TIDMAD paper "
+        "checkpoints, evaluated with the SIDERIUS `score_vector` pipeline "
+        "on the canonical anchor map."
+    )
     lines.append("")
     lines.append("## Aggregation")
     lines.append("")
@@ -145,18 +157,22 @@ def render_readme(summaries: dict[str, dict | None], out_path: Path) -> None:
     lines.append(f"denoising_score = log_{LOG_BASE}( Σ_(f,i) per_segment[f,i] / Σ_f |S_f| )")
     lines.append("```")
     lines.append("")
-    lines.append("Grand mean over every sampled segment across every sampled file, "
-                 "then log. See `execute_tools/scoring_utils.py` module docstring §3 "
-                 "for the full contract and the three aggregation patterns that MUST "
-                 "NOT be substituted.")
+    lines.append(
+        "Grand mean over every sampled segment across every sampled file, "
+        "then log. See `execute_tools/scoring_utils.py` module docstring §3 "
+        "for the full contract and the three aggregation patterns that MUST "
+        "NOT be substituted."
+    )
     lines.append("")
     lines.append("## Ruler")
     lines.append("")
     lines.append(f"- Raw baseline (no denoising): **{RAW_FLOOR}** — floor")
     lines.append(f"- Ground-truth ceiling (perfect denoiser): **{GT_CEILING}**")
     lines.append("")
-    lines.append("All scores are on the same log_5.27 scale, using the global s_max "
-                 "(295715680.14) from the committed `reference_data/segment_anchors.json`.")
+    lines.append(
+        "All scores are on the same log_5.27 scale, using the global s_max "
+        "(295715680.14) from the committed `reference_data/segment_anchors.json`."
+    )
     lines.append("")
     lines.append("## Band-checkpoint mapping (from `train.py::ifile_checkpoint`)")
     lines.append("")
@@ -167,9 +183,11 @@ def render_readme(summaries: dict[str, dict | None], out_path: Path) -> None:
     lines.append("| 10-14 | mid-high     | 10, 11, 12, 13, 14 | `{Model}_10_15.pth` |")
     lines.append("| 15-19 | high         | 15, 16, 17, 18, 19 | `{Model}_15_20.pth` |")
     lines.append("")
-    lines.append("*Wavenet is intentionally excluded* (per the request that spawned "
-                 "this evaluation); the paper's official wavenet is a single generalist "
-                 "checkpoint scored separately by `scripts/score_tidmad_official_wavenet.py`.")
+    lines.append(
+        "*Wavenet is intentionally excluded* (per the request that spawned "
+        "this evaluation); the paper's official wavenet is a single generalist "
+        "checkpoint scored separately by `scripts/score_tidmad_official_wavenet.py`."
+    )
     lines.append("")
     lines.append("## Summary")
     lines.append("")

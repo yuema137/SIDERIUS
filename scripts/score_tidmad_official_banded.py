@@ -381,14 +381,11 @@ def load_model(
         weights_only=False,
     )
     if not isinstance(model, torch.nn.Module):
-        raise TypeError(
-            f"Expected torch.nn.Module in {ckpt_path}; received {type(model)!r}"
-        )
+        raise TypeError(f"Expected torch.nn.Module in {ckpt_path}; received {type(model)!r}")
     actual_class_name = type(model).__name__
     if actual_class_name != spec.expected_class_name:
         raise TypeError(
-            f"{ckpt_path} contains {actual_class_name}; "
-            f"expected {spec.expected_class_name}"
+            f"{ckpt_path} contains {actual_class_name}; expected {spec.expected_class_name}"
         )
 
     model.to(device)
@@ -458,14 +455,7 @@ def denoise_batch(
         with torch.inference_mode():
             logits = model(input_tensor)
             predicted_classes = logits.argmax(dim=1)
-        return (
-            predicted_classes.to(torch.int16)
-            .sub(128)
-            .to(torch.int8)
-            .cpu()
-            .numpy()
-            .reshape(-1)
-        )
+        return predicted_classes.to(torch.int16).sub(128).to(torch.int8).cpu().numpy().reshape(-1)
 
     if spec.output_kind == "regressor":
         input_tensor = torch.from_numpy(class_indices).float().to(device, non_blocking=True)
@@ -619,9 +609,7 @@ def run_model(
         if device.type == "cuda":
             torch.cuda.empty_cache()
 
-    sample_set = {
-        file_index: list(range(SEGMENTS_PER_FILE)) for file_index in file_indices
-    }
+    sample_set = {file_index: list(range(SEGMENTS_PER_FILE)) for file_index in file_indices}
     missing_outputs = [
         denoised_dir / _denoised_fn(file_index)
         for file_index in file_indices
@@ -676,9 +664,7 @@ def run_model(
     # so scores are preserved regardless of what happens to the intermediates.
     # Only now, and only if explicitly requested, delete this model's denoised
     # HDF5 files. Default is KEEP.
-    denoised_bytes = sum(
-        p.stat().st_size for p in denoised_dir.glob("*.h5") if p.is_file()
-    )
+    denoised_bytes = sum(p.stat().st_size for p in denoised_dir.glob("*.h5") if p.is_file())
     if args.delete_denoised_after_score:
         if not summary_path.is_file():  # defensive: never delete without the summary
             raise RuntimeError(
@@ -703,9 +689,7 @@ def run_model(
         log_score = file_vector_log[file_index]
         score_text = "None" if file_score is None else f"{file_score:.12g}"
         log_text = (
-            "None"
-            if log_score is None or not math.isfinite(log_score)
-            else f"{log_score:.6f}"
+            "None" if log_score is None or not math.isfinite(log_score) else f"{log_score:.6f}"
         )
         elapsed_minutes = inference_seconds[file_index] / 60.0
         print(
@@ -725,9 +709,7 @@ def main() -> None:
 
     args = parse_args()
     file_indices = (
-        sorted(set(args.file_indices))
-        if args.file_indices is not None
-        else list(range(NUM_FILES))
+        sorted(set(args.file_indices)) if args.file_indices is not None else list(range(NUM_FILES))
     )
     anchor_data = validate_inputs(args, file_indices)
 
@@ -740,12 +722,14 @@ def main() -> None:
     # Startup stale-intermediate report (do NOT auto-remove — just surface them
     # so the operator can decide). Covers this feature's denoised dirs and any
     # abandoned temp dirs from older TemporaryDirectory-based runs.
-    stale = sorted(
-        p for p in args.work_dir.glob("denoised_*") if p.is_dir()
-    ) + sorted(p for p in args.work_dir.glob("tidmad_official_*_*") if p.is_dir())
+    stale = sorted(p for p in args.work_dir.glob("denoised_*") if p.is_dir()) + sorted(
+        p for p in args.work_dir.glob("tidmad_official_*_*") if p.is_dir()
+    )
     if stale:
-        print("NOTE: pre-existing intermediate directories under work_dir "
-              "(left in place; remove manually if unwanted):")
+        print(
+            "NOTE: pre-existing intermediate directories under work_dir "
+            "(left in place; remove manually if unwanted):"
+        )
         for p in stale:
             nbytes = sum(f.stat().st_size for f in p.glob("*.h5") if f.is_file())
             print(f"  - {p}  ({nbytes / 2**30:.1f} GiB)")
@@ -780,11 +764,7 @@ def main() -> None:
         elapsed_minutes = (time.perf_counter() - started) / 60.0
         print(f"\n{spec.key} finished in {elapsed_minutes:.1f} minutes.\n")
 
-    retention = (
-        "deleted after scoring"
-        if args.delete_denoised_after_score
-        else "KEPT on disk"
-    )
+    retention = "deleted after scoring" if args.delete_denoised_after_score else "KEPT on disk"
     print(f"All requested models scored. Denoised intermediates: {retention}.")
 
 
