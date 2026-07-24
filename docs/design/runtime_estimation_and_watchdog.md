@@ -1952,6 +1952,22 @@ Scenario B = the exact incident config via the deterministic driver
   an attempt per the pinned RT2-G harness tests
   (`test_rt2g_admission_wiring.py`) — the tuner-side contract this
   status feeds.
+- [x] Scenario A policy wiring (operator decision 2026-07-24: Gate 2
+  must exercise the INTENDED production policy, not incidental
+  defaults) — `--runtime_safety_factor` + `--runtime_watchdog_floor_
+  seconds` wired lock-step through schema (defaults 1.0/60 unchanged
+  for programmatic callers) → protocol → workflow → chain runner →
+  shell wrapper (CONTRACT_FLAGS) → run_comparison → tuner CLI → the
+  tuner's policy builder (extracted to `_build_runtime_policy`,
+  unit-testable). Audit: watchdog grace=10/poll=1 are stable schema
+  defaults recorded in every observation's `runtime_policy`
+  provenance → no CLI flags needed. Checkpoint:
+  `test_gate2_policy_wiring.py` proves the EXACT Scenario A command
+  resolves to safety 1.5 / watchdog on / floor 120 / grace 10 /
+  poll 1 / guardrails 150k/4/off-override / share 0.10 / formal
+  budget 1800 s (trial rounds record-only); 38 targeted tests passed
+  (incl. shell parity with the 2 new contract flags); ruff + pyright
+  clean; chain `--dry-run` shows the flags forwarded end-to-end.
 - [ ] Gate 2 Scenario A (LAUNCH ONLY on explicit operator approval
-  after the Scenario B stop-and-show)
+  after the Scenario B stop-and-show + this wiring's commit review)
 - [ ] Gate 2 (verdict)
