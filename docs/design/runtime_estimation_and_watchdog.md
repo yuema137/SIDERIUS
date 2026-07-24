@@ -1968,6 +1968,36 @@ Scenario B = the exact incident config via the deterministic driver
   budget 1800 s (trial rounds record-only); 38 targeted tests passed
   (incl. shell parity with the 2 new contract flags); ruff + pyright
   clean; chain `--dry-run` shows the flags forwarded end-to-end.
-- [ ] Gate 2 Scenario A (LAUNCH ONLY on explicit operator approval
-  after the Scenario B stop-and-show + this wiring's commit review)
-- [ ] Gate 2 (verdict)
+- [x] Gate 2 Scenario A EXECUTED 2026-07-24 (13 min, 19 LLM calls,
+  238,515 tokens; evidence in
+  `docs/design/pregate_evidence/gate2_scenarioA_*`). First launch
+  failed fast at startup (zero compute): default HealthGate peek
+  files [3,10,17] outside DataScope 4-9 — the DS invariants working;
+  relaunched with the prescribed `--health_gate_files 4,6,9`.
+  Attempt taxonomy across 6 attempts: 2 pre-existing VRAM-probe
+  timeouts on the LLM's slow-forward model; 1 pre-flight time-gate
+  skip (17.6 min > 5-min trial budget — estimator gate live); **1 §5
+  guardrail catch of formal batch_size 1 (the V18 incident shape)
+  planned by the real LLM**; 2 REAL scored rounds (trial + FORCED
+  FORMAL) — both `admitted @ post_training_verification` under the
+  production posture (safety 1.5, watchdog floor 120, recorded in
+  observation `runtime_policy` provenance), full real
+  training→inference→scoring, watchdog armed and SILENT, both
+  observations stored (`inference_complete`). Cleanup: GPU 0 MiB,
+  zero residue. Prediction quality (formal round): setup 1.0;
+  inference 1.61; **training ratio 3.09** (predicted 19.9 s vs actual
+  61.5 s — the novel architecture's step times were genuinely
+  unstable: the trial round's verification could not even reach
+  steady state in 200 steps, correctly yielding NO prediction under
+  record-only trial policy). Budget/watchdog still bounded everything
+  (actual ≪ 30-min gate budget; subprocess 98 s < 120 s floor).
+  **Score: None WITH gate_action=invalidate_round on both scored
+  rounds** — the LLM's invented model collapsed to constant output at
+  the 0.02 data volume; HealthGates fired exactly per the gate
+  standard's criterion 3b (None score WITH gate action = framework
+  correct); the planner's reflection correctly diagnosed data
+  insufficiency. The finite-score criterion was NOT met this run —
+  model quality, not framework (gate standard: "LLM quality issue,
+  not a feature bug").
+- [ ] Gate 2 (verdict — OPERATOR decision pending: the finite-score
+  criterion miss is the one open item; all framework criteria met)

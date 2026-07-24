@@ -1,0 +1,2517 @@
+[
+    {
+        "record_type": "attempt_failure",
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_001",
+        "status": "error",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:21:19",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_001",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "segmentation_size": 16000,
+                "batch_size": 1,
+                "embedding_dim": 128,
+                "hidden_channels": 256,
+                "skip_channels": 256,
+                "residual_blocks": 12,
+                "dilation_repeat": 2,
+                "kernel_size": 3,
+                "dropout": 0.0,
+                "model_type": "causal_wavenet_spectral_baseline"
+            },
+            "train_config": {
+                "lr": 0.0001,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 1e-05,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "custom",
+                "loss_name": "cross_entropy_spectral_consistency",
+                "reduction": "mean"
+            }
+        },
+        "logical_round": 1,
+        "attempt_index": 1,
+        "failure_stage": "vram_structural_probe",
+        "failure_type": "model_forward_error",
+        "failure_reason": "Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 80, in forward\n    z = torch.tanh(f) * torch.sigmoid(g)\n        ^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n",
+        "proposed_config": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_001",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "segmentation_size": 16000,
+                "batch_size": 1,
+                "embedding_dim": 128,
+                "hidden_channels": 256,
+                "skip_channels": 256,
+                "residual_blocks": 12,
+                "dilation_repeat": 2,
+                "kernel_size": 3,
+                "dropout": 0.0,
+                "model_type": "causal_wavenet_spectral_baseline"
+            },
+            "train_config": {
+                "lr": 0.0001,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 1e-05,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "custom",
+                "loss_name": "cross_entropy_spectral_consistency",
+                "reduction": "mean"
+            }
+        },
+        "traceback_summary": "Traceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py\", line 2446, in run\n    raise RuntimeError(f\"Resource check error: {resource_check.get('message')}\")\nRuntimeError: Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 80, in forward\n    z = torch.tanh(f) * torch.sigmoid(g)\n        ^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n\n",
+        "counts_toward_completed_rounds": false,
+        "counts_toward_attempt_budget": true,
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "The sparse baseline should train stably within budget and produce a finite denoising_score, giving a reliable reference for whether the custom spectral objective helps under limited data. I expect stable optimization but only modest score because the model sees limited data and just 1 epoch; if underfitting is evident, the next round should keep architecture fixed and ablate loss weight or padding behavior rather than switching architectures.",
+            "conclusion": "Attempt failed during vram_structural_probe: Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 80, in forward\n    z = torch.tanh(f) * torch.sigmoid(g)\n        ^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n",
+            "discovery": "model_forward_error in vram_structural_probe; proposed_config={'exp_id': 'causal_wavenet_spectral_baseline_iter_001_001', 'run_name': 'iter_001', 'model_type': 'causal_wavenet_spectral_baseline', 'model_config': {'segmentation_size': 16000, 'batch_size': 1, 'embedding_dim': 128, 'hidden_channels': 256, 'skip_channels': 256, 'residual_blocks': 12, 'dilation_repeat': 2, 'kernel_size': 3, 'dropout': 0.0, 'model_type': 'causal_wavenet_spectral_baseline'}, 'train_config': {'lr': 0.0001, 'epochs': 1, 'batch_size': 1, 'optimizer_type': 'adamw', 'weight_decay': 1e-05, 'device': 'cuda'}, 'loss_config': {'loss_type': 'custom', 'loss_name': 'cross_entropy_spectral_consistency', 'reduction': 'mean'}}",
+            "memory_update": "Do not repeat the failing configuration unchanged. Correct the vram_structural_probe failure before retrying.",
+            "round_index": 1,
+            "attempt_in_round": 1
+        }
+    },
+    {
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_002",
+        "status": "skipped_time_risk",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:22:50",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_002",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 16000,
+                "batch_size": 1,
+                "embedding_dim": 64,
+                "hidden_channels": 128,
+                "skip_channels": 128,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 3,
+                "dropout": 0.1
+            },
+            "train_config": {
+                "lr": 0.0005,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adam",
+                "weight_decay": 0.0,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            },
+            "inference_batch": 32
+        },
+        "denoising_score": null,
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "A lighter WaveNet with segmentation_size 16000, 6 residual blocks, narrower channels, and focal loss will pass the structural probe and complete 1 epoch within the time budget. I expect a finite but modest denoising_score because this is still a sparse 1-epoch trial, but it should establish the first successful reference point and reveal whether the prior failure was primarily due to model compute rather than data or optimization instability.",
+            "conclusion": "Skipped: estimated wall-time (17.64 min) exceeds budget (5.0 min).",
+            "discovery": "❌ OVER BUDGET — Est 17.6 min vs budget 5.0 min (train 202.1s + inf 839.6s + score 16.6s). Dominant phase: inference.",
+            "memory_update": "Raise segmentation_size to the next valid divisor of 10,000,000 so fewer steps cover the same data.",
+            "time_estimate_minutes": 17.64,
+            "time_budget_minutes": 5.0,
+            "time_mode": "trial",
+            "inference_ms_source": "static_formula",
+            "inference_batch_uncalibrated": true,
+            "round_index": 1,
+            "attempt_in_round": 2
+        }
+    },
+    {
+        "record_type": "attempt_failure",
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_003",
+        "status": "error",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:23:59",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_003",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "embedding_dim": 32,
+                "hidden_channels": 64,
+                "skip_channels": 64,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 2,
+                "dropout": 0.1
+            },
+            "train_config": {
+                "lr": 0.0003,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adam",
+                "weight_decay": 0.0,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            }
+        },
+        "logical_round": 1,
+        "attempt_index": 3,
+        "failure_stage": "vram_structural_probe",
+        "failure_type": "model_forward_error",
+        "failure_reason": "Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 77, in forward\n    x_padded = F.pad(x, (pad_left, 0))\n               ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/functional.py\", line 5418, in pad\n    return torch._C._nn.pad(input, pad, mode, value)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n",
+        "proposed_config": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_003",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "embedding_dim": 32,
+                "hidden_channels": 64,
+                "skip_channels": 64,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 2,
+                "dropout": 0.1
+            },
+            "train_config": {
+                "lr": 0.0003,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adam",
+                "weight_decay": 0.0,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            }
+        },
+        "traceback_summary": "Traceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py\", line 2446, in run\n    raise RuntimeError(f\"Resource check error: {resource_check.get('message')}\")\nRuntimeError: Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 77, in forward\n    x_padded = F.pad(x, (pad_left, 0))\n               ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/functional.py\", line 5418, in pad\n    return torch._C._nn.pad(input, pad, mode, value)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n\n",
+        "counts_toward_completed_rounds": false,
+        "counts_toward_attempt_budget": true,
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "A substantially lighter causal WaveNet using segmentation_size 40000, 6 residual blocks, narrower channels, kernel_size 2, and focal loss at lr 3e-4 will pass resource gates and finish within the 5-minute trial budget. I expect a finite but modest denoising_score; if it completes successfully, the result will establish a working runtime-safe baseline and show whether larger temporal context helps more than the lost capacity hurts.",
+            "conclusion": "Attempt failed during vram_structural_probe: Resource check error: VRAMEval runtime error: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\nTraceback (most recent call last):\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 563, in run_skill\n    inference_batch = resolve_inference_batch(\n                      ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/batch_resolver.py\", line 127, in resolve_inference_batch\n    probe = probe_activation_footprint(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/structural_probe.py\", line 257, in probe_activation_footprint\n    out = model(input_sample)\n          ^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._call_impl(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py\", line 1787, in _call_impl\n    return forward_call(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/plugins/iter_001/causal_wavenet_spectral_baseline.py\", line 77, in forward\n    x_padded = F.pad(x, (pad_left, 0))\n               ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/.venv/lib/python3.12/site-packages/torch/nn/functional.py\", line 5418, in pad\n    return torch._C._nn.pad(input, pad, mode, value)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/REPO/SIDERIUS/agent/skills/evaluate_vram_skill/wrapper.py\", line 109, in _handler\n    raise ForwardPassTimeoutError(\nagent.skills.evaluate_vram_skill.wrapper.ForwardPassTimeoutError: Forward-pass probe 'resolve_inference_batch' exceeded 60s. Most common cause: a Python `for`/`while` loop over the time dimension inside `nn.Module.forward(...)`. Use vectorized ops (FFT, linear attention, associative scans).\n",
+            "discovery": "model_forward_error in vram_structural_probe; proposed_config={'exp_id': 'causal_wavenet_spectral_baseline_iter_001_003', 'run_name': 'iter_001', 'model_type': 'causal_wavenet_spectral_baseline', 'model_config': {'model_type': 'causal_wavenet_spectral_baseline', 'segmentation_size': 40000, 'batch_size': 1, 'embedding_dim': 32, 'hidden_channels': 64, 'skip_channels': 64, 'residual_blocks': 6, 'dilation_repeat': 1, 'kernel_size': 2, 'dropout': 0.1}, 'train_config': {'lr': 0.0003, 'epochs': 1, 'batch_size': 1, 'optimizer_type': 'adam', 'weight_decay': 0.0, 'device': 'cuda'}, 'loss_config': {'loss_type': 'focal', 'alpha': 0.5, 'gamma': 2.0, 'reduction': 'mean'}}",
+            "memory_update": "Do not repeat the failing configuration unchanged. Correct the vram_structural_probe failure before retrying.",
+            "round_index": 1,
+            "attempt_in_round": 3
+        }
+    },
+    {
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_004",
+        "status": "failed_mode_collapse",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:27:10",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_004",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "embedding_dim": 8,
+                "hidden_channels": 16,
+                "skip_channels": 16,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 2,
+                "dropout": 0.0
+            },
+            "train_config": {
+                "lr": 0.0001,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adam",
+                "weight_decay": 0.0,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "ce",
+                "reduction": "mean"
+            },
+            "inference_batch": 16
+        },
+        "final_loss": 3.814128773212433,
+        "loss_history": [
+            3.814128773212433
+        ],
+        "model_params": 16416,
+        "denoising_score": null,
+        "file_vector": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        ],
+        "score_table": null,
+        "failure_reason": "[output_diversity_blocking] output_diversity: aggregation=any_pass failed — per-file: file_4=1, file_6=1, file_9=1 (threshold: unique_int8 > 25). Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio. | [output_std_blocking] output_std: aggregation=any_pass failed — per-file: file_4=0.0, file_6=0.0, file_9=0.0 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal. | [amplitude_collapse_blocking] amplitude_collapse: aggregation=any_pass failed — per-file: file_4=1.0, file_6=1.0, file_9=1.0 (threshold: dominant_fraction < 0.95). Single-class dominance — the model is producing a near-constant output. | [scoring_validity] denoising_score is None or non-finite; the model produced no valid denoising signal",
+        "gate_action": "invalidate_round",
+        "health_gate_results": [
+            {
+                "gate_name": "output_diversity_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "output_diversity: aggregation=any_pass failed — per-file: file_4=1, file_6=1, file_9=1 (threshold: unique_int8 > 25). Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio.",
+                "threshold": {
+                    "metric": "n_unique_int8_values",
+                    "operator": ">",
+                    "value": 25,
+                    "unit": "count"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0004.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852789705619089,
+                                "stable_inventory_id": "9dd01e56ea08c0d8024a7d60b22cc7b3b6cbab1d1733394c20eb49d5b8a70519"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0006.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852796084492180,
+                                "stable_inventory_id": "233dbe7d1c12bc8865dc49b148c68e977a09dc6ebd402136373a239c3437672a"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0009.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852805894297014,
+                                "stable_inventory_id": "c21f3117457dfe3b74abaee566a774af57cc16c5510b4474252e046d83f7bcd7"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold": 25,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 1.0,
+                        "q25": 1.0,
+                        "median": 1.0,
+                        "q75": 1.0,
+                        "maximum": 1.0,
+                        "mean": 1.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.09658645652234554
+            },
+            {
+                "gate_name": "output_std_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "output_std: aggregation=any_pass failed — per-file: file_4=0.0, file_6=0.0, file_9=0.0 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal.",
+                "threshold": {
+                    "metric": "output_std_mv",
+                    "operator": ">=",
+                    "value": 1.0,
+                    "unit": "mV"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0004.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852789705619089,
+                                "stable_inventory_id": "9dd01e56ea08c0d8024a7d60b22cc7b3b6cbab1d1733394c20eb49d5b8a70519"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0006.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852796084492180,
+                                "stable_inventory_id": "233dbe7d1c12bc8865dc49b148c68e977a09dc6ebd402136373a239c3437672a"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0009.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852805894297014,
+                                "stable_inventory_id": "c21f3117457dfe3b74abaee566a774af57cc16c5510b4474252e046d83f7bcd7"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold_mv": 1.0,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 0.0,
+                        "q25": 0.0,
+                        "median": 0.0,
+                        "q75": 0.0,
+                        "maximum": 0.0,
+                        "mean": 0.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.02458702214062214
+            },
+            {
+                "gate_name": "amplitude_collapse_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "amplitude_collapse: aggregation=any_pass failed — per-file: file_4=1.0, file_6=1.0, file_9=1.0 (threshold: dominant_fraction < 0.95). Single-class dominance — the model is producing a near-constant output.",
+                "threshold": {
+                    "metric": "dominant_mode_fraction",
+                    "operator": "<=",
+                    "value": 0.95,
+                    "unit": "fraction"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0004.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852789705619089,
+                                "stable_inventory_id": "9dd01e56ea08c0d8024a7d60b22cc7b3b6cbab1d1733394c20eb49d5b8a70519"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0006.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852796084492180,
+                                "stable_inventory_id": "233dbe7d1c12bc8865dc49b148c68e977a09dc6ebd402136373a239c3437672a"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0009.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852805894297014,
+                                "stable_inventory_id": "c21f3117457dfe3b74abaee566a774af57cc16c5510b4474252e046d83f7bcd7"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold": 0.95,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 1.0,
+                        "q25": 1.0,
+                        "median": 1.0,
+                        "q75": 1.0,
+                        "maximum": 1.0,
+                        "mean": 1.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.020014679059386253
+            },
+            {
+                "gate_name": "pearson_dispersion_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 0,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "peek_samples_requested": 1000000,
+                    "pearson_per_file": {},
+                    "unit": "dimensionless_correlation",
+                    "calculation_version": "pearson_dispersion_v1",
+                    "pearson_dispersion": null,
+                    "pearson_mean": null,
+                    "pearson_range": null,
+                    "per_file": {},
+                    "aggregate_statistics": {
+                        "count": 0
+                    }
+                },
+                "gate_runtime_seconds": 0.2613913491368294
+            },
+            {
+                "gate_name": "spectral_peak_ratio_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 0,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "ratio_per_file": {
+                        "4": null,
+                        "6": null,
+                        "9": null
+                    },
+                    "io_failed": {},
+                    "peek_samples_requested": 1000000,
+                    "unit": "dimensionless_ratio",
+                    "calculation_version": "spectral_peak_ratio_v1",
+                    "ratio_mean": null,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0004.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852789705619089,
+                                "stable_inventory_id": "9dd01e56ea08c0d8024a7d60b22cc7b3b6cbab1d1733394c20eb49d5b8a70519"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": null,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0006.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852796084492180,
+                                "stable_inventory_id": "233dbe7d1c12bc8865dc49b148c68e977a09dc6ebd402136373a239c3437672a"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": null,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0009.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852805894297014,
+                                "stable_inventory_id": "c21f3117457dfe3b74abaee566a774af57cc16c5510b4474252e046d83f7bcd7"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": null,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        }
+                    },
+                    "aggregate_statistics": {
+                        "count": 0
+                    }
+                },
+                "gate_runtime_seconds": 0.1005415078252554
+            },
+            {
+                "gate_name": "per_file_output_std_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 3,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "std_mv_per_file": {
+                        "4": 0.0,
+                        "6": 0.0,
+                        "9": 0.0
+                    },
+                    "io_failed": {},
+                    "peek_samples_requested": 100000,
+                    "unit": "mV",
+                    "calculation_version": "per_file_output_std_v1",
+                    "std_mv_mean": 0.0,
+                    "std_mv_median": 0.0,
+                    "std_mv_min": 0.0,
+                    "std_mv_max": 0.0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0004.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852789705619089,
+                                "stable_inventory_id": "9dd01e56ea08c0d8024a7d60b22cc7b3b6cbab1d1733394c20eb49d5b8a70519"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0006.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852796084492180,
+                                "stable_inventory_id": "233dbe7d1c12bc8865dc49b148c68e977a09dc6ebd402136373a239c3437672a"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_004_0009.h5",
+                                "exists": true,
+                                "size_bytes": 80086192,
+                                "mtime_ns": 1784852805894297014,
+                                "stable_inventory_id": "c21f3117457dfe3b74abaee566a774af57cc16c5510b4474252e046d83f7bcd7"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "40fa7a534f401ec0b05dfc07dc0168f30f57cee520bc1950428fe54c74141301",
+                            "io_warning": null
+                        }
+                    },
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 0.0,
+                        "q25": 0.0,
+                        "median": 0.0,
+                        "q75": 0.0,
+                        "maximum": 0.0,
+                        "mean": 0.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.007298050448298454
+            }
+        ],
+        "training_psd_segments": 24,
+        "eval_psd_segments": 24,
+        "timing": {
+            "train_time_s": 84.2,
+            "inference_time_s": 36.8,
+            "scoring_time_s": 20.6
+        },
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "An ultra-light WaveNet at segmentation_size 40000 with minimal valid depth and narrow channels, trained for 1 epoch with CE and batch_size 1, is more likely to pass the structural probe and finish within budget than prior wider configs. I expect low absolute denoising_score because capacity is heavily reduced and data/epochs are constrained, but the key prediction is a successful finite run that establishes the first executable reference point for this architecture.",
+            "conclusion": "bad. Although training converged (single-epoch CE final_loss=3.81 is the only CE run so far), validation denoising_score is non-finite (-Infinity) and multiple output health gates failed (output diversity, std, amplitude collapse) indicating the model generated a near-constant / single-class output. This is not a meaningful generalisation improvement across train->validation, and the run is invalidated under production policy.",
+            "key_factor": "Severely constrained data/optimization regime (trial_portion=0.02, training_psd_segments=24, epochs=1 with CE and batch_size implied minimal) combined with the ultra-light architecture/segmentation setup led to degenerate validation outputs (constant/single-mode). The architecture/loss did not produce a usable denoising signal even though training loss is low for this limited setting.",
+            "discovery": "An ultra-light WaveNet trained on very limited PSD segments (24) for only 1 epoch can achieve a seemingly low CE training loss but still collapse on validation into near-constant outputs (std_mv=0 across files 4/6/9 and n_unique_int8_values=1), making denoising_score non-finite. Therefore, CE training loss at low trial_portion is not sufficient to ensure valid denoising behavior; output-distribution health gates are the early indicator.",
+            "memory_update": "Before changing loss_type/lr, increase effective training data to escape degeneracy: raise trial_portion substantially (e.g., 0.02 -> 0.1 or 0.2) and consider training for more than 1 epoch to allow non-collapsed solutions. In the next run, keep an eye on output health gates (diversity >25 unique int8, std_mv >= 1mV, dominant_fraction <0.95); if they fail again, further increase model capacity slightly or add regularization (e.g., weight_decay/dropout) to prevent constant-output collapse.",
+            "time_estimate_minutes": 0.28,
+            "time_budget_minutes": 5.0,
+            "time_mode": "trial",
+            "inference_ms_source": "static_formula",
+            "training_ms_source": "static_uncalibrated",
+            "vram_estimate_gb": 0.796,
+            "vram_budget_gb": 24.0,
+            "inference_per_psd_seg_ms_measured": 799.4562746025622,
+            "inference_warmup_aggregator": "median",
+            "inference_n_timed_files": 5,
+            "inference_warmup_fraction": 0.2,
+            "inference_process_startup_ms": 17038.174636662006,
+            "round_index": 1,
+            "attempt_in_round": 1
+        },
+        "resolved_data_scope": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9
+        ],
+        "health_gate_enabled": true,
+        "is_trial": true,
+        "trial_strategy": "snapshot",
+        "trial_portion": 0.02,
+        "eval_strategy": "snapshot",
+        "eval_portion": 0.02,
+        "train_portion": 0.1,
+        "planned_trial_strategy": "snapshot",
+        "planned_eval_strategy": "snapshot",
+        "strategy_normalization_reason": null,
+        "runtime_verification": {
+            "schema_version": 1,
+            "timestamp": "2026-07-24T00:26:45+0000",
+            "chain_id": null,
+            "attempt_id": "causal_wavenet_spectral_baseline_iter_001_004",
+            "hardware": {
+                "hostname": "94cdab4290e0",
+                "gpu_name": "NVIDIA H100 80GB HBM3",
+                "cuda_version": "12.8"
+            },
+            "software": {
+                "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+                "python_version": "3.12.3",
+                "torch_version": "2.10.0+cu128"
+            },
+            "storage": {
+                "dataset_root": "/workspace/DATA/TIDMAD_DATA",
+                "file_count": 6,
+                "files_present": 6,
+                "expected_raw_bytes": 720000000,
+                "total_file_bytes": 13108719697,
+                "filesystem_type": "fuse",
+                "bytes_read_from_storage": 0,
+                "cache_state": "warm_page_cache",
+                "rss_bytes_before_setup": 558907392,
+                "rss_bytes_after_setup": 900866048
+            },
+            "runtime_policy": {
+                "operator_budget_seconds": null,
+                "safety_factor": 1.5,
+                "verification": {
+                    "steady": {
+                        "window": 8,
+                        "stable_windows": 4,
+                        "rel_spread_tol": 0.1,
+                        "max_steps": 200
+                    },
+                    "min_timed_steps": 5,
+                    "min_timed_ms": 500.0,
+                    "max_steps": 200,
+                    "max_wall_ms": 60000.0,
+                    "pathological_factor": 10.0,
+                    "max_unit_ms": null,
+                    "prior_match_tol": 0.25,
+                    "drift_extra_factor": 2.0
+                },
+                "historical_phase_share_limit": 0.1,
+                "observation_store_root": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/runtime_observations",
+                "watchdog": {
+                    "enabled": true,
+                    "grace_seconds": 10.0,
+                    "poll_seconds": 1.0,
+                    "floor_seconds": 120.0
+                }
+            },
+            "historical_prior": null,
+            "prior_agreement": null,
+            "calibration_context": {
+                "precision": "float32",
+                "optimizer_type": "adam",
+                "model_family": "causal_wavenet_spectral_baseline",
+                "param_count": 16416,
+                "seg_size": 40000,
+                "batch_size": 1,
+                "runtime_flags": {
+                    "num_workers": 0,
+                    "pin_memory": false,
+                    "grad_accumulation": false,
+                    "torch_compile": false
+                }
+            },
+            "components": {
+                "setup": {
+                    "workload": null,
+                    "prediction": {
+                        "predicted_seconds": 17.285291139036417,
+                        "source": "real_dataset_setup",
+                        "formal_execution_eligible": true,
+                        "steady_state": true,
+                        "verification": "passed",
+                        "confidence": "high",
+                        "ms_per_unit": 17285.291139036417,
+                        "n_steady_units": 1,
+                        "unit_count": 1,
+                        "safety_factor": 1.0,
+                        "prior_expected_seconds": null,
+                        "prior_agreement_ratio": null,
+                        "detail": {}
+                    },
+                    "measurement": {
+                        "unit": "setup_pass",
+                        "n_measured_units": 1,
+                        "n_stabilization_units": 0,
+                        "unit_time_ms_median": 17285.291139036417,
+                        "unit_time_ms_mad": null,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 17.285291139036417,
+                        "raw_timings_ms": [
+                            17285.291139036417
+                        ],
+                        "detail": {
+                            "dataset_construction_seconds": 1.9929786566644907
+                        }
+                    },
+                    "actual_seconds": 17.285291139036417,
+                    "prediction_error": {
+                        "predicted_seconds": 17.285291139036417,
+                        "actual_seconds": 17.285291139036417,
+                        "ratio": 1.0,
+                        "log_error": 0.0
+                    }
+                },
+                "training": {
+                    "workload": {
+                        "phase": "training",
+                        "unit": "optimizer_step",
+                        "unit_count": 1500,
+                        "detail": {
+                            "source": "materialized_epoch0_loader",
+                            "steps_per_epoch": 1500,
+                            "epochs": 1,
+                            "epoch0_samples": 1500,
+                            "batch_size": 1,
+                            "train_portion": 0.1
+                        }
+                    },
+                    "prediction": null,
+                    "measurement": {
+                        "unit": "optimizer_step",
+                        "n_measured_units": 9,
+                        "n_stabilization_units": 16,
+                        "unit_time_ms_median": 7.5409915298223495,
+                        "unit_time_ms_mad": 0.5463212728500366,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 2.5276724603027105,
+                        "raw_timings_ms": [
+                            1890.5244935303926,
+                            6.767371669411659,
+                            7.169198244810104,
+                            7.5189508497715,
+                            7.474251091480255,
+                            7.1021802723407745,
+                            90.41620418429375,
+                            7.61662982404232,
+                            8.269112557172775,
+                            83.52281711995602,
+                            8.791390806436539,
+                            9.990859776735306,
+                            76.04760490357876,
+                            6.400151178240776,
+                            6.298869848251343,
+                            84.02260765433311,
+                            7.298912853002548,
+                            7.028017193078995,
+                            79.57499660551548,
+                            7.5409915298223495,
+                            6.994670256972313,
+                            7.448859512805939,
+                            8.350640535354614,
+                            8.257787674665451,
+                            87.24489063024521
+                        ],
+                        "detail": {
+                            "state": "failed_pathological_unit",
+                            "failure_reason": "pathological unit: 87.2 ms > 10.0x steady median 7.5 ms",
+                            "prior_agreement": "new_configuration",
+                            "prior_expected_unit_ms": null,
+                            "rolling_medians_ms": [
+                                7.496600970625877,
+                                7.496600970625877,
+                                7.56779033690691,
+                                7.942871190607548,
+                                8.530251681804657,
+                                9.391125291585922,
+                                9.391125291585922,
+                                8.530251681804657,
+                                9.391125291585922,
+                                9.391125291585922,
+                                8.045151829719543,
+                                8.644886314868927,
+                                7.419952191412449,
+                                7.1634650230407715,
+                                7.3738861829042435,
+                                7.494925521314144,
+                                7.494925521314144,
+                                7.8993896022439
+                            ]
+                        }
+                    },
+                    "actual_seconds": 49.48737797699869,
+                    "prediction_error": null
+                },
+                "inference": {
+                    "workload": {
+                        "phase": "inference",
+                        "unit": "inference_batch",
+                        "unit_count": 378,
+                        "detail": {
+                            "n_files": 6,
+                            "per_file_ml_segments": {
+                                "4": 1000,
+                                "5": 1000,
+                                "6": 1000,
+                                "7": 1000,
+                                "8": 1000,
+                                "9": 1000
+                            },
+                            "per_file_batches": {
+                                "4": 63,
+                                "5": 63,
+                                "6": 63,
+                                "7": 63,
+                                "8": 63,
+                                "9": 63
+                            },
+                            "n_psd": 24,
+                            "ml_segments_per_psd": 250,
+                            "total_ml_segments": 6000,
+                            "output_bytes": 480000000,
+                            "output_files": 6,
+                            "seg_size": 40000,
+                            "inference_batch_size": 16
+                        }
+                    },
+                    "prediction": {
+                        "predicted_seconds": 12.240584133192897,
+                        "source": "real_inference_verification",
+                        "formal_execution_eligible": true,
+                        "steady_state": true,
+                        "verification": "passed",
+                        "confidence": "medium",
+                        "ms_per_unit": 12.269992381334305,
+                        "n_steady_units": 15,
+                        "unit_count": 378,
+                        "safety_factor": 1.5,
+                        "prior_expected_seconds": null,
+                        "prior_agreement_ratio": null,
+                        "detail": {
+                            "measured_unit_ms": 12.269992381334305,
+                            "unit_count": 378,
+                            "extra_predicted_seconds": 7.60252701304853,
+                            "verification_seconds": 0.8242781925946474,
+                            "prior_agreement": "new_configuration",
+                            "inference_setup_seconds": 0.4501196648925543,
+                            "input_read_seconds_per_psd": 0.24646206991747022,
+                            "output_write_seconds_per_psd": 0.030971241183578968,
+                            "per_file_residual_seconds": 0.08233464695513248,
+                            "io_files_measured": 1,
+                            "total_psd_planned": 24,
+                            "total_files_planned": 6
+                        }
+                    },
+                    "measurement": {
+                        "unit": "inference_batch",
+                        "n_measured_units": 15,
+                        "n_stabilization_units": 1,
+                        "unit_time_ms_median": 12.269992381334305,
+                        "unit_time_ms_mad": 2.3799166083335876,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 0.8242781925946474,
+                        "raw_timings_ms": [
+                            310.7896279543638,
+                            13.97022046148777,
+                            12.269992381334305,
+                            10.434519499540329,
+                            77.6375513523817,
+                            10.938230901956558,
+                            10.016389191150665,
+                            85.4081641882658,
+                            15.70211909711361,
+                            77.28829979896545,
+                            9.890075773000717,
+                            9.900983422994614,
+                            80.25920763611794,
+                            9.917186573147774,
+                            9.854843840003014,
+                            80.00078052282333
+                        ],
+                        "detail": {
+                            "state": "verified",
+                            "failure_reason": null,
+                            "prior_agreement": "new_configuration",
+                            "prior_expected_unit_ms": null,
+                            "rolling_medians_ms": [
+                                13.120106421411037,
+                                13.120106421411037,
+                                13.986055739223957,
+                                13.320174999535084,
+                                13.320174999535084,
+                                13.320174999535084,
+                                12.859254144132137,
+                                12.809652835130692,
+                                12.809652835130692
+                            ]
+                        }
+                    },
+                    "actual_seconds": 20.182783188298345,
+                    "prediction_error": {
+                        "predicted_seconds": 12.240584133192897,
+                        "actual_seconds": 20.182783188298345,
+                        "ratio": 1.6488415069644036,
+                        "log_error": 0.5000729243216494
+                    }
+                }
+            },
+            "total": null,
+            "admission": {
+                "decision": "admitted",
+                "stage": "post_training_verification",
+                "setup_cost_seconds": 17.285291139036417,
+                "verification_cost_seconds": 2.5276724603027105,
+                "avoided_predicted_runtime_seconds": null,
+                "reason": "record-only: no operator budget in force (verification failures recorded: ['training'])"
+            },
+            "watchdog_status": null,
+            "final_status": "inference_complete",
+            "calibration_eligible": false
+        }
+    },
+    {
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_005",
+        "status": "skipped_time_risk",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:27:19",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_005",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "embedding_dim": 16,
+                "hidden_channels": 32,
+                "skip_channels": 32,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 2,
+                "dropout": 0.1
+            },
+            "train_config": {
+                "lr": 0.0005,
+                "epochs": 1,
+                "batch_size": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 0.0001,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            }
+        },
+        "denoising_score": null,
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "Using the runtime-safe 40000 segmentation with focal loss, slightly increased capacity, dropout 0.1, and AdamW at lr=5e-4 will avoid the single-class collapse seen under CE and yield a valid finite formal denoising_score on files 4-9. I expect training loss to be higher than the collapsed CE run, but output diversity/std should recover and validation should become scoreable.",
+            "conclusion": "Skipped by §5 guardrails: formal batch_size 1 below min_formal_batch_size 4 (§5 launch-overhead pathology — V18 incident shape)",
+            "discovery": "resolved_steps=6000; guardrail config: max_steps_per_attempt=150000, min_formal_batch_size=4, allow_extreme_steps=False",
+            "memory_update": "Reduce the step count (higher batch_size / segmentation_size, lower portions/epochs) or raise the formal batch size. The operator can override with allow_extreme_steps=True.",
+            "time_mode": "formal",
+            "verification_stage": "guardrail",
+            "round_index": 2,
+            "attempt_in_round": 1
+        }
+    },
+    {
+        "exp_id": "causal_wavenet_spectral_baseline_iter_001_006",
+        "status": "failed_mode_collapse",
+        "model_type": "causal_wavenet_spectral_baseline",
+        "timestamp": "2026-07-24 00:30:53",
+        "file_index": 6,
+        "params": {
+            "exp_id": "causal_wavenet_spectral_baseline_iter_001_006",
+            "run_name": "iter_001",
+            "model_type": "causal_wavenet_spectral_baseline",
+            "model_config": {
+                "model_type": "causal_wavenet_spectral_baseline",
+                "segmentation_size": 40000,
+                "batch_size": 4,
+                "embedding_dim": 16,
+                "hidden_channels": 32,
+                "skip_channels": 32,
+                "residual_blocks": 6,
+                "dilation_repeat": 1,
+                "kernel_size": 2,
+                "dropout": 0.1
+            },
+            "train_config": {
+                "lr": 0.0005,
+                "epochs": 1,
+                "batch_size": 4,
+                "optimizer_type": "adamw",
+                "weight_decay": 0.0001,
+                "device": "cuda"
+            },
+            "loss_config": {
+                "loss_type": "focal",
+                "alpha": 0.5,
+                "gamma": 2.0,
+                "reduction": "mean"
+            },
+            "inference_batch": 16
+        },
+        "final_loss": 1.448585693438848,
+        "loss_history": [
+            1.448585693438848
+        ],
+        "model_params": 51776,
+        "denoising_score": null,
+        "file_vector": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        ],
+        "score_table": null,
+        "failure_reason": "[output_diversity_blocking] output_diversity: aggregation=any_pass failed — per-file: file_4=1, file_6=1, file_9=1 (threshold: unique_int8 > 25). Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio. | [output_std_blocking] output_std: aggregation=any_pass failed — per-file: file_4=0.0, file_6=0.0, file_9=0.0 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal. | [amplitude_collapse_blocking] amplitude_collapse: aggregation=any_pass failed — per-file: file_4=1.0, file_6=1.0, file_9=1.0 (threshold: dominant_fraction < 0.95). Single-class dominance — the model is producing a near-constant output. | [scoring_validity] denoising_score is None or non-finite; the model produced no valid denoising signal",
+        "gate_action": "invalidate_round",
+        "health_gate_results": [
+            {
+                "gate_name": "output_diversity_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "output_diversity: aggregation=any_pass failed — per-file: file_4=1, file_6=1, file_9=1 (threshold: unique_int8 > 25). Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio.",
+                "threshold": {
+                    "metric": "n_unique_int8_values",
+                    "operator": ">",
+                    "value": 25,
+                    "unit": "count"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "n_unique_int8_values": {
+                                    "value": 1,
+                                    "unit": "count"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold": 25,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 1.0,
+                        "q25": 1.0,
+                        "median": 1.0,
+                        "q75": 1.0,
+                        "maximum": 1.0,
+                        "mean": 1.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.02754853293299675
+            },
+            {
+                "gate_name": "output_std_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "output_std: aggregation=any_pass failed — per-file: file_4=0.0, file_6=0.0, file_9=0.0 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal.",
+                "threshold": {
+                    "metric": "output_std_mv",
+                    "operator": ">=",
+                    "value": 1.0,
+                    "unit": "mV"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold_mv": 1.0,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 0.0,
+                        "q25": 0.0,
+                        "median": 0.0,
+                        "q75": 0.0,
+                        "maximum": 0.0,
+                        "mean": 0.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.016605328768491745
+            },
+            {
+                "gate_name": "amplitude_collapse_blocking",
+                "execution_status": "failed",
+                "check_passed": false,
+                "would_invalidate_under_production_policy": true,
+                "resolved_action": "invalidate_round",
+                "failure_reason": "amplitude_collapse: aggregation=any_pass failed — per-file: file_4=1.0, file_6=1.0, file_9=1.0 (threshold: dominant_fraction < 0.95). Single-class dominance — the model is producing a near-constant output.",
+                "threshold": {
+                    "metric": "dominant_mode_fraction",
+                    "operator": "<=",
+                    "value": 0.95,
+                    "unit": "fraction"
+                },
+                "aggregation": {
+                    "aggregation_rule": "any_pass",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "aggregate_passed": false
+                },
+                "metrics": {
+                    "aggregated_passed": false,
+                    "aggregation": "any_pass",
+                    "n_files_attempted": 3,
+                    "n_files_io_failed": 0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": false,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "dominant_mode_fraction": {
+                                    "value": 1.0,
+                                    "unit": "fraction"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "threshold": 0.95,
+                    "peek_samples_requested": 100000,
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 1.0,
+                        "q25": 1.0,
+                        "median": 1.0,
+                        "q75": 1.0,
+                        "maximum": 1.0,
+                        "mean": 1.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.01348537765443325
+            },
+            {
+                "gate_name": "pearson_dispersion_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 3,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "peek_samples_requested": 1000000,
+                    "pearson_per_file": {
+                        "4": -0.0019457612383507819,
+                        "6": -0.0017316865325592472,
+                        "9": 0.000574520999276336
+                    },
+                    "unit": "dimensionless_correlation",
+                    "calculation_version": "pearson_dispersion_v1",
+                    "pearson_dispersion": 0.0013973930320930743,
+                    "pearson_mean": -0.0010343089238778976,
+                    "pearson_range": 0.002520282237627118,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "pearson_correlation": {
+                                    "value": -0.0019457612383507819,
+                                    "unit": "correlation"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "pearson_correlation": {
+                                    "value": -0.0017316865325592472,
+                                    "unit": "correlation"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "pearson_correlation": {
+                                    "value": 0.000574520999276336,
+                                    "unit": "correlation"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": -0.0019457612383507819,
+                        "q25": -0.0018387238854550144,
+                        "median": -0.0017316865325592472,
+                        "q75": -0.0005785827666414556,
+                        "maximum": 0.000574520999276336,
+                        "mean": -0.0010343089238778976,
+                        "standard_deviation": 0.0013973930320930743
+                    }
+                },
+                "gate_runtime_seconds": 0.19599922560155392
+            },
+            {
+                "gate_name": "spectral_peak_ratio_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 1,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "ratio_per_file": {
+                        "4": null,
+                        "6": 0.07916361629544517,
+                        "9": null
+                    },
+                    "io_failed": {},
+                    "peek_samples_requested": 1000000,
+                    "unit": "dimensionless_ratio",
+                    "calculation_version": "spectral_peak_ratio_v1",
+                    "ratio_mean": 0.07916361629544517,
+                    "ratio_median": 0.07916361629544517,
+                    "ratio_min": 0.07916361629544517,
+                    "ratio_max": 0.07916361629544517,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": null,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": 0.07916361629544517,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 1000000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "spectral_peak_ratio": {
+                                    "value": null,
+                                    "unit": "ratio"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "aggregate_statistics": {
+                        "count": 1,
+                        "minimum": 0.07916361629544517,
+                        "q25": 0.07916361629544517,
+                        "median": 0.07916361629544517,
+                        "q75": 0.07916361629544517,
+                        "maximum": 0.07916361629544517,
+                        "mean": 0.07916361629544517,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.05538160726428032
+            },
+            {
+                "gate_name": "per_file_output_std_recording",
+                "execution_status": "passed",
+                "check_passed": true,
+                "would_invalidate_under_production_policy": false,
+                "resolved_action": "continue",
+                "failure_reason": null,
+                "threshold": null,
+                "aggregation": {
+                    "aggregation_rule": "recording",
+                    "files_requested": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_completed": [
+                        4,
+                        6,
+                        9
+                    ],
+                    "files_passed": [],
+                    "files_failed": [],
+                    "aggregate_passed": true
+                },
+                "metrics": {
+                    "n_files_measured": 3,
+                    "n_files_io_failed": 0,
+                    "n_files_attempted": 3,
+                    "std_mv_per_file": {
+                        "4": 0.0,
+                        "6": 0.0,
+                        "9": 0.0
+                    },
+                    "io_failed": {},
+                    "peek_samples_requested": 100000,
+                    "unit": "mV",
+                    "calculation_version": "per_file_output_std_v1",
+                    "std_mv_mean": 0.0,
+                    "std_mv_median": 0.0,
+                    "std_mv_min": 0.0,
+                    "std_mv_max": 0.0,
+                    "per_file": {
+                        "4": {
+                            "file_index": 4,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0004.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853024947938916,
+                                "stable_inventory_id": "cd9df069dc6c6de916ee99e3cb2aad28e9fd17aa028c46094aca154e4e21c91b"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "6": {
+                            "file_index": 6,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0006.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853028108876029,
+                                "stable_inventory_id": "912925c1788fec8c39b3edbdd4f234651260e2c392e42668a9b3fa29ebfaaa9e"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        },
+                        "9": {
+                            "file_index": 9,
+                            "file": {
+                                "path": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/abra_validation_denoised_causal_wavenet_spectral_baseline_iter_001_causal_wavenet_spectral_baseline_iter_001_006_0009.h5",
+                                "exists": true,
+                                "size_bytes": 40047952,
+                                "mtime_ns": 1784853033114776436,
+                                "stable_inventory_id": "3d3ac93fd660fbd97c26b083438a39cb3f4205834a239895b3f01560161eb5ed"
+                            },
+                            "passed": null,
+                            "execution_status": "passed",
+                            "sample_count_inspected": 100000,
+                            "sampling_method": "channel0001_prefix_peek",
+                            "metrics": {
+                                "output_std_mv": {
+                                    "value": 0.0,
+                                    "unit": "mV"
+                                }
+                            },
+                            "checkpoint_sha256": "7952e6882edff11fed66a3baea2f6351458e8952403fe475e9e5deb5e269fb1f",
+                            "io_warning": null
+                        }
+                    },
+                    "aggregate_statistics": {
+                        "count": 3,
+                        "minimum": 0.0,
+                        "q25": 0.0,
+                        "median": 0.0,
+                        "q75": 0.0,
+                        "maximum": 0.0,
+                        "mean": 0.0,
+                        "standard_deviation": 0.0
+                    }
+                },
+                "gate_runtime_seconds": 0.007229320704936981
+            }
+        ],
+        "training_psd_segments": 24,
+        "eval_psd_segments": 12,
+        "timing": {
+            "train_time_s": 98.5,
+            "inference_time_s": 26.7,
+            "scoring_time_s": 16.8
+        },
+        "memory": {
+            "expert_advice_followed": "NOTE: This implementation passes trainability checks but deviates from the proposed mathematical spec. The tuner is optimizing an approximation of the intended architecture. Deviations: The model is trainable and returns the required [B,256,T] logits. It differs from the spec in block count/dilation schedule (12 blocks with repeated [1,2,4,8,16,32] instead of 8 blocks [1..128]), but that does not break runtime.\n\nFocus areas: Tune segmentation_size first because receptive-field usefulness and spectral-loss stability both depend on temporal context length.; Tune the spectral penalty weight before widening or deepening the stack; the memo already identifies objective mismatch as a key uncertainty.; Watch whether validation improves more from longer segments or from modest learning-rate reduction, since cold-start gated TCNs can overfit token-local structure early.; If the first run underperforms, test offline symmetric padding as the next architectural variant rather than immediately switching to attention.\nConstraints: Keep predicted peak VRAM below 19 GB at baseline to preserve tuner headroom under the 24 GB operator cap.; Keep total trainable parameters below 2,000,000 for the baseline.; Use a valid segmentation_size that exactly divides 10,000,000.; Maintain batch_size small enough that skip-path activations from all residual blocks do not push memory near the cap.\nKnown failures: The receptive field from 8 dilated blocks may still be too short for the dominant long-period structure in files [4-9], causing oversmoothing or failure to reconstruct slow trends.; The spectral auxiliary term may overweight global magnitude matching and hurt per-timestep class accuracy, yielding better spectra but weaker denoising_score if the task metric rewards exact token reconstruction.; If segmentation_size is set much larger by the tuner, activation memory from skip paths across all residual blocks could still rise enough to reduce batch size and destabilize optimization, even though the baseline is designed to sit comfortably below the 24 GB cap.\nSuggested directions: Start with segmentation_size 16000 as a conservative valid divisor that should fit easily and still expose nontrivial temporal structure.; First ablation after the baseline should keep the model fixed and vary only the spectral loss weight, since the memo explicitly proposes the registered spectral objective.; If denoising_score is weak but training is stable, extend depth from 8 to 10 blocks or switch to offline symmetric padding in the next iteration.; If spectra improve while token accuracy falls, reduce spectral weight or increase label smoothing only slightly rather than replacing the architecture.\nRationale: This guidance matches a cold-start, budget-safe convolutional baseline whose main uncertainties are temporal context sufficiency and loss alignment. The architecture is intentionally simple, so the highest-value tuning axes are segment length and spectral-loss balance rather than wholesale mechanism changes.",
+            "hypothesis": "A formal run with batch_size 4, focal loss, and modest regularization on the lightweight 40000-segment WaveNet will avoid the single-class validation collapse seen under CE, pass output diversity/std/amplitude health gates, and produce the first finite formal denoising_score for this architecture on files 4-9. Training loss will likely be higher than the collapsed CE run, but validation outputs should be materially more diverse and physically plausible.",
+            "conclusion": "bad — Although focal loss training converged (final_loss=1.4486 is the only focal run so best_final_loss for focal), validation denoising_score is non-finite (None) because the model output collapsed on all requested files (file_4/file_6/file_9): zero output std (0 mV), single-class dominance (dominant_mode_fraction=1.0), and zero output diversity (n_unique_int8_values=1). This indicates failure to learn a usable denoising signal rather than a mild generalization issue.",
+            "key_factor": "The combination of focal loss training (single epoch) with very limited training data (training_psd_segments=24, trial_portion=0.02) did not prevent degenerate validation behavior; the primary driver appears to be under-robust training leading to constant/saturated outputs on validation, causing denoising_score to be invalid.",
+            "discovery": "With only 24 PSD segments (trial_portion=0.02), this causal_wavenet_spectral_baseline setup can converge on the training focal loss while still producing a near-constant output on validation (unique_int8=1 and output_std_mv=0 across files). Therefore, training loss decrease alone is not sufficient to guarantee a valid denoising signal; health gates must be satisfied for scoring to be meaningful.",
+            "memory_update": "Invalidate_round due to validation collapse (diversity/std/amplitude gates failed on files 4/6/9; denoising_score=None). Next round: increase trial_portion substantially (e.g., 0.02 → 0.2) to address likely data insufficiency before changing loss_type/lr, since baseline data volume is not established and poor gate pass suggests learning saturation from too little data. Keep/possibly add stronger anti-collapse measures when retrying with more data (e.g., increase regularization or output noise/temperature if available), but prioritize data volume first.",
+            "time_estimate_minutes": 1.03,
+            "time_budget_minutes": 30.0,
+            "time_mode": "formal",
+            "inference_ms_source": "static_formula",
+            "training_ms_source": "static_uncalibrated",
+            "vram_estimate_gb": 1.387,
+            "vram_budget_gb": 24.0,
+            "inference_per_psd_seg_ms_measured": 813.3927136659622,
+            "inference_warmup_aggregator": "median",
+            "inference_n_timed_files": 5,
+            "inference_warmup_fraction": 0.2,
+            "inference_process_startup_ms": 16582.45898783207,
+            "round_index": 2,
+            "attempt_in_round": 2
+        },
+        "resolved_data_scope": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9
+        ],
+        "health_gate_enabled": true,
+        "runtime_verification": {
+            "schema_version": 1,
+            "timestamp": "2026-07-24T00:30:33+0000",
+            "chain_id": null,
+            "attempt_id": "causal_wavenet_spectral_baseline_iter_001_006",
+            "hardware": {
+                "hostname": "94cdab4290e0",
+                "gpu_name": "NVIDIA H100 80GB HBM3",
+                "cuda_version": "12.8"
+            },
+            "software": {
+                "platform": "Linux-6.8.0-90-generic-x86_64-with-glibc2.39",
+                "python_version": "3.12.3",
+                "torch_version": "2.10.0+cu128"
+            },
+            "storage": {
+                "dataset_root": "/workspace/DATA/TIDMAD_DATA",
+                "file_count": 6,
+                "files_present": 6,
+                "expected_raw_bytes": 720000000,
+                "total_file_bytes": 13108719697,
+                "filesystem_type": "fuse",
+                "bytes_read_from_storage": 0,
+                "cache_state": "warm_page_cache",
+                "rss_bytes_before_setup": 565751808,
+                "rss_bytes_after_setup": 1266176000
+            },
+            "runtime_policy": {
+                "operator_budget_seconds": 1800.0,
+                "safety_factor": 1.5,
+                "verification": {
+                    "steady": {
+                        "window": 8,
+                        "stable_windows": 4,
+                        "rel_spread_tol": 0.1,
+                        "max_steps": 200
+                    },
+                    "min_timed_steps": 5,
+                    "min_timed_ms": 500.0,
+                    "max_steps": 200,
+                    "max_wall_ms": 60000.0,
+                    "pathological_factor": 10.0,
+                    "max_unit_ms": null,
+                    "prior_match_tol": 0.25,
+                    "drift_extra_factor": 2.0
+                },
+                "historical_phase_share_limit": 0.1,
+                "observation_store_root": "/tmp/gate2_rc/iter_001/iteration_001/causal_wavenet_spectral_baseline/runtime_observations",
+                "watchdog": {
+                    "enabled": true,
+                    "grace_seconds": 10.0,
+                    "poll_seconds": 1.0,
+                    "floor_seconds": 120.0
+                }
+            },
+            "historical_prior": null,
+            "prior_agreement": null,
+            "calibration_context": {
+                "precision": "float32",
+                "optimizer_type": "adamw",
+                "model_family": "causal_wavenet_spectral_baseline",
+                "param_count": 51776,
+                "seg_size": 40000,
+                "batch_size": 4,
+                "runtime_flags": {
+                    "num_workers": 0,
+                    "pin_memory": false,
+                    "grad_accumulation": false,
+                    "torch_compile": false
+                }
+            },
+            "components": {
+                "setup": {
+                    "workload": null,
+                    "prediction": {
+                        "predicted_seconds": 20.472249111160636,
+                        "source": "real_dataset_setup",
+                        "formal_execution_eligible": true,
+                        "steady_state": true,
+                        "verification": "passed",
+                        "confidence": "high",
+                        "ms_per_unit": 20472.249111160636,
+                        "n_steady_units": 1,
+                        "unit_count": 1,
+                        "safety_factor": 1.0,
+                        "prior_expected_seconds": null,
+                        "prior_agreement_ratio": null,
+                        "detail": {}
+                    },
+                    "measurement": {
+                        "unit": "setup_pass",
+                        "n_measured_units": 1,
+                        "n_stabilization_units": 0,
+                        "unit_time_ms_median": 20472.249111160636,
+                        "unit_time_ms_mad": null,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 20.472249111160636,
+                        "raw_timings_ms": [
+                            20472.249111160636
+                        ],
+                        "detail": {
+                            "dataset_construction_seconds": 6.4237639009952545
+                        }
+                    },
+                    "actual_seconds": 20.472249111160636,
+                    "prediction_error": {
+                        "predicted_seconds": 20.472249111160636,
+                        "actual_seconds": 20.472249111160636,
+                        "ratio": 1.0,
+                        "log_error": 0.0
+                    }
+                },
+                "training": {
+                    "workload": {
+                        "phase": "training",
+                        "unit": "optimizer_step",
+                        "unit_count": 1500,
+                        "detail": {
+                            "source": "materialized_epoch0_loader",
+                            "steps_per_epoch": 1500,
+                            "epochs": 1,
+                            "epoch0_samples": 6000,
+                            "batch_size": 4,
+                            "train_portion": 1.0
+                        }
+                    },
+                    "prediction": {
+                        "predicted_seconds": 19.925549626350403,
+                        "source": "real_training_verification",
+                        "formal_execution_eligible": true,
+                        "steady_state": true,
+                        "verification": "passed",
+                        "confidence": "high",
+                        "ms_per_unit": 13.283699750900269,
+                        "n_steady_units": 17,
+                        "unit_count": 1500,
+                        "safety_factor": 1.5,
+                        "prior_expected_seconds": null,
+                        "prior_agreement_ratio": null,
+                        "detail": {
+                            "measured_unit_ms": 13.283699750900269,
+                            "unit_count": 1500,
+                            "extra_predicted_seconds": 0.0,
+                            "verification_seconds": 1.0954451002180576,
+                            "prior_agreement": "new_configuration",
+                            "epoch0_dataset_seconds": 6.4237639009952545
+                        }
+                    },
+                    "measurement": {
+                        "unit": "optimizer_step",
+                        "n_measured_units": 17,
+                        "n_stabilization_units": 1,
+                        "unit_time_ms_median": 13.283699750900269,
+                        "unit_time_ms_mad": 0.21558627486228943,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 1.0954451002180576,
+                        "raw_timings_ms": [
+                            548.5602933913469,
+                            13.32349143922329,
+                            13.083091005682945,
+                            31.805355101823807,
+                            13.06811347603798,
+                            13.060428202152252,
+                            77.83314771950245,
+                            13.055747374892235,
+                            77.14854180812836,
+                            13.228587806224823,
+                            13.10446672141552,
+                            79.1211873292923,
+                            13.187913224101067,
+                            13.215631246566772,
+                            62.63162940740585,
+                            13.283699750900269,
+                            13.319075107574463,
+                            73.41470010578632
+                        ],
+                        "detail": {
+                            "state": "verified",
+                            "failure_reason": null,
+                            "prior_agreement": "new_configuration",
+                            "prior_expected_unit_ms": null,
+                            "rolling_medians_ms": [
+                                13.203291222453117,
+                                13.203291222453117,
+                                13.155839405953884,
+                                13.166527263820171,
+                                13.166527263820171,
+                                13.208250515162945,
+                                13.222109526395798,
+                                13.222109526395798,
+                                13.256143778562546,
+                                13.256143778562546,
+                                13.301387429237366
+                            ]
+                        }
+                    },
+                    "actual_seconds": 61.48515138961375,
+                    "prediction_error": {
+                        "predicted_seconds": 19.925549626350403,
+                        "actual_seconds": 61.48515138961375,
+                        "ratio": 3.085744310325229,
+                        "log_error": 1.126792895785459
+                    }
+                },
+                "inference": {
+                    "workload": {
+                        "phase": "inference",
+                        "unit": "inference_batch",
+                        "unit_count": 192,
+                        "detail": {
+                            "n_files": 6,
+                            "per_file_ml_segments": {
+                                "4": 500,
+                                "5": 500,
+                                "6": 500,
+                                "7": 500,
+                                "8": 500,
+                                "9": 500
+                            },
+                            "per_file_batches": {
+                                "4": 32,
+                                "5": 32,
+                                "6": 32,
+                                "7": 32,
+                                "8": 32,
+                                "9": 32
+                            },
+                            "n_psd": 12,
+                            "ml_segments_per_psd": 250,
+                            "total_ml_segments": 3000,
+                            "output_bytes": 240000000,
+                            "output_files": 6,
+                            "seg_size": 40000,
+                            "inference_batch_size": 16
+                        }
+                    },
+                    "prediction": {
+                        "predicted_seconds": 6.581035068258643,
+                        "source": "real_inference_verification",
+                        "formal_execution_eligible": true,
+                        "steady_state": true,
+                        "verification": "passed",
+                        "confidence": "high",
+                        "ms_per_unit": 12.691282667219639,
+                        "n_steady_units": 14,
+                        "unit_count": 192,
+                        "safety_factor": 1.5,
+                        "prior_expected_seconds": null,
+                        "prior_agreement_ratio": null,
+                        "detail": {
+                            "measured_unit_ms": 12.691282667219639,
+                            "unit_count": 192,
+                            "extra_predicted_seconds": 4.1443087961524725,
+                            "verification_seconds": 0.8374427407979965,
+                            "prior_agreement": "new_configuration",
+                            "inference_setup_seconds": 0.47464542649686337,
+                            "input_read_seconds_per_psd": 0.2309972085058689,
+                            "output_write_seconds_per_psd": 0.02935023419559002,
+                            "per_file_residual_seconds": 0.09091567620635033,
+                            "io_files_measured": 1,
+                            "total_psd_planned": 12,
+                            "total_files_planned": 6
+                        }
+                    },
+                    "measurement": {
+                        "unit": "inference_batch",
+                        "n_measured_units": 14,
+                        "n_stabilization_units": 3,
+                        "unit_time_ms_median": 12.691282667219639,
+                        "unit_time_ms_mad": 0.29375776648521423,
+                        "steady_state_reached": true,
+                        "total_measurement_seconds": 0.8374427407979965,
+                        "raw_timings_ms": [
+                            303.802190348506,
+                            16.941435635089874,
+                            15.217814594507217,
+                            12.417476624250412,
+                            77.55857892334461,
+                            12.377573177218437,
+                            12.837732210755348,
+                            83.74079689383507,
+                            12.54483312368393,
+                            77.8961069881916,
+                            12.520693242549896,
+                            12.418100610375404,
+                            74.91051778197289,
+                            13.043159618973732,
+                            12.536970898509026,
+                            74.20214079320431,
+                            12.476619333028793
+                        ],
+                        "detail": {
+                            "state": "verified",
+                            "failure_reason": null,
+                            "prior_agreement": "new_configuration",
+                            "prior_expected_unit_ms": null,
+                            "rolling_medians_ms": [
+                                16.079625114798546,
+                                14.027773402631283,
+                                14.027773402631283,
+                                12.691282667219639,
+                                12.691282667219639,
+                                12.691282667219639,
+                                12.94044591486454,
+                                12.79399637132883,
+                                12.79399637132883,
+                                12.790065258741379
+                            ]
+                        }
+                    },
+                    "actual_seconds": 10.602741848677397,
+                    "prediction_error": {
+                        "predicted_seconds": 6.581035068258643,
+                        "actual_seconds": 10.602741848677397,
+                        "ratio": 1.6111055082833508,
+                        "log_error": 0.47692059446703183
+                    }
+                }
+            },
+            "total": null,
+            "admission": {
+                "decision": "admitted",
+                "stage": "post_training_verification",
+                "setup_cost_seconds": 20.472249111160636,
+                "verification_cost_seconds": 1.0954451002180576,
+                "avoided_predicted_runtime_seconds": null,
+                "reason": "known-cost lower bound 40.4s (safety x1.5 -> 60.6s) within budget 1800.0s; unverified phases remain pending"
+            },
+            "watchdog_status": null,
+            "final_status": "inference_complete",
+            "calibration_eligible": false
+        }
+    }
+]
