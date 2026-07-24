@@ -99,6 +99,8 @@ def local_validated_model(
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
     runtime_watchdog_enabled: bool = False,
+    runtime_safety_factor: float = 1.0,
+    runtime_watchdog_floor_seconds: float = 60.0,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -255,6 +257,8 @@ def local_validated_model(
         min_formal_batch_size=min_formal_batch_size,
         allow_extreme_steps=allow_extreme_steps,
         runtime_watchdog_enabled=runtime_watchdog_enabled,
+        runtime_safety_factor=runtime_safety_factor,
+        runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
     )
 
 

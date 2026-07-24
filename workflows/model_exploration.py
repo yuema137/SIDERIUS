@@ -1409,6 +1409,8 @@ def run_workflow(
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
     runtime_watchdog_enabled: bool = False,
+    runtime_safety_factor: float = 1.0,
+    runtime_watchdog_floor_seconds: float = 60.0,
     # --- Reasoning pipeline ---
     exploration_mode: ExplorationMode = "auto",
     minimum_boldness: float = 0.05,
@@ -2432,6 +2434,8 @@ def run_workflow(
             min_formal_batch_size=min_formal_batch_size,
             allow_extreme_steps=allow_extreme_steps,
             runtime_watchdog_enabled=runtime_watchdog_enabled,
+            runtime_safety_factor=runtime_safety_factor,
+            runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

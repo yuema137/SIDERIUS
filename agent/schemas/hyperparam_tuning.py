@@ -1172,6 +1172,29 @@ class HyperparamTuningInput(BaseModel):
             "safety)). Disabled by default; Gate 2 enables it explicitly."
         ),
     )
+    runtime_safety_factor: float = Field(
+        default=1.0,
+        ge=1.0,
+        description=(
+            "§2.10 safety multiplier applied to the known-cost sum at "
+            "admission time and to the verified estimate in the watchdog "
+            "deadline. Schema default 1.0 preserves programmatic-caller "
+            "behavior; the V18 production posture (1.5) is passed "
+            "explicitly by the launch configuration (Gate 2 wiring, "
+            "2026-07-24)."
+        ),
+    )
+    runtime_watchdog_floor_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        description=(
+            "§4 watchdog deadline floor. Schema default 60.0 mirrors "
+            "WatchdogConfig; the V18 production posture (120.0 — covers "
+            "the measured 20-25 s subprocess startup that verified "
+            "components do not include) is passed explicitly by the "
+            "launch configuration."
+        ),
+    )
 
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the

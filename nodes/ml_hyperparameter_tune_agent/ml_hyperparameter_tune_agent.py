@@ -1390,6 +1390,34 @@ def _build_guardrail_rejection_record(
     }
 
 
+def _build_runtime_policy(
+    agent_input, *, chosen_time_budget: float | None, is_trial: bool, base_dir: str
+) -> dict:
+    """Assemble the attempt's RuntimeControlPolicy dict (RT2-G/RT6).
+
+    Formal rounds enforce the operator budget; trial rounds run
+    record-only (None budget). Operator-visible policy values —
+    safety factor and watchdog enable/floor — come from the input
+    schema (Gate 2 wiring, 2026-07-24); watchdog grace/poll keep
+    their WatchdogConfig schema defaults (10 s / 1 s), which the
+    executor validates and every observation records in
+    ``runtime_policy`` provenance. Extracted as a helper so the exact
+    policy the tuner ships is unit-testable against the launch
+    configuration.
+    """
+    return {
+        "operator_budget_seconds": (
+            chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
+        ),
+        "observation_store_root": os.path.join(base_dir, "runtime_observations"),
+        "safety_factor": agent_input.runtime_safety_factor,
+        "watchdog": {
+            "enabled": agent_input.runtime_watchdog_enabled,
+            "floor_seconds": agent_input.runtime_watchdog_floor_seconds,
+        },
+    }
+
+
 def _check_and_record_guardrail_skip(
     *,
     sandbox,
@@ -2751,18 +2779,12 @@ class HyperparamTuningAgent:
                     # pre-flight gate above stays as the cheap screen);
                     # trial rounds run record-only so observations and
                     # priors accrue with zero behavior change.
-                    active_params["runtime_policy"] = {
-                        "operator_budget_seconds": (
-                            chosen_time_budget * 60.0
-                            if (not plan.is_trial and chosen_time_budget is not None)
-                            else None
-                        ),
-                        "observation_store_root": os.path.join(
-                            sandbox.base_dir, "runtime_observations"
-                        ),
-                        # RT6: §4 watchdog enable is an operator input.
-                        "watchdog": {"enabled": agent_input.runtime_watchdog_enabled},
-                    }
+                    active_params["runtime_policy"] = _build_runtime_policy(
+                        agent_input,
+                        chosen_time_budget=chosen_time_budget,
+                        is_trial=plan.is_trial,
+                        base_dir=sandbox.base_dir,
+                    )
 
                     failure_stage = "training"
                     print("\n[Step 1/3] Training...")
@@ -4345,6 +4367,21 @@ def main() -> int:
         "their own process group under the deadline max(floor, "
         "min(budget, verified_estimate x safety)). Default off.",
     )
+    parser.add_argument(
+        "--runtime_safety_factor",
+        type=float,
+        default=1.0,
+        help="§2.10 safety multiplier for admission and the watchdog "
+        "deadline. Default 1.0 (schema-mirroring); V18 production "
+        "posture is 1.5, passed explicitly by the launch config.",
+    )
+    parser.add_argument(
+        "--runtime_watchdog_floor_seconds",
+        type=float,
+        default=60.0,
+        help="§4 watchdog deadline floor. Default 60.0 "
+        "(schema-mirroring); V18 production posture is 120.0.",
+    )
 
     args = parser.parse_args()
 
@@ -4451,6 +4488,8 @@ def main() -> int:
     input_dict["min_formal_batch_size"] = args.min_formal_batch_size or None
     input_dict["allow_extreme_steps"] = args.allow_extreme_steps
     input_dict["runtime_watchdog_enabled"] = args.runtime_watchdog
+    input_dict["runtime_safety_factor"] = args.runtime_safety_factor
+    input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
 
