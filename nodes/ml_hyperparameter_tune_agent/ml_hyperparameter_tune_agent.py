@@ -1945,12 +1945,21 @@ class HyperparamTuningAgent:
         # Resolve invocation-wide formal comparison metadata once (V19 PR 1:
         # the SINGLE authoritative computation — startup logging, durable
         # output provenance, AND both delta gates consume these values).
+        # ``enable_chain_incumbent_formal_gates`` controls ONLY consumption:
+        # OFF (default) resolves against no reference even when an incumbent
+        # was provided; the provided value is still recorded in run_config
+        # for audit (design §3.2 — OFF never reinstates 0.0).
+        _consumed_reference = (
+            agent_input.current_run_best_formal_score
+            if agent_input.enable_chain_incumbent_formal_gates
+            else None
+        )
         (
             formal_reference_score,
             resolved_skip_formal_threshold,
             resolved_bypass_formal_threshold,
         ) = _resolve_formal_comparison_thresholds(
-            reference_score=agent_input.current_run_best_formal_score,
+            reference_score=_consumed_reference,
             skip_min_delta=agent_input.skip_formal_min_delta,
             bypass_min_delta=agent_input.bypass_formal_time_budget_min_delta,
         )
@@ -1968,6 +1977,13 @@ class HyperparamTuningAgent:
             "formal_reference_score": formal_reference_score,
             "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
             "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            # V19 PR 1 audit provenance: the provided incumbent and the
+            # coupling-flag state, so "provided but not consumed" (flag
+            # OFF) is distinguishable from "no incumbent existed".
+            "chain_incumbent_provided": agent_input.current_run_best_formal_score,
+            "enable_chain_incumbent_formal_gates": (
+                agent_input.enable_chain_incumbent_formal_gates
+            ),
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,
@@ -4434,6 +4450,14 @@ def main() -> int:
         help="§4 watchdog deadline floor. Default 60.0 "
         "(schema-mirroring); V18 production posture is 120.0.",
     )
+    parser.add_argument(
+        "--enable_chain_incumbent_formal_gates",
+        action="store_true",
+        help="V19 PR 1: let the formal delta gates CONSUME "
+        "current_run_best_formal_score as their reference. Default OFF "
+        "(gates see no reference). Schema-mirroring; consumption-only "
+        "switch — see HyperparamTuningInput field docstring.",
+    )
 
     args = parser.parse_args()
 
@@ -4481,6 +4505,8 @@ def main() -> int:
         "progress_bar": args.progress_bar,
         "cleanup_denoised": args.cleanup_denoised,
         "is_trial": args.is_trial,
+        # V19 PR 1 — consumption-only coupling switch (default OFF).
+        "enable_chain_incumbent_formal_gates": args.enable_chain_incumbent_formal_gates,
     }
     # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
     if args.trial_strategy != "snapshot" or args.eval_strategy != "snapshot":

@@ -326,11 +326,14 @@ class TestHyperparamTuningAgentRun:
         assert "reference=none, skip=none, bypass=none" in capsys.readouterr().out
 
     def test_injected_formal_thresholds_persist(self, agent_and_mocks, tmp_path):
+        """V19 PR 1: with the coupling flag ON, the injected incumbent is
+        consumed and the resolved thresholds persist."""
         agent, _, _ = agent_and_mocks
         output = agent.run(
             _make_input(tmp_path).model_copy(
                 update={
                     "current_run_best_formal_score": 6.0,
+                    "enable_chain_incumbent_formal_gates": True,
                     "skip_formal_min_delta": 0.2,
                     "bypass_formal_time_budget_min_delta": 0.7,
                 }
@@ -340,6 +343,22 @@ class TestHyperparamTuningAgentRun:
         assert output.formal_reference_score == 6.0
         assert output.resolved_skip_formal_threshold == pytest.approx(6.2)
         assert output.resolved_bypass_formal_threshold == pytest.approx(6.7)
+
+    def test_incumbent_provided_but_flag_off_not_consumed(self, agent_and_mocks, tmp_path):
+        """V19 PR 1 rollback semantics: flag OFF → gates consume nothing
+        (reference resolves to None, never 0.0) while the provided value
+        stays auditable in run_config as chain_incumbent_provided."""
+        agent, _, _ = agent_and_mocks
+        output = agent.run(
+            _make_input(tmp_path).model_copy(update={"current_run_best_formal_score": 6.0})
+        )
+
+        assert output.formal_reference_score is None
+        assert output.resolved_skip_formal_threshold is None
+        assert output.resolved_bypass_formal_threshold is None
+        run_config = json.loads((tmp_path / "run_config_test_run.json").read_text())
+        assert run_config["chain_incumbent_provided"] == 6.0
+        assert run_config["enable_chain_incumbent_formal_gates"] is False
 
     def test_historical_output_without_formal_threshold_metadata_loads(self):
         output = HyperparamTuningOutput.model_validate(
