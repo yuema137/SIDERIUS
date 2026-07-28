@@ -118,15 +118,26 @@ def main() -> None:
             recursive=True,
         )
     )
-    tuning_h5_by_round = {
-        str((record.get("memory") or {}).get("round_index")): sorted(
+    # OOM-recovery rounds (scripts/finalize_recovered_diagnostic_round.py)
+    # commit a record under ``{source_exp_id}_recovered`` while the .h5
+    # artifacts on disk keep the SOURCE exp_id. Remap the glob key so the
+    # recovered round finds its files, and exclude the source exp_id from
+    # the partial-attempt bucket so the same artifacts are not counted
+    # twice (once as completed tuning, once as a partial attempt).
+    recovery = tuner_output.get("recovery") or {}
+    recovered_exp_id = recovery.get("recovered_exp_id")
+    recovery_source_exp_id = recovery.get("source_exp_id")
+    tuning_h5_by_round = {}
+    for record in completed_records:
+        output_exp_id = record.get("exp_id")
+        if output_exp_id == recovered_exp_id and recovery_source_exp_id:
+            output_exp_id = recovery_source_exp_id
+        tuning_h5_by_round[str((record.get("memory") or {}).get("round_index"))] = sorted(
             glob.glob(
-                os.path.join(agent_dir, "**", f"*{record.get('exp_id')}*.h5"),
+                os.path.join(agent_dir, "**", f"*{output_exp_id}*.h5"),
                 recursive=True,
             )
         )
-        for record in completed_records
-    }
     partial_attempt_h5 = {
         str(record.get("exp_id")): sorted(
             glob.glob(
@@ -135,6 +146,7 @@ def main() -> None:
             )
         )
         for record in infrastructure_records
+        if record.get("exp_id") != recovery_source_exp_id
     }
     completed_round_numbers = [item["round_number"] for item in rounds]
     complete = (
@@ -187,6 +199,7 @@ def main() -> None:
             "best_valid_result": "present" if best else "no valid round",
         },
         "infrastructure_blocker": args.infrastructure_blocker,
+        "recovery": recovery or None,
         "observed_patterns": anomalies,
         "retained_outputs": {
             "baseline_hdf5_count": len(baseline_h5),
