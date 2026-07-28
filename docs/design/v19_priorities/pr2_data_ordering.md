@@ -433,165 +433,434 @@ call sites and tests; noted in the coupling ledger instead).
   implementation merges — its matched-budget campaign plan will be a
   separate section (§7.3) locked with operator approval.
 
-## 6. Commit plan (detailed — locked at P2-D approval, 2026-07-28)
+## 6. Commit plan (detailed — locked at P2-D approval, 2026-07-28; expanded per operator template same day)
 
 PR 1 tick discipline applies: an item is `[x]` only when implemented
-AND its verification evidence is recorded (test names + counts in this
-doc). Stop-and-show before every commit. Each commit is independently
-revertible; later commits depend on earlier ones only in the order
-listed.
+AND its verification evidence is recorded (test names + counts + wall
+time in this doc). Stop-and-show before every commit: exact diff
+summary, staged file list, tests run, and any deviation from this
+design. Each commit is independently reviewable and revertible;
+dependencies only in the order listed. Standing rules restated for
+the implementer: ordering and loader partitioning remain separate
+concerns; `file_order` is a full permutation of the resolved
+DataScope; the default remains `shuffle`; planner exposure and
+production-default changes are OUTSIDE these commits. If code
+inspection during implementation reveals ambiguity or larger scope
+than assumed here, STOP and ask before changing the plan.
 
-### P2-CA — genericity seam (baseline §1.3 artifacts; zero behavior change)
+### P2-CA — genericity seam (baseline §1.3 artifacts)
 
-*Plan*
+**Goal.** Make training-loader file-path construction dataset-config-
+driven instead of inlined, and create the two §1.3 artifacts
+(genericity contract, coupling ledger). This is its own commit
+because it is pure refactor + docs with zero behavior change — mixing
+it with the ordering feature would make the ordering diff
+unreviewable and violate the §1.3 "own commit, skippable for urgent
+fixes" rule. It precedes commit B because the ordering code touches
+the same constructor.
 
-- [ ] `docs/design/genericity_contract.md` (NEW): indexed-dataset
-      contract — `file_index → (readable path, segment list)`
-      resolved through `DatasetConfig` (`training_file_pattern`,
-      `dataset_config.py:37`); task-pack and metric seams as
-      PLACEHOLDER sections (filled by the PR that first touches
-      them); the §1.3 rule that new abstractions require updating
+**Scope.**
+- Changes: `docs/design/genericity_contract.md` (NEW),
+  `docs/design/tidmad_coupling_ledger.md` (NEW),
+  `execute_tools/train_engine_sandbox.py` (four template sites:
+  `:159` TIDMADDataset, `:294` TIDMADEpochDataset, `:606` RT2
+  file-path list, `:906` legacy single-file main), one new test file.
+- The pattern source already exists:
+  `DatasetConfig.training_file_pattern` (default
+  `"abra_training_{file_index:04d}.h5"`, `dataset_config.py:36-39`) —
+  consumption via `pattern.format(file_index=...)`; note the audited
+  sites use `{file_index:04d}`-equivalent f-strings, and the field's
+  default already carries the format spec, so call sites pass the
+  bare int.
+- Non-goals / must-not-change: no signature changes; no behavior
+  change (resolved TIDMAD paths identical); inference/scoring
+  template sites are LEDGER ENTRIES only, not refactored here
+  (bounded in-passing rule); the frozen score formula and
+  `legacy_baseline_configs.json` untouched.
+- Dependencies: none (first commit of the PR).
+
+**Implementation plan.**
+- [ ] Write `docs/design/genericity_contract.md`: indexed-dataset
+      contract (`file_index → (readable path, segment list)` through
+      `DatasetConfig`); task-pack + metric seams as PLACEHOLDER
+      sections; §1.3 rule that new abstractions require updating
       this doc first.
-- [ ] `docs/design/tidmad_coupling_ledger.md` (NEW): grep-able
-      inventory seeded from the P2-A audits (inlined
-      `abra_training_{i:04d}.h5` sites, `log_5.27`/`s_max`
-      constants, TIDMAD-worded prompt fragments,
-      20-file/200-segment assumptions), each entry marked
-      decoupled/remaining with file:line.
-- [ ] `train_engine_sandbox.py` — replace the four inlined template
-      sites (`:159`, `:294`, `:606`, `:906`) with
-      `DatasetConfig.training_file_pattern` consumption (TIDMAD
-      instance; no signature changes).
-- [ ] Second-dataset contract test (NEW,
-      `tests/unit/execute_tools/test_dataset_contract.py`): a
+- [ ] Write `docs/design/tidmad_coupling_ledger.md`: entries with
+      file:line from the P2-A audits (inlined template sites incl.
+      the non-training ones left in place, `log_5.27`/`s_max`
+      constants, TIDMAD-worded prompt fragments, 20-file/200-segment
+      assumptions), each marked decoupled/remaining.
+- [ ] Refactor the four `train_engine_sandbox.py` sites to consume
+      `TIDMAD.training_file_pattern`.
+- [ ] Add `tests/unit/execute_tools/test_dataset_contract.py`:
       synthetic `DatasetConfig` fixture (different pattern, file
-      count, segment count) proving path construction is
-      config-driven — guardrail 3 ("a seam without such a test is
-      renamed, not generic").
+      count, segment count) driving dataset path construction.
 
-*Validation*
+**Validation plan.**
+- Unit: path-resolution parity (per audited site, resolved TIDMAD
+  filename before == after); contract test with the synthetic
+  fixture (path built from the fixture's pattern, not the TIDMAD
+  literal).
+- Integration/pseudo: none required (no behavior change).
+- Negative: pattern missing the `{file_index}` placeholder →
+  `KeyError`/`IndexError` surfaced as a config error (test pins the
+  failure mode).
+- Backward-compat: targeted regression suites (below) green
+  unchanged.
+- Gate tests: none (docs + refactor only).
 
-- [ ] Path-resolution parity test: for every audited site, the
-      resolved TIDMAD filename before == after (default behavior
-      unchanged).
-- [ ] Contract test green with the synthetic fixture.
-- [ ] Targeted regression: existing `tests/unit/execute_tools` +
-      `tests/unit/core/test_sandbox_executor.py` suites green.
-- [ ] `ruff check` + `ruff format --check` clean on touched files.
-- [ ] Frozen-exception audit: no diff in the score formula or
-      `legacy_baseline_configs.json`.
+**Acceptance criteria.**
+- For every file index in `range(TIDMAD.num_files)`, the refactored
+  code resolves the character-identical filename the inlined
+  f-strings produced (asserted, not eyeballed).
+- The contract test constructs a dataset path from a NON-TIDMAD
+  pattern without touching any TIDMAD literal.
+- `git diff` contains no change to `score_vector`, the score
+  formula, or `legacy_baseline_configs.json`.
+- Both new docs exist and the ledger's "remaining" entries each carry
+  a file:line.
 
-### P2-CB1 — schema + validation (ordering fields, no engine change)
+**Failure and edge cases.**
+- Malformed pattern (no placeholder): config error at first use —
+  stop execution (a wrong pattern must never silently produce wrong
+  paths).
+- Missing file on disk: existing behavior preserved exactly
+  (warning + skip, `train_engine_sandbox.py:295-297`) — this commit
+  must not change it.
 
-*Plan*
+**Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
+      (counts + wall time recorded here after run)
+- [ ] `.venv/bin/python -m pytest tests/unit/core/test_sandbox_executor.py -q`
+- [ ] `.venv/bin/ruff check` + `.venv/bin/ruff format --check` on
+      touched files
+- [ ] Any test not run: listed here with the reason — never claimed.
 
-- [ ] `agent/schemas/hyperparam_tuning.py`:
-      `order_strategy: Literal["shuffle", "sequential"] = "shuffle"`
-      and `file_order: list[int] | None = None` on
-      `HyperparamTuningInput` and `TrialConfig` (TrialConfig is the
-      per-round single source of truth, mirroring
-      `train_portion`).
-- [ ] Full-permutation validator (Decision 5): `file_order` must
-      equal the resolved DataScope as a SET (no missing, no extra,
-      no duplicates; order free). Startup error at the
-      `HyperparamTuningInput` layer — same layer as
-      `health_gate_files ⊆ scope`. `file_order` without
-      `order_strategy="sequential"` → schema error. `None` +
-      `sequential` → resolved to ascending scope order, resolution
-      recorded in provenance.
-- [ ] `ExperimentRecord` provenance fields: `order_strategy`,
-      `resolved_file_order` (the materialized permutation, never
-      `None`), following the `trial_strategy` stamp pattern.
-- [ ] `run_config_*.json` persistence of both fields (P1-C5 A4
+**Commit boundary.** Docs + template consumption + contract test
+ONLY. No ordering code, no schema fields, no cleanup beyond the four
+sites. Stop-and-show the diff summary + staged list + test evidence
+before committing.
+
+### P2-CB1 — ordering schema + validation (no engine change)
+
+**Goal.** Introduce the validated ordering vocabulary
+(`order_strategy`, `file_order`) at the schema layer, with the
+Decision-5 full-permutation contract enforced before anything can
+execute. Separate from the engine commit so schema semantics are
+reviewable (and revertible) independently of loader mechanics.
+
+**Scope.**
+- Changes: `agent/schemas/hyperparam_tuning.py` —
+  `HyperparamTuningInput`, `TrialConfig`, `ExperimentRecord`
+  provenance fields, and `validate_runtime_config` (`:1573`);
+  `run_config` persistence in the tuner (write-side only).
+- Two-layer validation split (mirrors the existing DS8 pattern):
+  dataset-INDEPENDENT checks in schema validators (duplicates,
+  `file_order` without `sequential` — precedent: the
+  `health_gate_files` validators at `hyperparam_tuning.py:1352-1359`);
+  resolution-DEPENDENT checks in `validate_runtime_config`
+  (full-permutation vs resolved scope — precedent: the partial-scope
+  checks at `:1597-1623`; runs at tuner `run()` entry and workflow
+  pre-flight, before any LLM call or file I/O).
+- Non-goals / must-not-change: no engine behavior; no
+  `ExperimentPlan` field (Decision 3); no propagation to CLIs yet;
+  defaults leave every existing construction site valid unchanged.
+- Dependencies: none strictly, but lands after P2-CA to keep the
+  ladder linear.
+
+**Implementation plan.**
+- [ ] `order_strategy: Literal["shuffle", "sequential"] = "shuffle"`
+      + `file_order: list[int] | None = None` on
+      `HyperparamTuningInput`.
+- [ ] Same fields on `TrialConfig` (per-round single source of
+      truth, mirroring `train_portion`); model-validator: duplicates
+      in `file_order` → error; `file_order` present with
+      `order_strategy="shuffle"` → error.
+- [ ] `validate_runtime_config`: when `order_strategy="sequential"`
+      and `file_order` is not None, require
+      `sorted(file_order) == resolved_scope` (full permutation —
+      same set, no missing, no extra); when `file_order` is None,
+      resolve to ascending `resolved_scope` (recorded, see next).
+- [ ] `ExperimentRecord` provenance: `order_strategy`,
+      `resolved_file_order` (materialized permutation, never None
+      for executed rounds), following the `trial_strategy` stamp
+      pattern (`:380-435` block).
+- [ ] Persist both fields in `run_config_*.json` (P1-C5 A4
       precedent).
 
-*Validation*
+**Validation plan.**
+- Unit (positive): valid full permutation accepted; `None` +
+  `sequential` resolves to ascending scope with provenance recording
+  the resolution; defaults (`shuffle`, `None`) accepted everywhere an
+  input is constructed today.
+- Unit (negative, one test each): subset (`[4,6,5]` under scope
+  `[4..9]`); missing file; extra/out-of-scope file; duplicate;
+  `file_order` + `shuffle`; empty list.
+- DS8 interaction: permutation validated against the RESOLVED scope
+  under a partial `--data_scope`.
+- Backward-compat: existing suite for the schema module green with
+  no fixture edits beyond additive fields.
+- Integration/pseudo: none in this commit (fields are inert until
+  CB2/CB3).
+- Gate tests: none.
 
-- [ ] Unit tests (schema): valid full permutation accepted; subset
-      rejected; missing-file rejected; extra/out-of-scope rejected;
-      duplicate rejected; `file_order`+`shuffle` rejected; `None`+
-      `sequential` → ascending default with provenance; DS8 partial
-      scope — permutation validated against the RESOLVED scope.
-- [ ] Provenance round-trip test (record → JSON → record).
-- [ ] Targeted regression: `tests/unit/agent/tune_ml_hyperparam_agent`
-      suite green.
-- [ ] `ruff` clean.
+**Acceptance criteria.**
+- Every input/fixture constructed without the new fields validates
+  exactly as before (defaults are non-breaking) — demonstrated by
+  the untouched existing suite passing.
+- Each of the six invalid `file_order` shapes produces a distinct,
+  message-bearing error naming the offending indices, at the layer
+  specified above (schema vs `validate_runtime_config`) — asserted
+  by layer, not just "raises".
+- `resolved_file_order` in a persisted record equals the exact
+  permutation execution will use (ascending default resolution
+  included), round-tripped through JSON.
+
+**Failure and edge cases.**
+- Invalid permutations: stop at startup (operator config is a
+  contract — DS8 precedent; no normalization, no warning-and-continue).
+- Legacy configuration (records/run_configs without ordering
+  fields): read paths must tolerate absence (`.get(default)` /
+  optional fields) — pre-PR2 artifacts remain parseable.
+- Resume: `order_strategy` is stamped per-iteration in `run_config`
+  and provenance, but — mirroring `formal_strategy` treatment — it
+  is NOT added to `run_invariants_lock.json` in PR 2. Consequence: a
+  mid-chain operator flip of ordering between iterations is
+  recordable and visible but not blocked. **Flagged to operator at
+  the CB1 stop-and-show** (options: keep as-is like formal_strategy,
+  or add to the lock later as a follow-up; not silently decided).
+
+**Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
+      (counts + wall time recorded here)
+- [ ] New-test file run in isolation (name recorded here)
+- [ ] `ruff check` + `ruff format --check` on touched files
+- [ ] Any test not run: listed with reason.
+
+**Commit boundary.** Schema + validators + provenance + run_config
+write-side ONLY. No engine code, no CLI flags, no forwarding. Stop-
+and-show before commit.
 
 ### P2-CB2 — engine ordering + boundary validation + docstring repair
 
-*Plan*
+**Goal.** Implement the actual visitation-order mechanics in the
+training engine, defended by its own boundary validation, and repair
+the documented-vs-actual drift. This is the only commit that touches
+the training loop, so its diff is exactly reviewable as "does the
+loader visit what we said, in the order we said".
 
-- [ ] `train_engine_sandbox.py`: `sequential` index permutation —
-      per-file index blocks assembled in `file_order`, each block
-      shuffled with the epoch RNG (`base_seed + ep` discipline,
-      Decision 2), flattened, and passed to ONE global
-      `DataLoader(sampler=..., drop_last=True)` (Decision 4a —
-      global drop_last preserved, batches may cross file
-      boundaries, step count unchanged). `shuffle` path untouched
-      (`DataLoader(shuffle=True)`).
-- [ ] Subprocess CLI: `--order_strategy` + `--file_order_json`
-      (engine re-validates; never trusts the caller).
+**Scope.**
+- Changes: `execute_tools/train_engine_sandbox.py` only (ordering
+  path in `run_experiment_streaming` around `:577-593`, new CLI args
+  in `main()` `:770-826`, boundary validation helper, docstrings
+  `:477-481` + `:881`), plus new unit tests.
+- Non-goals / must-not-change: `TIDMADEpochDataset` construction
+  (selection, subsample RNG, concatenation) — untouched; the
+  `shuffle` branch — untouched (`DataLoader(shuffle=True)`, `:593`);
+  RT2 setup window, reconstruction term, scoped bytes, step
+  arithmetic, verification loop — all untouched (§3.4); ONE global
+  loader with global `drop_last` (Decision 4a) — no per-file
+  loaders, no partitioning semantics.
+- Dependencies: P2-CB1 not strictly required (engine takes plain CLI
+  values and re-validates), but the ladder lands CB1 first so the
+  vocabulary is defined once.
+
+**Implementation plan.**
+*(Note: sampler mechanics below are the design intent; the
+implementer inspects the epoch loop before finalizing the exact
+DataLoader wiring — torch requires `shuffle=False` when a sampler is
+passed, and the epoch-RNG plumbing must reuse `epoch_rng`/`epoch_seed`
+at `:583-584`, not introduce a second seed path.)*
+- [ ] Build the `sequential` index permutation: per-file index
+      blocks in `file_order` order (dataset row ranges are derivable
+      from the construction order — verify block offsets against the
+      constructor's sorted-file iteration at `:292` before coding),
+      each block shuffled with the epoch RNG (Decision 2), flattened.
+- [ ] Pass the permutation to ONE global
+      `DataLoader(..., drop_last=True)` via `sampler=`/`shuffle=False`;
+      `shuffle` strategy keeps the existing `shuffle=True` call
+      byte-for-byte.
+- [ ] CLI: `--order_strategy` (default `"shuffle"`) +
+      `--file_order_json` (path, mirroring `--sample_set_json`
+      style); engine re-validates, never trusts the caller.
 - [ ] Engine boundary validation: `file_order` is exactly a
-      permutation of `sample_set` keys — violation terminates,
-      non-retryable (DataScope layered-enforcement precedent).
+      permutation of `sample_set` keys — violation prints a
+      structured error and terminates non-retryably (DataScope
+      layered-enforcement precedent).
 - [ ] RT2 provenance: `order_strategy` added to the training
-      workload `detail` (no arithmetic change — §3.4).
-- [ ] Docstring drift repair: `run_experiment_streaming` docstring
-      (`:477-481`) and `main()` comment (`:881`) rewritten to
-      describe the per-epoch concatenated dataset + ordering per
-      `order_strategy`.
+      workload `detail` dict (`:622-629`) — no arithmetic change.
+- [ ] Docstring repair: `run_experiment_streaming` docstring and the
+      `main()` call-site comment rewritten to describe reality
+      (per-epoch concatenated dataset; ordering per
+      `order_strategy`; "streaming" name retained, drift noted in
+      the coupling ledger).
 
-*Validation*
+**Validation plan.**
+- Unit (default parity — the four-part proof the operator requires):
+  under a fixed seed, `order_strategy` unset/`"shuffle"` vs pre-PR
+  code produces (1) the same selection (same subsampled segment
+  sets), (2) the same RNG behavior (same `epoch_rng` consumption —
+  subsample draws unchanged), (3) the same visited sample sequence,
+  (4) the same step count. Implemented by capturing the visited
+  index sequence from a small synthetic dataset, both before the
+  change (recorded expectation) and after.
+- Unit (exact visitation): scope `[4..9]`,
+  `file_order=[4,6,5,9,7,8]` → the flattened visited sequence equals
+  the concatenation of per-file permutations in exactly that block
+  order — asserted on the actual iterated sample indices, not on the
+  configuration value.
+- Unit (step-count parity): `len(loader)` equal across both
+  strategies for the same selection, at `batch_size=1` and at a
+  batch size that forces a boundary-mixing batch.
+- Unit (epoch reshuffle): within-file permutation differs across
+  epochs and is deterministic per seed.
+- Negative: each engine boundary-validation violation terminates
+  with the structured error (subset/extra/duplicate vs sample_set
+  keys); malformed `--file_order_json` (non-list, non-int) fails
+  fast.
+- Backward-compat: `test_rt2b_streaming_preamble.py` +
+  `test_rt2c_training_verification.py` green UNCHANGED
+  (dataset-construction count still 1 per epoch; workload
+  `unit_count` unchanged).
+- Gate tests: none in this commit (P2-V2 covers real training,
+  separately approved).
 
-- [ ] Default-parity test: unset / `"shuffle"` → same selection,
-      same RNG behavior, same visited sample sequence as pre-PR
-      code under a fixed seed (§3.1 parity contract).
-- [ ] Exact-visitation test: scope `[4..9]`,
-      `file_order=[4,6,5,9,7,8]` → flattened sequence equals the
-      concatenation of per-file permutations in exactly that order.
-- [ ] Step-count parity test: `len(loader)` equal across strategies
-      for the same selection, across batch sizes (incl.
-      `batch_size=1` and a boundary-mixing batch size).
-- [ ] Epoch-reshuffle test: within-file permutation differs between
-      epochs, deterministic per seed (`freeze` semantics untouched).
-- [ ] Boundary-validation negative tests: permutation violations at
-      the engine terminate non-retryably.
-- [ ] RT2 non-regression: `test_rt2b_streaming_preamble.py` +
-      `test_rt2c_training_verification.py` green unchanged
-      (dataset-construction count still 1 per epoch; workload
-      unit_count unchanged).
-- [ ] `ruff` clean.
+**Acceptance criteria.**
+- The visited SAMPLE sequence (not the config echo) is asserted for
+  both strategies on synthetic data: sequential matches the
+  constructed expectation exactly; shuffle matches the pre-PR
+  recorded sequence exactly under the same seed.
+- Step count identical across strategies for every tested
+  (selection, batch_size) pair.
+- Zero diff in RT2 observation content except the added
+  `order_strategy` detail key (asserted on a captured sidecar).
+- The two repaired docstrings no longer claim one-file-at-a-time
+  residency or shuffled file iteration.
+
+**Failure and edge cases.**
+- Permutation mismatch vs `sample_set` keys at the engine: stop
+  execution, non-retryable (defense in depth even though CB1
+  validates upstream — the engine can be invoked directly).
+- Missing file on disk (existing warning+skip, `:295-297`): the
+  block for a skipped file is empty; the visited sequence is the
+  concatenation of the REMAINING blocks in `file_order` order —
+  warning, continue (preserves existing selection behavior;
+  asserted by test).
+- `file_order` given with `--order_strategy shuffle` at the engine
+  CLI: error, stop (mirrors schema rule).
+- Legacy invocation (no new flags): identical to pre-PR behavior —
+  covered by the default-parity proof.
+
+**Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
+      (counts + wall time recorded here)
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/test_rt2b_streaming_preamble.py tests/unit/execute_tools/test_rt2c_training_verification.py -q`
+- [ ] `ruff check` + `ruff format --check` on touched files
+- [ ] Any test not run: listed with reason.
+
+**Commit boundary.** Engine + its tests + docstrings ONLY. No
+schema, no propagation, no chain scripts, no unrelated engine
+cleanup (`freeze_subsample` stays as-is — FU-P2-2). Stop-and-show
+before commit.
 
 ### P2-CB3 — propagation (operator surface end-to-end)
 
-*Plan*
+**Goal.** Thread the two operator fields through every launch
+surface (sandbox → skill wrapper → tuner → comparison script → chain
+scripts) so a chain operator can actually set ordering, with
+provenance stamped end-to-end. Last because it depends on both the
+vocabulary (CB1) and the engine behavior (CB2).
 
-- [ ] `core/sandbox_executor.py::execute_training` — named
-      `order_strategy`/`file_order` params, forwarded as CLI args;
-      stub twin (`StubSandbox`) mirrors the signature.
-- [ ] `agent/skills/training_skill/wrapper.py` — forward both fields.
-- [ ] Tuner (`ml_hyperparameter_tune_agent.py`): TrialConfig build
-      reads the operator fields (no `ExperimentPlan` involvement —
-      Decision 3); CLI `--order_strategy`/`--file_order`;
-      `input_dict` assembly.
-- [ ] `scripts/run_comparison.py`: flags + forwarding to the tuner
-      subprocess.
-- [ ] `sdsc_submission_scripts/run_one_iteration.py` +
-      `_chain_common.sh`: parse arm + forward-when-set (PR 1
-      `--enable_chain_incumbent_formal_gates` pattern).
+**Scope.**
+- Changes: `core/sandbox_executor.py` (`execute_training` `:680-691`
+  + append-when-set block `:770-773`; stub twin `:1357-1369`),
+  `agent/skills/training_skill/wrapper.py`,
+  `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
+  (TrialConfig build `:2357-2379`, `active_params` `:2447-2460`, CLI
+  + `input_dict` `:4229-4584` region),
+  `scripts/run_comparison.py` (agent-phase forwarding `:722-737`,
+  CLI `:959-972` region),
+  `sdsc_submission_scripts/run_one_iteration.py`,
+  `sdsc_submission_scripts/_chain_common.sh` (parse arm +
+  forward-when-set — PR 1 `--enable_chain_incumbent_formal_gates`
+  pattern), plus tests.
+- Non-goals / must-not-change: no `ExperimentPlan`/planner
+  involvement (Decision 3); `run_baseline_trial` baseline behavior
+  unchanged (no ordering flag on the baseline path — it is a frozen
+  comparison anchor); defaults preserve today's behavior at every
+  hop.
+- Dependencies: P2-CB1 (schema) + P2-CB2 (engine).
 
-*Validation*
+**Implementation plan.**
+- [ ] `execute_training`: named `order_strategy`/`file_order`
+      params; write `file_order` JSON next to the sample-set file;
+      append `--order_strategy`/`--file_order_json` when non-default;
+      stub twin mirrors the signature.
+- [ ] `training_skill` wrapper: forward both via `kwargs.get`.
+- [ ] Tuner: `TrialConfig` build consumes
+      `agent_input.order_strategy`/`.file_order` (operator fields —
+      formal AND trial rounds use the same operator-set ordering; no
+      per-round LLM influence); `active_params` carries them to the
+      skill; CLI `--order_strategy`/`--file_order` + `input_dict`
+      assembly + `validate_runtime_config` call already in place
+      from CB1.
+- [ ] `run_comparison.py`: CLI flags, forwarded to the tuner
+      subprocess (agent phase only).
+- [ ] Chain scripts: `ORDER_STRATEGY`/`FILE_ORDER` env-arg parse arm
+      + forward-when-set.
 
-- [ ] Per-hop forwarding unit tests (sandbox call → CLI args; wrapper
-      passthrough; tuner CLI → input schema).
-- [ ] Pseudo integration test: a chain iteration with
-      `sequential` + explicit permutation stamps
-      `order_strategy`/`resolved_file_order` provenance end-to-end
-      (records + run_config + manifest).
-- [ ] Shell parity check for the chain-script arm (existing parity
-      test pattern).
-- [ ] Targeted regression: workflows + protocols + tune suites green.
-- [ ] `ruff` clean.
+**Validation plan.**
+- Unit (per-hop forwarding): sandbox call → subprocess argv
+  contains the flags exactly when non-default and never otherwise;
+  wrapper passthrough; tuner CLI → input schema values.
+- Pseudo integration: one chain iteration with `sequential` + an
+  explicit permutation — `order_strategy`/`resolved_file_order`
+  stamped in the round record, `run_config_*.json`, and the
+  iteration manifest; a second run with defaults shows `shuffle`
+  provenance and NO new flags in the training argv.
+- Negative (propagation failure surface): a hop that drops the field
+  is caught by the end-to-end pseudo assertion (stamped provenance
+  must equal the operator input, not the default).
+- Backward-compat: chain shell parity test (existing pattern) green;
+  full targeted regression on workflows + protocols + tune suites.
+- Gate tests: NONE launched from this commit. P2-V2 (real training)
+  is listed separately in §0/§7.2 and requires explicit operator
+  approval of a shown launch plan.
+
+**Acceptance criteria.**
+- With defaults, the training subprocess argv is IDENTICAL to
+  pre-PR2 argv (asserted, not assumed) — the flags appear only when
+  the operator sets non-default values.
+- With `sequential` + explicit permutation, the provenance chain
+  (record → run_config → manifest) carries the operator's exact
+  permutation at every stage of the pseudo run.
+- The stub sandbox accepts the same call signature as the real one
+  (pseudo mode cannot drift).
+- Shell parity: `_chain_common.sh` arm round-trips the values into
+  `run_one_iteration.py` argv verbatim.
+
+**Failure and edge cases.**
+- Operator sets `file_order` without `sequential` anywhere on the
+  surface: rejected at the earliest validated layer (schema) with
+  the CB1 error — never silently ignored.
+- Chain script arm set but iteration script older (skew): the PR 1
+  forward-when-set pattern makes the flag absence a hard argparse
+  error, not silent drop — verified by the parity test.
+- Legacy resumes (pre-PR2 workspaces): absence of ordering fields in
+  old records/manifests must not break resume reads (CB1 legacy
+  rule re-verified at this level in the pseudo test).
+
+**Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent -q`
+      (counts + wall time recorded here)
+- [ ] `.venv/bin/python -m pytest tests/unit/scripts -q`
+- [ ] Pseudo integration file run (name + counts recorded here)
+- [ ] `ruff check` + `ruff format --check` on touched files
+- [ ] Any test not run: listed with reason.
+
+**Commit boundary.** Propagation + its tests ONLY. No engine or
+schema changes (fixes discovered here go back to CB1/CB2 as
+amendments, shown to operator). Stop-and-show before commit.
 
 ### P2-V1 — pre-gate sweep (after CB3)
 
