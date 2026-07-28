@@ -1,8 +1,8 @@
 # PR 2 — Expose Data Ordering as a Controlled Optimization Dimension
 
-**Status**: rev 2 — P2-D APPROVED (operator, 2026-07-28) with
-corrections applied; LOCKED for implementation. Do not expand the
-design.
+**Status**: rev 3 DRAFT — operator revision request 2026-07-28
+(ordering proposal/override/resolution model) incorporated; P2-D
+RE-APPROVAL PENDING. No code until re-approval.
 **Baseline**: `docs/design/v19_priorities.md` §2.0 PR 2 block + §2.9 + §1.3
 **Date**: 2026-07-28
 **Branch (planned)**: `feat/v19-pr2-data-ordering`
@@ -24,18 +24,23 @@ green with recorded evidence.
 ```text
 [x] P2-A  — pre-design code audit (this doc §2; two code-traced audits
             2026-07-28: config-plumbing chain + RT2 workload coupling)
-[x] P2-D  — design approved by operator (2026-07-28, rev 2: all five
-            §3.0 decisions resolved — D1 order ≠ partitioning
-            [operator ruling verbatim], D2 shuffle-within-file, D3
-            operator-only, D4a pure permutation / global drop_last,
-            D5 file_order = FULL permutation of resolved scope; plus
-            parity-wording correction. Doc locked; do not expand.)
+[ ] P2-D  — design approval. History: rev 2 approved 2026-07-28
+            (D1-D5); superseded same day by the operator revision
+            request introducing the proposal/override/resolution
+            model (rev 3, this doc). RE-APPROVAL PENDING — no code
+            until granted. Rev 3 decision state: D1/D2/D4 unchanged;
+            D3 REPLACED (agent-proposable + operator-overridable,
+            resolver precedence override > proposal > default); D5
+            clarified (two-stage validation: structural at proposal,
+            full-permutation after scope resolution + override).
 [ ] P2-CA — commit A: minimal indexed-dataset seam + genericity
             contract doc + TIDMAD coupling ledger + second-dataset
             contract tests (baseline §1.3 artifacts)
-[ ] P2-CB — commit B: ordering implementation (order_strategy +
-            file_order schema, engine support, propagation, RT2
-            accounting, tests)
+[ ] P2-CB — commit B (three sub-commits CB1/CB2/CB3, §6): ordering
+            proposal/override/resolution schema + single resolver +
+            chain-lock override fields; engine consumes resolved
+            values only + [data_order] logs; end-to-end propagation
+            incl. interpreter-visible resolved context; tests
 [ ] P2-V1 — pre-gate sweep: targeted unit + pseudo integration
             (default-parity + exact-visitation both deterministic)
 [ ] P2-V2 — Gate 2: bounded real smoke (cold-start, per the standing
@@ -212,7 +217,7 @@ below.
 
 ## 3. Design
 
-### 3.0 OPEN DECISIONS (operator must resolve before P2-D)
+### 3.0 DECISIONS (rev 3 — D3 replaced, D5 clarified; re-approval pending)
 
 **Decision 1 — RESOLVED (operator, 2026-07-28): ordering semantics
 and loader partitioning are independent concerns.** Operator ruling,
@@ -274,39 +279,72 @@ each file are shuffled per epoch using the existing seed discipline
 (`base_seed + ep`). A strict within-file mode is NOT offered in PR 2
 (one variable at a time; addable later if evidence motivates it).
 
-**Decision 3 — RESOLVED (operator, 2026-07-28): operator-only.**
-Ordering is settable via `HyperparamTuningInput` + chain/CLI flags
-only. It is NOT added to `ExperimentPlan`; the agent must not choose
-it before the empirical study. Planner exposure, if later approved,
-is a separate post-evidence decision per the §2.0 lifecycle and
-follows the DataScope precedent (plan field + normalization +
-recorded provenance).
+**Decision 3 — REVISED (operator, 2026-07-28, rev 3; replaces the
+rev-2 operator-only decision): agent-proposable + operator-
+overridable, resolver-mediated.** Ordering is the first concrete
+implementation of the project-wide configuration principle:
 
-**Decision 5 (operator correction, 2026-07-28) — `file_order` is a
+> Agents propose configuration. The execution system resolves
+> configuration. Only resolved values describe what actually ran.
+
+- The agent MAY propose `shuffle` or `sequential` (plus a file
+  order) via `ExperimentPlan`.
+- The operator MAY force one strategy for an entire chain via a
+  chain-level override.
+- The executed value is explicitly resolved with fixed precedence
+  **operator override > agent proposal > default (`shuffle`)** by ONE
+  resolver (§3.8); precedence logic is never duplicated across
+  workflow, tuner, and engine.
+- The agent proposal is intent, never execution truth; the engine
+  consumes resolved values only; downstream interpretation attributes
+  results to resolved values only (§3.9 invariant).
+- Two supported chain modes: **forced comparison** (override set →
+  every round resolves to the override; proposals recorded but not
+  executed) and **agent exploration** (no override → proposal or
+  default; may vary across rounds/iterations).
+- PR 2 verifies correct information FLOW and RECORDING only. Any
+  claim that the agent uses ordering intelligently, or that
+  interpreter behavior improves, is an agent-behavior claim under
+  the baseline §4 validation standard and is NOT made by this PR.
+
+**Decision 5 (operator correction, 2026-07-28; rev-3 clarification
+same day) — any sequential `file_order` must ULTIMATELY resolve to a
 FULL PERMUTATION of the resolved DataScope, never a subset.**
 Ordering must not change selection. Example: resolved scope
 `[4,5,6,7,8,9]` → `[4,6,5,9,7,8]` is valid; `[4,6,5]` is INVALID.
-Validation requires: exactly the same file set as the resolved scope —
-no missing files, no extra files, no duplicates; only the order may
-differ. Enforced at the schema layer (startup error) and re-checked
-at the engine boundary (§3.3).
+Two-stage validation (rev 3):
+- **Structural stage (proposal/override intake, scope-independent)**:
+  duplicates, empty list, `file_order` supplied with strategy
+  `shuffle` — rejected at the layer that received the value
+  (plan validator for proposals; CLI/schema validator for
+  overrides). Rule: **every provided value must be structurally
+  valid, even if overridden** — a malformed agent proposal is
+  rejected (and surfaced) rather than silently hidden by an
+  operator override.
+- **Resolution stage (scope-dependent, after DataScope resolution
+  AND override application)**: the RESOLVED `file_order` must be a
+  full permutation of the resolved scope — same set, no missing, no
+  extra. Applied to the resolved value only; re-checked at the
+  engine boundary (§3.3).
 
 ### 3.1 Ordering semantics (commit B)
 
+The vocabulary below describes the RESOLVED execution values — what
+the engine actually runs. How they are resolved from agent proposals
+and operator overrides is §3.6; provenance naming is §3.7.
+
 ```text
-order_strategy: "shuffle" | "sequential"   default "shuffle"
-                                           (behavior unchanged from
-                                           today)
-file_order:     list[int] | None           sequential only; default
-                                           None = ascending file
-                                           index over the resolved
-                                           scope; when given, MUST be
-                                           a FULL PERMUTATION of the
-                                           resolved scope (same set —
-                                           no missing, no extra, no
-                                           duplicates; Decision 5);
-                                           illegal with
-                                           order_strategy="shuffle"
+resolved_order_strategy: "shuffle" | "sequential"
+    default "shuffle" (behavior unchanged from today when nothing is
+    proposed or overridden)
+resolved_file_order:     list[int] | None
+    meaningful ONLY when resolved strategy is "sequential"; then it
+    MUST be a FULL PERMUTATION of the resolved DataScope (same set —
+    no missing, no extra, no duplicates; Decision 5); when
+    "sequential" resolves with no proposed/override file order,
+    ascending file index over the resolved scope; when "shuffle"
+    resolves, resolved_file_order is None — a proposed sequential
+    file order is NOT silently retained under a shuffle resolution.
 ```
 
 - `shuffle` (default): existing behavior, unchanged —
@@ -338,24 +376,52 @@ file_order:     list[int] | None           sequential only; default
 Bounded scope, defined here ONCE (guardrail 1):
 
 1. **Genericity contract doc** `docs/design/genericity_contract.md`:
-   defines the indexed-dataset contract — `file_index → (readable
-   path, segment list)` resolved through `DatasetConfig`
-   (`training_file_pattern` already exists at `dataset_config.py:37`)
-   — plus the task-pack and metric seams as PLACEHOLDER sections
-   (filled by the PRs that first touch them; baseline §1.3 rule that
-   inventing a new abstraction requires updating this doc first).
+   defines (a) the indexed-dataset contract — `file_index →
+   (readable path, segment list)` resolved through `DatasetConfig`
+   (`training_file_pattern` already exists at
+   `dataset_config.py:36-39`); (b) the **proposal/override/resolution
+   configuration principle** (operator, 2026-07-28), stated as:
+   *"Configurable options may have a proposed value, an operator
+   override, and a resolved execution value. Only the resolved value
+   defines what ran. Every override must remain visible in
+   provenance and downstream interpretation."* — with ordering
+   recorded as its first concrete implementation; (c) a
+   **permissions taxonomy** for future options: each option declares
+   whether it is agent-settable, operator-overridable, chain-locked,
+   or frozen — safety limits and frozen scoring rules do NOT
+   automatically become agent-settable because ordering is; (d) the
+   task-pack and metric seams as PLACEHOLDER sections (filled by the
+   PRs that first touch them; baseline §1.3 rule that inventing a
+   new abstraction requires updating this doc first).
 2. **Path-template extraction**: loaders consume
    `DatasetConfig.training_file_pattern` instead of inlining
    `abra_training_{i:04d}.h5`. Audited sites:
    `train_engine_sandbox.py:159, :294, :606, :906`. (Other modules'
    inlined templates are LEDGER ENTRIES, not commit-A work — bounded
    in-passing rule.)
-3. **Coupling ledger** `docs/design/tidmad_coupling_ledger.md`:
+3. **Explicit filename-pattern validation** (operator correction):
+   `str.format()` does NOT fail when `{file_index}` is absent — a
+   pattern like `training_file.h5` would silently map EVERY index to
+   the same file. Commit A adds a validator (natural home: a
+   `DatasetConfig` model validator — confirm at implementation) that
+   parses the pattern's replacement fields (`string.Formatter().parse`)
+   and requires a usable `file_index` field; valid forms include
+   `training_{file_index}.h5` and `training_{file_index:04d}.h5`.
+   The error fires at config construction — BEFORE any training,
+   never relying on a later file-not-found (which would not even
+   occur in the every-index-same-file case).
+4. **Coupling ledger** `docs/design/tidmad_coupling_ledger.md`:
    grep-able inventory (template strings, `log_5.27`/`s_max`
    constants, TIDMAD-worded prompt fragments, 20-file/200-segment
    assumptions), each marked decoupled/remaining. Seeded from the
-   audits; updated in-passing by every future PR.
-4. **Second-dataset contract test**: a minimal synthetic
+   audits; updated in-passing by every future PR. PLUS a
+   **configuration-migration inventory**: future
+   proposal/override/resolution candidates — sampling strategy,
+   `train_portion`, learning rate / optimizer settings, DataScope,
+   resource budgets, HealthGate policy inputs — each listed with its
+   expected permissions class (§ item 1c), and explicitly NOT
+   migrated in PR 2.
+5. **Second-dataset contract test**: a minimal synthetic
    `DatasetConfig` fixture (different pattern, file count, segment
    count) proving the loader construction path is
    dataset-config-driven. A seam without such a test is "renamed",
@@ -364,39 +430,64 @@ Bounded scope, defined here ONCE (guardrail 1):
 Frozen exception (guardrail 4): the TIDMAD score formula and
 `legacy_baseline_configs.json` are untouched.
 
-### 3.3 Propagation path (commit B)
+### 3.3 Propagation path (commit B, rev 3 — resolver-mediated)
 
 Ordering follows the established out-of-band data-option pattern
-(§2.2), validated by Pydantic BEFORE execution at every entry:
+(§2.2), with the single ordering resolver (§3.6) between intake and
+execution. Both intake surfaces are Pydantic-validated BEFORE the
+resolver runs (Decision 5 structural stage); the resolver output is
+scope-validated (Decision 5 resolution stage); the engine re-checks
+at its boundary:
 
 ```text
-operator CLI (--order_strategy/--file_order; chain _chain_common.sh,
-  run_one_iteration.py, run_comparison.py, tuner CLI)
-  → HyperparamTuningInput (new validated fields; file_order must be a
-    FULL PERMUTATION of the resolved DataScope — same file set, no
-    missing, no extra, no duplicates (Decision 5) — enforced by
-    validator at startup, same layer that validates
-    health_gate_files ⊆ scope)
-  → TrialConfig (new fields; single source of truth per round)
-  → active_params → training_skill wrapper → execute_training
-    (named params; stub twin mirrors)
-  → subprocess CLI (--order_strategy/--file_order_json)
-  → boundary validation in the engine: file_order is exactly a
-    permutation of sample_set keys (constructive check next to
-    validate_sample_set — DataScope layered-enforcement precedent;
-    violation terminates, non-retryable)
+agent proposal                       operator override
+(ExperimentPlan: order_strategy /    (chain CLI → HyperparamTuningInput
+ file_order proposal fields;          override fields; structural
+ structural validation in the         validation at schema layer;
+ plan validator — reject              override locked per chain in
+ file_order+shuffle, duplicates,      run_invariants_lock, §3.8)
+ empty list)                          |
+        \                             |
+         \                            v
+          +──────────→  ordering resolver (ONE function, §3.6)
+                        precedence: override > proposal > default
+                        + full-permutation check vs resolved
+                          DataScope on the RESOLVED value
+                              |
+                              v
+              ResolvedOrdering (typed result, §3.6)
+                              |
+                              v
+  TrialConfig / active_params (resolved values + full provenance)
+                              |
+                              v
+  training_skill wrapper → execute_training (resolved values ONLY;
+    stub twin mirrors) → subprocess CLI
+    (--order_strategy/--file_order_json carry RESOLVED values)
+                              |
+                              v
+  engine boundary re-check: resolved file_order is exactly a
+    permutation of sample_set keys (violation terminates,
+    non-retryable) → [data_order] runtime log (§3.9)
+                              |
+                              v
+  records / run_config / manifest (proposed + override + resolved +
+    source, §3.7) → interpreter-visible execution context
+    (resolved values identify what ran, §3.7 invariant)
 ```
 
-No `ExperimentPlan` field in PR 2 (Decision 3). `freeze_subsample`
-(dead switch, §2.2) is left as-is — removing it is out of scope.
+`freeze_subsample` (dead switch, §2.2) is left as-is — removing it
+is out of scope.
 
 ### 3.4 RT2 accounting (commit B, minimal under Decisions 1+4a)
 
 - No change to the setup window, reconstruction term, scoped bytes,
   step arithmetic, or verification loop — dataset construction and
   step count are both unchanged (Decision 1 + Decision 4a).
-  `workload_resolvers.py` needs no strategy-aware arm. The only RT2
-  delta is provenance: `order_strategy` recorded in the workload
+  `workload_resolvers.py` needs no strategy-aware arm (and is NOT in
+  the affected-file list; resolver step-count parity is asserted by
+  test without a code change there). The only RT2 delta is
+  provenance: `resolved_order_strategy` recorded in the workload
   `detail` so observations remain attributable if ordering ever
   affects unit time.
 - §12 error-ledger evidence: one entry comparing predicted vs actual
@@ -408,35 +499,203 @@ No `ExperimentPlan` field in PR 2 (Decision 3). `freeze_subsample`
 
 `run_experiment_streaming` docstring (`:477-481`) and the `main()`
 comment (`:881`) are rewritten to describe reality: per-epoch
-concatenated dataset, ordering per `order_strategy`. The misleading
-"streaming" name is NOT changed in PR 2 (rename = churn across
-call sites and tests; noted in the coupling ledger instead).
+concatenated dataset, ordering per the resolved strategy. The
+misleading "streaming" name is NOT changed in PR 2 (rename = churn
+across call sites and tests; noted in the coupling ledger instead).
+
+### 3.6 Ordering resolver (rev 3 — ONE function, typed result)
+
+Precedence is implemented exactly once. Conceptual behavior:
+
+```text
+if operator override is present:
+    resolved = operator override;      source = "operator_override"
+elif agent proposal is present:
+    resolved = agent proposal;         source = "agent_proposal"
+else:
+    resolved = "shuffle";              source = "default"
+
+then, for file_order on the RESOLVED strategy:
+  resolved "sequential" + explicit order (from the winning level) →
+      that order, full-permutation-validated vs resolved scope
+  resolved "sequential" + no order supplied → ascending resolved scope
+  resolved "shuffle" → resolved_file_order = None (a proposed
+      sequential file order is dropped, recorded only as proposal)
+```
+
+Typed result (conceptual; exact type/location chosen at CB1 after
+code inspection — candidate home: `agent/schemas/hyperparam_tuning.py`
+beside `TrialConfig`, keeping schema + resolution in one module):
+
+```text
+ResolvedOrdering:
+    proposed_strategy:   "shuffle" | "sequential" | None
+    proposed_file_order: list[int] | None
+    override_strategy:   "shuffle" | "sequential" | None
+    override_file_order: list[int] | None
+    resolved_strategy:   "shuffle" | "sequential"
+    resolved_file_order: list[int] | None
+    resolution_source:   "operator_override" | "agent_proposal"
+                         | "default"
+```
+
+Call site: the tuner's per-round config assembly (where
+`ExperimentPlan` meets `HyperparamTuningInput`, near
+`_resolve_sample_set_cfg` — the same place formal/trial precedence
+already lives). Workflow, tuner, and engine never re-derive
+precedence; they consume the resolver's output.
+
+Validation split (Decision 5): structural validity is checked at
+each intake BEFORE the resolver (a malformed proposal is rejected
+and surfaced even when an override would win — malformed agent
+output must not be hidden by an override); the full-permutation
+check runs on the RESOLVED value inside the resolver.
+
+### 3.7 Provenance schema + attribution invariant (rev 3)
+
+**Invariant (verbatim, governs all downstream use):** *Only resolved
+configuration values describe the executed experiment. Proposed
+values describe agent intent; override values describe operator
+control. Downstream attribution and interpretation must use the
+resolved values.*
+
+Persisted per round (in `ExperimentRecord`, `run_config_*.json`, and
+the iteration manifest — names below are canonical; if
+implementation shortens them, the mapping is documented here):
+
+```text
+proposed_order_strategy    | None when the agent proposed nothing
+proposed_file_order        | None when not proposed
+override_order_strategy    | None when no operator override
+override_file_order        | None when not overridden
+resolved_order_strategy    | always present for executed rounds
+resolved_file_order        | None iff resolved strategy is shuffle
+ordering_resolution_source | "operator_override" | "agent_proposal"
+                           | "default"
+```
+
+A reviewer must be able to reconstruct, from any round record alone:
+"Agent proposed sequential; operator override shuffle; actually
+executed shuffle; source operator_override." An overridden proposal
+is NEVER described as executed.
+
+Interpreter exposure: the resolved values surface in the
+interpretation input path. Audited seam: `InterpretationInput`
+consumes `ModelRunSummary` objects
+(`agent/schemas/interpretation.py:175+`) and explicitly NOT raw
+records — so the resolved ordering travels via the summary layer
+(exact field placement on `ModelRunSummary` decided at CB3 after
+inspecting its construction site). The interpreter-facing field
+carries RESOLVED values (labeled as what ran); proposal/override may
+accompany as context but never replace it.
+
+Legacy artifacts (explicit interpretation, no guessing, no
+rewriting): records without ordering fields → treated as
+`resolved_order_strategy="shuffle"`, `resolved_file_order=None`,
+proposal/override = None, `ordering_resolution_source=
+"legacy_default"` (a fourth enum value used ONLY when reading
+pre-PR2 artifacts — never written by new runs).
+
+### 3.8 Chain-lock semantics (rev 3 — lock the OVERRIDE, not the resolution)
+
+The operator override is chain-stable control policy; the resolved
+value may legitimately vary per round when no override is active.
+Therefore:
+
+- `run_invariants_lock.json` (`core/run_invariants.py::RunInvariants`,
+  canonical set currently `resolved_data_scope` +
+  `health_gate_enabled` + `health_config_sha256`) gains
+  `ordering_override_strategy: str | None = None` and
+  `ordering_override_file_order: list[int] | None = None`, added to
+  `_CANONICAL_FIELDS`. Defaults `None` = "no override recorded" —
+  chosen precisely so legacy locks (which lack the keys)
+  `model_validate` cleanly to the no-override state instead of
+  raising the corruption error (`load_run_invariants` `:90-116`
+  audited).
+- `resolved_order_strategy` is NOT locked — locking it would forbid
+  legitimate per-round variation in agent-exploration mode.
+- Resume matrix (all tested):
+  - same override on resume → accepted;
+  - changed override strategy → `RunInvariantsViolation`;
+  - changed override file order → `RunInvariantsViolation`;
+  - no override + different agent proposals across iterations →
+    allowed, each iteration records its own resolved ordering;
+  - legacy workspace (lock without ordering keys) + no override →
+    accepted (None == None);
+  - legacy workspace + operator now adds an override → rejected
+    (None ≠ value; the operator explicitly starts a new workspace to
+    change chain control policy — consistent with existing scope/
+    gate-flip semantics).
+
+### 3.9 Bounded runtime ordering log (rev 3)
+
+Two-line split, forced by the CB2 rule that the engine receives
+resolved values ONLY (it cannot log proposal/override it never sees):
+
+- **Resolution line** — emitted once per round at the resolution
+  point (the tuner, which knows all three levels):
+
+  ```text
+  [data_order] proposed=sequential override=shuffle resolved=shuffle \
+    source=operator_override file_order=none
+  ```
+
+- **Engine line** — emitted once per epoch from resolved values:
+
+  ```text
+  [data_order] resolved=shuffle file_order=none epoch=0 epoch_seed=42
+  ```
+
+Together they show: proposed strategy, operator override, resolved
+strategy, resolution source, resolved file order (`none` or the
+permutation), epoch + epoch seed. No per-sample dumps in real runs —
+deterministic tests own full-sequence verification. P2-V2's Gate
+evidence quotes both lines verbatim to prove the expected resolved
+strategy and file order were actually selected and logged
+(anti-hallucination standard).
 
 ## 4. Affected locations
 
+Re-audited for rev 3 (2026-07-28). `workload_resolvers.py` REMOVED
+(no code change required — §3.4; resolver step-count parity is
+asserted by test only). Additions: `ExperimentPlan` proposal fields
+(same module as the other schema work), the ordering resolver,
+`core/run_invariants.py` (override lock), and the interpretation
+summary seam.
+
 | Area | Files |
 |---|---|
-| Commit A | `docs/design/genericity_contract.md` (new), `docs/design/tidmad_coupling_ledger.md` (new), `execute_tools/train_engine_sandbox.py` (template consumption), `execute_tools/dataset_config.py` (no schema change expected), new contract test |
-| Commit B schema | `agent/schemas/hyperparam_tuning.py` (`HyperparamTuningInput`, `TrialConfig`, record provenance fields) |
-| Commit B engine | `execute_tools/train_engine_sandbox.py` (sampler + boundary validation + docstrings), `execute_tools/workload_resolvers.py` |
-| Commit B plumbing | `core/sandbox_executor.py` (execute_training + stub), `agent/skills/training_skill/wrapper.py`, `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` (TrialConfig build + CLI), `scripts/run_comparison.py`, `sdsc_submission_scripts/run_one_iteration.py`, `sdsc_submission_scripts/_chain_common.sh` |
-| Tests | new unit suites (ordering semantics, validation, parity), pseudo integration, resolver tests |
+| Commit A | `docs/design/genericity_contract.md` (new), `docs/design/tidmad_coupling_ledger.md` (new), `execute_tools/train_engine_sandbox.py` (template consumption), `execute_tools/dataset_config.py` (filename-pattern validator, §3.2 item 3), new contract test |
+| Commit B schema + resolver | `agent/schemas/hyperparam_tuning.py` (`ExperimentPlan` proposal fields `:582+`; `HyperparamTuningInput` override fields; `TrialConfig` resolved fields; `ExperimentRecord` provenance septet `:380+` region; `ResolvedOrdering` + the resolver — candidate home this module, confirm at CB1), `core/run_invariants.py` (`RunInvariants` override fields + `_CANONICAL_FIELDS` `:50-81`, `build_run_invariants` `:213+`) |
+| Commit B engine | `execute_tools/train_engine_sandbox.py` (sampler + boundary validation + `[data_order]` log + docstrings) |
+| Commit B plumbing | `core/sandbox_executor.py` (execute_training + stub), `agent/skills/training_skill/wrapper.py`, `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` (resolver call site near `_resolve_sample_set_cfg` + TrialConfig build + CLI), `scripts/run_comparison.py`, `sdsc_submission_scripts/run_one_iteration.py`, `sdsc_submission_scripts/_chain_common.sh`, `agent/schemas/interpretation.py` (`ModelRunSummary` resolved-ordering exposure `:175+` seam — exact field at CB3) |
+| Tests | new unit suites (resolver/resolution matrix, ordering semantics, validation, parity, lock/resume matrix), pseudo integration (three resolution cases), pattern-validator tests |
 
 ## 5. Scope and non-goals
 
-- Training loader only. Eval/scoring order, `score_vector`,
-  HealthGates, and the frozen score formula are untouched.
-- Per-file optimizer re-initialization: NOT a V19 commitment
-  (baseline §2.9).
-- True per-file streaming / peak-RAM reduction: FU-P2-1, outside
-  PR 2 (Decision 1, pending operator).
-- Planner-selectable ordering: outside PR 2 (Decision 3, pending
-  operator); lifecycle gate lives in the baseline §2.0 Delivery block.
-- No change to the default: `shuffle` remains; parity contract (§3.1)
-  verified — same selection, RNG behavior, and visited sequence.
-- The empirical strategy evaluation (P2-E) is designed AFTER the
-  implementation merges — its matched-budget campaign plan will be a
-  separate section (§7.3) locked with operator approval.
+Explicit non-goals (rev 3, operator-enumerated):
+
+- PR 2 does NOT migrate all configuration options to the
+  proposal/override/resolved pattern (ordering only; others are
+  inventory entries — §3.2 item 4).
+- PR 2 does NOT create a universal repository-wide configuration
+  framework (one resolver, for ordering).
+- PR 2 does NOT change loader partitioning (Decision 1).
+- PR 2 does NOT reduce memory usage (FU-P2-1).
+- PR 2 does NOT change optimizer-step count (Decision 4a).
+- PR 2 does NOT make ordering the production default (`shuffle`
+  remains; parity contract §3.1 — same selection, RNG behavior,
+  visited sequence, step count).
+- PR 2 does NOT claim the agent uses ordering intelligently — it
+  verifies information flow and recording only; behavior claims fall
+  under baseline §4.
+- PR 2 ONLY establishes ordering as the first tested example of the
+  proposal/override/resolved pattern.
+
+Also unchanged from rev 2: training loader only (eval/scoring order,
+`score_vector`, HealthGates, frozen score formula untouched);
+per-file optimizer re-initialization not a V19 commitment; P2-E
+empirical campaign designed after merge (not overdesigned now).
 
 ## 6. Commit plan (detailed — locked at P2-D approval, 2026-07-28; expanded per operator template same day)
 
@@ -448,10 +707,12 @@ design. Each commit is independently reviewable and revertible;
 dependencies only in the order listed. Standing rules restated for
 the implementer: ordering and loader partitioning remain separate
 concerns; `file_order` is a full permutation of the resolved
-DataScope; the default remains `shuffle`; planner exposure and
-production-default changes are OUTSIDE these commits. If code
-inspection during implementation reveals ambiguity or larger scope
-than assumed here, STOP and ask before changing the plan.
+DataScope; the default remains `shuffle`; the agent's PROPOSAL
+fields land in these commits (rev 3) but no intelligent-use claim is
+made, and strategy promotion / production-default changes remain
+OUTSIDE (P2-E/P2-ACT). If code inspection during implementation
+reveals ambiguity or larger scope than assumed here, STOP and ask
+before changing the plan.
 
 ### P2-CA — genericity seam (baseline §1.3 artifacts)
 
@@ -485,16 +746,27 @@ the same constructor.
 - Dependencies: none (first commit of the PR).
 
 **Implementation plan.**
-- [ ] Write `docs/design/genericity_contract.md`: indexed-dataset
-      contract (`file_index → (readable path, segment list)` through
-      `DatasetConfig`); task-pack + metric seams as PLACEHOLDER
-      sections; §1.3 rule that new abstractions require updating
-      this doc first.
+- [ ] Write `docs/design/genericity_contract.md` per §3.2 item 1:
+      indexed-dataset contract; the proposal/override/resolution
+      configuration principle (operator statement verbatim) with
+      ordering named as its first concrete implementation; the
+      permissions taxonomy (agent-settable / operator-overridable /
+      chain-locked / frozen); task-pack + metric PLACEHOLDER
+      sections; the §1.3 update-this-doc-first rule.
 - [ ] Write `docs/design/tidmad_coupling_ledger.md`: entries with
       file:line from the P2-A audits (inlined template sites incl.
       the non-training ones left in place, `log_5.27`/`s_max`
       constants, TIDMAD-worded prompt fragments, 20-file/200-segment
-      assumptions), each marked decoupled/remaining.
+      assumptions), each marked decoupled/remaining; PLUS the
+      configuration-migration inventory (§3.2 item 4: sampling
+      strategy, train_portion, lr/optimizer, DataScope, resource
+      budgets, HealthGate policy inputs — with expected permissions
+      class, NOT migrated in PR 2).
+- [ ] Add the filename-pattern validator (§3.2 item 3): parse
+      replacement fields via `string.Formatter().parse`, require a
+      usable `file_index` field; error at config construction.
+      (NOT a format()-raises assumption — `str.format()` ignores
+      absent placeholders.)
 - [ ] Refactor the four `train_engine_sandbox.py` sites to consume
       `TIDMAD.training_file_pattern`.
 - [ ] Add `tests/unit/execute_tools/test_dataset_contract.py`:
@@ -506,10 +778,13 @@ the same constructor.
   filename before == after); contract test with the synthetic
   fixture (path built from the fixture's pattern, not the TIDMAD
   literal).
+- Pattern validator: positive tests for `training_{file_index}.h5`
+  and `training_{file_index:04d}.h5` (and the TIDMAD default);
+  negative test for `training_file.h5` (no placeholder) → clear
+  config-construction error BEFORE training, never a downstream
+  file-not-found (which would not occur — every index would map to
+  the same existing file).
 - Integration/pseudo: none required (no behavior change).
-- Negative: pattern missing the `{file_index}` placeholder →
-  `KeyError`/`IndexError` surfaced as a config error (test pins the
-  failure mode).
 - Backward-compat: targeted regression suites (below) green
   unchanged.
 - Gate tests: none (docs + refactor only).
@@ -526,9 +801,10 @@ the same constructor.
   a file:line.
 
 **Failure and edge cases.**
-- Malformed pattern (no placeholder): config error at first use —
-  stop execution (a wrong pattern must never silently produce wrong
-  paths).
+- Malformed pattern (no `{file_index}` replacement field): explicit
+  validator error at config construction — stop execution. NOT
+  detectable via `str.format()` raising (it does not) nor via
+  file-not-found (the same-file mapping points at an existing file).
 - Missing file on disk: existing behavior preserved exactly
   (warning + skip, `train_engine_sandbox.py:295-297`) — this commit
   must not change it.
@@ -546,105 +822,146 @@ ONLY. No ordering code, no schema fields, no cleanup beyond the four
 sites. Stop-and-show the diff summary + staged list + test evidence
 before committing.
 
-### P2-CB1 — ordering schema + validation (no engine change)
+### P2-CB1 — schema, proposal, override, and resolution (no engine change)
 
-**Goal.** Introduce the validated ordering vocabulary
-(`order_strategy`, `file_order`) at the schema layer, with the
-Decision-5 full-permutation contract enforced before anything can
-execute. Separate from the engine commit so schema semantics are
+**Goal.** Introduce the complete ordering-control vocabulary —
+agent proposal fields, operator override fields, the single ordering
+resolver with its typed `ResolvedOrdering` result, the provenance
+septet, and the chain-lock override fields — so that precedence
+exists in exactly one place before any engine or propagation code is
+written. Separate from the engine commit so resolution semantics are
 reviewable (and revertible) independently of loader mechanics.
 
 **Scope.**
-- Changes: `agent/schemas/hyperparam_tuning.py` —
-  `HyperparamTuningInput`, `TrialConfig`, `ExperimentRecord`
-  provenance fields, and `validate_runtime_config` (`:1573`);
+- Changes: `agent/schemas/hyperparam_tuning.py` — `ExperimentPlan`
+  proposal fields (`:582+` block, `with_defaults` tolerant of
+  absence); `HyperparamTuningInput` override fields;
+  `TrialConfig` resolved fields; `ExperimentRecord` provenance
+  septet (§3.7, near the `trial_strategy` stamps `:380-435`);
+  `ResolvedOrdering` + the resolver function (candidate home: this
+  module — confirm at implementation); `validate_runtime_config`
+  (`:1573`) wiring for the resolution-stage check;
+  `core/run_invariants.py` — `RunInvariants` override fields +
+  `_CANONICAL_FIELDS` + `build_run_invariants` (§3.8);
   `run_config` persistence in the tuner (write-side only).
-- Two-layer validation split (mirrors the existing DS8 pattern):
-  dataset-INDEPENDENT checks in schema validators (duplicates,
-  `file_order` without `sequential` — precedent: the
-  `health_gate_files` validators at `hyperparam_tuning.py:1352-1359`);
-  resolution-DEPENDENT checks in `validate_runtime_config`
-  (full-permutation vs resolved scope — precedent: the partial-scope
-  checks at `:1597-1623`; runs at tuner `run()` entry and workflow
-  pre-flight, before any LLM call or file I/O).
-- Non-goals / must-not-change: no engine behavior; no
-  `ExperimentPlan` field (Decision 3); no propagation to CLIs yet;
-  defaults leave every existing construction site valid unchanged.
-- Dependencies: none strictly, but lands after P2-CA to keep the
-  ladder linear.
+- Validation split (Decision 5 rev 3): STRUCTURAL checks at each
+  intake (plan validator for proposals — precedent
+  `_validate_target_files`; schema validator for overrides —
+  precedent the `health_gate_files` validators at
+  `hyperparam_tuning.py:1352-1359`); the FULL-PERMUTATION check on
+  the RESOLVED value only (inside the resolver, invoked from
+  `validate_runtime_config` and the per-round assembly — precedent
+  the partial-scope checks at `:1597-1623`).
+- Non-goals / must-not-change: no engine behavior; no propagation
+  to CLIs yet; defaults leave every existing construction site valid
+  unchanged; no migration of any other option to this pattern.
+- Dependencies: lands after P2-CA (contract doc defines the
+  principle this commit implements).
 
 **Implementation plan.**
-- [ ] `order_strategy: Literal["shuffle", "sequential"] = "shuffle"`
-      + `file_order: list[int] | None = None` on
-      `HyperparamTuningInput`.
-- [ ] Same fields on `TrialConfig` (per-round single source of
-      truth, mirroring `train_portion`); model-validator: duplicates
-      in `file_order` → error; `file_order` present with
-      `order_strategy="shuffle"` → error.
-- [ ] `validate_runtime_config`: when `order_strategy="sequential"`
-      and `file_order` is not None, require
-      `sorted(file_order) == resolved_scope` (full permutation —
-      same set, no missing, no extra); when `file_order` is None,
-      resolve to ascending `resolved_scope` (recorded, see next).
-- [ ] `ExperimentRecord` provenance: `order_strategy`,
-      `resolved_file_order` (materialized permutation, never None
-      for executed rounds), following the `trial_strategy` stamp
-      pattern (`:380-435` block).
-- [ ] Persist both fields in `run_config_*.json` (P1-C5 A4
+- [ ] `ExperimentPlan` proposal fields:
+      `order_strategy: Literal["shuffle","sequential"] | None = None`,
+      `file_order: list[int] | None = None` (proposal semantics —
+      intent, not execution truth); plan validator rejects
+      internally inconsistent proposals (file_order with proposed
+      shuffle; duplicates; empty list). Scope-dependent checks
+      deferred to resolution.
+- [ ] `HyperparamTuningInput` override fields (conceptually
+      `order_strategy_override` / `file_order_override` — exact
+      names after auditing nearby CLI conventions); structural
+      validation at the schema layer.
+- [ ] `ResolvedOrdering` type + ONE resolver function (§3.6):
+      precedence override > proposal > default; file_order
+      resolution rules incl. shuffle → None (no silent retention of
+      a proposed sequential order); full-permutation check vs
+      resolved scope on the RESOLVED value.
+- [ ] `TrialConfig` gains resolved fields only
+      (`resolved_order_strategy`, `resolved_file_order`) — the
+      engine-facing single source of truth per round.
+- [ ] `ExperimentRecord` provenance septet (§3.7):
+      proposed/override/resolved strategy + file_order +
+      `ordering_resolution_source`.
+- [ ] `RunInvariants`: `ordering_override_strategy` /
+      `ordering_override_file_order` (defaults None; legacy locks
+      load as no-override, §3.8) + canonical-set inclusion +
+      `build_run_invariants` plumbing.
+- [ ] Persist the septet in `run_config_*.json` (P1-C5 A4
       precedent).
 
 **Validation plan.**
-- Unit (positive): valid full permutation accepted; `None` +
-  `sequential` resolves to ascending scope with provenance recording
-  the resolution; defaults (`shuffle`, `None`) accepted everywhere an
-  input is constructed today.
-- Unit (negative, one test each): subset (`[4,6,5]` under scope
-  `[4..9]`); missing file; extra/out-of-scope file; duplicate;
-  `file_order` + `shuffle`; empty list.
-- DS8 interaction: permutation validated against the RESOLVED scope
+- Unit (resolution matrix, one test each — §7.1 "Resolution logic"):
+  proposal sequential + no override → sequential
+  (source=agent_proposal); proposal shuffle + no override → shuffle;
+  no proposal + no override → default shuffle (source=default);
+  proposal sequential + override shuffle → shuffle
+  (source=operator_override), proposed file order NOT retained;
+  proposal shuffle + override sequential → sequential;
+  override sequential with no file order → ascending resolved
+  scope; invalid override permutation → startup failure;
+  structurally invalid proposal + valid override → proposal error
+  surfaced (not hidden by the override).
+- Unit (structural negatives, per intake): duplicates; empty list;
+  file_order with shuffle — at plan layer AND at override layer.
+- Unit (resolved-value negatives): subset (`[4,6,5]` under scope
+  `[4..9]`); missing file; extra/out-of-scope file — on the
+  RESOLVED value.
+- Lock/resume matrix (§3.8, one test each): same override accepted;
+  changed override strategy rejected; changed override file order
+  rejected; no-override + varying proposals allowed; legacy lock +
+  no override accepted; legacy lock + new override rejected.
+- DS8 interaction: resolution validated against the RESOLVED scope
   under a partial `--data_scope`.
-- Backward-compat: existing suite for the schema module green with
-  no fixture edits beyond additive fields.
-- Integration/pseudo: none in this commit (fields are inert until
-  CB2/CB3).
+- Backward-compat: existing suites for the schema module and
+  `tests/unit/core/test_run_invariants.py` green with no fixture
+  edits beyond additive fields.
+- Integration/pseudo: none in this commit (resolver is exercised
+  end-to-end in CB3).
 - Gate tests: none.
 
 **Acceptance criteria.**
 - Every input/fixture constructed without the new fields validates
-  exactly as before (defaults are non-breaking) — demonstrated by
-  the untouched existing suite passing.
-- Each of the six invalid `file_order` shapes produces a distinct,
-  message-bearing error naming the offending indices, at the layer
-  specified above (schema vs `validate_runtime_config`) — asserted
-  by layer, not just "raises".
-- `resolved_file_order` in a persisted record equals the exact
-  permutation execution will use (ascending default resolution
-  included), round-tripped through JSON.
+  exactly as before (defaults non-breaking) — untouched existing
+  suites pass.
+- The full resolution matrix above holds, with
+  `ordering_resolution_source` asserted per case — not just the
+  resolved strategy.
+- Precedence logic exists in exactly ONE function (asserted by
+  grep-level review at stop-and-show: no second comparison of
+  proposal vs override anywhere).
+- Each invalid shape produces a distinct, message-bearing error
+  naming the offending indices, at the specified layer (plan vs
+  override schema vs resolver) — asserted by layer.
+- A persisted record's septet fully reconstructs "proposed X,
+  override Y, executed Z, source S", round-tripped through JSON.
+- Legacy `run_invariants_lock.json` (no ordering keys) loads
+  cleanly as no-override; the resume matrix behaves exactly as
+  §3.8 specifies.
 
 **Failure and edge cases.**
-- Invalid permutations: stop at startup (operator config is a
-  contract — DS8 precedent; no normalization, no warning-and-continue).
+- Invalid resolved permutations: stop at startup (operator config
+  is a contract — DS8 precedent; no normalization).
+- Structurally invalid proposal under a winning override: error
+  surfaced, run stops — malformed LLM output is never silently
+  masked (operator rule, §3.0 D5).
 - Legacy configuration (records/run_configs without ordering
-  fields): read paths must tolerate absence (`.get(default)` /
-  optional fields) — pre-PR2 artifacts remain parseable.
-- Resume: `order_strategy` is stamped per-iteration in `run_config`
-  and provenance, but — mirroring `formal_strategy` treatment — it
-  is NOT added to `run_invariants_lock.json` in PR 2. Consequence: a
-  mid-chain operator flip of ordering between iterations is
-  recordable and visible but not blocked. **Flagged to operator at
-  the CB1 stop-and-show** (options: keep as-is like formal_strategy,
-  or add to the lock later as a follow-up; not silently decided).
+  fields): read paths tolerate absence; interpretation per §3.7
+  legacy rules (`legacy_default` source; no artifact rewriting).
+- Resume: override locked (strategy AND file order); resolved value
+  NOT locked; legacy-lock semantics per §3.8. (Supersedes the rev-2
+  "mirror formal_strategy, don't lock" flag — the operator resolved
+  it: lock the OVERRIDE, never the resolution.)
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
       (counts + wall time recorded here)
-- [ ] New-test file run in isolation (name recorded here)
+- [ ] `.venv/bin/python -m pytest tests/unit/core/test_run_invariants.py -q`
+- [ ] New-test files run in isolation (names recorded here)
 - [ ] `ruff check` + `ruff format --check` on touched files
 - [ ] Any test not run: listed with reason.
 
-**Commit boundary.** Schema + validators + provenance + run_config
-write-side ONLY. No engine code, no CLI flags, no forwarding. Stop-
-and-show before commit.
+**Commit boundary.** Schema + resolver + lock fields + provenance +
+run_config write-side ONLY. No engine code, no CLI flags, no
+forwarding. Stop-and-show before commit.
 
 ### P2-CB2 — engine ordering + boundary validation + docstring repair
 
@@ -666,6 +983,12 @@ loader visit what we said, in the order we said".
   arithmetic, verification loop — all untouched (§3.4); ONE global
   loader with global `drop_last` (Decision 4a) — no per-file
   loaders, no partitioning semantics.
+- **Rev-3 boundary rule**: the engine receives RESOLVED values only
+  (`--order_strategy`/`--file_order_json` carry the resolver
+  output). It has no knowledge of proposals, overrides, or how they
+  were combined — no proposal/override flags exist at the engine
+  CLI. Its `[data_order]` epoch line (§3.9) therefore shows resolved
+  values + epoch seed only.
 - Dependencies: P2-CB1 not strictly required (engine takes plain CLI
   values and re-validates), but the ladder lands CB1 first so the
   vocabulary is defined once.
@@ -687,13 +1010,18 @@ at `:583-584`, not introduce a second seed path.)*
       byte-for-byte.
 - [ ] CLI: `--order_strategy` (default `"shuffle"`) +
       `--file_order_json` (path, mirroring `--sample_set_json`
-      style); engine re-validates, never trusts the caller.
-- [ ] Engine boundary validation: `file_order` is exactly a
-      permutation of `sample_set` keys — violation prints a
+      style) — RESOLVED values only; engine re-validates, never
+      trusts the caller; no proposal/override flags exist here.
+- [ ] Engine boundary validation: resolved `file_order` is exactly
+      a permutation of `sample_set` keys — violation prints a
       structured error and terminates non-retryably (DataScope
       layered-enforcement precedent).
-- [ ] RT2 provenance: `order_strategy` added to the training
-      workload `detail` dict (`:622-629`) — no arithmetic change.
+- [ ] `[data_order]` engine log line (§3.9): once per epoch,
+      `resolved=... file_order=... epoch=N epoch_seed=S` — bounded,
+      never per-sample.
+- [ ] RT2 provenance: `resolved_order_strategy` added to the
+      training workload `detail` dict (`:622-629`) — no arithmetic
+      change.
 - [ ] Docstring repair: `run_experiment_streaming` docstring and the
       `main()` call-site comment rewritten to describe reality
       (per-epoch concatenated dataset; ordering per
@@ -738,7 +1066,10 @@ at `:583-584`, not introduce a second seed path.)*
 - Step count identical across strategies for every tested
   (selection, batch_size) pair.
 - Zero diff in RT2 observation content except the added
-  `order_strategy` detail key (asserted on a captured sidecar).
+  `resolved_order_strategy` detail key (asserted on a captured
+  sidecar).
+- The engine `[data_order]` line appears once per epoch with the
+  resolved values and epoch seed (asserted on captured stdout).
 - The two repaired docstrings no longer claim one-file-at-a-time
   residency or shuffled file iteration.
 
@@ -768,92 +1099,130 @@ schema, no propagation, no chain scripts, no unrelated engine
 cleanup (`freeze_subsample` stays as-is — FU-P2-2). Stop-and-show
 before commit.
 
-### P2-CB3 — propagation (operator surface end-to-end)
+### P2-CB3 — propagation (proposal + override + resolution end-to-end)
 
-**Goal.** Thread the two operator fields through every launch
-surface (sandbox → skill wrapper → tuner → comparison script → chain
-scripts) so a chain operator can actually set ordering, with
-provenance stamped end-to-end. Last because it depends on both the
-vocabulary (CB1) and the engine behavior (CB2).
+**Goal.** Wire the full rev-3 flow through every surface:
+
+```text
+ExperimentPlan proposal + chain override
+  → ordering resolver → ResolvedOrdering
+  → TrialConfig / active_params
+  → engine (resolved only)
+  → records / run_config / manifest (full septet)
+  → interpreter-visible execution context (resolved = what ran)
+```
+
+Last because it depends on the vocabulary + resolver (CB1) and the
+engine behavior (CB2).
 
 **Scope.**
 - Changes: `core/sandbox_executor.py` (`execute_training` `:680-691`
   + append-when-set block `:770-773`; stub twin `:1357-1369`),
   `agent/skills/training_skill/wrapper.py`,
   `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
-  (TrialConfig build `:2357-2379`, `active_params` `:2447-2460`, CLI
-  + `input_dict` `:4229-4584` region),
-  `scripts/run_comparison.py` (agent-phase forwarding `:722-737`,
-  CLI `:959-972` region),
+  (resolver call at the per-round assembly near
+  `_resolve_sample_set_cfg` `:729-777` / plan intake `:2265-2330`;
+  TrialConfig build `:2357-2379`; `active_params` `:2447-2460`; CLI
+  + `input_dict` `:4229-4584` region; `[data_order]` resolution log
+  line §3.9), `scripts/run_comparison.py` (agent-phase forwarding
+  `:722-737`, CLI `:959-972` region),
   `sdsc_submission_scripts/run_one_iteration.py`,
-  `sdsc_submission_scripts/_chain_common.sh` (parse arm +
-  forward-when-set — PR 1 `--enable_chain_incumbent_formal_gates`
-  pattern), plus tests.
-- Non-goals / must-not-change: no `ExperimentPlan`/planner
-  involvement (Decision 3); `run_baseline_trial` baseline behavior
-  unchanged (no ordering flag on the baseline path — it is a frozen
+  `sdsc_submission_scripts/_chain_common.sh` (override parse arm +
+  forward-when-set — PR 1 pattern),
+  `agent/schemas/interpretation.py` (`ModelRunSummary` resolved-
+  ordering exposure — exact field placement after inspecting the
+  summary construction site), plus tests.
+- Non-goals / must-not-change: `run_baseline_trial` baseline
+  behavior unchanged (no ordering on the baseline path — frozen
   comparison anchor); defaults preserve today's behavior at every
-  hop.
-- Dependencies: P2-CB1 (schema) + P2-CB2 (engine).
+  hop; no claim of intelligent agent USE of the proposal fields
+  (information flow only).
+- Dependencies: P2-CB1 (schema + resolver) + P2-CB2 (engine).
 
 **Implementation plan.**
-- [ ] `execute_training`: named `order_strategy`/`file_order`
-      params; write `file_order` JSON next to the sample-set file;
-      append `--order_strategy`/`--file_order_json` when non-default;
-      stub twin mirrors the signature.
+- [ ] Tuner: extract the ordering proposal from the validated
+      `ExperimentPlan`; combine with the operator override via the
+      CB1 resolver at the per-round assembly; emit the
+      `[data_order]` resolution line; populate `TrialConfig`
+      resolved fields + the record/run_config septet.
+- [ ] `execute_training`: named RESOLVED params
+      (`order_strategy`/`file_order` at this boundary carry
+      resolver output — execution-facing name kept for
+      compatibility, mapping documented per §3.7); write the
+      file-order JSON next to the sample-set file; append flags
+      when non-default; stub twin mirrors.
 - [ ] `training_skill` wrapper: forward both via `kwargs.get`.
-- [ ] Tuner: `TrialConfig` build consumes
-      `agent_input.order_strategy`/`.file_order` (operator fields —
-      formal AND trial rounds use the same operator-set ordering; no
-      per-round LLM influence); `active_params` carries them to the
-      skill; CLI `--order_strategy`/`--file_order` + `input_dict`
-      assembly + `validate_runtime_config` call already in place
-      from CB1.
-- [ ] `run_comparison.py`: CLI flags, forwarded to the tuner
-      subprocess (agent phase only).
-- [ ] Chain scripts: `ORDER_STRATEGY`/`FILE_ORDER` env-arg parse arm
-      + forward-when-set.
+- [ ] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
+      surface (conceptually `ORDER_STRATEGY_OVERRIDE`/
+      `FILE_ORDER_OVERRIDE`; exact names after auditing nearby
+      conventions) parse + forward-when-set; override recorded into
+      `run_invariants` at chain start (CB1 lock fields).
+- [ ] Manifest (`run_one_iteration.py::write_manifest`): septet
+      stamped per iteration.
+- [ ] `ModelRunSummary`: resolved-ordering field(s) exposed to the
+      interpreter as the factual execution configuration.
 
 **Validation plan.**
-- Unit (per-hop forwarding): sandbox call → subprocess argv
-  contains the flags exactly when non-default and never otherwise;
-  wrapper passthrough; tuner CLI → input schema values.
-- Pseudo integration: one chain iteration with `sequential` + an
-  explicit permutation — `order_strategy`/`resolved_file_order`
-  stamped in the round record, `run_config_*.json`, and the
-  iteration manifest; a second run with defaults shows `shuffle`
-  provenance and NO new flags in the training argv.
-- Negative (propagation failure surface): a hop that drops the field
-  is caught by the end-to-end pseudo assertion (stamped provenance
-  must equal the operator input, not the default).
-- Backward-compat: chain shell parity test (existing pattern) green;
-  full targeted regression on workflows + protocols + tune suites.
+- Unit (per-hop forwarding): sandbox call → subprocess argv carries
+  RESOLVED values exactly when non-default and never otherwise;
+  wrapper passthrough; tuner CLI → input schema values; override →
+  lock write.
+- Pseudo integration — the three resolution cases (operator-
+  required), each asserting record + run_config + manifest +
+  interpreter-visible context agree:
+  1. **proposal wins**: plan proposes `sequential`, no override →
+     sequential executes, source=`agent_proposal`;
+  2. **override wins**: plan proposes `sequential`, override
+     `shuffle` → shuffle executes, source=`operator_override`, and
+     the record still shows the proposal (never described as
+     executed);
+  3. **default wins**: no proposal, no override → shuffle executes,
+     source=`default`, training argv identical to pre-PR2.
+- Negative (propagation failure surface): a hop that drops a field
+  is caught by the end-to-end assertion (stamped septet must equal
+  the known inputs, not defaults).
+- Resume (chain level, pseudo): override fixed across resume
+  (violation cases covered at CB1 unit level); no-override chain
+  with different proposals across iterations → each iteration's
+  record shows its own resolved ordering.
+- Backward-compat: chain shell parity test green; legacy-workspace
+  resume read-path (§3.7 legacy rules) exercised; full targeted
+  regression on workflows + protocols + tune suites.
 - Gate tests: NONE launched from this commit. P2-V2 (real training)
   is listed separately in §0/§7.2 and requires explicit operator
   approval of a shown launch plan.
 
 **Acceptance criteria.**
-- With defaults, the training subprocess argv is IDENTICAL to
-  pre-PR2 argv (asserted, not assumed) — the flags appear only when
-  the operator sets non-default values.
-- With `sequential` + explicit permutation, the provenance chain
-  (record → run_config → manifest) carries the operator's exact
-  permutation at every stage of the pseudo run.
+- With no proposal and no override, the training subprocess argv is
+  IDENTICAL to pre-PR2 argv (asserted, not assumed).
+- All three resolution cases hold end-to-end with record,
+  run_config, manifest, and interpreter-visible context in
+  agreement on (proposed, override, resolved, source) — and an
+  overridden proposal is never described as executed anywhere in
+  those artifacts.
+- The engine subprocess receives resolved values ONLY (its argv
+  contains no proposal/override material — asserted).
+- The interpreter-facing summary identifies the resolved ordering
+  as the actual executed setting.
 - The stub sandbox accepts the same call signature as the real one
   (pseudo mode cannot drift).
-- Shell parity: `_chain_common.sh` arm round-trips the values into
-  `run_one_iteration.py` argv verbatim.
+- Shell parity: `_chain_common.sh` override arm round-trips the
+  values into `run_one_iteration.py` argv verbatim.
 
 **Failure and edge cases.**
-- Operator sets `file_order` without `sequential` anywhere on the
-  surface: rejected at the earliest validated layer (schema) with
-  the CB1 error — never silently ignored.
+- `file_order` without `sequential` at any intake (plan or
+  override): rejected at that intake's structural layer with the
+  CB1 error — never silently ignored.
+- Structurally invalid proposal + winning override: proposal error
+  surfaced (D5 rule) — the chain does not proceed on hidden-invalid
+  agent output.
 - Chain script arm set but iteration script older (skew): the PR 1
   forward-when-set pattern makes the flag absence a hard argparse
   error, not silent drop — verified by the parity test.
 - Legacy resumes (pre-PR2 workspaces): absence of ordering fields in
-  old records/manifests must not break resume reads (CB1 legacy
-  rule re-verified at this level in the pseudo test).
+  old records/manifests must not break resume reads; lock without
+  ordering keys = no-override (§3.8) — re-verified at this level in
+  the pseudo test.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent -q`
@@ -899,17 +1268,23 @@ the code as actually merged, not as designed.
 **Scope.** Enumerate touched nodes/skills from the final PR diff (do
 not rely on this list alone); known targets from the plan:
 - [ ] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
-      — new `--order_strategy`/`--file_order` CLI args with defaults,
-      the Decision-5 full-permutation contract, the two-layer
-      validation split, and an ordering block in Key behavioral
-      notes (PR 1 chain-incumbent block precedent).
-- [ ] `docs/running_chain_test.md` — chain-level
-      `ORDER_STRATEGY`/`FILE_ORDER` arm, forward-when-set semantics,
-      defaults.
+      — the full ordering-control model: proposal fields
+      (ExperimentPlan), override CLI args with defaults, the
+      resolver precedence rule, the Decision-5 permutation contract
+      with its two-stage validation, the provenance septet, and an
+      ordering block in Key behavioral notes (PR 1 chain-incumbent
+      block precedent) stating the §3.7 attribution invariant.
+- [ ] `docs/running_chain_test.md` — chain-level override arm
+      (final names from CB3), forward-when-set semantics, defaults,
+      the two chain modes (forced comparison vs agent exploration),
+      and the lock-the-override resume rule.
 - [ ] `agent/skills/training_skill/` — has NO `.md` today: create a
       minimal one documenting the skill contract (inputs incl. the
-      new ordering fields, defaults, subprocess flags emitted), per
-      the standing rule.
+      resolved ordering fields, defaults, subprocess flags emitted),
+      per the standing rule.
+- [ ] `nodes/result_interpretation_agent/result_interpretation_agent.md`
+      — the resolved-ordering field(s) on the interpreter-visible
+      summary and the invariant that resolved values are what ran.
 - [ ] Diff sweep: any other touched node/skill `.md` (check
       `nodes/*/`*.md` against the PR's touched-file list); confirm
       or update each — record "no update needed" per file
@@ -950,17 +1325,47 @@ the argparse source.
   interaction covered: the permutation is validated against the
   RESOLVED scope, whatever it is.
 - Resolver parity: predicted step count == materialized `len(loader)`
-  for both strategies (unchanged global floor).
-- Resume/provenance: stamps round-trip through records,
-  `run_config_*.json`, and the run-invariants lock unchanged.
-- Second-dataset contract test (commit A).
+  for both strategies (unchanged global floor; asserted by test —
+  NO code change in `workload_resolvers.py`).
+- Second-dataset contract test + filename-pattern validation tests
+  (commit A).
+- **Resolution logic (rev 3, one deterministic test per row)**:
+  - proposal `sequential` + no override → `sequential`;
+  - proposal `shuffle` + no override → `shuffle`;
+  - no proposal + no override → default `shuffle`;
+  - proposal `sequential` + override `shuffle` → `shuffle`;
+  - proposal `shuffle` + override `sequential` → `sequential`;
+  - override `sequential`, no file order → ascending resolved scope;
+  - invalid override permutation → startup failure;
+  - structurally invalid proposal + valid override → proposal error
+    surfaced (D5 rule: every provided value structurally valid even
+    if overridden; scope-dependent validation on the resolved value).
+- **Attribution and recording (rev 3)**:
+  - engine receives resolved values only;
+  - record contains proposed, override, resolved, and source;
+  - run_config and manifest agree;
+  - interpreter-facing data identifies resolved ordering as what
+    ran;
+  - an overridden proposal is never described as executed.
+- **Chain behavior (rev 3)**:
+  - fixed override cannot change during resume (strategy or file
+    order → `RunInvariantsViolation`);
+  - agent proposal may change across iterations when no override
+    exists — allowed and recorded per iteration;
+  - each iteration records its own resolved ordering;
+  - separate chains can force different strategies for controlled
+    comparisons (forced-comparison mode);
+  - legacy workspaces without override fields → §3.8 explicit
+    compatibility behavior.
 
 ### 7.2 P2-V2 real smoke (bounded, operator-approved launch)
 
 Cold-start (standing rule), DS8-paired partial scope, smallest
-canonical config; one `sequential` attempt proving: correct visited
-order in the log, RT2 §12 ledger entry within tolerance, HealthGate
-pipeline unaffected. Launch plan drafted for approval at P2-V1 exit.
+canonical config; one attempt with a forced `sequential` override
+proving: the expected resolved strategy and file order actually
+selected — both `[data_order]` lines (§3.9) quoted verbatim as
+evidence; RT2 §12 ledger entry within tolerance; HealthGate pipeline
+unaffected. Launch plan drafted for approval at P2-V1 exit.
 
 ### 7.3 P2-E empirical strategy evaluation (post-merge, separate)
 
