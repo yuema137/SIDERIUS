@@ -68,8 +68,11 @@ green with recorded evidence.
             84 + 166 green; parity green)
 [x] P1-C4 — trial incumbent persisted fields (read-only bookkeeping)
             (commit pending operator approval; tune suite 71 green)
-[ ] P1-C5 — per-file best table (SECONDARY but REQUIRED, isolated
+[x] P1-C5 — per-file best table (SECONDARY but REQUIRED, isolated
             commit; strengthened determinism contract §3.7)
+            (commit pending operator approval; 18 targeted + 340
+            regression green; A4 write-side + smallest public boundary
+            in core.resume landed together)
 [ ] P1-V1 — pre-gate sweep: targeted unit + pseudo integration
             (BOTH incumbent branches deterministic)
 [ ] P1-V2 — Gate 2: standalone smallest canonical smoke (real LLM +
@@ -580,6 +583,162 @@ rebuild script**, under the following determinism contract
   no-hash artifacts admitted, marked in the header as
   `unverified_sources: N`).
 
+#### 3.7.1 Resolved P1-C5 decisions (operator, 2026-07-27, rev 3.1)
+
+**A1 — incremental write location**: chain-only, in
+`sdsc_submission_scripts/run_one_iteration.py::main` after the
+committed `run_output`, its SHA-256, and the normal manifest are
+available. No `model_exploration.py` in-process hook (the workflow
+does not currently provide the same manifest/hash commit boundary).
+Exact placement + failure handling pinned after code audit (§3.7.3
+below).
+
+**A2 — `gate_summary` — ONE stable schema for both raw and valid
+rows** (the row key describes the candidate pool used for best
+selection; `gate_summary` describes the actual source record):
+
+```text
+candidate_validity: "valid" | "invalid" | "unknown"
+validity_basis:    "committed_fields" | "persisted_verdicts"
+                 | "waiver" | "unknown"
+blocking_failed_gate_ids: list[str]  # empty list when none
+waiver_ids:               list[str]  # empty list when none
+```
+
+A `validity=raw` row may still be sourced from a HealthGate-valid
+record — the `gate_summary` reports the record's actual status. Full
+HealthGate payloads are NOT persisted in the table.
+
+**A3 — per-file best selection (shared helper for incremental +
+rebuild)**: for each `(file_index, phase, validity)` consider only
+finite positive linear `file_vector[file_index]` values; pick the
+largest linear value; convert to log for storage. Tie rule: earliest
+iteration → deterministic persisted-round rule per §3.3 → lex smallest
+`exp_id`. Round identity is never fabricated (§3.3 `round_provenance`).
+
+**A4 — formal `eval_portion`**: use committed `formal_eval_portion`
+when the source has it; store `null` for legacy sources where it is
+unavailable. NEVER inferred from current defaults or repo config.
+Audit result recorded in §3.7.2 below before table code is edited.
+
+**A5 — equality test scope**: strict byte-equality
+(incremental == rebuild) on the SYNTHETIC two-iteration workspace
+only; copied real V17/V18r workspace is a legacy backfill smoke +
+provenance-availability check, NOT a byte-equality expectation.
+
+**A6 — incremental trigger**: update ONLY on normal completed
+iterations with a committed source artifact. NEVER on `no_records`,
+`failed`, or crash manifests. `iterations_included` is derived from
+the accepted committed sources (no separate monotonic counter).
+
+**A7 — untouched files**: no empty rows for files that never received
+a usable score; `files_covered` reports the actual sorted file set.
+
+**A8 — canonical header (compact; strict byte-equality domain)**:
+
+```text
+schema_version        # "1"
+metric_id             # "tidmad_denoising_score"
+score_transform       # "log"
+log_base              # 5.27
+iterations_included   # sorted list
+files_covered         # sorted list
+skipped_nonpositive_count  # int
+unverified_sources    # int (legacy no-hash count)
+validity_semantics    # short prose note
+```
+
+No `generated_by` and no `generated_at` (either would break byte
+identity). Tool/run metadata may be PRINTED separately but MUST NOT
+enter the canonical JSON.
+
+#### 3.7.2 Formal `eval_portion` audit (§3.7 A4 requirement)
+
+Grep + live-artifact check performed 2026-07-27. Findings:
+
+- `formal_eval_portion` exists ONLY as a `HyperparamTuningInput` field
+  (`agent/schemas/hyperparam_tuning.py:897`); it is a run-time
+  parameter, threaded via the tune protocol into the tuner.
+- The tuner's persisted `run_config_iter_NNN.json` (assembled at
+  `ml_hyperparameter_tune_agent.py:1969`) does NOT include the field.
+  The three formal-related keys it persists are
+  `formal_reference_score`, `resolved_skip_formal_threshold`,
+  `resolved_bypass_formal_threshold`.
+- Verified against two live artifacts:
+  - `exploration_loss_v17_20260718_235910/iter_001/.../run_config_iter_001.json`
+    — `formal_eval_portion` MISSING.
+  - `v18r_arch_10_14/iter_001/.../run_config_iter_001.json`
+    — `formal_eval_portion` MISSING.
+- The tuner's per-round `ExperimentRecord` writes `eval_portion` only
+  when `trial_config.is_trial` (§2.4 trap 2 in this doc); formal
+  records genuinely have no key.
+
+**Consequence for P1-C5 (operator revision 2026-07-27)**: legacy rows
+correctly hold `eval_portion=null`, but **P1-C5 explicitly requires
+formal sampling provenance for new artifacts**, so this PR carries the
+smallest write-side change: persist `formal_eval_portion` (and
+`formal_strategy`, which pairs with it and is likewise required by
+the P1-C5 row schema) in the committed `run_config_iter_NNN.json`.
+Modern rows read the committed values; legacy rows stay `null` (never
+inferred from current defaults or repo configuration). Both branches
+are tested. **FU-P1-7 removed** — this is not a follow-up.
+
+#### 3.7.3 P1-C5 code-audit and file plan
+
+Chain-runner commit/error flow (`sdsc_submission_scripts/run_one_iteration.py`)
+audited 2026-07-27 (lines 1462–1534). Structure:
+
+- `write_manifest(iter_dir, run_name, results=[], crashed=True)` on
+  every failure branch (2 exception handlers, lines 1469, 1474).
+- Normal path: `manifest = write_manifest(iter_dir, run_name, results, ...)`
+  at line 1477 (P1-C3 added the incumbent kwargs).
+- `[TOKEN_ITER]` rollup at line 1497 is the ESTABLISHED best-effort
+  pattern (wrapped in `try/except`; failure prints a `WARN` and never
+  breaks the chain). **The per-file-best writer mirrors this pattern
+  exactly.**
+- Then a branch on `manifest["status"]`: `completed` → `sys.exit(0)`
+  at 1513; `no_records` → `sys.exit(0)` at 1530; other → `sys.exit(1)`.
+
+**Placement**: after `write_manifest` (line 1477) and after the
+`[TOKEN_ITER]` rollup (line 1503), inside a `try/except` best-effort
+block gated on `manifest["status"] == "completed"` (A6). Failure to
+write the table logs a `WARN` and never fails the iteration — the
+table is not decision state.
+
+**File plan** (minimal, no new abstractions beyond the operator-
+requested shared helper):
+
+| File | Change |
+|---|---|
+| `execute_tools/per_file_best.py` (NEW) | The shared computation: `build_table(workspace) -> dict` walks `{workspace}/iter_*/manifest.json`, verifies hashes when present, parses run_outputs, applies A3 per-file selection using core.resume commit-time validity primitives, returns canonical dict. `write_table(workspace) -> Path` serializes it atomically per A8. |
+| `sdsc_submission_scripts/run_one_iteration.py` | After `write_manifest` + `[TOKEN_ITER]` rollup, best-effort call `write_table(args.workspace)` gated on `manifest["status"] == "completed"`. |
+| `scripts/rebuild_per_file_best.py` (NEW) | Thin CLI wrapper around `write_table`; also accepts `--print-only` for the backfill smoke. |
+| `tests/unit/execute_tools/test_per_file_best.py` (NEW) | The seven design-doc test bullets. |
+| `tests/unit/scripts/test_rebuild_per_file_best.py` (NEW) | CLI smoke + rebuild==incremental byte-identity assertion. |
+
+**Shared primitives (P1-C2 ↔ P1-C5) — smallest public boundary
+(operator revision 2026-07-27)**: rather than importing several
+underscore-private helpers from `core.resume`, expose ONE thin
+public entry point that returns the commit-time classification +
+artifact-verification information P1-C5 needs. Chosen boundary
+(inspected 2026-07-27): a single public function
+`classify_committed_record(record, parsed_output, output_path,
+workspace)` that returns a small structured result carrying
+`validity` (VALID / INVALID / UNKNOWN), `validity_basis`
+(`committed_fields|persisted_verdicts|waiver|unknown`) — matching
+the A2 gate_summary schema — plus the `round_index` +
+`round_provenance` per §3.3. Artifact-hash verification and gate-set
+resolution stay INSIDE `core.resume` (the P1-C5 caller passes the
+already-parsed output + workspace and receives back the classification
+only). No new shared module; no bulk promotion of unrelated resume
+internals.
+
+**Write-side additions for P1-C5 A4 (operator revision 2026-07-27)**:
+tuner `run_config_iter_NNN.json` (assembled at
+`ml_hyperparameter_tune_agent.py:1969`) gains `formal_eval_portion`
+and `formal_strategy`. Backfill-blind — historical run_configs still
+parse cleanly; missing keys resolve to `null` in per_file_best rows.
+
 ## 4. Affected locations
 
 | File | Change | Commit |
@@ -990,39 +1149,114 @@ touches no decision logic; scope-expansion rule per §0.
 
 **Code**:
 
-- [ ] incremental materialization at iteration commit (atomic write,
+- [x] incremental materialization at iteration commit (atomic write,
       canonical serialization, committed-provenance timestamps)
-- [ ] `scripts/rebuild_per_file_best.py` (hash-checked sources,
+      *(done 2026-07-27: `execute_tools/per_file_best.py`
+      `write_table`; atomic temp+`os.replace`; canonical JSON
+      (sort_keys, fixed separators, LF, UTF-8); wired into
+      `run_one_iteration.py` after `[TOKEN_ITER]` rollup as best-
+      effort `[PER_FILE_BEST]`; gated on `manifest["status"] ==
+      "completed"` per A6.)*
+- [x] `scripts/rebuild_per_file_best.py` (hash-checked sources,
       backfill mode, `unverified_sources` header count)
-- [ ] linear→log conversion + skip counting; formal `eval_portion`
+      *(done: thin CLI wrapper over `write_table` +
+      `canonical_bytes`; `--print-only` mode; exits 2 on missing
+      workspace.)*
+- [x] linear→log conversion + skip counting; formal `eval_portion`
       sourcing rule; raw/valid row separation with record-level
       commit-time validity semantics; metric/transform header
       (`metric_id`, `score_transform`, `log_base`)
+      *(done incl. A4 write-side: tuner `run_config` at
+      `ml_hyperparameter_tune_agent.py:1969` now persists
+      `formal_strategy` + `formal_eval_portion`; per_file_best reads
+      committed values, legacy sources resolve to null.)*
+- [x] Smallest shared boundary added: `core.resume` gains
+      `CommitTimeClassification` (dataclass) + `classify_committed_record`
+      (public function) — ONE entry point covering commit-time validity
+      + basis label + round provenance. `per_file_best.py` imports
+      only these public names; no underscore-private imports.
+      Trivial local duplicates (`_iter_run_name`, `_sha256_stream`)
+      documented in-place.
 
-**Tests**:
+**Tests** (all in
+`tests/unit/execute_tools/test_per_file_best.py` unless noted; CLI
+suite in `tests/unit/scripts/test_rebuild_per_file_best.py`):
 
-- [ ] rebuild == incremental (BYTE-identical under the canonical
+- [x] rebuild == incremental (BYTE-identical under the canonical
       serialization contract) on a synthetic two-iteration workspace
-- [ ] canonical ordering stable under permuted input discovery order
-- [ ] atomicity: interrupted write leaves the previous table intact
+      *(`test_rebuild_equals_incremental_byte_identical` + CLI-level
+      `test_cli_write_matches_incremental_bytes`)*
+- [x] canonical ordering stable under permuted input discovery order
+      *(`test_canonical_ordering_stable_under_permuted_iteration_order` —
+      touches manifests in reverse then rebuilds; bytes identical)*
+- [x] atomicity: interrupted write leaves the previous table intact
       (temp+replace verified)
-- [ ] timestamps derive from record provenance (two runs at different
+      *(`test_atomic_write_preserves_previous_on_failure` — patches
+      `os.replace` to raise mid-write; original file byte-identical)*
+- [x] timestamps derive from record provenance (two runs at different
       wall-clock times → identical bytes)
-- [ ] linear→log conversion correct incl. `-inf`/non-positive skip
+      *(`test_timestamps_derive_from_record_provenance_not_wallclock`)*
+- [x] linear→log conversion correct incl. `-inf`/non-positive skip
       counting
-- [ ] phantom record appears ONLY in raw rows, never valid rows;
+      *(`test_linear_to_log_conversion_and_nonpositive_skip` — 5.27
+      → 1.0 exact; 0.0 and -1.5 counted; None never participates.
+      **Note**: the `math.inf` case was DROPPED from the fixture —
+      does not survive HyperparamTuningOutput JSON round-trip and
+      real scoring never emits non-finite floats.)*
+- [x] phantom record appears ONLY in raw rows, never valid rows;
       `valid` rows use record-level commit-time validity (a record
       with per-file gate variance still classifies at record level)
-- [ ] tampered / hash-mismatched `run_output` → rebuild refuses the
+      *(`test_phantom_score_only_in_raw_rows` +
+      `test_valid_rows_use_record_level_commit_time_validity`; the
+      latter's assertion was corrected from `"invalid"` to
+      `"unknown"` after diagnosis — commit-time-only rules yield
+      UNKNOWN when no matching effective-policy artifact is present,
+      per §3.3 rule 3; my initial test contradicted my own design.)*
+- [x] tampered / hash-mismatched `run_output` → rebuild refuses the
       input (error names the artifact); incremental path unreachable
       by construction (§3.6 already stopped the chain)
-- [ ] offline real-workspace backfill smoke on a copied V17 iteration
+      *(`test_hash_mismatch_raises_replay_integrity` — same fail-
+      closed behavior as incumbent walker.)*
+- [x] offline real-workspace backfill smoke on a copied V17 iteration
       directory (no GPU/LLM; legacy no-hash sources admitted and
       counted in `unverified_sources`)
+      *(`test_legacy_no_hash_manifest_counted_as_unverified` +
+      `test_modern_run_config_populates_formal_provenance` — modern
+      write-side + legacy-null contract both covered as required by
+      A4.)*
+
+**Additional coverage (operator requirements)**:
+
+- [x] failed/missing incremental update is fully recoverable via the
+      rebuild path from committed artifacts alone
+      *(`test_failed_incremental_recoverable_by_rebuild` —
+      simulates a completely absent `per_file_best.json`; rebuild
+      writes the full state from `iter_NNN/` committed artifacts.)*
+- [x] A6 (`test_no_records_and_missing_iters_skipped`),
+      A7 (`test_untouched_files_have_no_rows`),
+      A8 (`test_header_shape_and_schema_version` — asserts NO
+      `generated_by`, NO `generated_at`),
+      trial sampling provenance
+      (`test_trial_row_uses_record_sampling_provenance`)
 
 **Verification checklist**:
 
-- [ ] targeted suites green (counts + wall); ruff + pyright clean
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/test_per_file_best.py tests/unit/scripts/test_rebuild_per_file_best.py -q`
+      → **18 passed, 1.01 s — GREEN** (first run 4 failures across
+      the two suites; all 4 diagnosed as TEST at fault — see the
+      corresponding test bullet evidence lines above)
+- [x] regression sweep
+      (`tests/unit/execute_tools/test_per_file_best.py` +
+      `tests/unit/scripts/test_rebuild_per_file_best.py` +
+      `tests/unit/core/test_resume_incumbent.py` +
+      `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`)
+      → **108 passed, 124.75 s — GREEN**
+- [x] regression sweep 2
+      (`tests/unit/sdsc_submission_scripts` +
+      `tests/unit/core/test_resume.py` + `tests/unit/scripts`)
+      → **232 passed, 1.71 s — GREEN**
+- [x] ruff check + `ruff format --check` clean on all 7 touched files
+- [ ] ~~pyright~~ n/a on lilab (Node < 14; PR #123 precedent)
 
 **Test gate**: unit only.
 
