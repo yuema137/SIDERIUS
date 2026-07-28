@@ -344,6 +344,55 @@ class TestHyperparamTuningAgentRun:
         assert output.resolved_skip_formal_threshold == pytest.approx(6.2)
         assert output.resolved_bypass_formal_threshold == pytest.approx(6.7)
 
+    def test_best_valid_trial_fields_select_trial_records_only(self, agent_and_mocks, tmp_path):
+        """V19 PR 1 (P1-C4): best_valid_trial_* selects from HealthGate-valid
+        TRIAL records only — a higher-scoring valid FORMAL record is never
+        counted (bookkeeping notion, design §3.5)."""
+        agent, _, mock_sandbox = agent_and_mocks
+        # Pre-seed the summary with schema-valid records matching this
+        # run's invariant set (gates ENABLED — a False stamp is correctly
+        # rejected by the DS5 ingress validation) and carrying passing
+        # verdicts for the three shipped blocking gates so
+        # is_valid_candidate classifies them VALID.
+        passing = [
+            {
+                "gate_name": gate_id,
+                "execution_status": "passed",
+                "check_passed": True,
+                "would_invalidate_under_production_policy": False,
+                "resolved_action": "continue",
+            }
+            for gate_id in (
+                "output_diversity_blocking",
+                "output_std_blocking",
+                "amplitude_collapse_blocking",
+            )
+        ]
+        base = {
+            "status": "success",
+            "model_type": "punet",
+            "timestamp": "2026-07-27 00:00:00",
+            "params": {},
+            "health_gate_results": passing,
+            "health_gate_enabled": True,
+        }
+        mock_sandbox.save_record(
+            {**base, "exp_id": "trial_a", "denoising_score": 0.5, "is_trial": True}
+        )
+        mock_sandbox.save_record({**base, "exp_id": "formal_a", "denoising_score": 1.0})
+
+        output = agent.run(_make_input(tmp_path))
+        assert output.best_valid_trial_exp_id == "trial_a"
+        assert output.best_valid_trial_denoising_score == 0.5
+        # Formal side unaffected by the trial bookkeeping.
+        assert output.best_valid_formal_denoising_score == 1.0
+
+    def test_best_valid_trial_fields_none_without_valid_trials(self, agent_and_mocks, tmp_path):
+        agent, _, _ = agent_and_mocks
+        output = agent.run(_make_input(tmp_path))
+        assert output.best_valid_trial_exp_id is None
+        assert output.best_valid_trial_denoising_score is None
+
     def test_incumbent_provided_but_flag_off_not_consumed(self, agent_and_mocks, tmp_path):
         """V19 PR 1 rollback semantics: flag OFF → gates consume nothing
         (reference resolves to None, never 0.0) while the provided value

@@ -1471,3 +1471,23 @@ class TestChainIncumbentManifest:
         )
         assert m2["chain_incumbent_used"] is None
         assert m2["chain_incumbent_source"]["iter_idx"] == 1
+
+    def test_manifest_mirrors_best_valid_trial_score(self, tmp_path):
+        """V19 PR 1 (P1-C4): the read-only trial-best bookkeeping mirrors
+        into the manifest; absent on the output → null in the manifest."""
+        ws = str(tmp_path)
+        out1 = _p1_tune_output(
+            "iter_001", valid_formal=1.2, exp_id="f1", records=[_p1_record("f1", 1.2)]
+        )
+        out1.best_valid_trial_denoising_score = 0.5
+        out1.best_valid_trial_exp_id = "t1"
+        _p1_write_iter_output(ws, 1, out1)
+        m1 = runner.write_manifest(os.path.join(ws, "iter_001"), "iter_001", [out1])
+        assert m1["best_valid_trial_score"] == 0.5
+
+        out2 = _p1_tune_output(
+            "iter_002", valid_formal=None, exp_id=None, records=[_p1_record("f2", 0.3)]
+        )
+        _p1_write_iter_output(ws, 2, out2)
+        m2 = runner.write_manifest(os.path.join(ws, "iter_002"), "iter_002", [out2])
+        assert m2["best_valid_trial_score"] is None
