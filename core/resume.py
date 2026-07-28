@@ -438,6 +438,96 @@ def _summary_mismatch(iter_idx: int, field_name: str, detail: str) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Public boundary — V19 PR 1 shared helper for other in-repo callers that
+# need the SAME commit-time validity classification as the incumbent
+# reconstruction, without duplicating logic or importing private names
+# (design doc §3.7.3, rev 3.1 — the smallest boundary P1-C5 needs).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CommitTimeClassification:
+    """Commit-time classification of one ``ExperimentRecord`` for public use.
+
+    ``validity_basis`` mirrors the ``gate_summary`` schema in the P1-C5
+    per-file best table (design doc §3.7 A2):
+
+      * ``committed_fields`` — record matched the parsed output's
+        summary fields under the P1-C2 six-check contract (formal path
+        only; caller decides when to route here);
+      * ``persisted_verdicts`` — re-derived from the record's per-gate
+        results against the iteration's commit-time policy;
+      * ``waiver`` — the DS5 ``health_gate_enabled=False`` stamp (record
+        waived from gate requirement at commit time);
+      * ``unknown`` — commit-time validity could not be established (no
+        stamp, missing effective-policy artifact, sha mismatch, or
+        required verdicts absent).
+
+    ``round_index`` / ``round_provenance`` follow §3.3: never fabricated
+    from list position — persisted ``logical_round`` or explicit
+    ``legacy_unknown``.
+    """
+
+    validity: CandidateHealthValidity
+    validity_basis: str
+    round_index: int | None
+    round_provenance: str
+
+
+def classify_committed_record(
+    record: Any,
+    parsed_output: HyperparamTuningOutput,
+    output_path: str,
+    workspace: str,
+) -> CommitTimeClassification:
+    """Return commit-time validity + round provenance for one record.
+
+    Uses ONLY commit-time evidence: the iteration's persisted per-record
+    gate verdicts interpreted against the workspace's materialized
+    effective HealthGate policy (accepted only when its canonical body
+    sha equals the iteration's stamped ``health_config_sha256``). The
+    repo-current shipped ``configs/health_checks.yaml`` is NEVER
+    consulted — the same rule that makes incumbent reconstruction
+    stable across repo-policy edits (design doc §3.3).
+
+    Args:
+        record: an ``ExperimentRecord`` model or a plain dict as
+            serialized in ``run_output_*.json`` ``all_records``.
+        parsed_output: the validated ``HyperparamTuningOutput`` the
+            record was pulled from (needed for ``health_config_sha256``
+            when resolving commit-time gate ids).
+        output_path: absolute path of that ``run_output_*.json`` (used
+            for the effective-config lookup fallback: file's directory
+            first, then the workspace root).
+        workspace: chain workspace root.
+
+    Returns:
+        :class:`CommitTimeClassification`. The caller decides how to use
+        it — this function performs no artifact-hash verification or
+        summary/source cross-checks (those live in resume's incumbent
+        walker for incumbent-specific reasons).
+    """
+    rec = _record_dict(record)
+    gate_ids = _commit_time_gate_ids(parsed_output, output_path, workspace)
+    validity = _classify_commit_time(rec, gate_ids)
+
+    if rec.get("health_gate_enabled") is False:
+        validity_basis = "waiver"
+    elif gate_ids is None:
+        validity_basis = "unknown"
+    else:
+        validity_basis = "persisted_verdicts"
+
+    round_index, round_provenance = _round_provenance(rec)
+    return CommitTimeClassification(
+        validity=validity,
+        validity_basis=validity_basis,
+        round_index=round_index,
+        round_provenance=round_provenance,
+    )
+
+
 def _formal_candidate_from_committed_fields(
     parsed: HyperparamTuningOutput,
     manifest: dict,
