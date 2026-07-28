@@ -30,6 +30,7 @@ longer pass prior iters' run_outputs explicitly. The deprecated
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import sys
@@ -289,6 +290,8 @@ def write_manifest(
     results: list,
     *,
     crashed: bool = False,
+    chain_incumbent_used: float | None = None,
+    chain_incumbent_source: dict | None = None,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
@@ -369,7 +372,25 @@ def write_manifest(
             "resolved_bypass_formal_threshold": getattr(
                 tune_output, "resolved_bypass_formal_threshold", None
             ),
+            # V19 PR 1 (P1-C3, design §3.4/Invariant II) — the CHAIN
+            # incumbent this iteration consumed, under keys DISTINCT from
+            # every iteration-local best_* field. ``used`` is what the
+            # gates received (null when the coupling flag is OFF or no
+            # incumbent existed); ``source`` is the reconstruction
+            # provenance (recorded even when unconsumed, so
+            # "provided-but-not-consumed" is auditable).
+            "chain_incumbent_used": chain_incumbent_used,
+            "chain_incumbent_source": chain_incumbent_source,
         }
+        # V19 PR 1 (§3.6) — immutable artifact identity: hash the exact
+        # run_output this manifest describes, so resume can fail closed
+        # on any later mutation (ReplayIntegrityError).
+        if manifest["output_path"] is not None and os.path.isfile(manifest["output_path"]):
+            digest = hashlib.sha256()
+            with open(manifest["output_path"], "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    digest.update(chunk)
+            manifest["run_output_sha256"] = digest.hexdigest()
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -518,6 +539,15 @@ def build_parser() -> argparse.ArgumentParser:
         "(current_run_best_formal_score + bypass_formal_time_budget_min_delta). "
         "Matches HyperparamTuningInput schema default 0.0. "
         "Set to 0.5 to only bypass when trial beats current best by >= 0.5 dB.",
+    )
+    parser.add_argument(
+        "--enable_chain_incumbent_formal_gates",
+        action="store_true",
+        help="V19 PR 1: let the formal delta gates CONSUME the reconstructed "
+        "chain incumbent as their reference. Default OFF (gates see no "
+        "reference; reconstruction, provenance, and manifest stamps still "
+        "run unconditionally). Rollback = omit this flag; the pre-V19 "
+        "fixed-0.0 reference is not restorable.",
     )
     parser.add_argument(
         "--is_trial", action="store_true", help="Enable trial mode (default: True for production)."
@@ -1404,6 +1434,11 @@ def main():
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
+            # V19 PR 1 (P1-C3) — chain formal-incumbent carry-over.
+            # Reconstruction is unconditional; the flag controls only
+            # whether the tuner's formal gates consume the reference.
+            restored_chain_incumbent_score=state.chain_best_valid_formal_score,
+            enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
             # External agents (Commit 6) — see Design Decisions 1 + 2 in
             # docs/commit_plan_ml_literature_review.md. The enable flag is
             # resolved above (CLI > YAML > False); the config path
@@ -1435,7 +1470,22 @@ def main():
         write_manifest(iter_dir, run_name, results=[], crashed=True)
         sys.exit(1)
 
-    manifest = write_manifest(iter_dir, run_name, results)
+    manifest = write_manifest(
+        iter_dir,
+        run_name,
+        results,
+        # V19 PR 1 (Invariant II): the chain incumbent this iteration
+        # consumed, stamped under its own keys — never as an
+        # iteration-local best_* field. ``used`` reflects the coupling
+        # flag; ``source`` records the reconstruction provenance even
+        # when unconsumed.
+        chain_incumbent_used=(
+            state.chain_best_valid_formal_score
+            if args.enable_chain_incumbent_formal_gates
+            else None
+        ),
+        chain_incumbent_source=state.chain_best_valid_formal_provenance,
+    )
 
     # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON error
     # in the rollup must never break the chain — token_usage.jsonl is
