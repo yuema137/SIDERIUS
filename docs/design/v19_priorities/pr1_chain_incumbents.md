@@ -1400,7 +1400,9 @@ production skip behavior after this Gate 2 must be backed by direct
 evidence from the actual logs of the run** — do not infer skip
 behavior from the mere presence of an incumbent.
 
-**Exact command** (lilab; single invocation, no `tee`):
+**Exact command** (lilab; single invocation, no `tee`). Every line
+ends with a bare `\` — no trailing inline comments — so the block is
+copy-pasteable verbatim into a shell:
 
 ```bash
 WS=/tmp/checkpoint_pr1_$(date +%s)
@@ -1413,11 +1415,17 @@ bash sdsc_submission_scripts/run_chain.sh \
     --max_proposal_attempts 3 \
     --max_epochs 1 \
     --data_scope 4-9 \
-    --trial_portion 0.02 --train_portion 1.0 --eval_portion 0.01 \
-    --formal_portion 0.02 --formal_train_portion 1.0 --formal_eval_portion 0.01 \
+    --health_gate_files 4,5,6,7,8,9 \
+    --trial_portion 0.02 \
+    --train_portion 1.0 \
+    --eval_portion 0.01 \
+    --formal_portion 0.02 \
+    --formal_train_portion 1.0 \
+    --formal_eval_portion 0.01 \
     --trial_time_budget_minutes 5 \
     --formal_time_budget_minutes 30 \
-    --trial_vram_budget_gb 24 --formal_vram_budget_gb 24 \
+    --trial_vram_budget_gb 24 \
+    --formal_vram_budget_gb 24 \
     --runtime_watchdog \
     --enable_chain_incumbent_formal_gates \
     --llm_config llm_configs/openai_tiered_v1.json \
@@ -1426,10 +1434,19 @@ bash sdsc_submission_scripts/run_chain.sh \
         /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
 ```
 
-Note: `--enable_chain_incumbent_formal_gates` is the P1-C3-added
-shell arm (`_chain_common.sh:215`) that forwards to the tuner as
-`--enable_chain_incumbent_formal_gates` (P1-C3c). No other launcher
-change is needed.
+Notes:
+
+- `--enable_chain_incumbent_formal_gates` is the P1-C3-added shell
+  arm (`_chain_common.sh:215`) that forwards to the tuner as
+  `--enable_chain_incumbent_formal_gates` (P1-C3c).
+- `--health_gate_files 4,5,6,7,8,9` is **REQUIRED** under any partial
+  `--data_scope`. DS8 boundary enforcement (`run_one_iteration.py`
+  startup) refuses to launch when the shipped
+  `configs/health_checks.yaml`'s `peek_file_indices` fall outside the
+  resolved DataScope OR when any check omits an explicit peek list
+  under partial scope. The values must EXACTLY equal the resolved
+  DataScope. V18r's launcher pairs these two flags together at
+  `sdsc_submission_scripts/launch_v18_wave1.sh:121`.
 
 **Scope, rounds, iterations, portions** (spelled out from the command
 above, all matching Lite Plan defaults except iteration count):
@@ -1441,6 +1458,7 @@ above, all matching Lite Plan defaults except iteration count):
 | Proposal attempts per iter | 3 | Lite default |
 | Max epochs | 1 | Lite default |
 | DataScope | files 4-9 (6 files) | Lite default |
+| HealthGate monitored files | `4,5,6,7,8,9` — exactly matches DataScope | DS8 requirement (see notes above) |
 | `trial_portion / train_portion / eval_portion` | 0.02 / 1.0 / 0.01 | Lite default |
 | `formal_portion / formal_train_portion / formal_eval_portion` | 0.02 / 1.0 / 0.01 (→ ~3,000 training steps @ seg 10k b8; 12 eval PSD) | Lite default |
 | `trial_time_budget_minutes` | 5 | Lite default |
@@ -1598,6 +1616,20 @@ Verbatim-quoted evidence pattern (per anti-hallucination rule):
       instead.
 - [ ] `pyright` limitation on lilab is accepted (PR #123 precedent)
 - [ ] Wall-clock start noted; 120-min timer set
+- [ ] **Partial-DataScope HealthGate pairing (added after the 2026-07-27
+      first-attempt failure)**: verify `--health_gate_files` is present
+      in the command AND its value EXACTLY equals the resolved
+      `--data_scope`. Confirm by parsing the launch command:
+      `awk` the two flag values and assert equal. Never launch a
+      partial-scope smoke without this pairing — DS8 refuses at
+      startup, but the CI parity test (`test_chain_consistency.py`)
+      does not catch a MISSING flag, only a mismatched forwarding.
+- [ ] **CLI parse dry-run**: run
+      `bash sdsc_submission_scripts/_chain_common.sh` argparse-equivalent
+      or launch with `--dry_run` and confirm every flag parses and
+      every seed path resolves before real launch. (See
+      `docs/running_chain_test.md` "§3.2 flags" section for the
+      canonical dry-run recipe.)
 
 **Reporting after the run** (regardless of outcome):
 
@@ -1609,6 +1641,53 @@ Verbatim-quoted evidence pattern (per anti-hallucination rule):
   API cost.
 - Record any deviations from the launch command with rationale.
 
+#### P1-V2 attempt log
+
+**Attempt 1 — 2026-07-27 23:18:00-07:00 — FAILED at preflight
+(no cost incurred)**
+
+- Workspace: `/tmp/checkpoint_pr1_1785219480/` (retained for review;
+  contains only a crash `manifest.json` — safe to `rm -rf` any time
+  once the operator no longer needs it).
+- Failure timing: exit code 1 at `2026-07-27T23:18:01-07:00` — under
+  1 second after launch, during `run_one_iteration.py`'s
+  run-invariants pre-flight (before any subprocess launch).
+- Cause: the launch command omitted `--health_gate_files` while
+  passing `--data_scope 4-9`. DS8 boundary enforcement refuses to
+  start when the shipped `configs/health_checks.yaml`'s
+  `peek_file_indices` (`[3, 10, 17]` on blocking checks; empty on
+  recording checks → interpreted as "full dataset access") fall
+  outside the resolved partial DataScope. Verbatim error from the
+  log:
+  ```
+  FAIL: run-invariants computation refused to start: HealthGate
+  monitored files violate the DataScope:
+    - gate 'output_diversity_blocking' check 'output_diversity':
+      peek_file_indices [3, 10, 17] outside the DataScope
+      [4, 5, 6, 7, 8, 9]
+    - gate 'output_std_blocking' … (same)
+    - gate 'amplitude_collapse_blocking' … (same)
+    - gate 'pearson_dispersion_recording' check
+      'pearson_dispersion': no explicit peek_file_indices
+      (defaults to full-dataset access) — an explicit in-scope
+      list is required under a partial DataScope
+    - gate 'spectral_peak_ratio_recording' … (same)
+    - gate 'per_file_output_std_recording' … (same)
+    Remediation: pass --health_gate_files with in-scope files
+    (one shared list, applied to every check), or disable the
+    subsystem with --no-health_gate_enabled.
+  ```
+- Cost: **$0.00 LLM, 0 s GPU, 0 training runs** — the chain crashed
+  before any real work.
+- Resolution: paired `--health_gate_files 4,5,6,7,8,9` added to the
+  Exact command block above (matches V18r's launcher pattern at
+  `sdsc_submission_scripts/launch_v18_wave1.sh:121`); new preflight
+  rules added above to prevent recurrence.
+- Doc gap identified in the Gate standard → filed as **FU-P1-8**
+  (see §9 tracker).
+
+- [ ] Attempt 2: __ (awaiting operator go/no-go with the corrected
+      command)
 - [ ] Gate 2 result recorded here: __
 
 ### Validation budget table (baseline §4.4 — estimates filled at P1-D approval)
@@ -1660,6 +1739,17 @@ behavioral claim (§5).
       dual-source design remains a policy-study input for PR 4a.
 - [ ] FU-P1-5 — manifest `best_score`/`raw_best_score` duplicate alias
       cleanup (`run_one_iteration.py:353-354`).
+- [ ] FU-P1-8 — `docs/gates/gate_testing_standard.md` doc gap:
+      the "Lite Plan" and "Regular Plan" tables list
+      `--data_scope 4-9` but do NOT list the required paired
+      `--health_gate_files 4,5,6,7,8,9`. DS8 refuses to launch
+      without it (surfaced by the 2026-07-27 P1-V2 attempt 1
+      failure). Small docs-only fix: add a "HealthGate monitored
+      files" row to both plan tables, and a paragraph note in the
+      standard body pointing at
+      `sdsc_submission_scripts/launch_v18_wave1.sh:121` as the
+      canonical pairing. Not blocking PR 1 merge but should land
+      before the next partial-scope Gate 2 in any project.
 
 ## 10. Open questions
 
