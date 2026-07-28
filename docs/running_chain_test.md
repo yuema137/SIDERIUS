@@ -140,6 +140,49 @@ Two related tuner inputs, forwarded from the chain layer:
 See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
 under "Chain formal-incumbent reference" for full semantics.
 
+### Data-ordering override (V19 PR 2)
+
+Ordering — the sequence in which selected training samples are visited —
+is **agent-proposable** and **operator-overridable**. The execution
+system resolves the value that runs:
+
+```text
+operator override  >  agent proposal  >  default ("shuffle")
+```
+
+Two chain flags, both forwarded only when set (an unset override
+reproduces pre-V19 argv exactly):
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--order_strategy_override` | unset | Force `shuffle` or `sequential` for **every round of the chain**, overriding any agent proposal. |
+| `--file_order_override` | unset | File visitation **order** for `sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written and must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
+
+Two supported chain modes:
+
+- **Forced comparison** — set the override. Every round resolves to it;
+  agent proposals are still recorded but not executed. Use this for a
+  controlled ordering experiment, where a varying ordering would
+  confound the comparison.
+- **Agent exploration** — leave the override unset. Ordering may vary
+  round to round as the agent proposes; each round records its own.
+
+**Resume rule:** the OVERRIDE is pinned in `run_invariants_lock.json`,
+so changing it mid-chain is a violation — the chain's control policy
+cannot silently shift underneath a comparison. Adding an override to a
+chain that started without one (or removing one) requires a new
+workspace, the same rule as a scope change or a HealthGate flip. The
+per-round RESOLVED ordering is deliberately **not** locked, since it may
+legitimately vary in exploration mode.
+
+Where to look afterwards: the tuner prints a `[data_order]` line per
+round naming all three levels; the training engine prints one per epoch
+with the resolved values and epoch seed; each iteration's `manifest.json`
+carries `ordering_by_experiment`, keyed per experiment.
+
+See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Data-ordering resolution" for full semantics.
+
 ### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
 The orchestrator resolves the Python interpreter in this priority order
 (set in `resolve_py_cmd` and verified by the version + passthrough guards):

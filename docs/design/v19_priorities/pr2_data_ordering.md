@@ -1415,13 +1415,15 @@ engine behavior (CB2).
       `core.sandbox_executor.subprocess.run`.** Documented in the
       `_launch` helper's docstring in
       `tests/unit/core/test_ordering_propagation.py`.
-- [ ] `execute_training`: named RESOLVED params
+- [x] `execute_training`: named RESOLVED params
       (`order_strategy`/`file_order` at this boundary carry
       resolver output — execution-facing name kept for
       compatibility, mapping documented per §3.7); write the
       file-order JSON next to the sample-set file; append flags
       when non-default; stub twin mirrors.
-- [ ] `training_skill` wrapper: forward both via `kwargs.get`.
+- [x] `training_skill` wrapper: forward both via `kwargs.get`
+      *(`wrapper.py:21-22`; defaults to `"shuffle"` / `None` so a
+      caller that knows nothing about ordering is unaffected).*
 - [x] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
       surface parse + forward-when-set; override recorded into
       `run_invariants` at chain start (CB1 lock fields).
@@ -1563,12 +1565,24 @@ engine behavior (CB2).
   the pseudo test.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/scripts -q`
-- [ ] Pseudo integration file run (name + counts recorded here)
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+*(run 2026-07-28, lilab; split across the CB3-c / d1 / d2 commits)*
+- [x] `tests/unit/core` + `tests/unit/agent/schemas` →
+      **626 passed** (CB3-c).
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent` →
+      **690 passed in 164.44s** (CB3-c).
+- [x] `tests/unit/sdsc_submission_scripts` +
+      `result_interpretation_agent` + `agent/schemas` →
+      **468 passed in 1.57s** (CB3-d1).
+- [x] `tests/unit/scripts` + `sdsc_submission_scripts` +
+      `protocols` + `workflows` → **473 passed in 11.84s** (CB3-d2).
+- [x] Pseudo integration:
+      `tests/integration/workflows/test_ordering_resolution_pseudo.py`
+      → **7 passed in 1.95s** (recorded under P2-V1).
+- [x] `ruff check` + `ruff format --check` clean on every touched
+      file in all three commits.
+- [x] Tests NOT run, with reason: no Gate tests (P2-V2 is separate
+      and operator-approved); `pyright` not run (lilab Node < 14,
+      PR #123 precedent).
 
 **Commit boundary.** Propagation + its tests ONLY. No engine or
 schema changes (fixes discovered here go back to CB1/CB2 as
@@ -1576,10 +1590,45 @@ amendments, shown to operator). Stop-and-show before commit.
 
 ### P2-V1 — pre-gate sweep (after CB3)
 
-- [ ] Full targeted unit sweep across all four commits' suites, one
-      run, counts recorded here.
-- [ ] Pseudo integration: BOTH strategies deterministic end-to-end.
-- [ ] Evidence recorded in this doc (§7.1 boxes ticked with test
+- [x] Pseudo integration: every resolution case deterministic
+      end-to-end.
+      *(NEW `tests/integration/workflows/test_ordering_resolution_pseudo.py`,
+      **7 passed in 1.95s**. Drives the PRODUCTION path — real
+      `run_workflow` (agents mocked at the workflow boundary, no LLM,
+      no training) + the real `write_manifest` the chain runner uses,
+      reusing the PR 1 P1-V1 harness shape. Cases: proposal wins;
+      override wins AND is not attributed to the agent; default
+      wins; rejected proposal + no override; rejected proposal +
+      override; two-round granularity; manifest block survives to
+      disk. Each case asserts record, manifest, and
+      interpreter-facing summary tell ONE story via a shared
+      `_assert_agree` helper.
+      Harness fix during authoring (test-side only): iteration 1
+      loads a seed tuning output from
+      `{data_dir}/{model}/{source_run}/agent/run_output_*.json`
+      before any node runs, so the harness seeds one per test under
+      `tmp_path` instead of pointing at a nonexistent `/tmp/data`.)*
+- [x] Full unit sweep, one run, counts recorded here.
+      *(`.venv/bin/python -m pytest tests/unit -q` →
+      **4475 passed, 1 failed, 3 xfailed in 204.10s**. The single
+      failure is FU-P2-4
+      (`test_scoring_helpers.py::TestPostPathAReferenceConsistency`),
+      identified during P2-CA and PROVEN pre-existing by stashing all
+      PR-2 changes and reproducing it byte-identically. It is
+      skip-guarded on machines without the ground-truth data, so CI
+      never sees it. Unrelated to ordering.)*
+- [x] Integration sweep.
+      *(`pytest tests/integration/workflows -q` →
+      **32 passed, 8 skipped, 1 failed in 202.36s**. The failure is
+      `test_vocab_accumulation::test_vocab_candidate_promotion_across_three_iterations`
+      = **FU-7**, already recorded in
+      `docs/design/enable_partial_file_list.md` as pre-existing and
+      confirmed broken on master `9e503ea` on 2026-07-23. Root cause
+      is a stale test double: `RecordingLLMBridge` lacks
+      `emit_marker`, so the interpretation flow degrades and
+      `prediction_evaluation` is None. This branch touched neither
+      `agent/llm_bridge.py` nor that test.)*
+- [x] Evidence recorded in this doc (boxes above ticked with test
       names + counts).
 
 ### P2-V2 — Gate 2 real smoke (operator-approved launch)
@@ -1605,24 +1654,35 @@ the code as actually merged, not as designed.
 
 **Scope.** Enumerate touched nodes/skills from the final PR diff (do
 not rely on this list alone); known targets from the plan:
-- [ ] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
-      — the full ordering-control model: proposal fields
-      (ExperimentPlan), override CLI args with defaults, the
-      resolver precedence rule, the Decision-5 permutation contract
-      with its two-stage validation, the provenance septet, and an
-      ordering block in Key behavioral notes (PR 1 chain-incumbent
-      block precedent) stating the §3.7 attribution invariant.
-- [ ] `docs/running_chain_test.md` — chain-level override arm
-      (final names from CB3), forward-when-set semantics, defaults,
-      the two chain modes (forced comparison vs agent exploration),
-      and the lock-the-override resume rule.
-- [ ] `agent/skills/training_skill/` — has NO `.md` today: create a
-      minimal one documenting the skill contract (inputs incl. the
-      resolved ordering fields, defaults, subprocess flags emitted),
-      per the standing rule.
-- [ ] `nodes/result_interpretation_agent/result_interpretation_agent.md`
-      — the resolved-ordering field(s) on the interpreter-visible
-      summary and the invariant that resolved values are what ran.
+- [x] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+      *(three additions: a "Data ordering (V19 PR 2)" Input subsection
+      with both override fields and the precedence rule; both CLI
+      flags in the arguments table with exact defaults and the
+      range-syntax rejection; and a "Data-ordering resolution"
+      four-part contract in Key behavioral notes — resolution +
+      `[data_order]` lines, file-order semantics, rejected proposals
+      recorded not dropped, and the three-artifact persistence
+      split — stating the attribution invariant verbatim.)*
+- [x] `docs/running_chain_test.md`
+      *(new "Data-ordering override (V19 PR 2)" section beside the
+      PR 1 coupling one: both flags in a table, the two chain modes
+      (forced comparison vs agent exploration), the lock-the-override
+      resume rule with its new-workspace requirement, and where to
+      look afterwards — the two `[data_order]` log lines and the
+      manifest block.)*
+- [x] `agent/skills/training_skill/training_skill.md` — CREATED
+      *(no skill in the repo had a `.md`; this is the first, so it
+      follows the node-doc house style. Documents the full `kwargs`
+      contract incl. the resolved ordering pair, and states the two
+      load-bearing facts: the values arriving here are ALREADY
+      resolved and this layer never re-derives precedence, and the
+      stub mirrors the signature so pseudo mode cannot drift from
+      production at the call boundary.)*
+- [x] `nodes/result_interpretation_agent/result_interpretation_agent.md`
+      *(new Key-behavioral-note covering `round_ordering`: the two
+      rules for downstream use — resolved-only describes execution,
+      and a rejected proposal is not agent silence — plus why it is
+      per-round rather than per-run, and the `legacy_default` read.)*
 - [ ] Diff sweep: any other touched node/skill `.md` (check
       `nodes/*/`*.md` against the PR's touched-file list); confirm
       or update each — record "no update needed" per file
@@ -1724,11 +1784,33 @@ claim without score evidence; sequential may be rejected.
   the ordering study's outcome.
 - **FU-P2-2** — `freeze_subsample` dead switch: plumb or remove.
 - **FU-P2-3** — "streaming" naming cleanup once (if) FU-P2-1 lands.
-- **FU-P2-4** (filed during P2-CA, 2026-07-28) — pre-existing lilab
-  failure `test_scoring_helpers.py::TestPostPathAReferenceConsistency`
-  : `file_vector_to_log_space` disagrees with the on-disk ground
-  truth at `/home/klz/Data/SIDEREIS_DATA/ground_truth/` by ~5e-5
-  relative. Skip-guarded, so CI never sees it. Needs a decision:
-  regenerate the ground-truth artifacts, or fix a real
-  helper/`compute_ground_truth.py` drift. Unrelated to PR 2; not
-  touched by it.
+- **FU-P2-4** (filed during P2-CA, 2026-07-28; DIAGNOSED and marked
+  as a known defect, NOT fixed — operator decision required) — the
+  on-disk ground-truth artifacts and the current production formula
+  are on different rulers. Root cause proven bit-exactly:
+
+  ```text
+  ceiling file_vector[0]           = 1.0892888977496993e-06
+  on-disk per-file score           = -8.260916269975333
+  log_5.27(file_vector[0])         = -8.260971502899364  [current helper]
+  log_5.27(file_vector[0] + 1e-10) = -8.260916269975333  [EXACT match]
+  ```
+
+  The artifacts record `computed_at: 2026-05-01` and used the legacy
+  `1e-10` soft floor; `file_vector_to_log_space` has since removed it
+  ("that was outdated and is removed").
+
+  **The test is NOT stale — it is correctly reporting a real
+  inconsistency**, exactly the drift its own docstring says it exists
+  to catch (model column vs reference columns on different rulers).
+  The assertion and its `rel=1e-9` tolerance are therefore UNCHANGED;
+  the test carries `pytest.mark.xfail(strict=False)` with the full
+  diagnosis, so the suite is green today and this flips to XPASS the
+  moment the mismatch is resolved.
+
+  **Resolution requires a separate operator decision** — either
+  regenerate the reference artifacts under the current formula, or
+  preserve an explicit legacy-reference conversion path for
+  pre-2026-05-01 artifacts. Both touch frozen reference data.
+  **No reference-data or scoring-formula change is included in
+  PR 2** (operator instruction, 2026-07-28).

@@ -65,6 +65,36 @@
 | `formal_train_portion` | `float` | No | `1.0` | Per-epoch iteration fraction from the formal training scope. |
 | `formal_eval_portion` | `float` | No | `1.0` | Fraction of segments per file used for formal-mode eval scope (`snapshot` strategy). Default `1.0` reproduces the legacy full-clone behavior. |
 
+### Data ordering (V19 PR 2)
+
+Ordering is the **sequence** in which the selected samples are visited
+during training. It never changes *which* samples are selected — that is
+`DataScope` + the sampling strategies above.
+
+Ordering follows the project's proposal / override / resolution pattern
+(`docs/design/genericity_contract.md` Seam 2): the **agent proposes**
+(via `ExperimentPlan`), the **operator may override** for a whole chain
+(the fields below), and the execution system **resolves** the value that
+actually runs. Precedence is fixed:
+
+```text
+operator override  >  agent proposal  >  default ("shuffle")
+```
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `order_strategy_override` | `Literal["shuffle", "sequential"] \| None` | No | `None` | Force the visitation order for every round, overriding any agent proposal. `None` = the agent decides, falling back to `"shuffle"` (the pre-V19 behavior). Pinned in the run-invariants lock — changing it mid-chain is a violation. |
+| `file_order_override` | `list[int] \| None` | No | `None` | Operator-forced file visitation order, valid only with `order_strategy_override="sequential"`. Must be a **full permutation** of the resolved `DataScope` — same files, different order. `None` = ascending file index. |
+
+Strategies:
+
+- **`shuffle`** (default) — global uniform shuffle across the epoch's
+  concatenated dataset. Byte-for-byte the pre-V19 behavior.
+- **`sequential`** — file blocks visited in `file_order`, with samples
+  **shuffled within each file**. One global DataLoader with the global
+  `drop_last`, so batches may span a file boundary and the optimizer-step
+  count is identical to `shuffle` for the same selection.
+
 ### Sampling seeds
 
 | Field | Type | Required | Default | Description |
@@ -163,6 +193,8 @@ The CLI is the historical TIDMAD-style invocation and is what `scripts/run_compa
 | `--is_trial` | flag | `False` | Enable trial-explore mode. |
 | `--trial_strategy` / `--trial_portion` / `--train_portion` / `--target_files` / ... | various | various | Mirror the schema fields above. |
 | `--file_index` | `int` | `6` | Validation file index (formal mode). Ignored under `--is_trial` per `feedback_no_file_index_in_trial`. |
+| `--order_strategy_override` | `str` (`shuffle` \| `sequential`) | `None` | Force the training sample visitation order for every round, overriding any agent proposal. Omit = the agent decides, falling back to `shuffle`. |
+| `--file_order_override` | `str` (comma-separated) | `None` | File visitation **order** for `--order_strategy_override sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written; must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
 | `--progress_bar` | flag | `False` | Stream subprocess tqdm output. |
 
 ## Python API usage
@@ -218,6 +250,62 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`.
 
 ## Key behavioral notes
+
+### Data-ordering resolution (V19 PR 2)
+
+Ordering has three levels, and only one of them describes execution.
+This node is where they are combined — **exactly once**, by
+`agent/schemas/ordering.py::resolve_ordering`. Nothing downstream
+re-derives precedence: the training subprocess receives the resolved
+values and has no knowledge of how they were reached.
+
+**The governing invariant:**
+
+> Only resolved configuration values describe the executed experiment.
+> Proposed values describe agent intent; override values describe
+> operator control. Downstream attribution and interpretation must use
+> the resolved values.
+
+Four-part contract:
+
+1. **Resolution.** Each round, the agent's `ExperimentPlan` proposal is
+   combined with the operator's chain override under
+   `operator override > agent proposal > default ("shuffle")`. The
+   decision is printed as a `[data_order]` line naming all three
+   levels; the engine prints its own per-epoch `[data_order]` line with
+   the resolved values and epoch seed.
+
+2. **File-order semantics.** `file_order` is meaningful only for
+   `sequential`, and only alongside an explicit `sequential` strategy at
+   the same level. The resolved order must be a **full permutation** of
+   the resolved `DataScope` — ordering reorders the scope, never changes
+   it. A subset, an out-of-scope index, or a duplicate is a hard error,
+   not something to normalize. When `shuffle` resolves,
+   `resolved_file_order` is `None`; a proposed sequential order is *not*
+   silently retained.
+
+3. **Rejected proposals are recorded, never dropped.** A structurally
+   invalid ordering proposal from the LLM does not kill the round — it
+   falls back, matching the established `ExperimentPlan.with_defaults`
+   treatment of any bad trial field. But the fallback is **not silent**:
+   the record keeps the proposal, `ordering_proposal_rejected=True`, and
+   a reason that distinguishes *"the ordering itself was invalid"* from
+   *"the ordering was fine but another plan field failed"*. A rejected
+   proposal is materially different from agent silence, and
+   `ordering_resolution_source` is never `agent_proposal` for one — so
+   an override is never attributed to the agent.
+
+4. **What is persisted where.** Three artifacts, three jobs:
+   `run_config_{run}.json` holds the run-level **override policy**;
+   each `ExperimentRecord` holds **that round's** resolved ordering plus
+   full provenance; the iteration manifest holds
+   `ordering_by_experiment`, a **round-keyed list**. Ordering may
+   legitimately differ between rounds when no override is in force, so
+   none of these collapse to a single iteration-level value. The
+   operator override — not the resolved value — is pinned in the
+   run-invariants lock.
+
+Design: `docs/design/v19_priorities/pr2_data_ordering.md` §3.6–§3.9.
 
 ### Chain formal-incumbent reference
 
