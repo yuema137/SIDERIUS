@@ -763,6 +763,19 @@ the same constructor.
   sites use `{file_index:04d}`-equivalent f-strings, and the field's
   default already carries the format spec, so call sites pass the
   bare int.
+- **Pre-implementation audit (2026-07-28, operator-approved
+  stop-and-show)**: all four sites re-verified on disk — `:159` is
+  `TIDMADDataset._pull_events_from_sample_set` (confirmed a method
+  of that class); `:294` `TIDMADEpochDataset.__init__`; `:606` RT2
+  storage-provenance path list; `:906` legacy single-file `main()`
+  branch, which uses `str(file_index).zfill(4)` rather than a
+  format spec — identical output for the non-negative ints in play;
+  the parity test asserts equality across `range(TIDMAD.num_files)`
+  regardless. Validator placement confirmed: `DatasetConfig`
+  model-validator; the module-level `TIDMAD` instance means an
+  invalid default fails at import, the earliest possible point.
+  Import seam exists (`train_engine_sandbox.py:19` already imports
+  from `dataset_config`).
 - Non-goals / must-not-change: no signature changes; no behavior
   change (resolved TIDMAD paths identical); inference/scoring
   template sites are LEDGER ENTRIES only, not refactored here
