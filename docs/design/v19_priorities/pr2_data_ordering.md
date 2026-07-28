@@ -950,17 +950,33 @@ reviewable (and revertible) independently of loader mechanics.
   principle this commit implements).
 
 **Implementation plan.**
-- [ ] `ExperimentPlan` proposal fields:
+- [x] `ExperimentPlan` proposal fields:
       `order_strategy: Literal["shuffle","sequential"] | None = None`,
       `file_order: list[int] | None = None` (proposal semantics —
       intent, not execution truth); plan validator rejects
       internally inconsistent proposals (file_order with proposed
       shuffle; duplicates; empty list). Scope-dependent checks
       deferred to resolution.
-- [ ] `HyperparamTuningInput` override fields (conceptually
+      *(Validator `_validate_ordering_proposal` delegates to the
+      shared `validate_ordering_shape`, so proposal and override use
+      ONE structural rule set. **Interaction found with the
+      pre-existing `with_defaults` contract**: a structurally
+      invalid ordering proposal makes strict validation fail, so the
+      established LLM-robustness fallback drops it with the other
+      trial fields and the round proceeds with NO proposal
+      (resolving to override/default), warning printed. Kept as-is —
+      that is the documented treatment of any bad LLM trial field
+      (`trial_portion=5.0` etc.), and making ordering uniquely fatal
+      would let one malformed token kill a round. It does not weaken
+      D5, which concerns an override masking a proposal that DID
+      arrive; every proposal reaching the resolver is validated
+      there. Documented in the `with_defaults` docstring.)*
+- [x] `HyperparamTuningInput` override fields (conceptually
       `order_strategy_override` / `file_order_override` — exact
       names after auditing nearby CLI conventions); structural
       validation at the schema layer.
+      *(Names kept as `order_strategy_override` /
+      `file_order_override`.)*
 - [x] `ResolvedOrdering` type + ONE resolver function (§3.6):
       precedence override > proposal > default; file_order
       resolution rules incl. shuffle → None (no silent retention of
@@ -988,12 +1004,27 @@ reviewable (and revertible) independently of loader mechanics.
       only" and makes override-presence unambiguous
       (`override_strategy is not None`). Recorded here rather than
       silently chosen.
-- [ ] `TrialConfig` gains resolved fields only
+- [x] `TrialConfig` gains resolved fields only
       (`resolved_order_strategy`, `resolved_file_order`) — the
       engine-facing single source of truth per round.
-- [ ] `ExperimentRecord` provenance septet (§3.7):
+      *(Plus a cross-field validator: `resolved_file_order` must be
+      None under `shuffle`, so a stale order can never misreport
+      what ran.)*
+- [x] `ExperimentRecord` provenance septet (§3.7):
       proposed/override/resolved strategy + file_order +
       `ordering_resolution_source`.
+      *(All seven default to None so pre-PR2 records stay
+      constructible and readable; placed beside the existing
+      `planned_*` / `strategy_normalization_reason` provenance,
+      which is the same proposed-vs-effective idea this
+      generalizes.)*
+- [x] Resolution-stage wiring in `validate_runtime_config`.
+      *(**Placement bug caught by test**: the function early-returns
+      for FULL scopes, so an ordering check appended after it would
+      silently never run outside partial-scope runs. The override
+      validation now precedes that return, with a regression test
+      (`test_override_is_validated_under_a_FULL_scope_too`) pinning
+      it.)*
 - [ ] `RunInvariants`: `ordering_override_strategy` /
       `ordering_override_file_order` (defaults None; legacy locks
       load as no-override, §3.8) + canonical-set inclusion +
@@ -1064,13 +1095,22 @@ reviewable (and revertible) independently of loader mechanics.
   "mirror formal_strategy, don't lock" flag — the operator resolved
   it: lock the OVERRIDE, never the resolution.)
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/core/test_run_invariants.py -q`
-- [ ] New-test files run in isolation (names recorded here)
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `tests/unit/agent/schemas/test_ordering.py` (NEW, CB1-a) →
+      **26 passed in 0.07s** — full §7.1 resolution matrix.
+- [x] `tests/unit/agent/schemas/test_ordering_schema_wiring.py`
+      (NEW, CB1-b) → 28 tests; `tests/unit/agent/schemas/` whole
+      directory → **134 passed in 0.78s**.
+- [x] Regression sweep `.venv/bin/python -m pytest tests/unit/agent
+      tests/unit/workflows -q` → **2962 passed in 185.97s** — zero
+      regressions from the additive schema fields.
+- [x] `ruff check` + `ruff format --check` clean on all CB1-a/CB1-b
+      files.
+- [ ] `tests/unit/core/test_run_invariants.py` — pending CB1-c
+      (lock fields not yet implemented).
+- [x] Tests NOT run, with reason: no pseudo/integration yet (the
+      resolver is not wired into the tuner until CB3); `pyright` not
+      run (lilab Node < 14, PR #123 precedent).
 
 **Commit boundary.** Schema + resolver + lock fields + provenance +
 run_config write-side ONLY. No engine code, no CLI flags, no
