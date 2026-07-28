@@ -109,6 +109,25 @@ and are enforced by `tests/unit/scripts/test_chain_consistency.py` (Gate A
 three-way parity test). See the design doc
 `docs/phase68_orchestrator_memory_and_resume.md` §3.2 for the canonical table.
 
+### Chain formal-incumbent coupling (V19 PR 1)
+
+Two related tuner inputs, forwarded from the chain layer:
+
+- The chain reconstructs the best HealthGate-VALID FORMAL score from
+  prior committed iterations and delivers it to every subsequent
+  iteration's tuner (unconditional; visible in the `[resume]
+  incumbent carry-over` log line, the tuner's `[chain_incumbent]`
+  startup line, and every manifest under `chain_incumbent_source`).
+- Whether the tuner's formal delta gates ACT on that reference is
+  controlled by `--enable_chain_incumbent_formal_gates` (default
+  OFF). ON: gates use `chain_incumbent + fixed_delta` as thresholds.
+  OFF: reconstruction still runs but the gates ignore the reference
+  (they never fire on it). **OFF is not a fixed-`0.0` mode** — the
+  pre-V19 default is unrepresentable.
+
+See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Chain formal-incumbent reference" for full semantics.
+
 ### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
 The orchestrator resolves the Python interpreter in this priority order
 (set in `resolve_py_cmd` and verified by the version + passthrough guards):

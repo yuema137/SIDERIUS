@@ -1945,10 +1945,14 @@ class HyperparamTuningAgent:
         # Resolve invocation-wide formal comparison metadata once (V19 PR 1:
         # the SINGLE authoritative computation — startup logging, durable
         # output provenance, AND both delta gates consume these values).
-        # ``enable_chain_incumbent_formal_gates`` controls ONLY consumption:
-        # OFF (default) resolves against no reference even when an incumbent
-        # was provided; the provided value is still recorded in run_config
-        # for audit (design §3.2 — OFF never reinstates 0.0).
+        # ``enable_chain_incumbent_formal_gates`` is a consumption-only
+        # switch: OFF (default) short-circuits both formal delta gates to
+        # no-reference; ON couples them to ``chain_incumbent +
+        # fixed_delta``. Reconstruction / provenance / run_config
+        # persistence upstream are unconditional. OFF is NOT a fixed-0.0
+        # mode. Full semantics: nodes/ml_hyperparameter_tune_agent/
+        # ml_hyperparameter_tune_agent.md under "Chain formal-incumbent
+        # reference".
         _consumed_reference = (
             agent_input.current_run_best_formal_score
             if agent_input.enable_chain_incumbent_formal_gates
@@ -2012,6 +2016,18 @@ class HyperparamTuningAgent:
             f"reference={_fmt_reference(formal_reference_score)}, "
             f"skip={_fmt_reference(resolved_skip_formal_threshold)}, "
             f"bypass={_fmt_reference(resolved_bypass_formal_threshold)}"
+        )
+        # V19 PR 1: explicit runtime distinction between the reconstructed
+        # incumbent (provided), the coupling-flag state, and the reference
+        # actually consumed by the gates. Corrolates with the [resume]
+        # incumbent carry-over line (upstream) and the "Formal comparison
+        # thresholds" line (downstream = what the gates see).
+        _coupling_state = "ON" if agent_input.enable_chain_incumbent_formal_gates else "OFF"
+        print(
+            f"[chain_incumbent] provided="
+            f"{_fmt_reference(agent_input.current_run_best_formal_score)}; "
+            f"coupling={_coupling_state}; "
+            f"consumed={_fmt_reference(formal_reference_score)}"
         )
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
@@ -4477,10 +4493,13 @@ def main() -> int:
     parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
-        help="V19 PR 1: let the formal delta gates CONSUME "
-        "current_run_best_formal_score as their reference. Default OFF "
-        "(gates see no reference). Schema-mirroring; consumption-only "
-        "switch — see HyperparamTuningInput field docstring.",
+        help="V19 PR 1: consumption-only switch. When set, the two "
+        "formal delta gates use chain_incumbent + fixed_delta as their "
+        "thresholds. Default OFF: incumbent is still reconstructed and "
+        "recorded; the gates simply do not consume it. OFF is NOT a "
+        "fixed-0.0 mode. Full semantics: nodes/ml_hyperparameter_tune_agent/"
+        "ml_hyperparameter_tune_agent.md under 'Chain formal-incumbent "
+        "reference'.",
     )
 
     args = parser.parse_args()

@@ -1028,13 +1028,14 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Chain formal-incumbent reference (V19 PR 1). ``None`` = no "
             "incumbent: both delta gates short-circuit and never fire. In "
-            "chain production the value is the best commit-time-valid "
-            "FORMAL score reconstructed from committed prior iterations "
-            "(``core/resume.py``); consumption by the gates is controlled "
-            "by ``enable_chain_incumbent_formal_gates``. Explicit numeric "
-            "values remain legal for standalone runs. Never default this "
-            "to 0.0 (the pre-V19 defect) or 5.5763 (class-127 phantom; "
-            "see block comment above)."
+            "chain production, populated from committed prior iterations "
+            "by ``core.resume``; consumption gated by "
+            "``enable_chain_incumbent_formal_gates``. Full semantics: "
+            "``nodes/ml_hyperparameter_tune_agent/"
+            "ml_hyperparameter_tune_agent.md`` under 'Chain "
+            "formal-incumbent reference'. Never 0.0 as a default (the "
+            "pre-V19 defect); never 5.5763 (class-127 phantom; see block "
+            "comment above)."
         ),
     )
     skip_formal_min_delta: float = Field(
@@ -1068,15 +1069,13 @@ class HyperparamTuningInput(BaseModel):
     enable_chain_incumbent_formal_gates: bool = Field(
         default=False,
         description=(
-            "V19 PR 1 gate-coupling switch (design §3.2). Controls ONLY "
-            "whether the formal delta gates CONSUME "
-            "``current_run_best_formal_score`` — when False (default) the "
-            "gates receive no reference (no-incumbent behavior) even if a "
-            "reconstructed incumbent was provided; reconstruction, "
-            "provenance, and persistence upstream are unconditional. "
-            "Rollback = OFF; OFF never reinstates the pre-V19 fixed-0.0 "
-            "reference. Production activation is a separate operator "
-            "decision (P1-ACT)."
+            "V19 PR 1 consumption-only switch. ON: formal delta gates "
+            "use ``chain_incumbent + fixed_delta``. OFF (default): the "
+            "incumbent is still reconstructed and recorded, but the "
+            "gates do not consume it. OFF is NOT a fixed-0.0 mode. "
+            "Full semantics: ``nodes/ml_hyperparameter_tune_agent/"
+            "ml_hyperparameter_tune_agent.md`` under 'Chain "
+            "formal-incumbent reference'."
         ),
     )
 

@@ -89,6 +89,8 @@
 | `storage` | `StorageConfig` | Yes | — | Where this node reads its inputs and writes its outputs. Supports the local filesystem backend; populated by `main()` in CLI mode or by `workflows/model_exploration.py` in workflow mode. |
 | `cleanup_denoised` | `bool` | No | `False` | Delete denoised HDF5 files after scoring each round. Saves disk space (~4 GB per file × 20 files = 80 GB per formal round). Scores have already been computed by the time cleanup runs. |
 | `progress_bar` | `bool` | No | `False` | Stream live tqdm progress bars from training/inference subprocesses. |
+| `current_run_best_formal_score` | `float \| None` | No | `None` | Chain formal-incumbent reference (from `core/resume.py`). See "Chain formal-incumbent reference" under Key behavioral notes. |
+| `enable_chain_incumbent_formal_gates` | `bool` | No | `False` | Consumption-only switch for the two formal delta gates. See "Chain formal-incumbent reference" under Key behavioral notes. |
 
 ## Output
 
@@ -216,6 +218,59 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`.
 
 ## Key behavioral notes
+
+### Chain formal-incumbent reference
+
+Two related inputs govern how the tuner's two formal delta gates
+(``skip_formal_min_delta``, ``bypass_formal_time_budget_min_delta``)
+compute their reference score:
+
+- ``current_run_best_formal_score`` (``float | None``, default
+  ``None``) — the chain-level best HealthGate-VALID FORMAL score
+  reconstructed from prior committed iterations of the same workspace
+  by ``core/resume.py::restore_prior_state`` and delivered here
+  through the ``local_validated_model`` protocol. ``None`` = no
+  eligible incumbent exists (fresh chain, or nothing commit-time
+  valid).
+- ``enable_chain_incumbent_formal_gates`` (``bool``, default
+  ``False``) — a **consumption-only** switch. It does NOT control
+  reconstruction or persistence.
+
+Three-part contract:
+
+1. **The reconstructed chain incumbent.** Regardless of the flag,
+   ``core/resume.py`` walks committed iterations, verifies
+   ``run_output_sha256`` when present (fail-closed on mismatch), and
+   selects the best commit-time-VALID formal score under the §3.3
+   rules. The reconstructed value + full provenance is delivered on
+   this node's input, printed at ``[resume] incumbent carry-over
+   …``, echoed on the tuner startup ``[chain_incumbent]`` line, and
+   persisted in every iteration's manifest under
+   ``chain_incumbent_source``.
+
+2. **Coupling ON (flag=True).** The two formal delta gates use
+   ``chain_incumbent + fixed_delta`` as their thresholds:
+   ``resolved_skip_formal_threshold = current_run_best_formal_score +
+   skip_formal_min_delta`` (and symmetrically for bypass). A trial
+   winner falling below skip → skip the formal round; a trial winner
+   crossing bypass → bypass the time-budget gate on the formal.
+
+3. **Coupling OFF (flag=False; DEFAULT).** The reconstructed
+   incumbent is still delivered on the input and still stamped in
+   ``run_config`` / manifest / provenance — but the resolver treats
+   the reference as ``None``, so both resolved thresholds are
+   ``None`` and neither incumbent-based gate can fire. **OFF is
+   NOT a fixed-``0.0`` reference mode** — the pre-V19 default of
+   ``0.0`` is unrepresentable in this schema and unreachable via any
+   supported configuration; OFF simply skips consumption of the
+   reconstructed value.
+
+Rollback path: omit ``--enable_chain_incumbent_formal_gates`` on
+any launcher (equivalently: leave the schema field at its default
+``False``). Reconstruction and audit trails keep working; only gate
+consumption stops. See
+``docs/design/v19_priorities/pr1_chain_incumbents.md`` §3.2 / §3.4
+for the full design rationale.
 
 - **Round-loop structure**: each round runs **plan → resource check → train → infer → score → reflect**:
   1. **Plan** — `bridge.plan(...)` produces an `ExperimentPlan` (hyperparameters + `is_trial` choice). Subject to `plan_overrides`.

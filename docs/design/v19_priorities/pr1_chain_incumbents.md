@@ -73,8 +73,10 @@ green with recorded evidence.
             (commit pending operator approval; 18 targeted + 340
             regression green; A4 write-side + smallest public boundary
             in core.resume landed together)
-[ ] P1-V1 — pre-gate sweep: targeted unit + pseudo integration
+[x] P1-V1 — pre-gate sweep: targeted unit + pseudo integration
             (BOTH incumbent branches deterministic)
+            (commit pending operator approval; new pseudo suite 4
+            green; regression 296 green)
 [ ] P1-V2 — Gate 2: standalone smallest canonical smoke (real LLM +
             real training, flag ON) — REQUIRES OPERATOR APPROVAL
 [ ] P1-S  — stop-and-show; PR merged (coupling flag still OFF)
@@ -1266,22 +1268,89 @@ suite in `tests/unit/scripts/test_rebuild_per_file_best.py`):
 
 ### P1-V1 — pre-gate sweep (no approval needed)
 
-- [ ] Targeted unit suites listed per commit (NOT the full suite;
+- [x] Targeted unit suites listed per commit (NOT the full suite;
       per operator testing policy)
-- [ ] Pseudo integration (`tests/integration/workflows/`, dual-mode
-      default), **BOTH incumbent branches deterministic** (rev 2 —
-      Gate 2 must not depend on a stochastic score outcome):
-      - [ ] Branch A (numeric incumbent): iter 1 pseudo data contains
-            a valid formal → iter 2's tuner input carries it; banner
-            `reference=<value>`; manifest `chain_incumbent_used` +
-            `chain_incumbent_source` correct; local
-            `best_valid_formal_score` untouched (Invariant II)
-      - [ ] Branch B (no incumbent): iter 1 pseudo data has no valid
-            formal → iter 2 banner `reference=none`;
+      *(each of P1-C1..C5 ticked its own suite as it landed; totals
+      recorded per commit)*
+- [x] Pseudo integration
+      (`tests/integration/workflows/test_chain_incumbent_pseudo.py`),
+      **BOTH incumbent branches deterministic** (rev 2 — Gate 2 must
+      not depend on a stochastic score outcome):
+      - [x] Branch A (numeric incumbent): iter 1 pseudo data contains
+            a valid formal → iter 2's tuner input carries it;
+            manifest `chain_incumbent_used=1.25` +
+            `chain_incumbent_source.iter_idx=1` +
+            `artifact_verified=true`; local
+            `best_valid_formal_score=0.60` untouched (Invariant II)
+            *(`test_branch_a_numeric_incumbent_threads_through_full_chain`
+            — real `restore_prior_state` → real `run_workflow` (agents
+            mocked) → real `write_manifest`; iter 2's run_output
+            written to disk so `run_output_sha256` is stamped)*
+      - [x] Branch B (no incumbent): iter 1 pseudo data has no valid
+            formal → iter 2's tuner input receives `None`;
             `chain_incumbent_used=null`; gates short-circuit
-      - [ ] flag OFF variant: reconstruction + stamps still present,
+            *(`test_branch_b_no_incumbent_short_circuits`)*
+      - [x] flag OFF variant: reconstruction + stamps still present,
             gates inert
-- [ ] `ruff check` + `ruff format --check` + pyright, full tree
+            *(`test_branch_c_flag_off_reconstruction_still_stamps_source`;
+            during-run diagnosis recorded — my initial assertion
+            "tuner input receives None" contradicted §3.4: numeric
+            value is delivered unconditionally, only CONSUMPTION is
+            gated; assertion corrected + tuner-side flag-OFF
+            short-circuit remains covered by the P1-C1 unit
+            `test_incumbent_provided_but_flag_off_not_consumed`)*
+      - [x] BONUS: end-to-end replay-integrity fail-closed at chain
+            boundary (`test_tampered_iter1_artifact_stops_the_chain`)
+- [x] `ruff check` + `ruff format --check` on all P1-C1..C5 + P1-V1
+      touched files (see per-commit verification checklists);
+      pyright n/a on lilab (Node < 14, PR #123 precedent)
+
+Suite result: **4 passed, 1.42 s — GREEN**. Regression sweep across
+P1-C1..C5 areas + this new suite: **296 passed, 11.13 s**. After the
+documentation-surface + runtime-log additions (below), full tuner
+suite: **71 passed, 124.2 s** with the strengthened Branch C also
+covering the direct gate-consumption proof.
+
+**Documentation-surface additions (operator revision 2026-07-27,
+included in the same P1-V1 commit)**: audit found zero user-facing
+mentions of the flag; the canonical explanation now lives in
+`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Chain formal-incumbent reference" (three-part contract: what
+the reconstructed incumbent is; behavior with coupling ON; behavior
+with coupling OFF — including the explicit "OFF is NOT a fixed-0.0
+mode" clarification). Cross-references + concise notes added at the
+schema field, tuner CLI `--help`, inline resolver comment, tuner
+startup banner (new `[chain_incumbent] provided=… coupling=…
+consumed=…` line closing the previously-scattered runtime-log gap),
+`docs/running_chain_test.md`, and a legacy-pointer note on the older
+top-level `nodes/ml_hyperparameter_tune_agent.md`. Every wording is
+consistent with the ON = `chain_incumbent + fixed_delta` /
+OFF = reconstructed-but-not-consumed / OFF ≠ 0.0 contract.
+
+**Branch C strengthening (operator requirement 2026-07-27)**: added
+direct gate-consumption proof using production helpers
+(`_resolve_formal_comparison_thresholds`, `_should_skip_formal`,
+`_should_bypass_formal_time_budget`) applied to the value actually
+delivered on the tuner input under flag OFF. Asserts (a) consumed
+reference is `None`, (b) both resolved thresholds are `None`,
+(c) neither gate fires against a hypothetical high-scoring valid
+trial record.
+
+Diagnosed test failures during authoring (all TEST at fault, reported
+before fixing):
+1. `unittest.mock.patch(...) as name` cannot appear inside a plain
+   tuple — refactored `_run_iter_2` to `contextlib.ExitStack`.
+2. Missing schema-required fields on `ProposalOutput` (`expert_advice`)
+   and `ImplementorOutput` (`model_type`, `description_file_path`,
+   `model_file_path`, `test_file_path`, `config_fields`,
+   `model_description`, `mathematical_definition`) — verified via
+   `model_fields` inspection; test fixtures updated.
+3. `run_output_sha256` missing on iter 2's manifest — production
+   tuner writes the run_output; my mocked HyperparamTuningAgent
+   didn't, so `write_manifest`'s `os.path.isfile` guard skipped the
+   hash. Test now mirrors production by writing iter 2's run_output
+   to the tuner's expected path before `write_manifest`.
+4. See Branch C evidence line above.
 
 ### P1-V2 — Gate 2: standalone smallest canonical smoke — **REQUIRES OPERATOR APPROVAL**
 
