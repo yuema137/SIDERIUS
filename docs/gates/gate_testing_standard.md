@@ -54,7 +54,12 @@ training. Binary signal: does the chain complete with a non-null finite
 **When to use**: at Checkpoint commits (end of a feature's commit plan)
 before merging to master.
 
-**Canonical command**:
+**Canonical command** (full-scope, seeded — kept for historical
+reference; **new work should follow the cold-start rule in the
+"Partial-scope rules" section below** and omit `--seed_paths`; new
+partial-scope work additionally requires `--data_scope` +
+`--health_gate_files`):
+
 ```bash
 bash sdsc_submission_scripts/run_chain.sh \
     --mode lilab \
@@ -129,6 +134,48 @@ The following are explicitly NOT pass/fail criteria for Gate 2:
 
 ---
 
+### Partial-scope rules (DS8-mandatory, all real-training gate runs)
+
+Added 2026-07-27 after P1-V2 attempts 1 and 2 exposed two DS8
+(`enable_partial_file_list`, PR #130) rules the pre-DS8 Gate standard
+had not been updated for. When a real-training gate run uses a
+partial `--data_scope` (anything narrower than the full 20 files),
+**both** of the following are required — otherwise
+`run_one_iteration.py` refuses to start at pre-flight:
+
+1. **HealthGate monitored files must be paired with the scope.**
+   Pass `--health_gate_files` with the EXACT resolved scope
+   (e.g. `--data_scope 4-9 --health_gate_files 4,5,6,7,8,9`).
+   DS8's `validate_health_scope` refuses to launch when the shipped
+   `configs/health_checks.yaml`'s `peek_file_indices` fall outside
+   the resolved scope OR when any check omits an explicit peek list
+   under partial scope. `sdsc_submission_scripts/launch_v18_wave1.sh:121`
+   is the canonical pairing.
+
+2. **Always cold-start real-training gate runs (operator rule,
+   2026-07-27).** Omit `--seed_paths` entirely. Rationale:
+     - **DS8 correctness**: the canonical seeds
+       (`small_sample_trial_v0` wavenet + punet) are pre-DS8
+       full-scope artifacts. DS8's `validate_stamped_invariants`
+       (`core/run_invariants.py:321`) refuses to admit unstamped
+       (= legacy full-scope) ingress evidence into a partial-scope
+       run — surfaced by P1-V2 attempt 2 in under 2 s.
+     - **Uniformity**: pre-DS8 seeds are stamped for a fixed scope
+       different from most partial gate configurations. Rather than
+       maintain per-scope seed inventories, PR #126
+       (`nodes/result_interpretation_agent` `cold_start=True`
+       deterministic path, no LLM call) lets every gate run start
+       from a fresh workspace.
+     - **Provenance**: cold-start makes gate evidence
+       self-contained — everything in `$WS` was produced by that
+       one gate invocation.
+   Concretely: `--seed_paths` MUST NOT appear in any new real-
+   training gate command. V18r's launcher already runs this way
+   (`_chain_common.sh:280-283` documents cold-start as valid).
+   Exception: reproducing a specific historical run whose exact
+   seeded state matters — operator-approved on a case-by-case
+   basis only.
+
 ### Gate 2 parameter plans (Lite / Regular)
 
 Added 2026-07-23 from the runtime-control Gate 2 audit (design doc
@@ -136,6 +183,11 @@ Added 2026-07-23 from the runtime-control Gate 2 audit (design doc
 **be generous on GPU VRAM, stingy on wall time** — a VRAM-gate
 rejection wastes a whole Gate attempt, while time is controlled by
 portions and budgets.
+
+**Both plans below assume the DS8 partial-scope rules above** — the
+tables show only the deltas from those rules. Partial-scope plan
+invocations always include `--health_gate_files <scope>` and always
+omit `--seed_paths`.
 
 **Portion semantics crib (code-traced — do not infer from names):**
 
@@ -160,6 +212,8 @@ portions and budgets.
 | `--max_rounds` | 2 (1 trial + 1 forced formal) | 2 |
 | `--max_proposal_attempts` | 3 | 3 |
 | `--data_scope` | `4-9` (6 files) | `4-9` |
+| `--health_gate_files` (DS8-mandatory, paired with `--data_scope`) | `4,5,6,7,8,9` (matches scope exactly) | `4,5,6,7,8,9` |
+| Seeds | **NONE — cold-start** (see "Partial-scope rules" above) | **NONE — cold-start** |
 | `--trial_portion / --train_portion / --eval_portion` | 0.02 / 1.0 / 0.01 | 0.02 / 1.0 / 0.01 |
 | `--formal_portion / --formal_train_portion / --formal_eval_portion` | 0.02 / 1.0 / 0.01 (→ 3,000 steps @ seg 10k b8; 12 eval PSD) | 0.10 / 1.0 / 0.05 (→ 15,000 steps; 60 eval PSD) |
 | `--max_epochs` | 1 | 1 |
@@ -211,11 +265,19 @@ Notes:
 
 ---
 
-## Seed paths (canonical)
+## Seed paths (historical reference — DO NOT USE for new tests)
+
+> **Operator rule 2026-07-27**: all new real-training gate runs are
+> cold-start — do NOT pass `--seed_paths`. See the "Partial-scope
+> rules" section above for the DS8 rationale (these seeds are
+> pre-DS8 full-scope artifacts and cannot be admitted into any
+> partial-scope run). The paths below are kept only so historical
+> gate logs remain interpretable.
 
 ```
 /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
 /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
 ```
 
-These are the baseline seed files used for all smoke tests.
+Exception: reproducing a specific historical seeded run whose exact
+state matters — operator-approved on a case-by-case basis only.

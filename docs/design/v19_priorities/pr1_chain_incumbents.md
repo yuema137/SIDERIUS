@@ -1796,26 +1796,27 @@ behavioral claim (§5).
       dual-source design remains a policy-study input for PR 4a.
 - [ ] FU-P1-5 — manifest `best_score`/`raw_best_score` duplicate alias
       cleanup (`run_one_iteration.py:353-354`).
-- [ ] FU-P1-8 — `docs/gates/gate_testing_standard.md` doc gap:
-      the "Lite Plan" and "Regular Plan" tables are stale for
-      partial-scope operation under DS8. Both rules were surfaced
-      by the 2026-07-27 P1-V2 attempts 1 and 2:
-      1. `--data_scope 4-9` requires the paired
-         `--health_gate_files 4,5,6,7,8,9`; DS8 refuses to launch
-         without it (attempt 1). Fix: add a "HealthGate monitored
-         files" row to both plan tables.
-      2. The canonical seed paths listed in the standard
-         (`small_sample_trial_v0` wavenet + punet) are pre-DS8
-         full-scope artifacts and cannot be admitted into a
-         partial-scope run; DS8's `validate_stamped_invariants`
-         rejects them (attempt 2). Fix: for partial-scope plan
-         variants, note that `--seed_paths` must EITHER be omitted
-         entirely (cold-start per PR #126, V18r's pattern at
-         `sdsc_submission_scripts/launch_v18_wave1.sh` +
-         `_chain_common.sh:280-283`) OR provided from a
-         DS-scope-stamped source for the exact scope.
-      Docs-only fix; not blocking PR 1 merge; should land before
-      the next partial-scope Gate 2 in any project.
+- [x] FU-P1-8 — LANDED with the standing-rule commit
+      (`docs/gates/gate_testing_standard.md` +
+      `docs/running_chain_test.md` + `CLAUDE.md` + `AGENTS.md`,
+      operator rule 2026-07-27): new "Partial-scope rules" section
+      in the Gate standard establishes the two DS8 rules
+      (`--data_scope`+`--health_gate_files` pairing; cold-start /
+      no `--seed_paths`) surfaced by P1-V2 attempts 1 and 2. Lite +
+      Regular plan tables gained HealthGate-files and cold-start
+      rows. The pre-DS8 canonical seed section is retained as
+      historical reference only, with an operator rule at the top
+      forbidding it in new tests. Standing rule mirrored into
+      CLAUDE.md / AGENTS.md Coding Standards so all future agents
+      see it. **Root cause** of the doc gap: the Lite/Regular plans
+      were added (`b38edcc`, 2026-07-23) on the same day DS8 shipped
+      (`66df442`, 2026-07-23) but from a different work stream
+      (runtime-control audit); the V18r launcher worked around both
+      rules at the launcher level, but the standard was never
+      retroactively updated. The V18r cohort was terminated by
+      container replacement two days later (2026-07-25), so no
+      fresh partial-scope Gate 2 hit the rules until P1-V2. Fully
+      closed by the current standing-rule commit.
 
 ## 10. Open questions
 

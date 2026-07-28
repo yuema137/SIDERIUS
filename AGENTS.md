@@ -89,6 +89,15 @@
   `docs/architecture.md`) — do not invent ad-hoc abstractions. Exception: the
   frozen TIDMAD score formula stays byte-identical; new metrics plug in
   beside it, never rewrite it.
+- **Cold-start real-training gate runs (operator rule, 2026-07-27)**:
+  every new real-training gate run (Gate 1 with real training, Gate 2,
+  any smoke that invokes `run_chain.sh` or `run_one_iteration.py` with real
+  training) must be **cold-start** — do NOT pass `--seed_paths`. Rationale
+  and the twin DS8 partial-scope rule (paired `--data_scope` +
+  `--health_gate_files`) live in `docs/gates/gate_testing_standard.md`
+  "Partial-scope rules" section. The pre-DS8 canonical seed paths still
+  listed there are historical reference only. Exception: reproducing a
+  specific historical seeded run — operator-approved case-by-case only.
 
 ## Inter-Node Communication Principle
 

@@ -109,6 +109,18 @@ and are enforced by `tests/unit/scripts/test_chain_consistency.py` (Gate A
 three-way parity test). See the design doc
 `docs/phase68_orchestrator_memory_and_resume.md` §3.2 for the canonical table.
 
+### Cold-start real-training runs (operator rule, 2026-07-27)
+
+Every new real-training gate/smoke run must be cold-start — do NOT
+pass `--seed_paths`. The chain's own iter 1 produces a fresh
+DS-stamped output; iter 2+ chain off that. Rationale (DS8 correctness
++ uniformity + provenance) and the twin partial-scope rule (paired
+`--data_scope` + `--health_gate_files`) are in
+`docs/gates/gate_testing_standard.md` "Partial-scope rules" section.
+The pre-DS8 canonical seeds referenced there are historical only.
+Exception: reproducing a specific historical seeded run —
+operator-approved case-by-case only.
+
 ### Chain formal-incumbent coupling (V19 PR 1)
 
 Two related tuner inputs, forwarded from the chain layer:
