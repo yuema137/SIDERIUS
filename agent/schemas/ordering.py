@@ -127,6 +127,49 @@ def validate_ordering_shape(
         )
 
 
+def parse_file_order_cli(spec: str) -> list[int]:
+    """Parse a CLI file order, PRESERVING the order given.
+
+    Deliberately not ``DataScope.from_cli``: that sorts and dedupes, which is
+    right for a scope (a set of files) and catastrophic for an order (a
+    sequence). Routing a file order through it would silently rewrite every
+    operator-specified permutation into ascending order — the feature would
+    appear to work while doing nothing.
+
+    Only a comma-separated list is accepted. Range syntax (``4-9``) is
+    rejected because a range cannot express a permutation, so accepting it
+    would invite exactly the ascending-order confusion this function exists
+    to prevent.
+
+    Args:
+        spec: e.g. ``"4,6,5,9,7,8"``.
+
+    Returns:
+        File indices in the order written.
+
+    Raises:
+        OrderingValidationError: Empty, range syntax, or a non-integer token.
+    """
+    tokens = [t.strip() for t in spec.split(",") if t.strip()]
+    if not tokens:
+        raise OrderingValidationError(f"file order {spec!r} is empty.")
+    order: list[int] = []
+    for token in tokens:
+        if "-" in token[1:]:  # allow a leading '-' to reach the int() error
+            raise OrderingValidationError(
+                f"file order {spec!r} uses range syntax ({token!r}). A range "
+                f"cannot express a visitation order — list the indices "
+                f"explicitly, e.g. '4,6,5,9,7,8'."
+            )
+        try:
+            order.append(int(token))
+        except ValueError as exc:
+            raise OrderingValidationError(
+                f"file order {spec!r} contains a non-integer token {token!r}."
+            ) from exc
+    return order
+
+
 class RejectedOrderingProposal(BaseModel):
     """An agent ordering proposal that was received but not applied.
 

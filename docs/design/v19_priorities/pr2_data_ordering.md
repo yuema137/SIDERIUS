@@ -610,6 +610,15 @@ A reviewer must be able to reconstruct, from any round record alone:
 executed shuffle; source operator_override." An overridden proposal
 is NEVER described as executed.
 
+**Where each ordering fact is persisted** (three distinct artifacts —
+do not conflate them):
+
+| Artifact | Stores | Why |
+|---|---|---|
+| `run_config_{run}.json` | the run-level operator OVERRIDE policy (`order_strategy_override`, `file_order_override`; null = none) | One control decision for the whole run. The per-round resolved value does NOT belong here — it may differ round to round when no override is in force. |
+| `ExperimentRecord` (per round) | that round's full nonet: proposed (rejected or not), rejection flag + reason, override, resolved, resolution source | The per-round source of truth. Ordering can vary between rounds, so each round carries its own. |
+| iteration `manifest.json` | round/experiment-KEYED ordering provenance (`exp_id` + the same fields per entry) — **CB3-d, not yet implemented** | The cross-iteration handoff. Keyed per experiment so multiple rounds are never collapsed into one unlabelled iteration-level value. |
+
 **Manifest granularity rule (operator clarification, 2026-07-28):**
 ordering may resolve differently across rounds within one workflow
 iteration (agent-exploration mode), so the iteration manifest must
@@ -1366,11 +1375,46 @@ engine behavior (CB2).
 - Dependencies: P2-CB1 (schema + resolver) + P2-CB2 (engine).
 
 **Implementation plan.**
-- [ ] Tuner: extract the ordering proposal from the validated
+- [x] Tuner: extract the ordering proposal from the validated
       `ExperimentPlan`; combine with the operator override via the
       CB1 resolver at the per-round assembly; emit the
       `[data_order]` resolution line; populate `TrialConfig`
-      resolved fields + the record/run_config septet.
+      resolved fields + the record/run_config nonet.
+      *(CB3-c. Plan intake switched to `parse_with_fallback` so a
+      discarded proposal is reported; the single `resolve_ordering`
+      call sits immediately before `TrialConfig` construction.
+      **Record stamps are applied for EVERY round, deliberately
+      OUTSIDE the `if trial_config.is_trial:` block** — ordering
+      applies to all training, unlike the trial-only sampling
+      provenance next to it. `run_config` records only the
+      OVERRIDE (the run's control policy); per-round resolved values
+      live on each record, since they may differ round to round.
+      Lock wiring passes the override to `build_run_invariants`.)*
+      **Bug caught pre-commit**: the CLI initially parsed
+      `--file_order_override` with `DataScope.from_cli`, which SORTS
+      and dedupes (verified: `"4,6,5,9,7,8"` → `[4,5,6,7,8,9]`).
+      That would have silently rewritten every operator permutation
+      into ascending order — the feature would appear to work while
+      doing nothing. Replaced with a dedicated order-preserving
+      `parse_file_order_cli()` in `agent/schemas/ordering.py`
+      (shared by all three CLIs; rejects range syntax, which cannot
+      express a permutation), with a regression test that fails
+      loudly if anyone "simplifies" it back.
+      **Second bug caught pre-commit**: ruff F821 flagged
+      `resolved_scope` as undefined at the resolver call — the
+      in-scope name is `resolved_data_scope`. Would have been a
+      NameError on the first round of any real run.
+      **Test-authoring note (not a production issue), recorded so
+      the mistake is not repeated**: `execute_training` has TWO
+      launch paths — `_run_subprocess_with_watchdog` ONLY when a
+      runtime policy with the watchdog enabled is supplied, and
+      plain `subprocess.run` otherwise. A propagation test that
+      patches the watchdog helper while passing no policy therefore
+      launches REAL training (observed: a 316 s hang before being
+      killed). **The correct patch point for argv-capture tests is
+      `core.sandbox_executor.subprocess.run`.** Documented in the
+      `_launch` helper's docstring in
+      `tests/unit/core/test_ordering_propagation.py`.
 - [ ] `execute_training`: named RESOLVED params
       (`order_strategy`/`file_order` at this boundary carry
       resolver output — execution-facing name kept for

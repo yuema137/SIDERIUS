@@ -15,4 +15,9 @@ def run_skill(sandbox, **kwargs):
         # RT2-G: operator runtime policy for in-subprocess verification
         # (validated against RuntimeControlPolicy at the executor).
         runtime_policy=kwargs.get("runtime_policy"),
+        # V19 PR 2: RESOLVED ordering. The resolver already combined the
+        # agent proposal with any operator override upstream; nothing below
+        # this point re-derives precedence.
+        order_strategy=kwargs.get("order_strategy", "shuffle"),
+        file_order=kwargs.get("file_order"),
     )
