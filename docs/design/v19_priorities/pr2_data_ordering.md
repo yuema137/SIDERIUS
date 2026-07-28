@@ -37,9 +37,12 @@ green with recorded evidence.
             replaced (agent-proposable + operator-overridable,
             precedence override > proposal > default); D5 two-stage
             validation. Doc LOCKED.
-[ ] P2-CA — commit A: minimal indexed-dataset seam + genericity
+[x] P2-CA — commit A: minimal indexed-dataset seam + genericity
             contract doc + TIDMAD coupling ledger + second-dataset
             contract tests (baseline §1.3 artifacts)
+            (split into CA-1 code 999727a + CA-2 docs; 20 new tests,
+            26 + 49 + 75 green; one pre-existing unrelated lilab
+            failure documented as FU-P2-4)
 [ ] P2-CB — commit B (three sub-commits CB1/CB2/CB3, §6): ordering
             proposal/override/resolution schema + single resolver +
             chain-lock override fields; engine consumes resolved
@@ -784,32 +787,56 @@ the same constructor.
 - Dependencies: none (first commit of the PR).
 
 **Implementation plan.**
-- [ ] Write `docs/design/genericity_contract.md` per §3.2 item 1:
+- [x] Write `docs/design/genericity_contract.md` per §3.2 item 1:
       indexed-dataset contract; the proposal/override/resolution
       configuration principle (operator statement verbatim) with
       ordering named as its first concrete implementation; the
       permissions taxonomy (agent-settable / operator-overridable /
       chain-locked / frozen); task-pack + metric PLACEHOLDER
       sections; the §1.3 update-this-doc-first rule.
-- [ ] Write `docs/design/tidmad_coupling_ledger.md`: entries with
-      file:line from the P2-A audits (inlined template sites incl.
-      the non-training ones left in place, `log_5.27`/`s_max`
-      constants, TIDMAD-worded prompt fragments, 20-file/200-segment
-      assumptions), each marked decoupled/remaining; PLUS the
-      configuration-migration inventory (§3.2 item 4: sampling
-      strategy, train_portion, lr/optimizer, DataScope, resource
-      budgets, HealthGate policy inputs — with expected permissions
-      class, NOT migrated in PR 2).
-- [ ] Add the filename-pattern validator (§3.2 item 3): parse
+      *(4 seams; §1 marked partially-implemented — commit A moved
+      the TEMPLATE behind the seam, not the CHOICE of dataset, which
+      is recorded as a later ladder step.)*
+- [x] Write `docs/design/tidmad_coupling_ledger.md`: entries with
+      file:line from the P2-A audits, each marked
+      DECOUPLED/REMAINING/PARTIAL/FROZEN; PLUS the
+      configuration-migration inventory (§3.2 item 4).
+      *(6 sections. Every cited line re-verified by grep before
+      writing. Newly surfaced while seeding, beyond the design's
+      list: `execute_tools/array2h5.py:25` `create_abra_file` —
+      TIDMAD vocabulary in a public function NAME, not just a
+      literal; `execute_tools/per_file_best.py:62` — a SECOND
+      `LOG_BASE = 5.27` copy; and the denoised-OUTPUT naming family
+      (`run_comparison.py:445` etc.), flagged as needing its own
+      contract decision since it names artifacts SIDERIUS produces
+      rather than files it reads.)*
+- [x] Add the filename-pattern validator (§3.2 item 3): parse
       replacement fields via `string.Formatter().parse`, require a
       usable `file_index` field; error at config construction.
-      (NOT a format()-raises assumption — `str.format()` ignores
-      absent placeholders.)
-- [ ] Refactor the four `train_engine_sandbox.py` sites to consume
-      `TIDMAD.training_file_pattern`.
-- [ ] Add `tests/unit/execute_tools/test_dataset_contract.py`:
+      *(Implemented as a `field_validator` over BOTH pattern fields
+      rather than a model-validator — the check is per-field and
+      needs no cross-field data; `field_validator` was already
+      imported. Empirically probed all 11 pattern shapes first: only
+      the missing-placeholder case is silent, so the validator does
+      TWO checks — presence (the silent case) and a format probe
+      with `_PATTERN_PROBE_INDEX = 7` (moves the loud cases from
+      training time to construction time). Also added
+      `DatasetConfig.training_file_name()` as the single build
+      point; deliberately NO `validation_file_name()` — it would be
+      dead code, since validation templates live in `scripts/` and
+      are ledger entries.)*
+- [x] Refactor the four `train_engine_sandbox.py` sites to consume
+      `TIDMAD.training_file_pattern` *(via `training_file_name`;
+      import added at `:19-20`, ruff re-sorted)*.
+- [x] Add `tests/unit/execute_tools/test_dataset_contract.py`:
       synthetic `DatasetConfig` fixture (different pattern, file
       count, segment count) driving dataset path construction.
+      *(6 tests. Loader-consumption is probed by monkeypatching the
+      pattern and reading the loader's OWN missing-file warning —
+      proves the path is config-derived without needing HDF5
+      fixtures. Validator/parity tests went into the EXISTING
+      `test_dataset_config.py` (14 added) since they test that
+      module; the new file holds only the contract-level tests.)*
 
 **Validation plan.**
 - Unit: path-resolution parity (per audited site, resolved TIDMAD
@@ -847,13 +874,39 @@ the same constructor.
   (warning + skip, `train_engine_sandbox.py:295-297`) — this commit
   must not change it.
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-      (counts + wall time recorded here after run)
-- [ ] `.venv/bin/python -m pytest tests/unit/core/test_sandbox_executor.py -q`
-- [ ] `.venv/bin/ruff check` + `.venv/bin/ruff format --check` on
-      touched files
-- [ ] Any test not run: listed here with the reason — never claimed.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/test_dataset_config.py
+      tests/unit/execute_tools/test_dataset_contract.py -q` →
+      **26 passed in 0.79s** (14 new in test_dataset_config +
+      6 new in test_dataset_contract, on top of the 6 pre-existing).
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q` →
+      **493 passed, 1 failed in 5.25s**. The single failure is
+      PRE-EXISTING and unrelated:
+      `test_scoring_helpers.py::TestPostPathAReferenceConsistency::
+      test_post_path_a_reference_consistency`. **Proven pre-existing**
+      by stashing all P2-CA changes and re-running — byte-identical
+      failure (`Obtained: -8.260916269975333`, `Expected:
+      -8.260971502899364 ± 8.3e-09`). It compares
+      `file_vector_to_log_space` against on-disk ground truth in
+      `/home/klz/Data/SIDEREIS_DATA/ground_truth/`; it is
+      `pytest.skip`-guarded when that data is absent, so CI skips it
+      and only lilab sees it. Either the on-disk ground truth is
+      stale or the helper and `compute_ground_truth.py` have drifted
+      (~5e-5 relative). **NOT fixed here — out of P2-CA scope;
+      flagged to operator** (see FU-P2-4).
+- [x] `.venv/bin/python -m pytest tests/unit/core/test_sandbox_executor.py -q`
+      → **49 passed in 0.81s**.
+- [x] Post-format re-run of all affected suites →
+      **75 passed in 0.83s**.
+- [x] `.venv/bin/ruff check` → clean on all 4 touched files (one
+      `I001` import-sort auto-fixed in `train_engine_sandbox.py`).
+      `.venv/bin/ruff format --check` → 4 files formatted
+      (`dataset_config.py` + `test_dataset_config.py` reformatted,
+      then re-tested green).
+- [x] Tests NOT run, with reason: no pseudo/integration or Gate
+      tests — this commit has zero behavior change, and the design
+      lists none for P2-CA. `pyright` not run (lilab Node < 14,
+      PR #123 precedent).
 
 **Commit boundary.** Docs + template consumption + contract test
 ONLY. No ordering code, no schema fields, no cleanup beyond the four
@@ -1432,3 +1485,11 @@ claim without score evidence; sequential may be rejected.
   the ordering study's outcome.
 - **FU-P2-2** — `freeze_subsample` dead switch: plumb or remove.
 - **FU-P2-3** — "streaming" naming cleanup once (if) FU-P2-1 lands.
+- **FU-P2-4** (filed during P2-CA, 2026-07-28) — pre-existing lilab
+  failure `test_scoring_helpers.py::TestPostPathAReferenceConsistency`
+  : `file_vector_to_log_space` disagrees with the on-disk ground
+  truth at `/home/klz/Data/SIDEREIS_DATA/ground_truth/` by ~5e-5
+  relative. Skip-guarded, so CI never sees it. Needs a decision:
+  regenerate the ground-truth artifacts, or fix a real
+  helper/`compute_ground_truth.py` drift. Unrelated to PR 2; not
+  touched by it.
