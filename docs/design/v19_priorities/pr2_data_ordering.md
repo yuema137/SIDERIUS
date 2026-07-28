@@ -1784,7 +1784,7 @@ claim without score evidence; sequential may be rejected.
   the ordering study's outcome.
 - **FU-P2-2** — `freeze_subsample` dead switch: plumb or remove.
 - **FU-P2-3** — "streaming" naming cleanup once (if) FU-P2-1 lands.
-- **FU-P2-4** (filed during P2-CA, 2026-07-28; DIAGNOSED and marked
+- **FU-P2-4** ([issue #138](https://github.com/Galileo-Sandbox/SIDERIUS/issues/138); DIAGNOSED and marked
   as a known defect, NOT fixed — operator decision required) — the
   on-disk ground-truth artifacts and the current production formula
   are on different rulers. Root cause proven bit-exactly:
