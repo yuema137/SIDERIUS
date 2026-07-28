@@ -289,6 +289,13 @@ class TIDMADEpochDataset(Dataset):
 
         ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
         all_ch1, all_ch2 = [], []
+        # Row span each file occupies in the concatenated arrays, recorded as
+        # the rows are appended. Sequential ordering needs to address one
+        # file's rows without re-deriving the layout — and re-deriving it
+        # would be wrong anyway, since a missing file is skipped below and
+        # contributes no rows at all.
+        self.file_row_ranges: dict[int, tuple[int, int]] = {}
+        rows_so_far = 0
 
         for file_key in sorted(sample_set.keys(), key=int):
             file_index = int(file_key)
@@ -321,6 +328,11 @@ class TIDMADEpochDataset(Dataset):
                         np.array(ch2[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
                     )
 
+            file_rows = len(segments) * ml_segs_per_psd
+            if file_rows:
+                self.file_row_ranges[file_index] = (rows_so_far, rows_so_far + file_rows)
+                rows_so_far += file_rows
+
             gc.collect()
 
         self.inputs = (
@@ -338,6 +350,112 @@ class TIDMADEpochDataset(Dataset):
             self.inputs[idx].astype(np.int16) + 128,
             self.targets[idx].astype(np.int16) + 128,
         )
+
+
+def validate_ordering_against_scope(
+    order_strategy: str,
+    file_order: list[int] | None,
+    sample_set: dict,
+) -> None:
+    """Re-check resolved ordering at the execution boundary.
+
+    Mirrors the DataScope enforcement pattern: the tuner validated this
+    already, but the engine is directly invocable (and is a subprocess with
+    its own CLI), so it never trusts its input. Violations terminate the run
+    and are not retryable — an ordering that does not cover the sample set
+    would change which files are trained on.
+
+    Args:
+        order_strategy: Resolved strategy, ``"shuffle"`` or ``"sequential"``.
+        file_order:     Resolved file order, or ``None``.
+        sample_set:     ``{file_index: [segment_indices]}`` for this round.
+
+    Raises:
+        ValueError: Unknown strategy, a file order supplied under
+            ``shuffle``, or a file order that is not a permutation of the
+            sample set's files.
+    """
+    if order_strategy not in ("shuffle", "sequential"):
+        raise ValueError(
+            f"order_strategy={order_strategy!r} is not recognized "
+            f"(expected 'shuffle' or 'sequential')."
+        )
+    if order_strategy == "shuffle":
+        if file_order is not None:
+            raise ValueError(
+                f"file_order={file_order} was supplied with order_strategy='shuffle'. "
+                f"A file order is meaningful only for sequential ordering."
+            )
+        return
+    if file_order is None:
+        return  # ascending sample-set order, resolved at build time
+
+    scope = {int(k) for k in sample_set}
+    order = list(file_order)
+    if sorted(order) != sorted(scope) or len(order) != len(set(order)):
+        missing = sorted(scope - set(order))
+        extra = sorted(set(order) - scope)
+        duplicates = sorted({i for i in order if order.count(i) > 1})
+        problems = []
+        if missing:
+            problems.append(f"missing {missing}")
+        if extra:
+            problems.append(f"outside the sample set {extra}")
+        if duplicates:
+            problems.append(f"duplicated {duplicates}")
+        raise ValueError(
+            f"file_order {order} is not a permutation of the training sample "
+            f"set's files {sorted(scope)}: {'; '.join(problems)}. Ordering must "
+            f"reorder the scope, never change it."
+        )
+
+
+def build_sequential_indices(
+    file_row_ranges: dict[int, tuple[int, int]],
+    file_order: list[int] | None,
+    rng: "random.Random",
+) -> list[int]:
+    """Row indices for one epoch under ``sequential`` ordering.
+
+    File blocks are visited in ``file_order``; the rows inside each block are
+    shuffled with ``rng`` (operator decision: file order is fixed, samples
+    within a file are shuffled per epoch). The result is a permutation of
+    every row the dataset holds — ordering changes the visit sequence, never
+    the selection.
+
+    Files in ``file_order`` that contributed no rows (missing on disk, so
+    skipped during construction) are passed over, preserving the loader's
+    existing warn-and-continue behavior. Files present in the dataset but
+    absent from ``file_order`` would be silently dropped, so they are a hard
+    error instead — that would change selection.
+
+    Args:
+        file_row_ranges: ``{file_index: (start, end)}`` from the dataset.
+        file_order:      Visit order; ``None`` = ascending file index.
+        rng:             Epoch RNG (same seed discipline as subsampling).
+
+    Returns:
+        Row indices, ordered for this epoch.
+
+    Raises:
+        ValueError: ``file_order`` omits a file the dataset actually loaded.
+    """
+    order = list(file_order) if file_order is not None else sorted(file_row_ranges)
+    missing = sorted(set(file_row_ranges) - set(order))
+    if missing:
+        raise ValueError(
+            f"file_order {order} omits loaded training file(s) {missing}; their "
+            f"samples would never be visited. Ordering must not change selection."
+        )
+    indices: list[int] = []
+    for file_index in order:
+        span = file_row_ranges.get(file_index)
+        if span is None:
+            continue  # file skipped during construction (missing on disk)
+        block = list(range(*span))
+        rng.shuffle(block)
+        indices.extend(block)
+    return indices
 
 
 # ==========================================
@@ -473,13 +591,20 @@ def run_experiment_streaming(
     freeze_subsample: bool = False,
     train_base_seed: int | None = None,
     runtime_session: RuntimeVerificationSession | None = None,
+    order_strategy: str = "shuffle",
+    file_order: list[int] | None = None,
 ):
     """
-    Streaming training: process one file at a time, never hold multiple files in RAM.
+    Multi-file training: rebuild the epoch dataset each epoch, then train on it.
 
-    Follows the legacy ``train.py`` pattern: for each epoch, iterate through files
-    in shuffled order, load one file's segments, train on them, free memory, move
-    to the next file. Model weights carry over across files.
+    Each epoch subsamples ``train_portion`` of the scope, loads those segments
+    via HDF5 slicing, and concatenates them into one in-memory dataset. All
+    scope files are resident simultaneously; the per-epoch rebuild is what
+    varies the subsample.
+
+    (The name is historical. An earlier implementation did hold one file at a
+    time — the coupling ledger tracks the rename, which is deliberately not
+    bundled with the ordering work.)
 
     ``sample_set`` defines the data **scope** (which files and segments are in play).
     ``train_portion`` controls how much of each file's scope is subsampled per epoch.
@@ -512,12 +637,30 @@ def run_experiment_streaming(
                            context — verification is the first part of formal
                            execution, never a separate pass. ``None`` →
                            behavior identical to pre-RT2-B code.
+        order_strategy:    RESOLVED visitation order — ``"shuffle"`` (default,
+                           global uniform shuffle: the pre-PR2 behavior) or
+                           ``"sequential"`` (file blocks in ``file_order``,
+                           rows shuffled within each block). Already resolved
+                           upstream from the agent proposal and any operator
+                           override; this engine never sees those levels and
+                           does not re-derive precedence.
+        file_order:        RESOLVED file visitation order for ``sequential``.
+                           ``None`` = ascending file index. Must be a
+                           permutation of ``sample_set``'s files — re-checked
+                           here because the engine is directly invocable.
 
     Returns:
         The result summary dict, or ``None`` when the runtime-verification
         admission decision rejected the attempt (the structured rejection
         lives in the session's observation sidecar).
     """
+    # Boundary validation, in the DataScope tradition: the caller already
+    # validated, but this engine is directly invocable, so it re-checks rather
+    # than trusting its input. A violation terminates — an ordering that does
+    # not cover the scope would silently change selection, which no retry
+    # would fix.
+    validate_ordering_against_scope(order_strategy, file_order, sample_set)
+
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     seg_size = model_cfg.segmentation_size
 
@@ -591,7 +734,34 @@ def run_experiment_streaming(
             train_portion=train_portion,
             rng=epoch_rng,
         )
-        loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
+        if order_strategy == "sequential":
+            # Independent RNG stream, seeded from the same epoch seed: the
+            # dataset above consumes a variable number of draws depending on
+            # train_portion and file count, so sharing its generator would
+            # couple visit order to subsampling internals. The "order:" prefix
+            # keeps epoch N's ordering stream from colliding with epoch N+1's
+            # subsampling stream.
+            order_rng = random.Random(f"order:{epoch_seed}")
+            epoch_indices = build_sequential_indices(dataset.file_row_ranges, file_order, order_rng)
+            # ONE global loader with the global drop_last, exactly as the
+            # shuffle path: ordering changes the visit sequence only. Batches
+            # may therefore span a file boundary, and the step count is
+            # identical to shuffle's for the same selection.
+            loader = DataLoader(
+                dataset,
+                batch_size=train_cfg.batch_size,
+                sampler=epoch_indices,
+                drop_last=True,
+            )
+        else:
+            loader = DataLoader(
+                dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True
+            )
+        print(
+            f"[data_order] resolved={order_strategy} "
+            f"file_order={'none' if file_order is None else file_order} "
+            f"epoch={ep} epoch_seed={epoch_seed}"
+        )
         if ep == 0:
             epoch0_dataset_seconds = time.perf_counter() - t_dataset
 
@@ -627,6 +797,11 @@ def run_experiment_streaming(
                         "epoch0_samples": len(dataset),
                         "batch_size": train_cfg.batch_size,
                         "train_portion": train_portion,
+                        # Provenance only — ordering permutes the same rows,
+                        # so it changes no term in the workload arithmetic.
+                        # Recorded so observations stay attributable if
+                        # ordering ever turns out to affect unit time.
+                        "resolved_order_strategy": order_strategy,
                     },
                 ),
                 detail={"dataset_construction_seconds": epoch0_dataset_seconds},
@@ -810,6 +985,24 @@ def main():
         "When None, derived from exp_id hash.",
     )
     parser.add_argument(
+        "--order_strategy",
+        type=str,
+        default="shuffle",
+        choices=["shuffle", "sequential"],
+        help="RESOLVED training sample visitation order. 'shuffle' (default) is a "
+        "global uniform shuffle; 'sequential' visits file blocks in order with "
+        "rows shuffled within each block. Already resolved from the agent "
+        "proposal and any operator override — this process does not re-resolve.",
+    )
+    parser.add_argument(
+        "--file_order_json",
+        type=str,
+        default=None,
+        help="Path to a JSON list giving the RESOLVED file visitation order for "
+        "--order_strategy sequential. Must be a permutation of the sample set's "
+        "files. Omit for ascending file index.",
+    )
+    parser.add_argument(
         "--runtime_observation_out",
         type=str,
         default=None,
@@ -878,8 +1071,18 @@ def main():
         with open(args.sample_set_json) as f:
             sample_set = json.load(f)
 
+    file_order = None
+    if args.file_order_json:
+        with open(args.file_order_json) as f:
+            file_order = json.load(f)
+        if not isinstance(file_order, list) or not all(isinstance(i, int) for i in file_order):
+            raise ValueError(
+                f"--file_order_json {args.file_order_json!r} must contain a JSON "
+                f"list of integers, got {type(file_order).__name__}."
+            )
+
     if sample_set is not None:
-        # Streaming mode: one file at a time, memory-efficient
+        # Multi-file mode: per-epoch concatenated dataset over the sample set.
         results = run_experiment_streaming(
             model_cfg,
             train_cfg,
@@ -892,6 +1095,8 @@ def main():
             freeze_subsample=args.freeze_subsample,
             train_base_seed=args.train_base_seed,
             runtime_session=runtime_session,
+            order_strategy=args.order_strategy,
+            file_order=file_order,
         )
         if results is None:
             # Runtime verification rejected the attempt: the structured

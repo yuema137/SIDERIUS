@@ -1170,34 +1170,48 @@ implementer inspects the epoch loop before finalizing the exact
 DataLoader wiring — torch requires `shuffle=False` when a sampler is
 passed, and the epoch-RNG plumbing must reuse `epoch_rng`/`epoch_seed`
 at `:583-584`, not introduce a second seed path.)*
-- [ ] Build the `sequential` index permutation: per-file index
-      blocks in `file_order` order (dataset row ranges are derivable
-      from the construction order — verify block offsets against the
-      constructor's sorted-file iteration at `:292` before coding),
-      each block shuffled with the epoch RNG (Decision 2), flattened.
-- [ ] Pass the permutation to ONE global
-      `DataLoader(..., drop_last=True)` via `sampler=`/`shuffle=False`;
-      `shuffle` strategy keeps the existing `shuffle=True` call
-      byte-for-byte.
-- [ ] CLI: `--order_strategy` (default `"shuffle"`) +
-      `--file_order_json` (path, mirroring `--sample_set_json`
-      style) — RESOLVED values only; engine re-validates, never
-      trusts the caller; no proposal/override flags exist here.
-- [ ] Engine boundary validation: resolved `file_order` is exactly
-      a permutation of `sample_set` keys — violation prints a
-      structured error and terminates non-retryably (DataScope
-      layered-enforcement precedent).
-- [ ] `[data_order]` engine log line (§3.9): once per epoch,
-      `resolved=... file_order=... epoch=N epoch_seed=S` — bounded,
-      never per-sample.
-- [ ] RT2 provenance: `resolved_order_strategy` added to the
-      training workload `detail` dict (`:622-629`) — no arithmetic
-      change.
-- [ ] Docstring repair: `run_experiment_streaming` docstring and the
-      `main()` call-site comment rewritten to describe reality
-      (per-epoch concatenated dataset; ordering per
-      `order_strategy`; "streaming" name retained, drift noted in
-      the coupling ledger).
+- [x] Build the `sequential` index permutation: per-file index
+      blocks in `file_order` order, each block shuffled with the
+      epoch RNG (Decision 2), flattened.
+      *(**Block offsets are NOT re-derived** — that would have been
+      wrong: a file missing on disk is skipped with warn+continue
+      and contributes no rows, so any recomputed layout would drift
+      from reality. `TIDMADEpochDataset` now records
+      `file_row_ranges: {file_index: (start, end)}` as rows are
+      appended, and `build_sequential_indices()` addresses those
+      spans. A file named in `file_order` that contributed no rows
+      is passed over; a LOADED file omitted from `file_order` is a
+      hard error, since never visiting it would change selection.
+      Ordering uses an independent RNG stream seeded
+      `f"order:{epoch_seed}"` — the dataset consumes a variable
+      number of draws depending on train_portion and file count, so
+      sharing its generator would couple visit order to subsampling
+      internals; the prefix also prevents epoch N's ordering stream
+      colliding with epoch N+1's subsampling stream.)*
+- [x] Pass the permutation to ONE global
+      `DataLoader(..., drop_last=True)` via `sampler=`; `shuffle`
+      strategy keeps the existing `shuffle=True` call unchanged.
+      *(Verified empirically that a plain list is accepted as
+      `sampler` (torch 2.10 annotates `Sampler | Iterable | None`),
+      that `len(loader)` still applies the global `drop_last` floor,
+      and that iteration follows the sampler exactly.)*
+- [x] CLI: `--order_strategy` (default `"shuffle"`, `choices=`
+      constrained) + `--file_order_json` — RESOLVED values only;
+      engine re-validates; no proposal/override flags here.
+- [x] Engine boundary validation
+      (`validate_ordering_against_scope`): resolved `file_order` is
+      exactly a permutation of `sample_set` keys — violation raises
+      with missing/extra/duplicated named, non-retryable.
+- [x] `[data_order]` engine log line (§3.9): once per epoch,
+      `resolved=... file_order=... epoch=N epoch_seed=S`.
+- [x] RT2 provenance: `resolved_order_strategy` added to the
+      training workload `detail` dict — no arithmetic change.
+- [x] Docstring repair: the `run_experiment_streaming` docstring and
+      the `main()` call-site comment now describe reality (per-epoch
+      concatenated dataset, all scope files resident); the false
+      "one file at a time / shuffled file order" claims are gone.
+      The misleading *name* is retained deliberately, with the
+      rename recorded in the coupling ledger.
 
 **Validation plan.**
 - Unit (default parity — the four-part proof the operator requires):
@@ -1258,12 +1272,29 @@ at `:583-584`, not introduce a second seed path.)*
 - Legacy invocation (no new flags): identical to pre-PR behavior —
   covered by the default-parity proof.
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/test_rt2b_streaming_preamble.py tests/unit/execute_tools/test_rt2c_training_verification.py -q`
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `tests/unit/execute_tools/test_ordering_engine.py` (NEW) →
+      **25 passed in 2.16s**. Includes two REAL engine runs
+      (`run_experiment_streaming`, tiny wavenet on CPU) capturing
+      the DataLoader kwargs: shuffle path → `shuffle=True`, no
+      sampler; sequential path → sampler present, no `shuffle`, same
+      `drop_last`, every row visited exactly once, file 6 first
+      under `file_order=[6,4,5]`. Both `[data_order]` lines asserted
+      on captured stdout.
+- [x] RT2 non-regression: `test_rt2b_streaming_preamble.py` +
+      `test_rt2c_training_verification.py` +
+      `test_workload_resolvers.py` → **21 passed in 2.91s**,
+      unchanged (dataset-construction count still 1/epoch; workload
+      arithmetic untouched).
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q` →
+      **518 passed, 1 failed in 6.73s** — the failure is the same
+      pre-existing, unrelated FU-P2-4 scoring-ground-truth drift
+      documented under P2-CA.
+- [x] `ruff check` + `ruff format --check` clean on both files.
+- [x] Tests NOT run, with reason: no pseudo/integration yet (the
+      resolver is not wired into the tuner until CB3); no Gate
+      tests (P2-V2, operator-approved separately); `pyright` not run
+      (lilab Node < 14).
 
 **Commit boundary.** Engine + its tests + docstrings ONLY. No
 schema, no propagation, no chain scripts, no unrelated engine
