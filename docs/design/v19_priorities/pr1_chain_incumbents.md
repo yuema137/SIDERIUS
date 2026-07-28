@@ -77,8 +77,11 @@ green with recorded evidence.
             (BOTH incumbent branches deterministic)
             (commit pending operator approval; new pseudo suite 4
             green; regression 296 green)
-[ ] P1-V2 — Gate 2: standalone smallest canonical smoke (real LLM +
-            real training, flag ON) — REQUIRES OPERATOR APPROVAL
+[x] P1-V2 — Gate 2: standalone smallest canonical smoke (real LLM +
+            real training, flag ON) — **PASS WITH DOCUMENTED
+            LIMITATIONS** (attempt 3, 2026-07-27; Branch B path
+            validated end-to-end in 17m18s; Branch A + replay-hash
+            paths remain covered by P1-V1 + P1-C2)
 [ ] P1-S  — stop-and-show; PR merged (coupling flag still OFF)
 [ ] P1-ACT — activation: coupling flag ON in production launchers
             (separate operator decision; not part of this PR's merge)
@@ -1743,9 +1746,87 @@ workspaces retained (`/tmp/checkpoint_pr1_1785219480/`,
 `/tmp/checkpoint_pr1_1785220044/`) — a few KB each; safe to
 `rm -rf` any time.
 
-- [ ] Attempt 3: __ (cold-start; awaiting operator go/no-go with
-      the corrected command above)
-- [ ] Gate 2 result recorded here: __
+**Attempt 3 — 2026-07-27 23:33:26 → 23:50:44 -07:00 — PASS WITH
+DOCUMENTED LIMITATIONS**
+
+- Workspace: `/tmp/checkpoint_pr1_1785220406/` (retained for review
+  per plan; do NOT delete yet).
+- Command: exact form committed in `9a0a083` + cold-start
+  refinement in `69da366` (no `--seed_paths`).
+- Wall time: **17 min 18 s** (well inside 50-80 min expected /
+  120 min hard cap).
+- Chain exit code: 0. Both iterations completed (`completed_rounds=2`
+  each), both landed as `status: "no_records"` — cold-start invented
+  `tiny_spectral_gated_token_mixer_baseline`; every scoring round
+  was invalidated by HealthGate, no round produced a valid finite
+  score. This is the design's **Branch B path** (iter 1 produces no
+  commit-time-valid formal → iter 2 has no incumbent to
+  reconstruct).
+
+**Applicable pass criteria (evidence verbatim from log + manifests):**
+
+Baseline Gate 2 criteria (§`docs/gates/gate_testing_standard.md`):
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 1 | Chain exits 0 | ✅ PASS | notification exit_code=0; log tail `EXIT CODE: 0` |
+| 2 | Every scoring round has `gate_action` in final_record | ✅ PASS | 4 scoring records (iter1 r003, r006; iter2 r001, r003) all carry `gate_action='invalidate_round'` |
+| 3 | Every `denoising_score` is finite-positive OR None+invalidating gate_action | ✅ PASS | **Four scoring records were inspected. Two had finite scores (iter1 r003 = -1.856; iter2 r001 = -2.908) and two had no score (iter1 r006 = None; iter2 r003 = None). All four were invalidated with explicit gate failures — `gate_action='invalidate_round'` and non-empty `blocking_failed_gate_ids`. No score survived the gates.** |
+| 4 | No phantom 5.5762667 as final accepted score | ✅ PASS | scanned all 9 records; no score within 1e-4 of 5.5762667; no accepted scores anywhere |
+| 5 | ≥1 round triggers HealthGate | ✅ PASS | 4 rounds fired with `['output_diversity', 'output_std', 'amplitude_collapse']` blocking-failed under `any_pass` aggregation |
+
+PR-1 specific criteria (this run exercised Branch B; Branch A + hash
+write/verify remain deterministically covered elsewhere):
+
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| 6 | Iter 2 `[chain_incumbent]` startup banner emits with `coupling=ON` | ✅ PASS | log line 2433 verbatim: `[chain_incumbent] provided=none; coupling=ON; consumed=none` |
+| 7 | Branch A cross-surface consistency (numeric incumbent) | **NOT EXERCISED** in this real run — cold-start produced no commit-time-valid formal to reconstruct. Deterministically covered by P1-V1 `test_branch_a_numeric_incumbent_threads_through_full_chain` |
+| 8 | **Branch B cross-surface consistency (no incumbent) — the primary claim validated by this real run** | ✅ PASS | All four surfaces agree "none":<br>• iter 2 log line 2293: `[resume] incumbent carry-over: none`<br>• iter 2 log line 2432: `Formal comparison thresholds: reference=none, skip=none, bypass=none`<br>• iter 2 log line 2433: `[chain_incumbent] provided=none; coupling=ON; consumed=none`<br>• iter 2 `manifest.json`: `"chain_incumbent_used": null`, `"chain_incumbent_source": null` |
+| 9 | Invariant II (iter-local ≠ chain-state keys) | ✅ PASS | iter 2 manifest keys structurally distinct: `best_valid_formal_score: null` (iter-local — iter 2 rounds produced no valid formal) sits alongside separate `chain_incumbent_used: null` / `chain_incumbent_source: null` (chain-state). No cross-contamination |
+| 10 | Replay integrity write side | **NOT EXERCISED** in this real run — both manifests are `status: "no_records"` → `output_path: null` → `write_manifest` correctly skips `run_output_sha256` (P1-C3e code path). Deterministically covered by P1-V1 `test_branch_a_numeric_incumbent_threads_through_full_chain` (hash presence) and P1-C2 `test_tampered_iter1_artifact_stops_the_chain` / `test_hash_mismatch_raises_replay_integrity` (mismatch detection) |
+
+**What the real run did and did NOT validate**:
+
+- **DID validate**: the Branch B no-incumbent path end-to-end, including
+  reconstruction (`[resume] incumbent carry-over: none`), delivery to
+  the tuner input, the resolver's None short-circuit (both resolved
+  thresholds null), the manifest chain-state stamps (`chain_incumbent_used`
+  and `chain_incumbent_source` both null), and the operator-requested
+  `[chain_incumbent]` runtime line rendering with `coupling=ON`.
+- **DID NOT exercise (remains covered by tests)**: the Branch A
+  numeric-incumbent path (deterministic in P1-V1) and the replay-
+  hash write/verify path (deterministic in P1-V1 + P1-C2 unit
+  tests). Neither gap represents a production risk; the operator
+  plan was explicitly outcome-agnostic on Branch A vs B.
+
+**Actual resource usage**:
+
+| Metric | Actual | Budget/cap |
+|---|---|---|
+| Wall time | 17 min 18 s | 50-80 min expected, 120 min hard cap |
+| LLM calls | **27 real OpenAI calls** (gpt-5.4 dominant, plus mini + nano tiers) across proposer.comparison×2, proposer.causal_reasoning×2, proposer.proposing×6, implementor.reasoning×1, implementor.code×1, validator.code_review×2, tuner.planner×9, tuner.reflector×4 | ~25-35 expected |
+| API cost | **Not directly reported** — the token-usage telemetry logged 27 calls but did not populate per-call `tokens.input`/`tokens.output` fields on this branch (pre-existing telemetry gap, unrelated to PR 1). **Exact cost unavailable; estimated to remain within the approved $5 hard cap** given call count + Lite-tier price structure (Gate standard's Lite Plan itself estimates ~$1 for a 1-iter run of similar shape) | $5 hard cap |
+| GPU time | ~5 min (four watchdog-killed training attempts at 60-132 s each + minor formal training) | 25-45 min expected |
+| Disk (workspace) | ~few MB (no denoised outputs retained — gates invalidated all scoring rounds; `cleanup_denoised` default on) | 60 GB hard cap; `/tmp` had 538 GB free |
+
+**Telemetry limitation** (for post-run reporting only, not a PR-1
+issue): `token_usage.jsonl` records 27 calls with correct
+`{ts, run_id, iter, label, model, provider}` metadata but empty
+`tokens.input`/`tokens.output`. Consequence: exact per-run API-cost
+attribution isn't possible from the workspace alone; the OpenAI
+dashboard is authoritative if precise cost is needed.
+
+**Cumulative attempt cost (all 3 attempts)**: 27 real LLM calls, no
+training success (all gate-invalidated), zero cost incurred by
+attempts 1 & 2, attempt-3 cost unattributed but estimated within
+the $5 cap.
+
+- [x] **Gate 2 result recorded here: PASS WITH DOCUMENTED LIMITATIONS
+      — Branch B no-incumbent path validated end-to-end; Branch A
+      numeric-incumbent and replay-hash write/verify paths not
+      exercised in this real run and remain covered by unit +
+      pseudo-integration tests (P1-V1 + P1-C2).**
 
 ### Validation budget table (baseline §4.4 — estimates filled at P1-D approval)
 
@@ -1754,7 +1835,7 @@ layer                | scenarios | samples | LLM calls | training runs | wall | 
 unit (P1-C1..C5)     | n/a       | n/a     | 0         | 0             | ~min | 0   | 0        | n/a      | none
 pseudo chain (P1-V1) | 3 (A/B/off)| 1      | 0         | 0 (stub)      | ~min | 0   | 0        | n/a      | none
 backfill smoke (C5)  | 1         | 1       | 0         | 0 (offline)   | ~min | 0   | 0        | n/a      | none
-Gate 2 (P1-V2)       | 1         | 1       | ~2 iters  | ~4-6 rounds   | TBD  | TBD | TBD      | TBD      | OPERATOR
+Gate 2 (P1-V2)       | 1         | 1       | 27        | 2 iters, 0 valid | 17m18s | ~5m | not reported (≤$5 est.) | 120m/$5/60GB | OPERATOR (approved 2026-07-27, PASS WITH DOCUMENTED LIMITATIONS)
 ```
 
 No Layer-2/Layer-3 agent-behavior campaign: this PR makes no
