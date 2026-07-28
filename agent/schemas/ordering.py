@@ -127,6 +127,35 @@ def validate_ordering_shape(
         )
 
 
+class RejectedOrderingProposal(BaseModel):
+    """An agent ordering proposal that was received but not applied.
+
+    Recovering from a malformed LLM proposal is acceptable — falling back
+    silently is not. A rejected proposal is materially different from no
+    proposal at all: the agent tried to steer the run and was overruled by
+    the schema, which is a fact about agent behavior that downstream
+    interpretation must be able to see (operator requirement, 2026-07-28).
+
+    Attributes:
+        strategy:   The raw strategy the agent asked for, if any. Untyped
+                    (``str``) on purpose — a rejected value may be exactly
+                    the thing that is not a valid ``OrderStrategy``.
+        file_order: The raw file order the agent asked for, if any. Also
+                    deliberately loose: it may be the malformed part.
+        reason:     Why it was not applied, stating WHICH failure occurred —
+                    the ordering itself was invalid, or the ordering was
+                    well-formed but discarded because another field of the
+                    plan failed validation. Reporting the second as the
+                    first would misattribute the defect.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    strategy: str | None = Field(default=None)
+    file_order: list[int] | None = Field(default=None)
+    reason: str = Field(min_length=1)
+
+
 class ResolvedOrdering(BaseModel):
     """The full ordering provenance for one round: intent, control, and fact.
 
@@ -134,17 +163,40 @@ class ResolvedOrdering(BaseModel):
     executed. The proposed and override values are context: they explain WHY
     the resolved value is what it is, and they must never be reported as what
     ran (``docs/design/v19_priorities/pr2_data_ordering.md`` §3.7).
+
+    A rejected proposal is carried here too, in ``proposed_*`` plus
+    ``proposal_rejected`` / ``proposal_rejection_reason``, so a reader can
+    distinguish "the agent proposed nothing" from "the agent proposed
+    something unusable". ``resolution_source`` is never ``agent_proposal``
+    in that case.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    proposed_strategy: OrderStrategy | None = Field(
+    proposed_strategy: str | None = Field(
         default=None,
-        description="What the agent proposed, or None when it proposed nothing.",
+        description=(
+            "What the agent proposed, or None when it proposed nothing. Typed "
+            "as str rather than OrderStrategy because a REJECTED proposal is "
+            "preserved here verbatim, and an unusable value may be exactly "
+            "what the agent sent."
+        ),
     )
     proposed_file_order: list[int] | None = Field(
         default=None,
-        description="File order the agent proposed, if any.",
+        description="File order the agent proposed, if any (rejected or not).",
+    )
+    proposal_rejected: bool = Field(
+        default=False,
+        description=(
+            "True when an ordering proposal was received but not applied. "
+            "Distinguishes a rejected proposal from an absent one — the "
+            "fallback must never look like agent silence."
+        ),
+    )
+    proposal_rejection_reason: str | None = Field(
+        default=None,
+        description="Why the proposal was not applied. None unless rejected.",
     )
     override_strategy: OrderStrategy | None = Field(
         default=None,
@@ -184,8 +236,11 @@ class ResolvedOrdering(BaseModel):
     def describes_execution(self) -> str:
         """One-line human summary suitable for logs and reports."""
         order = "none" if self.resolved_file_order is None else str(self.resolved_file_order)
+        proposed = self.proposed_strategy or "none"
+        if self.proposal_rejected:
+            proposed = f"{proposed}(REJECTED)"
         return (
-            f"proposed={self.proposed_strategy or 'none'} "
+            f"proposed={proposed} "
             f"override={self.override_strategy or 'none'} "
             f"resolved={self.resolved_strategy} "
             f"source={self.resolution_source} "
@@ -200,6 +255,7 @@ def resolve_ordering(
     proposed_file_order: list[int] | None = None,
     override_strategy: OrderStrategy | None = None,
     override_file_order: list[int] | None = None,
+    rejected_proposal: RejectedOrderingProposal | None = None,
 ) -> ResolvedOrdering:
     """Resolve the ordering that will execute, with full provenance.
 
@@ -225,6 +281,13 @@ def resolve_ordering(
         proposed_file_order:  Agent-proposed file order, or None.
         override_strategy:    Operator override, or None.
         override_file_order:  Operator-forced file order, or None.
+        rejected_proposal:    A proposal that arrived but could not be
+                              applied. Mutually exclusive with
+                              ``proposed_strategy`` — a proposal is either
+                              usable or rejected, never both. When given, the
+                              resolution proceeds as if no proposal had been
+                              made (so the override, else the default, wins)
+                              while the rejection is preserved in the result.
 
     Returns:
         A fully populated :class:`ResolvedOrdering`.
@@ -233,7 +296,17 @@ def resolve_ordering(
         OrderingValidationError: Either level is structurally invalid, the
             resolved scope is empty, or the resolved file order is not a full
             permutation of the resolved scope.
+        ValueError: Both a usable proposal and a rejected one were supplied.
     """
+    if rejected_proposal is not None and (
+        proposed_strategy is not None or proposed_file_order is not None
+    ):
+        raise ValueError(
+            "resolve_ordering received both a usable proposal and a rejected "
+            "one. A proposal is either applied or rejected — passing both "
+            "would make the recorded provenance self-contradictory."
+        )
+
     validate_ordering_shape(proposed_strategy, proposed_file_order, level="agent proposal")
     validate_ordering_shape(override_strategy, override_file_order, level="operator override")
 
@@ -263,8 +336,18 @@ def resolve_ordering(
         _assert_full_permutation(resolved_file_order, resolved_scope, source=source)
 
     return ResolvedOrdering(
-        proposed_strategy=proposed_strategy,
-        proposed_file_order=proposed_file_order,
+        # A rejected proposal still populates proposed_*, so downstream can
+        # see that the agent DID try to steer this round.
+        proposed_strategy=(
+            rejected_proposal.strategy if rejected_proposal is not None else proposed_strategy
+        ),
+        proposed_file_order=(
+            rejected_proposal.file_order if rejected_proposal is not None else proposed_file_order
+        ),
+        proposal_rejected=rejected_proposal is not None,
+        proposal_rejection_reason=(
+            rejected_proposal.reason if rejected_proposal is not None else None
+        ),
         override_strategy=override_strategy,
         override_file_order=override_file_order,
         resolved_strategy=strategy,

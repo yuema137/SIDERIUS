@@ -571,8 +571,15 @@ the iteration manifest — names below are canonical; if
 implementation shortens them, the mapping is documented here):
 
 ```text
-proposed_order_strategy    | None when the agent proposed nothing
-proposed_file_order        | None when not proposed
+proposed_order_strategy    | what the agent proposed, REJECTED OR NOT;
+                           | None only when it proposed nothing
+proposed_file_order        | ditto
+ordering_proposal_rejected | True when a proposal arrived but was not
+                           | applied (operator requirement, 2026-07-28)
+ordering_proposal_rejection_reason
+                           | why — distinguishing an invalid ordering
+                           | from one discarded because ANOTHER plan
+                           | field failed validation
 override_order_strategy    | None when no operator override
 override_file_order        | None when not overridden
 resolved_order_strategy    | always present for executed rounds
@@ -580,6 +587,23 @@ resolved_file_order        | None iff resolved strategy is shuffle
 ordering_resolution_source | "operator_override" | "agent_proposal"
                            | "default"
 ```
+
+**Rejected proposals are recorded, never silently dropped** (operator
+clarification, 2026-07-28). Falling back from a malformed LLM ordering
+proposal is acceptable — it is the established `with_defaults`
+treatment of any bad trial field, so one malformed token cannot kill a
+round — but the fallback must not be SILENT. A rejected proposal is
+materially different from no proposal: the agent DID try to steer the
+round and was overruled. Every rejection therefore exposes: that a
+proposal was present; that it was rejected; the reason; the resolved
+ordering that actually ran; and whether that came from the override or
+the default. `ordering_resolution_source` is never `agent_proposal`
+for a rejected proposal, so an override is never attributed to the
+agent. Two rejection KINDS are distinguished, because reporting the
+second as the first would misattribute the defect:
+- the ordering fields were themselves invalid;
+- the ordering was well-formed but discarded because a different plan
+  field failed validation.
 
 A reviewer must be able to reconstruct, from any round record alone:
 "Agent proposed sequential; operator override shuffle; actually

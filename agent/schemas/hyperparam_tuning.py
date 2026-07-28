@@ -15,7 +15,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from agent.schemas.ordering import OrderStrategy, resolve_ordering, validate_ordering_shape
+from agent.schemas.ordering import (
+    OrderingValidationError,
+    OrderStrategy,
+    RejectedOrderingProposal,
+    resolve_ordering,
+    validate_ordering_shape,
+)
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
@@ -445,13 +451,32 @@ class ExperimentRecord(BaseModel):
     # an overridden proposal must never be reported as what ran. All default
     # to None so pre-PR2 records stay readable — a record with no ordering
     # fields is interpreted via ResolvedOrdering.legacy_default().
-    proposed_order_strategy: OrderStrategy | None = Field(
+    proposed_order_strategy: str | None = Field(
         default=None,
-        description="Ordering the agent proposed. None = no proposal (or legacy record).",
+        description=(
+            "Ordering the agent proposed, REJECTED OR NOT. None = no proposal "
+            "(or legacy record). Typed as str because a rejected proposal is "
+            "preserved verbatim and may not be a valid strategy."
+        ),
     )
     proposed_file_order: list[int] | None = Field(
         default=None,
-        description="File order the agent proposed, if any.",
+        description="File order the agent proposed, if any (rejected or not).",
+    )
+    ordering_proposal_rejected: bool = Field(
+        default=False,
+        description=(
+            "True when an ordering proposal arrived but was not applied. "
+            "Downstream must not read a rejected proposal as agent silence: "
+            "the agent DID try to steer this round and was overruled."
+        ),
+    )
+    ordering_proposal_rejection_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the proposal was not applied — distinguishing an invalid "
+            "ordering from one discarded because another plan field failed."
+        ),
     )
     override_order_strategy: OrderStrategy | None = Field(
         default=None,
@@ -781,8 +806,20 @@ class ExperimentPlan(BaseModel):
 
     @classmethod
     def with_defaults(cls, raw: dict[str, Any] | list[Any]) -> ExperimentPlan:
+        """Validate raw LLM output, falling back to defaults on invalid fields.
+
+        Thin wrapper over :meth:`parse_with_fallback` for callers that do not
+        need to know whether an ordering proposal was discarded.
         """
-        Validate raw LLM output, falling back to defaults on invalid trial fields.
+        plan, _rejected_ordering = cls.parse_with_fallback(raw)
+        return plan
+
+    @classmethod
+    def parse_with_fallback(
+        cls, raw: dict[str, Any] | list[Any]
+    ) -> tuple[ExperimentPlan, RejectedOrderingProposal | None]:
+        """
+        Validate raw LLM output, reporting any ordering proposal that was lost.
 
         If the full dict fails validation (e.g. trial_portion=5.0), strip the
         trial fields and retry — preserving the LLM's experiment design while
@@ -793,16 +830,24 @@ class ExperimentPlan(BaseModel):
         ``list[Any]`` to honestly reflect that runtime contract. Unwrap that
         case before validation; any other shape raises a clear TypeError.
 
-        Ordering proposals ride this same path: a structurally invalid
-        ``order_strategy`` / ``file_order`` from the LLM makes the strict
-        validation fail, so the fallback drops it along with the other trial
-        fields and the round proceeds with no ordering proposal (resolving to
-        the operator override, or to the default). The warning below is the
-        signal. This is deliberately the established treatment of any bad LLM
-        trial field, not a special case: one malformed token must not kill a
-        round. It does not weaken the "malformed proposals are surfaced"
-        rule, which is about an override masking a proposal that DID arrive —
-        every proposal that survives to the resolver is validated there.
+        Ordering proposals ride this same path: a bad one does not kill the
+        round, which is the established treatment of any invalid LLM trial
+        field. But falling back must never be SILENT — a rejected proposal is
+        materially different from no proposal, and downstream interpretation
+        has to be able to tell them apart. So when the fallback discards an
+        ordering proposal, this method returns it alongside the plan, with a
+        reason that distinguishes the two possible failures:
+
+        - the ordering fields were themselves invalid, or
+        - the ordering was well-formed but was discarded because a DIFFERENT
+          plan field failed validation.
+
+        Reporting the second as the first would blame the agent's ordering for
+        someone else's defect.
+
+        Returns:
+            ``(plan, rejected_ordering)`` — the second element is None when no
+            ordering proposal was lost.
         """
         if isinstance(raw, list):
             if len(raw) == 1 and isinstance(raw[0], dict):
@@ -816,8 +861,9 @@ class ExperimentPlan(BaseModel):
         if not isinstance(raw, dict):
             raise TypeError(f"ExperimentPlan expected a dict, got {type(raw).__name__}.")
         try:
-            return cls.model_validate(raw)
-        except Exception:
+            return cls.model_validate(raw), None
+        except Exception as exc:
+            plan_error = str(exc)
             # Keep only experiment fields, let trial fields take defaults.
             # Use alias names (model_config, train_config, loss_config) since
             # that's what the LLM outputs.
@@ -834,7 +880,50 @@ class ExperimentPlan(BaseModel):
                 f"[ExperimentPlan] LLM returned invalid trial fields — "
                 f"falling back to defaults. Kept keys: {list(safe.keys())}"
             )
-            return cls.model_validate(safe)
+            rejected = cls._describe_lost_ordering(raw, plan_error)
+            if rejected is not None:
+                print(f"[ExperimentPlan] ordering proposal not applied: {rejected.reason}")
+            return cls.model_validate(safe), rejected
+
+    @staticmethod
+    def _describe_lost_ordering(
+        raw: dict[str, Any], plan_error: str
+    ) -> RejectedOrderingProposal | None:
+        """Report the ordering proposal the fallback discarded, if there was one.
+
+        Distinguishes "your ordering was invalid" from "your ordering was fine
+        but the plan failed elsewhere" by re-validating the ordering fields on
+        their own. Without that split, an unrelated ``trial_portion`` error
+        would be recorded as an ordering defect.
+        """
+        strategy = raw.get("order_strategy")
+        file_order = raw.get("file_order")
+        if strategy is None and file_order is None:
+            return None  # nothing was proposed, so nothing was lost
+
+        try:
+            validate_ordering_shape(strategy, file_order, level="agent proposal")
+        except OrderingValidationError as ordering_exc:
+            reason = f"the ordering proposal itself was invalid: {ordering_exc}"
+        except Exception:
+            # Not even shape-checkable (e.g. a non-list file_order); the plan
+            # error already describes it.
+            reason = f"the ordering proposal was not well-formed: {plan_error}"
+        else:
+            reason = (
+                "the ordering proposal was well-formed but was discarded with "
+                "the other trial fields because the plan failed validation: "
+                f"{plan_error}"
+            )
+        return RejectedOrderingProposal(
+            strategy=strategy if isinstance(strategy, str) else None,
+            file_order=(
+                file_order
+                if isinstance(file_order, list) and all(isinstance(i, int) for i in file_order)
+                else None
+            ),
+            reason=reason,
+        )
 
 
 # ---------------------------------------------------------------------------
