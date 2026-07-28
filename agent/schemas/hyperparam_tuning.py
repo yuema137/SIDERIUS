@@ -1964,6 +1964,25 @@ class HyperparamTuningOutput(BaseModel):
             "against its source record before use (design doc §3.3)."
         ),
     )
+    best_valid_trial_exp_id: str | None = Field(
+        default=None,
+        description=(
+            "V19 PR 1 (P1-C4): experiment id of the highest HealthGate-valid "
+            "TRIAL record. Read-only bookkeeping — the trial incumbent is "
+            "context, never decision state. NOTE: bookkeeping notion; the "
+            "gate-side _best_trial_winner additionally requires "
+            "memory.time_mode=='trial' and may disagree (design doc §3.5)."
+        ),
+    )
+    best_valid_trial_denoising_score: float | None = Field(
+        default=None,
+        description=(
+            "V19 PR 1 (P1-C4): highest finite denoising_score among "
+            "HealthGate-valid TRIAL records. Small-sample estimate "
+            "(trial eval portions) — never comparable to formal scores, "
+            "never eligible for the formal incumbent."
+        ),
+    )
     best_valid_config: dict[str, Any] | None = Field(
         default=None,
         description="Configuration that produced best_valid_denoising_score.",
