@@ -57,8 +57,10 @@ green with recorded evidence.
 [x] P1-C1 — schema widening + threshold consolidation + comment sweep
             (29ec054; design-doc commit 98119e3; tune 687 green,
             workflows 206 green; pyright n/a lilab)
-[ ] P1-C2 — incumbent reconstruction in core/resume.py (RestoredState;
+[x] P1-C2 — incumbent reconstruction in core/resume.py (RestoredState;
             commit-time validity; artifact-hash verification)
+            (2f9d4c7 + docs 387f387; new suite 19 green; core 446
+            green + 2 pre-existing watchdog env failures)
 [ ] P1-C3 — threading: subprocess → workflow → protocol → tuner input
             (+ enable_chain_incumbent_formal_gates flag, default OFF;
             manifest artifact hash + chain_incumbent_used stamps)
@@ -846,54 +848,91 @@ never 0.0; iteration-local fields never contaminated (Invariant II).
 
 **Code**:
 
-- [ ] five-site threading per §3.4; post-hoc mutation
+- [x] five-site threading per §3.4; post-hoc mutation
       `model_exploration.py:2462-2463` removed
-- [ ] `enable_chain_incumbent_formal_gates` flag: schema field + tuner
+      *(done 2026-07-27: run_one_iteration passes
+      `restored_chain_incumbent_score` + flag → run_workflow kwargs →
+      NEW local `chain_formal_incumbent_reference` (two-state; seeded
+      from RestoredState, advanced only by committed VALID formals) →
+      protocol named parameter. `best_score_overall` retains only the
+      workflow print/summary role.)*
+- [x] `enable_chain_incumbent_formal_gates` flag: schema field + tuner
       CLI + `run_one_iteration.py` + `_chain_common.sh` +
       `run_comparison.py`, default OFF; OFF passes `None` to the gates
       while reconstruction/provenance/persistence run UNCONDITIONALLY
-- [ ] manifest gains `run_output_sha256` (P1-C2 write side lands
+      *(done: schema field; tuner CLI arg + input_dict; consumption
+      applied at the resolver (`_consumed_reference`); run_config
+      records `chain_incumbent_provided` + flag state so
+      provided-but-not-consumed is auditable; shell arm/default/
+      forwarding follow the `runtime_watchdog` 0/1 pattern; flag added
+      to `CONTRACT_FLAGS` in test_chain_consistency.py — parity suite
+      green)*
+- [x] manifest gains `run_output_sha256` (P1-C2 write side lands
       here with `write_manifest`) plus the consumed-incumbent stamps
       `chain_incumbent_used` (float | null) and
       `chain_incumbent_source` (full provenance dict incl.
       `artifact_verified`); these keys are DISTINCT from every
       iteration-local `best_*` field (Invariant II)
-- [ ] rewrite `test_trial_only_iter_does_not_poison_formal_anchor`
+- [x] rewrite `test_trial_only_iter_does_not_poison_formal_anchor`
       (`tests/unit/workflows/test_model_exploration.py:674-714`) to
       assert the INTENT: trial-only iter → next iter's formal
       incumbent is `None` (not `0.0`)
+      *(done in P1-C1, disclosed there)*
 
 **Tests**:
 
-- [ ] protocol unit
+- [x] protocol unit
       (`tests/unit/agent/protocols/test_ml_model_valid_to_ml_model_tune.py`):
-      named parameter threads; omitted → `None`
-- [ ] workflow unit: restored incumbent initializes
+      named parameter threads; omitted → `None` (+ flag default/thread
+      cases; 4 new parametrized ids)
+- [x] workflow unit: restored incumbent initializes
       `chain_formal_incumbent_reference` only; `best_score_overall`
       remains derived solely from the current workflow execution's own
       formal results (formal-only update rule preserved; trial score
       never promotes)
-- [ ] **three-iteration separation test (Invariant II, operator-
-      specified)**: iter 1 commits a valid formal → iter 2 has NO
-      valid formal of its own but consumes iter 1's score as chain
-      reference → assert (a) iter 2's manifest
-      `best_valid_formal_score` is `None`, (b) iter 2's
-      `chain_incumbent_used` equals iter 1's score with
-      `chain_incumbent_source.iter_idx == 1` → iter 3's restored
-      incumbent still attributes provenance to iter 1 (not iter 2)
-- [ ] equivalence: in-process `run_workflow(max_iterations=2)`
+      *(`TestChainIncumbentThreading`: restored 5.0 reaches tuner
+      input while summary best_score_overall stays 1.8; raw formal 7.7
+      never advances the reference)*
+- [x] **three-iteration separation test (Invariant II, operator-
+      specified)** — `tests/unit/sdsc_submission_scripts/
+      test_run_one_iteration.py::TestChainIncumbentManifest::
+      test_three_iteration_separation_and_attribution`: iter 2 manifest
+      `best_valid_formal_score` is None while `chain_incumbent_used`
+      == 1.2 with `source.iter_idx == 1`; iter 3 reconstruction still
+      attributes iter 1
+- [x] equivalence: in-process `run_workflow(max_iterations=2)`
       incumbent sequence == two chained single-iteration runs over the
       same workspace
-- [ ] flag OFF → gates see `None` even with a restored incumbent
+      *(split as designed evidence: in-process half in
+      `test_valid_formal_advances_reference_across_iterations`
+      (iter 2 ref == iter 1's committed valid formal); on-disk half in
+      the three-iteration test (write_manifest → restore yields the
+      same value) — both halves assert the identical rule/value)*
+- [x] flag OFF → gates see `None` even with a restored incumbent
       (rollback semantics) while `chain_incumbent_used` is still
       stamped; flag ON → gates see the restored value
-- [ ] `--auto_resume` restart mid-chain reconstructs the same
+      *(tuner level: `test_incumbent_provided_but_flag_off_not_consumed`
+      + flag-ON `test_injected_formal_thresholds_persist` — the
+      latter's old flag-less form was DIAGNOSED test-at-fault under
+      the new contract and updated; manifest level:
+      `test_flag_off_stamps_source_but_not_used`)*
+- [x] `--auto_resume` restart mid-chain reconstructs the same
       incumbent (resume determinism)
+      *(covered by P1-C2 `test_reconstruction_is_deterministic` —
+      every iteration re-derives from disk, no cross-process cache;
+      mapping disclosed)*
 
 **Verification checklist**:
 
-- [ ] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent/protocols tests/unit/sdsc_submission_scripts -q` green (counts + wall)
-- [ ] ruff + pyright clean
+- [x] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent/protocols
+      tests/unit/sdsc_submission_scripts tests/unit/scripts
+      tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py
+      tests/unit/core/test_resume_incumbent.py -q` →
+      **540 passed → after the two diagnosed test fixes: all green**
+      (final runs: tuning_agent + chain_consistency 84 passed 120.7 s;
+      workflows + sdsc 166 passed 10.9 s; protocols in the 540 sweep)
+- [x] ruff check + format clean on all 11 touched files
+- [ ] ~~pyright~~ n/a on lilab (Node < 14; PR #123 precedent)
 
 **Test gate**: unit + pseudo integration (P1-V1 covers the chain-level
 pseudo run).
