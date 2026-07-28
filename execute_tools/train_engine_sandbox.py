@@ -17,6 +17,7 @@ from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.dataset_config import TIDMAD
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
 
@@ -156,7 +157,7 @@ class TIDMADDataset(Dataset):
 
         for file_index, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index)  # JSON keys may be strings
-            filename = f"abra_training_{file_index:04d}.h5"
+            filename = TIDMAD.training_file_name(file_index)
             file_path = os.path.join(self.filepath, filename)
             if not os.path.exists(file_path):
                 print(f"Warning: {file_path} not found, skipping.")
@@ -291,7 +292,7 @@ class TIDMADEpochDataset(Dataset):
 
         for file_key in sorted(sample_set.keys(), key=int):
             file_index = int(file_key)
-            file_path = os.path.join(data_dir, f"abra_training_{file_index:04d}.h5")
+            file_path = os.path.join(data_dir, TIDMAD.training_file_name(file_index))
             if not os.path.exists(file_path):
                 print(f"Warning: {file_path} not found, skipping.")
                 continue
@@ -603,7 +604,7 @@ def run_experiment_streaming(
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
             file_paths = [
-                os.path.join(data_dir, f"abra_training_{int(k):04d}.h5")
+                os.path.join(data_dir, TIDMAD.training_file_name(int(k)))
                 for k in sorted(sample_set.keys(), key=int)
             ]
             # Scoped read volume (pre-Gate F2): the setup reads only the
@@ -903,7 +904,7 @@ def main():
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
         dataset = TIDMADDataset(
             args.data_dir,
-            [f"abra_training_{str(args.file_index).zfill(4)}.h5"],
+            [TIDMAD.training_file_name(args.file_index)],
             model_cfg.segmentation_size,
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)

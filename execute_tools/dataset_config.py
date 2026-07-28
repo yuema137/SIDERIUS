@@ -15,7 +15,13 @@ Constants:
     validation_file_pattern:  Format string for validation file names.
 """
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from string import Formatter
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+
+# Arbitrary in-range index used only to probe that a filename pattern
+# actually formats. Never used to build a path that is read.
+_PATTERN_PROBE_INDEX = 7
 
 
 class DatasetConfig(BaseModel):
@@ -41,6 +47,73 @@ class DatasetConfig(BaseModel):
         default="abra_validation_{file_index:04d}.h5",
         description="Format string for validation file names. Use {file_index}.",
     )
+
+    @field_validator("training_file_pattern", "validation_file_pattern")
+    @classmethod
+    def _validate_file_index_placeholder(cls, value: str, info: ValidationInfo) -> str:
+        """Reject filename patterns that cannot map an index to a distinct file.
+
+        ``str.format()`` does NOT raise when a replacement field is absent, so
+        a pattern like ``"training_file.h5"`` maps EVERY file index to the SAME
+        filename — a whole run would train and score on one file with no error
+        raised anywhere. This validator is the only place that failure mode is
+        caught, and it fires at config construction, before any file is opened.
+
+        Two checks, in order:
+
+        1. a ``file_index`` replacement field is present — the silent case
+           above, and the only one ``.format()`` will not surface itself;
+        2. the pattern actually formats with an integer index — catches
+           unknown fields, bad format specs, and index/attribute access. Those
+           all DO raise, but at training time; the probe moves them here.
+
+        Args:
+            value: The candidate pattern.
+            info:  Pydantic validation context (supplies the field name).
+
+        Returns:
+            The pattern unchanged when both checks pass.
+
+        Raises:
+            ValueError: The pattern has no usable ``file_index`` field, is not
+                a valid format string, or does not format with an int index.
+        """
+        field = info.field_name
+        try:
+            field_names = [name for _, name, _, _ in Formatter().parse(value)]
+        except ValueError as exc:
+            raise ValueError(f"{field}={value!r} is not a valid format string ({exc}).") from exc
+        # "file_index[0]" / "file_index.attr" carry the base name plus access
+        # syntax; strip it so presence is judged on the name itself. Such
+        # patterns pass this check and are then rejected by the format probe.
+        base_names = {name.split("[")[0].split(".")[0] for name in field_names if name}
+        if "file_index" not in base_names:
+            raise ValueError(
+                f"{field}={value!r} has no {{file_index}} replacement field, so every "
+                f"file index would resolve to the same filename. str.format() does not "
+                f"raise on an absent field, so this would corrupt a run silently rather "
+                f"than fail. Use e.g. 'training_{{file_index}}.h5' or "
+                f"'training_{{file_index:04d}}.h5'."
+            )
+        try:
+            value.format(file_index=_PATTERN_PROBE_INDEX)
+        except Exception as exc:
+            raise ValueError(
+                f"{field}={value!r} contains a {{file_index}} field but does not format "
+                f"with an integer index ({type(exc).__name__}: {exc})."
+            ) from exc
+        return value
+
+    def training_file_name(self, file_index: int) -> str:
+        """Return the training filename for ``file_index``.
+
+        The single place a training filename is built from the pattern, so
+        loaders never re-inline a dataset-specific template. (No validation
+        counterpart yet: the validation-side inlined templates live in
+        ``scripts/`` and are coupling-ledger entries, refactored by whichever
+        PR next touches them — bounded in-passing rule.)
+        """
+        return self.training_file_pattern.format(file_index=file_index)
 
     def valid_segmentation_sizes(self, lo: int = 100, hi: int = 100_000) -> list[int]:
         """Return sorted divisors of ``psd_segment_length`` in ``[lo, hi]``.
