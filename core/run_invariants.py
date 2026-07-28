@@ -59,8 +59,22 @@ class RunInvariants(BaseModel):
             HealthGate config; ``None`` when gates are disabled (a disabled
             run has no effective config file, so the flag itself is part of
             the locked identity).
+        ordering_override_strategy: The operator's data-ordering override for
+            this chain, or ``None`` when no override is in force. This locks
+            the chain's ordering CONTROL POLICY, not its outcome — see below.
+        ordering_override_file_order: The operator-forced file visitation
+            order, or ``None``.
         created_at: ISO-8601 creation timestamp. Provenance only — never
             part of equality.
+
+    Why the ordering OVERRIDE is locked but the RESOLVED ordering is not:
+    an override is a chain-level control decision, and silently changing it
+    mid-chain would invalidate the comparison the chain exists to make. The
+    resolved value, by contrast, may legitimately differ from round to round
+    when no override is active and the agent is exploring — locking it would
+    forbid the intended behavior. Each round's resolved ordering is recorded
+    on its own ``ExperimentRecord`` instead
+    (docs/design/v19_priorities/pr2_data_ordering.md §3.8).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -68,6 +82,11 @@ class RunInvariants(BaseModel):
     resolved_data_scope: list[int]
     health_gate_enabled: bool
     health_config_sha256: str | None
+    # Default None so a pre-PR2 lock file — which has no ordering keys at
+    # all — validates cleanly into the no-override state instead of tripping
+    # the corruption guard in load_run_invariants().
+    ordering_override_strategy: str | None = None
+    ordering_override_file_order: list[int] | None = None
     created_at: str | None = None
 
     # Fields participating in lock equality. created_at (and any future
@@ -76,6 +95,8 @@ class RunInvariants(BaseModel):
         "resolved_data_scope",
         "health_gate_enabled",
         "health_config_sha256",
+        "ordering_override_strategy",
+        "ordering_override_file_order",
     )
 
     def canonical(self) -> dict:
@@ -216,6 +237,8 @@ def build_run_invariants(
     health_gate_files: list[int] | None,
     health_checks_config: str | None,
     workspace: str,
+    ordering_override_strategy: str | None = None,
+    ordering_override_file_order: list[int] | None = None,
 ) -> tuple[RunInvariants, str | None]:
     """Compute a run's invariants — the ONE shared path for every entry point.
 
@@ -235,6 +258,11 @@ def build_run_invariants(
         health_checks_config: Operator-supplied HealthGate YAML path, or
             ``None`` for the shipped default.
         workspace: Directory receiving ``health_checks_effective.yaml``.
+        ordering_override_strategy: The run's data-ordering override, or
+            ``None`` for no override. Defaults keep every pre-PR2 call site
+            producing an unchanged, no-override lock.
+        ordering_override_file_order: The operator-forced file order, or
+            ``None``.
 
     Returns:
         ``(invariants, effective_config_path)`` — the path is ``None`` when
@@ -260,6 +288,12 @@ def build_run_invariants(
             resolved_data_scope=list(resolved_data_scope),
             health_gate_enabled=health_gate_enabled,
             health_config_sha256=sha,
+            ordering_override_strategy=ordering_override_strategy,
+            ordering_override_file_order=(
+                list(ordering_override_file_order)
+                if ordering_override_file_order is not None
+                else None
+            ),
         ),
         effective_path,
     )

@@ -1025,10 +1025,26 @@ reviewable (and revertible) independently of loader mechanics.
       validation now precedes that return, with a regression test
       (`test_override_is_validated_under_a_FULL_scope_too`) pinning
       it.)*
-- [ ] `RunInvariants`: `ordering_override_strategy` /
+- [x] `RunInvariants`: `ordering_override_strategy` /
       `ordering_override_file_order` (defaults None; legacy locks
       load as no-override, §3.8) + canonical-set inclusion +
       `build_run_invariants` plumbing.
+      *(Both added to `_CANONICAL`, so drift is reported per-field
+      by the existing violation machinery with locked-vs-attempted
+      values. `build_run_invariants` gained two defaulted keyword
+      params — all four production call sites
+      (`run_comparison.py:1186`, `model_exploration.py:1755`,
+      `run_one_iteration.py:1000`,
+      `ml_hyperparameter_tune_agent.py:1785`) are unchanged and
+      produce no-override locks until CB3 wires the operator value
+      through. The file order is copied into the lock so it cannot
+      alias a caller's mutable list.
+      **One pre-existing test updated**:
+      `test_run_invariants.py::test_lock_file_is_plain_json` asserted
+      an EXACT key set of the pre-PR2 lock schema; extended with the
+      two new keys (both asserted None by default). Test-expectation
+      change only — no production behavior was altered to make it
+      pass.)*
 - [ ] Persist the septet in `run_config_*.json` (P1-C5 A4
       precedent).
 
@@ -1106,8 +1122,10 @@ reviewable (and revertible) independently of loader mechanics.
       regressions from the additive schema fields.
 - [x] `ruff check` + `ruff format --check` clean on all CB1-a/CB1-b
       files.
-- [ ] `tests/unit/core/test_run_invariants.py` — pending CB1-c
-      (lock fields not yet implemented).
+- [x] `tests/unit/core/test_run_invariants_ordering.py` (NEW, CB1-c,
+      the §3.8 resume matrix) + `test_run_invariants.py` →
+      **41 passed in 0.10s**; full `tests/unit/core` →
+      **462 passed in 2.97s**.
 - [x] Tests NOT run, with reason: no pseudo/integration yet (the
       resolver is not wired into the tuner until CB3); `pyright` not
       run (lilab Node < 14, PR #123 precedent).
