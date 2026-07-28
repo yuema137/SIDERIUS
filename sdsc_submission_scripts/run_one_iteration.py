@@ -1502,6 +1502,27 @@ def main():
     except Exception as e:
         print(f"  [TOKEN_ITER] WARN: rollup emit failed: {type(e).__name__}: {e}")
 
+    # V19 PR 1 (P1-C5) — incremental per-file best table. Best-effort:
+    # a table-write failure NEVER breaks the chain (the table is
+    # analytical bookkeeping, not decision state); on failure the
+    # existing table is preserved by atomic replace and can always be
+    # regenerated deterministically via
+    # ``scripts/rebuild_per_file_best.py`` from committed artifacts.
+    # Only updates on completed manifests (A6).
+    if manifest["status"] == "completed":
+        try:
+            from execute_tools.per_file_best import write_table
+
+            path = write_table(args.workspace)
+            print(f"  [PER_FILE_BEST] wrote {path}")
+        except Exception as e:
+            print(
+                f"  [PER_FILE_BEST] WARN: incremental table write failed for "
+                f"workspace {args.workspace!r}: {type(e).__name__}: {e} — "
+                f"chain continues; regenerate via "
+                f"scripts/rebuild_per_file_best.py."
+            )
+
     if manifest["status"] == "completed":
         print()
         print("=" * 60)
