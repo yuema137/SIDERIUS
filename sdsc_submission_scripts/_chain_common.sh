@@ -91,6 +91,7 @@ MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
 MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=0
+ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=0  # V19 PR 1: consumption-only switch; matches Python default False
 RUNTIME_SAFETY_FACTOR=1.0           # §3.2: matches Python default; V18 posture 1.5
 RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; V18 posture 2.0 (Wave-1A split)
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
@@ -211,6 +212,7 @@ parse_chain_args() {
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
         --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
+        --enable_chain_incumbent_formal_gates) ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=1; shift ;;
         --runtime_safety_factor)  RUNTIME_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_trial_safety_factor)  RUNTIME_TRIAL_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_formal_safety_factor) RUNTIME_FORMAL_SAFETY_FACTOR="$2"; shift 2 ;;
@@ -416,6 +418,11 @@ build_app_args() {
     fi
     if [ "$RUNTIME_WATCHDOG" -eq 1 ]; then
         APP_ARGS+=(--runtime_watchdog)
+    fi
+    # V19 PR 1 — consumption-only gate coupling (default OFF; forwarded
+    # only when explicitly enabled, matching Python argparse store_true).
+    if [ "$ENABLE_CHAIN_INCUMBENT_FORMAL_GATES" -eq 1 ]; then
+        APP_ARGS+=(--enable_chain_incumbent_formal_gates)
     fi
     # FORCE_FORMAL_ROUND default 1 preserves prior chain behavior; only forward
     # the negation explicitly when set to 0 (run_one_iteration.py's argparse
