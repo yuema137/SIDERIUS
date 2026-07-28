@@ -61,10 +61,13 @@ green with recorded evidence.
             commit-time validity; artifact-hash verification)
             (2f9d4c7 + docs 387f387; new suite 19 green; core 446
             green + 2 pre-existing watchdog env failures)
-[ ] P1-C3 — threading: subprocess → workflow → protocol → tuner input
+[x] P1-C3 — threading: subprocess → workflow → protocol → tuner input
             (+ enable_chain_incumbent_formal_gates flag, default OFF;
             manifest artifact hash + chain_incumbent_used stamps)
-[ ] P1-C4 — trial incumbent persisted fields (read-only bookkeeping)
+            (bb37bfc..741aff4 7-commit split + docs 0e82037; suites
+            84 + 166 green; parity green)
+[x] P1-C4 — trial incumbent persisted fields (read-only bookkeeping)
+            (commit pending operator approval; tune suite 71 green)
 [ ] P1-C5 — per-file best table (SECONDARY but REQUIRED, isolated
             commit; strengthened determinism contract §3.7)
 [ ] P1-V1 — pre-gate sweep: targeted unit + pseudo integration
@@ -946,20 +949,35 @@ trial incumbent available on `RestoredState`; nothing consumes it.
 
 **Code**:
 
-- [ ] output selection + serialization beside `:3915-3917`; schema
+- [x] output selection + serialization beside `:3915-3917`; schema
       fields; manifest mirror; pseudo-data mirrors
-- [ ] docstring note: bookkeeping notion ≠ `_best_trial_winner` gate
-      predicate (`time_mode` requirement)
+      *(done 2026-07-27: `valid_trial_records` selection beside the
+      formal twin; `best_valid_trial_exp_id`/`_denoising_score` schema
+      fields; manifest mirror `best_valid_trial_score`. Pseudo-data
+      mirrors n/a — grep shows zero pseudo files carry ANY
+      `best_valid*` field (schema defaults apply; PR #124 precedent).)*
+- [x] docstring note: bookkeeping notion ≠ `_best_trial_winner` gate
+      predicate (`time_mode` requirement) — in code comment + both
+      field descriptions
 
 **Tests**:
 
-- [ ] trial best selected from valid trial records only; `None` when
+- [x] trial best selected from valid trial records only; `None` when
       none; formal records never counted
-- [ ] manifest round-trip; legacy manifest without the field → `None`
+      *(agent-level via pre-seeded sandbox records; first fixture
+      attempt DIAGNOSED test-at-fault — stamped
+      `health_gate_enabled=False` against a gates-enabled run and DS5
+      ingress validation correctly rejected the mixed-policy history;
+      fixed to stamp True + passing blocking verdicts)*
+- [x] manifest round-trip; legacy manifest without the field → `None`
+      (`test_manifest_mirrors_best_valid_trial_score`)
 
 **Verification checklist**:
 
-- [ ] targeted suites green (counts + wall); ruff + pyright clean
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent/test_tuning_agent.py`
+      → **71 passed, 124.5 s — GREEN**; sdsc suite green in the
+      combined 148-passed run; ruff check + format clean
+- [ ] ~~pyright~~ n/a on lilab (Node < 14)
 
 **Test gate**: unit only.
 
