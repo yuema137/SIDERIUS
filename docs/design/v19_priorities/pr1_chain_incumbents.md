@@ -1363,24 +1363,252 @@ pseudo, Gate 2 validates **end-to-end artifact consistency and
 no-regression for whichever branch the real run produces** — it does
 not need to force a particular stochastic score outcome.
 
-- [ ] Pass criterion 1: iter 2 startup banner `reference=…` agrees
-      exactly with iter 1's manifest state (numeric value or `none`;
-      verbatim quote of the banner line + the manifest
-      `chain_incumbent_used`/`chain_incumbent_source` JSON —
-      anti-hallucination)
-- [ ] Pass criterion 2: `[resume] incumbent carry-over:` line matches
-      the iter-1 manifest value exactly, incl. `basis=` and
-      `verified=true` (hash present and matching)
-- [ ] Pass criterion 3: iter 2's own `best_valid_formal_score` in its
-      manifest reflects only iter 2's rounds (Invariant II, verbatim
-      JSON)
-- [ ] Pass criterion 4: no crash/regression in the standard smoke pass
-      criteria of the gate standard
-- [ ] Budget estimate (filled before launch per baseline §4.4):
-      expected wall ≈ 2 × (one smallest-canonical iteration); LLM
-      calls ≈ 2 iterations × per-iteration profile; GPU bounded by
-      trial+formal budgets; hard upper bound and stop condition stated
-      at launch request
+#### P1-V2 launch plan — drafted 2026-07-27, awaiting operator approval
+
+**Scope** (derived from `docs/gates/gate_testing_standard.md` "Lite
+Plan" adapted for PR 1): 2 chained iterations (chain-incumbent test
+needs a prior iteration for iter 2 to consume; Lite's default 1 is
+insufficient), force_formal_round default ON (Lite; the incumbent
+flows through the formal path — we want the `[chain_incumbent]`
+banner + manifest stamps observed on a real formal round), DataScope
+`4-9` (Lite's smallest 6-file scope), portions from Lite,
+`enable_chain_incumbent_formal_gates=ON`. No V18r piggyback: fresh
+`/tmp/checkpoint_pr1_...` workspace, standalone. Outcome-agnostic per
+operator direction — both incumbent branches already deterministically
+covered in P1-V1, so pass criteria verify **consistency across the
+three runtime surfaces** whichever branch the real run produces.
+
+**What this smoke primarily validates** (operator clarification,
+2026-07-27):
+
+- incumbent reconstruction;
+- iteration-1 → iteration-2 threading;
+- the reference actually presented to the formal-gate logic;
+- consistency among logs, run_config, manifest, and run_output;
+- preservation of iteration-local results (Invariant II).
+
+**What this smoke does NOT prove — `force_formal_round` interaction
+(operator clarification, 2026-07-27)**: with `force_formal_round`
+enabled (Lite default), the tuner will typically continue to formal
+evaluation **even when an incumbent comparison exists** — the
+skip-formal gate is not required to fire for the smoke to pass, and
+this Gate 2 does not attempt to demonstrate production skip behavior.
+The skip/bypass gate mechanics are covered separately by P1-C1 unit
+tests (`test_delta_gates.py`) and by P1-V1's Branch A/B/C
+deterministic pseudo-integration coverage. **Any claim about
+production skip behavior after this Gate 2 must be backed by direct
+evidence from the actual logs of the run** — do not infer skip
+behavior from the mere presence of an incumbent.
+
+**Exact command** (lilab; single invocation, no `tee`):
+
+```bash
+WS=/tmp/checkpoint_pr1_$(date +%s)
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace "$WS" \
+    --run_name pr1_v2_smoke \
+    --num_iterations 2 \
+    --max_rounds 2 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --data_scope 4-9 \
+    --trial_portion 0.02 --train_portion 1.0 --eval_portion 0.01 \
+    --formal_portion 0.02 --formal_train_portion 1.0 --formal_eval_portion 0.01 \
+    --trial_time_budget_minutes 5 \
+    --formal_time_budget_minutes 30 \
+    --trial_vram_budget_gb 24 --formal_vram_budget_gb 24 \
+    --runtime_watchdog \
+    --enable_chain_incumbent_formal_gates \
+    --llm_config llm_configs/openai_tiered_v1.json \
+    --seed_paths \
+        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
+        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
+```
+
+Note: `--enable_chain_incumbent_formal_gates` is the P1-C3-added
+shell arm (`_chain_common.sh:215`) that forwards to the tuner as
+`--enable_chain_incumbent_formal_gates` (P1-C3c). No other launcher
+change is needed.
+
+**Scope, rounds, iterations, portions** (spelled out from the command
+above, all matching Lite Plan defaults except iteration count):
+
+| Knob | Value | Source |
+|---|---|---|
+| Iterations | 2 | PR 1 requirement (chain incumbent needs a prior) |
+| Rounds per iter | 2 | Lite default |
+| Proposal attempts per iter | 3 | Lite default |
+| Max epochs | 1 | Lite default |
+| DataScope | files 4-9 (6 files) | Lite default |
+| `trial_portion / train_portion / eval_portion` | 0.02 / 1.0 / 0.01 | Lite default |
+| `formal_portion / formal_train_portion / formal_eval_portion` | 0.02 / 1.0 / 0.01 (→ ~3,000 training steps @ seg 10k b8; 12 eval PSD) | Lite default |
+| `trial_time_budget_minutes` | 5 | Lite default |
+| `formal_time_budget_minutes` | 30 (Gate-specific; production stays 120) | Lite default |
+| `trial_vram_budget_gb / formal_vram_budget_gb` | 24 / 24 (generous per Lite policy) | Lite default |
+| `runtime_watchdog` | on (passive validation) | Lite default |
+| `force_formal_round` | default ON | Lite default (needed to exercise the incumbent flow through the formal path) |
+| `enable_chain_incumbent_formal_gates` | **ON** | PR 1 P1-V2 |
+| LLM config | `openai_tiered_v1.json` (gpt-5.4 dominant) | Gate-2 mandatory |
+| Seeds | canonical wavenet + punet lilab seeds | Gate-2 canonical |
+
+**Expected LLM calls** (per Lite/iteration profile in the gate
+standard: ~15 min of LLM setup per iter = interp + 3-stage proposer +
+implementor + validator; then 2 tuner rounds × 2 LLM sub-calls
+[planner + reflector]). Rough envelope per iter: ~10 role-level calls
+plus tuner sub-calls; **2 iters → ~25-35 total LLM calls**.
+
+**Expected wall time**: **~50-80 min** (Lite is ~30-45 min for 1
+iteration; 2 iterations doubles the LLM setup + trial rounds; the
+single forced-formal round per iter is capped at
+`formal_time_budget_minutes=30`, typically ~1-5 min at Lite's tiny
+portions).
+
+**Expected GPU time**: bounded by 2 iters × (2 trial rounds ≤5 min
+each + 1 forced-formal round ≤~5 min at Lite portions) + subprocess
+startups ≈ **~25-45 min GPU** (upper bound).
+
+**API cost**: **~$2-3** (Lite is ~$1 for 1 iteration; 2 iterations
+double the gpt-5.4 dominant cost).
+
+**Hard upper bound**: **120 minutes wall / $5 API cost / 60 GB `/tmp`**.
+If exceeded, kill immediately (see stop conditions).
+
+**Stop conditions**:
+
+1. **Time cap**: if wall exceeds 120 min from launch, kill the chain
+   process group (`pkill -TERM -f run_chain.sh`; wait 30 s; `pkill
+   -KILL -f run_chain.sh`) and record cause.
+2. **Disk cap**: if `du -sh /tmp/*` shows > 60 GB total or `$WS` > 40
+   GB during the run, kill and record cause (Lite portions should
+   nowhere near this — this is a safety net).
+3. **Repeated LLM validation failures**: if all 3 proposal attempts
+   fail validation for both iterations, kill and record cause per
+   the gate standard's failure-handling guidance (indicates LLM
+   quality issue, not a PR 1 bug).
+4. **Cost cap**: if operator's OpenAI dashboard shows this run
+   crossing $5, kill immediately.
+5. **Manual abort**: `Ctrl-C` (SIGINT) is safe at any point; the
+   chain runner traps it, writes a `crashed` manifest for the
+   in-flight iter, and stops.
+
+**Exact pass criteria** (verbatim quotes required from the artifacts
+below; anti-hallucination — do not paraphrase log lines or JSON
+values):
+
+*Gate-2 standard baseline criteria (docs/gates/gate_testing_standard.md
+§Pass criteria — HealthGate framework correctness)*
+
+1. Chain exits 0.
+2. Every completed round has a recorded `gate_action` in
+   `final_record` (any value: `continue`, `INVALIDATE_ROUND`,
+   `SKIP_TO_FORMAL`, `SKIP_ITER`).
+3. Every `denoising_score` is either finite-positive, OR
+   `None`/`-inf` WITH a corresponding invalidating `gate_action` in
+   that round's record.
+4. No phantom `5.5762667` appears as a final accepted score.
+5. At least one round triggers a HealthGate evaluation.
+
+*PR 1 specific criteria — three-surface consistency (whichever
+branch iter 1 produces)*
+
+6. **Iter 2 tuner startup banner emits the new `[chain_incumbent]`
+   line** with format `[chain_incumbent] provided=<X|none>;
+   coupling=ON; consumed=<Y|none>` — verbatim-quoted from iter 2's
+   log. `coupling=ON` is mandatory (matches the launch flag).
+7. **Branch A (iter 1 produced a commit-time-VALID formal)**: iter
+   2's `[resume] incumbent carry-over:` log line, iter 2's
+   `[chain_incumbent] provided=…` value, iter 2's `Formal
+   comparison thresholds: reference=…` value, and iter 2's manifest
+   `chain_incumbent_used` all agree bit-for-bit (float `==`) with
+   iter 1's manifest `best_valid_formal_score`. Iter 2's manifest
+   `chain_incumbent_source.iter_idx == 1`, `.exp_id == iter 1's
+   `best_valid_formal_exp_id`, `.artifact_verified == true`.
+8. **Branch B (iter 1 produced no commit-time-VALID formal)**: iter
+   2's `[resume] incumbent carry-over: none`, iter 2's
+   `[chain_incumbent] provided=none; coupling=ON; consumed=none`,
+   iter 2's `Formal comparison thresholds: reference=none, skip=none,
+   bypass=none`, iter 2's manifest `chain_incumbent_used=null` and
+   `chain_incumbent_source=null` — all four consistent.
+9. **Invariant II (both branches)**: iter 2's manifest
+   `best_valid_formal_score` reflects ONLY iter 2's own rounds —
+   never equals iter 1's committed value except by coincidence (in
+   which case iter 2's `chain_incumbent_source` still names iter 1,
+   not iter 2). The two keys are structurally distinct in the
+   manifest.
+10. **Replay integrity**: both manifests carry a
+    `run_output_sha256`; neither iter is re-run against a modified
+    prior artifact (verify by comparing the `run_output_sha256`
+    value in iter 1's manifest to a fresh `sha256sum` of iter 1's
+    `run_output_iter_001.json` post-run).
+
+**Exact files and logs to inspect** (chain-runner logs land in the
+harness capture; workspace files land at `$WS/`):
+
+| Artifact | Path | Used by criteria |
+|---|---|---|
+| Iter 1 manifest | `$WS/iter_001/manifest.json` | 7, 8, 9, 10 |
+| Iter 1 run_output | `$WS/iter_001/iteration_001/<model>/run_output_iter_001.json` | 4, 10 (hash re-verify) |
+| Iter 2 manifest | `$WS/iter_002/manifest.json` | 7, 8, 9, 10 |
+| Iter 2 startup log | harness capture, look for `[resume] incumbent carry-over:` / `[chain_incumbent] provided=` / `Formal comparison thresholds: reference=` in iter 2's block | 6, 7, 8 |
+| Chain summary | harness capture / `$WS/iter_002/manifest.json` `status` | 1 |
+| Per-round records | iter N `run_output_iter_00N.json` `all_records[*]` | 2, 3, 4, 5 |
+| HealthGate evaluations | iter N `run_output_iter_00N.json` `all_records[*].health_gate_results` | 5 |
+
+Verbatim-quoted evidence pattern (per anti-hallucination rule):
+> "iter 2 log line 12345: `[chain_incumbent] provided=1.2500; coupling=ON; consumed=1.2500`; iter 1 manifest `best_valid_formal_score`: `1.25`; iter 2 manifest `chain_incumbent_used`: `1.25`; iter 2 manifest `chain_incumbent_source`: `{"iter_idx":1,"exp_id":"…","artifact_verified":true,…}`."
+
+**Cleanup behavior after timeout or failure**:
+
+- On success or normal completion: **keep `$WS` for post-run audit
+  and evidence recording** (small — under 1 GB at Lite portions).
+  Operator may delete manually after the P1-V2 result line is
+  filled.
+- On stop-condition timeout / kill: **do not auto-delete** — the
+  partial artifacts (crashed manifest, partial run_output, any hash
+  written) are needed to diagnose. Cleanup only after operator
+  confirms the run is unrecoverable.
+- On repeated LLM validation failures (stop condition 3): keep the
+  full workspace + logs for LLM-quality diagnosis.
+- Process cleanup: `pkill` sequence in stop condition 1 targets only
+  the chain process group; the tuner subprocess trees are children
+  and get SIGTERM'd cleanly. If a training subprocess survives past
+  the SIGKILL wait, `nvidia-smi` may show orphaned CUDA context;
+  `pkill -KILL -f run_one_iteration` clears it.
+- Disk cleanup: `rm -rf $WS` when done. Also `rm -rf /tmp/pytest-of-*`
+  if any test artifacts leaked (unlikely from a Gate run).
+
+**Preflight checklist** (before launch — operator to confirm):
+
+- [ ] `git status` clean on `feat/v19-pr1-chain-incumbents`
+- [ ] Canonical seed files exist:
+      `/home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/...`
+      and the punet twin
+- [ ] `llm_configs/openai_tiered_v1.json` exists and OpenAI API key
+      is loaded
+- [ ] `$WS` chosen and its parent filesystem has **≥ 90 GB free**
+      before launch (operator clarification, 2026-07-27: the 60 GB
+      disk hard cap in the stop-conditions must be covered plus a
+      ~30 GB reserve for the system and any other concurrent
+      processes). Verify with `df -h "$(dirname "$WS")"` and refuse
+      to launch if the "Avail" column is below that threshold —
+      running the disk cap to zero can wedge the box or fail other
+      services. If `/tmp` is tmpfs-backed and smaller than 90 GB
+      free, choose a workspace on a larger disk-backed filesystem
+      instead.
+- [ ] `pyright` limitation on lilab is accepted (PR #123 precedent)
+- [ ] Wall-clock start noted; 120-min timer set
+
+**Reporting after the run** (regardless of outcome):
+
+- Fill P1-V2 result line below with: **PASS** / **PASS WITH
+  LIMITATIONS** / **FAIL**, plus which incumbent branch (A or B)
+  the real run produced, plus the verbatim evidence for criteria
+  6-10.
+- Update the validation budget table below with actual wall / GPU /
+  API cost.
+- Record any deviations from the launch command with rationale.
+
 - [ ] Gate 2 result recorded here: __
 
 ### Validation budget table (baseline §4.4 — estimates filled at P1-D approval)
