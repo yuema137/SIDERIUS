@@ -961,11 +961,33 @@ reviewable (and revertible) independently of loader mechanics.
       `order_strategy_override` / `file_order_override` — exact
       names after auditing nearby CLI conventions); structural
       validation at the schema layer.
-- [ ] `ResolvedOrdering` type + ONE resolver function (§3.6):
+- [x] `ResolvedOrdering` type + ONE resolver function (§3.6):
       precedence override > proposal > default; file_order
       resolution rules incl. shuffle → None (no silent retention of
       a proposed sequential order); full-permutation check vs
       resolved scope on the RESOLVED value.
+      *(Landed as a DEDICATED module `agent/schemas/ordering.py`
+      (~310 lines) rather than inside the 1600-line
+      `hyperparam_tuning.py` — the design left the home to
+      implementation choice, and the project rule "each module
+      testable individually, pluggable, decoupled" favors a separate
+      module. Public API: `OrderStrategy`,
+      `OrderingResolutionSource`, `DEFAULT_ORDER_STRATEGY`,
+      `OrderingValidationError`, `validate_ordering_shape`,
+      `ResolvedOrdering` (frozen, + `.legacy_default()`,
+      `.describes_execution()`), `resolve_ordering`.
+      `resolve_ordering` re-runs structural validation on both
+      levels so a caller that skipped the intake check cannot
+      smuggle a malformed value past resolution. 26 tests green.)*
+      **Under-specification resolved during implementation** (§3.6
+      did not define "override is present" when only
+      `file_order_override` is set): a uniform structural rule now
+      applies at BOTH levels — a `file_order` may be supplied only
+      alongside an explicit `sequential` strategy AT THE SAME LEVEL.
+      This follows from the design's own "file_order: sequential
+      only" and makes override-presence unambiguous
+      (`override_strategy is not None`). Recorded here rather than
+      silently chosen.
 - [ ] `TrialConfig` gains resolved fields only
       (`resolved_order_strategy`, `resolved_file_order`) — the
       engine-facing single source of truth per round.
