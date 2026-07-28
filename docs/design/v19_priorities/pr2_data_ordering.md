@@ -1388,8 +1388,24 @@ engine behavior (CB2).
       granularity rule (each entry: `exp_id` + septet; never one
       unlabelled iteration-level value; exact field name/shape
       chosen here after code inspection).
-- [ ] `ModelRunSummary`: resolved-ordering field(s) exposed to the
+- [x] `ModelRunSummary`: resolved-ordering field(s) exposed to the
       interpreter as the factual execution configuration.
+      *(CB3-b. New `RoundOrdering` model in
+      `agent/schemas/interpretation.py` + `ModelRunSummary.
+      round_ordering: list[RoundOrdering]`, PARALLEL to the existing
+      `round_scores` / `round_conclusions` lists — that is how this
+      schema already associates per-round facts with rounds, and it
+      satisfies the §3.7 granularity rule without inventing a new
+      shape. Each entry carries `exp_id`, resolved strategy + file
+      order, resolution source, and the rejection pair. Populated by
+      a new `_round_ordering()` helper in
+      `tuning_output_to_model_run_summary`; records predating the
+      option read explicitly as `legacy_default`, never guessed.
+      6 tests: per-round distinctness, overridden proposal not
+      presented as executed, rejected proposal visible AS rejected,
+      silence-vs-rejection distinguishable, legacy read, JSON
+      round-trip. `tests/unit/agent/result_interpretation_agent` +
+      `protocols` → **313 passed in 1.16s**; ruff clean.)*
 
 **Validation plan.**
 - Unit (per-hop forwarding): sandbox call → subprocess argv carries

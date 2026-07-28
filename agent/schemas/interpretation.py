@@ -28,6 +28,56 @@ from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 
+class RoundOrdering(BaseModel):
+    """What data ordering one round actually ran, and where it came from.
+
+    Interpreter-facing view of the ordering provenance
+    (``docs/design/v19_priorities/pr2_data_ordering.md`` §3.7). Two rules
+    govern how downstream reasoning may use it:
+
+    - ``resolved_*`` is the ONLY pair that describes execution. A proposal
+      the operator overrode was not what ran, and must never be reported as
+      though it were.
+    - a REJECTED proposal is not the same as no proposal. The agent tried to
+      steer this round and was overruled by validation; reading that as
+      agent silence would misdescribe its behavior.
+
+    Ordering can differ between rounds of one iteration (the agent may
+    propose differently each round when no override is set), so these are
+    carried per round rather than collapsed to one value for the run.
+    """
+
+    exp_id: str | None = Field(
+        default=None,
+        description="Experiment this ordering belongs to. None on legacy records.",
+    )
+    resolved_order_strategy: str = Field(
+        description="The visitation order that ACTUALLY RAN for this round.",
+    )
+    resolved_file_order: list[int] | None = Field(
+        default=None,
+        description="File order that actually ran; None when the strategy was 'shuffle'.",
+    )
+    resolution_source: str = Field(
+        description=(
+            "Which level decided it: 'operator_override', 'agent_proposal', "
+            "'default', or 'legacy_default' for pre-ordering records."
+        ),
+    )
+    proposed_order_strategy: str | None = Field(
+        default=None,
+        description="What the agent proposed, rejected or not. None = it proposed nothing.",
+    )
+    proposal_rejected: bool = Field(
+        default=False,
+        description="True when a proposal arrived but was not applied.",
+    )
+    proposal_rejection_reason: str | None = Field(
+        default=None,
+        description="Why the proposal was not applied. None unless rejected.",
+    )
+
+
 class ModelRunSummary(BaseModel):
     """
     Condensed summary of one tuning run for one model type.
@@ -83,6 +133,13 @@ class ModelRunSummary(BaseModel):
         default_factory=list,
         description="One-line conclusion from each round's LLM reflection. "
         "Extracted from the 'memory.conclusion' field of each record.",
+    )
+    round_ordering: list[RoundOrdering] = Field(
+        default_factory=list,
+        description="Data ordering that actually ran, per round, in the same "
+        "chronological order as round_scores. Kept per round because ordering "
+        "may legitimately differ between rounds when no operator override is "
+        "in force. Empty on runs that predate the ordering option.",
     )
     model_description: str | None = Field(
         default=None,

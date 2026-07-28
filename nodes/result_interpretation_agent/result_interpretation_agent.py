@@ -29,7 +29,9 @@ from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
     ModelRunSummary,
+    RoundOrdering,
 )
+from agent.schemas.ordering import DEFAULT_ORDER_STRATEGY
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.model_descriptions import get_model_description
@@ -1690,6 +1692,33 @@ def _required_denoising_score(record: ExperimentRecord) -> float:
     return score
 
 
+def _round_ordering(record) -> RoundOrdering:
+    """Read one record's ordering provenance for the interpreter.
+
+    A record written before the ordering option existed carries no ordering
+    fields at all. That is read explicitly as the global shuffle with source
+    ``legacy_default`` — never guessed at, and never confused with a run that
+    actively chose the default.
+    """
+    resolved = record.resolved_order_strategy
+    if resolved is None:
+        return RoundOrdering(
+            exp_id=record.exp_id,
+            resolved_order_strategy=DEFAULT_ORDER_STRATEGY,
+            resolved_file_order=None,
+            resolution_source="legacy_default",
+        )
+    return RoundOrdering(
+        exp_id=record.exp_id,
+        resolved_order_strategy=resolved,
+        resolved_file_order=record.resolved_file_order,
+        resolution_source=record.ordering_resolution_source or "default",
+        proposed_order_strategy=record.proposed_order_strategy,
+        proposal_rejected=record.ordering_proposal_rejected,
+        proposal_rejection_reason=record.ordering_proposal_rejection_reason,
+    )
+
+
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
 ) -> ModelRunSummary:
@@ -1707,6 +1736,7 @@ def tuning_output_to_model_run_summary(
     round_conclusions: list[str] = []
     round_trial_portions: list[float | None] = []
     round_model_params: list[int | None] = []
+    round_ordering: list[RoundOrdering] = []
 
     for r in records:
         round_scores.append(r.denoising_score)
@@ -1716,6 +1746,7 @@ def tuning_output_to_model_run_summary(
             round_conclusions.append("")
         else:
             round_conclusions.append(r.memory.conclusion or "")
+        round_ordering.append(_round_ordering(r))
 
     from execute_tools.health_checks.candidate_eligibility import (
         CandidateHealthValidity,
@@ -1789,6 +1820,7 @@ def tuning_output_to_model_run_summary(
         best_valid_config=(valid_best_rec.params if valid_best_rec else None),
         round_scores=round_scores,
         round_conclusions=round_conclusions,
+        round_ordering=round_ordering,
         # Per-file performance (raw primitive retained per §7.2 scope note)
         best_file_vector=best_rec.file_vector if best_rec else None,
         formal_score=formal_rec.denoising_score if formal_rec else None,
