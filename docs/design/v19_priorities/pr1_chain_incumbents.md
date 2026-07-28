@@ -82,7 +82,10 @@ green with recorded evidence.
             LIMITATIONS** (attempt 3, 2026-07-27; Branch B path
             validated end-to-end in 17m18s; Branch A + replay-hash
             paths remain covered by P1-V1 + P1-C2)
-[ ] P1-S  — stop-and-show; PR merged (coupling flag still OFF)
+[x] P1-S  — stop-and-show; PR merged (coupling flag still OFF)
+            (PR #137, merge commit 6678d19, 2026-07-28; one CI flake
+            fixed in-passing on the branch: watchdog survivor-check
+            race, 21143ca — pre-existing, not a PR-1 regression)
 [ ] P1-ACT — activation: coupling flag ON in production launchers
             (separate operator decision; not part of this PR's merge)
 

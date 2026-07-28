@@ -228,7 +228,10 @@ contracts.
 
 ### Phase I — Repair the search substrate
 
-- [ ] PR 1 — Chain-level incumbents
+- [x] PR 1 — Chain-level incumbents *(merged 2026-07-28, PR #137
+      `6678d19`; coupling flag OFF — P1-ACT activation is a separate
+      pending operator decision, tracked in the PR 1 Delivery
+      checkpoints and the design doc §0)*
 - [ ] PR 2 — Data ordering as an optimization dimension
 - [ ] PR 3 — Structured HealthGate feedback propagation
 
@@ -408,51 +411,53 @@ the PR-specific documents, not in this priorities file.
 
 *Design and audit*
 
-- [ ] Current incumbent-loss path re-audited from code
-- [ ] Committed-manifest source of truth confirmed
-- [ ] Scope-key and run-invariants identity design approved
-- [ ] Legacy, interrupted, replayed, and partial-campaign semantics approved
-- [ ] Tie-breaking and no-incumbent initialization approved
-- [ ] Rollback semantics approved without restoring the fixed-0.0 bug
+- [x] Current incumbent-loss path re-audited from code
+- [x] Committed-manifest source of truth confirmed
+- [x] Scope-key and run-invariants identity design approved
+- [x] Legacy, interrupted, replayed, and partial-campaign semantics approved
+- [x] Tie-breaking and no-incumbent initialization approved
+- [x] Rollback semantics approved without restoring the fixed-0.0 bug
 
 *Blocking deterministic implementation*
 
-- [ ] Valid-formal incumbent reconstruction implemented
-- [ ] Trial incumbent context implemented
-- [ ] Validity filtering implemented
-- [ ] Scope-keyed persistence implemented
-- [ ] Resume and replay behavior implemented
-- [ ] Formal-gate decision wiring implemented
-- [ ] Invalid and phantom scores proven unable to become decision incumbents
-- [ ] Deterministic reconstruction and negative tests passed
+- [x] Valid-formal incumbent reconstruction implemented
+- [x] Trial incumbent context implemented
+- [x] Validity filtering implemented
+- [x] Scope-keyed persistence implemented
+- [x] Resume and replay behavior implemented
+- [x] Formal-gate decision wiring implemented
+- [x] Invalid and phantom scores proven unable to become decision incumbents
+- [x] Deterministic reconstruction and negative tests passed
 
 *Secondary per-file bookkeeping*
 
-- [ ] Incremental per-file table design approved
-- [ ] Incremental materialization implemented
-- [ ] Deterministic rebuild script implemented
-- [ ] Raw-best and valid-best separation verified
-- [ ] Sampling provenance preserved
-- [ ] Historical rebuild tested
-- [ ] Secondary table explicitly deferred if it threatens the blocking scope
+- [x] Incremental per-file table design approved
+- [x] Incremental materialization implemented
+- [x] Deterministic rebuild script implemented
+- [x] Raw-best and valid-best separation verified
+- [x] Sampling provenance preserved
+- [ ] Historical rebuild tested *(deferred per §2.4.b — rebuild of
+      pre-PR-1 historical workspaces is explicitly non-blocking;
+      synthetic-workspace rebuild determinism IS tested)*
+- n/a — Secondary table explicitly deferred if it threatens the
+  blocking scope *(condition never triggered; table shipped in PR 1)*
 
 *Agent-behavior validation — only if behavioral use is claimed
 (otherwise mark n/a in the PR design and limit the claims accordingly)*
 
-- [ ] Layer-1 incumbent-context plumbing verified
-- [ ] Layer-2 synthetic control/treatment campaign designed
-- [ ] Layer-2 pilot completed
-- [ ] Layer-2 repeated evaluation completed
-- [ ] Layer-3 bounded real-LLM + real-training validation approved
-- [ ] Layer-3 validation completed
-- [ ] Behavioral uncertainty and limitations reported
+- n/a — PR 1 makes no behavioral claim (design doc §5); its claims are
+  limited to state correctness and context availability. The
+  behavioral question (does incumbent context change proposals?)
+  remains open for a future validation effort.
 
 *Delivery*
 
-- [ ] Validation budget and actual cost recorded
-- [ ] Stop-and-show approved
-- [ ] PR merged
-- [ ] Incumbent-driven decision coupling activation approved
+- [x] Validation budget and actual cost recorded
+- [x] Stop-and-show approved
+- [x] PR merged *(PR #137, merge `6678d19`, 2026-07-28; coupling flag
+      still OFF)*
+- [ ] Incumbent-driven decision coupling activation approved *(P1-ACT
+      — separate operator decision)*
 - [ ] Post-activation incumbent behavior reviewed
 
 **PR 2 — Expose data ordering as a controlled optimization dimension
