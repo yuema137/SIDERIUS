@@ -118,6 +118,12 @@ class TestLocalValidatedModel:
             pytest.param("file_index", 6, id="file_index"),
             pytest.param("llm_provider", "gemini", id="llm_provider"),
             pytest.param("is_trial", False, id="is_trial"),
+            # V19 PR 1 (P1-C3): omitted incumbent → None (no incumbent);
+            # coupling flag defaults OFF.
+            pytest.param("current_run_best_formal_score", None, id="chain_incumbent_default_none"),
+            pytest.param(
+                "enable_chain_incumbent_formal_gates", False, id="incumbent_gates_default_off"
+            ),
         ],
     )
     def test_default_when_kwarg_omitted(
@@ -143,6 +149,20 @@ class TestLocalValidatedModel:
             pytest.param("llm_model_id", "gpt-4o", "llm_model_id", id="llm_model_id_override"),
             pytest.param(
                 "cleanup_denoised", True, "cleanup_denoised", id="cleanup_denoised_override"
+            ),
+            # V19 PR 1 (P1-C3): the incumbent travels as a NAMED protocol
+            # parameter (no post-hoc mutation), and the coupling flag threads.
+            pytest.param(
+                "current_run_best_formal_score",
+                1.3110632929636985,
+                "current_run_best_formal_score",
+                id="chain_incumbent_threads",
+            ),
+            pytest.param(
+                "enable_chain_incumbent_formal_gates",
+                True,
+                "enable_chain_incumbent_formal_gates",
+                id="incumbent_gates_flag_threads",
             ),
         ],
     )
