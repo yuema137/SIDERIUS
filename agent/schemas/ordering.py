@@ -31,7 +31,7 @@ Design: ``docs/design/v19_priorities/pr2_data_ordering.md`` §3.1, §3.6, §3.7.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -263,6 +263,34 @@ class ResolvedOrdering(BaseModel):
     resolution_source: OrderingResolutionSource = Field(
         description="Which level supplied the resolved value.",
     )
+
+    @classmethod
+    def from_record(cls, record: Any) -> ResolvedOrdering:
+        """Read the ordering a persisted record says it ran.
+
+        The single place the legacy rule lives, so the interpreter and the
+        iteration manifest cannot drift apart on it: a record with no
+        ``resolved_order_strategy`` predates the ordering option entirely and
+        is read as the global shuffle with source ``legacy_default`` — read
+        explicitly, never guessed, and never written back.
+
+        Takes any object exposing the record's ordering attributes (duck
+        typed, so this module stays free of a schema import cycle).
+        """
+        resolved = getattr(record, "resolved_order_strategy", None)
+        if resolved is None:
+            return cls.legacy_default()
+        return cls(
+            proposed_strategy=getattr(record, "proposed_order_strategy", None),
+            proposed_file_order=getattr(record, "proposed_file_order", None),
+            proposal_rejected=bool(getattr(record, "ordering_proposal_rejected", False)),
+            proposal_rejection_reason=getattr(record, "ordering_proposal_rejection_reason", None),
+            override_strategy=getattr(record, "override_order_strategy", None),
+            override_file_order=getattr(record, "override_file_order", None),
+            resolved_strategy=resolved,
+            resolved_file_order=getattr(record, "resolved_file_order", None),
+            resolution_source=getattr(record, "ordering_resolution_source", None) or "default",
+        )
 
     @classmethod
     def legacy_default(cls) -> ResolvedOrdering:

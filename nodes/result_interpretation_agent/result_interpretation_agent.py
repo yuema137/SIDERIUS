@@ -31,7 +31,7 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
     RoundOrdering,
 )
-from agent.schemas.ordering import DEFAULT_ORDER_STRATEGY
+from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.model_descriptions import get_model_description
@@ -1700,22 +1700,15 @@ def _round_ordering(record) -> RoundOrdering:
     ``legacy_default`` — never guessed at, and never confused with a run that
     actively chose the default.
     """
-    resolved = record.resolved_order_strategy
-    if resolved is None:
-        return RoundOrdering(
-            exp_id=record.exp_id,
-            resolved_order_strategy=DEFAULT_ORDER_STRATEGY,
-            resolved_file_order=None,
-            resolution_source="legacy_default",
-        )
+    ordering = ResolvedOrdering.from_record(record)
     return RoundOrdering(
         exp_id=record.exp_id,
-        resolved_order_strategy=resolved,
-        resolved_file_order=record.resolved_file_order,
-        resolution_source=record.ordering_resolution_source or "default",
-        proposed_order_strategy=record.proposed_order_strategy,
-        proposal_rejected=record.ordering_proposal_rejected,
-        proposal_rejection_reason=record.ordering_proposal_rejection_reason,
+        resolved_order_strategy=ordering.resolved_strategy,
+        resolved_file_order=ordering.resolved_file_order,
+        resolution_source=ordering.resolution_source,
+        proposed_order_strategy=ordering.proposed_strategy,
+        proposal_rejected=ordering.proposal_rejected,
+        proposal_rejection_reason=ordering.proposal_rejection_reason,
     )
 
 

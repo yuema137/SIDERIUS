@@ -1427,11 +1427,30 @@ engine behavior (CB2).
       `FILE_ORDER_OVERRIDE`; exact names after auditing nearby
       conventions) parse + forward-when-set; override recorded into
       `run_invariants` at chain start (CB1 lock fields).
-- [ ] Manifest (`run_one_iteration.py::write_manifest`): ordering
+- [x] Manifest (`run_one_iteration.py::write_manifest`): ordering
       provenance as a round/experiment-KEYED list per the §3.7
-      granularity rule (each entry: `exp_id` + septet; never one
-      unlabelled iteration-level value; exact field name/shape
-      chosen here after code inspection).
+      granularity rule (each entry: `exp_id` + nonet; never one
+      unlabelled iteration-level value).
+      *(CB3-d1. Field name chosen after inspection:
+      `ordering_by_experiment`, a list built by
+      `_ordering_by_experiment()` from `tune_output.all_records`;
+      each entry carries `exp_id`, `round_index` (from
+      `memory.round_index`), and the full nonet. Best-effort per
+      record — the manifest is a handoff aid, so a malformed record
+      must not fail an otherwise-successful iteration. Absent
+      entirely on `crashed` / `no_records` manifests, which have no
+      ordering to report. **The legacy-read rule was factored into
+      ONE place** — `ResolvedOrdering.from_record()` (duck-typed, so
+      `ordering.py` stays free of a schema import cycle) — and the
+      CB3-b interpreter reader was refactored onto it, so the
+      manifest and the interpreter cannot drift on "no
+      `resolved_order_strategy` means legacy_default".
+      8 tests incl. the operator-required two-round
+      differing-ordering case (two distinct keyed entries) and a
+      guard asserting NO iteration-level ordering key exists.
+      `tests/unit/sdsc_submission_scripts` +
+      `result_interpretation_agent` + `agent/schemas` →
+      **468 passed in 1.57s**; ruff clean.)*
 - [x] `ModelRunSummary`: resolved-ordering field(s) exposed to the
       interpreter as the factual execution configuration.
       *(CB3-b. New `RoundOrdering` model in
