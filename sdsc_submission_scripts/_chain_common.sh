@@ -92,6 +92,8 @@ MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
 ALLOW_EXTREME_STEPS=0
 RUNTIME_WATCHDOG=0
 ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=0  # V19 PR 1: consumption-only switch; matches Python default False
+ORDER_STRATEGY_OVERRIDE=""          # V19 PR 2: empty == omit == agent decides (default 'shuffle')
+FILE_ORDER_OVERRIDE=""              # V19 PR 2: empty == omit == ascending scope order
 RUNTIME_SAFETY_FACTOR=1.0           # §3.2: matches Python default; V18 posture 1.5
 RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; V18 posture 2.0 (Wave-1A split)
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
@@ -213,6 +215,8 @@ parse_chain_args() {
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
         --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
         --enable_chain_incumbent_formal_gates) ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=1; shift ;;
+        --order_strategy_override) ORDER_STRATEGY_OVERRIDE="$2"; shift 2 ;;
+        --file_order_override)     FILE_ORDER_OVERRIDE="$2"; shift 2 ;;
         --runtime_safety_factor)  RUNTIME_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_trial_safety_factor)  RUNTIME_TRIAL_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_formal_safety_factor) RUNTIME_FORMAL_SAFETY_FACTOR="$2"; shift 2 ;;
@@ -423,6 +427,15 @@ build_app_args() {
     # only when explicitly enabled, matching Python argparse store_true).
     if [ "$ENABLE_CHAIN_INCUMBENT_FORMAL_GATES" -eq 1 ]; then
         APP_ARGS+=(--enable_chain_incumbent_formal_gates)
+    fi
+    # V19 PR 2 — operator ordering override (default: omit, so the agent's
+    # proposal decides and 'shuffle' applies when it proposes nothing).
+    # Forwarded only when set, so an unset override reproduces pre-V19 argv.
+    if [ -n "$ORDER_STRATEGY_OVERRIDE" ]; then
+        APP_ARGS+=(--order_strategy_override "$ORDER_STRATEGY_OVERRIDE")
+    fi
+    if [ -n "$FILE_ORDER_OVERRIDE" ]; then
+        APP_ARGS+=(--file_order_override "$FILE_ORDER_OVERRIDE")
     fi
     # FORCE_FORMAL_ROUND default 1 preserves prior chain behavior; only forward
     # the negation explicitly when set to 0 (run_one_iteration.py's argparse

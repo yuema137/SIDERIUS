@@ -42,7 +42,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
-from agent.schemas.ordering import ResolvedOrdering
+from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
@@ -591,6 +591,26 @@ def build_parser() -> argparse.ArgumentParser:
         "Set to 0.5 to only bypass when trial beats current best by >= 0.5 dB.",
     )
     parser.add_argument(
+        "--order_strategy_override",
+        type=str,
+        default=None,
+        choices=["shuffle", "sequential"],
+        help="V19 PR 2: force the training sample visitation order for every "
+        "round of this chain, overriding any agent proposal. Unset (default) "
+        "= the agent's proposal decides, falling back to 'shuffle' (pre-V19 "
+        "behavior). Pinned in the run-invariants lock — changing it mid-chain "
+        "is a violation.",
+    )
+    parser.add_argument(
+        "--file_order_override",
+        type=str,
+        default=None,
+        help="V19 PR 2: comma-separated file visitation ORDER for "
+        "--order_strategy_override sequential, e.g. '4,6,5,9,7,8'. Order is "
+        "preserved as written and must be a full permutation of the resolved "
+        "DataScope. Omit for ascending file index.",
+    )
+    parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
         help="V19 PR 1: let the formal delta gates CONSUME the reconstructed "
@@ -1049,6 +1069,11 @@ def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
         health_gate_files=args.health_gate_files,
         health_checks_config=args.health_checks_config,
         workspace=args.workspace,
+        # V19 PR 2 — the ordering override is chain control policy, so it
+        # is locked. Must match what the workflow and tuner lock for this
+        # same workspace.
+        ordering_override_strategy=args.order_strategy_override,
+        ordering_override_file_order=args.file_order_override,
     )
     return invariants
 
@@ -1169,6 +1194,12 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             DataScope.from_cli(args.health_gate_files).file_indices
             if args.health_gate_files
             else None
+        )
+        # V19 PR 2 — a file ORDER is a sequence, so it must NOT go through
+        # DataScope.from_cli, which sorts and dedupes. Doing so would
+        # silently rewrite the operator's permutation into ascending order.
+        args.file_order_override = (
+            parse_file_order_cli(args.file_order_override) if args.file_order_override else None
         )
     except ValueError as e:
         parser.error(str(e))
@@ -1489,6 +1520,9 @@ def main():
             # whether the tuner's formal gates consume the reference.
             restored_chain_incumbent_score=state.chain_best_valid_formal_score,
             enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
+            # V19 PR 2 — operator ordering override for this chain.
+            order_strategy_override=args.order_strategy_override,
+            file_order_override=args.file_order_override,
             # External agents (Commit 6) — see Design Decisions 1 + 2 in
             # docs/commit_plan_ml_literature_review.md. The enable flag is
             # resolved above (CLI > YAML > False); the config path

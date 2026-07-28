@@ -1422,11 +1422,36 @@ engine behavior (CB2).
       file-order JSON next to the sample-set file; append flags
       when non-default; stub twin mirrors.
 - [ ] `training_skill` wrapper: forward both via `kwargs.get`.
-- [ ] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
-      surface (conceptually `ORDER_STRATEGY_OVERRIDE`/
-      `FILE_ORDER_OVERRIDE`; exact names after auditing nearby
-      conventions) parse + forward-when-set; override recorded into
+- [x] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
+      surface parse + forward-when-set; override recorded into
       `run_invariants` at chain start (CB1 lock fields).
+      *(CB3-d2. Names kept: `--order_strategy_override` /
+      `--file_order_override`; shell `ORDER_STRATEGY_OVERRIDE` /
+      `FILE_ORDER_OVERRIDE` default `""` ≡ Python `None`, forwarded
+      only when set, so an unset override reproduces pre-V19 argv on
+      both layers. Both flags added to `CONTRACT_FLAGS` in
+      `test_chain_consistency.py`, so the existing shell↔Python
+      parity machinery now enforces their defaults and shapes.
+      `run_workflow` and the tune protocol gained the override as
+      NAMED parameters, same discipline as PR 1's incumbent
+      reference. `run_comparison.py` forwards to the AGENT phase
+      only — `run_baseline_trial` is deliberately untouched, since
+      the baseline is the frozen comparison anchor and must stay on
+      the pre-V19 global shuffle; a test asserts no ordering symbol
+      appears in that function. Baseline and agent workspaces were
+      verified distinct, so the baseline's no-override lock cannot
+      collide with the agent phase's.)*
+      **Blocker found and fixed during implementation**:
+      `workflows/model_exploration.py:1773` also calls
+      `ensure_run_invariants`. With CB1-c having added the override
+      to the canonical lock set, the workflow would have written a
+      NO-override lock into the same workspace the tuner writes an
+      override lock into — a guaranteed `RunInvariantsViolation`
+      aborting every run that used the feature. All three lock sites
+      (tuner, workflow, chain runner) now pass the override, and a
+      regression test parses each `build_run_invariants(...)` call
+      and fails if any omits it — this class of bug is invisible
+      until runtime.
 - [x] Manifest (`run_one_iteration.py::write_manifest`): ordering
       provenance as a round/experiment-KEYED list per the §3.7
       granularity rule (each entry: `exp_id` + nonet; never one

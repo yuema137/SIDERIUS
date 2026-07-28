@@ -180,6 +180,11 @@ CONTRACT_FLAGS = [
     # forwarded-when-set, default OFF on both layers (consumption-only
     # switch; see pr1_chain_incumbents.md §3.2).
     "enable_chain_incumbent_formal_gates",
+    # V19 PR 2 — operator data-ordering override. Shell "" ≡ Python None
+    # (forwarded only when set), so an unset override reproduces pre-V19
+    # argv on both layers. See pr2_data_ordering.md §3.3.
+    "order_strategy_override",
+    "file_order_override",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse
