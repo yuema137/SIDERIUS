@@ -43,20 +43,32 @@ green with recorded evidence.
             (split into CA-1 code 999727a + CA-2 docs; 20 new tests,
             26 + 49 + 75 green; one pre-existing unrelated lilab
             failure documented as FU-P2-4)
-[ ] P2-CB — commit B (three sub-commits CB1/CB2/CB3, §6): ordering
-            proposal/override/resolution schema + single resolver +
-            chain-lock override fields; engine consumes resolved
-            values only + [data_order] logs; end-to-end propagation
-            incl. interpreter-visible resolved context; tests
-[ ] P2-V1 — pre-gate sweep: targeted unit + pseudo integration
-            (default-parity + exact-visitation both deterministic)
+[x] P2-CB — commit B (§6): ordering proposal/override/resolution
+            schema + single resolver + chain-lock override fields;
+            engine consumes resolved values only + [data_order] logs;
+            end-to-end propagation incl. interpreter-visible resolved
+            context; tests.
+            (7 git commits: CB1a a720b06 resolver, CB1b 4fe9f15
+            schema, CB1c f2cb18d lock, CB2 3d3054a engine,
+            CB3a 83c925d rejection recording, CB3b 2104a53
+            interpreter, CB3c a3fc896 propagation, CB3d1 0f8c3e0
+            manifest, CB3d2 3290cab operator surface)
+[x] P2-V1 — pre-gate sweep: targeted unit + pseudo integration
+            (every resolution case deterministic)
+            (1d55e68; new pseudo suite 7 green; tests/unit 4475
+            passed / 1 xfailed [FU-P2-4, issue #138];
+            tests/integration/workflows 53 passed / 8 skipped after
+            the FU-7 repair e434b78)
 [ ] P2-V2 — Gate 2: bounded real smoke (cold-start, per the standing
             rule; launch plan requires operator approval)
-[ ] P2-DOC — node/skill documentation sync (operator rule,
+[x] P2-DOC — node/skill documentation sync (operator rule,
             2026-07-28): every node and skill touched by this PR has
             its .md updated — CLI arguments, default values, and
-            behavior explanations current. Very last step before
-            merge; see §6 P2-DOC block.
+            behavior explanations current.
+            (73fb98d; diff sweep found exactly 3 touched node/skill
+            dirs, all covered, + docs/running_chain_test.md;
+            agent/skills/training_skill/training_skill.md CREATED —
+            the repo's first skill .md)
 [ ] P2-S  — stop-and-show; implementation PR merged (default remains
             "shuffle"; no strategy recommendation implied)
 [ ] P2-E  — matched-budget empirical strategy evaluation (separate
@@ -1633,14 +1645,85 @@ amendments, shown to operator). Stop-and-show before commit.
 
 ### P2-V2 — Gate 2 real smoke (operator-approved launch)
 
-- [ ] Launch plan drafted at P2-V1 exit (cold-start standing rule;
+- [x] Launch plan drafted at P2-V1 exit (cold-start standing rule;
       DS8-paired partial scope; smallest canonical config; explicit
-      command shown for approval).
-- [ ] One `sequential` attempt: visited order verified from the
-      training log; RT2 §12 ledger entry within tolerance;
-      HealthGate pipeline unaffected.
+      command shown for approval). **See the launch plan below.**
+- [ ] One forced-`sequential` attempt: resolved strategy AND file
+      order verified from the logs; RT2 §12 ledger entry within
+      tolerance; HealthGate pipeline unaffected.
 - [ ] Result + limitations recorded here (PASS/FAIL verbatim
       evidence, PR 1 §7 style).
+
+#### Launch plan (drafted 2026-07-28; AWAITING OPERATOR APPROVAL)
+
+Adapted from PR 1's P1-V2 command, which passed on attempt 3 in
+**17m18s** with this exact budget/scope shape — so the runtime is a
+measured precedent, not an estimate. Two substantive changes:
+`--enable_chain_incumbent_formal_gates` is dropped (PR 1's coupling is
+still OFF in production and would add an unrelated variable), and the
+two PR 2 ordering flags are added.
+
+```bash
+WS=/tmp/checkpoint_pr2_$(date +%s)
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace "$WS" \
+    --run_name pr2_v2_smoke \
+    --num_iterations 2 \
+    --max_rounds 2 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --data_scope 4-9 \
+    --health_gate_files 4,5,6,7,8,9 \
+    --order_strategy_override sequential \
+    --file_order_override 9,7,5,4,8,6 \
+    --trial_portion 0.02 \
+    --train_portion 1.0 \
+    --eval_portion 0.01 \
+    --formal_portion 0.02 \
+    --formal_train_portion 1.0 \
+    --formal_eval_portion 0.01 \
+    --trial_time_budget_minutes 5 \
+    --formal_time_budget_minutes 30 \
+    --trial_vram_budget_gb 24 \
+    --formal_vram_budget_gb 24 \
+    --runtime_watchdog \
+    --llm_config llm_configs/openai_tiered_v1.json
+```
+
+Design notes:
+
+- **The file order is deliberately NON-ascending** (`9,7,5,4,8,6`, a
+  permutation of scope `4-9`). An ascending order would make a
+  sorting bug INVISIBLE — precisely the `DataScope.from_cli` defect
+  caught in CB3-c. This value only survives to the engine if every
+  layer preserves sequence.
+- **Cold-start**: no `--seed_paths` (standing rule; the canonical
+  seeds are pre-DS8 full-scope artifacts that DS8 ingress refuses
+  under a partial scope — PR 1's attempt-2 failure).
+- **`--health_gate_files` exactly equals the resolved DataScope**,
+  required under any partial scope by DS8 boundary enforcement.
+- Pre-verified by `run_chain.sh --dry-run`: both new flags thread
+  through the shell into `run_one_iteration.py` argv alongside the
+  DS8 pair.
+
+Evidence to collect (quoted verbatim, anti-hallucination standard):
+
+1. the tuner's `[data_order]` resolution line per round — expect
+   `override=sequential`, `resolved=sequential`,
+   `source=operator_override`, `file_order=[9, 7, 5, 4, 8, 6]`;
+2. the engine's per-epoch `[data_order]` line — expect
+   `resolved=sequential file_order=[9, 7, 5, 4, 8, 6]` with the epoch
+   seed;
+3. `manifest.json` → `ordering_by_experiment`, one keyed entry per
+   experiment, each carrying the resolved order;
+4. `run_invariants_lock.json` → the override pinned;
+5. the RT2 §12 predicted-vs-actual entry (expected: within existing
+   tolerance, since only the visit permutation changed);
+6. HealthGate verdicts present and unaffected.
+
+Rollback if it fails: the feature is inert without the flags
+(`shuffle` default), so a failure blocks P2-S but requires no revert.
 
 ### P2-DOC — node/skill documentation sync (very last step before merge)
 
