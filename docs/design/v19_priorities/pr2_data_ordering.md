@@ -1,8 +1,10 @@
 # PR 2 — Expose Data Ordering as a Controlled Optimization Dimension
 
-**Status**: rev 3 DRAFT — operator revision request 2026-07-28
-(ordering proposal/override/resolution model) incorporated; P2-D
-RE-APPROVAL PENDING. No code until re-approval.
+**Status**: rev 3 — P2-D RE-APPROVED (operator, 2026-07-28; manifest
+granularity clarification §3.7 applied; both judgment calls — split
+[data_order] log, lock-the-override — approved). LOCKED for
+implementation. Do not expand or polish further unless
+implementation-time inspection reveals a concrete conflict.
 **Baseline**: `docs/design/v19_priorities.md` §2.0 PR 2 block + §2.9 + §1.3
 **Date**: 2026-07-28
 **Branch (planned)**: `feat/v19-pr2-data-ordering`
@@ -24,15 +26,17 @@ green with recorded evidence.
 ```text
 [x] P2-A  — pre-design code audit (this doc §2; two code-traced audits
             2026-07-28: config-plumbing chain + RT2 workload coupling)
-[ ] P2-D  — design approval. History: rev 2 approved 2026-07-28
-            (D1-D5); superseded same day by the operator revision
-            request introducing the proposal/override/resolution
-            model (rev 3, this doc). RE-APPROVAL PENDING — no code
-            until granted. Rev 3 decision state: D1/D2/D4 unchanged;
-            D3 REPLACED (agent-proposable + operator-overridable,
-            resolver precedence override > proposal > default); D5
-            clarified (two-stage validation: structural at proposal,
-            full-permutation after scope resolution + override).
+[x] P2-D  — design RE-APPROVED (operator, 2026-07-28, rev 3).
+            History: rev 2 approved 2026-07-28 (D1-D5); superseded
+            same day by the proposal/override/resolution revision;
+            re-approved with the §3.7 manifest granularity
+            clarification (round-keyed provenance, no iteration-level
+            collapse) and both judgment calls approved (split
+            [data_order] log; lock the override, not the
+            resolution). Decision state: D1/D2/D4a unchanged; D3
+            replaced (agent-proposable + operator-overridable,
+            precedence override > proposal > default); D5 two-stage
+            validation. Doc LOCKED.
 [ ] P2-CA — commit A: minimal indexed-dataset seam + genericity
             contract doc + TIDMAD coupling ledger + second-dataset
             contract tests (baseline §1.3 artifacts)
@@ -578,6 +582,27 @@ A reviewer must be able to reconstruct, from any round record alone:
 "Agent proposed sequential; operator override shuffle; actually
 executed shuffle; source operator_override." An overridden proposal
 is NEVER described as executed.
+
+**Manifest granularity rule (operator clarification, 2026-07-28):**
+ordering may resolve differently across rounds within one workflow
+iteration (agent-exploration mode), so the iteration manifest must
+NOT store one unlabelled iteration-level septet as though it
+describes the whole iteration. Rules:
+- `ExperimentRecord` remains the per-round source of truth;
+- each experiment's `run_config` records the values actually
+  associated with THAT experiment;
+- the iteration manifest records ordering provenance as a
+  round/experiment-KEYED list (or keyed summary), each entry
+  preserving `exp_id` and its proposed/override/resolved/source
+  values — multiple round configurations are never collapsed into
+  one unlabelled value;
+- interpreter-facing summaries associate resolved ordering with the
+  correct model/round.
+Exact manifest field name and JSON shape are selected during CB3
+code inspection; this granularity rule is binding regardless of the
+shape chosen, and the CB3 tests assert it (a two-round pseudo
+iteration with differing resolved ordering must yield two keyed
+manifest entries).
 
 Interpreter exposure: the resolved values surface in the
 interpretation input path. Audited seam: `InterpretationInput`
@@ -1157,8 +1182,11 @@ engine behavior (CB2).
       `FILE_ORDER_OVERRIDE`; exact names after auditing nearby
       conventions) parse + forward-when-set; override recorded into
       `run_invariants` at chain start (CB1 lock fields).
-- [ ] Manifest (`run_one_iteration.py::write_manifest`): septet
-      stamped per iteration.
+- [ ] Manifest (`run_one_iteration.py::write_manifest`): ordering
+      provenance as a round/experiment-KEYED list per the §3.7
+      granularity rule (each entry: `exp_id` + septet; never one
+      unlabelled iteration-level value; exact field name/shape
+      chosen here after code inspection).
 - [ ] `ModelRunSummary`: resolved-ordering field(s) exposed to the
       interpreter as the factual execution configuration.
 
@@ -1181,6 +1209,11 @@ engine behavior (CB2).
 - Negative (propagation failure surface): a hop that drops a field
   is caught by the end-to-end assertion (stamped septet must equal
   the known inputs, not defaults).
+- Manifest granularity (§3.7 rule): a two-round pseudo iteration
+  with DIFFERING resolved ordering across rounds yields two keyed
+  manifest entries (exp_id + septet each); no unlabelled
+  iteration-level collapse; interpreter-facing summary associates
+  each resolved ordering with the correct model/round.
 - Resume (chain level, pseudo): override fixed across resume
   (violation cases covered at CB1 unit level); no-override chain
   with different proposals across iterations → each iteration's
