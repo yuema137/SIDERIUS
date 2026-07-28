@@ -14,7 +14,7 @@ H.2 — Three-iteration candidate promotion:
     - proposed_by_run injection (Bug 1 fix): interpretation agent injects
       proposed_by_run = model_name before calling build_runtime_vocab
     - seen_in_runs accumulation across iterations via model_knowledge_cache carry-forward
-    - promote_candidates() firing at seen_in_runs length == 3
+    - promote_candidates() firing at seen_in_runs length == min_runs (2)
     - _dedup_promoted() running and keeping a genuinely new canonical entry
 
 H.3 — Vocab discoveries appear in proposal prompt:
@@ -312,7 +312,7 @@ def test_vocab_grows_across_two_iterations(tmp_path, request):
 # ---------------------------------------------------------------------------
 
 # The candidate that will be proposed in all three iterations.
-# After 3 distinct runs propose it, promote_candidates() should fire.
+# After 2 distinct runs propose it, promote_candidates() fires (min_runs=2).
 _PROMO_CANDIDATE = {
     "name": "spectral_gating",
     "kind": "feature",
@@ -473,9 +473,18 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
 
     Iteration 1:  attn_wavenet REFUTED.  spectral_gating seen_in_runs=["attn_wavenet"]
     Iteration 2:  spectral_net CONFIRMED. spectral_gating seen_in_runs=[..., "spectral_net"]
-    Iteration 3:  wavelet_net  CONFIRMED. spectral_gating seen_in_runs=[..., "wavelet_net"]
+                  → seen_in_runs reaches promote_candidates()' min_runs=2
                   → promote_candidates() fires → spectral_gating tier="canonical"
                   → _dedup_promoted() runs and keeps the entry (not a duplicate)
+    Iteration 3:  wavelet_net  CONFIRMED. spectral_gating seen_in_runs=[..., "wavelet_net"]
+                  → already canonical; accumulation continues, no re-promotion
+
+    Threshold note: ``promote_candidates`` uses ``min_runs=2``, lowered from
+    3 by commit ``9592494`` (2026-06-28) after the v15 retrospective found
+    no candidate ever reached 3 distinct runs in 20 iterations. That commit
+    updated ``test_vocab_feedback.py`` but not this file, which is why this
+    test asserted the abandoned 3-run threshold and had been failing since
+    (tracked as FU-7).
     """
     from tests.conftest import _is_real_llm
     from tests.helpers.recording_llm_bridge import RecordingLLMBridge
@@ -542,13 +551,23 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
 
     sg_iter2 = next((v for v in iter2_output.runtime_vocab if v.name == "spectral_gating"), None)
     assert sg_iter2 is not None, "spectral_gating missing from runtime_vocab after iter 2"
-    assert sg_iter2.tier == "candidate", f"Promoted too early (only 2 runs): tier={sg_iter2.tier!r}"
     assert "spectral_net" in sg_iter2.seen_in_runs, (
         f"spectral_net not added to seen_in_runs: {sg_iter2.seen_in_runs}"
     )
     assert len(sg_iter2.seen_in_runs) == 2
+    # Two distinct runs == promote_candidates()' min_runs, so promotion fires
+    # HERE, not at iteration 3.
+    assert sg_iter2.tier == "canonical", (
+        f"not promoted at the min_runs=2 threshold: "
+        f"tier={sg_iter2.tier!r}, seen_in_runs={sg_iter2.seen_in_runs}"
+    )
+    assert iter2_output.vocab_changes, "vocab_changes is empty — promotion not logged"
+    assert any("spectral_gating" in change for change in iter2_output.vocab_changes), (
+        f"spectral_gating promotion not in vocab_changes: {iter2_output.vocab_changes}"
+    )
 
     print(f"  [iter 2] CONFIRMED spectral_gating.seen_in_runs={sg_iter2.seen_in_runs}")
+    print(f"  [iter 2] tier={sg_iter2.tier!r} ✓  vocab_changes={iter2_output.vocab_changes}")
 
     # -----------------------------------------------------------------------
     # Iteration 3 — wavelet_net is new; all others cached
@@ -572,22 +591,17 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
 
     sg_iter3 = next((v for v in iter3_output.runtime_vocab if v.name == "spectral_gating"), None)
     assert sg_iter3 is not None, "spectral_gating missing from runtime_vocab after iter 3"
+    # Already canonical from iteration 2; a third run must not demote it or
+    # stop accumulating evidence.
     assert sg_iter3.tier == "canonical", (
-        f"spectral_gating not promoted after 3 runs: "
+        f"spectral_gating lost canonical tier: "
         f"tier={sg_iter3.tier!r}, seen_in_runs={sg_iter3.seen_in_runs}"
     )
     assert len(sg_iter3.seen_in_runs) == 3
     assert "wavelet_net" in sg_iter3.seen_in_runs
 
-    # vocab_changes must record the promotion event
-    assert iter3_output.vocab_changes, "vocab_changes is empty — promotion not logged"
-    promo_logged = any("spectral_gating" in change for change in iter3_output.vocab_changes)
-    assert promo_logged, (
-        f"spectral_gating promotion not in vocab_changes: {iter3_output.vocab_changes}"
-    )
-
     print(f"  [iter 3] CONFIRMED spectral_gating.seen_in_runs={sg_iter3.seen_in_runs}")
-    print(f"  [iter 3] tier={sg_iter3.tier!r} ✓  vocab_changes={iter3_output.vocab_changes}")
+    print(f"  [iter 3] tier={sg_iter3.tier!r} ✓ (promoted at iter 2)")
 
 
 # ---------------------------------------------------------------------------

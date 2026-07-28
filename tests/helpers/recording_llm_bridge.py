@@ -140,6 +140,22 @@ class RecordingLLMBridge:
         self.calls.append(("tool_call", system_prompt, user_prompt, tools))
         return self._pop("tool_call")
 
+    def emit_marker(self, *, label: str, extra: dict[str, Any] | None = None) -> None:
+        """Mirror of :meth:`LLMBridge.emit_marker`. Records; returns nothing.
+
+        Deliberately does NOT consume a queued response: the real method
+        appends a synthetic token-usage row and makes no LLM call, so
+        requiring a registered response would force every test that merely
+        *reaches* a marker site to pre-register one.
+
+        Production raises on an empty label and is otherwise a silent no-op
+        when no run context is set — which is exactly a test's situation, so
+        the label check is the only behavior worth mirroring.
+        """
+        if not label:
+            raise ValueError("emit_marker requires a non-empty label")
+        self.calls.append(("emit_marker", label, extra))
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
