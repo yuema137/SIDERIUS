@@ -299,6 +299,9 @@ class TestHyperparamTuningAgentRun:
     def test_default_formal_thresholds_persist_and_match_log(
         self, agent_and_mocks, tmp_path, capsys
     ):
+        """V19 PR 1: default reference is None (no chain incumbent) —
+        output, run_config, and banner must all agree on the
+        no-incumbent state (never 0.0)."""
         agent, _, _ = agent_and_mocks
         output = agent.run(
             _make_input(tmp_path).model_copy(
@@ -309,18 +312,18 @@ class TestHyperparamTuningAgentRun:
             )
         )
 
-        assert output.formal_reference_score == 0.0
-        assert output.resolved_skip_formal_threshold == 0.0
-        assert output.resolved_bypass_formal_threshold == 0.5
+        assert output.formal_reference_score is None
+        assert output.resolved_skip_formal_threshold is None
+        assert output.resolved_bypass_formal_threshold is None
         persisted = json.loads((tmp_path / "run_output_test_run.json").read_text())
-        assert persisted["formal_reference_score"] == 0.0
-        assert persisted["resolved_skip_formal_threshold"] == 0.0
-        assert persisted["resolved_bypass_formal_threshold"] == 0.5
+        assert persisted["formal_reference_score"] is None
+        assert persisted["resolved_skip_formal_threshold"] is None
+        assert persisted["resolved_bypass_formal_threshold"] is None
         run_config = json.loads((tmp_path / "run_config_test_run.json").read_text())
-        assert run_config["formal_reference_score"] == 0.0
-        assert run_config["resolved_skip_formal_threshold"] == 0.0
-        assert run_config["resolved_bypass_formal_threshold"] == 0.5
-        assert "reference=0.0000, skip=0.0000, bypass=0.5000" in capsys.readouterr().out
+        assert run_config["formal_reference_score"] is None
+        assert run_config["resolved_skip_formal_threshold"] is None
+        assert run_config["resolved_bypass_formal_threshold"] is None
+        assert "reference=none, skip=none, bypass=none" in capsys.readouterr().out
 
     def test_injected_formal_thresholds_persist(self, agent_and_mocks, tmp_path):
         agent, _, _ = agent_and_mocks

@@ -995,10 +995,14 @@ class HyperparamTuningInput(BaseModel):
         return v
 
     # --- Post-v15 delta gates: skip_formal + bypass_formal_time_budget ---
-    # Both gates use ``current_run_best_formal_score`` as the reference point,
-    # V17 intentionally fixes the production subprocess reference at 0.0 for
-    # every iteration. Chain-wide committed incumbent restoration is deferred
-    # to V18.
+    # Both gates use ``current_run_best_formal_score`` as the reference point.
+    # V19 PR 1 (docs/design/v19_priorities/pr1_chain_incumbents.md): the
+    # reference is ``float | None`` with ``None`` = "no chain incumbent"
+    # (both gates short-circuit). In chain production the value is injected
+    # from committed prior-iteration state reconstructed by
+    # ``core/resume.py`` (commit-time HealthGate validity only); it is never
+    # a fixed constant. Explicit numeric values remain legal for
+    # standalone/test runs.
     #
     # Do NOT use 5.5763 as the default. That value is the deterministic
     # scoring fingerprint of the class-127 mode-collapse attractor:
@@ -1019,15 +1023,18 @@ class HyperparamTuningInput(BaseModel):
     #   consumed formal-round budget without producing useful data. The
     #   skip gate cuts that waste while keeping borderline cases.
 
-    current_run_best_formal_score: float = Field(
-        default=0.0,
+    current_run_best_formal_score: float | None = Field(
+        default=None,
         description=(
-            "The fixed V17 formal-comparison reference. Initialized to "
-            "0.0 for every production iteration. Used as the reference "
-            "point for ``skip_formal_min_delta`` and "
-            "``bypass_formal_time_budget_min_delta``. "
-            "V17 does not restore or update a chain-wide formal incumbent; "
-            "that committed-state behavior is deferred to V18."
+            "Chain formal-incumbent reference (V19 PR 1). ``None`` = no "
+            "incumbent: both delta gates short-circuit and never fire. In "
+            "chain production the value is the best commit-time-valid "
+            "FORMAL score reconstructed from committed prior iterations "
+            "(``core/resume.py``); consumption by the gates is controlled "
+            "by ``enable_chain_incumbent_formal_gates``. Explicit numeric "
+            "values remain legal for standalone runs. Never default this "
+            "to 0.0 (the pre-V19 defect) or 5.5763 (class-127 phantom; "
+            "see block comment above)."
         ),
     )
     skip_formal_min_delta: float = Field(
@@ -1035,6 +1042,8 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Skip all formal rounds when ``best_trial_score < "
             "(current_run_best_formal_score + skip_formal_min_delta)``. "
+            "When the reference is ``None`` the resolved threshold is "
+            "``None`` and this gate never fires. "
             "Default ``-1.0``: only skip formal when trial is more than "
             "1.0 dB below the current best formal score. Set to ``0.0`` "
             "to skip formal whenever trial does not beat current best. "
@@ -1046,7 +1055,9 @@ class HyperparamTuningInput(BaseModel):
         description=(
             "Bypass the formal time-budget gate when ``best_trial_score "
             ">= (current_run_best_formal_score + "
-            "bypass_formal_time_budget_min_delta)``. Default ``0.0``: "
+            "bypass_formal_time_budget_min_delta)``. When the reference "
+            "is ``None`` the resolved threshold is ``None`` and this "
+            "gate never fires. Default ``0.0``: "
             "bypass the time gate whenever trial sets a new run best. "
             "Set to ``0.5`` to only bypass when trial beats current "
             "best by >= 0.5 dB. Set to ``float('inf')`` to disable "
@@ -1866,7 +1877,9 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description=(
             "Resolved current_run_best_formal_score used by this tuner invocation. "
-            "None only for historical outputs written before this metadata existed."
+            "None on historical outputs written before this metadata existed, "
+            "AND on V19+ invocations that ran with no chain incumbent "
+            "(the gates were short-circuited)."
         ),
     )
     resolved_skip_formal_threshold: float | None = Field(
@@ -1908,9 +1921,8 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Highest denoising_score achieved across completed FORMAL rounds "
             "only (excludes trial rounds). This raw scientific field remains "
-            "separate from best_valid_formal_denoising_score. V17 production "
-            "subprocess iterations use the fixed 0.0 formal reference; "
-            "chain-wide restoration is deferred to V18."
+            "separate from best_valid_formal_denoising_score and is NOT "
+            "eligible for chain-incumbent reconstruction (raw ≠ valid)."
         ),
     )
     best_valid_exp_id: str | None = Field(
@@ -1932,7 +1944,9 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description=(
             "Highest finite denoising_score among HealthGate-valid formal records. "
-            "Reporting only in V17; dynamic chain restoration is deferred to V18."
+            "V19 PR 1: this committed field is the source of truth for "
+            "chain-incumbent reconstruction (core/resume.py), validated "
+            "against its source record before use (design doc §3.3)."
         ),
     )
     best_valid_config: dict[str, Any] | None = Field(

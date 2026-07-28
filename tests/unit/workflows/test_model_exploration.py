@@ -684,9 +684,12 @@ class TestRunWorkflowMultiIteration:
         and ``bypass_formal_time_budget_min_delta`` too strict (v15
         mamba_multirate_fuser / dualpath_spectral_router pattern).
 
-        After this fix, iter_2's tune_input.current_run_best_formal_score
-        must be the schema default (V17 fixed reference 0.0) — unchanged
-        by iter_1's trial-only success.
+        V19 PR 1 (P1-C1): the schema default is now ``None`` ("no
+        incumbent"). iter_2's tune_input.current_run_best_formal_score
+        must remain ``None`` — a trial-only iter provides no formal
+        incumbent. The INTENT of the original regression (trial scores
+        must never become the formal anchor) is preserved; the full
+        Invariant II three-iteration coverage lands with P1-C3.
         """
         # iter_1: simulates "all formal attempts gated, only trial scored".
         iter1_tune = _make_tune_output(model_type="model_a", score=7.7)
@@ -709,9 +712,9 @@ class TestRunWorkflowMultiIteration:
             max_iterations=2,
         )
         iter2_tune_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
-        # Schema default = 0.0 (V17 fixed reference). Must NOT be the
+        # Schema default = None (V19 PR 1: no incumbent). Must NOT be the
         # iter_1 trial score (7.7) — that would mean the bug is back.
-        assert iter2_tune_input.current_run_best_formal_score == pytest.approx(0.0)
+        assert iter2_tune_input.current_run_best_formal_score is None
 
 
 # ---------------------------------------------------------------------------

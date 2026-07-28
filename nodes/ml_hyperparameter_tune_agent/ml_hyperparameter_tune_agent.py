@@ -197,51 +197,73 @@ def _best_trial_winner(memory_history: list) -> dict | None:
 def _should_skip_formal(
     memory_history: list,
     *,
-    reference_score: float,
-    min_delta: float,
+    threshold: float | None,
 ) -> bool:
-    """Return whether the best valid trial falls below the formal threshold."""
+    """Return whether the best valid trial falls below the formal threshold.
 
+    ``threshold`` is the RESOLVED value from
+    ``_resolve_formal_comparison_thresholds`` — the single source of the
+    gate arithmetic (V19 PR 1). ``None`` (no chain incumbent) means the
+    gate never fires.
+    """
+
+    if threshold is None or threshold == float("-inf"):
+        return False
     winner = _best_trial_winner(memory_history)
-    threshold = reference_score + min_delta
-    return (
-        winner is not None and threshold > float("-inf") and winner["denoising_score"] < threshold
-    )
+    return winner is not None and winner["denoising_score"] < threshold
 
 
 def _should_bypass_formal_time_budget(
     memory_history: list,
     *,
-    reference_score: float,
-    min_delta: float,
+    threshold: float | None,
 ) -> bool:
-    """Return whether the best valid trial clears the formal bypass threshold."""
+    """Return whether the best valid trial clears the formal bypass threshold.
 
+    ``threshold`` is the RESOLVED value from
+    ``_resolve_formal_comparison_thresholds``. ``None`` (no chain
+    incumbent) means the gate never fires.
+    """
+
+    if threshold is None or threshold == float("inf"):
+        return False
     winner = _best_trial_winner(memory_history)
-    threshold = reference_score + min_delta
-    return (
-        winner is not None and threshold < float("inf") and winner["denoising_score"] >= threshold
-    )
+    return winner is not None and winner["denoising_score"] >= threshold
 
 
 def _resolve_formal_comparison_thresholds(
     *,
-    reference_score: float,
+    reference_score: float | None,
     skip_min_delta: float,
     bypass_min_delta: float,
-) -> tuple[float, float, float]:
+) -> tuple[float | None, float | None, float | None]:
     """Resolve invocation-wide formal comparison values once.
 
     The returned tuple is ``(reference, skip_threshold, bypass_threshold)``.
-    It is used for both startup logging and durable output metadata so those
-    audit surfaces cannot drift while leaving selector behavior unchanged.
+    V19 PR 1: this is the SINGLE authoritative computation — the gates,
+    the startup banner, and the durable output metadata all consume these
+    values, so the persisted thresholds provably equal what the gates
+    used. ``reference_score=None`` (no chain incumbent) resolves to
+    ``(None, None, None)`` and both gates short-circuit.
     """
 
+    if reference_score is None:
+        return (None, None, None)
     return (
         reference_score,
         reference_score + skip_min_delta,
         reference_score + bypass_min_delta,
     )
+
+
+def _fmt_reference(value: float | None) -> str:
+    """Render a resolved reference/threshold for banners and logs.
+
+    ``None`` renders as ``"none"`` — never as ``0.0`` (the pre-V19
+    defect value).
+    """
+
+    return "none" if value is None else f"{value:.4f}"
 
 
 def _latest_trial_inference_marginal(memory_history: list) -> float | None:
@@ -1920,9 +1942,9 @@ class HyperparamTuningAgent:
             f"gt_scalar_full={reference_scores.gt_scalar_full:.4f}."
         )
 
-        # Resolve invocation-wide formal comparison metadata once. The same
-        # values feed startup logging and durable output provenance; selector
-        # behavior continues to use the equivalent runtime input formula.
+        # Resolve invocation-wide formal comparison metadata once (V19 PR 1:
+        # the SINGLE authoritative computation — startup logging, durable
+        # output provenance, AND both delta gates consume these values).
         (
             formal_reference_score,
             resolved_skip_formal_threshold,
@@ -1965,9 +1987,9 @@ class HyperparamTuningAgent:
         print(f"HealthGate config: {agent_input.health_checks_config or '(shipped default)'}")
         print(
             "Formal comparison thresholds: "
-            f"reference={formal_reference_score:.4f}, "
-            f"skip={resolved_skip_formal_threshold:.4f}, "
-            f"bypass={resolved_bypass_formal_threshold:.4f}"
+            f"reference={_fmt_reference(formal_reference_score)}, "
+            f"skip={_fmt_reference(resolved_skip_formal_threshold)}, "
+            f"bypass={_fmt_reference(resolved_bypass_formal_threshold)}"
         )
         print(f"Expert Advice: {expert_advice_str}")
         print(f"Max Rounds: {max_rounds} | Strategy: {model_type_setting}")
@@ -2062,32 +2084,29 @@ class HyperparamTuningAgent:
             #
             # The gate fires only when (a) we're about to enter the
             # forced-formal round, (b) at least one trial winner exists, and
-            # (c) ``best_trial_score < current_run_best_formal_score +
-            # skip_formal_min_delta`` — semantics documented on the schema
-            # fields. Disabled by setting ``skip_formal_min_delta`` to
-            # ``float('-inf')``.
-            if is_formal_round and agent_input.force_formal_round:
-                _skip_threshold = (
-                    agent_input.current_run_best_formal_score + agent_input.skip_formal_min_delta
+            # (c) ``best_trial_score < resolved_skip_formal_threshold`` —
+            # the startup-resolved value (V19 PR 1: single-source
+            # arithmetic; ``None`` = no chain incumbent = gate inert).
+            # Disabled by ``skip_formal_min_delta=float('-inf')``.
+            if (
+                is_formal_round
+                and agent_input.force_formal_round
+                and _should_skip_formal(
+                    sandbox.get_summary() or [],
+                    threshold=resolved_skip_formal_threshold,
                 )
-                if _skip_threshold > float("-inf"):
-                    _winner = _best_trial_winner(sandbox.get_summary() or [])
-                    _best_trial_score = (
-                        _winner.get("denoising_score") if _winner is not None else None
-                    )
-                    if _should_skip_formal(
-                        sandbox.get_summary() or [],
-                        reference_score=agent_input.current_run_best_formal_score,
-                        min_delta=agent_input.skip_formal_min_delta,
-                    ):
-                        print(
-                            f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
-                            f"current_best({agent_input.current_run_best_formal_score:.4f}) "
-                            f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
-                            f"{_skip_threshold:.4f} — skipping formal round.",
-                            flush=True,
-                        )
-                        break  # exit the while loop; this iter has no formal score
+            ):
+                _winner = _best_trial_winner(sandbox.get_summary() or [])
+                _best_trial_score = _winner.get("denoising_score") if _winner is not None else None
+                print(
+                    f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
+                    f"reference({_fmt_reference(formal_reference_score)}) "
+                    f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
+                    f"{_fmt_reference(resolved_skip_formal_threshold)} — "
+                    "skipping formal round.",
+                    flush=True,
+                )
+                break  # exit the while loop; this iter has no formal score
 
             for attempt_in_round in range(1, N + 1):
                 total_attempts += 1
@@ -2697,40 +2716,40 @@ class HyperparamTuningAgent:
                         # time guard for the formal round (trial rounds
                         # still respect it) and only when the trial winner
                         # has already beat the current best.
-                        if is_formal_round and not time_check.get("feasible", True):
-                            _bypass_threshold = (
-                                agent_input.current_run_best_formal_score
-                                + agent_input.bypass_formal_time_budget_min_delta
+                        # V19 PR 1: consume the startup-resolved
+                        # threshold (single-source arithmetic;
+                        # ``None`` = no chain incumbent = gate inert).
+                        if (
+                            is_formal_round
+                            and not time_check.get("feasible", True)
+                            and _should_bypass_formal_time_budget(
+                                memory_history,
+                                threshold=resolved_bypass_formal_threshold,
                             )
-                            if _bypass_threshold < float("inf"):
-                                _winner = _best_trial_winner(memory_history)
-                                _best_trial_score = (
-                                    _winner.get("denoising_score") if _winner is not None else None
-                                )
-                                if _should_bypass_formal_time_budget(
-                                    memory_history,
-                                    reference_score=agent_input.current_run_best_formal_score,
-                                    min_delta=agent_input.bypass_formal_time_budget_min_delta,
-                                ):
-                                    print(
-                                        f"  [BypassTimeBudget] Trial "
-                                        f"{_best_trial_score:.4f} >= "
-                                        f"current_best("
-                                        f"{agent_input.current_run_best_formal_score:.4f}) "
-                                        f"+ delta("
-                                        f"{agent_input.bypass_formal_time_budget_min_delta:.4f}) "
-                                        f"= {_bypass_threshold:.4f} — "
-                                        f"bypassing time gate for this "
-                                        f"formal attempt.",
-                                        flush=True,
-                                    )
-                                    # Force the feasibility flag so the
-                                    # downstream skipped_time_risk path is
-                                    # skipped. The estimator's verdict and
-                                    # suggestion stay in time_check for the
-                                    # downstream record, just not as a hard
-                                    # rejection.
-                                    time_check["feasible"] = True
+                        ):
+                            _winner = _best_trial_winner(memory_history)
+                            _best_trial_score = (
+                                _winner.get("denoising_score") if _winner is not None else None
+                            )
+                            print(
+                                f"  [BypassTimeBudget] Trial "
+                                f"{_best_trial_score:.4f} >= "
+                                f"reference("
+                                f"{_fmt_reference(formal_reference_score)}) "
+                                f"+ delta("
+                                f"{agent_input.bypass_formal_time_budget_min_delta:.4f}) "
+                                f"= {_fmt_reference(resolved_bypass_formal_threshold)} — "
+                                f"bypassing time gate for this "
+                                f"formal attempt.",
+                                flush=True,
+                            )
+                            # Force the feasibility flag so the
+                            # downstream skipped_time_risk path is
+                            # skipped. The estimator's verdict and
+                            # suggestion stay in time_check for the
+                            # downstream record, just not as a hard
+                            # rejection.
+                            time_check["feasible"] = True
 
                         if not time_check.get("feasible", True):
                             print("Time check FAILED — this attempt does NOT count as a round.")
