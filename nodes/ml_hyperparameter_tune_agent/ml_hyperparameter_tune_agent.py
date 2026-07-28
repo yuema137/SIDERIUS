@@ -3897,6 +3897,18 @@ class HyperparamTuningAgent:
             if valid_formal_records
             else None
         )
+        # V19 PR 1 (P1-C4) — persisted trial-best bookkeeping. NOTE: this
+        # is the BOOKKEEPING notion (HealthGate-valid trial records only);
+        # it is deliberately NOT identical to ``_best_trial_winner``'s gate
+        # predicate, which additionally requires ``memory.time_mode ==
+        # "trial"`` (design doc §3.5). Read-only: nothing consumes these
+        # fields in V19.
+        valid_trial_records = [r for r in valid_records if r.get("is_trial", False)]
+        valid_trial_top_record = (
+            max(valid_trial_records, key=lambda r: r["denoising_score"])
+            if valid_trial_records
+            else None
+        )
 
         # Phase K.7 — gate-exhaustion feedback for the next iteration's
         # proposer (§10.13). active_mode comes from the most recent plan;
@@ -3952,6 +3964,12 @@ class HyperparamTuningAgent:
             else None,
             "best_valid_formal_denoising_score": valid_formal_top_record.get("denoising_score")
             if valid_formal_top_record
+            else None,
+            "best_valid_trial_exp_id": valid_trial_top_record.get("exp_id")
+            if valid_trial_top_record
+            else None,
+            "best_valid_trial_denoising_score": valid_trial_top_record.get("denoising_score")
+            if valid_trial_top_record
             else None,
             "best_valid_config": valid_top_record.get("params") if valid_top_record else None,
             "best_valid_file_vector": valid_top_record.get("file_vector")
