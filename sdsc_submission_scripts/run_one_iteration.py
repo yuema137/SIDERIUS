@@ -359,6 +359,10 @@ def write_manifest(
             "best_valid_formal_score": getattr(
                 tune_output, "best_valid_formal_denoising_score", None
             ),
+            # V19 PR 1 (P1-C4) — read-only trial-best bookkeeping mirror.
+            "best_valid_trial_score": getattr(
+                tune_output, "best_valid_trial_denoising_score", None
+            ),
             "completed_rounds": tune_output.completed_rounds,
             "health_checks_config": getattr(tune_output, "health_checks_config", None),
             # DS6c — invariant stamps (scalar comparability boundary).
