@@ -1428,10 +1428,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --formal_vram_budget_gb 24 \
     --runtime_watchdog \
     --enable_chain_incumbent_formal_gates \
-    --llm_config llm_configs/openai_tiered_v1.json \
-    --seed_paths \
-        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
-        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
+    --llm_config llm_configs/openai_tiered_v1.json
 ```
 
 Notes:
@@ -1447,6 +1444,20 @@ Notes:
   under partial scope. The values must EXACTLY equal the resolved
   DataScope. V18r's launcher pairs these two flags together at
   `sdsc_submission_scripts/launch_v18_wave1.sh:121`.
+- **NO `--seed_paths`**: this smoke uses **cold-start** (PR #126).
+  The Gate-standard Lite Plan's canonical seeds
+  (`small_sample_trial_v0` wavenet + punet) are pre-DS8 full-scope
+  artifacts; DS8's `validate_stamped_invariants` refuses to admit
+  legacy unstamped ingress evidence into a partial-scope run (the
+  attempt-2 failure below). V18r's launcher runs the same partial
+  scope without any `--seed_paths` and lets the interpreter's
+  deterministic cold-start path (`nodes/result_interpretation_agent`
+  under `cold_start=True`, from PR #126) emit a "no prior evidence"
+  digest, followed by the normal proposer→implementor→validator→
+  tuner flow. Iter 1's committed DS-4-9-stamped `run_output` is then
+  a valid predecessor for iter 2's chain-incumbent reconstruction.
+  Do not add `--seed_paths` for any partial-scope Gate 2 unless
+  DS-scope-stamped seeds for the exact scope are available.
 
 **Scope, rounds, iterations, portions** (spelled out from the command
 above, all matching Lite Plan defaults except iteration count):
@@ -1686,8 +1697,54 @@ Verbatim-quoted evidence pattern (per anti-hallucination rule):
 - Doc gap identified in the Gate standard → filed as **FU-P1-8**
   (see §9 tracker).
 
-- [ ] Attempt 2: __ (awaiting operator go/no-go with the corrected
-      command)
+**Attempt 2 — 2026-07-27 23:27:24-07:00 — FAILED at preflight
+(no cost incurred)**
+
+- Workspace: `/tmp/checkpoint_pr1_1785220044/` (retained for review;
+  contains only a crash `manifest.json` — safe to `rm -rf` any time).
+- Failure timing: exit code 1 at `2026-07-27T23:27:26-07:00` — under
+  2 seconds after launch, inside `run_workflow`'s ingress-validation
+  step (`workflows/model_exploration.py:1763`), immediately after
+  the plugin registry preload and before any LLM call.
+- Cause: the (now attempt-1-fixed) launch command still carried the
+  Gate-standard's canonical `--seed_paths` (wavenet + punet
+  `small_sample_trial_v0`). Those run_outputs were produced before
+  DS8 shipped and are unstamped (`resolved_data_scope` absent →
+  legacy = full scope `[0..19]`). DS8's
+  `validate_stamped_invariants` (`core/run_invariants.py:321`)
+  refuses to admit legacy full-scope ingress evidence into a
+  partial-scope `[4-9]` run. Verbatim error from the log:
+  ```
+  core.run_invariants.RunInvariantsViolation: ingress evidence from
+  seed/restored output 'small_sample_trial_v0_agent' (wavenet) is
+  incompatible with this run's invariants:
+    - resolved_data_scope: record is unstamped (legacy = full scope)
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+      vs this run's [4, 5, 6, 7, 8, 9]
+    Records are only comparable within one invariant set — start a
+    new workspace, or seed with matching-scope evidence.
+  ```
+- Cost: **$0.00 LLM, 0 s GPU, 0 training runs** — the chain crashed
+  in ingress validation, before the interpreter's first LLM call.
+- Resolution: **remove `--seed_paths` entirely — cold-start**. The
+  Exact command block above now omits the flag. V18r's launcher
+  (`sdsc_submission_scripts/launch_v18_wave1.sh` + `_chain_common.sh:280-283`)
+  runs the identical `4-9` partial scope without any seeds and lets
+  PR #126's seedless cold-start take over; the interpreter emits a
+  deterministic "no prior experimental evidence" digest without any
+  LLM call, then the normal proposer→implementor→validator→tuner
+  chain runs as usual. Iter 1's committed DS-4-9-stamped run_output
+  is a valid predecessor for iter 2's chain-incumbent reconstruction.
+- Doc gap in the Gate standard NOW covers both DS8 rules → filed
+  under the expanded **FU-P1-8** (see §9 tracker).
+
+**Cumulative attempt cost**: $0.00 LLM, 0 s GPU. Both crashed
+workspaces retained (`/tmp/checkpoint_pr1_1785219480/`,
+`/tmp/checkpoint_pr1_1785220044/`) — a few KB each; safe to
+`rm -rf` any time.
+
+- [ ] Attempt 3: __ (cold-start; awaiting operator go/no-go with
+      the corrected command above)
 - [ ] Gate 2 result recorded here: __
 
 ### Validation budget table (baseline §4.4 — estimates filled at P1-D approval)
@@ -1740,16 +1797,25 @@ behavioral claim (§5).
 - [ ] FU-P1-5 — manifest `best_score`/`raw_best_score` duplicate alias
       cleanup (`run_one_iteration.py:353-354`).
 - [ ] FU-P1-8 — `docs/gates/gate_testing_standard.md` doc gap:
-      the "Lite Plan" and "Regular Plan" tables list
-      `--data_scope 4-9` but do NOT list the required paired
-      `--health_gate_files 4,5,6,7,8,9`. DS8 refuses to launch
-      without it (surfaced by the 2026-07-27 P1-V2 attempt 1
-      failure). Small docs-only fix: add a "HealthGate monitored
-      files" row to both plan tables, and a paragraph note in the
-      standard body pointing at
-      `sdsc_submission_scripts/launch_v18_wave1.sh:121` as the
-      canonical pairing. Not blocking PR 1 merge but should land
-      before the next partial-scope Gate 2 in any project.
+      the "Lite Plan" and "Regular Plan" tables are stale for
+      partial-scope operation under DS8. Both rules were surfaced
+      by the 2026-07-27 P1-V2 attempts 1 and 2:
+      1. `--data_scope 4-9` requires the paired
+         `--health_gate_files 4,5,6,7,8,9`; DS8 refuses to launch
+         without it (attempt 1). Fix: add a "HealthGate monitored
+         files" row to both plan tables.
+      2. The canonical seed paths listed in the standard
+         (`small_sample_trial_v0` wavenet + punet) are pre-DS8
+         full-scope artifacts and cannot be admitted into a
+         partial-scope run; DS8's `validate_stamped_invariants`
+         rejects them (attempt 2). Fix: for partial-scope plan
+         variants, note that `--seed_paths` must EITHER be omitted
+         entirely (cold-start per PR #126, V18r's pattern at
+         `sdsc_submission_scripts/launch_v18_wave1.sh` +
+         `_chain_common.sh:280-283`) OR provided from a
+         DS-scope-stamped source for the exact scope.
+      Docs-only fix; not blocking PR 1 merge; should land before
+      the next partial-scope Gate 2 in any project.
 
 ## 10. Open questions
 
