@@ -98,6 +98,16 @@
   "Partial-scope rules" section. The pre-DS8 canonical seed paths still
   listed there are historical reference only. Exception: reproducing a
   specific historical seeded run — operator-approved case-by-case only.
+- **Node/skill doc sync before merge (operator rule, 2026-07-28)**:
+  every PR that updates a node or a skill must update the relevant
+  `.md` (the node's `nodes/{node}/{node}.md`, the skill's doc, and any
+  operator-surface doc such as `docs/running_chain_test.md`) so CLI
+  arguments, default values, and behavior explanations stay current —
+  this codebase is large and the docs are the operator's map. If a
+  touched skill has no `.md`, create a minimal one. Done as the very
+  last step before merging the PR (so docs describe the merged code),
+  written into the PR's plan as its own checklist stage, and verified
+  by quoting each documented flag/default against the merged source.
 
 ## Inter-Node Communication Principle
 

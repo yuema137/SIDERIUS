@@ -40,6 +40,11 @@ green with recorded evidence.
             (default-parity + exact-visitation both deterministic)
 [ ] P2-V2 — Gate 2: bounded real smoke (cold-start, per the standing
             rule; launch plan requires operator approval)
+[ ] P2-DOC — node/skill documentation sync (operator rule,
+            2026-07-28): every node and skill touched by this PR has
+            its .md updated — CLI arguments, default values, and
+            behavior explanations current. Very last step before
+            merge; see §6 P2-DOC block.
 [ ] P2-S  — stop-and-show; implementation PR merged (default remains
             "shuffle"; no strategy recommendation implied)
 [ ] P2-E  — matched-budget empirical strategy evaluation (separate
@@ -880,6 +885,45 @@ amendments, shown to operator). Stop-and-show before commit.
       HealthGate pipeline unaffected.
 - [ ] Result + limitations recorded here (PASS/FAIL verbatim
       evidence, PR 1 §7 style).
+
+### P2-DOC — node/skill documentation sync (very last step before merge)
+
+**Goal.** Keep the per-node and per-skill `.md` files truthful for a
+large codebase: every CLI argument, default value, and behavior
+explanation introduced by this PR is documented where an operator
+looks for it. Operator rule (2026-07-28), standing for all future
+PRs: every updated skill and every updated node gets its relevant
+`.md` updated; done as the final pre-merge step so the docs describe
+the code as actually merged, not as designed.
+
+**Scope.** Enumerate touched nodes/skills from the final PR diff (do
+not rely on this list alone); known targets from the plan:
+- [ ] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+      — new `--order_strategy`/`--file_order` CLI args with defaults,
+      the Decision-5 full-permutation contract, the two-layer
+      validation split, and an ordering block in Key behavioral
+      notes (PR 1 chain-incumbent block precedent).
+- [ ] `docs/running_chain_test.md` — chain-level
+      `ORDER_STRATEGY`/`FILE_ORDER` arm, forward-when-set semantics,
+      defaults.
+- [ ] `agent/skills/training_skill/` — has NO `.md` today: create a
+      minimal one documenting the skill contract (inputs incl. the
+      new ordering fields, defaults, subprocess flags emitted), per
+      the standing rule.
+- [ ] Diff sweep: any other touched node/skill `.md` (check
+      `nodes/*/`*.md` against the PR's touched-file list); confirm
+      or update each — record "no update needed" per file
+      explicitly, never silently.
+
+**Acceptance criteria.** For every touched node/skill, its `.md`
+states the new arguments with their exact defaults and semantics; a
+reader can operate the feature from the docs alone without reading
+the argparse source.
+
+**Verification.**
+- [ ] Cross-check each documented flag/default against the merged
+      argparse/schema source (values quoted, not paraphrased).
+- [ ] Evidence recorded here (files updated + one-line summary each).
 
 ## 7. Validation plan (maps to baseline §2.0 checkpoints)
 
