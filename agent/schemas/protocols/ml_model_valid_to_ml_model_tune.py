@@ -61,6 +61,14 @@ def local_validated_model(
     # CLI surface reproduces pre-v16 behaviour.
     skip_formal_min_delta: float = -1.0,
     bypass_formal_time_budget_min_delta: float = 0.0,
+    # V19 PR 1 (P1-C3) — chain formal-incumbent reference as a NAMED
+    # protocol parameter (design §3.4; replaces the workflow's post-hoc
+    # mutation of the constructed input). ``None`` = no incumbent (both
+    # delta gates short-circuit). ``enable_chain_incumbent_formal_gates``
+    # controls only whether the gates CONSUME the reference —
+    # reconstruction/provenance upstream are unconditional. Default OFF.
+    current_run_best_formal_score: float | None = None,
+    enable_chain_incumbent_formal_gates: bool = False,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
@@ -238,6 +246,8 @@ def local_validated_model(
         max_epochs=max_epochs,
         skip_formal_min_delta=skip_formal_min_delta,
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
+        current_run_best_formal_score=current_run_best_formal_score,
+        enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,

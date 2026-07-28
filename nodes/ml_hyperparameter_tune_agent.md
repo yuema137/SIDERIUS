@@ -1,5 +1,12 @@
 # ml_hyperparameter_tune_agent — Node Documentation
 
+> **Note**: this older top-level document remains as a legacy pointer.
+> The current node contract, input/output schemas, and behavioral
+> notes live in
+> `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+> (per the one-directory-per-node convention). New readers should
+> start there.
+
 ## Overview
 
 Optimizes hyperparameters for a given ML model architecture over N rounds.
@@ -9,6 +16,15 @@ Supports three execution modes:
 - **Trial**: sparse multi-file sampling for fast iteration
 - **Formal**: full multi-file evaluation for definitive scoring
 - **Single-file (legacy)**: single training file, original pipeline
+
+**V19 PR 1 addition**: the tuner now accepts a chain-reconstructed
+formal-incumbent reference and a coupling switch
+(`enable_chain_incumbent_formal_gates`, default OFF). The chain
+incumbent is always reconstructed and recorded; the two formal delta
+gates consume it only when coupling is ON (`chain_incumbent + fixed_delta`).
+OFF is not a fixed-`0.0` mode. Full contract:
+`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Chain formal-incumbent reference".
 
 ## Entry Point
 

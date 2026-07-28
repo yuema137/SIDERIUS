@@ -1,46 +1,41 @@
 """Unit tests for the post-v15 delta gates: ``skip_formal_min_delta`` and
 ``bypass_formal_time_budget_min_delta``.
 
-Both gates use ``current_run_best_formal_score`` as the reference point.
-Defaults:
-  * ``current_run_best_formal_score = 0.0`` (V17 fixed formal reference)
-  * ``skip_formal_min_delta = -1.0`` → skip formal when trial < (best - 1.0)
+V19 PR 1 (docs/design/v19_priorities/pr1_chain_incumbents.md, P1-C1):
+``current_run_best_formal_score`` is the chain formal-incumbent
+reference, ``float | None`` with ``None`` = "no incumbent". Defaults:
+  * ``current_run_best_formal_score = None`` → both gates short-circuit
+  * ``skip_formal_min_delta = -1.0`` → skip formal when trial < (ref - 1.0)
   * ``bypass_formal_time_budget_min_delta = 0.0`` → bypass time gate when
-    trial >= best
+    trial >= ref
 
-Motivation: v15 retrospective surfaced two failure modes —
-  * trial scores well below baseline still burned formal-round budget
-  * trial winners that beat the run best had every formal attempt
-    rejected by the time-risk gate (mamba_multirate_fuser, dualpath_
-    spectral_router)
+``_resolve_formal_comparison_thresholds`` is the SINGLE authoritative
+computation: the gates, the startup banner, and the persisted output
+metadata all consume its values (no independent ``ref + delta`` copies).
 
-See ``reports/v15_20260628.md`` §1.3 / §1.4 for the time-budget data and
-``agent/schemas/hyperparam_tuning.py`` (the three field docstrings under
-``current_run_best_formal_score``) for the schema definition.
+Motivation history (v15 retrospective) is retained on the schema block
+comment; see ``agent/schemas/hyperparam_tuning.py``.
 """
 
 from __future__ import annotations
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+    _fmt_reference,
+    _resolve_formal_comparison_thresholds,
+    _should_bypass_formal_time_budget,
+    _should_skip_formal,
+)
 
 # ---------------------------------------------------------------------------
-# Test fixture — minimal valid HyperparamTuningInput
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
 def _make_input(**overrides) -> HyperparamTuningInput:
-    """Construct a minimal valid HyperparamTuningInput. Tests override the
-    three delta-gate fields plus ``current_run_best_formal_score`` to set
-    up the threshold arithmetic, then read the field values back to verify
-    schema plumbing.
-
-    Pydantic validation happens at construction; mutating the returned
-    object afterwards is fine for these tests because we are testing the
-    SCHEMA contract, not the tuner's runtime gate logic (which lives
-    deeper in ``ml_hyperparameter_tune_agent.py`` and is exercised by
-    integration tests).
-    """
+    """Construct a minimal valid HyperparamTuningInput; tests override the
+    delta-gate fields to exercise the schema contract."""
     storage = StorageConfig(local=LocalStorageConfig(workspace="/tmp/test_delta_gates"))
     base = {
         "model_type": "punet",
@@ -51,172 +46,213 @@ def _make_input(**overrides) -> HyperparamTuningInput:
     return HyperparamTuningInput(**base)
 
 
+_BLOCKING_IDS = (
+    "output_diversity_blocking",
+    "output_std_blocking",
+    "amplitude_collapse_blocking",
+)
+
+
+def _valid_trial(score: float) -> dict:
+    """A HealthGate-valid trial record eligible for `_best_trial_winner`."""
+    return {
+        "exp_id": f"trial_{score}",
+        "status": "success",
+        "denoising_score": score,
+        "is_trial": True,
+        "health_gate_results": [
+            {
+                "gate_name": gate_id,
+                "execution_status": "passed",
+                "check_passed": True,
+                "would_invalidate_under_production_policy": False,
+                "resolved_action": "continue",
+            }
+            for gate_id in _BLOCKING_IDS
+        ],
+        "memory": {"time_mode": "trial"},
+    }
+
+
+def _resolve(reference, skip_delta=-1.0, bypass_delta=0.0):
+    return _resolve_formal_comparison_thresholds(
+        reference_score=reference,
+        skip_min_delta=skip_delta,
+        bypass_min_delta=bypass_delta,
+    )
+
+
 # ---------------------------------------------------------------------------
-# Schema-level tests for the three new fields
+# Schema defaults — the None incumbent sentinel
 # ---------------------------------------------------------------------------
 
 
 class TestDeltaGateSchema:
-    def test_default_baseline_used_as_initial_reference(self):
-        """V17 fixes ``current_run_best_formal_score`` at zero."""
+    def test_default_reference_is_none_no_incumbent(self):
+        """V19 PR 1: default is ``None`` (no chain incumbent) — NOT the
+        pre-V19 fixed 0.0 defect value."""
         inp = _make_input()
+        assert inp.current_run_best_formal_score is None
+
+    def test_explicit_zero_reference_remains_legal(self):
+        """0.0 as an EXPLICIT reference stays valid (standalone runs) and
+        behaves as an ordinary number, distinct from ``None``."""
+        inp = _make_input(current_run_best_formal_score=0.0)
         assert inp.current_run_best_formal_score == 0.0
+        ref, skip_t, bypass_t = _resolve(inp.current_run_best_formal_score)
+        assert (ref, skip_t, bypass_t) == (0.0, -1.0, 0.0)
 
     def test_skip_formal_min_delta_default_is_one_dB_floor(self):
-        """Default ``-1.0`` means a trial score has to be more than 1.0
-        dB below the current best formal to trigger a skip. Borderline
-        scores still get a formal-round shot."""
         inp = _make_input()
         assert inp.skip_formal_min_delta == -1.0
 
     def test_bypass_formal_time_budget_min_delta_default_is_zero(self):
-        """Default ``0.0`` means *any* trial winner that meets-or-beats
-        the current best bypasses the time gate. The v15 arch chain's
-        trial-only 7.65 and 7.77 would have bypassed at this default."""
         inp = _make_input()
         assert inp.bypass_formal_time_budget_min_delta == 0.0
 
 
 # ---------------------------------------------------------------------------
-# Threshold arithmetic — what the tuner runtime computes per round
+# Resolver — the single source of gate arithmetic
 # ---------------------------------------------------------------------------
-#
-# The runtime gates compute:
-#   skip_threshold   = current_run_best + skip_formal_min_delta
-#   bypass_threshold = current_run_best + bypass_formal_time_budget_min_delta
-#
-# and fire on:
-#   skip   if best_trial_score < skip_threshold
-#   bypass if best_trial_score >= bypass_threshold
-#
-# These tests exercise the arithmetic for the four canonical operator
-# scenarios from the design spec.
+
+
+class TestResolver:
+    def test_none_reference_resolves_to_all_none(self):
+        assert _resolve(None) == (None, None, None)
+
+    def test_numeric_reference_resolves_sums(self):
+        assert _resolve(6.0, skip_delta=-1.0, bypass_delta=0.5) == (6.0, 5.0, 6.5)
+
+    def test_gates_consume_resolver_output_verbatim(self):
+        """Single-source assertion: the values the gates receive are the
+        resolver's outputs — recomputing ``ref + delta`` independently
+        must give the identical threshold the gate fires on."""
+        _ref, skip_t, bypass_t = _resolve(6.0, skip_delta=-1.0, bypass_delta=0.0)
+        # skip fires exactly below skip_t
+        assert _should_skip_formal([_valid_trial(skip_t - 0.01)], threshold=skip_t)
+        assert not _should_skip_formal([_valid_trial(skip_t)], threshold=skip_t)
+        # bypass fires exactly at/above bypass_t
+        assert _should_bypass_formal_time_budget([_valid_trial(bypass_t)], threshold=bypass_t)
+        assert not _should_bypass_formal_time_budget(
+            [_valid_trial(bypass_t - 0.01)], threshold=bypass_t
+        )
+
+    def test_fmt_reference_renders_none_not_zero(self):
+        """``None`` renders as 'none' — never as '0.0000' (the pre-V19
+        defect value must be unrepresentable in banners)."""
+        assert _fmt_reference(None) == "none"
+        assert _fmt_reference(6.0) == "6.0000"
+
+
+# ---------------------------------------------------------------------------
+# None short-circuits — no incumbent means no gate can fire
+# ---------------------------------------------------------------------------
+
+
+class TestNoneShortCircuit:
+    def test_skip_gate_cannot_fire_without_incumbent(self):
+        _, skip_t, _ = _resolve(None)
+        assert skip_t is None
+        assert not _should_skip_formal([_valid_trial(-99.0)], threshold=skip_t)
+
+    def test_bypass_gate_cannot_fire_without_incumbent(self):
+        _, _, bypass_t = _resolve(None)
+        assert bypass_t is None
+        assert not _should_bypass_formal_time_budget([_valid_trial(99.0)], threshold=bypass_t)
+
+
+# ---------------------------------------------------------------------------
+# Numeric-threshold behavior (canonical operator scenarios, now through
+# the real helpers)
+# ---------------------------------------------------------------------------
 
 
 class TestSkipFormalGate:
-    def test_skip_formal_fires_when_trial_well_below_best(self):
-        """best_formal=6.0, trial=4.5, delta=-1.0 → threshold=5.0 →
-        trial(4.5) < 5.0 → formal SKIPPED."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            skip_formal_min_delta=-1.0,
-        )
-        best_trial_score = 4.5
-        skip_threshold = inp.current_run_best_formal_score + inp.skip_formal_min_delta
-        assert skip_threshold == 5.0
-        assert best_trial_score < skip_threshold  # gate fires → skip
+    def test_skip_fires_when_trial_well_below_best(self):
+        """ref=6.0, delta=-1.0 → threshold=5.0 → trial 4.5 SKIPS formal."""
+        _, skip_t, _ = _resolve(6.0, skip_delta=-1.0)
+        assert skip_t == 5.0
+        assert _should_skip_formal([_valid_trial(4.5)], threshold=skip_t)
 
-    def test_skip_formal_does_not_fire_when_trial_close_to_best(self):
-        """best_formal=6.0, trial=5.2, delta=-1.0 → threshold=5.0 →
-        trial(5.2) >= 5.0 → formal PROCEEDS.
-
-        A borderline trial close to the current best is still worth a
-        formal attempt — the formal eval might confirm or refute it. The
-        default delta of -1.0 keeps the door open for these cases."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            skip_formal_min_delta=-1.0,
-        )
-        best_trial_score = 5.2
-        skip_threshold = inp.current_run_best_formal_score + inp.skip_formal_min_delta
-        assert skip_threshold == 5.0
-        assert best_trial_score >= skip_threshold  # gate does NOT fire
+    def test_skip_does_not_fire_when_trial_close_to_best(self):
+        """trial 5.2 >= threshold 5.0 → formal proceeds."""
+        _, skip_t, _ = _resolve(6.0, skip_delta=-1.0)
+        assert not _should_skip_formal([_valid_trial(5.2)], threshold=skip_t)
 
     def test_skip_with_zero_delta_skips_anything_below_best(self):
-        """delta=0.0 → threshold=current_best → trial below best at all
-        triggers a skip. Operator may pick this when they only want to
-        spend formal budget on actual SOTA-beaters."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            skip_formal_min_delta=0.0,
-        )
-        assert inp.current_run_best_formal_score + inp.skip_formal_min_delta == 6.0
-        # trial 5.99 (very close, but below) is skipped
-        assert 5.99 < 6.0
-        # trial 6.01 (just above) proceeds
-        assert 6.01 >= 6.0
+        _, skip_t, _ = _resolve(6.0, skip_delta=0.0)
+        assert skip_t == 6.0
+        assert _should_skip_formal([_valid_trial(5.99)], threshold=skip_t)
+        assert not _should_skip_formal([_valid_trial(6.01)], threshold=skip_t)
 
 
 class TestBypassFormalTimeBudgetGate:
     def test_bypass_fires_when_trial_beats_best(self):
-        """best_formal=6.0, trial=6.1, delta=0.0 → threshold=6.0 →
-        trial(6.1) >= 6.0 → time gate BYPASSED.
-
-        The v15 arch chain's trial winners (7.65, 7.77) would have
-        bypassed under this default — they beat any plausible
-        current_run_best at any iter."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            bypass_formal_time_budget_min_delta=0.0,
-        )
-        best_trial_score = 6.1
-        bypass_threshold = (
-            inp.current_run_best_formal_score + inp.bypass_formal_time_budget_min_delta
-        )
-        assert bypass_threshold == 6.0
-        assert best_trial_score >= bypass_threshold  # gate fires → bypass
+        _, _, bypass_t = _resolve(6.0, bypass_delta=0.0)
+        assert bypass_t == 6.0
+        assert _should_bypass_formal_time_budget([_valid_trial(6.1)], threshold=bypass_t)
 
     def test_bypass_does_not_fire_when_trial_below_best(self):
-        """best_formal=6.0, trial=5.9, delta=0.0 → threshold=6.0 →
-        trial(5.9) < 6.0 → time gate APPLIES (skipped_time_risk
-        proceeds as before)."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            bypass_formal_time_budget_min_delta=0.0,
-        )
-        best_trial_score = 5.9
-        bypass_threshold = (
-            inp.current_run_best_formal_score + inp.bypass_formal_time_budget_min_delta
-        )
-        assert bypass_threshold == 6.0
-        assert best_trial_score < bypass_threshold  # gate does NOT fire
+        _, _, bypass_t = _resolve(6.0, bypass_delta=0.0)
+        assert not _should_bypass_formal_time_budget([_valid_trial(5.9)], threshold=bypass_t)
 
     def test_bypass_with_positive_delta_requires_clear_margin(self):
-        """delta=0.5 → only bypass when trial beats current_best by at
-        least 0.5 dB. Operator uses this when they want formal budget
-        spent only on clearly-beating candidates."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            bypass_formal_time_budget_min_delta=0.5,
-        )
-        bypass_threshold = (
-            inp.current_run_best_formal_score + inp.bypass_formal_time_budget_min_delta
-        )
-        assert bypass_threshold == 6.5
-        # trial 6.4 (positive but below margin) — time gate APPLIES
-        assert 6.4 < bypass_threshold
-        # trial 6.5 (at margin) — time gate BYPASSED
-        assert 6.5 >= bypass_threshold
+        _, _, bypass_t = _resolve(6.0, bypass_delta=0.5)
+        assert bypass_t == 6.5
+        assert not _should_bypass_formal_time_budget([_valid_trial(6.4)], threshold=bypass_t)
+        assert _should_bypass_formal_time_budget([_valid_trial(6.5)], threshold=bypass_t)
 
 
 class TestDisableGatesViaInfinity:
-    """Both gates can be turned off entirely by setting the delta to a
-    boundary value. Documented on the field docstrings."""
+    """Both gates can still be turned off via boundary deltas; the
+    disable semantics moved INSIDE the helpers with the resolved-value
+    signature."""
 
     def test_skip_gate_disabled_at_negative_infinity(self):
-        """``skip_formal_min_delta = -inf`` disables the gate: no trial
-        score is below the resulting threshold (which is -inf)."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            skip_formal_min_delta=float("-inf"),
-        )
-        skip_threshold = inp.current_run_best_formal_score + inp.skip_formal_min_delta
-        assert skip_threshold == float("-inf")
-        # The tuner's runtime gate guards on ``_skip_threshold > float("-inf")``
-        # so a -inf threshold short-circuits the gate entirely.
-        assert not (skip_threshold > float("-inf"))
+        _, skip_t, _ = _resolve(6.0, skip_delta=float("-inf"))
+        assert skip_t == float("-inf")
+        assert not _should_skip_formal([_valid_trial(-99.0)], threshold=skip_t)
 
     def test_bypass_gate_disabled_at_positive_infinity(self):
-        """``bypass_formal_time_budget_min_delta = +inf`` disables the
-        gate: no trial score reaches the resulting threshold."""
-        inp = _make_input(
-            current_run_best_formal_score=6.0,
-            bypass_formal_time_budget_min_delta=float("inf"),
+        _, _, bypass_t = _resolve(6.0, bypass_delta=float("inf"))
+        assert bypass_t == float("inf")
+        assert not _should_bypass_formal_time_budget([_valid_trial(99.0)], threshold=bypass_t)
+
+
+# ---------------------------------------------------------------------------
+# Persistence round-trip and the phantom negative
+# ---------------------------------------------------------------------------
+
+
+class TestPersistence:
+    def test_none_reference_round_trips_through_output(self):
+        """``formal_reference_score=None`` survives HyperparamTuningOutput
+        serialization → JSON null → parse."""
+        out = HyperparamTuningOutput(
+            run_name="rt",
+            model_type="punet",
+            file_index=0,
+            status="completed",
+            completed_rounds=0,
+            total_attempts=0,
+            all_records=[],
+            started_at="2026-07-27 00:00:00",
+            finished_at="2026-07-27 00:00:01",
+            formal_reference_score=None,
+            resolved_skip_formal_threshold=None,
+            resolved_bypass_formal_threshold=None,
         )
-        bypass_threshold = (
-            inp.current_run_best_formal_score + inp.bypass_formal_time_budget_min_delta
-        )
-        assert bypass_threshold == float("inf")
-        # The tuner's runtime gate guards on ``_bypass_threshold < float("inf")``
-        # so a +inf threshold short-circuits the gate entirely.
-        assert not (bypass_threshold < float("inf"))
+        parsed = HyperparamTuningOutput.model_validate_json(out.model_dump_json())
+        assert parsed.formal_reference_score is None
+        assert parsed.resolved_skip_formal_threshold is None
+        assert parsed.resolved_bypass_formal_threshold is None
+
+    def test_phantom_family_reference_is_just_a_number(self):
+        """5.5763 (class-127 phantom fingerprint) as an explicit reference
+        gets no special-casing — it resolves like any float. Guarding
+        against phantom DEFAULTS is the schema's job (default is None);
+        eligibility filtering is reconstruction's job (P1-C2)."""
+        ref, skip_t, bypass_t = _resolve(5.5762667, skip_delta=-1.0, bypass_delta=0.0)
+        assert ref == 5.5762667
+        assert skip_t == 4.5762667
+        assert bypass_t == 5.5762667

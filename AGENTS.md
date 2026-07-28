@@ -79,6 +79,25 @@
 - **Never directly continue on the previous work right after conversation
   compression**: stop after conversation compression. The user will remind you
   of the context, the docs, and the code to read. Never start blindly.
+- **Gradual genericization (in-passing rule)**: SIDERIUS is being reshaped
+  from TIDMAD-only into a generic dataset/task/metric framework (operator
+  decision 2026-07-27). When a PR touches a module, refactor the touched
+  module toward the generic seams as part of that PR — in its own commit,
+  skippable for urgent fixes. Never a big-bang refactor PR. Seams are defined
+  once in the genericity contract (`docs/design/v19_priorities.md` §1.3 until
+  the dedicated contract doc exists; design direction in
+  `docs/architecture.md`) — do not invent ad-hoc abstractions. Exception: the
+  frozen TIDMAD score formula stays byte-identical; new metrics plug in
+  beside it, never rewrite it.
+- **Cold-start real-training gate runs (operator rule, 2026-07-27)**:
+  every new real-training gate run (Gate 1 with real training, Gate 2,
+  any smoke that invokes `run_chain.sh` or `run_one_iteration.py` with real
+  training) must be **cold-start** — do NOT pass `--seed_paths`. Rationale
+  and the twin DS8 partial-scope rule (paired `--data_scope` +
+  `--health_gate_files`) live in `docs/gates/gate_testing_standard.md`
+  "Partial-scope rules" section. The pre-DS8 canonical seed paths still
+  listed there are historical reference only. Exception: reproducing a
+  specific historical seeded run — operator-approved case-by-case only.
 
 ## Inter-Node Communication Principle
 

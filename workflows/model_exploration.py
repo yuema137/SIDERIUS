@@ -1453,6 +1453,18 @@ def run_workflow(
     # leave this at None and behaviour is bit-for-bit unchanged.
     # See docs/Consistent_growing_vocab_list.md §10.3.3.
     restored_previous_proposal: dict | None = None,
+    # --- V19 PR 1 (P1-C3) — chain formal-incumbent carry-over ---
+    # Two-state design (design doc §3.4): the restored chain incumbent
+    # seeds ONLY the local ``chain_formal_incumbent_reference`` (consumed
+    # by the tune protocol's named parameter) — NEVER
+    # ``best_score_overall`` (current-workflow raw-formal progress only)
+    # and never any iteration-local best_* field (Invariant II).
+    # Provenance stays with the chain runner (manifest stamps).
+    # Default None preserves legacy/in-process first-iter behaviour.
+    restored_chain_incumbent_score: float | None = None,
+    # Gate-coupling switch (default OFF; consumption only — see the
+    # HyperparamTuningInput field docstring).
+    enable_chain_incumbent_formal_gates: bool = False,
     # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
     # When both are non-None, every agent constructed inside the iter loop
     # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
@@ -1789,7 +1801,20 @@ def run_workflow(
 
     # Collect results across iterations
     iteration_results: list[HyperparamTuningOutput] = []
+    # Current-workflow RAW-formal progress tracker (print + workflow
+    # summary ONLY — derived solely from this execution's own formal
+    # results; never seeded from restored chain state and never fed to
+    # the tuner: V19 PR 1 two-state design, design doc §3.4).
     best_score_overall: float | None = None
+    # V19 PR 1 — the chain formal-incumbent reference (decision state).
+    # Seeded from RestoredState; updated after each in-process iteration
+    # commit from that iteration's committed VALID formal (max, §3.3 tie
+    # rules) so in-process multi-iteration runs are equivalent to N
+    # chained subprocesses. Consumed only by the tune protocol.
+    # (Provenance for the restored incumbent is stamped into the manifest
+    # by the chain runner from RestoredState; in-process mode writes no
+    # manifests, so only the score travels here.)
+    chain_formal_incumbent_reference: float | None = restored_chain_incumbent_score
 
     # Long-term memory: variables carried forward across iterations.
     # Chain mode: seed from `restored_previous_proposal` (forwarded by
@@ -2440,6 +2465,15 @@ def run_workflow(
             runtime_trial_safety_factor=runtime_trial_safety_factor,
             runtime_formal_safety_factor=runtime_formal_safety_factor,
             runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
+            # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
+            # protocol parameter (two-state design, design doc §3.4).
+            # ``chain_formal_incumbent_reference`` is decision state:
+            # seeded from RestoredState, updated only from committed
+            # VALID formals. ``best_score_overall`` (raw progress) is
+            # deliberately NOT used here — the pre-V19 post-hoc mutation
+            # that fed it to the tuner is removed.
+            current_run_best_formal_score=chain_formal_incumbent_reference,
+            enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
@@ -2447,20 +2481,6 @@ def run_workflow(
         # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
         # See docs/design/enable_global_task_config.md § Commit T4a.
         tune_input.task_description = get_task_description(load_task_config())
-        # Post-v15 delta-gate threading: tell the tuner the best score this
-        # chain run has seen so far. Both the skip_formal and
-        # bypass_formal_time_budget gates inside the tuner use this as the
-        # reference point. ``best_score_overall`` reflects the workflow's
-        # best ``tune_output.best_denoising_score`` across iterations
-        # (formal-dominated under inherit_best_trial / full_clone, which is
-        # the production default — see workflows/model_exploration.py:
-        # 2134-2137). When no iter has completed yet, the schema default
-        # (V17 fixed reference 0.0) applies, so iter_001's gates have a
-        # meaningful anchor too. NOTE: 5.5763 is intentionally NOT the
-        # default — it is the class-127 mode-collapse fingerprint (SNR=2^17
-        # FP artifact), see docs/design/pluggable_health_checks.md §7.1.
-        if best_score_overall is not None:
-            tune_input.current_run_best_formal_score = best_score_overall
 
         _tune_agent = HyperparamTuningAgent(
             bridge_factory=bridge_factory,
@@ -2537,21 +2557,30 @@ def run_workflow(
             )
 
         # --- Check score target ---
-        # ``best_score_overall`` is the reference for the next iter's
-        # ``current_run_best_formal_score`` (the anchor for both
-        # ``skip_formal_min_delta`` and ``bypass_formal_time_budget_min_delta``).
-        # It must track FORMAL scores only — a noisy trial score from an iter
-        # whose formal rounds all got gated would otherwise poison every
-        # downstream gate decision. Falling back to ``best_denoising_score``
-        # (the all-rounds max) is exactly what motivated this fix: v15's
-        # mamba_multirate_fuser (trial 7.65) and dualpath_spectral_router
-        # (trial 7.77) had every formal attempt time-gated, and under the
-        # old logic their trial scores would have become the v16 anchor.
+        # ``best_score_overall`` is the current-workflow RAW-formal
+        # progress tracker (print + workflow summary ONLY — V19 PR 1
+        # two-state design; it no longer feeds the tuner). It must track
+        # FORMAL scores only — a noisy trial score from an iter whose
+        # formal rounds all got gated would otherwise misreport progress.
+        # (Historical context: v15's mamba_multirate_fuser trial 7.65 /
+        # dualpath_spectral_router trial 7.77 motivated formal-only.)
         if tune_output.best_formal_denoising_score is not None and (
             best_score_overall is None
             or tune_output.best_formal_denoising_score > best_score_overall
         ):
             best_score_overall = tune_output.best_formal_denoising_score
+
+        # V19 PR 1 — DECISION-STATE incumbent update (in-process
+        # multi-iteration equivalence with N chained subprocesses,
+        # design §3.4): only this iteration's committed VALID formal may
+        # advance ``chain_formal_incumbent_reference``; strictly-greater
+        # keeps the earliest holder on ties (§3.3).
+        _iter_valid_formal = tune_output.best_valid_formal_denoising_score
+        if _iter_valid_formal is not None and (
+            chain_formal_incumbent_reference is None
+            or _iter_valid_formal > chain_formal_incumbent_reference
+        ):
+            chain_formal_incumbent_reference = _iter_valid_formal
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "

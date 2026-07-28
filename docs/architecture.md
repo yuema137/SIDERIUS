@@ -666,21 +666,44 @@ rationale.
 
 ---
 
-## TODO: Multi-Dataset Support
+## Design Direction: Gradual Genericization (Multi-Dataset / Multi-Task / Multi-Metric)
 
-The current execution layer (`execute_tools/`, `core/sandbox_executor.py`, `ml_models/`) is
-tightly coupled to the TIDMAD dataset (HDF5 format, ADC 0–255 values, denoising score metric,
-`file_index` split scheme). The agent layer above it is already dataset-agnostic.
+**Operator decision (2026-07-27)** — supersedes the previous "do not design this
+abstraction until a second dataset exists" stance in this section.
 
-When a second dataset is introduced, extract a backend interface:
+SIDERIUS is being reshaped from a TIDMAD-only repo into a generic framework that
+accommodates different datasets, tasks, and metrics. The current execution layer
+(`execute_tools/`, `core/sandbox_executor.py`, `ml_models/`) is tightly coupled to
+TIDMAD (HDF5 format, ADC 0–255 values, `abra_*` filename templates, denoising score
+metric, `file_index` split scheme); the agent layer above it is already largely
+dataset-agnostic.
 
-- Move TIDMAD-specific code into `backends/tidmad/`
-- Define a thin `DatasetBackend` protocol that `sandbox_executor` calls
-- Each new dataset implements its own backend (data loading, scoring metric, split scheme)
-- The agent nodes and schemas remain unchanged
+**Mechanism — in-passing refactoring, never a big-bang**: when a PR touches a
+module, that PR also refactors the touched module toward the generic seams (as its
+own commit; skippable for urgent fixes). There is no dedicated mega-refactor PR;
+the reshaping rides on the normal development ladder.
 
-**Do not design this abstraction speculatively.** Extract it when there is a second concrete
-use case — at that point the right interface boundary will be obvious.
+The target shape is unchanged from the original TODO:
+
+- TIDMAD-specific code migrates toward `backends/tidmad/` (or equivalent seam)
+- A thin dataset contract (`file_index → segments`, resolvable to readable files)
+  that the execution layer calls
+- Each dataset implements its own backend (data loading, scoring metric, split
+  scheme); agent nodes and schemas remain unchanged
+
+Guardrails (full version: `docs/design/v19_priorities.md` §1.3, canonical once the
+genericity-contract doc exists):
+
+1. Seams are defined ONCE in a genericity-contract doc (extending
+   `configs/task_config.yaml`, the declared porting entry point) — in-passing
+   refactors converge to those seams and never invent ad-hoc abstractions.
+2. A coupling ledger tracks TIDMAD residue (decoupled vs remaining) as the
+   progress meter.
+3. Every genericized seam gets a contract test against a minimal synthetic
+   second-dataset fixture — the fixture plays the "second concrete use case"
+   role the old stance waited for.
+4. The frozen TIDMAD metric instance (score formula, paper comparability) stays
+   byte-identical; metric pluggability means new metrics plug in beside it.
 
 ---
 

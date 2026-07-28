@@ -684,9 +684,12 @@ class TestRunWorkflowMultiIteration:
         and ``bypass_formal_time_budget_min_delta`` too strict (v15
         mamba_multirate_fuser / dualpath_spectral_router pattern).
 
-        After this fix, iter_2's tune_input.current_run_best_formal_score
-        must be the schema default (V17 fixed reference 0.0) — unchanged
-        by iter_1's trial-only success.
+        V19 PR 1 (P1-C1): the schema default is now ``None`` ("no
+        incumbent"). iter_2's tune_input.current_run_best_formal_score
+        must remain ``None`` — a trial-only iter provides no formal
+        incumbent. The INTENT of the original regression (trial scores
+        must never become the formal anchor) is preserved; the full
+        Invariant II three-iteration coverage lands with P1-C3.
         """
         # iter_1: simulates "all formal attempts gated, only trial scored".
         iter1_tune = _make_tune_output(model_type="model_a", score=7.7)
@@ -709,9 +712,92 @@ class TestRunWorkflowMultiIteration:
             max_iterations=2,
         )
         iter2_tune_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
-        # Schema default = 0.0 (V17 fixed reference). Must NOT be the
+        # Schema default = None (V19 PR 1: no incumbent). Must NOT be the
         # iter_1 trial score (7.7) — that would mean the bug is back.
-        assert iter2_tune_input.current_run_best_formal_score == pytest.approx(0.0)
+        assert iter2_tune_input.current_run_best_formal_score is None
+
+
+class TestChainIncumbentThreading:
+    """V19 PR 1 (P1-C3) — two-state variable design (design doc §3.4,
+    Invariant II): the restored chain incumbent initializes
+    ``chain_formal_incumbent_reference`` ONLY (reaching the tuner input
+    as a named protocol parameter); ``best_score_overall`` remains
+    derived solely from the current workflow execution's own formal
+    results."""
+
+    def test_restored_incumbent_initializes_reference_only(self, workflow_env):
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            restored_chain_incumbent_score=5.0,
+            enable_chain_incumbent_formal_gates=True,
+        )
+        tune_input = workflow_env["tune"].return_value.run.call_args_list[0][0][0]
+        assert tune_input.current_run_best_formal_score == 5.0
+        assert tune_input.enable_chain_incumbent_formal_gates is True
+        # Non-contamination: best_score_overall derives solely from this
+        # execution's own RAW formal (mock output: 1.8) — never from the
+        # restored chain state (5.0).
+        summary_path = os.path.join(workflow_env["workspace"], "test_run", "workflow_test_run.json")
+        with open(summary_path) as f:
+            summary = json.load(f)
+        assert summary["best_score_overall"] == 1.8
+
+    def test_valid_formal_advances_reference_across_iterations(self, workflow_env):
+        """In-process equivalence half: iter 1's committed VALID formal
+        becomes iter 2's reference (the on-disk half of the equivalence
+        claim lives in tests/unit/sdsc_submission_scripts/, via
+        write_manifest + restore_prior_state)."""
+        iter1 = _make_tune_output("model_a", 1.8)
+        iter1.best_valid_formal_denoising_score = 1.0
+        iter1.best_valid_formal_exp_id = "model_a_explore_v1_001"
+        iter2 = _make_tune_output("model_b", 1.8)
+
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
+        workflow_env["tune"].return_value.run.side_effect = [iter1, iter2]
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter2_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
+        # The VALUE always travels (reconstruction is unconditional)…
+        assert iter2_input.current_run_best_formal_score == 1.0
+        # …while CONSUMPTION stays off by default (rollback semantics).
+        assert iter2_input.enable_chain_incumbent_formal_gates is False
+
+    def test_raw_formal_never_advances_reference(self, workflow_env):
+        """A raw formal (valid None) must not become the next iteration's
+        reference — valid-only rule, §3.3."""
+        iter1 = _make_tune_output("model_a", 7.7)  # raw formal 7.7, valid None
+        iter2 = _make_tune_output("model_b", 1.8)
+
+        names = iter(["model_a", "model_b"])
+        workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
+            next(names)
+        )
+        workflow_env["tune"].return_value.run.side_effect = [iter1, iter2]
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        iter2_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
+        assert iter2_input.current_run_best_formal_score is None
 
 
 # ---------------------------------------------------------------------------

@@ -1332,3 +1332,162 @@ class TestDeprecatedStrategyFlags:
         assert "trial_strategy" not in kwargs
         assert "target_files" not in kwargs
         assert "eval_strategy" not in kwargs
+
+
+# ---------------------------------------------------------------------------
+# V19 PR 1 (P1-C3) — manifest incumbent stamps, artifact hash, and the
+# operator-specified three-iteration separation test (design doc §3.1
+# Invariant II + §3.4 equivalence, on-disk half).
+# ---------------------------------------------------------------------------
+
+from agent.schemas.hyperparam_tuning import HyperparamTuningOutput  # noqa: E402
+from core.resume import restore_prior_state  # noqa: E402
+
+
+def _p1_record(exp_id: str, score: float | None) -> dict:
+    """Minimal schema-valid formal ExperimentRecord with the DS5 waiver
+    stamp (health_gate_enabled=False → commit-time VALID)."""
+    return {
+        "exp_id": exp_id,
+        "status": "success",
+        "model_type": "punet",
+        "timestamp": "2026-07-27 00:00:00",
+        "params": {},
+        "denoising_score": score,
+        "health_gate_results": [],
+        "health_gate_enabled": False,
+    }
+
+
+def _p1_tune_output(
+    run_name: str,
+    *,
+    valid_formal: float | None,
+    exp_id: str | None,
+    records: list[dict],
+) -> HyperparamTuningOutput:
+    return HyperparamTuningOutput(
+        run_name=run_name,
+        model_type="punet",
+        file_index=6,
+        status="completed",
+        completed_rounds=len(records),
+        total_attempts=len(records),
+        best_denoising_score=(records[0]["denoising_score"] if records else None),
+        all_records=records,
+        best_valid_formal_denoising_score=valid_formal,
+        best_valid_formal_exp_id=exp_id,
+        started_at="2026-07-27 00:00:00",
+        finished_at="2026-07-27 00:00:01",
+    )
+
+
+def _p1_write_iter_output(workspace: str, iter_idx: int, output: HyperparamTuningOutput) -> str:
+    run_name = f"iter_{iter_idx:03d}"
+    model_dir = os.path.join(workspace, run_name, "iteration_001", "punet")
+    os.makedirs(model_dir, exist_ok=True)
+    path = os.path.join(model_dir, f"run_output_{run_name}.json")
+    with open(path, "w") as f:
+        f.write(output.model_dump_json())
+    return path
+
+
+class TestChainIncumbentManifest:
+    def test_three_iteration_separation_and_attribution(self, tmp_path):
+        """iter 1 commits a valid formal; iter 2 has NO valid formal of its
+        own but consumes iter 1's score as its chain reference; iter 2's
+        local best stays None while the chain stamps carry the incumbent;
+        iter 3's reconstruction still attributes the source to iter 1."""
+        ws = str(tmp_path)
+
+        # --- iter 1: valid formal 1.2 ---
+        out1 = _p1_tune_output(
+            "iter_001",
+            valid_formal=1.2,
+            exp_id="f1",
+            records=[_p1_record("f1", 1.2)],
+        )
+        _p1_write_iter_output(ws, 1, out1)
+        m1 = runner.write_manifest(os.path.join(ws, "iter_001"), "iter_001", [out1])
+        assert m1["best_valid_formal_score"] == 1.2
+        assert "run_output_sha256" in m1  # §3.6 immutable artifact identity
+
+        # --- iter 2 startup: reconstruction (the chained-equivalence half:
+        # the on-disk walk yields exactly iter 1's committed valid formal,
+        # matching the in-process rule tested in test_model_exploration) ---
+        state2 = restore_prior_state(ws, 2, seed_paths=[])
+        assert state2.chain_best_valid_formal_score == 1.2
+        assert state2.chain_best_valid_formal_provenance["iter_idx"] == 1
+        assert state2.chain_best_valid_formal_provenance["artifact_verified"] is True
+
+        # --- iter 2: NO valid formal of its own; consumed iter 1's ref
+        # (flag-ON scenario) ---
+        out2 = _p1_tune_output(
+            "iter_002",
+            valid_formal=None,
+            exp_id=None,
+            records=[_p1_record("f2", 0.3)],
+        )
+        _p1_write_iter_output(ws, 2, out2)
+        m2 = runner.write_manifest(
+            os.path.join(ws, "iter_002"),
+            "iter_002",
+            [out2],
+            chain_incumbent_used=state2.chain_best_valid_formal_score,
+            chain_incumbent_source=state2.chain_best_valid_formal_provenance,
+        )
+        # Invariant II: iteration-local best stays None…
+        assert m2["best_valid_formal_score"] is None
+        # …while the chain stamps live under their OWN keys.
+        assert m2["chain_incumbent_used"] == 1.2
+        assert m2["chain_incumbent_source"]["iter_idx"] == 1
+
+        # --- iter 3: attribution still names iter 1, not iter 2 ---
+        state3 = restore_prior_state(ws, 3, seed_paths=[])
+        assert state3.chain_best_valid_formal_score == 1.2
+        assert state3.chain_best_valid_formal_provenance["iter_idx"] == 1
+
+    def test_flag_off_stamps_source_but_not_used(self, tmp_path):
+        """Rollback semantics: reconstruction provenance is stamped even
+        when consumption is OFF; ``chain_incumbent_used`` is null."""
+        ws = str(tmp_path)
+        out1 = _p1_tune_output(
+            "iter_001", valid_formal=1.2, exp_id="f1", records=[_p1_record("f1", 1.2)]
+        )
+        _p1_write_iter_output(ws, 1, out1)
+        runner.write_manifest(os.path.join(ws, "iter_001"), "iter_001", [out1])
+        state = restore_prior_state(ws, 2, seed_paths=[])
+
+        out2 = _p1_tune_output(
+            "iter_002", valid_formal=None, exp_id=None, records=[_p1_record("f2", 0.3)]
+        )
+        _p1_write_iter_output(ws, 2, out2)
+        m2 = runner.write_manifest(
+            os.path.join(ws, "iter_002"),
+            "iter_002",
+            [out2],
+            chain_incumbent_used=None,  # flag OFF: gates consumed nothing
+            chain_incumbent_source=state.chain_best_valid_formal_provenance,
+        )
+        assert m2["chain_incumbent_used"] is None
+        assert m2["chain_incumbent_source"]["iter_idx"] == 1
+
+    def test_manifest_mirrors_best_valid_trial_score(self, tmp_path):
+        """V19 PR 1 (P1-C4): the read-only trial-best bookkeeping mirrors
+        into the manifest; absent on the output → null in the manifest."""
+        ws = str(tmp_path)
+        out1 = _p1_tune_output(
+            "iter_001", valid_formal=1.2, exp_id="f1", records=[_p1_record("f1", 1.2)]
+        )
+        out1.best_valid_trial_denoising_score = 0.5
+        out1.best_valid_trial_exp_id = "t1"
+        _p1_write_iter_output(ws, 1, out1)
+        m1 = runner.write_manifest(os.path.join(ws, "iter_001"), "iter_001", [out1])
+        assert m1["best_valid_trial_score"] == 0.5
+
+        out2 = _p1_tune_output(
+            "iter_002", valid_formal=None, exp_id=None, records=[_p1_record("f2", 0.3)]
+        )
+        _p1_write_iter_output(ws, 2, out2)
+        m2 = runner.write_manifest(os.path.join(ws, "iter_002"), "iter_002", [out2])
+        assert m2["best_valid_trial_score"] is None

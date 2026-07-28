@@ -68,23 +68,25 @@ def test_no_valid_trial_returns_none() -> None:
 
 
 def test_skip_formal_uses_valid_candidate_and_zero_reference() -> None:
-    assert _should_skip_formal([_trial("valid", -0.1)], reference_score=0.0, min_delta=0.0)
-    assert not _should_skip_formal([_trial("valid", 0.0)], reference_score=0.0, min_delta=0.0)
-    assert not _should_skip_formal(
-        [_trial("collapsed", 9.0, healthy=False)], reference_score=0.0, min_delta=0.0
-    )
+    # V19 PR 1: the helpers take the RESOLVED threshold
+    # (reference 0.0 + delta 0.0 → 0.0).
+    assert _should_skip_formal([_trial("valid", -0.1)], threshold=0.0)
+    assert not _should_skip_formal([_trial("valid", 0.0)], threshold=0.0)
+    assert not _should_skip_formal([_trial("collapsed", 9.0, healthy=False)], threshold=0.0)
+    # None threshold (no chain incumbent) → never fires, even on a
+    # score that would fail any numeric threshold.
+    assert not _should_skip_formal([_trial("valid", -99.0)], threshold=None)
 
 
 def test_bypass_uses_valid_candidate_and_half_point_threshold() -> None:
+    # Resolved threshold: reference 0.0 + delta 0.5 → 0.5.
+    assert not _should_bypass_formal_time_budget([_trial("valid", 0.49)], threshold=0.5)
+    assert _should_bypass_formal_time_budget([_trial("valid", 0.5)], threshold=0.5)
     assert not _should_bypass_formal_time_budget(
-        [_trial("valid", 0.49)], reference_score=0.0, min_delta=0.5
+        [_trial("collapsed", 9.0, healthy=False)], threshold=0.5
     )
-    assert _should_bypass_formal_time_budget(
-        [_trial("valid", 0.5)], reference_score=0.0, min_delta=0.5
-    )
-    assert not _should_bypass_formal_time_budget(
-        [_trial("collapsed", 9.0, healthy=False)], reference_score=0.0, min_delta=0.5
-    )
+    # None threshold (no chain incumbent) → never fires.
+    assert not _should_bypass_formal_time_budget([_trial("valid", 99.0)], threshold=None)
 
 
 def test_failed_nontrial_and_contradictory_records_are_excluded() -> None:

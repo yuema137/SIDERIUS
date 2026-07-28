@@ -176,6 +176,10 @@ CONTRACT_FLAGS = [
     # → legacy runtime_safety_factor → schema default.
     "runtime_trial_safety_factor",
     "runtime_formal_safety_factor",
+    # V19 PR 1 (P1-C3) — chain-incumbent gate coupling; boolean shell 0/1
+    # forwarded-when-set, default OFF on both layers (consumption-only
+    # switch; see pr1_chain_incumbents.md §3.2).
+    "enable_chain_incumbent_formal_gates",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse

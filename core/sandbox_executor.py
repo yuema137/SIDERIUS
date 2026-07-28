@@ -497,12 +497,25 @@ def _run_subprocess_with_watchdog(
                 stdout, stderr = proc.communicate()
             # Orphan check: the group must be gone (§4 "verify no
             # surviving pids"). killpg(0) probes without sending.
-            try:
-                os.killpg(pgid, 0)
+            # After SIGKILL the kernel needs a brief moment to reap PIDs;
+            # ``proc.communicate()`` above only waits for the TRACKED
+            # child, so children in the same process group can still be
+            # in the reap window when the probe runs. Poll briefly
+            # (bounded, ≤2 s at 50 ms intervals) so the fast path
+            # (already reaped) still returns on the first probe while
+            # ruling out reap-window races that used to false-positive
+            # under load (CI runners, busy dev boxes).
+            survivors = True
+            _survivor_probe_deadline = time.perf_counter() + 2.0
+            while time.perf_counter() < _survivor_probe_deadline:
+                try:
+                    os.killpg(pgid, 0)
+                except ProcessLookupError:
+                    survivors = False
+                    break
+                time.sleep(0.05)
+            if survivors:
                 print(f"--- Watchdog [{label}] WARNING: process group {pgid} survived ---")
-                survivors = True
-            except ProcessLookupError:
-                survivors = False
             return None, {
                 "elapsed_s": round(elapsed, 3),
                 "deadline_s": round(deadline, 3),

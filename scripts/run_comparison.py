@@ -658,6 +658,7 @@ def run_agent(
     runtime_trial_safety_factor: float | None = None,
     runtime_formal_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float | None = None,
+    enable_chain_incumbent_formal_gates: bool = False,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
@@ -757,6 +758,8 @@ def run_agent(
         cmd.extend(["--runtime_formal_safety_factor", str(runtime_formal_safety_factor)])
     if runtime_watchdog_floor_seconds is not None:
         cmd.extend(["--runtime_watchdog_floor_seconds", str(runtime_watchdog_floor_seconds)])
+    if enable_chain_incumbent_formal_gates:
+        cmd.append("--enable_chain_incumbent_formal_gates")
     if resume:
         cmd.append("--resume")
 
@@ -1057,6 +1060,13 @@ def main():
         default=None,
         help="Forwarded to the tuner when set. §4 watchdog floor; V18 "
         "production posture 120. Default None = tuner default (60).",
+    )
+    parser.add_argument(
+        "--enable_chain_incumbent_formal_gates",
+        action="store_true",
+        help="V19 PR 1: forwarded to the tuner — let the formal delta "
+        "gates consume the chain-incumbent reference. Default OFF "
+        "(consumption-only switch; rollback = omit).",
     )
     args = parser.parse_args()
 
@@ -1513,6 +1523,7 @@ def main():
         runtime_trial_safety_factor=args.runtime_trial_safety_factor,
         runtime_formal_safety_factor=args.runtime_formal_safety_factor,
         runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
+        enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
     )
 
     print(f"\n{'#' * 60}")

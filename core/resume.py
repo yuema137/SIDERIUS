@@ -19,12 +19,17 @@ See ``docs/phase68_orchestrator_memory_and_resume.md`` §3.3 for the design.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
 import re
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
+
+import yaml
 
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -40,6 +45,15 @@ from core.run_invariants import (
 )
 from core.sandbox_executor import get_plugin_dir
 from execute_tools.dataset_config import TIDMAD
+from execute_tools.health_checks.candidate_eligibility import (
+    CandidateHealthValidity,
+    classify_candidate_health,
+    required_blocking_gate_ids,
+)
+from execute_tools.health_checks.config import (
+    EFFECTIVE_CONFIG_BASENAME,
+    load_health_gates_config,
+)
 from workflows.model_exploration import _add_plugin_to_registries
 
 # ---------------------------------------------------------------------------
@@ -66,6 +80,21 @@ class ResumeError(RuntimeError):
     targeted operator-facing message ("iter 003 manifest is missing — was
     the chain interrupted between iter 002 commit and iter 003 launch?")
     rather than a stack trace.
+    """
+
+
+class ReplayIntegrityError(ResumeError):
+    """A committed artifact changed after its manifest hash was recorded.
+
+    V19 PR 1 §3.6 (docs/design/v19_priorities/pr1_chain_incumbents.md):
+    a ``run_output_sha256`` mismatch means chain history is no longer
+    trustworthy — excluding-and-continuing could still alter the chain
+    incumbent and therefore future decisions, so the chain STOPS before
+    the next iteration launches. Recovery is an explicit operator action:
+    restore the original artifact, or regenerate a consistent
+    manifest+hash pair for the intentionally replaced one, then relaunch.
+    Not bypassed by ``enable_chain_incumbent_formal_gates`` — integrity
+    verification always runs.
     """
 
 
@@ -164,6 +193,23 @@ class RestoredState:
     previous_proposal_data: dict | None = None
     model_knowledge_cache: dict[str, dict] = field(default_factory=dict)
 
+    # --- V19 PR 1 chain incumbents (design doc §3.3) -----------------------
+    # ``chain_best_valid_formal_*`` is the DECISION-STATE incumbent: the best
+    # commit-time-HealthGate-valid FORMAL score across committed iterations,
+    # with full provenance ({iter_idx, round_index, round_provenance,
+    # exp_id, model_type, score, resolved_data_scope, health_config_sha256,
+    # validity_basis, artifact_verified}). Consumed ONLY by the formal
+    # delta gates (behind ``enable_chain_incumbent_formal_gates``) and
+    # provenance stamps — never serialized as any iteration's own best_*.
+    # ``chain_best_trial_*`` is READ-ONLY bookkeeping context; its
+    # provenance additionally carries the mandatory sampling fields
+    # (eval_strategy, eval_portion, train_portion). ``None`` = no eligible
+    # incumbent (fresh chain, or nothing commit-time valid).
+    chain_best_valid_formal_score: float | None = None
+    chain_best_valid_formal_provenance: dict[str, Any] | None = None
+    chain_best_trial_score: float | None = None
+    chain_best_trial_provenance: dict[str, Any] | None = None
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -250,6 +296,382 @@ def _validate_run_output(
         raise ResumeError(
             f"iter {iter_idx:03d}: run_output failed validation at {output_path}: {e}"
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# V19 PR 1 — chain-incumbent reconstruction (design doc §3.3/§3.6).
+# Commit-time validity ONLY: the repo-current configs/health_checks.yaml is
+# NEVER consulted for decision state. Candidates whose commit-time validity
+# cannot be established are UNKNOWN and excluded.
+# ---------------------------------------------------------------------------
+
+
+def _sha256_file(path: str) -> str:
+    """Stream a file's SHA-256 hex digest."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _scores_agree(a: float, b: float) -> bool:
+    """Operator-fixed tolerance (design §3.3): |a-b| <= 1e-9 * max(1, |a|)."""
+    return abs(a - b) <= 1e-9 * max(1.0, abs(a))
+
+
+def _record_dict(record: Any) -> dict[str, Any]:
+    """Normalize an ExperimentRecord model (or dict) to a plain dict."""
+    if isinstance(record, dict):
+        return record
+    if hasattr(record, "model_dump"):
+        return record.model_dump(mode="json")
+    return {}
+
+
+def _round_provenance(record: dict[str, Any]) -> tuple[int | None, str]:
+    """Round identity from the PERSISTED ``logical_round`` only.
+
+    Design §3.3 (rev 3): position in ``all_records`` is NOT a round index
+    and is never presented as one — the field is conditionally written, so
+    no positional invariant exists. Missing/null → ``(None,
+    "legacy_unknown")``, an explicit gap rather than a fabricated value.
+    """
+    lr = record.get("logical_round")
+    if isinstance(lr, int) and not isinstance(lr, bool):
+        return lr, "persisted"
+    return None, "legacy_unknown"
+
+
+def _effective_config_body_sha(path: str) -> str | None:
+    """Recompute the canonical body sha of a materialized effective config.
+
+    Mirrors ``materialize_effective_config`` exactly (load → model_dump →
+    ``yaml.safe_dump(sort_keys=True)`` → sha256) so the recorded
+    ``health_config_sha256`` stamp can be verified against the on-disk
+    artifact. ``None`` when the file is missing or unparseable.
+    """
+    try:
+        cfg = load_health_gates_config(path)
+        body = yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=True)
+        return hashlib.sha256(body.encode()).hexdigest()
+    except Exception:
+        return None
+
+
+def _commit_time_gate_ids(
+    parsed: HyperparamTuningOutput,
+    output_path: str,
+    workspace: str,
+) -> frozenset[str] | None:
+    """Blocking-gate ids under the iteration's COMMIT-TIME effective policy.
+
+    Locates the materialized ``health_checks_effective.yaml`` (tuner
+    workspace beside the run_output, falling back to the chain root) and
+    accepts it only when its canonical body sha equals the iteration's
+    stamped ``health_config_sha256``. Returns ``None`` when commit-time
+    gate-set completeness cannot be established (missing stamp, missing
+    artifact, or sha mismatch) — callers must treat affected candidates
+    as UNKNOWN. The repo-current shipped config is deliberately never
+    used here (design §3.3).
+    """
+    stamped = getattr(parsed, "health_config_sha256", None)
+    if not stamped:
+        return None
+    candidates = (
+        os.path.join(os.path.dirname(output_path), EFFECTIVE_CONFIG_BASENAME),
+        os.path.join(workspace, EFFECTIVE_CONFIG_BASENAME),
+    )
+    for path in candidates:
+        if os.path.isfile(path) and _effective_config_body_sha(path) == stamped:
+            return required_blocking_gate_ids(production_config_path=path)
+    return None
+
+
+def _classify_commit_time(
+    record: dict[str, Any],
+    gate_ids: frozenset[str] | None,
+) -> CandidateHealthValidity:
+    """Commit-time validity of one record from PERSISTED verdicts only.
+
+    The record-level ``health_gate_enabled=False`` waiver (DS5 stamp)
+    applies without needing the policy artifact; otherwise gate-set
+    completeness is judged against the commit-time ``gate_ids`` — and an
+    unresolvable policy (``gate_ids is None``) yields UNKNOWN, never a
+    fallback to repo-current policy.
+    """
+    if record.get("health_gate_enabled") is False:
+        # Delegate: classifier returns VALID for stamped-disabled records
+        # (or INVALID for non-success/non-finite) without touching policy.
+        return classify_candidate_health(record, required_gate_ids=frozenset())
+    if gate_ids is None:
+        # Success-status check still applies: a non-success record is
+        # INVALID regardless of policy resolvability.
+        base = classify_candidate_health(record, required_gate_ids=frozenset())
+        if base is CandidateHealthValidity.INVALID:
+            return CandidateHealthValidity.INVALID
+        return CandidateHealthValidity.UNKNOWN
+    return classify_candidate_health(record, required_gate_ids=gate_ids)
+
+
+def _pick_best(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Within-iteration selection: max score; tie → lexicographic smallest
+    ``exp_id`` (design §3.3 tie rules; cross-iteration earliest-wins is
+    enforced by the strictly-greater update in the caller's walk)."""
+    best: dict[str, Any] | None = None
+    for rec in records:
+        if best is None:
+            best = rec
+            continue
+        score, best_score = rec["denoising_score"], best["denoising_score"]
+        if score > best_score or (
+            score == best_score and str(rec.get("exp_id")) < str(best.get("exp_id"))
+        ):
+            best = rec
+    return best
+
+
+def _summary_mismatch(iter_idx: int, field_name: str, detail: str) -> None:
+    print(
+        f"[resume] SUMMARY-MISMATCH: iter {iter_idx:03d} {field_name}: {detail} "
+        f"— candidate classified UNKNOWN and excluded from decision state."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public boundary — V19 PR 1 shared helper for other in-repo callers that
+# need the SAME commit-time validity classification as the incumbent
+# reconstruction, without duplicating logic or importing private names
+# (design doc §3.7.3, rev 3.1 — the smallest boundary P1-C5 needs).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CommitTimeClassification:
+    """Commit-time classification of one ``ExperimentRecord`` for public use.
+
+    ``validity_basis`` mirrors the ``gate_summary`` schema in the P1-C5
+    per-file best table (design doc §3.7 A2):
+
+      * ``committed_fields`` — record matched the parsed output's
+        summary fields under the P1-C2 six-check contract (formal path
+        only; caller decides when to route here);
+      * ``persisted_verdicts`` — re-derived from the record's per-gate
+        results against the iteration's commit-time policy;
+      * ``waiver`` — the DS5 ``health_gate_enabled=False`` stamp (record
+        waived from gate requirement at commit time);
+      * ``unknown`` — commit-time validity could not be established (no
+        stamp, missing effective-policy artifact, sha mismatch, or
+        required verdicts absent).
+
+    ``round_index`` / ``round_provenance`` follow §3.3: never fabricated
+    from list position — persisted ``logical_round`` or explicit
+    ``legacy_unknown``.
+    """
+
+    validity: CandidateHealthValidity
+    validity_basis: str
+    round_index: int | None
+    round_provenance: str
+
+
+def classify_committed_record(
+    record: Any,
+    parsed_output: HyperparamTuningOutput,
+    output_path: str,
+    workspace: str,
+) -> CommitTimeClassification:
+    """Return commit-time validity + round provenance for one record.
+
+    Uses ONLY commit-time evidence: the iteration's persisted per-record
+    gate verdicts interpreted against the workspace's materialized
+    effective HealthGate policy (accepted only when its canonical body
+    sha equals the iteration's stamped ``health_config_sha256``). The
+    repo-current shipped ``configs/health_checks.yaml`` is NEVER
+    consulted — the same rule that makes incumbent reconstruction
+    stable across repo-policy edits (design doc §3.3).
+
+    Args:
+        record: an ``ExperimentRecord`` model or a plain dict as
+            serialized in ``run_output_*.json`` ``all_records``.
+        parsed_output: the validated ``HyperparamTuningOutput`` the
+            record was pulled from (needed for ``health_config_sha256``
+            when resolving commit-time gate ids).
+        output_path: absolute path of that ``run_output_*.json`` (used
+            for the effective-config lookup fallback: file's directory
+            first, then the workspace root).
+        workspace: chain workspace root.
+
+    Returns:
+        :class:`CommitTimeClassification`. The caller decides how to use
+        it — this function performs no artifact-hash verification or
+        summary/source cross-checks (those live in resume's incumbent
+        walker for incumbent-specific reasons).
+    """
+    rec = _record_dict(record)
+    gate_ids = _commit_time_gate_ids(parsed_output, output_path, workspace)
+    validity = _classify_commit_time(rec, gate_ids)
+
+    if rec.get("health_gate_enabled") is False:
+        validity_basis = "waiver"
+    elif gate_ids is None:
+        validity_basis = "unknown"
+    else:
+        validity_basis = "persisted_verdicts"
+
+    round_index, round_provenance = _round_provenance(rec)
+    return CommitTimeClassification(
+        validity=validity,
+        validity_basis=validity_basis,
+        round_index=round_index,
+        round_provenance=round_provenance,
+    )
+
+
+def _formal_candidate_from_committed_fields(
+    parsed: HyperparamTuningOutput,
+    manifest: dict,
+    iter_idx: int,
+) -> dict[str, Any] | None:
+    """§3.3 step 1: committed ``best_valid_formal_*`` fast path, with
+    mandatory summary-vs-source-record validation (rev 3). Any check
+    failure → ``None`` (UNKNOWN, excluded) with a visible warning."""
+    score = parsed.best_valid_formal_denoising_score
+    if score is None:
+        return None  # not this path — caller falls to verdict re-derivation
+    exp_id = parsed.best_valid_formal_exp_id
+    if not exp_id:
+        _summary_mismatch(
+            iter_idx, "best_valid_formal_exp_id", "null exp_id beside a non-null score"
+        )
+        return None
+    source = next(
+        (r for r in (_record_dict(rec) for rec in parsed.all_records) if r.get("exp_id") == exp_id),
+        None,
+    )
+    if source is None:
+        _summary_mismatch(
+            iter_idx, "best_valid_formal_exp_id", f"exp_id {exp_id!r} absent from all_records"
+        )
+        return None
+    if source.get("is_trial"):
+        _summary_mismatch(
+            iter_idx, "best_valid_formal_exp_id", f"source record {exp_id!r} is a TRIAL"
+        )
+        return None
+    rec_score = source.get("denoising_score")
+    if (
+        not isinstance(rec_score, int | float)
+        or isinstance(rec_score, bool)
+        or not math.isfinite(rec_score)
+    ):
+        _summary_mismatch(
+            iter_idx,
+            "best_valid_formal_denoising_score",
+            f"source record {exp_id!r} has no finite score",
+        )
+        return None
+    if not _scores_agree(float(score), float(rec_score)):
+        _summary_mismatch(
+            iter_idx,
+            "best_valid_formal_denoising_score",
+            f"summary {score!r} vs record {rec_score!r} beyond tolerance",
+        )
+        return None
+    manifest_score = manifest.get("best_valid_formal_score")
+    if manifest_score is not None and not _scores_agree(float(score), float(manifest_score)):
+        _summary_mismatch(
+            iter_idx,
+            "best_valid_formal_score",
+            f"output {score!r} vs manifest {manifest_score!r} conflict",
+        )
+        return None
+    for stamp in ("resolved_data_scope", "health_config_sha256"):
+        m_val, o_val = manifest.get(stamp), getattr(parsed, stamp, None)
+        if m_val is not None and o_val is not None and m_val != o_val:
+            _summary_mismatch(iter_idx, stamp, f"manifest {m_val!r} vs output {o_val!r} conflict")
+            return None
+    round_index, round_prov = _round_provenance(source)
+    return {
+        "record": source,
+        "score": float(score),
+        "round_index": round_index,
+        "round_provenance": round_prov,
+        "validity_basis": "committed_fields",
+    }
+
+
+def _candidates_from_persisted_verdicts(
+    parsed: HyperparamTuningOutput,
+    gate_ids: frozenset[str] | None,
+    *,
+    want_trial: bool,
+) -> dict[str, Any] | None:
+    """§3.3 step 2: re-derive from persisted per-record gate verdicts."""
+    pool: list[dict[str, Any]] = []
+    for rec in parsed.all_records:
+        r = _record_dict(rec)
+        if bool(r.get("is_trial")) is not want_trial:
+            continue
+        if _classify_commit_time(r, gate_ids) is not CandidateHealthValidity.VALID:
+            continue
+        pool.append(r)
+    best = _pick_best(pool)
+    if best is None:
+        return None
+    round_index, round_prov = _round_provenance(best)
+    return {
+        "record": best,
+        "score": float(best["denoising_score"]),
+        "round_index": round_index,
+        "round_provenance": round_prov,
+        "validity_basis": "persisted_verdicts",
+    }
+
+
+def _build_provenance(
+    candidate: dict[str, Any],
+    parsed: HyperparamTuningOutput,
+    iter_idx: int,
+    artifact_verified: bool,
+    *,
+    trial: bool,
+) -> dict[str, Any] | None:
+    """Assemble the provenance dict (design §3.3 schema). For trial
+    candidates the sampling fields are MANDATORY — a valid trial record
+    lacking them is uninterpretable and excluded (with a warning)."""
+    record = candidate["record"]
+    prov: dict[str, Any] = {
+        "iter_idx": iter_idx,
+        "round_index": candidate["round_index"],
+        "round_provenance": candidate["round_provenance"],
+        "exp_id": record.get("exp_id"),
+        "model_type": record.get("model_type") or parsed.model_type,
+        "score": candidate["score"],
+        "resolved_data_scope": getattr(parsed, "resolved_data_scope", None),
+        "health_config_sha256": getattr(parsed, "health_config_sha256", None),
+        "validity_basis": candidate["validity_basis"],
+        "artifact_verified": artifact_verified,
+    }
+    if trial:
+        eval_strategy = record.get("eval_strategy")
+        eval_portion = record.get("eval_portion")
+        if eval_strategy is None or eval_portion is None:
+            print(
+                f"[resume] iter {iter_idx:03d}: trial candidate "
+                f"{record.get('exp_id')!r} lacks sampling provenance "
+                f"(eval_strategy={eval_strategy!r}, eval_portion={eval_portion!r}) "
+                f"— excluded from the trial incumbent (design §3.3)."
+            )
+            return None
+        prov.update(
+            {
+                "eval_strategy": eval_strategy,
+                "eval_portion": eval_portion,
+                "train_portion": record.get("train_portion"),
+            }
+        )
+    return prov
 
 
 # ---------------------------------------------------------------------------
@@ -668,6 +1090,34 @@ def restore_prior_state(
             )
             continue
         output_path = manifest["output_path"]
+
+        # V19 PR 1 §3.6 — replay integrity BEFORE trusting the artifact's
+        # content. A recorded hash that no longer matches the bytes on disk
+        # STOPS the chain (fail closed); a legacy manifest without the hash
+        # is admitted but visibly unverified.
+        recorded_sha = manifest.get("run_output_sha256")
+        if recorded_sha:
+            if not os.path.isfile(output_path):
+                raise ResumeError(
+                    f"iter {iter_idx:03d}: manifest points at output_path "
+                    f"{output_path} but the file does not exist."
+                )
+            actual_sha = _sha256_file(output_path)
+            if actual_sha != recorded_sha:
+                raise ReplayIntegrityError(
+                    f"[resume] REPLAY-INTEGRITY: iter {iter_idx:03d} committed "
+                    f"artifact changed: {output_path} "
+                    f"expected sha256 {recorded_sha[:16]}… but found "
+                    f"{actual_sha[:16]}…. A committed run_output no longer "
+                    f"matches its manifest hash — chain history is not "
+                    f"trustworthy. Restore the original artifact, or "
+                    f"regenerate a consistent manifest for the intentionally "
+                    f"replaced one, then relaunch."
+                )
+            artifact_verified = True
+        else:
+            artifact_verified = False
+
         parsed = _validate_run_output(output_path, iter_idx)
 
         # DS6b — invariant-stamp check BEFORE this iter's plugin is
@@ -732,6 +1182,37 @@ def restore_prior_state(
             state.accumulated_physical_rejections.extend(parsed.physical_rejections)
         if parsed.gate_exhaustion is not None:
             state.accumulated_gate_exhaustions.append(parsed.gate_exhaustion)
+
+        # V19 PR 1 §3.3 — chain-incumbent fold, commit-time validity only.
+        # FORMAL: committed-fields fast path (with summary-vs-source
+        # validation); a legacy output (field absent) re-derives from
+        # persisted verdicts under the iteration's commit-time policy.
+        # TRIAL: always re-derived from persisted verdicts (committed
+        # trial-best fields only exist from P1-C4 onward).
+        # Cross-iteration tie rule: strictly-greater replaces, so the
+        # ascending walk makes earliest-iteration-wins automatic.
+        gate_ids = _commit_time_gate_ids(parsed, output_path, abs_workspace)
+        formal_cand = _formal_candidate_from_committed_fields(parsed, manifest, iter_idx)
+        if formal_cand is None and parsed.best_valid_formal_denoising_score is None:
+            formal_cand = _candidates_from_persisted_verdicts(parsed, gate_ids, want_trial=False)
+        if formal_cand is not None and (
+            state.chain_best_valid_formal_score is None
+            or formal_cand["score"] > state.chain_best_valid_formal_score
+        ):
+            prov = _build_provenance(formal_cand, parsed, iter_idx, artifact_verified, trial=False)
+            if prov is not None:
+                state.chain_best_valid_formal_score = formal_cand["score"]
+                state.chain_best_valid_formal_provenance = prov
+
+        trial_cand = _candidates_from_persisted_verdicts(parsed, gate_ids, want_trial=True)
+        if trial_cand is not None and (
+            state.chain_best_trial_score is None
+            or trial_cand["score"] > state.chain_best_trial_score
+        ):
+            prov = _build_provenance(trial_cand, parsed, iter_idx, artifact_verified, trial=True)
+            if prov is not None:
+                state.chain_best_trial_score = trial_cand["score"]
+                state.chain_best_trial_provenance = prov
 
     # Apply K-most-recent caps. We collect chronologically and trim from the
     # head so the *latest* signals win — older rejections become stale once
@@ -802,6 +1283,30 @@ def restore_prior_state(
             f"{len(state.accumulated_gate_exhaustions)} gate-exhaustion summar"
             f"{'y' if len(state.accumulated_gate_exhaustions) == 1 else 'ies'}"
         )
+
+    # V19 PR 1 — incumbent carry-over audit lines (design §3.3).
+    if state.chain_best_valid_formal_provenance is not None:
+        p = state.chain_best_valid_formal_provenance
+        print(
+            f"[resume] incumbent carry-over: score={p['score']:.4f} "
+            f"iter={p['iter_idx']:03d} "
+            f"round={p['round_index'] if p['round_index'] is not None else 'none'} "
+            f"exp_id={p['exp_id']} basis={p['validity_basis']} "
+            f"verified={str(p['artifact_verified']).lower()}"
+        )
+    else:
+        print("[resume] incumbent carry-over: none")
+    if state.chain_best_trial_provenance is not None:
+        p = state.chain_best_trial_provenance
+        print(
+            f"[resume] trial-incumbent carry-over: score={p['score']:.4f} "
+            f"iter={p['iter_idx']:03d} "
+            f"round={p['round_index'] if p['round_index'] is not None else 'none'} "
+            f"exp_id={p['exp_id']} basis={p['validity_basis']} "
+            f"verified={str(p['artifact_verified']).lower()}"
+        )
+    else:
+        print("[resume] trial-incumbent carry-over: none")
 
     return state
 

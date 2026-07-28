@@ -109,6 +109,37 @@ and are enforced by `tests/unit/scripts/test_chain_consistency.py` (Gate A
 three-way parity test). See the design doc
 `docs/phase68_orchestrator_memory_and_resume.md` §3.2 for the canonical table.
 
+### Cold-start real-training runs (operator rule, 2026-07-27)
+
+Every new real-training gate/smoke run must be cold-start — do NOT
+pass `--seed_paths`. The chain's own iter 1 produces a fresh
+DS-stamped output; iter 2+ chain off that. Rationale (DS8 correctness
++ uniformity + provenance) and the twin partial-scope rule (paired
+`--data_scope` + `--health_gate_files`) are in
+`docs/gates/gate_testing_standard.md` "Partial-scope rules" section.
+The pre-DS8 canonical seeds referenced there are historical only.
+Exception: reproducing a specific historical seeded run —
+operator-approved case-by-case only.
+
+### Chain formal-incumbent coupling (V19 PR 1)
+
+Two related tuner inputs, forwarded from the chain layer:
+
+- The chain reconstructs the best HealthGate-VALID FORMAL score from
+  prior committed iterations and delivers it to every subsequent
+  iteration's tuner (unconditional; visible in the `[resume]
+  incumbent carry-over` log line, the tuner's `[chain_incumbent]`
+  startup line, and every manifest under `chain_incumbent_source`).
+- Whether the tuner's formal delta gates ACT on that reference is
+  controlled by `--enable_chain_incumbent_formal_gates` (default
+  OFF). ON: gates use `chain_incumbent + fixed_delta` as thresholds.
+  OFF: reconstruction still runs but the gates ignore the reference
+  (they never fire on it). **OFF is not a fixed-`0.0` mode** — the
+  pre-V19 default is unrepresentable.
+
+See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Chain formal-incumbent reference" for full semantics.
+
 ### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
 The orchestrator resolves the Python interpreter in this priority order
 (set in `resolve_py_cmd` and verified by the version + passthrough guards):
