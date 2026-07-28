@@ -1992,6 +1992,12 @@ class HyperparamTuningAgent:
             if agent_input.health_gate_enabled
             else None,
             "health_config_sha256": health_config_sha256,
+            # V19 PR 1 (P1-C5 A4) — formal sampling provenance so the
+            # per-file best table can populate formal rows' eval_portion
+            # from committed data (never from current defaults). Legacy
+            # run_configs without these keys correctly resolve to null.
+            "formal_strategy": agent_input.formal_strategy,
+            "formal_eval_portion": agent_input.formal_eval_portion,
             "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
