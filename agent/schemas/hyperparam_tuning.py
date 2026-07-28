@@ -1065,6 +1065,21 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    enable_chain_incumbent_formal_gates: bool = Field(
+        default=False,
+        description=(
+            "V19 PR 1 gate-coupling switch (design §3.2). Controls ONLY "
+            "whether the formal delta gates CONSUME "
+            "``current_run_best_formal_score`` — when False (default) the "
+            "gates receive no reference (no-incumbent behavior) even if a "
+            "reconstructed incumbent was provided; reconstruction, "
+            "provenance, and persistence upstream are unconditional. "
+            "Rollback = OFF; OFF never reinstates the pre-V19 fixed-0.0 "
+            "reference. Production activation is a separate operator "
+            "decision (P1-ACT)."
+        ),
+    )
+
     degenerate_penalty_score: float | None = Field(
         default=None,
         description=(
