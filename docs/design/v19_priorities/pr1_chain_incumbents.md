@@ -54,7 +54,9 @@ green with recorded evidence.
 [x] P1-A  — pre-design code audit (this doc §2; agent audit 2026-07-27)
 [x] P1-D  — design approved by operator (rev 3, 2026-07-27 — see
             approval record in §10; doc locked for implementation)
-[ ] P1-C1 — schema widening + threshold consolidation + comment sweep
+[x] P1-C1 — schema widening + threshold consolidation + comment sweep
+            (29ec054; design-doc commit 98119e3; tune 687 green,
+            workflows 206 green; pyright n/a lilab)
 [ ] P1-C2 — incumbent reconstruction in core/resume.py (RestoredState;
             commit-time validity; artifact-hash verification)
 [ ] P1-C3 — threading: subprocess → workflow → protocol → tuner input
@@ -732,81 +734,104 @@ provenance; reconstruction is deterministic and replay-stable.
 
 **Code**:
 
-- [ ] `RestoredState` + fold at `:648-733` per §3.3 (formal + trial,
+- [x] `RestoredState` + fold at `:648-733` per §3.3 (formal + trial,
       full provenance dicts incl. `round_index`, trial sampling
       fields, `validity_basis`, `artifact_verified`, scope/sha stamps)
-- [ ] eligibility per §3.3 commit-time rules: committed
+      *(done 2026-07-27: 4 new dataclass fields + fold in the walk;
+      strictly-greater update makes earliest-iteration-wins automatic)*
+- [x] eligibility per §3.3 commit-time rules: committed
       `best_valid_formal_*` fast path; legacy re-derivation from
       PERSISTED gate verdicts + the workspace's effective policy
       artifact only; commit-time validity not establishable →
       `UNKNOWN` → EXCLUDED; repo-current `configs/health_checks.yaml`
       never consulted for decision state
-- [ ] `run_output_sha256` verification per §3.6 (recompute, compare,
-      fail closed on mismatch with `[resume] REPLAY-INTEGRITY:`
-      warning; legacy no-hash → `artifact_verified: false`, visible)
-- [ ] tie-break rule per §3.3 (explicit comparator, not bare `max`)
-- [ ] tolerance: missing `best_*` keys contribute nothing; crash
+      *(done: `_formal_candidate_from_committed_fields` with the six
+      rev-3 summary-vs-source checks; `_commit_time_gate_ids` locates
+      the materialized effective config (output-sibling → chain root)
+      and accepts it only when its canonical body sha equals the
+      stamped `health_config_sha256` — sha recipe mirrors
+      `materialize_effective_config` exactly; classifier reused
+      verbatim via its `required_gate_ids` parameter)*
+- [x] `run_output_sha256` verification per §3.6 (recompute, compare,
+      STOP on mismatch via `ReplayIntegrityError(ResumeError)` naming
+      artifact + both hash prefixes; legacy no-hash →
+      `artifact_verified: false`, visible)
+- [x] tie-break rule per §3.3 (explicit comparator `_pick_best`; not
+      bare `max`)
+- [x] tolerance: missing `best_*` keys contribute nothing; crash
       manifests unchanged (`ResumeError` preserved)
-- [ ] `[resume] incumbent carry-over: … basis=… verified=…` /
-      `… : none` prints
+- [x] `[resume] incumbent carry-over: … basis=… verified=…` /
+      `… : none` prints (+ matching `trial-incumbent` line;
+      `SUMMARY-MISMATCH` warnings)
 
 **Tests** (`tests/unit/core/test_resume_incumbent.py`, new file):
 
-- [ ] two committed iters, valid formals 1.2 then 0.8 → incumbent 1.2,
+- [x] two committed iters, valid formals 1.2 then 0.8 → incumbent 1.2,
       provenance iter 1 with correct `exp_id` and `round_index` per
       the §3.3 rules
-- [ ] valid trial only (no valid formal) → formal incumbent `None`,
+- [x] valid trial only (no valid formal) → formal incumbent `None`,
       trial incumbent set WITH `eval_strategy`, `eval_portion`,
       `train_portion` populated and `round_index` per rules
-- [ ] **committed-summary validation, positive**: summary fields with
+- [x] **committed-summary validation, positive**: summary fields with
       a matching formal source record (exp_id found, score within
       tolerance, no manifest/stamp conflict) →
       `validity_basis="committed_fields"`
-- [ ] **committed-summary validation, negatives** (each → UNKNOWN +
+- [x] **committed-summary validation, negatives** (each → UNKNOWN +
       excluded + `[resume] SUMMARY-MISMATCH:` warning): null
       `best_valid_formal_exp_id`; exp_id absent from `all_records`;
       score disagreement beyond `1e-9·max(1,|a|)`; source record is a
       trial; manifest `best_valid_formal_score` conflicts with the
       output field
-- [ ] **round_index rules**: record with persisted `logical_round` →
+- [x] **round_index rules**: record with persisted `logical_round` →
       that value, `round_provenance="persisted"`; legacy record with
       null `logical_round` → `round_index=null`,
       `round_provenance="legacy_unknown"` — asserted NOT inferred
       from list position
-- [ ] `no_records` iter contributes nothing; ordering preserved
-- [ ] tie (equal scores, iters 2 and 4) → earliest iteration wins;
+- [x] `no_records` iter contributes nothing; ordering preserved
+- [x] tie (equal scores, iters 2 and 4) → earliest iteration wins;
       same-iter tie → lexicographic `exp_id`
-- [ ] legacy output without `best_valid_formal_*` fields but WITH
+- [x] legacy output without `best_valid_formal_*` fields but WITH
       persisted gate verdicts + effective-policy artifact →
       re-derived, `validity_basis="persisted_verdicts"`
-- [ ] legacy output where commit-time validity is NOT establishable
+- [x] legacy output where commit-time validity is NOT establishable
       (verdicts missing / effective policy absent) → UNKNOWN →
       excluded (negative)
-- [ ] repo-policy independence: mutate a COPY of
+- [x] repo-policy independence: mutate a COPY of
       `configs/health_checks.yaml` in the test env → reconstruction
       result unchanged (decision state never reads repo policy)
-- [ ] phantom/collapsed record (`failed_mode_collapse`, score present)
+- [x] phantom/collapsed record (`failed_mode_collapse`, score present)
       can never become the incumbent (negative)
-- [ ] **replay integrity (rev 3)**: tamper with a committed
+- [x] **replay integrity (rev 3)**: tamper with a committed
       `run_output` after manifest hash was written →
       `ReplayIntegrityError` raised BEFORE the next iteration; error
       message contains the artifact path and both hash prefixes
       (verbatim-asserted); no `RestoredState` is produced
-- [ ] legacy manifest without `run_output_sha256` → candidate
+- [x] legacy manifest without `run_output_sha256` → candidate
       admitted, `artifact_verified=false` visible in provenance and
       print
-- [ ] **non-contamination (two-state design, §3.4)**: restored chain
+- [x] **non-contamination (two-state design, §3.4)**: restored chain
       state never appears in `best_score_overall` or any
       iteration-local `best_*` field; `best_score_overall` never
       reaches tuner input
-- [ ] missing keys / degraded partial output → no crash, no incumbent
-- [ ] determinism: same workspace parsed twice → identical
+- [x] missing keys / degraded partial output → no crash, no incumbent
+- [x] determinism: same workspace parsed twice → identical
       `RestoredState` incumbent fields
 
 **Verification checklist**:
 
-- [ ] `.venv/bin/python -m pytest tests/unit/core -q` green (counts + wall)
-- [ ] ruff + pyright clean
+- [x] `.venv/bin/python -m pytest tests/unit/core/test_resume_incumbent.py -q`
+      → **19 passed, 0.95 s — GREEN** (first run 15/19: fixture defect
+      — `ExperimentRecord.memory` requires `expert_advice_followed` +
+      `hypothesis`; diagnosis recorded: TEST FIXTURE at fault,
+      production untouched)
+- [x] `.venv/bin/python -m pytest tests/unit/core -q` →
+      **446 passed / 2 failed — the 2 failures are PRE-EXISTING**
+      (`test_watchdog.py::TestKillTree::{test_kill_leaves_no_orphans,
+      test_term_ignoring_child_is_killed}` — reproduce identically on
+      a clean `git stash` tree; lilab environment issue, unrelated to
+      this commit; not fixed here)
+- [x] ruff check + `ruff format --check` clean on both files
+- [ ] ~~pyright~~ n/a on lilab (Node < 14; PR #123 precedent)
 
 **Test gate**: unit only.
 
