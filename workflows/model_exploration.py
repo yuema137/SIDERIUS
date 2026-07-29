@@ -2530,6 +2530,15 @@ def run_workflow(
             # it inside the tuner; the workflow never resolves ordering.
             order_strategy_override=order_strategy_override,
             file_order_override=file_order_override,
+            # V19 PR 3 — policy pass-through so the TUNER's lock matches
+            # the workflow's (contradictory locks abort the run).
+            enable_structured_health_feedback=enable_structured_health_feedback,
+            health_feedback_history_window_iterations=(
+                health_feedback_history_window_iterations
+            ),
+            health_feedback_history_max_entries_per_model=(
+                health_feedback_history_max_entries_per_model
+            ),
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune
