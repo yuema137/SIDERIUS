@@ -198,16 +198,54 @@ Carried from the PR 1/PR 2 process (operator rules):
              grounded cost table (~113k input tokens/proposer sample,
              treatment adds ~460). AWAITING operator pilot-launch
              decision — no launch from the draft.
-[ ] P3-L2  — Layer-2 campaign NOT RUN — STOPPED by the pre-registered
-             condition (2026-07-29): at the observed 33% terminal
-             success, the smallest justified design needs ~600-1200
-             calls / ~$120-240 vs the authorized 300 calls / $59.54
-             remaining. Layer-2 verdict: INCONCLUSIVE
-             (execution-reliability-blocked by issue #146 — a
-             production-scope citation weakness explicitly outside
-             this study's change budget). Unblock path: fix #146 →
-             rev-4 pilot → campaign. The treatment's behavioral claim
-             is OPEN, not refuted — no valid control arm existed.
+[ ] P3-L2  — Layer-2 campaign NOT RUN — STOPPED by the frozen
+             cannot-fit stop condition (2026-07-29): at the observed
+             33% terminal success, the smallest justified design needs
+             ~600-1200 calls / ~$120-240 vs the authorized 300 calls /
+             $59.54 remaining. Layer-2 verdict: INCONCLUSIVE
+             (execution-reliability-blocked). 0 valid control samples
+             → no C-vs-T comparison → behavioral efficacy UNKNOWN;
+             the 3 valid samples are delivery evidence only. The
+             treatment's behavioral claim is OPEN, not refuted.
+[x] P3-AUD — post-run zero-LLM audit (2026-07-29, operator-directed;
+             report §13, protocol §21). Record-changing findings:
+             P-1 production retry-loop defect — the proposing stage
+             re-injects the CAUSAL stage's inherited_components on
+             every structural attempt (agent :1689/:1781), discarding
+             the model's corrected citations; a malformed causal-stage
+             citation is a guaranteed terminal failure (proven from
+             rev-3 raw bodies, S2_C_1). P-2 refines #146: causal-stage
+             origin (memo never validated there), two malformed
+             classes (external_agent+iteration/registry tags,
+             human+"## Vocabulary" refs), semantically-correct
+             provenance with no legal encoding, no worked
+             prefix:identifier example in any prompt; observed under
+             gpt-5.4 (v16 production — NOT gemini as earlier written)
+             and gpt-5.5; treatment-independent. Runner findings
+             R-1..R-4 (calibration-only): §19.1 stop rule was a
+             MID-RUN PROTOCOL AMENDMENT (not pre-registration) and was
+             never enforced; mid-sample cap crash left S2_T_2 unmarked
+             + run_summary unwritten; wrapper echo masked the nonzero
+             exit; launch command unarchived. 33% is NOT a clean
+             reliability estimate (P-1 removed the assumed recovery
+             channel). Unblock path: fix P-1 + #146 (operator-gated)
+             → rev-4 reliability pilot → campaign re-sizing.
+[ ] P3-L2p-r4 — rev-4 citation-reliability pilot: protocol DESIGNED
+             (`pr3_l2p_rev4_reliability_protocol.md`, 2026-07-29;
+             rescaled per operator decision same day) — operational
+             endpoint only (terminal ProposalOutput success),
+             **S1 only, 4 samples (C×2 + T×2)**, 16 nominal /
+             24 hard-cap calls, ≈$3.2-4.8, gate pre-registered in
+             the doc (4/4 valid [≥80% at n=4], ≥1 valid/arm, no
+             dominant failure class, corrected retry values
+             preserved, no provenance corruption, complete
+             artifacts, runner stop + exit-code proven, exact
+             treatment isolation). S2/larger runs must NOT be added
+             merely for more samples if the gate fails.
+             Preconditions: operator-approved production fix +
+             runner fixes R-1..R-4 + green deterministic tests.
+             LAUNCH REQUIRES SEPARATE OPERATOR APPROVAL — not
+             launched.
 [ ] P3-L3  — Layer-3 bounded real-LLM + real-training Gate complete
              (operator-approved launch; docs/gates/ conventions)
 [ ] P3-ACT — production activation decision (operator; separate from merge)
@@ -2198,3 +2236,80 @@ counts/time recorded here.
 **Commit boundary.** Operator-surface wiring only; no schema or prompt
 logic changes (those are CB1-CB4); P3-DOC (node/skill .md sync) follows
 as its own commit before merge per the standing rule.
+
+## 12. P3-AUD follow-up — production fix options (recorded 2026-07-29; NOT implemented; operator decision pending)
+
+Source of evidence: report §13, protocol doc §21. Two production
+defects (P-1 retry-loop discard; P-2 = #146 interface + expressiveness
+gap). Options compared per the operator's audit-first instruction; no
+code changed.
+
+**Option A — prompt clarification (targets P-2 induction).** Add to
+`causal_reasoning_stage.md` (the stage of origin) and mirror in
+`proposing_stage.md`: one worked example PER source type (incl. an
+`external_agent` `prefix:identifier` example and a human example);
+explicit instructions that registry losses/models inherited from past
+iterations are `source_type='experiment'` with the introducing
+`model_type` as `source_id` (+ `from_run` when known); that vocabulary
+items are cited with a designated stable form; and the regex stated
+where the schema is described. Cheap, zero schema/migration risk,
+directly addresses the "no worked example" evidence. Cannot by itself
+fix P-1 (corrections would still be discarded) and leaves the
+provenance vocabulary semantically overloaded.
+
+**Option B — narrow deterministic normalization.** Pre-validation
+normalizer for UNAMBIGUOUS malformed forms only (e.g.
+`Vocabulary:x`/`vocabulary.x` → the designated vocabulary form;
+`iter_NNN`-style external_agent ids → a canonical iteration form),
+with every rewrite recorded in provenance. Risk: silently converts a
+possibly-wrong attribution into a legal-looking one — it can hide
+attribution errors the validator exists to catch. If adopted at all,
+only as a RECORDED normalization with the original preserved, never a
+silent fix. Not recommended as the primary fix.
+
+**Option C — extend the source representation (targets P-2
+expressiveness).** Add legal source types/forms for what prompts
+actually expose: e.g. `registry` (loss/model registry entries, id =
+registry name + introducing iteration) and `vocabulary` (id = vocab
+item name), or equivalently structured origin fields. Removes the
+overload where everything collapses to `experiment`; makes the
+semantically-correct citations the model already produces legal.
+Cost: schema migration (validator, prompts, tests, any consumers of
+`source_type`), medium scope; must keep old records readable.
+
+**Option D — relax validation. REJECTED as primary.** Widening the
+regex or accepting malformed ids raises pass rate by corrupting the
+provenance record (`iter_004` as an external_agent id is precisely the
+ambiguity the contract exists to prevent). Only defensible as a
+temporary diagnostic mode, never as the fix.
+
+**P-1 fix (required regardless of A-D).** In pipeline mode, validate
+`inherited_components` at the CAUSAL stage (fail fast where the
+feedback loop can actually reach the producing response) AND/OR accept
+the proposing response's corrected `inherited_components` when the
+injected causal values fail validation. Smallest coherent form:
+validate the memo's citations inside the causal-stage retry loop with
+the same `InheritedComponent` contract, so the retry instruction
+becomes satisfiable; keep the proposing-stage injection unchanged.
+
+**Recommendation (evidence-based): P-1 fix + Option A now; Option C
+as the durable follow-up** (separate migration commit or PR); B/D
+rejected. Rationale: rev-3 raw bodies prove the model produces correct
+semantics and, when told, correct syntax — the failures are induced by
+missing guidance (A), unexpressible sources (C), and an unfixable
+retry seam (P-1). Deterministic validation before any rev-4: contract
+tests for each malformed class (must fail with instructive messages),
+prompt-render tests asserting the worked examples appear in both
+stages, and a causal-stage-retry test proving a malformed memo
+citation is corrected within the causal loop.
+
+**Runner fixes (calibration scope, separate from production fix):**
+R-1 enforce protocol stop conditions in the sample loop (count
+terminal failures at each `run_sample` return; stop when the floor
+becomes unattainable); R-2 top-level try/finally writing
+`run_status.json` with outcome ∈ {completed, protocol_stop,
+budget_stop, technical_failure} (+ always write `run_summary.json`);
+R-3 mark an in-flight sample aborted by a cap (`aborted_incomplete`
+marker in its dir); R-4 archive the exact launch command + wrapper in
+the run dir; wrapper must propagate the runner's exit status (no
+trailing echo as last command).

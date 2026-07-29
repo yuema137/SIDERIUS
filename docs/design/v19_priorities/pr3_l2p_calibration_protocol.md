@@ -481,7 +481,9 @@ evidence is retained. Artifacts preserved unchanged:
    `external_agent` citations (`ce_plus_hf_spectral_loss`,
    `emd_ordinal_loss`, `iter_007`) against the
    `InheritedComponent.source_id` contract; same structural failure
-   observed terminally in a real production chain (v16, gemini); no
+   observed terminally in a real production chain (v16 — proposer LLM
+   gpt-5.4; the doc's earlier "gemini" attribution was wrong, gemini
+   was the tuner planner — corrected by the §21 audit); no
    worked `prefix:identifier` example exists in any stage prompt.
    Recorded as: a pre-existing production prompt/schema reliability
    weakness, amplified under gpt-5.5, OUTSIDE this calibration fix's
@@ -519,8 +521,19 @@ allowance **$71.51**, enforced by the ledger at every call. The
 full-campaign budget is NOT yet frozen — it is derived from rev-3 pilot
 evidence and separately approved.
 
-### 19.1 Rev-3 floor-evaluation rule (pre-registered mid-run, 2026-07-29,
-after sample 1 and before any further sample completed)
+### 19.1 Rev-3 floor-evaluation rule (MID-RUN PROTOCOL AMENDMENT,
+2026-07-29, after sample 1 and before any further sample completed)
+
+**Methodological status (corrected 2026-07-29, operator instruction):**
+this rule was introduced AFTER the rev-3 run had begun — it is a
+mid-run protocol amendment, NOT pre-registration, and cannot serve as
+confirmatory pre-registered evidence. At introduction, one terminal
+failure (S1_C_1) had already been observed. It was added to remove
+post-hoc stop discretion by making the §3.6 floor an attainability
+rule. The runner never enforced it (no automated stop-condition check
+existed — report §13.3); the run overshot the 4th terminal failure by
+~26 calls to the 60-call cap. The original text below is preserved
+unchanged.
 
 The §3.6 floor (sample-level terminal success >= 70%) is evaluated as
 an ATTAINABILITY rule over the 10-sample plan: the pilot stops at the
@@ -538,10 +551,48 @@ in BOTH arms (all four control samples failed — no C-vs-T comparison
 exists); the populated production vocabulary did not reduce the rate
 (rev-2 50% → rev-3 67% terminal). Delivery invariants 10/10; version
 `gpt-5.5-2026-04-23` stable across all 96 Layer-2 calls; cumulative
-spend $20.46 of $80. Full campaign NOT RUN — the pre-registered
-cannot-fit stop condition applies (justified design ≈600-1200 calls /
+spend $20.46 of $80. Full campaign NOT RUN — the frozen (set in the
+pre-execution authorization) cannot-fit stop condition applies (justified design ≈600-1200 calls /
 $120-240 vs 300 calls / $59.54 authorized). Layer-2 verdict:
 INCONCLUSIVE (execution-reliability-blocked). Deviations recorded in
 the report §5.4 (incl. the §19.1 mid-run enforcement gap in the
 runner). Complete report:
 `reports/pr3_structured_health_feedback_layer2_calibration_2026-07-29.md`.
+
+**Interpretation lock (operator, 2026-07-29): 0 valid control samples
+→ no Control-vs-Treatment comparison → behavioral efficacy remains
+UNKNOWN. The three valid rev-3 samples are delivery/descriptive
+evidence only, never efficacy evidence.**
+
+## 21. Post-run audit (2026-07-29, zero-LLM) — corrected root cause
+
+Full detail: report §13. Summary of record-changing findings:
+
+1. **P-1 (production, NEW)**: the proposing-stage structural-retry
+   loop extracts `inherited_components` from the causal stage ONCE
+   (`ml_model_proposal_agent.py:1689`) and re-injects it on every
+   validation attempt (`:1781`), discarding the proposing response's
+   own corrected citations. Any malformed causal-stage citation is
+   therefore a guaranteed terminal node failure — proven from raw
+   bodies (S2_C_1: proposing attempts 2-3 regex-legal, sample still
+   failed with the causal-stage errors all three times).
+2. **P-2 (production, refines #146)**: all rev-3 terminal citations
+   originated in the CAUSAL stage (never validated there — the memo is
+   a raw dict until ProposalOutput); malformed classes are
+   `external_agent`+iteration/registry tags AND `human`+"## Vocabulary"
+   section references; the underlying provenance is semantically
+   correct but has no documented legal encoding (schema expressiveness
+   + missing worked examples). Even valid samples are provenance-lossy
+   (everything cited as `experiment`). Observed under gpt-5.4
+   (production v16) and gpt-5.5 (pilots); treatment-independent.
+3. **R-1..R-4 (calibration runner)**: no automated protocol-stop
+   enforcement (only call/dollar caps + version drift); mid-sample
+   `BudgetExceeded` crashes the run leaving the in-flight sample
+   unmarked and `run_summary.json` unwritten (both revisions ended
+   this way); launch wrapper's trailing `echo` masked the nonzero
+   exit and the wrapper command was not archived; per-sample bundles
+   otherwise complete for all 15 completed samples.
+4. Rev-3's 33% terminal-success rate is NOT a clean model-reliability
+   estimate: the retry recovery channel the design assumed did not
+   exist (P-1). Post-fix reliability must be re-measured (rev-4)
+   before any campaign sizing.
