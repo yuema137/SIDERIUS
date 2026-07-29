@@ -222,3 +222,61 @@ class TestCase3WorkspaceBOffFromCreation:
         prompt = _propose_prompt(output, ws, on=False)
         assert "[HEALTHGATE EVIDENCE]" not in prompt
         assert SIG not in prompt
+
+
+class TestCase1PipelineProduction:
+    """P3-V1 reopen fix: the SAME two-iteration chain of custody, but the
+    iteration-2 proposer runs the PRODUCTION pipeline path — the
+    fingerprint must appear in the actual proposing-stage prompt (not in
+    the legacy _build_reasoning_prompt output)."""
+
+    def test_iter1_fingerprint_reaches_iter2_pipeline_stage_prompt(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from agent.schemas.proposal import ReasoningPipelineConfig, ReasoningStage
+        from nodes.ml_model_proposal_agent import MLModelProposalAgent
+        from tests.unit.agent.ml_model_proposal_agent.test_prompt_context_surfacing import (
+            _FAKE_COMPARISON,
+            _FAKE_PROPOSING,
+            _FAKE_REASONING,
+        )
+
+        ws = str(tmp_path)
+        ensure_run_invariants(ws, _invariants(ws, on=True))
+        _, out1 = _run_interp(ws, 1, on=True, scratch_tag="p1")
+        _write_digest_at_chain_path(ws, 1, out1)
+        restored = load_latest_fingerprint_history(ws, 2, [1])
+        _, out2 = _run_interp(
+            ws, 2, on=True, history={k: list(v) for k, v in restored.items()}, scratch_tag="p2"
+        )
+
+        storage = StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace=ws, run_name="pipe")
+        )
+        propose_input = local_full_context(
+            out2,
+            storage,
+            enable_structured_health_feedback=True,
+            reasoning_pipeline=ReasoningPipelineConfig(
+                exploration_mode="exploit",
+                stages=[
+                    ReasoningStage(name="comparison", system_prompt_key="COMPARATIVE_ANALYSIS"),
+                    ReasoningStage(name="causal_reasoning", system_prompt_key="CAUSAL_REASONING"),
+                ],
+            ),
+        )
+        mock_bridge = MagicMock()
+        mock_bridge.generate.side_effect = [_FAKE_COMPARISON, _FAKE_REASONING, _FAKE_PROPOSING]
+        agent = MLModelProposalAgent(
+            provider="gemini", model_id="test", bridge_factory=lambda **kw: mock_bridge
+        )
+        agent.run(propose_input)
+
+        final = None
+        for call in mock_bridge.generate.call_args_list:
+            prompt = call.kwargs.get("system_prompt") or call.args[0]
+            if "custom_loss_spec" in prompt:  # proposing_stage.md marker
+                final = prompt
+        assert final is not None
+        assert "[HEALTHGATE EVIDENCE]" in final
+        assert f"- {SIG}: 2 occurrence(s) across iteration(s) 1, 2" in final

@@ -1457,6 +1457,17 @@ class MLModelProposalAgent:
             "recent_gate_exhaustions_block": _format_recent_gate_exhaustions_block(
                 inp.recent_gate_exhaustions
             ),
+            # V19 PR 3 (§3.7) — structured HealthGate evidence for the
+            # PRODUCTION pipeline path (P3-V1 reopen fix: the legacy-mode
+            # splice in _build_reasoning_prompt never reached pipeline
+            # mode). Same mechanism as the §14.N variable above; ""
+            # when the flag is OFF or no supported evidence exists, so
+            # the placeholder collapses and the OFF prompt is unchanged.
+            "healthgate_evidence_block": (
+                _format_healthgate_evidence_block(inp.interpretation)
+                if inp.enable_structured_health_feedback
+                else ""
+            ),
             # T3 — task config injection. {FORWARD_CONTRACT} is rendered into
             # proposing_stage.md (line 68 area); {TASK_DESCRIPTION} is rendered
             # into any future template that wants the bare task string. Both

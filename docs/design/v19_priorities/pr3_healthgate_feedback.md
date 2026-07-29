@@ -87,7 +87,41 @@ Carried from the PR 1/PR 2 process (operator rules):
              workspace cases — implemented, 31 new tests green, block
              regression 980 passed; CB5-c commits pending
              stop-and-show approval (§11-CB5 evidence)
-[x] P3-V1  — Layer-1 deterministic validation COMPLETE (2026-07-29):
+[x] P3-V1  — RESTORED after reopen-fix (2026-07-29): verdict PASS
+             WITH DOCUMENTED LIMITATIONS. Reopen history: the blocking
+             claim "structured evidence reaches the production
+             proposer" was CONTRADICTED in pipeline mode — CB4 spliced
+             the block into _build_reasoning_prompt (legacy 2-call mode
+             only) while production uses _run_pipeline's template
+             assembly (source :481); every proposer-prompt test had
+             validated the non-production path (the audit's own
+             false-positive pattern; found by the L2p call-count
+             design). Fix: healthgate_evidence_block template variable
+             mirroring the §14.N mechanism ("" when OFF/no evidence) +
+             the {healthgate_evidence_block} placeholder in
+             proposing_stage.md — the narrowest production stage (the
+             JSON-emitting final stage; audit: the §14.N placeholder
+             exists ONLY there, explore/exploit files are injected
+             fragments, earlier stages would duplicate context).
+             Corrected claim-G evidence (production path, direct):
+             test_health_evidence_pipeline.py 6 passed 0.96s — real
+             MLModelProposalAgent.run() pipeline with captured stage
+             prompts: flag-ON exact fingerprints/attribution/window
+             counts/representative metrics in the ACTUAL proposing-
+             stage prompt; block in EXACTLY one stage; §14.N inside the
+             prompt byte-identical and ordered before it; flag-OFF no
+             leak + placeholder substituted + byte-identical to a
+             legacy-payload prompt; legacy dict + flag ON renders
+             nothing. Cross-iteration production path:
+             workspace Case-1 pipeline variant — iter-1 record → digest
+             → typed restore → iter-2 REAL pipeline proposing-stage
+             prompt contains the fingerprint with iteration tags 1, 2
+             (5 passed 1.12s). Regressions: proposer+protocols+schemas+
+             workflows 1029 passed 13.13s; repo ruff + format clean.
+             _build_reasoning_prompt evidence is NOT counted for this
+             claim. Original closure evidence retained below (all
+             non-G claims unaffected):
+             Layer-1 deterministic validation had reported (2026-07-29):
              verdict PASS WITH DOCUMENTED LIMITATIONS. Full unit suite
              4617 passed / 4 xfailed / 216.20s locally (repo venv);
              CI run 30472894670 head 14f2891 SUCCESS — ruff clean,
@@ -1188,7 +1222,7 @@ proximity. Four gaps found; each closed by a focused test in
 | D. Summary boundary: 1:1 alignment; exact fields; no fabricated fingerprints; legacy loadable; pre-PR3 fields unchanged | `test_round_health_summary.py` alignment/backward-compat/round-trip + mixed-stream lockstep audit test | proven |
 | E. Deterministic outputs + degraded invariant | `test_health_feedback_outputs.py` (8) — incl. healthy≡degraded field equality (the strongest LLM-independence form) and the operator 5-condition scenario | proven |
 | F. Interpreter parity + treatment | goldens committed BEFORE renderer (`23c3fbe` < `2052fa2`, git-order-proven); full-string equality with health data present; `test_health_prompt_rendering.py` (10) | proven |
-| G. Proposer parity + treatment + §14.N | golden `66efed8` < `4b04723`; `test_health_evidence_block.py` (12) incl. §14.N byte-identical both flag states | proven |
+| G. Proposer parity + treatment + §14.N | REOPENED + FIXED 2026-07-29: the original evidence covered legacy mode only (production gap — pipeline mode missed the block). Now proven on the PRODUCTION path: `test_health_evidence_pipeline.py` (6) — real pipeline run, captured proposing-stage prompts, ON exactness + OFF byte-parity vs legacy payload + exactly-one-stage + §14.N ordering; cross-iteration pipeline workspace case. Legacy-mode evidence (`test_health_evidence_block.py`, 12) retained for the legacy path | proven (both modes) |
 | H. Flag/policy/lock matrix + three sites | `test_run_invariants_health_feedback.py` (10) + all-three-sites window-scan regression | proven |
 | I. One-directional history flow | write-site count (exactly 2) + no-reverse-construction assertions; healthy≡degraded equality proves fields cannot derive from LLM output; digest-only restore suite (6) | proven |
 | J. CLI/shell/run_config/manifest | `test_health_feedback_chain_wiring.py` (12) + shell parity (15) with the two documented overrides; startup rejection ×3 pre-execution | proven |
