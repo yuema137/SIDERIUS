@@ -518,3 +518,14 @@ $8.49); Layer-2 monetary hard cap unchanged at $80 → remaining
 allowance **$71.51**, enforced by the ledger at every call. The
 full-campaign budget is NOT yet frozen — it is derived from rev-3 pilot
 evidence and separately approved.
+
+### 19.1 Rev-3 floor-evaluation rule (pre-registered mid-run, 2026-07-29,
+after sample 1 and before any further sample completed)
+
+The §3.6 floor (sample-level terminal success >= 70%) is evaluated as
+an ATTAINABILITY rule over the 10-sample plan: the pilot stops at the
+moment the floor becomes unreachable — i.e., at the FOURTH terminal
+sample failure (6/10 < 70%). Three or fewer failures allow completion
+(7/10 = 70% attainable). This matches the rev-2 stop logic and removes
+any post-hoc stop discretion. Terminal failures remain recorded, their
+calls count, and the run otherwise continues sample by sample.
