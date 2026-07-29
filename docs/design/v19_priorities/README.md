@@ -12,19 +12,31 @@ evidence, and implementation logs live here).
 
 | PR | Design doc | Status |
 |----|-----------|--------|
-| PR 1 — Chain-level incumbents | [`pr1_chain_incumbents.md`](./pr1_chain_incumbents.md) | rev 3 — P1-D approved, locked; implementation starting |
-| PR 2 — Data ordering as an optimization dimension | — | not started |
+### Required V19 work
+
+| PR | Design doc | Status |
+|----|-----------|--------|
+| PR 1 — Chain-level incumbents | [`pr1_chain_incumbents.md`](./pr1_chain_incumbents.md) | complete — merged (PR #137) |
+| PR 2 — Data ordering as an optimization dimension | [`pr2_data_ordering.md`](./pr2_data_ordering.md) | rev 3 locked; implementation complete, PR open |
 | PR 3 — Structured HealthGate feedback propagation | — | not started |
-| PR 4a — Threshold & aggregation study | — | not started |
-| PR 4b — Adaptive routing + fingerprint avoidance | — | not started |
-| PR 5 — Metric integrity & score-variant analysis | — | not started |
-| PR 6 — Stateful stop policies | — | not started |
-| PR 7+ — Workflow evolution (per sub-PR docs) | — | not started |
+
+### Parallel operational work
+
+| Item | Design doc | Status |
+|----|-----------|--------|
 | O1a — Runtime provenance | — | not started |
 | O2 — `--only` launcher selector | — | not started |
 
+### Unscheduled candidate features
+
+Threshold recalibration, adaptive routing, metric redesign, stateful
+stop policies, and workflow evolution are NOT required for V19
+completion and have no per-PR design docs. They live as unscheduled
+candidates in [`../candidate_features_v19.md`](../candidate_features_v19.md)
+and may be promoted only by an explicit operator decision.
+
 Naming convention: `pr{N}_{short_slug}.md` (e.g. `pr1_chain_incumbents.md`,
-`pr4a_threshold_study.md`, `o2_launcher_only_selector.md`).
+`o2_launcher_only_selector.md`).
 
 Each document must complete the design and validation template defined
 in the baseline's §2.0 "Per-PR exit contracts" and carry the

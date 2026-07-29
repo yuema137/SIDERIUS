@@ -50,8 +50,8 @@
   iterations 6/7/4/4 of 20 (container replacement), leaving 17 closed
   iterations with `run_output` records
   ([`../../reports/v18r_campaign_audit_20260725.md`](../../reports/v18r_campaign_audit_20260725.md));
-  bands 15-19 and 0-3 never launched (queue fully pending). PR 4a and
-  PR 5 may begin on the 17 closed iterations; full-band coverage (and
+  bands 15-19 and 0-3 never launched (queue fully pending). Candidates A
+  and C could begin on the 17 closed iterations if promoted; full-band coverage (and
   the band 15-19 / 0-3 rows of §1.1) requires the V18r restart after
   the documented restart blockers are fixed. Runtime-control
   observation stores hold V18r production data, though under
@@ -190,6 +190,22 @@ These statements govern the whole document and every V19 PR:
 
 ## V19 Progress Tracker
 
+**V19 feature completion requires the approved implementation and
+validation of PR 1, PR 2, and PR 3 only. Candidate features do not
+block V19 completion** (operator decision, 2026-07-28 —
+[`candidate_features_v19.md`](candidate_features_v19.md)).
+
+The existing separations are unchanged by that narrowing:
+
+- PR 2's implementation merge is separate from its empirical ordering
+  comparison;
+- PR 3's deterministic plumbing is separate from its full behavioral
+  validation;
+- merge and production activation remain separate decisions (§4.5).
+
+Narrowing the required scope does **not** weaken the validation
+requirements of PR 2 or PR 3.
+
 Top-level completion state per PR/work item; a box is checked only
 when the item is FULLY complete per its §2.0 checklist. Detailed
 per-stage checkpoints live inside each PR block in §2.0 (and §3 for
@@ -220,13 +236,10 @@ separate decisions unless explicitly listed as blocking for that PR.
 Concretely: PR 1 may complete even if the secondary per-file table is
 explicitly deferred; PR 2's implementation merge precedes empirical
 strategy completion; PR 3's deterministic plumbing may merge before
-behavioral validation and activation; PR 4b's routing infrastructure
-may merge in observe-only mode; PR 6's deterministic stop-policy
-implementation may merge while agent-behavior claims remain unmade or
-unvalidated; PR 7+ sub-PRs must each satisfy their own behavioral
-contracts.
+behavioral validation and activation. (The equivalent rules for the
+unscheduled candidates live in `candidate_features_v19.md`.)
 
-### Phase I — Repair the search substrate
+### Required V19 work
 
 - [x] PR 1 — Chain-level incumbents *(merged 2026-07-28, PR #137
       `6678d19`; coupling flag OFF — P1-ACT activation is a separate
@@ -235,21 +248,19 @@ contracts.
 - [ ] PR 2 — Data ordering as an optimization dimension
 - [ ] PR 3 — Structured HealthGate feedback propagation
 
-### Phase II — Make feedback alter execution safely
+### Parallel operational work
 
-- [ ] PR 4a — Threshold and aggregation study
-- [ ] PR 4b — Adaptive routing and fingerprint avoidance
-- [ ] PR 6 — Stateful stop policies
-
-### Parallel non-blocking work
-
-- [ ] PR 5 — Metric integrity and score-variant analysis
 - [ ] O1a — GPU clock/utilization/contention provenance
 - [ ] O2 — Single-chain launcher selector
 
-### Phase III — Workflow evolution
+### Unscheduled candidate features
 
-- [ ] PR 7+ — Multi-PR workflow-evolution epic
+See [`candidate_features_v19.md`](candidate_features_v19.md).
+
+Threshold recalibration, adaptive routing, metric redesign, stateful
+stop policies, and large workflow evolution are **not required for V19
+completion**. They are retained as unscheduled candidate features and
+may be promoted only by an explicit operator decision.
 
 ## 2. Carried-over capability groups (from the V18 draft)
 
@@ -267,7 +278,7 @@ benchmark, not the implementation template; implementation choices are
 candidate mechanisms whose value must be demonstrated empirically on
 HealthGate-valid formal score.
 
-#### Phase I — Repair the search substrate
+#### Required V19 foundation — repair the search substrate
 
 Three complementary foundations. The implementation ORDER is
 operator-fixed (PR 1 → PR 2 → PR 3), but this is an execution order,
@@ -285,27 +296,38 @@ foundational problems:
 | **PR 2** | Expose data ordering as a controlled optimization dimension (commit A: minimal indexed-dataset seam + coupling ledger; commit B: ordering implementation) | §2.9 + §1.3 artifacts | deterministic + empirical optimization study | — |
 | **PR 3** | Propagate structured HealthGate evidence into downstream agent context | §2.1 | agent-behavior | — |
 
-#### Phase II — Make feedback alter execution safely
+#### Parallel operational track
 
-| PR | Title | Sections | Class (§4.1) | Depends on |
-|----|-------|----------|--------------|------------|
-| PR 4a | Threshold & aggregation study | §2.2 (study half) | analysis/policy | PR 3; campaign data (can begin on the 17 closed V18r iterations; full bands preferred) |
-| PR 4b | Adaptive routing + collapse-fingerprint avoidance | §2.2 (activation half) | mixed | PR 4a |
-| PR 6 | Stateful stop policies | §2.3 | primarily deterministic (mixed if planner-behavior claims are made) | PR 1 (terminal-state/resume contracts) |
-
-#### Parallel non-blocking track
-
-| PR | Title | Sections | Class (§4.1) | Notes |
+| Item | Title | Sections | Class (§4.1) | Notes |
 |----|-------|----------|--------------|-------|
-| PR 5 | Metric integrity & score-variant analysis | §2.6 | analysis/policy | parallel research track; does NOT block the ladder unless it discovers a critical flaw HealthGate cannot mitigate |
-| O1a | GPU clock/utilization/contention provenance recording ONLY | §3 item 1a | deterministic | recording only, no behavior change; separated from adaptive margins (O1b, §3) which change admission behavior and come after Phase II review |
-| O2 | Single-chain launcher selector `--only` | §3 item 2 | deterministic, trivial | can land any time, incl. before the V18r restart |
+| O1a | GPU clock/utilization/contention provenance recording ONLY | §3 item 1a | deterministic | recording only, no behavior change; separated from adaptive margins (O1b, §3) which change admission behavior |
+| O2 | Single-chain launcher selector `--only` | §3 item 2 | deterministic, trivial | can land any time |
 
-#### Phase III — Larger workflow evolution
+These are small operational follow-ups. They are NOT required
+scientific V19 features and do not gate V19 completion.
 
-| PR | Title | Sections | Class (§4.1) | Depends on |
-|----|-------|----------|--------------|------------|
-| PR 7+ | Cross-iteration workflow evolution: meta-planner, run monitor, modular orchestration (multi-PR epic) | §2.5 | agent-behavior heavy | Phases I–II stable |
+#### Unscheduled candidate features (operator decision, 2026-07-28)
+
+Threshold recalibration, adaptive routing, metric redesign, stateful
+stop policies, and large workflow evolution are **not required for V19
+completion**. They are retained as unscheduled candidate features in
+[`candidate_features_v19.md`](candidate_features_v19.md) and may be
+promoted only by an explicit operator decision.
+
+The former `PR 4a / 4b / 5 / 6 / 7+` labels are retired — they implied
+a scheduled position in a ladder that these items no longer have:
+
+| Former label | Now | Topic |
+|---|---|---|
+| PR 4a | Candidate A | Threshold and aggregation study |
+| PR 4b | Candidate B | Adaptive routing and collapse-fingerprint avoidance |
+| PR 5 | Candidate C | Metric integrity and score-variant analysis |
+| PR 6 | Candidate D | Stateful stop policies |
+| PR 7+ | Candidate epic | Larger workflow evolution (must be decomposed before promotion) |
+
+Moving an item to candidate status is **not** equivalent to scheduling
+it for V20, and does not weaken its future validation requirements
+(§4).
 
 No dedicated PR: §2.7 forensic backlog (opportunistic), §2.8 DEFER
 bookkeeping (table only).
@@ -704,140 +726,13 @@ the PR-specific documents, not in this priorities file.
 - [ ] Post-activation HealthGate-valid rate reviewed
 - [ ] Top-level PR 3 complete (all layers support the claimed behavioral improvement)
 
-**PR 4a — Threshold & aggregation study (analysis/policy)**
+**Candidate features (formerly PR 4a / 4b / 5 / 6 / 7+)**
 
-- Must produce a **versioned policy proposal with evidence and
-  uncertainty**, not exploratory plots. No LLM-behavior claim is
-  necessary unless LLM interpretation is part of the analysis.
-- Required outputs: empirical gate distributions;
-  architecture-family dependence; threshold candidates; aggregation
-  comparison (`any_pass`/`all_pass`/numeric); false-positive/
-  false-negative (or equivalent) tradeoffs; impact on retention of
-  valid formal rounds; a disposition for every gate — activate,
-  remain recording-only, or insufficient evidence.
-
-##### PR 4a progress checkpoints
-
-- [ ] Campaign datasets and eligibility rules frozen
-- [ ] Gate distributions computed
-- [ ] Architecture-family dependence analyzed
-- [ ] Threshold candidates evaluated
-- [ ] `any_pass`, `all_pass`, and numeric aggregation compared
-- [ ] False-positive and false-negative tradeoffs estimated
-- [ ] Valid-formal retention impact estimated
-- [ ] Missing or insufficient evidence identified
-- [ ] Every gate assigned a preliminary disposition
-- [ ] Versioned policy proposal written
-- [ ] Uncertainty and limitations reported
-- [ ] Policy proposal reviewed
-- [ ] No behavior change confirmed
-
-**PR 4b — Adaptive routing + fingerprint avoidance (mixed)**
-
-- Deterministic routing logic: exact tests (action resolution,
-  severity, persistence).
-- Collapse-fingerprint avoidance and proposer adaptation: true-LLM
-  pseudo (§4.2 L2) and bounded true-training (§4.2 L3) validation.
-- Activation is a separate operator decision with rollback to
-  observe-only.
-
-##### PR 4b progress checkpoints
-
-*Deterministic routing*
-
-- [ ] PR 4a policy version selected
-- [ ] Routing schema approved
-- [ ] Action-resolution tests passed
-- [ ] Severity and aggregation tests passed
-- [ ] Persistence and resume tests passed
-- [ ] Observe-only rollback verified
-
-*Agent behavior*
-
-- [ ] Fingerprint-avoidance behavioral contract defined
-- [ ] Relevant synthetic scenario subset selected
-- [ ] Layer-2 control/treatment evaluation completed
-- [ ] Repeated sampling and uncertainty reported
-- [ ] Layer-3 real-training validation approved
-- [ ] Layer-3 validation completed
-- [ ] Unintended over-avoidance evaluated
-
-*Activation*
-
-- [ ] Merge approved
-- [ ] PR merged with behavior disabled or recording-only, if appropriate
-- [ ] Production activation separately approved
-- [ ] Post-activation routing outcomes reviewed
-- [ ] Rollback readiness confirmed
-
-**PR 5 — Metric integrity & score-variant analysis (analysis/policy,
-parallel, non-blocking)**
-
-- Runs beside the ladder; escalates only on discovery of a critical
-  metric flaw that HealthGate cannot mitigate.
-- Validation focuses on offline metric integrity, HealthGate overlap,
-  and score comparability; no agent-behavior testing unless the metric
-  is surfaced to agents and a behavioral claim is made.
-
-##### PR 5 progress checkpoints
-
-- [ ] Existing metric and HealthGate overlap audited
-- [ ] Collapse and phantom families included in the analysis
-- [ ] Canonical metric byte-identity confirmed
-- [ ] Integrity-gate incremental value evaluated
-- [ ] Score-variant candidates defined, if justified
-- [ ] Paper comparability impact analyzed
-- [ ] Offline experiments completed
-- [ ] Governance recommendation written
-- [ ] Critical flaw escalation decision made
-- [ ] Main V19 ladder remains unblocked unless a critical flaw is confirmed
-
-**PR 6 — Stateful stop policies (primarily deterministic)**
-
-- Counters, reconstruction, terminal states, resume: deterministic
-  exact tests (incl. deterministic reconstruction from persisted
-  history).
-- Any claim that planner behavior improves because of the surfaced
-  stop reason is agent-behavior and triggers §4.2/§4.3 — otherwise do
-  not make the claim.
-
-##### PR 6 progress checkpoints
-
-- [ ] Stop-policy state model approved
-- [ ] `ScoreValidityResult` implemented
-- [ ] `RoundHealthClassification` implemented
-- [ ] Independent counters implemented
-- [ ] OR aggregation implemented
-- [ ] Persisted-history reconstruction implemented
-- [ ] Resume and replay tests passed
-- [ ] `completed_early` terminal-state contracts implemented
-- [ ] Monitoring and wrapper compatibility verified
-- [ ] Default-disabled behavior verified
-- [ ] Synthetic deterministic stop scenarios passed
-- [ ] Agent-behavior validation completed only if planner-improvement claims are made
-- [ ] Activation policy reviewed
-- [ ] PR merged
-- [ ] Production activation separately approved
-
-**PR 7+ — Workflow evolution (agent-behavior heavy)**
-
-- Every behavioral claim requires its OWN explicit §4.3 evaluation
-  contract, controls, repeated sampling, and bounded Gate-style
-  real-system validation. One broad epic-level demonstration must not
-  be allowed to validate multiple unrelated claims — no epic-level
-  exit without per-claim evidence.
-
-##### PR 7+ epic checkpoints
-
-(no single checklist for the whole epic — each sub-PR uses the
-standard agent-behavior checklist)
-
-- [ ] Epic decomposed into independent behavioral claims
-- [ ] Each claim assigned its own PR/design document
-- [ ] Each claim has a separate evaluation contract
-- [ ] Shared infrastructure separated from behavior-changing logic
-- [ ] Merge and activation boundaries defined per sub-PR
-- [ ] No epic-level behavioral claim accepted from one broad demo
+Moved out of the required V19 ladder by operator decision 2026-07-28.
+Their full exit contracts, progress checklists, dependencies, non-goals,
+and validation requirements are preserved in
+[`candidate_features_v19.md`](candidate_features_v19.md) as Candidates
+A-E. They do not block V19 completion and are not scheduled.
 
 ### 2.1 Feedback propagation — REMAINDER  *(→ PR 3)*
 
@@ -871,7 +766,7 @@ recording-only boundary per §4.5 — but the top-level work item stays
 incomplete until behavioral validation concludes. See the PR 3 exit
 contract in §2.0.
 
-### 2.2 Adaptation  *(→ PR 4a study / PR 4b activation)*
+### 2.2 Adaptation  *(→ Candidates A + B — unscheduled, see candidate_features_v19.md)*
 
 Unchanged from the V18 draft — none of it landed (V18r still runs the
 frozen observe-mode policy):
@@ -891,7 +786,7 @@ frozen observe-mode policy):
 Dependencies: 2.1. V18r produces additional evidence (e.g. the observed
 20-unique-int8 near-threshold cases on files 4-9).
 
-### 2.3 Independent stateful stop policies  *(→ PR 6)*
+### 2.3 Independent stateful stop policies  *(→ Candidate D — unscheduled, see candidate_features_v19.md)*
 
 Carried verbatim from the V18 draft (nothing landed; the `gate-exhaustion`
 surfacing that exists today is not the typed circuit breaker):
@@ -1017,14 +912,14 @@ complexity must not block the strict §2.4.a incumbent fix — if this
 half grows unexpectedly large, it is explicitly deferred without
 blocking PR 1.
 
-### 2.5 Workflow evolution  *(→ PR 7+ — multi-PR epic, last)*
+### 2.5 Workflow evolution  *(→ Candidate epic — unscheduled, must be decomposed; see candidate_features_v19.md)*
 
 Unchanged from the V18 draft: bidirectional cross-iteration information
 flow (beyond the vocab/previous-proposal restoration that exists);
 iteration-level meta-planner; Run Monitor agent; modular orchestration
 (multi-week rework).
 
-### 2.6 Metric refinement — REMAINDER  *(→ PR 5 — parallel, non-blocking research track)*
+### 2.6 Metric refinement — REMAINDER  *(→ Candidate C — unscheduled, see candidate_features_v19.md)*
 
 Landed in V18 (modified form): the correlation guard shipped as the
 `pearson_dispersion_recording` HealthGate check (M8 §3.4 — dispersion of
@@ -1312,9 +1207,9 @@ when many are unrelated to its claim. For example: PR 1 may focus on
 incumbent-improvement, no-improvement, invalid-formal incumbent, and
 conflicting trial/formal histories; PR 3 focuses heavily on collapse
 fingerprints, invalid high scores, conflicting gate evidence, recovery
-after collapse, and semantically equivalent repeated proposals; PR 4b
+after collapse, and semantically equivalent repeated proposals; Candidate B
 focuses on routing outcomes, repeated fingerprints, near-threshold
-results, and inappropriate avoidance; PR 7+ defines separate scenario
+results, and inappropriate avoidance; the workflow-evolution candidate defines separate scenario
 subsets for each behavioral claim rather than one giant evaluation for
 the whole epic. The selected subset must still provide meaningful
 coverage and repeated samples.
@@ -1435,9 +1330,9 @@ validation while keeping behavior-changing features disabled.
 Production activation additionally requires: the required behavioral
 evaluation (Layers 2–3); acceptable uncertainty; operator review;
 documented rollback; bounded Gate-style validation. This separation is
-especially important for: adaptive routing (PR 4b); fingerprint
-avoidance (PR 4b); stop-policy feedback (PR 6); meta-planner behavior
-(PR 7+).
+especially important for the unscheduled candidates: adaptive routing
+and fingerprint avoidance (Candidate B); stop-policy feedback
+(Candidate D); meta-planner behavior (Candidate epic).
 
 ## 5. Sequencing hypothesis (superseded record)
 
