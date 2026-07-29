@@ -1856,12 +1856,40 @@ behavior change with defaults (flag OFF + default policy ⇒ lock
 equality with pre-PR3 expectations must hold for legacy workspaces).
 Depends on: CB1-CB4.
 
+**Revised commit boundaries (operator, 2026-07-29, post-audit)**:
+CB5-a = canonical lock policy + tuner pass-through (workflow/chain
+sites intentionally rely on builder defaults — an INTERMEDIATE state,
+not completed three-site propagation; the all-three-sites regression
+is deferred to CB5-c). CB5-b = workflow + resume carry. CB5-c = chain
+CLI + final stamps + all-three-sites regression + the three approved
+workspace cases (the end-to-end legacy+CLI-ON rejection belongs here —
+the CLI surface does not exist earlier).
+
 **Implementation plan.**
 
-- [ ] `RunInvariants` fields + docstring resume matrix
-- [ ] All three lock sites pass the fields consistently
-- [ ] Workflow: params threaded, history carried, degraded-safe
-- [ ] Resume: typed entries restored from digest (`.get` default)
+- [x] CB5-a: `RunInvariants` three fields + `_CANONICAL` + docstring
+      resume matrix; `build_run_invariants` params (defaults keep every
+      pre-PR3 call site producing an unchanged OFF/3/8 lock);
+      `HyperparamTuningInput` three pass-through fields (tuner has NO
+      PR 3 behavior — lock + stamp only); tuner lock call passes all
+      three explicitly; tuner run_config stamps the three POLICY values
+      (policy only — per-round evidence stays in records/digest, never
+      duplicated). *(2026-07-29 evidence: new
+      `test_run_invariants_health_feedback.py` 10 passed 0.09s — same
+      policy accepted; changed flag rejected naming field + both
+      values; changed window rejected; changed max-entries rejected;
+      legacy lock loads OFF/3/8 and validates; ON-over-legacy rejected;
+      tuner lock-call + run_config surface assertions; builder-default
+      equivalence. Block regression core+schemas+tuner-suite: 1 failure
+      diagnosed as a TEST-CONTRACT update — `test_lock_file_is_plain_json`
+      pins the exact on-disk key set and legitimately grows by the
+      three approved fields (same evolution it records for PR 2);
+      after the update core suite 480 passed 2.99s; full regression
+      1382 passed 177s pre-fix, tuner suite unaffected. ruff + format
+      clean.)*
+- [ ] CB5-b: Workflow: params threaded, history carried, degraded-safe;
+      workflow lock call passes the policy explicitly
+- [ ] CB5-b: Resume: typed entries restored from digest (`.get` default)
 - [ ] CLI flags (`--enable_structured_health_feedback`, retention
       flags) + `run_chain.sh` passthrough
 - [ ] run_config + per-iteration manifest stamps
