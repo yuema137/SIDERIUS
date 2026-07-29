@@ -794,7 +794,7 @@ per §0.
   (§2.5 trap 6); needs its own decision.
 - NO `--auto_resume` no_records-overwrite fix (FU-P1-2), NO inspector
   alignment (FU-P1-3), NO threshold recalibration (the Δ 0.5 bypass
-  miscalibration belongs to PR 4a).
+  miscalibration belongs to the threshold study — see the note below).
 - NO change to scoring, HealthGate policy, DataScope, or the V18r
   frozen protocol.
 
@@ -1931,3 +1931,18 @@ design). Operator decisions recorded:
 This design doc is LOCKED for implementation: no further expansion or
 polish unless implementation-time code inspection reveals a concrete
 conflict (which is stopped-and-reported per §0).
+
+---
+
+## Note on retired roadmap labels (added 2026-07-28)
+
+This document was written when the V19 ladder still contained
+`PR 4a / 4b / 5 / 6 / 7+`. Those labels are retired: the required V19
+scope is now PR 1-3 only, and the threshold study, adaptive routing,
+metric work, stop policies, and workflow evolution are unscheduled
+candidates.
+
+The historical references above are left as written — they record what
+was true when the work was done. **Current disposition is governed by
+the locked `../v19_priorities.md` and
+`../candidate_features_v19.md`**, not by the labels used here.
