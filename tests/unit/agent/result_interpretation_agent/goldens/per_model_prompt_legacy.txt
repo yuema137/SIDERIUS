@@ -1,0 +1,19 @@
+## Model: wavenet
+Run: round_health_summary_test | Status: completed | Rounds: 1
+Raw best score       : None (health=unknown)
+Best valid score     : None
+Worst denoising score: 0.7
+Formal round score   : 0.7
+
+### Architecture Description
+A test architecture.
+
+### Best Config
+none
+
+### Score Trajectory (chronological)
+  Round 1: score=0.7000 — 
+
+---
+## Human Guidance (highest priority — overrides expert advice)
+Try smaller lr.
