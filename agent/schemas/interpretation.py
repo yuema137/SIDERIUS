@@ -51,8 +51,14 @@ class RoundOrdering(BaseModel):
         default=None,
         description="Experiment this ordering belongs to. None on legacy records.",
     )
-    resolved_order_strategy: str = Field(
-        description="The visitation order that ACTUALLY RAN for this round.",
+    resolved_order_strategy: str | None = Field(
+        default=None,
+        description=(
+            "The visitation order that ACTUALLY RAN for this round. None when "
+            "nothing ran — i.e. resolution_source is 'not_executed', an "
+            "attempt rejected at pre-flight. Downstream must not describe a "
+            "None as having executed any ordering."
+        ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
@@ -61,7 +67,9 @@ class RoundOrdering(BaseModel):
     resolution_source: str = Field(
         description=(
             "Which level decided it: 'operator_override', 'agent_proposal', "
-            "'default', or 'legacy_default' for pre-ordering records."
+            "or 'default' when an ordering actually ran; 'legacy_default' for "
+            "a pre-ordering artifact; 'not_executed' for a current attempt "
+            "rejected at pre-flight, where no ordering ran at all."
         ),
     )
     proposed_order_strategy: str | None = Field(

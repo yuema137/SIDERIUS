@@ -49,15 +49,48 @@ OrderingResolutionSource = Literal[
     "agent_proposal",
     "default",
     "legacy_default",
+    "not_executed",
 ]
-"""Which level supplied the resolved value.
+"""Which level supplied the ordering that RAN — or why none did.
 
-``legacy_default`` is produced ONLY when reading pre-PR2 artifacts that
-carry no ordering fields (see :meth:`ResolvedOrdering.legacy_default`). A
-live run never records it.
+The first three describe an ordering that actually executed:
+
+``operator_override``  training ran the operator-forced ordering.
+``agent_proposal``     training ran the validated agent proposal.
+``default``            training ran the current default, because there was
+                       no usable proposal and no override.
+
+The last two describe the absence of an executed ordering, and are
+deliberately distinct because they mean different things:
+
+``legacy_default``     a PRE-PR2 artifact has no ordering fields because it
+                       predates the feature; the reader reconstructs the
+                       historical default for compatibility.
+``not_executed``       a CURRENT-code attempt never reached training (it was
+                       rejected at pre-flight), so no ordering was applied.
+                       ``resolved_strategy`` / ``resolved_file_order`` are
+                       both ``None`` — inventing a shuffle value for
+                       something that never ran would be a lie.
+
+Neither of the last two is ever written by a live executed round.
 """
 
 DEFAULT_ORDER_STRATEGY: OrderStrategy = "shuffle"
+
+NOT_EXECUTED_STATUSES: frozenset[str] = frozenset(
+    {
+        "skipped_oom_risk",
+        "skipped_time_risk",
+        "skipped_schema_violation",
+    }
+)
+"""Record statuses meaning the attempt was rejected BEFORE training ran.
+
+Taken from the ``ExperimentRecord.status`` Literal. These are the pre-flight
+rejections — the gate declined the attempt, so no data was ever visited and
+no ordering was applied. Every other status implies training at least
+started.
+"""
 
 
 class OrderingValidationError(ValueError):
@@ -249,8 +282,13 @@ class ResolvedOrdering(BaseModel):
         default=None,
         description="File order the operator forced, if any.",
     )
-    resolved_strategy: OrderStrategy = Field(
-        description="The strategy that actually executed.",
+    resolved_strategy: OrderStrategy | None = Field(
+        default=None,
+        description=(
+            "The strategy that actually executed. None ONLY when nothing "
+            "executed — i.e. resolution_source is 'not_executed'. A live "
+            "resolution always produces a strategy."
+        ),
     )
     resolved_file_order: list[int] | None = Field(
         default=None,
@@ -279,6 +317,12 @@ class ResolvedOrdering(BaseModel):
         """
         resolved = getattr(record, "resolved_order_strategy", None)
         if resolved is None:
+            # No executed-ordering stamp. Two very different reasons, and
+            # conflating them misreports the run: a CURRENT attempt rejected
+            # at pre-flight never ran an ordering, whereas a PRE-PR2 artifact
+            # has no ordering fields because the feature did not exist yet.
+            if getattr(record, "status", None) in NOT_EXECUTED_STATUSES:
+                return cls.not_executed(record)
             return cls.legacy_default()
         return cls(
             proposed_strategy=getattr(record, "proposed_order_strategy", None),
@@ -290,6 +334,34 @@ class ResolvedOrdering(BaseModel):
             resolved_strategy=resolved,
             resolved_file_order=getattr(record, "resolved_file_order", None),
             resolution_source=getattr(record, "ordering_resolution_source", None) or "default",
+        )
+
+    @classmethod
+    def not_executed(cls, record: Any = None) -> ResolvedOrdering:
+        """A current-code attempt that never reached training.
+
+        Rejected at pre-flight (OOM risk, time risk, schema violation), so no
+        data was visited and no ordering was applied. Both resolved fields are
+        ``None``: inventing a shuffle value for something that never ran would
+        misreport the run, and is exactly the confusion that made
+        ``legacy_default`` the wrong label for these attempts.
+
+        Any proposal the agent made is still preserved — including its
+        rejection — because that describes what the agent DID, which is
+        independent of whether the attempt survived admission. The
+        ``resolution_source`` describes what EXECUTED, never what would have
+        been selected had the attempt been admitted.
+        """
+        return cls(
+            proposed_strategy=getattr(record, "proposed_order_strategy", None),
+            proposed_file_order=getattr(record, "proposed_file_order", None),
+            proposal_rejected=bool(getattr(record, "ordering_proposal_rejected", False)),
+            proposal_rejection_reason=getattr(record, "ordering_proposal_rejection_reason", None),
+            override_strategy=getattr(record, "override_order_strategy", None),
+            override_file_order=getattr(record, "override_file_order", None),
+            resolved_strategy=None,
+            resolved_file_order=None,
+            resolution_source="not_executed",
         )
 
     @classmethod
