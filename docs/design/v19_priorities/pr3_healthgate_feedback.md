@@ -1348,6 +1348,39 @@ Template rules (binding for every commit block):
 - Update this document immediately after each implementation or test
   checkpoint — never batched.
 
+#### Test scope by development stage (operator principle, 2026-07-29)
+
+Do not run the full repository test suite or wait for a complete CI
+run after every commit by default. Use staged validation:
+
+**Before an individual commit** — run only: tests directly covering
+the changed behavior; the smallest relevant regression suite for the
+touched modules; lint and formatting checks on touched files; type
+checking where locally available and proportionate to the change.
+Record exactly what was and was not run.
+
+**After a logical commit block** — run a broader targeted regression
+across the modules integrated by that block.
+
+**Before opening, updating for final review, or merging the PR** — run
+the complete PR validation plan: full required unit/regression suites;
+blocking type checks; repository lint/format checks; required pseudo
+integrations; any approved Gate validation.
+
+A full CI run does not need to finish before every intermediate
+commit. Waiting for CI is required only when the result is necessary
+to validate an environment-specific risk, a locally unavailable
+blocking check, or the final PR state. (On lilab, pyright is the
+standing locally-unavailable blocking check — Node v10 — so a CI wait
+is justified when a change plausibly affects typing; otherwise
+continue working and read the verdict when it lands.)
+
+Governing principle:
+
+> Validation should be proportional to the scope and risk of the
+> current change. Local commit evidence is targeted; full-repository
+> evidence is collected before PR completion.
+
 ### CB1 — schemas + deterministic logic (`agent/schemas/health_feedback.py`)
 
 **Goal.** Create the complete typed data model and ALL deterministic
