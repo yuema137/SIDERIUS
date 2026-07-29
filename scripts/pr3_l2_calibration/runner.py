@@ -339,11 +339,156 @@ def run_sample(entry: dict, run_dir: Path, ledger: Ledger, first_gate_done: list
     return meta
 
 
+# --- Terminal run states (R-1/R-2 fixes, PR 3 audit §13.3) -----------------
+# run_status.json is the authoritative outcome record; the process exit code
+# mirrors it so wrappers and operators can distinguish the states without
+# forensic artifact reading.
+OUTCOME_COMPLETED = "completed"
+OUTCOME_PROTOCOL_STOP = "protocol_stop"
+OUTCOME_BUDGET_STOP = "budget_stop"
+OUTCOME_TECHNICAL_FAILURE = "technical_failure"
+OUTCOME_EXTERNAL_INTERRUPTION = "external_interruption"
+
+EXIT_CODES = {
+    OUTCOME_COMPLETED: 0,
+    OUTCOME_PROTOCOL_STOP: 3,
+    OUTCOME_BUDGET_STOP: 4,
+    OUTCOME_TECHNICAL_FAILURE: 1,
+    OUTCOME_EXTERNAL_INTERRUPTION: 130,
+}
+
+
+def mark_aborted_incomplete(sample_dir: Path | None, reason: str) -> None:
+    """R-3: finalize an in-flight sample cut down mid-run.
+
+    Writes an explicit ``aborted_incomplete.json`` marker so the bundle is
+    distinguishable from a completed sample (which has ``sample_meta.json``)
+    and from a terminal failure (``terminal_failure.json``). No-op when no
+    sample was in flight or the sample already finalized itself.
+    """
+    if sample_dir is None or not sample_dir.exists():
+        return
+    if (sample_dir / "sample_meta.json").exists():
+        return
+    (sample_dir / "aborted_incomplete.json").write_text(
+        json.dumps({"reason": reason, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}, indent=2)
+    )
+
+
+def run_order(
+    order: list[dict],
+    run_dir: Path,
+    ledger: Ledger,
+    max_terminal_failures: int,
+    run_sample_fn=run_sample,
+) -> tuple[str, str, list[dict]]:
+    """Execute the frozen sample order with enforced stop conditions.
+
+    Returns ``(outcome, detail, results)``. Stop conditions (R-1):
+
+    - PROTOCOL STOP: evaluated immediately after EVERY completed sample —
+      once the terminal-failure count reaches ``max_terminal_failures``
+      the next sample is never launched.
+    - BUDGET STOP: the ledger precheck fires before every LLM call
+      (inside the tee); the resulting ``BudgetExceeded`` is caught here,
+      the in-flight sample is finalized with an ``aborted_incomplete``
+      marker, and the run ends with an explicit persisted outcome.
+    - Version drift is a frozen protocol stop condition.
+    - Any other exception is a technical failure; KeyboardInterrupt is an
+      external interruption. Both finalize the in-flight sample.
+    """
+    first_gate_done: list = []
+    results: list[dict] = []
+    current_sample_dir: Path | None = None
+    try:
+        for entry in order:
+            sid = f"{entry['scenario']}_{entry['arm']}_{entry['rep']}"
+            print(f"[{entry['idx']}] {sid} ...")
+            current_sample_dir = run_dir / sid
+            meta = run_sample_fn(entry, run_dir, ledger, first_gate_done)
+            current_sample_dir = None
+            results.append(meta)
+            print(
+                f"    done: calls={ledger.calls} cost=${ledger.cost:.2f} "
+                f"terminal_error={meta['terminal_error']}"
+            )
+            terminal_failures = sum(1 for m in results if m.get("terminal_error"))
+            if terminal_failures >= max_terminal_failures:
+                return (
+                    OUTCOME_PROTOCOL_STOP,
+                    f"terminal failures {terminal_failures} >= "
+                    f"{max_terminal_failures} — stopping before the next sample",
+                    results,
+                )
+        return OUTCOME_COMPLETED, f"all {len(results)} samples executed", results
+    except BudgetExceeded as e:
+        mark_aborted_incomplete(current_sample_dir, f"BudgetExceeded: {e}")
+        return OUTCOME_BUDGET_STOP, str(e), results
+    except VersionDrift as e:
+        mark_aborted_incomplete(current_sample_dir, f"VersionDrift: {e}")
+        return OUTCOME_PROTOCOL_STOP, str(e), results
+    except KeyboardInterrupt:
+        mark_aborted_incomplete(current_sample_dir, "KeyboardInterrupt")
+        return OUTCOME_EXTERNAL_INTERRUPTION, "KeyboardInterrupt", results
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        mark_aborted_incomplete(current_sample_dir, f"{type(e).__name__}: {e}")
+        return OUTCOME_TECHNICAL_FAILURE, f"{type(e).__name__}: {e}", results
+
+
+def write_run_records(
+    run_dir: Path, ledger: Ledger, outcome: str, detail: str, results: list[dict]
+) -> None:
+    """R-2: run_summary.json + run_status.json are ALWAYS written."""
+    terminal_failures = sum(1 for m in results if m.get("terminal_error"))
+    (run_dir / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "outcome": outcome,
+                "samples": results,
+                "calls": ledger.calls,
+                "input_tokens": ledger.input_tokens,
+                "cached_tokens": ledger.cached_tokens,
+                "output_tokens": ledger.output_tokens,
+                "cost_usd": round(ledger.cost, 4),
+                "pinned_model_version": ledger.pinned_version,
+            },
+            indent=2,
+        )
+    )
+    (run_dir / "run_status.json").write_text(
+        json.dumps(
+            {
+                "outcome": outcome,
+                "detail": detail,
+                "exit_code": EXIT_CODES[outcome],
+                "samples_completed": len(results),
+                "terminal_failures": terminal_failures,
+                "calls": ledger.calls,
+                "cost_usd": round(ledger.cost, 4),
+                "pinned_model_version": ledger.pinned_version,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+            indent=2,
+        )
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_id", required=True)
     parser.add_argument("--max_calls", type=int, required=True)
     parser.add_argument("--dollar_cap", type=float, required=True)
+    parser.add_argument(
+        "--max_terminal_failures",
+        type=int,
+        required=True,
+        help="R-1 protocol stop: stop before launching the next sample once "
+        "this many samples have failed terminally (rev-4 gate: 1 — the "
+        "first terminal failure makes the 4/4 gate unreachable).",
+    )
     parser.add_argument("--order_manifest", default=None)
     args = parser.parse_args()
 
@@ -355,6 +500,17 @@ def main():
 
     run_dir = REPO / "reports" / "artifacts" / "pr3_l2p" / args.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    # R-4: archive the exact launch invocation in the run dir.
+    (run_dir / "launch_command.json").write_text(
+        json.dumps(
+            {
+                "argv": sys.argv,
+                "cwd": os.getcwd(),
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+            indent=2,
+        )
+    )
     ledger = Ledger(args.max_calls, args.dollar_cap, run_dir / "ledger.jsonl")
 
     if args.order_manifest:
@@ -369,31 +525,18 @@ def main():
         )
         order = PILOT_ORDER
 
-    first_gate_done: list = []
-    results = []
-    for entry in order:
-        print(f"[{entry['idx']}] {entry['scenario']}_{entry['arm']}_{entry['rep']} ...")
-        meta = run_sample(entry, run_dir, ledger, first_gate_done)
-        results.append(meta)
-        print(
-            f"    done: calls={ledger.calls} cost=${ledger.cost:.2f} "
-            f"terminal_error={meta['terminal_error']}"
-        )
-    (run_dir / "run_summary.json").write_text(
-        json.dumps(
-            {
-                "samples": results,
-                "calls": ledger.calls,
-                "input_tokens": ledger.input_tokens,
-                "cached_tokens": ledger.cached_tokens,
-                "output_tokens": ledger.output_tokens,
-                "cost_usd": round(ledger.cost, 4),
-                "pinned_model_version": ledger.pinned_version,
-            },
-            indent=2,
-        )
+    outcome = OUTCOME_TECHNICAL_FAILURE
+    detail = "run_order never returned"
+    results: list[dict] = []
+    try:
+        outcome, detail, results = run_order(order, run_dir, ledger, args.max_terminal_failures)
+    finally:
+        write_run_records(run_dir, ledger, outcome, detail, results)
+    print(
+        f"RUN {outcome.upper()}: {detail} — {ledger.calls} calls, "
+        f"${ledger.cost:.2f} (exit {EXIT_CODES[outcome]})"
     )
-    print(f"RUN COMPLETE: {ledger.calls} calls, ${ledger.cost:.2f}")
+    sys.exit(EXIT_CODES[outcome])
 
 
 if __name__ == "__main__":

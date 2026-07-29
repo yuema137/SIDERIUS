@@ -727,3 +727,47 @@ re-audit; no further LLM spend without a new operator decision.
   audit round; merge options in report §10 unchanged.
 - Either way: no P3-L3, no activation, no merge state change from this
   pilot alone.
+
+## 23. Runner stop/status fixes (R-1..R-4 implemented, 2026-07-29)
+
+Implements the §21.3 runner findings; calibration scope only, separate
+from the production citation fix (commit `5c8e483`).
+
+- **R-1 stop enforcement**: `run_order()` evaluates the terminal-failure
+  count immediately after EVERY completed sample and never launches the
+  next sample once `--max_terminal_failures` (new REQUIRED CLI arg;
+  rev-4 gate value: 1) is reached. The per-call ledger precheck
+  (call + dollar caps before every LLM call) is unchanged.
+- **R-2 status records**: `main()` wraps execution in try/finally —
+  `run_summary.json` AND the new `run_status.json` (outcome, detail,
+  exit_code, samples_completed, terminal_failures, calls, cost,
+  pinned version) are ALWAYS written. Outcome enum: `completed` /
+  `protocol_stop` (incl. version drift) / `budget_stop` /
+  `technical_failure` / `external_interruption`, with distinct process
+  exit codes (0 / 3 / 4 / 1 / 130).
+- **R-3 in-flight finalization**: `BudgetExceeded`, `VersionDrift`,
+  `KeyboardInterrupt`, and unexpected exceptions caught at the sample
+  loop finalize the in-flight sample with an `aborted_incomplete.json`
+  marker (no-op if the sample already wrote `sample_meta.json`).
+- **R-4 launch archival + wrapper**: `main()` archives
+  `launch_command.json` (argv, cwd, timestamp) in the run dir; the new
+  `launch_pilot.sh` wrapper (`<log-file>` + runner args) tees output to
+  the log and exits with `PIPESTATUS[0]` — trailing logging can no
+  longer mask the runner's exit status. Paths resolve relative to the
+  script (portability rule); `PILOT_PYTHON` overrides the interpreter
+  for tests.
+
+Tests (`tests/unit/scripts/test_pr3_l2p_runner_status.py`, 15, all
+green; scripts suite 107 passed; ruff + format clean): completed;
+protocol stop at the exact boundary with no next-sample launch
+(threshold 1 and cross-sample threshold 2); budget stop with marker +
+retained results; version drift → protocol_stop; technical failure with
+marker; external interruption; marker no-op cases; records always
+written with correct exit-code mapping; distinct exit codes for all
+five states; ledger precheck-before-call; wrapper propagates nonzero
+(7) and zero exits from a stub interpreter with cwd-independence; usage
+error on missing log argument.
+
+Known limitation (documented, accepted): a SIGKILL (uncatchable) still
+skips the finally block — `run_status.json` will then be absent, which
+itself distinguishes an external hard kill from every soft state.
