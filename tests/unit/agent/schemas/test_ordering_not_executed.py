@@ -24,7 +24,12 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentRecord,
     HyperparamTuningOutput,
 )
-from agent.schemas.ordering import NOT_EXECUTED_STATUSES, ResolvedOrdering
+from agent.schemas.ordering import (
+    NOT_EXECUTED_STATUSES,
+    OrderingValidationError,
+    ResolvedOrdering,
+    resolve_ordering,
+)
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 
 PERMUTATION = [9, 7, 5, 4, 8, 6]
@@ -219,3 +224,21 @@ def test_interpreter_summary_distinguishes_the_three_absence_cases():
     assert legacy.resolved_order_strategy == "shuffle"
 
     assert len({e.resolution_source for e in summary.round_ordering}) == 3
+
+
+# ---- executed_strategy() accessor ----
+
+
+def test_executed_strategy_returns_the_live_strategy():
+    ordering = resolve_ordering(resolved_scope=[4, 5], override_strategy="sequential")
+    assert ordering.executed_strategy() == "sequential"
+
+
+def test_executed_strategy_rejects_an_ordering_that_never_ran():
+    """Programming-error guard: a not_executed ordering has no executed
+    strategy, and callers must not silently substitute a default."""
+    ordering = ResolvedOrdering.from_record(_record(status="skipped_time_risk"))
+    with pytest.raises(OrderingValidationError) as exc:
+        ordering.executed_strategy()
+    assert "never ran" in str(exc.value)
+    assert "not_executed" in str(exc.value)

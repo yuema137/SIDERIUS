@@ -302,6 +302,32 @@ class ResolvedOrdering(BaseModel):
         description="Which level supplied the resolved value.",
     )
 
+    def executed_strategy(self) -> OrderStrategy:
+        """The strategy that executed, narrowed to non-null.
+
+        ``resolved_strategy`` is optional because the read-path
+        constructors describe attempts where nothing ran
+        (``not_executed``). A LIVE resolution always produces a concrete
+        strategy — :func:`resolve_ordering` assigns one in every branch —
+        so execution-facing callers use this accessor rather than
+        narrowing at the call site.
+
+        Keeping the check here also keeps it out of the tuner's very large
+        ``run()``: an inline ``assert`` there pushed pyright past its
+        per-function complexity budget.
+
+        Raises:
+            OrderingValidationError: called on an ordering that never
+                executed. Programming error, not a user-input error.
+        """
+        if self.resolved_strategy is None:
+            raise OrderingValidationError(
+                f"executed_strategy() called on an ordering that never ran "
+                f"(resolution_source={self.resolution_source!r}). Only a live "
+                f"resolution has an executed strategy."
+            )
+        return self.resolved_strategy
+
     @classmethod
     def from_record(cls, record: Any) -> ResolvedOrdering:
         """Read the ordering a persisted record says it ran.

@@ -2382,15 +2382,6 @@ class HyperparamTuningAgent:
                         rejected_proposal=rejected_ordering,
                     )
                     print(f"[data_order] {ordering.describes_execution()}")
-                    # resolve_ordering ALWAYS produces a concrete strategy —
-                    # every branch assigns override, proposal, or the default.
-                    # Only the read-path constructors (not_executed) yield
-                    # None, and those never reach execution. Narrowed here so
-                    # the engine-facing TrialConfig keeps its non-null type.
-                    assert ordering.resolved_strategy is not None, (
-                        "resolve_ordering returned no strategy; a live resolution "
-                        "must always produce one"
-                    )
 
                     trial_config = TrialConfig(
                         is_trial=plan.is_trial,
@@ -2411,8 +2402,11 @@ class HyperparamTuningAgent:
                         train_sampling_seed=train_sampling_seed,
                         eval_sampling_seed=eval_sampling_seed,
                         train_base_seed=train_base_seed,
-                        # Ordering — RESOLVED values only (V19 PR 2)
-                        resolved_order_strategy=ordering.resolved_strategy,
+                        # Ordering — RESOLVED values only (V19 PR 2).
+                        # executed_strategy() narrows to non-null inside
+                        # ordering.py; doing it here pushed pyright past its
+                        # per-function complexity budget for run().
+                        resolved_order_strategy=ordering.executed_strategy(),
                         resolved_file_order=ordering.resolved_file_order,
                     )
 
