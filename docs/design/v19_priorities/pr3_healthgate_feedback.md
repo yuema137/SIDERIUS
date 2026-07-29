@@ -171,7 +171,24 @@ Carried from the PR 1/PR 2 process (operator rules):
              REQUIRED, 50-call nominal / 60 hard cap, pre-registered
              LLM config + mechanism-relevance fields + rubric +
              redesign triggers + full-campaign decision rule).
-             AWAITING operator approval — no launch from the draft.
+             REVISED to rev 2 per the operator protocol review
+             (2026-07-29): exact 10-sample allocation table summing to
+             50 nominal / 60 hard; normative production-pipeline sample
+             invariant with per-sample auditable proposing-stage
+             prompts; frozen LLM config with explicit
+             provider-default-not-set entries + version-drift stop
+             rule; narrow retry semantics (schema-repair counts as an
+             LLM call); metric denominators incl. the
+             acknowledgment-not-possible rule; frozen
+             mechanism-relevance maps; deterministic-before-rubric
+             scoring with separate outputs; 8-label blinded rubric with
+             second-review rule; diagnostic-arm restrictions; 0.30 as a
+             PLANNING effect with the Primary-1/Primary-2/safety
+             hierarchy; Wilson/Holm reserved for the frozen full
+             campaign; transition + stop conditions; dry-render-
+             grounded cost table (~113k input tokens/proposer sample,
+             treatment adds ~460). AWAITING operator pilot-launch
+             decision — no launch from the draft.
 [ ] P3-L2  — Layer-2 synthetic real-LLM campaign complete + analyzed
 [ ] P3-L3  — Layer-3 bounded real-LLM + real-training Gate complete
              (operator-approved launch; docs/gates/ conventions)
