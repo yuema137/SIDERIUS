@@ -231,7 +231,7 @@ Carried from the PR 1/PR 2 process (operator rules):
              channel). Unblock path: fix P-1 + #146 (operator-gated)
              → rev-4 reliability pilot → campaign re-sizing.
 [ ] P3-L2p-r4 — rev-4 citation-reliability pilot: protocol DESIGNED
-             (`pr3_l2p_rev4_reliability_protocol.md`, 2026-07-29;
+             (`pr3_l2p_calibration_protocol.md` §22, 2026-07-29;
              rescaled per operator decision same day) — operational
              endpoint only (terminal ProposalOutput success),
              **S1 only, 4 samples (C×2 + T×2)**, 16 nominal /
@@ -2313,3 +2313,90 @@ R-3 mark an in-flight sample aborted by a cap (`aborted_incomplete`
 marker in its dir); R-4 archive the exact launch command + wrapper in
 the run dir; wrapper must propagate the runner's exit status (no
 trailing echo as last command).
+
+## 13. Retry-assembly pre-edit audit (2026-07-29; read-only; answers the operator's eight questions before any P-1 fix)
+
+Inspected: `_run_pipeline` stage loop (`ml_model_proposal_agent.py:1495-1579`),
+assembly (`:1681-1789`), structural-retry loop (`:1717-1835`),
+`agent/schemas/proposal.py` (DiscoveryMemo `:376`, ProposalOutput
+`:912`), `causal_reasoning_stage.md`, `proposing_stage.md`, git history
+of the extraction lines (`301037d`, `510ec3d`, phase-c).
+
+1. **Why immutable across retries?** Stage-ownership design from
+   phase-c: the reasoning stages own the memo's scientific content
+   (citations, prediction, vocab proposals); the proposing stage owns
+   implementation; stages 1+2 are never re-run from either retry loop
+   (cost control). The comment "these don't change on retry" encodes
+   the ASSUMPTION that injected scientific fields cannot fail
+   validation — never reconciled with the structural-retry feedback
+   that names errors in exactly those fields. The defect is that
+   assumption, not the ownership design.
+2. **Can the proposing stage return/correct inherited_components?**
+   Its declared output contract says NO — the "What you produce" JSON
+   in `proposing_stage.md` lists 9 fields and does NOT include
+   `inherited_components` (or any injected field). The corrected
+   citations observed in rev-3 retries were spontaneous,
+   outside-contract responses to error feedback. The causal stage's
+   contract DOES include `inherited_components` (worked example at
+   `causal_reasoning_stage.md:117-125`).
+3. **Fields discarded/overwritten by earlier-stage values** (assembly
+   `:1773-1789`): `inherited_components` (causal),
+   `falsifiable_prediction` (causal), `proposed_vocab_links`
+   (comparison), `proposed_vocab_candidates` (comparison+causal),
+   `proposed_discoveries` (comparison+causal). All other
+   ProposalOutput fields come from the proposing response and ARE
+   correctable by structural retry.
+4. **Other fields with the same uncorrectable pattern**: YES —
+   `falsifiable_prediction` carries the
+   `_prediction_differs_from_current` model validator (plus numeric
+   type coercion); a causal-stage violation is exactly as terminal
+   and unfixable as P-1 (latent, not yet observed).
+   `proposed_vocab_links` (status Literal + str coercion),
+   `proposed_vocab_candidates` (dict[str,str] coercion) and
+   `proposed_discoveries` (VocabEntry) can fail on type/Literal
+   errors — same pattern, lower likelihood, partly comparison-stage
+   origin. No stage output is Pydantic-validated at its own stage:
+   `accumulated[stage.name]` stores the raw bridge dict (`:1569/:1577`).
+5. **Intended source of truth**: the causal stage, for all attempts —
+   by design there is no "corrected retry" source because the design
+   assumed no correction would ever be needed. First attempt / retry /
+   corrected retry all currently read the same stale causal values.
+6. **Would accepting the retry response violate causal invariants?**
+   Partially: `proposing_stage.md` Rule 2 audits the implementation
+   AGAINST the memo's component list; letting the proposing stage
+   rewrite the list makes it self-referential and lets the
+   implementation stage alter scientific attribution produced with
+   fuller causal context. Downstream consumers
+   (`ml_code_validator_agent._check_inherited_components`,
+   `interpretation_helpers`, vocab accumulation) key on `component`
+   NAMES only — `source_type`/`source_id` are archival lineage — so
+   the blast radius of a wrong correction is provenance records, not
+   behavior.
+7. **Merge rule**: keep ONE rule for all attempts. Correcting at the
+   producing stage (Option C) preserves the uniform injection rule at
+   the proposing stage; per-attempt or error-field-selective merge
+   rules (Options A/B) introduce attempt-dependent semantics and a
+   second source of truth.
+8. **Compat/provenance risk per option**: A — proposing contract must
+   grow the field; citations restated each attempt can drift from a
+   VALID memo; largest surface. B — smallest happy-path delta but
+   implementation-stage attribution edits + per-index merge
+   complexity; corrections made without the causal context. C —
+   validation moves to the producing stage inside its own bounded
+   retry; no contract change to the proposing stage; existing tests
+   that inject malformed memos will fail earlier (test updates, which
+   is the point); adds ≤N causal retry calls on failure only. D — C
+   plus a proposing-stage override reintroduces two sources of truth;
+   only justified if causal-retry exhaustion were unacceptable, but
+   terminal-with-clear-message + the production workflow-level retry
+   already cover that.
+
+**Recommendation (pending operator approval): Option C, scoped to the
+causal stage's scientific subset** — validate `inherited_components` +
+`falsifiable_prediction` (one small partial model) immediately after
+the causal stage returns, inside a bounded causal-stage retry (≤2,
+error summary fed back; same feedback style as the structural loop).
+Retry instruction becomes truthful at the stage that owns the data;
+proposing-stage assembly unchanged; single source of truth preserved.
+Comparison-stage vocab fields: same latent pattern, zero observed
+failures — file as a follow-up issue rather than widening this fix.
