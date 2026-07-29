@@ -82,6 +82,7 @@ from agent.schemas.interpretation import (
     InterpretationOutput,
     ModelRunSummary,
 )
+from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ExpertContextItem, VocabEntry
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
@@ -1465,6 +1466,13 @@ def run_workflow(
     # Gate-coupling switch (default OFF; consumption only — see the
     # HyperparamTuningInput field docstring).
     enable_chain_incumbent_formal_gates: bool = False,
+    # --- Data-ordering OVERRIDE (V19 PR 2) ---
+    # Operator control, stable for the chain. Must reach BOTH the invariant
+    # lock built below and the tuner input: the tuner locks the override
+    # too, so a workflow that built a no-override lock in the same
+    # workspace would collide with it and abort the run.
+    order_strategy_override: OrderStrategy | None = None,
+    file_order_override: list[int] | None = None,
     # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
     # When both are non-None, every agent constructed inside the iter loop
     # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
@@ -1758,6 +1766,10 @@ def run_workflow(
         health_gate_files=health_gate_files,
         health_checks_config=health_checks_config,
         workspace=workspace,
+        # V19 PR 2 — must match what the tuner locks for this workspace,
+        # or the two would write contradictory locks and abort the run.
+        ordering_override_strategy=order_strategy_override,
+        ordering_override_file_order=file_order_override,
     )
     for _output in tuning_outputs:
         validate_stamped_invariants(
@@ -2474,6 +2486,11 @@ def run_workflow(
             # that fed it to the tuner is removed.
             current_run_best_formal_score=chain_formal_incumbent_reference,
             enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
+            # V19 PR 2 — operator ordering override for every round of this
+            # iteration. The agent's per-round proposal is resolved against
+            # it inside the tuner; the workflow never resolves ordering.
+            order_strategy_override=order_strategy_override,
+            file_order_override=file_order_override,
         )
         if human_advice_tune is not None:
             tune_input.human_advice = human_advice_tune

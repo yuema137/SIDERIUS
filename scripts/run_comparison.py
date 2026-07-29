@@ -640,6 +640,9 @@ def run_agent(
     formal_strategy: str = "snapshot",
     formal_portion: float = 0.1,
     formal_train_portion: float = 1.0,
+    # V19 PR 2 — agent-phase ordering override (baseline phase excluded).
+    order_strategy_override: str | None = None,
+    file_order_override: str | None = None,
     max_epochs: int | None = None,
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
@@ -723,6 +726,12 @@ def run_agent(
     cmd.extend(["--formal_strategy", formal_strategy])
     cmd.extend(["--formal_portion", str(formal_portion)])
     cmd.extend(["--formal_train_portion", str(formal_train_portion)])
+    # V19 PR 2 — forwarded only when set, so an unset override reproduces
+    # the pre-V19 tuner argv exactly.
+    if order_strategy_override is not None:
+        cmd.extend(["--order_strategy_override", order_strategy_override])
+    if file_order_override is not None:
+        cmd.extend(["--file_order_override", file_order_override])
     # Epoch cap + wall-time budgets (forwarded when set; None → tuner defaults).
     if max_epochs is not None:
         cmd.extend(["--max_epochs", str(max_epochs)])
@@ -974,6 +983,29 @@ def main():
         type=float,
         default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
+    )
+    # V19 PR 2 — data-ordering OVERRIDE, forwarded to the agent phase only.
+    # The BASELINE phase is deliberately excluded: it is the frozen
+    # comparison anchor, so its training must stay on the pre-V19 global
+    # shuffle regardless of what the agent phase is asked to do.
+    parser.add_argument(
+        "--order_strategy_override",
+        type=str,
+        default=None,
+        choices=["shuffle", "sequential"],
+        help="V19 PR 2: force the training sample visitation order for every "
+        "agent-phase round, overriding any agent proposal. Unset (default) = "
+        "the agent decides, falling back to 'shuffle'. Does NOT affect the "
+        "baseline phase.",
+    )
+    parser.add_argument(
+        "--file_order_override",
+        type=str,
+        default=None,
+        help="V19 PR 2: comma-separated file visitation ORDER for "
+        "--order_strategy_override sequential, e.g. '4,6,5,9,7,8'. Order is "
+        "preserved as written; must be a full permutation of the resolved "
+        "DataScope. Omit for ascending file index.",
     )
     parser.add_argument(
         "--max_epochs",
@@ -1507,6 +1539,8 @@ def main():
         formal_strategy=args.formal_strategy,
         formal_portion=args.formal_portion,
         formal_train_portion=args.formal_train_portion,
+        order_strategy_override=args.order_strategy_override,
+        file_order_override=args.file_order_override,
         max_epochs=args.max_epochs,
         trial_time_budget_minutes=args.trial_time_budget_minutes,
         formal_time_budget_minutes=args.formal_time_budget_minutes,

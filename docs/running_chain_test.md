@@ -121,6 +121,48 @@ The pre-DS8 canonical seeds referenced there are historical only.
 Exception: reproducing a specific historical seeded run —
 operator-approved case-by-case only.
 
+### Watchdog safety factors — ALWAYS pass them (empirical, lilab)
+
+`_chain_common.sh` defaults `RUNTIME_SAFETY_FACTOR=1.0` to mirror the
+Python schema default. That is correct as a schema default and
+**dangerous as a launch value**: the watchdog deadline is
+`predicted × safety_factor`, so 1.0 means **zero margin** — a run that
+exceeds its own RT2 prediction by a fraction of a percent is killed.
+
+Any run passing `--runtime_watchdog` should also pass the V18r posture
+(from `sdsc_submission_scripts/launch_v18_wave1.sh:125-127`):
+
+```bash
+--runtime_watchdog \
+--runtime_safety_factor 1.5 \
+--runtime_trial_safety_factor 3.0 \
+--runtime_formal_safety_factor 2.0
+```
+
+Trial gets the largest factor (3.0) because trial rounds run
+LLM-invented architectures with no historical prior, where the
+prediction is least reliable. Formal 2.0 is the operator decision in
+`a780186`.
+
+**Failure signature when you forget** (observed 2026-07-28, V19 PR 2
+Gate 2 attempt 1 — three consecutive kills):
+
+```
+watchdog killed training after 118.112s (deadline 117.866s, source=verified_components)
+```
+
+Overshoot under 1%, killed at 96-98% of the epoch,
+`source=verified_components`. That combination means the prediction was
+ACCURATE and the margin was ABSENT — it is not evidence that the model
+is too large or that the feature under test slowed training down. Do
+not let the planner chase it by shrinking the architecture.
+
+Copying an older Gate command verbatim is how this gets missed: the
+V19 PR 1 Gate 2 command omits these flags and happened to pass. Check
+new launch plans against `launch_v18_wave1.sh`, not against the
+previous PR's command. Full note:
+`docs/memories/project_watchdog_safety_factor_lilab.md`.
+
 ### Chain formal-incumbent coupling (V19 PR 1)
 
 Two related tuner inputs, forwarded from the chain layer:
@@ -139,6 +181,49 @@ Two related tuner inputs, forwarded from the chain layer:
 
 See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
 under "Chain formal-incumbent reference" for full semantics.
+
+### Data-ordering override (V19 PR 2)
+
+Ordering — the sequence in which selected training samples are visited —
+is **agent-proposable** and **operator-overridable**. The execution
+system resolves the value that runs:
+
+```text
+operator override  >  agent proposal  >  default ("shuffle")
+```
+
+Two chain flags, both forwarded only when set (an unset override
+reproduces pre-V19 argv exactly):
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--order_strategy_override` | unset | Force `shuffle` or `sequential` for **every round of the chain**, overriding any agent proposal. |
+| `--file_order_override` | unset | File visitation **order** for `sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written and must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
+
+Two supported chain modes:
+
+- **Forced comparison** — set the override. Every round resolves to it;
+  agent proposals are still recorded but not executed. Use this for a
+  controlled ordering experiment, where a varying ordering would
+  confound the comparison.
+- **Agent exploration** — leave the override unset. Ordering may vary
+  round to round as the agent proposes; each round records its own.
+
+**Resume rule:** the OVERRIDE is pinned in `run_invariants_lock.json`,
+so changing it mid-chain is a violation — the chain's control policy
+cannot silently shift underneath a comparison. Adding an override to a
+chain that started without one (or removing one) requires a new
+workspace, the same rule as a scope change or a HealthGate flip. The
+per-round RESOLVED ordering is deliberately **not** locked, since it may
+legitimately vary in exploration mode.
+
+Where to look afterwards: the tuner prints a `[data_order]` line per
+round naming all three levels; the training engine prints one per epoch
+with the resolved values and epoch seed; each iteration's `manifest.json`
+carries `ordering_by_experiment`, keyed per experiment.
+
+See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+under "Data-ordering resolution" for full semantics.
 
 ### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
 The orchestrator resolves the Python interpreter in this priority order

@@ -42,6 +42,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
@@ -284,6 +285,45 @@ def resolve_source_paths(source_paths: list[str]) -> list[str]:
     return resolved
 
 
+def _ordering_by_experiment(tune_output) -> list[dict]:
+    """Per-experiment ordering provenance for the iteration manifest.
+
+    One entry per record, each self-identifying by ``exp_id``, because
+    ordering may resolve differently across rounds of a single iteration.
+    Collapsing them into one iteration-level value would silently misreport
+    every round but one (§3.7 granularity rule).
+
+    Only ``resolved_*`` describes execution; ``proposed_*`` and
+    ``override_*`` explain why, and a rejected proposal is carried AS
+    rejected so it is never read as agent silence.
+
+    Best-effort by design: the manifest is a handoff aid, and a malformed
+    record must not take down an iteration that otherwise succeeded.
+    """
+    entries: list[dict] = []
+    for record in getattr(tune_output, "all_records", None) or []:
+        try:
+            ordering = ResolvedOrdering.from_record(record)
+            entries.append(
+                {
+                    "exp_id": getattr(record, "exp_id", None),
+                    "round_index": getattr(getattr(record, "memory", None), "round_index", None),
+                    "proposed_order_strategy": ordering.proposed_strategy,
+                    "proposed_file_order": ordering.proposed_file_order,
+                    "ordering_proposal_rejected": ordering.proposal_rejected,
+                    "ordering_proposal_rejection_reason": ordering.proposal_rejection_reason,
+                    "override_order_strategy": ordering.override_strategy,
+                    "override_file_order": ordering.override_file_order,
+                    "resolved_order_strategy": ordering.resolved_strategy,
+                    "resolved_file_order": ordering.resolved_file_order,
+                    "ordering_resolution_source": ordering.resolution_source,
+                }
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[WARN] could not read ordering provenance for a record: {exc}")
+    return entries
+
+
 def write_manifest(
     iter_dir: str,
     run_name: str,
@@ -385,6 +425,12 @@ def write_manifest(
             # "provided-but-not-consumed" is auditable).
             "chain_incumbent_used": chain_incumbent_used,
             "chain_incumbent_source": chain_incumbent_source,
+            # V19 PR 2 (§3.7) — ordering provenance, KEYED PER EXPERIMENT.
+            # Ordering can resolve differently for different rounds of one
+            # iteration (the agent may propose differently each round when no
+            # operator override is in force), so a single iteration-level
+            # value would misreport every round but one. Never collapse this.
+            "ordering_by_experiment": _ordering_by_experiment(tune_output),
         }
         # V19 PR 1 (§3.6) — immutable artifact identity: hash the exact
         # run_output this manifest describes, so resume can fail closed
@@ -543,6 +589,26 @@ def build_parser() -> argparse.ArgumentParser:
         "(current_run_best_formal_score + bypass_formal_time_budget_min_delta). "
         "Matches HyperparamTuningInput schema default 0.0. "
         "Set to 0.5 to only bypass when trial beats current best by >= 0.5 dB.",
+    )
+    parser.add_argument(
+        "--order_strategy_override",
+        type=str,
+        default=None,
+        choices=["shuffle", "sequential"],
+        help="V19 PR 2: force the training sample visitation order for every "
+        "round of this chain, overriding any agent proposal. Unset (default) "
+        "= the agent's proposal decides, falling back to 'shuffle' (pre-V19 "
+        "behavior). Pinned in the run-invariants lock — changing it mid-chain "
+        "is a violation.",
+    )
+    parser.add_argument(
+        "--file_order_override",
+        type=str,
+        default=None,
+        help="V19 PR 2: comma-separated file visitation ORDER for "
+        "--order_strategy_override sequential, e.g. '4,6,5,9,7,8'. Order is "
+        "preserved as written and must be a full permutation of the resolved "
+        "DataScope. Omit for ascending file index.",
     )
     parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
@@ -1003,6 +1069,11 @@ def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
         health_gate_files=args.health_gate_files,
         health_checks_config=args.health_checks_config,
         workspace=args.workspace,
+        # V19 PR 2 — the ordering override is chain control policy, so it
+        # is locked. Must match what the workflow and tuner lock for this
+        # same workspace.
+        ordering_override_strategy=args.order_strategy_override,
+        ordering_override_file_order=args.file_order_override,
     )
     return invariants
 
@@ -1123,6 +1194,12 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
             DataScope.from_cli(args.health_gate_files).file_indices
             if args.health_gate_files
             else None
+        )
+        # V19 PR 2 — a file ORDER is a sequence, so it must NOT go through
+        # DataScope.from_cli, which sorts and dedupes. Doing so would
+        # silently rewrite the operator's permutation into ascending order.
+        args.file_order_override = (
+            parse_file_order_cli(args.file_order_override) if args.file_order_override else None
         )
     except ValueError as e:
         parser.error(str(e))
@@ -1443,6 +1520,9 @@ def main():
             # whether the tuner's formal gates consume the reference.
             restored_chain_incumbent_score=state.chain_best_valid_formal_score,
             enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
+            # V19 PR 2 — operator ordering override for this chain.
+            order_strategy_override=args.order_strategy_override,
+            file_order_override=args.file_order_override,
             # External agents (Commit 6) — see Design Decisions 1 + 2 in
             # docs/commit_plan_ml_literature_review.md. The enable flag is
             # resolved above (CLI > YAML > False); the config path

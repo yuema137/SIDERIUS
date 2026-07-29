@@ -40,6 +40,7 @@ from agent.schemas.hyperparam_tuning import (
     serialize_expert_advice,
     validate_runtime_config,
 )
+from agent.schemas.ordering import parse_file_order_cli, resolve_ordering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
@@ -1788,6 +1789,11 @@ class HyperparamTuningAgent:
             health_gate_files=agent_input.health_gate_files,
             health_checks_config=health_checks_config_source,
             workspace=workspace,
+            # V19 PR 2 — the ordering OVERRIDE is chain control policy and is
+            # locked; the per-round RESOLVED ordering is deliberately not,
+            # since it may vary when no override is in force (§3.8).
+            ordering_override_strategy=agent_input.order_strategy_override,
+            ordering_override_file_order=agent_input.file_order_override,
         )
         health_config_sha256 = run_invariants.health_config_sha256
         if _effective_config_path is not None:
@@ -2002,6 +2008,12 @@ class HyperparamTuningAgent:
             # run_configs without these keys correctly resolve to null.
             "formal_strategy": agent_input.formal_strategy,
             "formal_eval_portion": agent_input.formal_eval_portion,
+            # V19 PR 2 — the run's ordering CONTROL POLICY (the operator
+            # override, or null for none). Per-round RESOLVED ordering is
+            # not recorded here: it may differ round to round when no
+            # override is in force, so it lives on each ExperimentRecord.
+            "order_strategy_override": agent_input.order_strategy_override,
+            "file_order_override": agent_input.file_order_override,
             "started_at": started_at,
         }
         run_config_path = os.path.join(workspace, f"run_config_{run_name}.json")
@@ -2260,8 +2272,11 @@ class HyperparamTuningAgent:
                         registry=self._registry,
                     )
 
-                    # Validate LLM output into ExperimentPlan (with fallback)
-                    plan = ExperimentPlan.with_defaults(decision)
+                    # Validate LLM output into ExperimentPlan (with fallback).
+                    # parse_with_fallback also reports an ordering proposal
+                    # that the fallback discarded, so a rejected proposal is
+                    # recorded rather than looking like agent silence.
+                    plan, rejected_ordering = ExperimentPlan.parse_with_fallback(decision)
 
                     # Apply hard overrides from operator config (before other
                     # overrides). FU-10 — an invalid effective plan raises
@@ -2354,6 +2369,20 @@ class HyperparamTuningAgent:
                     else:
                         eval_sampling_seed = (seed_hash >> 62) % (2**31)
 
+                    # V19 PR 2 — the ONE ordering resolution point. Combines
+                    # the agent's proposal (or its rejection) with the
+                    # operator's chain override; nothing downstream re-derives
+                    # precedence, and only the resolved values execute.
+                    ordering = resolve_ordering(
+                        resolved_scope=resolved_data_scope,
+                        proposed_strategy=plan.order_strategy,
+                        proposed_file_order=plan.file_order,
+                        override_strategy=agent_input.order_strategy_override,
+                        override_file_order=agent_input.file_order_override,
+                        rejected_proposal=rejected_ordering,
+                    )
+                    print(f"[data_order] {ordering.describes_execution()}")
+
                     trial_config = TrialConfig(
                         is_trial=plan.is_trial,
                         mode=mode,
@@ -2373,6 +2402,12 @@ class HyperparamTuningAgent:
                         train_sampling_seed=train_sampling_seed,
                         eval_sampling_seed=eval_sampling_seed,
                         train_base_seed=train_base_seed,
+                        # Ordering — RESOLVED values only (V19 PR 2).
+                        # executed_strategy() narrows to non-null inside
+                        # ordering.py; doing it here pushed pyright past its
+                        # per-function complexity budget for run().
+                        resolved_order_strategy=ordering.executed_strategy(),
+                        resolved_file_order=ordering.resolved_file_order,
                     )
 
                     # Validate integer relationships between dataset, PSD, ML segments
@@ -2455,6 +2490,9 @@ class HyperparamTuningAgent:
                         "train_portion": trial_config.train_portion,
                         "train_base_seed": trial_config.train_base_seed,
                         "eval_sample_set": eval_sample_set,  # validation data (from validation files)
+                        # Ordering — resolved values only (V19 PR 2)
+                        "order_strategy": trial_config.resolved_order_strategy,
+                        "file_order": trial_config.resolved_file_order,
                     }
 
                     # Clean params for records — exclude bulky SampleSet dicts
@@ -3646,6 +3684,23 @@ class HyperparamTuningAgent:
                     # fields below hold the EFFECTIVE strategies.
                     final_record["resolved_data_scope"] = resolved_data_scope
                     final_record["health_gate_enabled"] = agent_input.health_gate_enabled
+                    # V19 PR 2 — data-ordering provenance. Stamped for EVERY
+                    # round (trial and formal alike), unlike the trial-only
+                    # block below: ordering applies to all training. Only the
+                    # resolved_* pair describes execution; proposed/override
+                    # explain why, and a rejected proposal is recorded AS
+                    # rejected so it is never read as agent silence.
+                    final_record["proposed_order_strategy"] = ordering.proposed_strategy
+                    final_record["proposed_file_order"] = ordering.proposed_file_order
+                    final_record["ordering_proposal_rejected"] = ordering.proposal_rejected
+                    final_record["ordering_proposal_rejection_reason"] = (
+                        ordering.proposal_rejection_reason
+                    )
+                    final_record["override_order_strategy"] = ordering.override_strategy
+                    final_record["override_file_order"] = ordering.override_file_order
+                    final_record["resolved_order_strategy"] = ordering.resolved_strategy
+                    final_record["resolved_file_order"] = ordering.resolved_file_order
+                    final_record["ordering_resolution_source"] = ordering.resolution_source
                     # Trial context
                     if trial_config.is_trial:
                         final_record["is_trial"] = True
@@ -4256,6 +4311,30 @@ def main() -> int:
         choices=["snapshot", "anchors", "target"],
         help="Training-side sampling strategy in formal mode (default: snapshot).",
     )
+
+    # V19 PR 2 — data-ordering OVERRIDE. Ordering is agent-proposable; these
+    # flags let an operator force one value for the whole chain (e.g. for a
+    # controlled comparison). Unset = the agent's proposal decides, falling
+    # back to 'shuffle'. The override is pinned in the run-invariants lock.
+    parser.add_argument(
+        "--order_strategy_override",
+        type=str,
+        default=None,
+        choices=["shuffle", "sequential"],
+        help="Force the training sample visitation order for every round, "
+        "overriding any agent proposal. Unset (default) = the agent decides, "
+        "falling back to 'shuffle' (the pre-V19 behavior).",
+    )
+    parser.add_argument(
+        "--file_order_override",
+        type=str,
+        default=None,
+        help="Comma-separated file visitation ORDER for "
+        "--order_strategy_override sequential, e.g. '4,6,5,9,7,8'. Order is "
+        "preserved as written and must be a full permutation of the resolved "
+        "DataScope. Range syntax is rejected — a range cannot express an "
+        "order. Omit for ascending file index.",
+    )
     parser.add_argument(
         "--formal_portion",
         type=float,
@@ -4582,6 +4661,15 @@ def main() -> int:
     input_dict["formal_portion"] = args.formal_portion
     input_dict["formal_train_portion"] = args.formal_train_portion
     input_dict["formal_eval_portion"] = args.formal_eval_portion
+    # V19 PR 2 — ordering OVERRIDE (operator control). Forwarded only when
+    # set, so an unset override leaves the agent's proposal (or the default)
+    # in charge and produces exactly the pre-PR2 configuration.
+    if args.order_strategy_override is not None:
+        input_dict["order_strategy_override"] = args.order_strategy_override
+    if args.file_order_override is not None:
+        # NOT DataScope.from_cli — that sorts and dedupes, which would
+        # silently rewrite the operator's permutation into ascending order.
+        input_dict["file_order_override"] = parse_file_order_cli(args.file_order_override)
 
     if args.human_advice:
         input_dict["human_advice"] = args.human_advice

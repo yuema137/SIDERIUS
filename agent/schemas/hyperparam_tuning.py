@@ -15,6 +15,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent.schemas.ordering import (
+    OrderingValidationError,
+    OrderStrategy,
+    RejectedOrderingProposal,
+    resolve_ordering,
+    validate_ordering_shape,
+)
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
@@ -437,6 +444,72 @@ class ExperimentRecord(BaseModel):
             "ones (e.g. 'partial_data_scope'). None = no normalization."
         ),
     )
+    # --- Data-ordering provenance (V19 PR 2) ---
+    # The three levels kept distinct, so a reader can reconstruct "the agent
+    # proposed X, the operator overrode with Y, Z actually ran, because S"
+    # from this record alone. ONLY the resolved_* fields describe execution:
+    # an overridden proposal must never be reported as what ran. All default
+    # to None so pre-PR2 records stay readable — a record with no ordering
+    # fields is interpreted via ResolvedOrdering.legacy_default().
+    proposed_order_strategy: str | None = Field(
+        default=None,
+        description=(
+            "Ordering the agent proposed, REJECTED OR NOT. None = no proposal "
+            "(or legacy record). Typed as str because a rejected proposal is "
+            "preserved verbatim and may not be a valid strategy."
+        ),
+    )
+    proposed_file_order: list[int] | None = Field(
+        default=None,
+        description="File order the agent proposed, if any (rejected or not).",
+    )
+    ordering_proposal_rejected: bool = Field(
+        default=False,
+        description=(
+            "True when an ordering proposal arrived but was not applied. "
+            "Downstream must not read a rejected proposal as agent silence: "
+            "the agent DID try to steer this round and was overruled."
+        ),
+    )
+    ordering_proposal_rejection_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why the proposal was not applied — distinguishing an invalid "
+            "ordering from one discarded because another plan field failed."
+        ),
+    )
+    override_order_strategy: OrderStrategy | None = Field(
+        default=None,
+        description="Operator ordering override in force for the chain, if any.",
+    )
+    override_file_order: list[int] | None = Field(
+        default=None,
+        description="File order the operator forced, if any.",
+    )
+    resolved_order_strategy: OrderStrategy | None = Field(
+        default=None,
+        description=(
+            "The ordering that ACTUALLY EXECUTED for this round — the only "
+            "ordering field that describes execution. None on legacy records "
+            "(read as 'shuffle', source 'legacy_default')."
+        ),
+    )
+    resolved_file_order: list[int] | None = Field(
+        default=None,
+        description=(
+            "The file visitation order that ACTUALLY EXECUTED. None when the "
+            "resolved strategy was 'shuffle', or on legacy records."
+        ),
+    )
+    ordering_resolution_source: (
+        Literal["operator_override", "agent_proposal", "default", "legacy_default"] | None
+    ) = Field(
+        default=None,
+        description=(
+            "Which level supplied the executed ordering. None on records "
+            "written before this field existed."
+        ),
+    )
     file_vector: list[float | None] | None = Field(
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
@@ -526,6 +599,27 @@ class TrialConfig(BaseModel):
         description="Training/validation file index. Only used in single_file mode.",
     )
 
+    # --- Data ordering, RESOLVED (V19 PR 2) ---
+    # Execution truth for this round: already resolved from the agent
+    # proposal and any operator override. The training subprocess receives
+    # ONLY these values and never learns how they were reached. Full
+    # provenance (proposal, override, source) lives on ExperimentRecord.
+    resolved_order_strategy: OrderStrategy = Field(
+        default="shuffle",
+        description=(
+            "The visitation order that will execute. Default 'shuffle' is "
+            "the pre-PR2 behavior: a global uniform shuffle."
+        ),
+    )
+    resolved_file_order: list[int] | None = Field(
+        default=None,
+        description=(
+            "The file visitation order that will execute. None exactly when "
+            "resolved_order_strategy is 'shuffle'; otherwise a full "
+            "permutation of the resolved DataScope."
+        ),
+    )
+
     # --- Reproducibility seeds ---
     train_sampling_seed: int = Field(
         description="Seed for build_sample_set() to select training PSD segments.",
@@ -551,6 +645,12 @@ class TrialConfig(BaseModel):
             raise ValueError(
                 "train_validation_align=True but seeds differ: "
                 f"train={self.train_sampling_seed}, eval={self.eval_sampling_seed}."
+            )
+        if self.resolved_order_strategy == "shuffle" and self.resolved_file_order is not None:
+            raise ValueError(
+                "resolved_file_order must be None when resolved_order_strategy="
+                "'shuffle' — a file order is meaningful only for sequential "
+                "ordering, and carrying a stale one would misreport what ran."
             )
         return self
 
@@ -656,6 +756,31 @@ class ExperimentPlan(BaseModel):
         description="When True, train and eval scopes use the same segment indices.",
     )
 
+    # --- Data ordering PROPOSAL (V19 PR 2) ---
+    # Intent, not execution truth. The resolver combines this with any
+    # operator override; only the resolved value reaches training and only
+    # the resolved value describes what ran (see agent/schemas/ordering.py).
+    order_strategy: OrderStrategy | None = Field(
+        default=None,
+        description=(
+            "PROPOSED visitation order for training samples: 'shuffle' "
+            "(global uniform shuffle) or 'sequential' (fixed file order, "
+            "samples shuffled within each file). None = no proposal, which "
+            "leaves the default in place. An operator override, when set, "
+            "wins over this proposal — the proposal is still recorded."
+        ),
+    )
+    file_order: list[int] | None = Field(
+        default=None,
+        description=(
+            "PROPOSED file visitation order, valid only alongside "
+            "order_strategy='sequential'. Must ultimately be a full "
+            "permutation of the resolved DataScope (ordering must not change "
+            "selection); the scope-dependent check runs at resolution. None "
+            "with 'sequential' = ascending scope order."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_target_files(self):
         """target_files required when using trial target strategy."""
@@ -665,10 +790,36 @@ class ExperimentPlan(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_ordering_proposal(self):
+        """Structural validation of the ordering proposal (scope-independent).
+
+        Scope-dependent validation (full permutation of the resolved
+        DataScope) belongs to the resolver, which is the only place that
+        knows the resolved scope AND whether an override supersedes this
+        proposal. Note the proposal is validated even when an override will
+        discard it — malformed agent output is a defect to surface, not to
+        mask (see agent/schemas/ordering.py).
+        """
+        validate_ordering_shape(self.order_strategy, self.file_order, level="agent proposal")
+        return self
+
     @classmethod
     def with_defaults(cls, raw: dict[str, Any] | list[Any]) -> ExperimentPlan:
+        """Validate raw LLM output, falling back to defaults on invalid fields.
+
+        Thin wrapper over :meth:`parse_with_fallback` for callers that do not
+        need to know whether an ordering proposal was discarded.
         """
-        Validate raw LLM output, falling back to defaults on invalid trial fields.
+        plan, _rejected_ordering = cls.parse_with_fallback(raw)
+        return plan
+
+    @classmethod
+    def parse_with_fallback(
+        cls, raw: dict[str, Any] | list[Any]
+    ) -> tuple[ExperimentPlan, RejectedOrderingProposal | None]:
+        """
+        Validate raw LLM output, reporting any ordering proposal that was lost.
 
         If the full dict fails validation (e.g. trial_portion=5.0), strip the
         trial fields and retry — preserving the LLM's experiment design while
@@ -678,6 +829,25 @@ class ExperimentPlan(BaseModel):
         ``[{...}]`` instead of ``{...}`` — the input type therefore admits
         ``list[Any]`` to honestly reflect that runtime contract. Unwrap that
         case before validation; any other shape raises a clear TypeError.
+
+        Ordering proposals ride this same path: a bad one does not kill the
+        round, which is the established treatment of any invalid LLM trial
+        field. But falling back must never be SILENT — a rejected proposal is
+        materially different from no proposal, and downstream interpretation
+        has to be able to tell them apart. So when the fallback discards an
+        ordering proposal, this method returns it alongside the plan, with a
+        reason that distinguishes the two possible failures:
+
+        - the ordering fields were themselves invalid, or
+        - the ordering was well-formed but was discarded because a DIFFERENT
+          plan field failed validation.
+
+        Reporting the second as the first would blame the agent's ordering for
+        someone else's defect.
+
+        Returns:
+            ``(plan, rejected_ordering)`` — the second element is None when no
+            ordering proposal was lost.
         """
         if isinstance(raw, list):
             if len(raw) == 1 and isinstance(raw[0], dict):
@@ -691,8 +861,9 @@ class ExperimentPlan(BaseModel):
         if not isinstance(raw, dict):
             raise TypeError(f"ExperimentPlan expected a dict, got {type(raw).__name__}.")
         try:
-            return cls.model_validate(raw)
-        except Exception:
+            return cls.model_validate(raw), None
+        except Exception as exc:
+            plan_error = str(exc)
             # Keep only experiment fields, let trial fields take defaults.
             # Use alias names (model_config, train_config, loss_config) since
             # that's what the LLM outputs.
@@ -709,7 +880,50 @@ class ExperimentPlan(BaseModel):
                 f"[ExperimentPlan] LLM returned invalid trial fields — "
                 f"falling back to defaults. Kept keys: {list(safe.keys())}"
             )
-            return cls.model_validate(safe)
+            rejected = cls._describe_lost_ordering(raw, plan_error)
+            if rejected is not None:
+                print(f"[ExperimentPlan] ordering proposal not applied: {rejected.reason}")
+            return cls.model_validate(safe), rejected
+
+    @staticmethod
+    def _describe_lost_ordering(
+        raw: dict[str, Any], plan_error: str
+    ) -> RejectedOrderingProposal | None:
+        """Report the ordering proposal the fallback discarded, if there was one.
+
+        Distinguishes "your ordering was invalid" from "your ordering was fine
+        but the plan failed elsewhere" by re-validating the ordering fields on
+        their own. Without that split, an unrelated ``trial_portion`` error
+        would be recorded as an ordering defect.
+        """
+        strategy = raw.get("order_strategy")
+        file_order = raw.get("file_order")
+        if strategy is None and file_order is None:
+            return None  # nothing was proposed, so nothing was lost
+
+        try:
+            validate_ordering_shape(strategy, file_order, level="agent proposal")
+        except OrderingValidationError as ordering_exc:
+            reason = f"the ordering proposal itself was invalid: {ordering_exc}"
+        except Exception:
+            # Not even shape-checkable (e.g. a non-list file_order); the plan
+            # error already describes it.
+            reason = f"the ordering proposal was not well-formed: {plan_error}"
+        else:
+            reason = (
+                "the ordering proposal was well-formed but was discarded with "
+                "the other trial fields because the plan failed validation: "
+                f"{plan_error}"
+            )
+        return RejectedOrderingProposal(
+            strategy=strategy if isinstance(strategy, str) else None,
+            file_order=(
+                file_order
+                if isinstance(file_order, list) and all(isinstance(i, int) for i in file_order)
+                else None
+            ),
+            reason=reason,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1343,6 +1557,47 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- Data ordering OVERRIDE (V19 PR 2) ---
+    # Operator control, stable for a chain. When set it wins over any agent
+    # proposal; the proposal is still recorded. Pinned in the run-invariants
+    # lock so the chain's control policy cannot change mid-flight — the
+    # RESOLVED value is deliberately not locked, since it may vary per round
+    # when no override is active.
+    order_strategy_override: OrderStrategy | None = Field(
+        default=None,
+        description=(
+            "Operator override forcing the training sample visitation order "
+            "for the whole chain: 'shuffle' or 'sequential'. None (default) "
+            "= no override, so the agent's proposal decides, falling back to "
+            "'shuffle'. Set this to run a controlled comparison in which "
+            "every round uses the same ordering."
+        ),
+    )
+    file_order_override: list[int] | None = Field(
+        default=None,
+        description=(
+            "Operator-forced file visitation order, valid only alongside "
+            "order_strategy_override='sequential'. Must be a full permutation "
+            "of the resolved DataScope (checked at startup, once the scope is "
+            "resolved). None with 'sequential' = ascending scope order."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_ordering_override(self):
+        """Structural validation of the ordering override (scope-independent).
+
+        The full-permutation check needs the resolved DataScope and therefore
+        runs in ``validate_runtime_config`` (same schema/runtime split as the
+        DataScope rules — see docs/design/enable_partial_file_list.md).
+        """
+        validate_ordering_shape(
+            self.order_strategy_override,
+            self.file_order_override,
+            level="operator override",
+        )
+        return self
+
     @model_validator(mode="after")
     def _validate_health_gate_consistency(self):
         """Dataset-independent internal consistency only (see the schema/
@@ -1589,12 +1844,28 @@ def validate_runtime_config(
         The resolved scope (sorted list of allowed file indices).
 
     Raises:
-        ValueError: Out-of-range scope; partial scope with a non-snapshot
-            ``formal_strategy`` (illegal operator configuration); partial
-            scope with gates enabled but no explicit ``health_gate_files``;
-            single-file mode with ``file_index`` outside the scope.
+        ValueError: Out-of-range scope; an ordering override whose file order
+            is not a full permutation of the resolved scope; partial scope
+            with a non-snapshot ``formal_strategy`` (illegal operator
+            configuration); partial scope with gates enabled but no explicit
+            ``health_gate_files``; single-file mode with ``file_index``
+            outside the scope.
     """
     resolved = agent_input.data_scope.resolve(dataset)
+
+    # Ordering override: the scope-dependent half of the ordering contract
+    # (the structural half ran in the schema validator). Checked for EVERY
+    # scope, full or partial, so it precedes the full-scope early return
+    # below. Resolving with no proposal is enough to validate the override
+    # itself — the per-round resolution that mixes in the agent's proposal
+    # happens later, in the tuner.
+    if agent_input.order_strategy_override is not None:
+        resolve_ordering(
+            resolved_scope=resolved,
+            override_strategy=agent_input.order_strategy_override,
+            override_file_order=agent_input.file_order_override,
+        )
+
     is_partial = resolved != list(range(dataset.num_files))
     if not is_partial:
         return resolved

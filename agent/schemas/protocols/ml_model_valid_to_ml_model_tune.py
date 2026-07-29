@@ -22,6 +22,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 from typing import Any, Literal
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
+from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
@@ -69,6 +70,14 @@ def local_validated_model(
     # reconstruction/provenance upstream are unconditional. Default OFF.
     current_run_best_formal_score: float | None = None,
     enable_chain_incumbent_formal_gates: bool = False,
+    # V19 PR 2 — operator data-ordering OVERRIDE, threaded as named
+    # protocol parameters (same discipline as the incumbent reference
+    # above). The workflow supplies the operator's chain-level control;
+    # the tuner resolves it against each round's agent proposal. ``None``
+    # = no override, so the agent's proposal decides and the default
+    # ('shuffle') applies when it proposes nothing.
+    order_strategy_override: OrderStrategy | None = None,
+    file_order_override: list[int] | None = None,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
@@ -248,6 +257,8 @@ def local_validated_model(
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
         current_run_best_formal_score=current_run_best_formal_score,
         enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
+        order_strategy_override=order_strategy_override,
+        file_order_override=file_order_override,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,

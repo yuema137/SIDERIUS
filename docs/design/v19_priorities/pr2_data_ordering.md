@@ -37,23 +37,48 @@ green with recorded evidence.
             replaced (agent-proposable + operator-overridable,
             precedence override > proposal > default); D5 two-stage
             validation. Doc LOCKED.
-[ ] P2-CA — commit A: minimal indexed-dataset seam + genericity
+[x] P2-CA — commit A: minimal indexed-dataset seam + genericity
             contract doc + TIDMAD coupling ledger + second-dataset
             contract tests (baseline §1.3 artifacts)
-[ ] P2-CB — commit B (three sub-commits CB1/CB2/CB3, §6): ordering
-            proposal/override/resolution schema + single resolver +
-            chain-lock override fields; engine consumes resolved
-            values only + [data_order] logs; end-to-end propagation
-            incl. interpreter-visible resolved context; tests
-[ ] P2-V1 — pre-gate sweep: targeted unit + pseudo integration
-            (default-parity + exact-visitation both deterministic)
-[ ] P2-V2 — Gate 2: bounded real smoke (cold-start, per the standing
-            rule; launch plan requires operator approval)
-[ ] P2-DOC — node/skill documentation sync (operator rule,
+            (split into CA-1 code 999727a + CA-2 docs; 20 new tests,
+            26 + 49 + 75 green; one pre-existing unrelated lilab
+            failure documented as FU-P2-4)
+[x] P2-CB — commit B (§6): ordering proposal/override/resolution
+            schema + single resolver + chain-lock override fields;
+            engine consumes resolved values only + [data_order] logs;
+            end-to-end propagation incl. interpreter-visible resolved
+            context; tests.
+            (7 git commits: CB1a a720b06 resolver, CB1b 4fe9f15
+            schema, CB1c f2cb18d lock, CB2 3d3054a engine,
+            CB3a 83c925d rejection recording, CB3b 2104a53
+            interpreter, CB3c a3fc896 propagation, CB3d1 0f8c3e0
+            manifest, CB3d2 3290cab operator surface)
+[x] P2-V1 — pre-gate sweep: targeted unit + pseudo integration
+            (every resolution case deterministic)
+            (1d55e68; new pseudo suite 7 green; tests/unit 4475
+            passed / 1 xfailed [FU-P2-4, issue #138];
+            tests/integration/workflows 53 passed / 8 skipped after
+            the FU-7 repair e434b78)
+[x] P2-V2 — Gate 2: bounded real smoke (cold-start) —
+            **PASS WITH DOCUMENTED LIMITATIONS** (attempt 2,
+            2026-07-28). Ordering confirmed on real training at six
+            layers; the non-ascending permutation [9,7,5,4,8,6]
+            survived every layer across 4 trained rounds and 2
+            architectures; RT2 within ±2.5%; zero watchdog kills.
+            LIMITATION: no HealthGate-valid formal result (every
+            trained model collapsed on the deliberately minimal smoke
+            config) and no live formal round — formal ordering is
+            established by code-path audit + a deterministic
+            formal-branch test, not by this smoke. Gate found and
+            fixed a provenance defect (e0a376d, not_executed).
+[x] P2-DOC — node/skill documentation sync (operator rule,
             2026-07-28): every node and skill touched by this PR has
             its .md updated — CLI arguments, default values, and
-            behavior explanations current. Very last step before
-            merge; see §6 P2-DOC block.
+            behavior explanations current.
+            (73fb98d; diff sweep found exactly 3 touched node/skill
+            dirs, all covered, + docs/running_chain_test.md;
+            agent/skills/training_skill/training_skill.md CREATED —
+            the repo's first skill .md)
 [ ] P2-S  — stop-and-show; implementation PR merged (default remains
             "shuffle"; no strategy recommendation implied)
 [ ] P2-E  — matched-budget empirical strategy evaluation (separate
@@ -568,8 +593,15 @@ the iteration manifest — names below are canonical; if
 implementation shortens them, the mapping is documented here):
 
 ```text
-proposed_order_strategy    | None when the agent proposed nothing
-proposed_file_order        | None when not proposed
+proposed_order_strategy    | what the agent proposed, REJECTED OR NOT;
+                           | None only when it proposed nothing
+proposed_file_order        | ditto
+ordering_proposal_rejected | True when a proposal arrived but was not
+                           | applied (operator requirement, 2026-07-28)
+ordering_proposal_rejection_reason
+                           | why — distinguishing an invalid ordering
+                           | from one discarded because ANOTHER plan
+                           | field failed validation
 override_order_strategy    | None when no operator override
 override_file_order        | None when not overridden
 resolved_order_strategy    | always present for executed rounds
@@ -578,10 +610,36 @@ ordering_resolution_source | "operator_override" | "agent_proposal"
                            | "default"
 ```
 
+**Rejected proposals are recorded, never silently dropped** (operator
+clarification, 2026-07-28). Falling back from a malformed LLM ordering
+proposal is acceptable — it is the established `with_defaults`
+treatment of any bad trial field, so one malformed token cannot kill a
+round — but the fallback must not be SILENT. A rejected proposal is
+materially different from no proposal: the agent DID try to steer the
+round and was overruled. Every rejection therefore exposes: that a
+proposal was present; that it was rejected; the reason; the resolved
+ordering that actually ran; and whether that came from the override or
+the default. `ordering_resolution_source` is never `agent_proposal`
+for a rejected proposal, so an override is never attributed to the
+agent. Two rejection KINDS are distinguished, because reporting the
+second as the first would misattribute the defect:
+- the ordering fields were themselves invalid;
+- the ordering was well-formed but discarded because a different plan
+  field failed validation.
+
 A reviewer must be able to reconstruct, from any round record alone:
 "Agent proposed sequential; operator override shuffle; actually
 executed shuffle; source operator_override." An overridden proposal
 is NEVER described as executed.
+
+**Where each ordering fact is persisted** (three distinct artifacts —
+do not conflate them):
+
+| Artifact | Stores | Why |
+|---|---|---|
+| `run_config_{run}.json` | the run-level operator OVERRIDE policy (`order_strategy_override`, `file_order_override`; null = none) | One control decision for the whole run. The per-round resolved value does NOT belong here — it may differ round to round when no override is in force. |
+| `ExperimentRecord` (per round) | that round's full nonet: proposed (rejected or not), rejection flag + reason, override, resolved, resolution source | The per-round source of truth. Ordering can vary between rounds, so each round carries its own. |
+| iteration `manifest.json` | round/experiment-KEYED ordering provenance (`exp_id` + the same fields per entry) — **CB3-d, not yet implemented** | The cross-iteration handoff. Keyed per experiment so multiple rounds are never collapsed into one unlabelled iteration-level value. |
 
 **Manifest granularity rule (operator clarification, 2026-07-28):**
 ordering may resolve differently across rounds within one workflow
@@ -784,32 +842,56 @@ the same constructor.
 - Dependencies: none (first commit of the PR).
 
 **Implementation plan.**
-- [ ] Write `docs/design/genericity_contract.md` per §3.2 item 1:
+- [x] Write `docs/design/genericity_contract.md` per §3.2 item 1:
       indexed-dataset contract; the proposal/override/resolution
       configuration principle (operator statement verbatim) with
       ordering named as its first concrete implementation; the
       permissions taxonomy (agent-settable / operator-overridable /
       chain-locked / frozen); task-pack + metric PLACEHOLDER
       sections; the §1.3 update-this-doc-first rule.
-- [ ] Write `docs/design/tidmad_coupling_ledger.md`: entries with
-      file:line from the P2-A audits (inlined template sites incl.
-      the non-training ones left in place, `log_5.27`/`s_max`
-      constants, TIDMAD-worded prompt fragments, 20-file/200-segment
-      assumptions), each marked decoupled/remaining; PLUS the
-      configuration-migration inventory (§3.2 item 4: sampling
-      strategy, train_portion, lr/optimizer, DataScope, resource
-      budgets, HealthGate policy inputs — with expected permissions
-      class, NOT migrated in PR 2).
-- [ ] Add the filename-pattern validator (§3.2 item 3): parse
+      *(4 seams; §1 marked partially-implemented — commit A moved
+      the TEMPLATE behind the seam, not the CHOICE of dataset, which
+      is recorded as a later ladder step.)*
+- [x] Write `docs/design/tidmad_coupling_ledger.md`: entries with
+      file:line from the P2-A audits, each marked
+      DECOUPLED/REMAINING/PARTIAL/FROZEN; PLUS the
+      configuration-migration inventory (§3.2 item 4).
+      *(6 sections. Every cited line re-verified by grep before
+      writing. Newly surfaced while seeding, beyond the design's
+      list: `execute_tools/array2h5.py:25` `create_abra_file` —
+      TIDMAD vocabulary in a public function NAME, not just a
+      literal; `execute_tools/per_file_best.py:62` — a SECOND
+      `LOG_BASE = 5.27` copy; and the denoised-OUTPUT naming family
+      (`run_comparison.py:445` etc.), flagged as needing its own
+      contract decision since it names artifacts SIDERIUS produces
+      rather than files it reads.)*
+- [x] Add the filename-pattern validator (§3.2 item 3): parse
       replacement fields via `string.Formatter().parse`, require a
       usable `file_index` field; error at config construction.
-      (NOT a format()-raises assumption — `str.format()` ignores
-      absent placeholders.)
-- [ ] Refactor the four `train_engine_sandbox.py` sites to consume
-      `TIDMAD.training_file_pattern`.
-- [ ] Add `tests/unit/execute_tools/test_dataset_contract.py`:
+      *(Implemented as a `field_validator` over BOTH pattern fields
+      rather than a model-validator — the check is per-field and
+      needs no cross-field data; `field_validator` was already
+      imported. Empirically probed all 11 pattern shapes first: only
+      the missing-placeholder case is silent, so the validator does
+      TWO checks — presence (the silent case) and a format probe
+      with `_PATTERN_PROBE_INDEX = 7` (moves the loud cases from
+      training time to construction time). Also added
+      `DatasetConfig.training_file_name()` as the single build
+      point; deliberately NO `validation_file_name()` — it would be
+      dead code, since validation templates live in `scripts/` and
+      are ledger entries.)*
+- [x] Refactor the four `train_engine_sandbox.py` sites to consume
+      `TIDMAD.training_file_pattern` *(via `training_file_name`;
+      import added at `:19-20`, ruff re-sorted)*.
+- [x] Add `tests/unit/execute_tools/test_dataset_contract.py`:
       synthetic `DatasetConfig` fixture (different pattern, file
       count, segment count) driving dataset path construction.
+      *(6 tests. Loader-consumption is probed by monkeypatching the
+      pattern and reading the loader's OWN missing-file warning —
+      proves the path is config-derived without needing HDF5
+      fixtures. Validator/parity tests went into the EXISTING
+      `test_dataset_config.py` (14 added) since they test that
+      module; the new file holds only the contract-level tests.)*
 
 **Validation plan.**
 - Unit: path-resolution parity (per audited site, resolved TIDMAD
@@ -847,13 +929,39 @@ the same constructor.
   (warning + skip, `train_engine_sandbox.py:295-297`) — this commit
   must not change it.
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-      (counts + wall time recorded here after run)
-- [ ] `.venv/bin/python -m pytest tests/unit/core/test_sandbox_executor.py -q`
-- [ ] `.venv/bin/ruff check` + `.venv/bin/ruff format --check` on
-      touched files
-- [ ] Any test not run: listed here with the reason — never claimed.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/test_dataset_config.py
+      tests/unit/execute_tools/test_dataset_contract.py -q` →
+      **26 passed in 0.79s** (14 new in test_dataset_config +
+      6 new in test_dataset_contract, on top of the 6 pre-existing).
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q` →
+      **493 passed, 1 failed in 5.25s**. The single failure is
+      PRE-EXISTING and unrelated:
+      `test_scoring_helpers.py::TestPostPathAReferenceConsistency::
+      test_post_path_a_reference_consistency`. **Proven pre-existing**
+      by stashing all P2-CA changes and re-running — byte-identical
+      failure (`Obtained: -8.260916269975333`, `Expected:
+      -8.260971502899364 ± 8.3e-09`). It compares
+      `file_vector_to_log_space` against on-disk ground truth in
+      `/home/klz/Data/SIDEREIS_DATA/ground_truth/`; it is
+      `pytest.skip`-guarded when that data is absent, so CI skips it
+      and only lilab sees it. Either the on-disk ground truth is
+      stale or the helper and `compute_ground_truth.py` have drifted
+      (~5e-5 relative). **NOT fixed here — out of P2-CA scope;
+      flagged to operator** (see FU-P2-4).
+- [x] `.venv/bin/python -m pytest tests/unit/core/test_sandbox_executor.py -q`
+      → **49 passed in 0.81s**.
+- [x] Post-format re-run of all affected suites →
+      **75 passed in 0.83s**.
+- [x] `.venv/bin/ruff check` → clean on all 4 touched files (one
+      `I001` import-sort auto-fixed in `train_engine_sandbox.py`).
+      `.venv/bin/ruff format --check` → 4 files formatted
+      (`dataset_config.py` + `test_dataset_config.py` reformatted,
+      then re-tested green).
+- [x] Tests NOT run, with reason: no pseudo/integration or Gate
+      tests — this commit has zero behavior change, and the design
+      lists none for P2-CA. `pyright` not run (lilab Node < 14,
+      PR #123 precedent).
 
 **Commit boundary.** Docs + template consumption + contract test
 ONLY. No ordering code, no schema fields, no cleanup beyond the four
@@ -897,34 +1005,115 @@ reviewable (and revertible) independently of loader mechanics.
   principle this commit implements).
 
 **Implementation plan.**
-- [ ] `ExperimentPlan` proposal fields:
+- [x] `ExperimentPlan` proposal fields:
       `order_strategy: Literal["shuffle","sequential"] | None = None`,
       `file_order: list[int] | None = None` (proposal semantics —
       intent, not execution truth); plan validator rejects
       internally inconsistent proposals (file_order with proposed
       shuffle; duplicates; empty list). Scope-dependent checks
       deferred to resolution.
-- [ ] `HyperparamTuningInput` override fields (conceptually
+      *(Validator `_validate_ordering_proposal` delegates to the
+      shared `validate_ordering_shape`, so proposal and override use
+      ONE structural rule set. **Interaction found with the
+      pre-existing `with_defaults` contract**: a structurally
+      invalid ordering proposal makes strict validation fail, so the
+      established LLM-robustness fallback drops it with the other
+      trial fields and the round proceeds with NO proposal
+      (resolving to override/default), warning printed. Kept as-is —
+      that is the documented treatment of any bad LLM trial field
+      (`trial_portion=5.0` etc.), and making ordering uniquely fatal
+      would let one malformed token kill a round. It does not weaken
+      D5, which concerns an override masking a proposal that DID
+      arrive; every proposal reaching the resolver is validated
+      there. Documented in the `with_defaults` docstring.)*
+- [x] `HyperparamTuningInput` override fields (conceptually
       `order_strategy_override` / `file_order_override` — exact
       names after auditing nearby CLI conventions); structural
       validation at the schema layer.
-- [ ] `ResolvedOrdering` type + ONE resolver function (§3.6):
+      *(Names kept as `order_strategy_override` /
+      `file_order_override`.)*
+- [x] `ResolvedOrdering` type + ONE resolver function (§3.6):
       precedence override > proposal > default; file_order
       resolution rules incl. shuffle → None (no silent retention of
       a proposed sequential order); full-permutation check vs
       resolved scope on the RESOLVED value.
-- [ ] `TrialConfig` gains resolved fields only
+      *(Landed as a DEDICATED module `agent/schemas/ordering.py`
+      (~310 lines) rather than inside the 1600-line
+      `hyperparam_tuning.py` — the design left the home to
+      implementation choice, and the project rule "each module
+      testable individually, pluggable, decoupled" favors a separate
+      module. Public API: `OrderStrategy`,
+      `OrderingResolutionSource`, `DEFAULT_ORDER_STRATEGY`,
+      `OrderingValidationError`, `validate_ordering_shape`,
+      `ResolvedOrdering` (frozen, + `.legacy_default()`,
+      `.describes_execution()`), `resolve_ordering`.
+      `resolve_ordering` re-runs structural validation on both
+      levels so a caller that skipped the intake check cannot
+      smuggle a malformed value past resolution. 26 tests green.)*
+      **Under-specification resolved during implementation** (§3.6
+      did not define "override is present" when only
+      `file_order_override` is set): a uniform structural rule now
+      applies at BOTH levels — a `file_order` may be supplied only
+      alongside an explicit `sequential` strategy AT THE SAME LEVEL.
+      This follows from the design's own "file_order: sequential
+      only" and makes override-presence unambiguous
+      (`override_strategy is not None`). Recorded here rather than
+      silently chosen.
+- [x] `TrialConfig` gains resolved fields only
       (`resolved_order_strategy`, `resolved_file_order`) — the
       engine-facing single source of truth per round.
-- [ ] `ExperimentRecord` provenance septet (§3.7):
+      *(Plus a cross-field validator: `resolved_file_order` must be
+      None under `shuffle`, so a stale order can never misreport
+      what ran.)*
+- [x] `ExperimentRecord` provenance septet (§3.7):
       proposed/override/resolved strategy + file_order +
       `ordering_resolution_source`.
-- [ ] `RunInvariants`: `ordering_override_strategy` /
+      *(All seven default to None so pre-PR2 records stay
+      constructible and readable; placed beside the existing
+      `planned_*` / `strategy_normalization_reason` provenance,
+      which is the same proposed-vs-effective idea this
+      generalizes.)*
+- [x] Resolution-stage wiring in `validate_runtime_config`.
+      *(**Placement bug caught by test**: the function early-returns
+      for FULL scopes, so an ordering check appended after it would
+      silently never run outside partial-scope runs. The override
+      validation now precedes that return, with a regression test
+      (`test_override_is_validated_under_a_FULL_scope_too`) pinning
+      it.)*
+- [x] `RunInvariants`: `ordering_override_strategy` /
       `ordering_override_file_order` (defaults None; legacy locks
       load as no-override, §3.8) + canonical-set inclusion +
       `build_run_invariants` plumbing.
-- [ ] Persist the septet in `run_config_*.json` (P1-C5 A4
+      *(Both added to `_CANONICAL`, so drift is reported per-field
+      by the existing violation machinery with locked-vs-attempted
+      values. `build_run_invariants` gained two defaulted keyword
+      params — all four production call sites
+      (`run_comparison.py:1186`, `model_exploration.py:1755`,
+      `run_one_iteration.py:1000`,
+      `ml_hyperparameter_tune_agent.py:1785`) are unchanged and
+      produce no-override locks until CB3 wires the operator value
+      through. The file order is copied into the lock so it cannot
+      alias a caller's mutable list.
+      **One pre-existing test updated**:
+      `test_run_invariants.py::test_lock_file_is_plain_json` asserted
+      an EXACT key set of the pre-PR2 lock schema; extended with the
+      two new keys (both asserted None by default). Test-expectation
+      change only — no production behavior was altered to make it
+      pass.)*
+- [x] Persist the ordering policy in `run_config_*.json` (P1-C5 A4
       precedent).
+      **SUPERSEDED as originally written.** This item said "persist the
+      SEPTET", which was drafted in rev 2 — before the operator's §3.7
+      three-artifact clarification. Persisting per-round values in
+      `run_config` would contradict that split and is in fact
+      impossible: `run_config` is written ONCE at run startup, so it
+      cannot hold values that legitimately differ round to round.
+      What is implemented (`ml_hyperparameter_tune_agent.py:2015-2016`)
+      is the correct target: `run_config` holds the run-level
+      **override policy** (`order_strategy_override`,
+      `file_order_override`); the per-round resolved values and full
+      provenance live on each `ExperimentRecord`; the round-keyed
+      manifest carries them per experiment.
 
 **Validation plan.**
 - Unit (resolution matrix, one test each — §7.1 "Resolution logic"):
@@ -989,13 +1178,24 @@ reviewable (and revertible) independently of loader mechanics.
   "mirror formal_strategy, don't lock" flag — the operator resolved
   it: lock the OVERRIDE, never the resolution.)
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/core/test_run_invariants.py -q`
-- [ ] New-test files run in isolation (names recorded here)
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `tests/unit/agent/schemas/test_ordering.py` (NEW, CB1-a) →
+      **26 passed in 0.07s** — full §7.1 resolution matrix.
+- [x] `tests/unit/agent/schemas/test_ordering_schema_wiring.py`
+      (NEW, CB1-b) → 28 tests; `tests/unit/agent/schemas/` whole
+      directory → **134 passed in 0.78s**.
+- [x] Regression sweep `.venv/bin/python -m pytest tests/unit/agent
+      tests/unit/workflows -q` → **2962 passed in 185.97s** — zero
+      regressions from the additive schema fields.
+- [x] `ruff check` + `ruff format --check` clean on all CB1-a/CB1-b
+      files.
+- [x] `tests/unit/core/test_run_invariants_ordering.py` (NEW, CB1-c,
+      the §3.8 resume matrix) + `test_run_invariants.py` →
+      **41 passed in 0.10s**; full `tests/unit/core` →
+      **462 passed in 2.97s**.
+- [x] Tests NOT run, with reason: no pseudo/integration yet (the
+      resolver is not wired into the tuner until CB3); `pyright` not
+      run (lilab Node < 14, PR #123 precedent).
 
 **Commit boundary.** Schema + resolver + lock fields + provenance +
 run_config write-side ONLY. No engine code, no CLI flags, no
@@ -1037,34 +1237,48 @@ implementer inspects the epoch loop before finalizing the exact
 DataLoader wiring — torch requires `shuffle=False` when a sampler is
 passed, and the epoch-RNG plumbing must reuse `epoch_rng`/`epoch_seed`
 at `:583-584`, not introduce a second seed path.)*
-- [ ] Build the `sequential` index permutation: per-file index
-      blocks in `file_order` order (dataset row ranges are derivable
-      from the construction order — verify block offsets against the
-      constructor's sorted-file iteration at `:292` before coding),
-      each block shuffled with the epoch RNG (Decision 2), flattened.
-- [ ] Pass the permutation to ONE global
-      `DataLoader(..., drop_last=True)` via `sampler=`/`shuffle=False`;
-      `shuffle` strategy keeps the existing `shuffle=True` call
-      byte-for-byte.
-- [ ] CLI: `--order_strategy` (default `"shuffle"`) +
-      `--file_order_json` (path, mirroring `--sample_set_json`
-      style) — RESOLVED values only; engine re-validates, never
-      trusts the caller; no proposal/override flags exist here.
-- [ ] Engine boundary validation: resolved `file_order` is exactly
-      a permutation of `sample_set` keys — violation prints a
-      structured error and terminates non-retryably (DataScope
-      layered-enforcement precedent).
-- [ ] `[data_order]` engine log line (§3.9): once per epoch,
-      `resolved=... file_order=... epoch=N epoch_seed=S` — bounded,
-      never per-sample.
-- [ ] RT2 provenance: `resolved_order_strategy` added to the
-      training workload `detail` dict (`:622-629`) — no arithmetic
-      change.
-- [ ] Docstring repair: `run_experiment_streaming` docstring and the
-      `main()` call-site comment rewritten to describe reality
-      (per-epoch concatenated dataset; ordering per
-      `order_strategy`; "streaming" name retained, drift noted in
-      the coupling ledger).
+- [x] Build the `sequential` index permutation: per-file index
+      blocks in `file_order` order, each block shuffled with the
+      epoch RNG (Decision 2), flattened.
+      *(**Block offsets are NOT re-derived** — that would have been
+      wrong: a file missing on disk is skipped with warn+continue
+      and contributes no rows, so any recomputed layout would drift
+      from reality. `TIDMADEpochDataset` now records
+      `file_row_ranges: {file_index: (start, end)}` as rows are
+      appended, and `build_sequential_indices()` addresses those
+      spans. A file named in `file_order` that contributed no rows
+      is passed over; a LOADED file omitted from `file_order` is a
+      hard error, since never visiting it would change selection.
+      Ordering uses an independent RNG stream seeded
+      `f"order:{epoch_seed}"` — the dataset consumes a variable
+      number of draws depending on train_portion and file count, so
+      sharing its generator would couple visit order to subsampling
+      internals; the prefix also prevents epoch N's ordering stream
+      colliding with epoch N+1's subsampling stream.)*
+- [x] Pass the permutation to ONE global
+      `DataLoader(..., drop_last=True)` via `sampler=`; `shuffle`
+      strategy keeps the existing `shuffle=True` call unchanged.
+      *(Verified empirically that a plain list is accepted as
+      `sampler` (torch 2.10 annotates `Sampler | Iterable | None`),
+      that `len(loader)` still applies the global `drop_last` floor,
+      and that iteration follows the sampler exactly.)*
+- [x] CLI: `--order_strategy` (default `"shuffle"`, `choices=`
+      constrained) + `--file_order_json` — RESOLVED values only;
+      engine re-validates; no proposal/override flags here.
+- [x] Engine boundary validation
+      (`validate_ordering_against_scope`): resolved `file_order` is
+      exactly a permutation of `sample_set` keys — violation raises
+      with missing/extra/duplicated named, non-retryable.
+- [x] `[data_order]` engine log line (§3.9): once per epoch,
+      `resolved=... file_order=... epoch=N epoch_seed=S`.
+- [x] RT2 provenance: `resolved_order_strategy` added to the
+      training workload `detail` dict — no arithmetic change.
+- [x] Docstring repair: the `run_experiment_streaming` docstring and
+      the `main()` call-site comment now describe reality (per-epoch
+      concatenated dataset, all scope files resident); the false
+      "one file at a time / shuffled file order" claims are gone.
+      The misleading *name* is retained deliberately, with the
+      rename recorded in the coupling ledger.
 
 **Validation plan.**
 - Unit (default parity — the four-part proof the operator requires):
@@ -1125,12 +1339,29 @@ at `:583-584`, not introduce a second seed path.)*
 - Legacy invocation (no new flags): identical to pre-PR behavior —
   covered by the default-parity proof.
 
-**Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/test_rt2b_streaming_preamble.py tests/unit/execute_tools/test_rt2c_training_verification.py -q`
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+**Verification commands and evidence.** *(run 2026-07-28, lilab)*
+- [x] `tests/unit/execute_tools/test_ordering_engine.py` (NEW) →
+      **25 passed in 2.16s**. Includes two REAL engine runs
+      (`run_experiment_streaming`, tiny wavenet on CPU) capturing
+      the DataLoader kwargs: shuffle path → `shuffle=True`, no
+      sampler; sequential path → sampler present, no `shuffle`, same
+      `drop_last`, every row visited exactly once, file 6 first
+      under `file_order=[6,4,5]`. Both `[data_order]` lines asserted
+      on captured stdout.
+- [x] RT2 non-regression: `test_rt2b_streaming_preamble.py` +
+      `test_rt2c_training_verification.py` +
+      `test_workload_resolvers.py` → **21 passed in 2.91s**,
+      unchanged (dataset-construction count still 1/epoch; workload
+      arithmetic untouched).
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q` →
+      **518 passed, 1 failed in 6.73s** — the failure is the same
+      pre-existing, unrelated FU-P2-4 scoring-ground-truth drift
+      documented under P2-CA.
+- [x] `ruff check` + `ruff format --check` clean on both files.
+- [x] Tests NOT run, with reason: no pseudo/integration yet (the
+      resolver is not wired into the tuner until CB3); no Gate
+      tests (P2-V2, operator-approved separately); `pyright` not run
+      (lilab Node < 14).
 
 **Commit boundary.** Engine + its tests + docstrings ONLY. No
 schema, no propagation, no chain scripts, no unrelated engine
@@ -1178,30 +1409,127 @@ engine behavior (CB2).
 - Dependencies: P2-CB1 (schema + resolver) + P2-CB2 (engine).
 
 **Implementation plan.**
-- [ ] Tuner: extract the ordering proposal from the validated
+- [x] Tuner: extract the ordering proposal from the validated
       `ExperimentPlan`; combine with the operator override via the
       CB1 resolver at the per-round assembly; emit the
       `[data_order]` resolution line; populate `TrialConfig`
-      resolved fields + the record/run_config septet.
-- [ ] `execute_training`: named RESOLVED params
+      resolved fields + the record/run_config nonet.
+      *(CB3-c. Plan intake switched to `parse_with_fallback` so a
+      discarded proposal is reported; the single `resolve_ordering`
+      call sits immediately before `TrialConfig` construction.
+      **Record stamps are applied for EVERY round, deliberately
+      OUTSIDE the `if trial_config.is_trial:` block** — ordering
+      applies to all training, unlike the trial-only sampling
+      provenance next to it. `run_config` records only the
+      OVERRIDE (the run's control policy); per-round resolved values
+      live on each record, since they may differ round to round.
+      Lock wiring passes the override to `build_run_invariants`.)*
+      **Bug caught pre-commit**: the CLI initially parsed
+      `--file_order_override` with `DataScope.from_cli`, which SORTS
+      and dedupes (verified: `"4,6,5,9,7,8"` → `[4,5,6,7,8,9]`).
+      That would have silently rewritten every operator permutation
+      into ascending order — the feature would appear to work while
+      doing nothing. Replaced with a dedicated order-preserving
+      `parse_file_order_cli()` in `agent/schemas/ordering.py`
+      (shared by all three CLIs; rejects range syntax, which cannot
+      express a permutation), with a regression test that fails
+      loudly if anyone "simplifies" it back.
+      **Second bug caught pre-commit**: ruff F821 flagged
+      `resolved_scope` as undefined at the resolver call — the
+      in-scope name is `resolved_data_scope`. Would have been a
+      NameError on the first round of any real run.
+      **Test-authoring note (not a production issue), recorded so
+      the mistake is not repeated**: `execute_training` has TWO
+      launch paths — `_run_subprocess_with_watchdog` ONLY when a
+      runtime policy with the watchdog enabled is supplied, and
+      plain `subprocess.run` otherwise. A propagation test that
+      patches the watchdog helper while passing no policy therefore
+      launches REAL training (observed: a 316 s hang before being
+      killed). **The correct patch point for argv-capture tests is
+      `core.sandbox_executor.subprocess.run`.** Documented in the
+      `_launch` helper's docstring in
+      `tests/unit/core/test_ordering_propagation.py`.
+- [x] `execute_training`: named RESOLVED params
       (`order_strategy`/`file_order` at this boundary carry
       resolver output — execution-facing name kept for
       compatibility, mapping documented per §3.7); write the
       file-order JSON next to the sample-set file; append flags
       when non-default; stub twin mirrors.
-- [ ] `training_skill` wrapper: forward both via `kwargs.get`.
-- [ ] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
-      surface (conceptually `ORDER_STRATEGY_OVERRIDE`/
-      `FILE_ORDER_OVERRIDE`; exact names after auditing nearby
-      conventions) parse + forward-when-set; override recorded into
+- [x] `training_skill` wrapper: forward both via `kwargs.get`
+      *(`wrapper.py:21-22`; defaults to `"shuffle"` / `None` so a
+      caller that knows nothing about ordering is unaffected).*
+- [x] Chain scripts + `run_comparison.py` + tuner CLI: OVERRIDE
+      surface parse + forward-when-set; override recorded into
       `run_invariants` at chain start (CB1 lock fields).
-- [ ] Manifest (`run_one_iteration.py::write_manifest`): ordering
+      *(CB3-d2. Names kept: `--order_strategy_override` /
+      `--file_order_override`; shell `ORDER_STRATEGY_OVERRIDE` /
+      `FILE_ORDER_OVERRIDE` default `""` ≡ Python `None`, forwarded
+      only when set, so an unset override reproduces pre-V19 argv on
+      both layers. Both flags added to `CONTRACT_FLAGS` in
+      `test_chain_consistency.py`, so the existing shell↔Python
+      parity machinery now enforces their defaults and shapes.
+      `run_workflow` and the tune protocol gained the override as
+      NAMED parameters, same discipline as PR 1's incumbent
+      reference. `run_comparison.py` forwards to the AGENT phase
+      only — `run_baseline_trial` is deliberately untouched, since
+      the baseline is the frozen comparison anchor and must stay on
+      the pre-V19 global shuffle; a test asserts no ordering symbol
+      appears in that function. Baseline and agent workspaces were
+      verified distinct, so the baseline's no-override lock cannot
+      collide with the agent phase's.)*
+      **Blocker found and fixed during implementation**:
+      `workflows/model_exploration.py:1773` also calls
+      `ensure_run_invariants`. With CB1-c having added the override
+      to the canonical lock set, the workflow would have written a
+      NO-override lock into the same workspace the tuner writes an
+      override lock into — a guaranteed `RunInvariantsViolation`
+      aborting every run that used the feature. All three lock sites
+      (tuner, workflow, chain runner) now pass the override, and a
+      regression test parses each `build_run_invariants(...)` call
+      and fails if any omits it — this class of bug is invisible
+      until runtime.
+- [x] Manifest (`run_one_iteration.py::write_manifest`): ordering
       provenance as a round/experiment-KEYED list per the §3.7
-      granularity rule (each entry: `exp_id` + septet; never one
-      unlabelled iteration-level value; exact field name/shape
-      chosen here after code inspection).
-- [ ] `ModelRunSummary`: resolved-ordering field(s) exposed to the
+      granularity rule (each entry: `exp_id` + nonet; never one
+      unlabelled iteration-level value).
+      *(CB3-d1. Field name chosen after inspection:
+      `ordering_by_experiment`, a list built by
+      `_ordering_by_experiment()` from `tune_output.all_records`;
+      each entry carries `exp_id`, `round_index` (from
+      `memory.round_index`), and the full nonet. Best-effort per
+      record — the manifest is a handoff aid, so a malformed record
+      must not fail an otherwise-successful iteration. Absent
+      entirely on `crashed` / `no_records` manifests, which have no
+      ordering to report. **The legacy-read rule was factored into
+      ONE place** — `ResolvedOrdering.from_record()` (duck-typed, so
+      `ordering.py` stays free of a schema import cycle) — and the
+      CB3-b interpreter reader was refactored onto it, so the
+      manifest and the interpreter cannot drift on "no
+      `resolved_order_strategy` means legacy_default".
+      8 tests incl. the operator-required two-round
+      differing-ordering case (two distinct keyed entries) and a
+      guard asserting NO iteration-level ordering key exists.
+      `tests/unit/sdsc_submission_scripts` +
+      `result_interpretation_agent` + `agent/schemas` →
+      **468 passed in 1.57s**; ruff clean.)*
+- [x] `ModelRunSummary`: resolved-ordering field(s) exposed to the
       interpreter as the factual execution configuration.
+      *(CB3-b. New `RoundOrdering` model in
+      `agent/schemas/interpretation.py` + `ModelRunSummary.
+      round_ordering: list[RoundOrdering]`, PARALLEL to the existing
+      `round_scores` / `round_conclusions` lists — that is how this
+      schema already associates per-round facts with rounds, and it
+      satisfies the §3.7 granularity rule without inventing a new
+      shape. Each entry carries `exp_id`, resolved strategy + file
+      order, resolution source, and the rejection pair. Populated by
+      a new `_round_ordering()` helper in
+      `tuning_output_to_model_run_summary`; records predating the
+      option read explicitly as `legacy_default`, never guessed.
+      6 tests: per-round distinctness, overridden proposal not
+      presented as executed, rejected proposal visible AS rejected,
+      silence-vs-rejection distinguishable, legacy read, JSON
+      round-trip. `tests/unit/agent/result_interpretation_agent` +
+      `protocols` → **313 passed in 1.16s**; ruff clean.)*
 
 **Validation plan.**
 - Unit (per-hop forwarding): sandbox call → subprocess argv carries
@@ -1271,12 +1599,24 @@ engine behavior (CB2).
   the pseudo test.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent -q`
-      (counts + wall time recorded here)
-- [ ] `.venv/bin/python -m pytest tests/unit/scripts -q`
-- [ ] Pseudo integration file run (name + counts recorded here)
-- [ ] `ruff check` + `ruff format --check` on touched files
-- [ ] Any test not run: listed with reason.
+*(run 2026-07-28, lilab; split across the CB3-c / d1 / d2 commits)*
+- [x] `tests/unit/core` + `tests/unit/agent/schemas` →
+      **626 passed** (CB3-c).
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent` →
+      **690 passed in 164.44s** (CB3-c).
+- [x] `tests/unit/sdsc_submission_scripts` +
+      `result_interpretation_agent` + `agent/schemas` →
+      **468 passed in 1.57s** (CB3-d1).
+- [x] `tests/unit/scripts` + `sdsc_submission_scripts` +
+      `protocols` + `workflows` → **473 passed in 11.84s** (CB3-d2).
+- [x] Pseudo integration:
+      `tests/integration/workflows/test_ordering_resolution_pseudo.py`
+      → **7 passed in 1.95s** (recorded under P2-V1).
+- [x] `ruff check` + `ruff format --check` clean on every touched
+      file in all three commits.
+- [x] Tests NOT run, with reason: no Gate tests (P2-V2 is separate
+      and operator-approved); `pyright` not run (lilab Node < 14,
+      PR #123 precedent).
 
 **Commit boundary.** Propagation + its tests ONLY. No engine or
 schema changes (fixes discovered here go back to CB1/CB2 as
@@ -1284,22 +1624,258 @@ amendments, shown to operator). Stop-and-show before commit.
 
 ### P2-V1 — pre-gate sweep (after CB3)
 
-- [ ] Full targeted unit sweep across all four commits' suites, one
-      run, counts recorded here.
-- [ ] Pseudo integration: BOTH strategies deterministic end-to-end.
-- [ ] Evidence recorded in this doc (§7.1 boxes ticked with test
+- [x] Pseudo integration: every resolution case deterministic
+      end-to-end.
+      *(NEW `tests/integration/workflows/test_ordering_resolution_pseudo.py`,
+      **7 passed in 1.95s**. Drives the PRODUCTION path — real
+      `run_workflow` (agents mocked at the workflow boundary, no LLM,
+      no training) + the real `write_manifest` the chain runner uses,
+      reusing the PR 1 P1-V1 harness shape. Cases: proposal wins;
+      override wins AND is not attributed to the agent; default
+      wins; rejected proposal + no override; rejected proposal +
+      override; two-round granularity; manifest block survives to
+      disk. Each case asserts record, manifest, and
+      interpreter-facing summary tell ONE story via a shared
+      `_assert_agree` helper.
+      Harness fix during authoring (test-side only): iteration 1
+      loads a seed tuning output from
+      `{data_dir}/{model}/{source_run}/agent/run_output_*.json`
+      before any node runs, so the harness seeds one per test under
+      `tmp_path` instead of pointing at a nonexistent `/tmp/data`.)*
+- [x] Full unit sweep, one run, counts recorded here.
+      *(`.venv/bin/python -m pytest tests/unit -q` →
+      **4475 passed, 1 failed, 3 xfailed in 204.10s**. The single
+      failure is FU-P2-4
+      (`test_scoring_helpers.py::TestPostPathAReferenceConsistency`),
+      identified during P2-CA and PROVEN pre-existing by stashing all
+      PR-2 changes and reproducing it byte-identically. It is
+      skip-guarded on machines without the ground-truth data, so CI
+      never sees it. Unrelated to ordering.)*
+- [x] Integration sweep.
+      *(`pytest tests/integration/workflows -q` →
+      **32 passed, 8 skipped, 1 failed in 202.36s**. The failure is
+      `test_vocab_accumulation::test_vocab_candidate_promotion_across_three_iterations`
+      = **FU-7**, already recorded in
+      `docs/design/enable_partial_file_list.md` as pre-existing and
+      confirmed broken on master `9e503ea` on 2026-07-23. Root cause
+      is a stale test double: `RecordingLLMBridge` lacks
+      `emit_marker`, so the interpretation flow degrades and
+      `prediction_evaluation` is None. This branch touched neither
+      `agent/llm_bridge.py` nor that test.)*
+- [x] Evidence recorded in this doc (boxes above ticked with test
       names + counts).
 
 ### P2-V2 — Gate 2 real smoke (operator-approved launch)
 
-- [ ] Launch plan drafted at P2-V1 exit (cold-start standing rule;
+- [x] Launch plan drafted at P2-V1 exit (cold-start standing rule;
       DS8-paired partial scope; smallest canonical config; explicit
-      command shown for approval).
-- [ ] One `sequential` attempt: visited order verified from the
-      training log; RT2 §12 ledger entry within tolerance;
-      HealthGate pipeline unaffected.
-- [ ] Result + limitations recorded here (PASS/FAIL verbatim
-      evidence, PR 1 §7 style).
+      command shown for approval). **See the launch plan below.**
+- [x] One forced-`sequential` attempt: resolved strategy AND file
+      order verified from the logs; RT2 §12 ledger entry within
+      tolerance; HealthGate pipeline unaffected.
+      *(attempt 2, 2026-07-28; 4 trained rounds, 2 architectures, all
+      six evidence layers confirmed; RT2 within ±2.5%; zero watchdog
+      kills. Attempt 1 was killed 3× by a zero-margin watchdog
+      deadline caused by omitted safety-factor flags in the launch
+      plan — a launch defect, not an ordering one.)*
+- [x] Result + limitations recorded here (PASS/FAIL verbatim
+      evidence, PR 1 §7 style). *(See the RESULT block below.)*
+
+#### Launch plan (drafted 2026-07-28; AWAITING OPERATOR APPROVAL)
+
+Adapted from PR 1's P1-V2 command, which passed on attempt 3 in
+**17m18s** with this exact budget/scope shape — so the runtime is a
+measured precedent, not an estimate. Two substantive changes:
+`--enable_chain_incumbent_formal_gates` is dropped (PR 1's coupling is
+still OFF in production and would add an unrelated variable), and the
+two PR 2 ordering flags are added.
+
+```bash
+WS=/tmp/checkpoint_pr2_$(date +%s)
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace "$WS" \
+    --run_name pr2_v2_smoke \
+    --num_iterations 2 \
+    --max_rounds 2 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --data_scope 4-9 \
+    --health_gate_files 4,5,6,7,8,9 \
+    --order_strategy_override sequential \
+    --file_order_override 9,7,5,4,8,6 \
+    --trial_portion 0.02 \
+    --train_portion 1.0 \
+    --eval_portion 0.01 \
+    --formal_portion 0.02 \
+    --formal_train_portion 1.0 \
+    --formal_eval_portion 0.01 \
+    --trial_time_budget_minutes 5 \
+    --formal_time_budget_minutes 30 \
+    --trial_vram_budget_gb 24 \
+    --formal_vram_budget_gb 24 \
+    --runtime_watchdog \
+    --llm_config llm_configs/openai_tiered_v1.json
+```
+
+Design notes:
+
+- **The file order is deliberately NON-ascending** (`9,7,5,4,8,6`, a
+  permutation of scope `4-9`). An ascending order would make a
+  sorting bug INVISIBLE — precisely the `DataScope.from_cli` defect
+  caught in CB3-c. This value only survives to the engine if every
+  layer preserves sequence.
+- **Cold-start**: no `--seed_paths` (standing rule; the canonical
+  seeds are pre-DS8 full-scope artifacts that DS8 ingress refuses
+  under a partial scope — PR 1's attempt-2 failure).
+- **`--health_gate_files` exactly equals the resolved DataScope**,
+  required under any partial scope by DS8 boundary enforcement.
+- Pre-verified by `run_chain.sh --dry-run`: both new flags thread
+  through the shell into `run_one_iteration.py` argv alongside the
+  DS8 pair.
+
+Evidence to collect (quoted verbatim, anti-hallucination standard):
+
+1. the tuner's `[data_order]` resolution line per round — expect
+   `override=sequential`, `resolved=sequential`,
+   `source=operator_override`, `file_order=[9, 7, 5, 4, 8, 6]`;
+2. the engine's per-epoch `[data_order]` line — expect
+   `resolved=sequential file_order=[9, 7, 5, 4, 8, 6]` with the epoch
+   seed;
+3. `manifest.json` → `ordering_by_experiment`, one keyed entry per
+   experiment, each carrying the resolved order;
+4. `run_invariants_lock.json` → the override pinned;
+5. the RT2 §12 predicted-vs-actual entry (expected: within existing
+   tolerance, since only the visit permutation changed);
+6. HealthGate verdicts present and unaffected.
+
+Rollback if it fails: the feature is inert without the flags
+(`shuffle` default), so a failure blocks P2-S but requires no revert.
+
+#### RESULT — PASS WITH DOCUMENTED LIMITATIONS (2026-07-28, attempt 2)
+
+**Environment and launch.** lilab; cold-start (no `--seed_paths`);
+`--data_scope 4-9` paired with `--health_gate_files 4,5,6,7,8,9`;
+forced `--order_strategy_override sequential` with the deliberately
+NON-ascending permutation `--file_order_override 9,7,5,4,8,6`;
+2 iterations × 2 rounds; `--max_epochs 1`; trial budget 5 min, formal
+30 min; safety factors 1.5 / trial 3.0 / formal 2.0. Total wall time
+~12 min, **zero watchdog kills**. Workspace
+`/tmp/checkpoint_pr2_1785282966`.
+
+**Why the Gate passes.** Ordering was confirmed on real training at
+six independent layers, and the forced permutation `[9, 7, 5, 4, 8, 6]`
+survived every one of them without being sorted or rewritten, on four
+independent trained rounds across two different architectures. An
+ascending order would have made a sorting defect invisible; this one
+could not.
+
+| Layer | Result |
+|---|---|
+| Tuner resolution log | `[data_order] proposed=none override=sequential resolved=sequential source=operator_override file_order=[9, 7, 5, 4, 8, 6]` |
+| Engine per-epoch log | `[data_order] resolved=sequential file_order=[9, 7, 5, 4, 8, 6] epoch=0 epoch_seed=…` — 4 epochs, seeds `1074101029`, `916363156`, `1128228275`, `552777383` |
+| Persisted records | trained rounds stamped `resolved_order_strategy=sequential` |
+| Iteration manifest | `ordering_by_experiment` round-keyed, both iterations |
+| Run-invariants lock | `"ordering_override_strategy": "sequential"`, `"ordering_override_file_order": [9,7,5,4,8,6]` |
+| RT2 + HealthGate | prediction error within ±2.5%; zero watchdog kills; every collapse received a complete gate verdict |
+
+**RT2 predicted vs actual** (§12 ledger evidence):
+
+| Model / round | Predicted | Actual | Actual/predicted |
+|---|---|---|---|
+| wavenet_coldstart round 1 | 117.866 s | 120.814 s | 1.025 |
+| wavenet_coldstart round 2 | 73.564 s | 75.415 s | 1.025 |
+| spectral_gated round 1 | 44.337 s | 44.164 s | 0.996 |
+
+Interpretation: prediction error stayed within ~±2.5%; **sequential
+ordering did not inflate the modeled workload**; optimizer-step count
+and loader-construction semantics were unchanged as designed; zero
+watchdog kills in attempt 2.
+
+**Causal finding from attempt 1** (three kills, overshoots of 0.21%,
+0.21%, 0.06%): the attempt-1 deadline was `117.866 s` and the round
+prediction was **also** `117.866 s` — the deadline was effectively the
+raw prediction with no usable safety margin, because the launch omitted
+the safety-factor flags and took the shell default of 1.0. The actual
+run exceeded it by ~2.5%, while the identical work completed under the
+configured trial factor in attempt 2. **The attempt-1 kill is not
+attributable to sequential ordering.** Recorded as an empirical
+server-specific value in
+`docs/memories/project_watchdog_safety_factor_lilab.md` and in
+`docs/running_chain_test.md`.
+
+**Results.** Trained attempts: 4, all `failed_mode_collapse` (gate
+evidence: `unique_int8=1`, `output_std_mv=0`,
+`dominant_mode_fraction=1.0`). Skipped attempts: 3,
+`skipped_time_risk`. Best scores recorded before gate rejection: 0.684
+(iter 1) and -1.606 (iter 2). **No HealthGate-valid formal result.**
+
+**Limitations — state plainly, do not overstate the Gate.**
+
+P2-V2 does **not** demonstrate any of: ordering superiority; a
+HealthGate-valid score improvement; successful *live* formal-round
+execution; intelligent agent selection of ordering; or
+production-readiness of `sequential` as the preferred strategy. The
+collapses are consistent with the deliberately small smoke
+configuration — cold-start LLM-invented architectures, one epoch,
+`trial_portion 0.02`, a bounded five-minute trial budget — and
+HealthGate correctly rejected every one. **The absence of a valid
+formal result is not an ordering failure**: the trained attempts
+collapsed independently of the ordering plumbing.
+
+On the formal path specifically:
+
+> The bounded real-training smoke did not execute a formal round.
+> Formal ordering support is established by code-path audit and a
+> focused deterministic formal-branch test; it was not independently
+> observed in this real-training smoke.
+
+The audit (recorded below) found trial and formal share the complete
+ordering path, and
+`tests/unit/agent/tune_ml_hyperparam_agent/test_ordering_formal_branch.py`
+now exercises the formal branch with a forced non-default ordering.
+Formal ordering is therefore **not** an implementation gap, and no
+further real-training Gate is required for it.
+
+**Formal-path audit (code-traced, 2026-07-28).**
+
+| Question | Finding |
+|---|---|
+| Where do trial/formal diverge? | `_resolve_sample_set_cfg` (`:2344`); returns exactly 5 SAMPLING keys, no ordering |
+| Ordering resolved before/after? | After (`:2376`) but **mode-independent** — no argument is mode-gated |
+| Same `TrialConfig`? | Yes — one construction (`:2386`) |
+| Formal rebuild of `active_params`? | No — assigned once (`:2479`); later lines only add unrelated keys |
+| Same skill/CLI dispatch? | Yes — one `_run_skill("training_skill", …)` (`:2901`) |
+| Same stamping path? | Yes — stamps (`:3698-3700`) sit BEFORE the `if trial_config.is_trial:` gate (`:3702`) |
+| Formal-only bypass? | None — the only mode conditionals govern `target_files` and `file_index` |
+
+**Defect discovered by the Gate.** The round-keyed manifest exposed a
+provenance problem that a single iteration-level value would have
+hidden: two `skipped_time_risk` attempts — pre-flight rejections from a
+CURRENT run — were labelled `legacy_default`, which means "this
+artifact predates the ordering feature". Fixed in `e0a376d` by adding
+a fifth provenance state, `not_executed`, with
+`resolved_order_strategy=None` and `resolved_file_order=None`; the
+attempt stays visible with its status, and any proposal/override
+context is preserved without being reported as executed. Tests:
+`tests/unit/agent/schemas/test_ordering_not_executed.py` (11).
+
+Scope note for that fix: *this fix distinguishes known pre-flight
+non-executed attempts from legacy artifacts. Current-run error records
+that fail before the normal provenance-stamping site remain a known
+residual and are tracked separately* (issue #139 — preferred fix is to
+stamp resolved ordering immediately after resolution and before
+training dispatch).
+
+**What P2-V2 does not change.** This Gate validates implementation
+correctness and compatibility only. It does not complete P2-E. The
+matched-budget `shuffle` vs `sequential` evaluation, the
+HealthGate-valid formal score comparison, valid-round-rate, runtime and
+memory comparison, any strategy recommendation, and any
+production-default change all remain separate and unaddressed.
+`sequential` is NOT promoted; the default remains `shuffle`; no claim
+is made that the FCNet ordering procedure has been reproduced or shown
+superior.
 
 ### P2-DOC — node/skill documentation sync (very last step before merge)
 
@@ -1313,38 +1889,76 @@ the code as actually merged, not as designed.
 
 **Scope.** Enumerate touched nodes/skills from the final PR diff (do
 not rely on this list alone); known targets from the plan:
-- [ ] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
-      — the full ordering-control model: proposal fields
-      (ExperimentPlan), override CLI args with defaults, the
-      resolver precedence rule, the Decision-5 permutation contract
-      with its two-stage validation, the provenance septet, and an
-      ordering block in Key behavioral notes (PR 1 chain-incumbent
-      block precedent) stating the §3.7 attribution invariant.
-- [ ] `docs/running_chain_test.md` — chain-level override arm
-      (final names from CB3), forward-when-set semantics, defaults,
-      the two chain modes (forced comparison vs agent exploration),
-      and the lock-the-override resume rule.
-- [ ] `agent/skills/training_skill/` — has NO `.md` today: create a
-      minimal one documenting the skill contract (inputs incl. the
-      resolved ordering fields, defaults, subprocess flags emitted),
-      per the standing rule.
-- [ ] `nodes/result_interpretation_agent/result_interpretation_agent.md`
-      — the resolved-ordering field(s) on the interpreter-visible
-      summary and the invariant that resolved values are what ran.
-- [ ] Diff sweep: any other touched node/skill `.md` (check
+- [x] `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
+      *(three additions: a "Data ordering (V19 PR 2)" Input subsection
+      with both override fields and the precedence rule; both CLI
+      flags in the arguments table with exact defaults and the
+      range-syntax rejection; and a "Data-ordering resolution"
+      four-part contract in Key behavioral notes — resolution +
+      `[data_order]` lines, file-order semantics, rejected proposals
+      recorded not dropped, and the three-artifact persistence
+      split — stating the attribution invariant verbatim.)*
+- [x] `docs/running_chain_test.md`
+      *(new "Data-ordering override (V19 PR 2)" section beside the
+      PR 1 coupling one: both flags in a table, the two chain modes
+      (forced comparison vs agent exploration), the lock-the-override
+      resume rule with its new-workspace requirement, and where to
+      look afterwards — the two `[data_order]` log lines and the
+      manifest block.)*
+- [x] `agent/skills/training_skill/training_skill.md` — CREATED
+      *(no skill in the repo had a `.md`; this is the first, so it
+      follows the node-doc house style. Documents the full `kwargs`
+      contract incl. the resolved ordering pair, and states the two
+      load-bearing facts: the values arriving here are ALREADY
+      resolved and this layer never re-derives precedence, and the
+      stub mirrors the signature so pseudo mode cannot drift from
+      production at the call boundary.)*
+- [x] `nodes/result_interpretation_agent/result_interpretation_agent.md`
+      *(new Key-behavioral-note covering `round_ordering`: the two
+      rules for downstream use — resolved-only describes execution,
+      and a rejected proposal is not agent silence — plus why it is
+      per-round rather than per-run, and the `legacy_default` read.)*
+- [x] Diff sweep: any other touched node/skill `.md` (check
       `nodes/*/`*.md` against the PR's touched-file list); confirm
       or update each — record "no update needed" per file
       explicitly, never silently.
+      *(Run TWICE against `git diff --name-only master..HEAD`: once at
+      the original P2-DOC (73fb98d) and again after the post-P2-DOC
+      commits (7ae11af), because P2-DOC is by definition the last step
+      before merge and `e0a376d` had since added a provenance state.
+      Both sweeps found exactly three touched node/skill directories —
+      the tuner, the interpreter, and `training_skill` — with no
+      others anywhere in the branch diff. The explicit
+      "no update needed" record for `training_skill.md` is in the
+      re-sweep table above.)*
 
 **Acceptance criteria.** For every touched node/skill, its `.md`
 states the new arguments with their exact defaults and semantics; a
 reader can operate the feature from the docs alone without reading
 the argparse source.
 
-**Verification.**
-- [ ] Cross-check each documented flag/default against the merged
+**Verification.** *(2026-07-28)*
+- [x] Cross-check each documented flag/default against the merged
       argparse/schema source (values quoted, not paraphrased).
-- [ ] Evidence recorded here (files updated + one-line summary each).
+      *(`--order_strategy_override` default `None`, choices
+      `['shuffle','sequential']`; `--file_order_override` default
+      `None`, no choices — read from the live parsers of both
+      `run_one_iteration.py` and the tuner, and from
+      `_chain_common.sh:95-96` (`""` ≡ omit). All match the tables in
+      the tuner .md and running_chain_test.md.)*
+- [x] Evidence recorded here (files updated + one-line summary each).
+
+**Re-sweep after the post-P2-DOC commits.** P2-DOC first ran before
+`e0a376d` added the fifth provenance state, so the node docs described
+only four. Re-run against the FULL branch diff:
+
+| Touched dir | `.md` | Action |
+|---|---|---|
+| `nodes/ml_hyperparameter_tune_agent` | `…_agent.md` | UPDATED — new item 5, a five-state provenance table incl. `not_executed` (`resolved_order_strategy=None`, never a fabricated `shuffle`), plus the #139 error-path residual |
+| `nodes/result_interpretation_agent` | `…_agent.md` | UPDATED — third downstream rule (a `None` resolved strategy means nothing ran, do not read it as a default) and the two distinct absence readings |
+| `agent/skills/training_skill` | `training_skill.md` | **No update needed** — the skill receives RESOLVED values only and records no provenance, so the new state does not reach it (verified: zero `resolution_source` / `legacy_default` / provenance mentions in that file) |
+
+No other node or skill directory appears in the branch diff.
 
 ## 7. Validation plan (maps to baseline §2.0 checkpoints)
 
@@ -1432,3 +2046,33 @@ claim without score evidence; sequential may be rejected.
   the ordering study's outcome.
 - **FU-P2-2** — `freeze_subsample` dead switch: plumb or remove.
 - **FU-P2-3** — "streaming" naming cleanup once (if) FU-P2-1 lands.
+- **FU-P2-4** ([issue #138](https://github.com/Galileo-Sandbox/SIDERIUS/issues/138); DIAGNOSED and marked
+  as a known defect, NOT fixed — operator decision required) — the
+  on-disk ground-truth artifacts and the current production formula
+  are on different rulers. Root cause proven bit-exactly:
+
+  ```text
+  ceiling file_vector[0]           = 1.0892888977496993e-06
+  on-disk per-file score           = -8.260916269975333
+  log_5.27(file_vector[0])         = -8.260971502899364  [current helper]
+  log_5.27(file_vector[0] + 1e-10) = -8.260916269975333  [EXACT match]
+  ```
+
+  The artifacts record `computed_at: 2026-05-01` and used the legacy
+  `1e-10` soft floor; `file_vector_to_log_space` has since removed it
+  ("that was outdated and is removed").
+
+  **The test is NOT stale — it is correctly reporting a real
+  inconsistency**, exactly the drift its own docstring says it exists
+  to catch (model column vs reference columns on different rulers).
+  The assertion and its `rel=1e-9` tolerance are therefore UNCHANGED;
+  the test carries `pytest.mark.xfail(strict=False)` with the full
+  diagnosis, so the suite is green today and this flips to XPASS the
+  moment the mismatch is resolved.
+
+  **Resolution requires a separate operator decision** — either
+  regenerate the reference artifacts under the current formula, or
+  preserve an explicit legacy-reference conversion path for
+  pre-2026-05-01 artifacts. Both touch frozen reference data.
+  **No reference-data or scoring-formula change is included in
+  PR 2** (operator instruction, 2026-07-28).

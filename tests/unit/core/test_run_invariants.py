@@ -121,17 +121,22 @@ class TestViolationMatrix:
         assert "resolved_data_scope" not in str(excinfo.value)
 
     def test_lock_file_is_plain_json(self, tmp_path):
-        """The lock must stay hand-inspectable: flat JSON with the three
-        canonical fields + created_at."""
+        """The lock must stay hand-inspectable: flat JSON with the canonical
+        fields + created_at. The ordering-override pair joined the canonical
+        set in V19 PR 2 and defaults to None (no override)."""
         write_run_invariants(str(tmp_path), DISABLED)
         raw = json.loads((tmp_path / RUN_INVARIANTS_BASENAME).read_text())
         assert raw["resolved_data_scope"] == [4, 5, 6, 7, 8, 9]
         assert raw["health_gate_enabled"] is False
         assert raw["health_config_sha256"] is None
+        assert raw["ordering_override_strategy"] is None
+        assert raw["ordering_override_file_order"] is None
         assert set(raw) == {
             "resolved_data_scope",
             "health_gate_enabled",
             "health_config_sha256",
+            "ordering_override_strategy",
+            "ordering_override_file_order",
             "created_at",
         }
 

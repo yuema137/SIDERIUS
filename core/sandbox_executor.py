@@ -689,6 +689,8 @@ class TidmadSandbox:
         train_portion: float | None = None,
         train_base_seed: int | None = None,
         runtime_policy: dict | None = None,
+        order_strategy: str = "shuffle",
+        file_order: list[int] | None = None,
     ):
         """Executes the training physical script.
 
@@ -771,6 +773,19 @@ class TidmadSandbox:
                     cmd.extend(["--train_portion", str(train_portion)])
                 if train_base_seed is not None:
                     cmd.extend(["--train_base_seed", str(train_base_seed)])
+                # V19 PR 2: RESOLVED ordering only — the subprocess never
+                # learns about proposals or overrides. Flags are appended only
+                # when non-default, so a run that does not use ordering
+                # produces argv identical to pre-PR2.
+                if order_strategy != "shuffle":
+                    cmd.extend(["--order_strategy", str(order_strategy)])
+                if file_order is not None:
+                    fo_path = os.path.abspath(
+                        os.path.join(self.dirs["configs"], f"file_order_{exp_id}.json")
+                    )
+                    with open(fo_path, "w") as f:
+                        json.dump(list(file_order), f)
+                    cmd.extend(["--file_order_json", fo_path])
 
                 # RT2-B: in-subprocess runtime verification (streaming mode
                 # only). Remove any stale sidecar from a previous attempt with
@@ -1366,6 +1381,8 @@ class StubSandbox(TidmadSandbox):
         train_portion: float | None = None,
         train_base_seed: int | None = None,
         runtime_policy: dict | None = None,
+        order_strategy: str = "shuffle",
+        file_order: list[int] | None = None,
     ) -> dict[str, Any]:
         """Synthesise a successful training result. No subprocess launch.
 
@@ -1375,6 +1392,10 @@ class StubSandbox(TidmadSandbox):
         stub never runs verification, so the result carries
         ``runtime_verification=None`` — the explicit-absence shape
         downstream consumers already fail closed on (§7.3).
+        ``order_strategy`` / ``file_order`` are likewise accepted for
+        signature parity (V19 PR 2) — the stub trains nothing, so there is
+        no visitation order to apply, but a pseudo run must not diverge
+        from production at the call boundary.
         """
         if sample_set is not None:
             try:
