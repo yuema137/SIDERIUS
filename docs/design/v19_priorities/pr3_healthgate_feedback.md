@@ -1375,6 +1375,14 @@ standing locally-unavailable blocking check — Node v10 — so a CI wait
 is justified when a change plausibly affects typing; otherwise
 continue working and read the verdict when it lands.)
 
+PR 3 CI usage (operator, 2026-07-29 — draft PR #145 kept open so
+pyright can run): push once per completed commit block, not per
+micro-commit; CI runs asynchronously; no blocking watcher after a push
+(one exception granted: the first pyright pass over the new CB1 schema
+module); continue working unless CI reports a relevant failure; review
+the latest CI result at the next block boundary; run and wait for the
+full final CI only before final PR review or merge.
+
 Governing principle:
 
 > Validation should be proportional to the scope and risk of the
@@ -1552,16 +1560,47 @@ signal + evidence-precedence order are P3-CA-resolved — §2.5, §3.2).
 
 **Implementation plan.**
 
-- [ ] Re-inspect lifecycle + record shapes (§3.2 process step 1) and
-      confirm the CB1 provenance model covers them; stop-and-propose
-      on any real case that doesn't fit cleanly
-- [ ] `_round_health(record)` — classification per the §3.2
-      evidence-precedence order (governing rule binding); validity via
-      `classify_candidate_health` (reuse, §2.1); fingerprint via CB1
-      builders
-- [ ] `round_health` populated parallel to `round_scores` (alignment
-      guaranteed by the shared loop)
-- [ ] Protocol docstring update
+- [x] Re-inspect lifecycle + record shapes (§3.2 process step 1)
+      *(2026-07-29: records reach the builder as models validated FROM
+      dicts on both production paths — tuner `:4094`/`:4130` fresh,
+      `model_exploration.py:254` reparse — so `model_fields_set`
+      mirrors authored keys; gate config is process-cached
+      (`_CACHED_GATES`) so per-record `classify_candidate_health` is
+      cheap, matching the existing per-record `is_valid_candidate`
+      precedent; no record shape outside the CB1 provenance model
+      surfaced — stop-and-propose not triggered)*
+- [x] `_round_health(record)` — classification per the §3.2
+      evidence-precedence order; validity via
+      `classify_candidate_health` (reuse); fingerprint via CB1 builders
+      *(placed beside `_round_ordering`, same lazy-import precedent;
+      gate evidence passed to builders only under `gated` provenance;
+      `failure_reason` carried verbatim for every provenance with the
+      §2.5 field-overload finding documented in the docstring — the
+      provenance label is what disambiguates exception text from gate
+      evidence)*
+- [x] `round_health` populated parallel to `round_scores` (alignment
+      guaranteed by the shared loop) *(field added after
+      `round_ordering` on ModelRunSummary, default_factory=list —
+      legacy digests without the field validate to empty)*
+- [x] Protocol docstring update *(consumed list names round_health)*
+
+**CB2 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/agent/result_interpretation_agent/test_round_health_summary.py -q
+    → 12 passed in 0.93s   (new suite: 8 vintage/precedence cases +
+                            alignment + backward-compat + JSON
+                            round-trip + malformed-entry negative)
+pytest tests/unit/agent/result_interpretation_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 533 passed in 1.28s  (block regression)
+ruff check / ruff format --check → clean on the 4 touched files
+```
+
+NOT run at this stage (per the staged-validation principle): full repo
+suite, tuner suite, pseudo integrations — deferred to P3-V1/PR-final.
+CB1 CI on draft PR #145 (run 30425698414, head `2dfaf63`): SUCCESS —
+first pyright pass over the new module clean.
 
 **Validation plan.** Unit: `_round_health` across the §3.5 record-class
 list + the §7.1 provenance-classification suite with fixtures authored

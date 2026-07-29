@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent.schemas.health_feedback import RoundHealth
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.proposal import VocabEntry
 from agent.schemas.score_table import ScoreComparisonTable
@@ -148,6 +149,18 @@ class ModelRunSummary(BaseModel):
         "chronological order as round_scores. Kept per round because ordering "
         "may legitimately differ between rounds when no operator override is "
         "in force. Empty on runs that predate the ordering option.",
+    )
+    round_health: list[RoundHealth] = Field(
+        default_factory=list,
+        description="Condensed HealthGate evidence per round, in the same "
+        "chronological order as round_scores (V19 PR 3, "
+        "docs/design/v19_priorities/pr3_healthgate_feedback.md §3.2). Built "
+        "deterministically from each record's persisted gate fields under "
+        "the evidence-precedence rule — never from LLM prose. Provenance "
+        "labels the evidence source (gated / gates_disabled / "
+        "round_fields_only / gate_not_evaluated / legacy); a round without "
+        "evidence is carried labeled, never guessed at. Empty on summaries "
+        "built before this field existed.",
     )
     model_description: str | None = Field(
         default=None,

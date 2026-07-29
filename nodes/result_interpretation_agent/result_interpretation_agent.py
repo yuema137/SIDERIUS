@@ -24,6 +24,12 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
+from agent.schemas.health_feedback import (
+    RoundHealth,
+    build_collapse_fingerprint,
+    build_gate_outcomes,
+    classify_round_provenance,
+)
 from agent.schemas.hyperparam_tuning import ExperimentRecord, serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -1712,6 +1718,42 @@ def _round_ordering(record) -> RoundOrdering:
     )
 
 
+def _round_health(record) -> RoundHealth:
+    """Condense one record's HealthGate evidence for the interpreter.
+
+    Deterministic — never reads LLM output (V19 PR 3,
+    ``docs/design/v19_priorities/pr3_healthgate_feedback.md`` §3.2/§3.5).
+    Classification follows the evidence-precedence ladder in
+    ``classify_round_provenance``: persisted gate evidence is never
+    discarded by a status rule, and nothing is inferred from missing
+    fields — a round without evidence is carried LABELED (its
+    ``provenance``), never guessed at.
+
+    ``failure_reason`` is carried verbatim for every provenance. On
+    ``gate_not_evaluated`` records (attempt failures, pre-gate errors)
+    it holds the execution failure, NOT gate evidence — the provenance
+    label is what keeps downstream from misreading it (the §2.5
+    field-overload finding).
+    """
+    # Same lazy-import precedent as the summary builder below.
+    from execute_tools.health_checks.candidate_eligibility import (
+        classify_candidate_health,
+    )
+
+    provenance = classify_round_provenance(record)
+    gate_results = record.health_gate_results if provenance == "gated" else []
+    return RoundHealth(
+        exp_id=record.exp_id,
+        status=record.status,
+        health_validity=classify_candidate_health(record),
+        gate_action=record.gate_action,
+        failure_reason=record.failure_reason,
+        gate_outcomes=build_gate_outcomes(gate_results),
+        fingerprint=build_collapse_fingerprint(gate_results, record.gate_action),
+        provenance=provenance,
+    )
+
+
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
 ) -> ModelRunSummary:
@@ -1730,6 +1772,7 @@ def tuning_output_to_model_run_summary(
     round_trial_portions: list[float | None] = []
     round_model_params: list[int | None] = []
     round_ordering: list[RoundOrdering] = []
+    round_health: list[RoundHealth] = []
 
     for r in records:
         round_scores.append(r.denoising_score)
@@ -1740,6 +1783,7 @@ def tuning_output_to_model_run_summary(
         else:
             round_conclusions.append(r.memory.conclusion or "")
         round_ordering.append(_round_ordering(r))
+        round_health.append(_round_health(r))
 
     from execute_tools.health_checks.candidate_eligibility import (
         CandidateHealthValidity,
@@ -1814,6 +1858,7 @@ def tuning_output_to_model_run_summary(
         round_scores=round_scores,
         round_conclusions=round_conclusions,
         round_ordering=round_ordering,
+        round_health=round_health,
         # Per-file performance (raw primitive retained per §7.2 scope note)
         best_file_vector=best_rec.file_vector if best_rec else None,
         formal_score=formal_rec.denoising_score if formal_rec else None,
