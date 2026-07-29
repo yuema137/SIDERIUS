@@ -121,6 +121,48 @@ The pre-DS8 canonical seeds referenced there are historical only.
 Exception: reproducing a specific historical seeded run —
 operator-approved case-by-case only.
 
+### Watchdog safety factors — ALWAYS pass them (empirical, lilab)
+
+`_chain_common.sh` defaults `RUNTIME_SAFETY_FACTOR=1.0` to mirror the
+Python schema default. That is correct as a schema default and
+**dangerous as a launch value**: the watchdog deadline is
+`predicted × safety_factor`, so 1.0 means **zero margin** — a run that
+exceeds its own RT2 prediction by a fraction of a percent is killed.
+
+Any run passing `--runtime_watchdog` should also pass the V18r posture
+(from `sdsc_submission_scripts/launch_v18_wave1.sh:125-127`):
+
+```bash
+--runtime_watchdog \
+--runtime_safety_factor 1.5 \
+--runtime_trial_safety_factor 3.0 \
+--runtime_formal_safety_factor 2.0
+```
+
+Trial gets the largest factor (3.0) because trial rounds run
+LLM-invented architectures with no historical prior, where the
+prediction is least reliable. Formal 2.0 is the operator decision in
+`a780186`.
+
+**Failure signature when you forget** (observed 2026-07-28, V19 PR 2
+Gate 2 attempt 1 — three consecutive kills):
+
+```
+watchdog killed training after 118.112s (deadline 117.866s, source=verified_components)
+```
+
+Overshoot under 1%, killed at 96-98% of the epoch,
+`source=verified_components`. That combination means the prediction was
+ACCURATE and the margin was ABSENT — it is not evidence that the model
+is too large or that the feature under test slowed training down. Do
+not let the planner chase it by shrinking the architecture.
+
+Copying an older Gate command verbatim is how this gets missed: the
+V19 PR 1 Gate 2 command omits these flags and happened to pass. Check
+new launch plans against `launch_v18_wave1.sh`, not against the
+previous PR's command. Full note:
+`docs/memories/project_watchdog_safety_factor_lilab.md`.
+
 ### Chain formal-incumbent coupling (V19 PR 1)
 
 Two related tuner inputs, forwarded from the chain layer:

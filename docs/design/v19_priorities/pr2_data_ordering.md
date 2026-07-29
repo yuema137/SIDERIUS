@@ -59,8 +59,18 @@ green with recorded evidence.
             passed / 1 xfailed [FU-P2-4, issue #138];
             tests/integration/workflows 53 passed / 8 skipped after
             the FU-7 repair e434b78)
-[ ] P2-V2 — Gate 2: bounded real smoke (cold-start, per the standing
-            rule; launch plan requires operator approval)
+[x] P2-V2 — Gate 2: bounded real smoke (cold-start) —
+            **PASS WITH DOCUMENTED LIMITATIONS** (attempt 2,
+            2026-07-28). Ordering confirmed on real training at six
+            layers; the non-ascending permutation [9,7,5,4,8,6]
+            survived every layer across 4 trained rounds and 2
+            architectures; RT2 within ±2.5%; zero watchdog kills.
+            LIMITATION: no HealthGate-valid formal result (every
+            trained model collapsed on the deliberately minimal smoke
+            config) and no live formal round — formal ordering is
+            established by code-path audit + a deterministic
+            formal-branch test, not by this smoke. Gate found and
+            fixed a provenance defect (e0a376d, not_executed).
 [x] P2-DOC — node/skill documentation sync (operator rule,
             2026-07-28): every node and skill touched by this PR has
             its .md updated — CLI arguments, default values, and
@@ -1648,11 +1658,16 @@ amendments, shown to operator). Stop-and-show before commit.
 - [x] Launch plan drafted at P2-V1 exit (cold-start standing rule;
       DS8-paired partial scope; smallest canonical config; explicit
       command shown for approval). **See the launch plan below.**
-- [ ] One forced-`sequential` attempt: resolved strategy AND file
+- [x] One forced-`sequential` attempt: resolved strategy AND file
       order verified from the logs; RT2 §12 ledger entry within
       tolerance; HealthGate pipeline unaffected.
-- [ ] Result + limitations recorded here (PASS/FAIL verbatim
-      evidence, PR 1 §7 style).
+      *(attempt 2, 2026-07-28; 4 trained rounds, 2 architectures, all
+      six evidence layers confirmed; RT2 within ±2.5%; zero watchdog
+      kills. Attempt 1 was killed 3× by a zero-margin watchdog
+      deadline caused by omitted safety-factor flags in the launch
+      plan — a launch defect, not an ordering one.)*
+- [x] Result + limitations recorded here (PASS/FAIL verbatim
+      evidence, PR 1 §7 style). *(See the RESULT block below.)*
 
 #### Launch plan (drafted 2026-07-28; AWAITING OPERATOR APPROVAL)
 
@@ -1724,6 +1739,131 @@ Evidence to collect (quoted verbatim, anti-hallucination standard):
 
 Rollback if it fails: the feature is inert without the flags
 (`shuffle` default), so a failure blocks P2-S but requires no revert.
+
+#### RESULT — PASS WITH DOCUMENTED LIMITATIONS (2026-07-28, attempt 2)
+
+**Environment and launch.** lilab; cold-start (no `--seed_paths`);
+`--data_scope 4-9` paired with `--health_gate_files 4,5,6,7,8,9`;
+forced `--order_strategy_override sequential` with the deliberately
+NON-ascending permutation `--file_order_override 9,7,5,4,8,6`;
+2 iterations × 2 rounds; `--max_epochs 1`; trial budget 5 min, formal
+30 min; safety factors 1.5 / trial 3.0 / formal 2.0. Total wall time
+~12 min, **zero watchdog kills**. Workspace
+`/tmp/checkpoint_pr2_1785282966`.
+
+**Why the Gate passes.** Ordering was confirmed on real training at
+six independent layers, and the forced permutation `[9, 7, 5, 4, 8, 6]`
+survived every one of them without being sorted or rewritten, on four
+independent trained rounds across two different architectures. An
+ascending order would have made a sorting defect invisible; this one
+could not.
+
+| Layer | Result |
+|---|---|
+| Tuner resolution log | `[data_order] proposed=none override=sequential resolved=sequential source=operator_override file_order=[9, 7, 5, 4, 8, 6]` |
+| Engine per-epoch log | `[data_order] resolved=sequential file_order=[9, 7, 5, 4, 8, 6] epoch=0 epoch_seed=…` — 4 epochs, seeds `1074101029`, `916363156`, `1128228275`, `552777383` |
+| Persisted records | trained rounds stamped `resolved_order_strategy=sequential` |
+| Iteration manifest | `ordering_by_experiment` round-keyed, both iterations |
+| Run-invariants lock | `"ordering_override_strategy": "sequential"`, `"ordering_override_file_order": [9,7,5,4,8,6]` |
+| RT2 + HealthGate | prediction error within ±2.5%; zero watchdog kills; every collapse received a complete gate verdict |
+
+**RT2 predicted vs actual** (§12 ledger evidence):
+
+| Model / round | Predicted | Actual | Actual/predicted |
+|---|---|---|---|
+| wavenet_coldstart round 1 | 117.866 s | 120.814 s | 1.025 |
+| wavenet_coldstart round 2 | 73.564 s | 75.415 s | 1.025 |
+| spectral_gated round 1 | 44.337 s | 44.164 s | 0.996 |
+
+Interpretation: prediction error stayed within ~±2.5%; **sequential
+ordering did not inflate the modeled workload**; optimizer-step count
+and loader-construction semantics were unchanged as designed; zero
+watchdog kills in attempt 2.
+
+**Causal finding from attempt 1** (three kills, overshoots of 0.21%,
+0.21%, 0.06%): the attempt-1 deadline was `117.866 s` and the round
+prediction was **also** `117.866 s` — the deadline was effectively the
+raw prediction with no usable safety margin, because the launch omitted
+the safety-factor flags and took the shell default of 1.0. The actual
+run exceeded it by ~2.5%, while the identical work completed under the
+configured trial factor in attempt 2. **The attempt-1 kill is not
+attributable to sequential ordering.** Recorded as an empirical
+server-specific value in
+`docs/memories/project_watchdog_safety_factor_lilab.md` and in
+`docs/running_chain_test.md`.
+
+**Results.** Trained attempts: 4, all `failed_mode_collapse` (gate
+evidence: `unique_int8=1`, `output_std_mv=0`,
+`dominant_mode_fraction=1.0`). Skipped attempts: 3,
+`skipped_time_risk`. Best scores recorded before gate rejection: 0.684
+(iter 1) and -1.606 (iter 2). **No HealthGate-valid formal result.**
+
+**Limitations — state plainly, do not overstate the Gate.**
+
+P2-V2 does **not** demonstrate any of: ordering superiority; a
+HealthGate-valid score improvement; successful *live* formal-round
+execution; intelligent agent selection of ordering; or
+production-readiness of `sequential` as the preferred strategy. The
+collapses are consistent with the deliberately small smoke
+configuration — cold-start LLM-invented architectures, one epoch,
+`trial_portion 0.02`, a bounded five-minute trial budget — and
+HealthGate correctly rejected every one. **The absence of a valid
+formal result is not an ordering failure**: the trained attempts
+collapsed independently of the ordering plumbing.
+
+On the formal path specifically:
+
+> The bounded real-training smoke did not execute a formal round.
+> Formal ordering support is established by code-path audit and a
+> focused deterministic formal-branch test; it was not independently
+> observed in this real-training smoke.
+
+The audit (recorded below) found trial and formal share the complete
+ordering path, and
+`tests/unit/agent/tune_ml_hyperparam_agent/test_ordering_formal_branch.py`
+now exercises the formal branch with a forced non-default ordering.
+Formal ordering is therefore **not** an implementation gap, and no
+further real-training Gate is required for it.
+
+**Formal-path audit (code-traced, 2026-07-28).**
+
+| Question | Finding |
+|---|---|
+| Where do trial/formal diverge? | `_resolve_sample_set_cfg` (`:2344`); returns exactly 5 SAMPLING keys, no ordering |
+| Ordering resolved before/after? | After (`:2376`) but **mode-independent** — no argument is mode-gated |
+| Same `TrialConfig`? | Yes — one construction (`:2386`) |
+| Formal rebuild of `active_params`? | No — assigned once (`:2479`); later lines only add unrelated keys |
+| Same skill/CLI dispatch? | Yes — one `_run_skill("training_skill", …)` (`:2901`) |
+| Same stamping path? | Yes — stamps (`:3698-3700`) sit BEFORE the `if trial_config.is_trial:` gate (`:3702`) |
+| Formal-only bypass? | None — the only mode conditionals govern `target_files` and `file_index` |
+
+**Defect discovered by the Gate.** The round-keyed manifest exposed a
+provenance problem that a single iteration-level value would have
+hidden: two `skipped_time_risk` attempts — pre-flight rejections from a
+CURRENT run — were labelled `legacy_default`, which means "this
+artifact predates the ordering feature". Fixed in `e0a376d` by adding
+a fifth provenance state, `not_executed`, with
+`resolved_order_strategy=None` and `resolved_file_order=None`; the
+attempt stays visible with its status, and any proposal/override
+context is preserved without being reported as executed. Tests:
+`tests/unit/agent/schemas/test_ordering_not_executed.py` (11).
+
+Scope note for that fix: *this fix distinguishes known pre-flight
+non-executed attempts from legacy artifacts. Current-run error records
+that fail before the normal provenance-stamping site remain a known
+residual and are tracked separately* (issue #139 — preferred fix is to
+stamp resolved ordering immediately after resolution and before
+training dispatch).
+
+**What P2-V2 does not change.** This Gate validates implementation
+correctness and compatibility only. It does not complete P2-E. The
+matched-budget `shuffle` vs `sequential` evaluation, the
+HealthGate-valid formal score comparison, valid-round-rate, runtime and
+memory comparison, any strategy recommendation, and any
+production-default change all remain separate and unaddressed.
+`sequential` is NOT promoted; the default remains `shuffle`; no claim
+is made that the FCNet ordering procedure has been reproduced or shown
+superior.
 
 ### P2-DOC — node/skill documentation sync (very last step before merge)
 
