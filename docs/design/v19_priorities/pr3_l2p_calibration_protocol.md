@@ -529,3 +529,19 @@ sample failure (6/10 < 70%). Three or fewer failures allow completion
 (7/10 = 70% attainable). This matches the rev-2 stop logic and removes
 any post-hoc stop discretion. Terminal failures remain recorded, their
 calls count, and the run otherwise continues sample by sample.
+
+## 20. Final rev-3 outcome (2026-07-29)
+
+Rev-3 executed to the 60-call cap: 3/9 completed samples valid (33% vs
+the 70% floor); all six terminal failures were the #146 citation class
+in BOTH arms (all four control samples failed — no C-vs-T comparison
+exists); the populated production vocabulary did not reduce the rate
+(rev-2 50% → rev-3 67% terminal). Delivery invariants 10/10; version
+`gpt-5.5-2026-04-23` stable across all 96 Layer-2 calls; cumulative
+spend $20.46 of $80. Full campaign NOT RUN — the pre-registered
+cannot-fit stop condition applies (justified design ≈600-1200 calls /
+$120-240 vs 300 calls / $59.54 authorized). Layer-2 verdict:
+INCONCLUSIVE (execution-reliability-blocked). Deviations recorded in
+the report §5.4 (incl. the §19.1 mid-run enforcement gap in the
+runner). Complete report:
+`reports/pr3_structured_health_feedback_layer2_calibration_2026-07-29.md`.

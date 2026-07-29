@@ -164,7 +164,16 @@ Carried from the PR 1/PR 2 process (operator rules):
              CLI store_true + int) — not copied from this design doc.
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
              (flag OFF by default — no behavior change in production)
-[ ] P3-L2p — Layer-2 pilot (small; variance + runtime measured).
+[x] P3-L2p — Layer-2 pilot EXECUTED (2026-07-29): rev-2 ABORTED
+             (production-context fixture mismatch + runner artifact
+             gap; behavioral outputs excluded); rev-3 executed to the
+             60-call cap — terminal valid-sample rate 3/9 (33%) vs the
+             70% floor, ALL failures the pre-existing #146 citation
+             reliability class (both arms, zero valid control
+             samples). Delivery invariants 10/10; version stable;
+             cumulative Layer-2 spend 96 calls / $20.46 of $80.
+             Full report:
+             reports/pr3_structured_health_feedback_layer2_calibration_2026-07-29.md.
              Protocol DRAFTED 2026-07-29 —
              [`pr3_l2p_calibration_protocol.md`](pr3_l2p_calibration_protocol.md)
              (arms C/T/D, scenarios S1+S2, pipeline-mode proposer
@@ -189,7 +198,16 @@ Carried from the PR 1/PR 2 process (operator rules):
              grounded cost table (~113k input tokens/proposer sample,
              treatment adds ~460). AWAITING operator pilot-launch
              decision — no launch from the draft.
-[ ] P3-L2  — Layer-2 synthetic real-LLM campaign complete + analyzed
+[ ] P3-L2  — Layer-2 campaign NOT RUN — STOPPED by the pre-registered
+             condition (2026-07-29): at the observed 33% terminal
+             success, the smallest justified design needs ~600-1200
+             calls / ~$120-240 vs the authorized 300 calls / $59.54
+             remaining. Layer-2 verdict: INCONCLUSIVE
+             (execution-reliability-blocked by issue #146 — a
+             production-scope citation weakness explicitly outside
+             this study's change budget). Unblock path: fix #146 →
+             rev-4 pilot → campaign. The treatment's behavioral claim
+             is OPEN, not refuted — no valid control arm existed.
 [ ] P3-L3  — Layer-3 bounded real-LLM + real-training Gate complete
              (operator-approved launch; docs/gates/ conventions)
 [ ] P3-ACT — production activation decision (operator; separate from merge)
