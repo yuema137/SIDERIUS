@@ -25,6 +25,7 @@ from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
 from agent.schemas.health_feedback import (
+    CollapseFingerprint,
     RoundHealth,
     build_collapse_fingerprint,
     build_gate_outcomes,
@@ -185,7 +186,7 @@ def _render_health_summary_section(summary: ModelRunSummary) -> list[str]:
     """
     counts = {"valid": 0, "invalid": 0, "unknown": 0}
     fingerprint_rounds: dict[str, list[int]] = {}
-    fingerprint_by_sig: dict[str, object] = {}
+    fingerprint_by_sig: dict[str, CollapseFingerprint] = {}
     for i, health in enumerate(summary.round_health):
         counts[str(health.health_validity)] += 1
         if health.fingerprint is not None:
