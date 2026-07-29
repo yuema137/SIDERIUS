@@ -87,7 +87,30 @@ Carried from the PR 1/PR 2 process (operator rules):
              workspace cases — implemented, 31 new tests green, block
              regression 980 passed; CB5-c commits pending
              stop-and-show approval (§11-CB5 evidence)
-[ ] P3-V1  — Layer-1 deterministic validation complete (all §7.1 checks)
+[x] P3-V1  — Layer-1 deterministic validation COMPLETE (2026-07-29):
+             verdict PASS WITH DOCUMENTED LIMITATIONS. Full unit suite
+             4617 passed / 4 xfailed / 216.20s locally (repo venv);
+             CI run 30472894670 head 14f2891 SUCCESS — ruff clean,
+             format clean, pyright strict 0 errors (CI is the
+             type-check source of truth; not runnable on lilab),
+             pytest 4617 passed / 1 skipped / 3 xfailed / 269.73s.
+             Local-vs-CI count difference explained: the issue #138
+             Path-A reference test runs+xfails on lilab (real data
+             present) and skips on CI (data absent) — 4 xfailed vs
+             3 xfailed + 1 skipped, same test, environment-dependent
+             mode, no regression. Claim-to-evidence matrix in §7.1a:
+             all 12 operator categories (A-L) directly proven; 4 audit
+             gaps closed by test_health_feedback_p3v1_audit.py (6
+             tests). Branch diff audited d811226..HEAD = exactly the
+             §6 file list. Limitations (do NOT hide gaps): (1) Layer 1
+             proves delivery + deterministic persistence ONLY — no
+             behavioral-improvement claim; (2) the interp→propose
+             pseudo full-loop lives in tests/unit as composed
+             mock-LLM tests, not the tests/integration dual-mode
+             harness (functionally equivalent); (3) real-environment
+             chain execution deferred to P3-L3; (4) two CI-red rounds
+             during CB3/CB5 (pyright annotation, ruff format) were
+             mechanical, fixed same-day, final state green.
 [ ] P3-DOC — node/skill .md sync + operator-surface docs (last pre-merge)
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
              (flag OFF by default — no behavior change in production)
@@ -1148,6 +1171,44 @@ Not touched: gate execution (`execute_tools/health_checks/*` behavior),
 - "No production routing behavior changed": assert `GateAction` handling
   and tuner control flow untouched (no diff outside §6's file list — the
   PR 2 override-surface test pattern).
+
+### 7.1a P3-V1 closure — claim-to-evidence matrix (2026-07-29)
+
+Verdict and run evidence are recorded in §0 (P3-V1 entry). Audit method:
+every §7.1 bullet and every operator §1.4 category (A-L) mapped to a
+DIRECT test whose assertions were inspected — never inferred from test
+proximity. Four gaps found; each closed by a focused test in
+`tests/unit/agent/schemas/test_health_feedback_p3v1_audit.py` (6 tests).
+
+| Claim (category) | Direct evidence | Status |
+|---|---|---|
+| A. Extraction/classification: 8 record classes; presence not emptiness; evidence precedence; no invented verdicts | `test_health_feedback.py::TestProvenance` (9) + `test_round_health_summary.py` vintage suite (8) incl. error-with-evidence → gated; presence-manufacture hazard pinned | proven |
+| B. Primary fingerprint: 4-step selection; persisted gate_name/threshold.metric identity; raw kept, signature bucketed; recompute-from-raw; prose excluded; allowlist bounding | `TestPrimarySelection` (6) + `TestFingerprint` (6) | proven |
+| C. History/retention: buckets per iter; boundaries; non-contiguous expiry; windowed≠lifetime; drop-after-expiry; deterministic order+trim; latest-8 sources; representative rule; window variants; invalid policy fails | `TestWindowedCounts` (5) + `TestHistoryMerge` (7) + `TestHistoryEntryValidation` (6); incidental-order invariance + composed windowed-vs-lifetime→prompt added at P3-V1 (audit tests) | proven |
+| D. Summary boundary: 1:1 alignment; exact fields; no fabricated fingerprints; legacy loadable; pre-PR3 fields unchanged | `test_round_health_summary.py` alignment/backward-compat/round-trip + mixed-stream lockstep audit test | proven |
+| E. Deterministic outputs + degraded invariant | `test_health_feedback_outputs.py` (8) — incl. healthy≡degraded field equality (the strongest LLM-independence form) and the operator 5-condition scenario | proven |
+| F. Interpreter parity + treatment | goldens committed BEFORE renderer (`23c3fbe` < `2052fa2`, git-order-proven); full-string equality with health data present; `test_health_prompt_rendering.py` (10) | proven |
+| G. Proposer parity + treatment + §14.N | golden `66efed8` < `4b04723`; `test_health_evidence_block.py` (12) incl. §14.N byte-identical both flag states | proven |
+| H. Flag/policy/lock matrix + three sites | `test_run_invariants_health_feedback.py` (10) + all-three-sites window-scan regression | proven |
+| I. One-directional history flow | write-site count (exactly 2) + no-reverse-construction assertions; healthy≡degraded equality proves fields cannot derive from LLM output; digest-only restore suite (6) | proven |
+| J. CLI/shell/run_config/manifest | `test_health_feedback_chain_wiring.py` (12) + shell parity (15) with the two documented overrides; startup rejection ×3 pre-execution | proven |
+| K. Three-workspace contract | `test_health_feedback_workspace_cases.py` (4) — context snapshots on ACTUAL prompt strings | proven |
+| L. No routing/scientific change | branch diff = exactly the §6 file list (audited `d811226..HEAD`, zero files outside §6 + tests/docs); tuner consumption surface = exactly 2 references per policy field (audit test); gate YAML/checks/runner logic untouched except the approved vocabulary extraction | proven |
+
+Notes recorded during the audit:
+
+- §7.1 "renderer consumes the RESOLVED policy" transformed structurally:
+  renderers never need the policy because stored history is
+  post-retention; the enforceable form — merge takes policy as a
+  REQUIRED parameter; renderers import no retention constant — is now
+  asserted directly (audit tests).
+- §7.1 "dual-mode pseudo full-loop": covered by the composed
+  interp→propose workspace-case tests (predefined LLM responses, real
+  production code, context-snapshot assertions) living in `tests/unit`
+  rather than the `tests/integration` dual-mode harness — functionally
+  equivalent, location noted as a limitation, not a gap.
+- pyright strict is CI-only (Node v10 on lilab) — the CI run is the
+  type-check source of truth.
 
 ### 7.2 Layer 2 — synthetic real-LLM campaign (P3-L2p → P3-L2)
 
