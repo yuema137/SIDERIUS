@@ -64,17 +64,29 @@ Carried from the PR 1/PR 2 process (operator rules):
              file list fixed (§6). Provenance taxonomy left extensible
              per operator direction — smallest typed model chosen at
              CB1/CB2 under the §3.2 governing rule.
-[ ] P3-CB1 — commit block 1: RoundHealth + CollapseFingerprint schemas
-             (delivery data model, no consumers)
-[ ] P3-CB2 — commit block 2: summary-builder extraction
-             (tuning_output_to_model_run_summary → per-round health)
-[ ] P3-CB3 — commit block 3: interpreter delivery
-             (flag-gated prompt rendering + InterpretationOutput carry)
-[ ] P3-CB4 — commit block 4: proposer delivery
-             (flag-gated [HEALTHGATE EVIDENCE] block)
-[ ] P3-CB5 — commit block 5: chain/workflow wiring + cross-iteration
-             carry + retention policy + CLI flags + run_config/manifest
-             stamps + run-invariants lock fields (all three sites)
+[x] P3-CB1 — commit block 1 COMPLETE (2026-07-29): extractions
+             `153ec72` + health_feedback module `f2dcbf7`; 39 new
+             tests; CI green incl. first pyright pass (§11-CB1
+             evidence)
+[x] P3-CB2 — commit block 2 COMPLETE (2026-07-29): `f3a0b8c`;
+             RoundHealth into ModelRunSummary; 12 new tests over the
+             three real artifact vintages (§11-CB2 evidence)
+[x] P3-CB3 — commit block 3 COMPLETE (2026-07-29): goldens `23c3fbe`,
+             deterministic outputs + degraded-merge `e4cb62b`,
+             flag-gated rendering `2052fa2` (+ pyright annotation fix
+             `394ec86`); byte-identical flag-OFF parity vs pre-change
+             goldens; 21 new tests (§11-CB3 evidence)
+[x] P3-CB4 — commit block 4 COMPLETE (2026-07-29): goldens `66efed8`,
+             proposer [HEALTHGATE EVIDENCE] block `4b04723`; §14.N
+             pinned byte-identical; 15 new tests (§11-CB4 evidence)
+[x] P3-CB5 — commit block 5 IMPLEMENTED + validated (2026-07-29,
+             operator-revised a/b/c boundaries): CB5-a lock policy +
+             tuner pass-through `76f602a`; CB5-b workflow/resume carry
+             `4d5390e`; CB5-c chain CLI + stamps + lock-collision
+             closure + all-three-sites regression + the three
+             workspace cases — implemented, 31 new tests green, block
+             regression 980 passed; CB5-c commits pending
+             stop-and-show approval (§11-CB5 evidence)
 [ ] P3-V1  — Layer-1 deterministic validation complete (all §7.1 checks)
 [ ] P3-DOC — node/skill .md sync + operator-surface docs (last pre-merge)
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
@@ -1930,9 +1942,65 @@ one-directionality test used whitespace-exact source matches that
 `ruff format` legitimately collapsed — test made format-robust; the
 production wiring was correct. run_one_iteration forwarding of
 `state.collapse_fingerprint_history` is CB5-c (chain wiring).
-- [ ] CLI flags (`--enable_structured_health_feedback`, retention
-      flags) + `run_chain.sh` passthrough
-- [ ] run_config + per-iteration manifest stamps
+- [x] CB5-c: CLI flags + `run_chain.sh` passthrough *(2026-07-29:
+      three argparse flags with startup retention validation in
+      `normalize_args` — Pydantic ge=1 via the resolved policy, routed
+      through the shared `parser.error` path so an invalid value exits
+      non-zero BEFORE any resume mutation or LLM work; `_chain_common.sh`
+      vars + parse arms + forward-when-set (unset policy reproduces
+      pre-PR3 argv byte-identically); parity contract extended — the two
+      retention knobs registered in `SHELL_DEFAULT_OVERRIDES` with the
+      documented shell-""≡omit vs Python-3/8 rationale)*
+- [x] CB5-c: run_config + per-iteration manifest stamps *(run_config
+      stamped at CB5-a; `write_manifest` gains `health_feedback_policy`
+      — stamped on EVERY branch (completed/no_records/failed) so failed
+      iterations stay auditable; policy only, no per-round evidence)*
+- [x] CB5-c: lock-collision closure *(the CB5-b audit gap found during
+      implementation: the workflow threads tuner inputs through
+      `ml_model_valid_to_ml_model_tune`, which lacked the policy triple
+      — a flag-ON workflow + OFF-defaulted tuner would have written
+      contradictory locks, the exact PR 2 failure mode. Protocol +
+      workflow tune-call now thread all three; chain lock call passes
+      them; the ALL-THREE-SITES regression (window-scan over every
+      `build_run_invariants(` call) pins it)*
+- [x] CB5-c: three approved workspace cases *(composed end-to-end
+      pseudo over real components, mock LLM only; context snapshots
+      asserted on ACTUAL prompt strings: Case 1 — ws A flag-ON, iter-1
+      interpreter digest → typed restore → iter-2 merge shows buckets
+      [1, 2] → the iteration-2 PROPOSER prompt contains
+      "- {SIG}: 2 occurrence(s) across iteration(s) 1, 2"; manifest and
+      lock policy stamps agree. Case 2 — ws A resumed OFF →
+      RunInvariantsViolation naming the field + locked=True vs this
+      run=False. Case 3 — ws B OFF from creation: the actual bridge
+      prompts carry no treatment text while the digest carries the
+      recording-only structured provenance; proposer prompt has no
+      block and no signature)*
+
+**CB5-c evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../test_health_feedback_chain_wiring.py -q
+    → 12 passed 0.98s   (three-site lock regression; CLI defaults/parse/
+                          startup rejection ×3; run_workflow forwarding
+                          incl. typed history; manifest policy stamp +
+                          legacy-None)
+pytest tests/.../test_health_feedback_workspace_cases.py -q
+    → 4 passed 0.97s    (the three operator cases + stamp agreement)
+pytest tests/unit/scripts/test_chain_consistency.py -q
+    → 15 passed 1.14s   (shell parity incl. the two documented overrides)
+pytest tests/unit/sdsc_submission_scripts tests/unit/scripts \
+       tests/unit/workflows tests/unit/core tests/unit/agent/protocols -q
+    → 980 passed 15.04s (block regression)
+bash -n _chain_common.sh → syntax ok; ruff + format clean
+```
+
+Authoring-time fixes (each diagnosed before change): startup-validation
+insertion initially landed outside the existing try/except (syntax);
+missing --run_name in CLI test fixtures; window-scan replacing a
+non-greedy regex defeated by inner parens; manifest iter_dir not created
+by a test. One production improvement made during test authoring: the
+manifest policy stamp moved from the completed-branch dict to a single
+post-branch assignment so ALL manifest branches carry it.
 
 **Validation plan.** Unit: the §3.9 five-row resume matrix as five
 tests; three-site regression test (parse each
