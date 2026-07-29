@@ -22,30 +22,20 @@ from collections.abc import Iterable
 
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.registry import get
+
+# _SEVERITY / severity_of moved to schemas.py (V19 PR 3 CB1 — the
+# side-effect-free canonical home; see pr3_healthgate_feedback.md §2.5).
+# Re-imported here so every existing ``from ...runner import severity_of``
+# call site keeps working unchanged. The ordering logic is defined ONCE,
+# in schemas.py.
 from execute_tools.health_checks.schemas import (
+    _SEVERITY,
     GateAction,
     GateResult,
     HealthCheckContext,
     HealthCheckResult,
 )
-
-# Severity table — most restrictive wins (design §8).
-#   SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE
-_SEVERITY: dict[GateAction, int] = {
-    GateAction.CONTINUE: 0,
-    GateAction.INVALIDATE_ROUND: 1,
-    GateAction.SKIP_TO_FORMAL: 2,
-    GateAction.SKIP_ITER: 3,
-}
-
-
-def severity_of(action: GateAction) -> int:
-    """Integer severity for a ``GateAction``. Higher wins in ``resolve_action``.
-
-    Public so the tuner and logging can order actions without duplicating the
-    severity table.
-    """
-    return _SEVERITY[action]
+from execute_tools.health_checks.schemas import severity_of as severity_of
 
 
 def resolve_action(gate_results: Iterable[GateResult]) -> GateAction:

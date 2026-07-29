@@ -58,6 +58,53 @@ gate should flag ``is_degenerate`` (see ``_gate_results_to_score_meta`` in
 future contributors see it when they read the enum."""
 
 
+# Severity table — most restrictive wins (design §8).
+#   SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE
+# Moved here from runner.py (V19 PR 3 CB1, pr3_healthgate_feedback.md
+# §2.5): this module is the side-effect-free canonical home for gate
+# vocabulary, so schema-level consumers (agent/schemas/health_feedback)
+# can order actions without importing the runner's config/registry
+# machinery. runner.py re-exports both names for compatibility.
+_SEVERITY: dict[GateAction, int] = {
+    GateAction.CONTINUE: 0,
+    GateAction.INVALIDATE_ROUND: 1,
+    GateAction.SKIP_TO_FORMAL: 2,
+    GateAction.SKIP_ITER: 3,
+}
+
+
+def severity_of(action: GateAction) -> int:
+    """Integer severity for a ``GateAction``. Higher wins in ``resolve_action``.
+
+    Public so the tuner and logging can order actions without duplicating the
+    severity table.
+    """
+    return _SEVERITY[action]
+
+
+GateExecutionStatus = Literal["passed", "failed", "not_run", "error"]
+"""Execution state of one gate for one round (V19 PR 3 CB1).
+
+Extracted alias of the ``PersistedHealthGateResult.execution_status``
+value set so downstream schemas (``agent/schemas/health_feedback``)
+reference ONE definition. Serialized values are unchanged."""
+
+
+class CandidateHealthValidity(StrEnum):
+    """Eligibility state for scientific/execution candidate selection.
+
+    Moved here from ``candidate_eligibility.py`` (V19 PR 3 CB1): the enum
+    is pure vocabulary needed by schema-level consumers, while the
+    classifier functions (which read gate config) stay in
+    ``candidate_eligibility`` — which re-exports this name for
+    compatibility.
+    """
+
+    VALID = "valid"
+    INVALID = "invalid"
+    UNKNOWN = "unknown"
+
+
 # ---------------------------------------------------------------------------
 # HealthCheckContext — inputs shared by all skills
 # ---------------------------------------------------------------------------
@@ -248,7 +295,7 @@ class PersistedHealthGateResult(BaseModel):
     """Fully serialisable gate observation for durable experiment records."""
 
     gate_name: str
-    execution_status: Literal["passed", "failed", "not_run", "error"]
+    execution_status: GateExecutionStatus
     check_passed: bool | None = None
     would_invalidate_under_production_policy: bool
     resolved_action: GateAction
