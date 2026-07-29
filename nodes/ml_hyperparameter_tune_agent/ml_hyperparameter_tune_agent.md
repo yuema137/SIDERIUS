@@ -305,6 +305,32 @@ Four-part contract:
    operator override — not the resolved value — is pinned in the
    run-invariants lock.
 
+5. **Five provenance states**, recorded in
+   `ordering_resolution_source`. Three mean an ordering actually ran;
+   two mean none did, and they are deliberately distinct because they
+   mean different things:
+
+   | Source | Meaning | `resolved_order_strategy` |
+   |---|---|---|
+   | `operator_override` | training ran the operator-forced ordering | the forced value |
+   | `agent_proposal` | training ran the validated agent proposal | the proposed value |
+   | `default` | training ran the default, no usable proposal or override | `shuffle` |
+   | `legacy_default` | a **pre-PR2 artifact** has no ordering fields because it predates the feature; the reader reconstructs the historical default | `shuffle` (reconstructed) |
+   | `not_executed` | a **current-code attempt** was rejected at pre-flight (`skipped_oom_risk` / `skipped_time_risk` / `skipped_schema_violation`) and never reached training, so no ordering was applied | `None` |
+
+   `not_executed` never fabricates a `shuffle` value: inventing one for
+   an attempt that visited no data would misreport the run. Proposal and
+   override context is still preserved on such an attempt — what the
+   agent *did* is independent of whether the attempt was admitted — but
+   the source describes what **executed**, never what would have been
+   selected had it passed admission.
+
+   Known residual: current-run ERROR records (`error_training`,
+   `error_inference`, `error_scoring`, …) fail before the stamping site
+   and so still read as `legacy_default`. Tracked in issue #139; the
+   preferred fix is to stamp resolved ordering immediately after
+   resolution and before training dispatch.
+
 Design: `docs/design/v19_priorities/pr2_data_ordering.md` §3.6–§3.9.
 
 ### Chain formal-incumbent reference

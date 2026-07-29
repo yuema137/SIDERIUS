@@ -1916,10 +1916,28 @@ states the new arguments with their exact defaults and semantics; a
 reader can operate the feature from the docs alone without reading
 the argparse source.
 
-**Verification.**
-- [ ] Cross-check each documented flag/default against the merged
+**Verification.** *(2026-07-28)*
+- [x] Cross-check each documented flag/default against the merged
       argparse/schema source (values quoted, not paraphrased).
-- [ ] Evidence recorded here (files updated + one-line summary each).
+      *(`--order_strategy_override` default `None`, choices
+      `['shuffle','sequential']`; `--file_order_override` default
+      `None`, no choices — read from the live parsers of both
+      `run_one_iteration.py` and the tuner, and from
+      `_chain_common.sh:95-96` (`""` ≡ omit). All match the tables in
+      the tuner .md and running_chain_test.md.)*
+- [x] Evidence recorded here (files updated + one-line summary each).
+
+**Re-sweep after the post-P2-DOC commits.** P2-DOC first ran before
+`e0a376d` added the fifth provenance state, so the node docs described
+only four. Re-run against the FULL branch diff:
+
+| Touched dir | `.md` | Action |
+|---|---|---|
+| `nodes/ml_hyperparameter_tune_agent` | `…_agent.md` | UPDATED — new item 5, a five-state provenance table incl. `not_executed` (`resolved_order_strategy=None`, never a fabricated `shuffle`), plus the #139 error-path residual |
+| `nodes/result_interpretation_agent` | `…_agent.md` | UPDATED — third downstream rule (a `None` resolved strategy means nothing ran, do not read it as a default) and the two distinct absence readings |
+| `agent/skills/training_skill` | `training_skill.md` | **No update needed** — the skill receives RESOLVED values only and records no provenance, so the new state does not reach it (verified: zero `resolution_source` / `legacy_default` / provenance mentions in that file) |
+
+No other node or skill directory appears in the branch diff.
 
 ## 7. Validation plan (maps to baseline §2.0 checkpoints)
 
