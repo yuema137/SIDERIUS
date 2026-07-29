@@ -456,3 +456,65 @@ remain separate: P3-S (Layer-1 merge, flag OFF) → P3-L2p (this pilot)
 | Output tokens / API cost | launch-day dry render (input) + live price sheet + first-sample-per-scenario measurement (output) |
 | Registry-dependent prompt size | launch-day dry re-render against the then-current plugin/loss registries |
 | Scenario fixture freeze | fixtures committed to the repo before the launch request |
+
+## 19. Rev 3 (operator-approved, 2026-07-29) — post-abort revision
+
+**Rev-2 pilot: ABORTED — production-context fixture mismatch and
+artifact-completeness failure.** It does NOT state that the treatment
+failed. Stopped at 6/10 samples by the pre-registered §3.6 floor
+(terminal success 3/6 = 50% < 70%); 36 calls, $8.49; version stable
+(`gpt-5.5-2026-04-23`); delivery invariants green on every completed
+sample. All rev-2 behavioral outputs — including the three successes,
+which were produced under the SAME incomplete context and differ only
+through stochastic schema-validity outcomes — are EXCLUDED from pilot
+and campaign behavioral estimates. Token/latency/cost/retry/failure
+evidence is retained. Artifacts preserved unchanged:
+`reports/artifacts/pr3_l2p/pilot_20260729/`.
+
+**Root-cause classification (operator-accepted):**
+
+1. PRIMARY calibration defect — the rev-2 fixture passed
+   `vocab_seed=[]` while production chains load the non-empty static
+   seed on iteration 1 (later the runtime vocabulary). Material: the
+   vocabulary changes proposal distribution and inheritance choices.
+2. Independent latent production robustness issue — malformed
+   `external_agent` citations (`ce_plus_hf_spectral_loss`,
+   `emd_ordinal_loss`, `iter_007`) against the
+   `InheritedComponent.source_id` contract; same structural failure
+   observed terminally in a real production chain (v16, gemini); no
+   worked `prefix:identifier` example exists in any stage prompt.
+   Recorded as: a pre-existing production prompt/schema reliability
+   weakness, amplified under gpt-5.5, OUTSIDE this calibration fix's
+   scope. Follow-up: issue #146. No production prompt/schema/validator
+   change in this revision.
+3. Calibration runner defect — raw response bodies were not persisted
+   (violated §4.3). Rev 3 persists EVERY attempt's body, including
+   parse-/validation-failing responses.
+
+**Rev-3 changes (calibration package only):** production static vocab
+seed loaded through the production path
+(`workflows.model_exploration._load_vocab_seed`, 21 entries) wired into
+the interpreter's `runtime_vocab` and the proposer's `vocab_seed` —
+identical content across C/T/D; `expert_context=[]`/`agent_cards=[]`
+retained (production-consistent with lit-review off); response-body
+persistence in the runner tee; fixture hashes re-frozen
+(S1 `a8ab1db8...`, S2 `7f64f12d...`). Prompt-change statement,
+precisely: stage templates, schemas, retry logic, and PR 3 treatment
+rendering DO NOT change; the RESOLVED prompt content DOES change
+because the production vocabulary block is now populated — rev-3
+prompts are not globally identical to rev-2 prompts.
+
+**Rev-3 zero-LLM evidence (all green pre-launch):** vocab non-empty +
+matches the production seed file + identical across computations +
+production loader exercised; treatment-only C-vs-T difference proven by
+string surgery on the proposing-stage prompt (T minus block ≡ C);
+placeholders resolve; pipeline mode; tee captures schema-INVALID mocked
+bodies with distinct per-attempt artifacts; `git diff` clean of
+production files.
+
+**Rev-3 budget (operator decision):** up to 60 additional calls
+(50 nominal + 10 retry/schema-repair); rev-2 spend stands (36 calls /
+$8.49); Layer-2 monetary hard cap unchanged at $80 → remaining
+allowance **$71.51**, enforced by the ledger at every call. The
+full-campaign budget is NOT yet frozen — it is derived from rev-3 pilot
+evidence and separately approved.

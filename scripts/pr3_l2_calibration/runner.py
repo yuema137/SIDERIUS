@@ -135,12 +135,26 @@ def _wrap_client(bridge, ledger: Ledger, sample_dir: Path, node: str):
                     else None
                 ),
                 "error": error,
+                # rev 3 (§4.3 fix): EVERY attempt's raw response body is
+                # persisted — including responses that later fail JSON
+                # parsing or Pydantic validation downstream.
+                "response_content": (
+                    response.choices[0].message.content
+                    if response is not None and getattr(response, "choices", None)
+                    else None
+                ),
                 "request_messages": kwargs.get("messages"),
             }
             with open(calls_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
             if error is None:
-                ledger.record({k: v for k, v in row.items() if k != "request_messages"})
+                ledger.record(
+                    {
+                        k: v
+                        for k, v in row.items()
+                        if k not in ("request_messages", "response_content")
+                    }
+                )
 
     bridge.client.chat.completions.create = create
 
@@ -202,6 +216,9 @@ def run_sample(entry: dict, run_dir: Path, ledger: Ledger, first_gate_done: list
         s.model_description = MODEL_DESCRIPTIONS.get(s.model_type)
         summaries.append(s)
 
+    from scripts.pr3_l2_calibration.fixtures import production_vocab_seed
+
+    vocab_seed = production_vocab_seed()
     interp_input = InterpretationInput(
         summaries=summaries,
         storage={
@@ -212,6 +229,9 @@ def run_sample(entry: dict, run_dir: Path, ledger: Ledger, first_gate_done: list
         enable_structured_health_feedback=interp_on,
         collapse_fingerprint_history=spec["carried_history"](),
         task_description=get_task_description(load_task_config()),
+        # rev 3: production first-iteration vocabulary condition — the
+        # workflow seeds runtime_vocab from the static seed on iter 1.
+        runtime_vocab=vocab_seed,
     )
     os.makedirs(sample_dir / "interp_ws", exist_ok=True)
     (sample_dir / "interp_input.json").write_text(interp_input.model_dump_json(indent=2))
@@ -246,6 +266,7 @@ def run_sample(entry: dict, run_dir: Path, ledger: Ledger, first_gate_done: list
         interp_out,
         storage,
         enable_structured_health_feedback=proposer_on,
+        vocab_seed=vocab_seed,  # rev 3: production vocabulary for citations
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",
             stages=[

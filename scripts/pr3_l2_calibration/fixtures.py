@@ -23,7 +23,21 @@ from agent.schemas.health_feedback import (
 )
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 
-FIXTURE_VERSION = "p3l2p-fixtures-1"
+FIXTURE_VERSION = "p3l2p-fixtures-2"  # rev 3: + production static vocab seed
+
+
+def production_vocab_seed():
+    """The EXACT production static vocabulary seed, loaded through the
+    production path (workflows.model_exploration._load_vocab_seed reads
+    agent/schemas/vocab_seed.json) — the first-iteration chain condition.
+    Non-empty by preflight assertion; identical across arms by
+    construction (single loader, no arm parameter)."""
+    from workflows.model_exploration import _load_vocab_seed
+
+    seed = _load_vocab_seed()
+    assert seed, "production static vocab seed is empty or missing"
+    return seed
+
 
 SIG_DIVERSITY = "output_diversity_blocking:n_unique_int8_values=1"
 
@@ -273,6 +287,10 @@ def canonical_fixture_payload(scenario: str) -> dict:
         },
         "model_descriptions": MODEL_DESCRIPTIONS,
         "retention_policy": {"history_window_iterations": 3, "max_entries_per_model": 8},
+        "vocab_seed": [
+            v.model_dump(mode="json") if hasattr(v, "model_dump") else v
+            for v in production_vocab_seed()
+        ],
         "expected_attribution": spec["expected_attribution"],
         "relevance_map": spec["relevance_map"],
     }
