@@ -1100,8 +1100,20 @@ reviewable (and revertible) independently of loader mechanics.
       two new keys (both asserted None by default). Test-expectation
       change only — no production behavior was altered to make it
       pass.)*
-- [ ] Persist the septet in `run_config_*.json` (P1-C5 A4
+- [x] Persist the ordering policy in `run_config_*.json` (P1-C5 A4
       precedent).
+      **SUPERSEDED as originally written.** This item said "persist the
+      SEPTET", which was drafted in rev 2 — before the operator's §3.7
+      three-artifact clarification. Persisting per-round values in
+      `run_config` would contradict that split and is in fact
+      impossible: `run_config` is written ONCE at run startup, so it
+      cannot hold values that legitimately differ round to round.
+      What is implemented (`ml_hyperparameter_tune_agent.py:2015-2016`)
+      is the correct target: `run_config` holds the run-level
+      **override policy** (`order_strategy_override`,
+      `file_order_override`); the per-round resolved values and full
+      provenance live on each `ExperimentRecord`; the round-keyed
+      manifest carries them per experiment.
 
 **Validation plan.**
 - Unit (resolution matrix, one test each — §7.1 "Resolution logic"):
@@ -1906,10 +1918,19 @@ not rely on this list alone); known targets from the plan:
       rules for downstream use — resolved-only describes execution,
       and a rejected proposal is not agent silence — plus why it is
       per-round rather than per-run, and the `legacy_default` read.)*
-- [ ] Diff sweep: any other touched node/skill `.md` (check
+- [x] Diff sweep: any other touched node/skill `.md` (check
       `nodes/*/`*.md` against the PR's touched-file list); confirm
       or update each — record "no update needed" per file
       explicitly, never silently.
+      *(Run TWICE against `git diff --name-only master..HEAD`: once at
+      the original P2-DOC (73fb98d) and again after the post-P2-DOC
+      commits (7ae11af), because P2-DOC is by definition the last step
+      before merge and `e0a376d` had since added a provenance state.
+      Both sweeps found exactly three touched node/skill directories —
+      the tuner, the interpreter, and `training_skill` — with no
+      others anywhere in the branch diff. The explicit
+      "no update needed" record for `training_skill.md` is in the
+      re-sweep table above.)*
 
 **Acceptance criteria.** For every touched node/skill, its `.md`
 states the new arguments with their exact defaults and semantics; a
