@@ -121,6 +121,9 @@ Strategies:
 | `progress_bar` | `bool` | No | `False` | Stream live tqdm progress bars from training/inference subprocesses. |
 | `current_run_best_formal_score` | `float \| None` | No | `None` | Chain formal-incumbent reference (from `core/resume.py`). See "Chain formal-incumbent reference" under Key behavioral notes. |
 | `enable_chain_incumbent_formal_gates` | `bool` | No | `False` | Consumption-only switch for the two formal delta gates. See "Chain formal-incumbent reference" under Key behavioral notes. |
+| `enable_structured_health_feedback` | `bool` | No | `False` | V19 PR 3 chain-policy PASS-THROUGH. The tuner has NO PR 3 behavior of its own: it passes this value into its run-invariants lock call and stamps it into `run_config` — nothing else reads it (a source regression test pins exactly two references). The flag's behavioral effect lives in the interpreter/proposer prompts. |
+| `health_feedback_history_window_iterations` | `int` (`>= 1`) | No | `3` | V19 PR 3 retention-policy pass-through (locked + stamped only; consumed by the interpreter's history merge, not by the tuner). |
+| `health_feedback_history_max_entries_per_model` | `int` (`>= 1`) | No | `8` | V19 PR 3 retention-policy pass-through (locked + stamped only). |
 
 ## Output
 
@@ -243,7 +246,7 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 ## Storage outputs
 
 - **Run output JSON**: `{storage.local.workspace}/run_output_{run_name}.json` — the validated `HyperparamTuningOutput` dumped at the end of `run()`. Contains `all_records` (the full per-round audit trail) plus the best run + score tables + gate-exhaustion / physical-rejection info. The workflow reads this and converts it to `ModelRunSummary` via `tuning_output_to_model_run_summary` for the next interpretation pass.
-- **Run config snapshot**: `{workspace}/run_config_{run_name}.json` — the resolved input config (after defaults + plan-overrides). Audit log for reproducibility.
+- **Run config snapshot**: `{workspace}/run_config_{run_name}.json` — the resolved input config (after defaults + plan-overrides). Audit log for reproducibility. Since V19 PR 3 it also stamps the structured-health-feedback CONTROL POLICY (`enable_structured_health_feedback`, `health_feedback_history_window_iterations`, `health_feedback_history_max_entries_per_model`) — policy only: per-round gate evidence stays in the experiment records and the interpretation digest, never duplicated here. The same three values join the run-invariants lock at all three lock sites (tuner / workflow / chain runner); a changed value on the same workspace fails startup with a `RunInvariantsViolation` naming the field and both values, and a legacy (pre-PR3) lock resolves to `False` / `3` / `8`.
 - **Per-round trial config**: `{workspace}/trial_config_{run_name}_round{N}.json` — the resolved `TrialConfig` for round N, written before the training subprocess starts. Used by `core.resume.restore_prior_state` for crash-recovery.
 - **Token usage**: `{workspace}/token_usage.jsonl` (when `set_run_context` is called by the workflow) — append-only log of every LLM call's token cost.
 - **Per-run plugin dir**: `{workspace}/plugins/{run_name}/` — copy of `seed_plugin_path` written at run start so the training subprocess can find the plugin via `SIDERIUS_PLUGIN_DIRS`. Only populated when `seed_plugin_path` is set.

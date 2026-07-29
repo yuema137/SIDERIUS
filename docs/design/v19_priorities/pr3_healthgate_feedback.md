@@ -145,7 +145,23 @@ Carried from the PR 1/PR 2 process (operator rules):
              chain execution deferred to P3-L3; (4) two CI-red rounds
              during CB3/CB5 (pyright annotation, ruff format) were
              mechanical, fixed same-day, final state green.
-[ ] P3-DOC — node/skill .md sync + operator-surface docs (last pre-merge)
+[x] P3-DOC — node/skill .md sync + operator-surface docs COMPLETE
+             (2026-07-29): result_interpretation_agent.md (input flag +
+             retention knobs + typed history rows; three deterministic
+             output-field rows; recording-vs-rendering behavioral note
+             incl. degraded invariant, one-way history flow, lock/resume
+             semantics); ml_model_proposal_agent.md (input flag row;
+             [HEALTHGATE EVIDENCE] note covering BOTH modes — legacy
+             splice + production pipeline template variable in
+             proposing_stage.md); ml_hyperparameter_tune_agent.md
+             (three pass-through rows stating lock+stamp-only with the
+             two-references regression note; run_config policy-stamp
+             note); docs/running_chain_test.md (three-flag table with
+             defaults off/3/8, startup validation, resume-rule and
+             legacy-workspace paragraphs, where-to-look-afterwards).
+             Every flag and default cross-checked against MERGED source
+             by schema/argparse introspection (False/3/8 everywhere;
+             CLI store_true + int) — not copied from this design doc.
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
              (flag OFF by default — no behavior change in production)
 [ ] P3-L2p — Layer-2 pilot (small; variance + runtime measured)

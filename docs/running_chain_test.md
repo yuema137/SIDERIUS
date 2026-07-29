@@ -225,6 +225,34 @@ carries `ordering_by_experiment`, keyed per experiment.
 See `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`
 under "Data-ordering resolution" for full semantics.
 
+### Structured HealthGate feedback (V19 PR 3)
+
+Three chain flags (all forwarded by `run_chain.sh` only when set — an
+unset policy reproduces pre-PR3 argv exactly):
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--enable_structured_health_feedback` | off (`False`) | Render structured HealthGate evidence in the interpreter and proposer prompts: per-round `[GATE ...]` trajectory labels + a `### HealthGate summary` section for the interpreter; one `[HEALTHGATE EVIDENCE]` block for the proposer. **OFF: every agent-facing prompt is byte-identical to pre-PR3** (golden-parity tested); the deterministic evidence — per-round `RoundHealth`, collapse fingerprints, and the bounded cross-iteration history — is still recorded in the experiment records, the interpretation digest, and the manifest regardless (recording-only provenance). Informational only — never routes, rejects, or scores anything. |
+| `--health_feedback_history_window_iterations` | `3` | Fingerprint-history retention window: the TOTAL number of iterations retained INCLUDING the current one (window 3 at iteration 5 retains 3, 4, 5). Must be `>= 1` — an invalid value fails at startup, before any resume mutation or LLM work. |
+| `--health_feedback_history_max_entries_per_model` | `8` | Deterministic per-model trim bound on retained history entries. Must be `>= 1`; same startup validation. |
+
+**Resume rule:** all three values are pinned in
+`run_invariants_lock.json` at every lock site (tuner, workflow, chain
+runner). Changing any of them on the same workspace fails startup with a
+`RunInvariantsViolation` naming the field and both values. A legacy
+(pre-PR3) workspace resolves to `False` / `3` / `8` and resumes cleanly
+with the defaults — but turning the flag ON over such a workspace is a
+canonical mismatch and requires a NEW workspace, exactly like a scope
+change or a HealthGate flip.
+
+Where to look afterwards: each iteration's `manifest.json` carries the
+`health_feedback_policy` control stamp (flag + the two retention
+values — policy only; per-round gate evidence stays in the records and
+the interpretation digest); the tuner's `run_config_{run}.json` stamps
+the same three values; the interpretation digest carries
+`per_model_round_health_counts`, `per_model_collapse_fingerprints`, and
+the merged `collapse_fingerprint_history` whether the flag is on or off.
+
 ### Virtualenv auto-detection (`--mode lilab` orchestrator + SDSC submission node)
 The orchestrator resolves the Python interpreter in this priority order
 (set in `resolve_py_cmd` and verified by the version + passthrough guards):
