@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path("/home/yuema137/SIDERIUS")
+REPO = Path(__file__).resolve().parents[3]
 
 LOCK_SITES = [
     REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",

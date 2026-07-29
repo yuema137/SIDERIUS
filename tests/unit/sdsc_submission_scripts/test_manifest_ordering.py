@@ -12,16 +12,17 @@ import importlib.util
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
-REPO = "/home/yuema137/SIDERIUS"
-if REPO not in sys.path:
-    sys.path.insert(0, REPO)
+_REPO = Path(__file__).resolve().parents[3]
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
 
 _spec = importlib.util.spec_from_file_location(
     "run_one_iteration_for_test",
-    os.path.join(REPO, "sdsc_submission_scripts", "run_one_iteration.py"),
+    _REPO / "sdsc_submission_scripts" / "run_one_iteration.py",
 )
 roi = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(roi)
