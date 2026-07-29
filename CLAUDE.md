@@ -45,6 +45,96 @@
   - `--max_epochs` is forwarded to the tuner subprocess (clamps LLM-planned
     epochs to `min(planned, max_epochs)`).
 
+## Repository and Environment Portability
+
+SIDERIUS is maintained as a large open-source codebase. All production
+code, scripts, tests, and documentation examples must operate on the
+**current checkout** and on **explicitly configured** resources. They must
+not silently depend on a particular developer, server, username, home
+directory, or separate repository clone.
+
+Operator documentation may explicitly name known deployments and
+machine-specific examples. The prohibition is against implicit or silent
+dependencies in executable code and tests, not against clearly labelled
+documentation of a specific environment.
+
+**Motivating failure**: two test modules hardcoded one developer's
+repository path. CI failed because that path did not exist on the runner —
+and locally the same tests could pass falsely by reading a *different*
+clone, so a local green result said nothing about the code under test.
+
+### Required practices
+
+- **Never hardcode an absolute repository path**, such as
+  `/home/<user>/SIDERIUS` or `/Users/<user>/.../SIDERIUS`.
+- **Derive the repository root from the current file location**, or use an
+  existing repository helper:
+  ```python
+  REPO_ROOT = Path(__file__).resolve().parents[...]
+  ```
+  Prefer the established project helper or a nearby convention when one
+  exists; do not duplicate root-discovery logic unnecessarily.
+- **Tests must load code and artifacts from the checkout in which the test
+  is being executed.** A test must never silently import or load files from
+  another clone.
+- **Machine-specific data paths, workspace paths, cache paths, and
+  executable paths must come from** configuration, environment variables,
+  fixtures, or explicit test parameters.
+- **Tests that require external datasets or machine-specific resources
+  must**: declare the requirement clearly; validate the configured path;
+  skip or fail with an informative reason according to the intended test
+  contract; and never fall back silently to a developer-specific location.
+- **Temporary files must use pytest fixtures** (`tmp_path`) or standard
+  temporary directories, rather than fixed shared locations.
+- **Shell scripts must resolve paths relative to their own location** or to
+  a supplied repository/workspace root — not to the caller's current
+  working directory, unless that dependency is intentional and documented.
+- **Local success is not sufficient evidence of portability** when a test
+  touches filesystem paths, environment variables, executables, GPUs,
+  datasets, or shell tools. Add a targeted portability check when the risk
+  is meaningful.
+
+### Portability validation
+
+When adding or modifying path-sensitive tests, verify where practical that
+they work from a checkout at a different absolute path. A useful check is:
+
+```text
+current checkout
+  → copy or clone to a temporary unrelated path
+  → run the targeted tests there
+  → confirm they read that checkout, not another local clone
+```
+
+Simply running a test from another working directory is insufficient if an
+old hardcoded path still exists on the machine: an absolute reference keeps
+resolving to it, and the test passes while validating the wrong tree.
+
+### Environment assumptions
+
+Do not assume that local tools and CI tools are identical. Before claiming
+a check was run locally, verify that the required tool can actually run in
+the local environment, and record limitations explicitly — for example, an
+unsupported Node version preventing local pyright execution. Do not claim
+local validation when CI is the only environment capable of running the
+check.
+
+### Regression rule
+
+When a portability defect is found:
+
+1. Classify whether it is production code, test scaffolding, or
+   environment configuration.
+2. Search for the same hardcoded pattern in nearby files.
+3. Fix the smallest confirmed scope.
+4. Add a regression test that proves the current checkout is used.
+5. Track broader similar findings separately, rather than silently
+   widening the active PR.
+
+**Governing principle**: a green test is meaningful only if it tests the
+code and resources from the checkout and environment it claims to
+validate.
+
 ## Coding Standards
 
 - **Logic First**: Before every modification, review the current structure of
