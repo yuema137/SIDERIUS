@@ -268,9 +268,7 @@ def local_validated_model(
         order_strategy_override=order_strategy_override,
         file_order_override=file_order_override,
         enable_structured_health_feedback=enable_structured_health_feedback,
-        health_feedback_history_window_iterations=(
-            health_feedback_history_window_iterations
-        ),
+        health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
         health_feedback_history_max_entries_per_model=(
             health_feedback_history_max_entries_per_model
         ),

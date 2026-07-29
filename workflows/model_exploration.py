@@ -2533,9 +2533,7 @@ def run_workflow(
             # V19 PR 3 — policy pass-through so the TUNER's lock matches
             # the workflow's (contradictory locks abort the run).
             enable_structured_health_feedback=enable_structured_health_feedback,
-            health_feedback_history_window_iterations=(
-                health_feedback_history_window_iterations
-            ),
+            health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
             health_feedback_history_max_entries_per_model=(
                 health_feedback_history_max_entries_per_model
             ),
