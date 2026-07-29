@@ -1887,9 +1887,49 @@ the CLI surface does not exist earlier).
       after the update core suite 480 passed 2.99s; full regression
       1382 passed 177s pre-fix, tuner suite unaffected. ruff + format
       clean.)*
-- [ ] CB5-b: Workflow: params threaded, history carried, degraded-safe;
-      workflow lock call passes the policy explicitly
-- [ ] CB5-b: Resume: typed entries restored from digest (`.get` default)
+- [x] CB5-b: Workflow: params threaded, history carried, degraded-safe;
+      workflow lock call passes the policy explicitly *(2026-07-29:
+      `run_workflow` gains the flag + the two knobs + typed
+      `restored_collapse_fingerprint_history` (all pre-PR3-default);
+      workflow lock call passes the policy triple; carry is
+      one-directional and has exactly two write sites — restored seed
+      and interpreter-output replacement (asserted by source-surface
+      test incl. a no-reverse-construction check); interpreter input
+      + proposer protocol threading. Degraded-safe by CB3
+      construction: the interpreter's degraded output still carries
+      the merged history, so the loop replacement is total.)*
+- [x] CB5-b: Resume: typed entries restored from digest *(2026-07-29:
+      `load_latest_fingerprint_history` sibling loader, latest-wins —
+      each digest is already the merged post-retention history, so
+      concatenation would double-merge; `RestoredState` typed field +
+      population. Failure policy split recorded: FILE-level problems
+      warn+skip like every sibling loader; DATA-level corruption inside
+      a parseable digest raises a diagnostic ValueError naming iter +
+      model per the §11-CB5 failure contract — deterministic policy
+      data is never silently dropped. Legacy digest → {} via .get.)*
+
+**CB5-b evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/core/test_resume_fingerprint_history.py \
+       tests/unit/workflows/test_health_feedback_wiring.py -q
+    → 11 passed 0.93s  (typed round-trip; latest-wins; legacy empty;
+                         missing-file soft-fail warning; corrupted
+                         entry raises naming iter+model; first-iter
+                         short-circuit; signature defaults; workflow
+                         lock/interp/proposer threading; carry
+                         one-directionality with write-site count)
+pytest tests/unit/core tests/unit/workflows \
+       tests/unit/agent/result_interpretation_agent -q
+    → 959 passed 14.67s  (block regression)
+ruff check + format → clean
+```
+
+One test fix during authoring (diagnosed before change): the carry
+one-directionality test used whitespace-exact source matches that
+`ruff format` legitimately collapsed — test made format-robust; the
+production wiring was correct. run_one_iteration forwarding of
+`state.collapse_fingerprint_history` is CB5-c (chain wiring).
 - [ ] CLI flags (`--enable_structured_health_feedback`, retention
       flags) + `run_chain.sh` passthrough
 - [ ] run_config + per-iteration manifest stamps

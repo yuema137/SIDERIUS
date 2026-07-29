@@ -1473,6 +1473,18 @@ def run_workflow(
     # workspace would collide with it and abort the run.
     order_strategy_override: OrderStrategy | None = None,
     file_order_override: list[int] | None = None,
+    # --- Structured HealthGate feedback policy (V19 PR 3 §3.7/§3.9) ---
+    # Chain behavioral policy, run-invariants-locked. The flag gates the
+    # interpreter + proposer PROMPT rendering only (deterministic evidence
+    # is recorded regardless); the retention pair parameterizes the
+    # interpreter's history merge. Defaults preserve pre-PR3 behavior and
+    # the OFF/3/8 lock. restored_collapse_fingerprint_history is the
+    # chain runner's typed digest carry-over (RestoredState) — the ONLY
+    # history source; never rebuilt from proposer output or prompts.
+    enable_structured_health_feedback: bool = False,
+    health_feedback_history_window_iterations: int = 3,
+    health_feedback_history_max_entries_per_model: int = 8,
+    restored_collapse_fingerprint_history: dict | None = None,
     # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
     # When both are non-None, every agent constructed inside the iter loop
     # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
@@ -1770,6 +1782,12 @@ def run_workflow(
         # or the two would write contradictory locks and abort the run.
         ordering_override_strategy=order_strategy_override,
         ordering_override_file_order=file_order_override,
+        # V19 PR 3 — same rule for the structured-health-feedback policy.
+        structured_health_feedback_enabled=enable_structured_health_feedback,
+        health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+        health_feedback_history_max_entries_per_model=(
+            health_feedback_history_max_entries_per_model
+        ),
     )
     for _output in tuning_outputs:
         validate_stamped_invariants(
@@ -1856,6 +1874,11 @@ def run_workflow(
         )
     else:
         current_runtime_vocab = list(vocab_seed)  # first iter or in-process run
+    # V19 PR 3 — fingerprint-history carry (digest-only, one direction:
+    # restored typed history seeds the loop variable; each iteration's
+    # interpreter output REPLACES it — the interpreter is the only merge
+    # point). Empty for in-process / first-iter callers.
+    current_collapse_fingerprint_history: dict = dict(restored_collapse_fingerprint_history or {})
     # Per-model Phase 1 cache (grows once per model). Commit 6.1.a — chain
     # mode forwards the latest committed iter's cache via
     # restored_model_knowledge_cache so the cache-hit branch at
@@ -1978,6 +2001,15 @@ def run_workflow(
             previous_proposal=previous_proposal_data,
             storage=interp_storage,
             iteration=iteration,
+            # V19 PR 3 — structured-health-feedback policy + carried
+            # typed history (the interpreter runs the deterministic
+            # merge; output replaces the loop variable below).
+            enable_structured_health_feedback=enable_structured_health_feedback,
+            health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+            health_feedback_history_max_entries_per_model=(
+                health_feedback_history_max_entries_per_model
+            ),
+            collapse_fingerprint_history=current_collapse_fingerprint_history,
             # T4b — task config injection. Substituted into the
             # {TASK_DESCRIPTION} placeholder in PER_MODEL_SYSTEM_PROMPT +
             # SYNTHESIS_SYSTEM_PROMPT at call time.
@@ -1992,6 +2024,10 @@ def run_workflow(
         )
         _bind_iter_context(_interp_agent)
         interpretation = _interp_agent.run(interp_input)
+        # V19 PR 3 — one-directional carry: the interpreter's merged
+        # history REPLACES the loop variable (never merged again here,
+        # never read back from proposer output or prompts).
+        current_collapse_fingerprint_history = dict(interpretation.collapse_fingerprint_history)
         print(f"    Take-home: {interpretation.take_home_message}")
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
@@ -2153,6 +2189,9 @@ def run_workflow(
                     formal_time_budget_minutes=formal_time_budget_minutes,
                     data_dir=data_dir,
                     recent_tune_outputs=list(recent_tune_outputs),
+                    # V19 PR 3 — proposer prompt flag (evidence itself
+                    # travels inside the interpretation dump regardless).
+                    enable_structured_health_feedback=(enable_structured_health_feedback),
                 )
                 propose_input.existing_model_types = list(all_model_types)
                 # Task config injection (T3) — same pattern as T2's implementor

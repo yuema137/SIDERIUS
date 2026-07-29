@@ -31,6 +31,7 @@ from typing import Any
 
 import yaml
 
+from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
@@ -192,6 +193,9 @@ class RestoredState:
     accumulated_gate_exhaustions: list[GateExhaustionInfo] = field(default_factory=list)
     previous_proposal_data: dict | None = None
     model_knowledge_cache: dict[str, dict] = field(default_factory=dict)
+    collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = field(
+        default_factory=dict
+    )
 
     # --- V19 PR 1 chain incumbents (design doc §3.3) -----------------------
     # ``chain_best_valid_formal_*`` is the DECISION-STATE incumbent: the best
@@ -791,6 +795,86 @@ def load_latest_knowledge(
     return runtime_vocab, findings
 
 
+def load_latest_fingerprint_history(
+    workspace: str,
+    current_iter: int,
+    committed_iters: Sequence[int],
+) -> dict[str, list[CollapseFingerprintHistoryEntry]]:
+    """Read prior iters' digests; return the latest TYPED fingerprint history.
+
+    V19 PR 3 (pr3_healthgate_feedback.md §3.8/§11-CB5). Latest-wins,
+    matching ``load_latest_knowledge_cache``: each digest's
+    ``collapse_fingerprint_history`` is already the merged, retention-
+    trimmed history AFTER that iteration, so concatenating across iters
+    would double-merge and resurrect expired buckets.
+
+    Failure policy — a deliberate split of the family's soft-fail rule:
+
+    * FILE-level problems (digest missing / unreadable JSON) → warn +
+      skip, like every sibling loader (availability is best-effort).
+    * DATA-level corruption inside a parseable digest (a history entry
+      that fails typed validation) → diagnostic ``ValueError`` naming
+      the iter and model (design §11-CB5 failure contract: "validation
+      error at restore naming the entry, not silent drop"). The history
+      is deterministic POLICY data — unlike LLM-derived vocab, a
+      corrupt entry means real gate evidence would be silently lost or
+      misattributed, so the restore refuses to guess.
+
+    Legacy digests without the field (pre-PR3) resolve to ``{}`` via
+    ``.get`` — no error, no invented history.
+    """
+    if current_iter <= 1 or not committed_iters:
+        return {}
+
+    history: dict[str, list[CollapseFingerprintHistoryEntry]] = {}
+
+    for iter_idx in committed_iters:  # ascending per restore_prior_state
+        path = _interpretation_path(workspace, iter_idx)
+        if not os.path.isfile(path):
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: interpretation digest not "
+                f"found at {path}. Skipping for fingerprint-history "
+                f"carry-over.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
+                f"digest {path}: {e}. Skipping for fingerprint-history "
+                f"carry-over.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+
+        raw = data.get("collapse_fingerprint_history") or {}
+        if not raw:
+            continue
+        typed: dict[str, list[CollapseFingerprintHistoryEntry]] = {}
+        for model_type, entries in raw.items():
+            validated = []
+            for entry in entries:
+                try:
+                    validated.append(CollapseFingerprintHistoryEntry.model_validate(entry))
+                except Exception as e:
+                    raise ValueError(
+                        f"[resume] iter {iter_idx:03d}: corrupted "
+                        f"collapse_fingerprint_history entry for model "
+                        f"{model_type!r} in {path}: {e}. Refusing to drop "
+                        f"deterministic gate evidence silently — fix or "
+                        f"remove the digest."
+                    ) from e
+            typed[model_type] = validated
+        history = typed  # overwrite: only the LATEST iter's wins
+
+    return history
+
+
 def load_latest_knowledge_cache(
     workspace: str,
     current_iter: int,
@@ -1253,6 +1337,21 @@ def restore_prior_state(
         current_iter,
         state.committed_iters,
     )
+    # V19 PR 3 — typed fingerprint-history carry-over (digest-only, one
+    # direction: digest -> typed restore -> workflow input -> interpreter
+    # merge -> next digest). Never rebuilt from proposer output or prompts.
+    state.collapse_fingerprint_history = load_latest_fingerprint_history(
+        abs_workspace,
+        current_iter,
+        state.committed_iters,
+    )
+    if state.collapse_fingerprint_history:
+        n_entries = sum(len(v) for v in state.collapse_fingerprint_history.values())
+        print(
+            f"[resume] fingerprint-history carry-over: {n_entries} "
+            f"entr{'y' if n_entries == 1 else 'ies'} across "
+            f"{len(state.collapse_fingerprint_history)} model(s)"
+        )
     if state.model_knowledge_cache:
         n = len(state.model_knowledge_cache)
         print(
