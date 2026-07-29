@@ -1394,27 +1394,76 @@ necessary.
 
 **Implementation plan.**
 
-- [ ] Minimal extractions into `health_checks/schemas.py`
+- [x] Minimal extractions into `health_checks/schemas.py`
       (`severity_of`/`_SEVERITY` from runner, `CandidateHealthValidity`
       from candidate_eligibility, `GateExecutionStatus` alias);
       compatibility re-exports at both origin modules; serialized
-      values unchanged
-- [ ] Models per §3.2/§3.3/§3.8 with the §9 type/validation decisions
-      (canonical-type reuse, `default_factory`, `ge=1`, `min_length=1`,
-      occurrence-bucket validators); provenance = the SMALLEST typed
-      model covering the §3.2 confirmed cases (re-inspect lifecycle +
-      record shapes first; stop-and-propose if a real case doesn't fit)
-- [ ] Metric allowlist dict with exact NESTED extraction paths
-      (`per_file.{idx}.metrics.*` + `aggregate_statistics` — §2.5),
-      authored against real-V17-payload fixtures + `bucket_signature()`
-      (2 sig figs, floats only; sorted keys)
-- [ ] `select_primary_gate_outcome()` — 4-step narrowing with
-      empty-step fall-through (§3.3)
-- [ ] `build_collapse_fingerprint()` — raw metrics stored, bucketed
-      signature derived
-- [ ] `merge_fingerprint_history()` — inclusive-window expiry, count
+      values unchanged *(2026-07-29: PersistedHealthGateResult
+      execution_status retyped to the alias — same Literal values;
+      runner re-export via the redundant-alias idiom `import X as X`
+      (F401-exempt, no noqa); identity asserted across all three
+      import paths (runner / candidate_eligibility / package init);
+      ruff + format clean; health_checks suite 230 passed 0.32s;
+      health_checks+core 700 passed 3.33s)*
+- [x] Models per §3.2/§3.3/§3.8 with the §9 type/validation decisions
+      *(2026-07-29, `agent/schemas/health_feedback.py`:
+      CandidateHealthValidity + GateAction + GateExecutionStatus reused
+      from health_checks.schemas; default_factory everywhere; ge=1 /
+      min_length=1; occurrence ascending-unique model_validator.
+      Provenance = 5-value Literal — every value maps to an observed
+      §2.5 record shape, none speculative; docstring records the
+      per-value evidence. Two CB1 implementation decisions recorded:
+      (1) fingerprint.check_name holds the persisted gate_name — the
+      check's registered name is not persisted, so the gate id is the
+      strongest identity actually present; (2) blocking allowlist keyed
+      by the persisted threshold.metric name, self-describing, no
+      gate-id mapping table)*
+- [x] Metric allowlist authored from the REAL V17 payload *(real names
+      differ from design shorthand: n_unique_int8_values /
+      output_std_mv / dominant_mode_fraction; worst-case via
+      aggregate_statistics minimum|maximum per collapse direction;
+      exactness from threshold.unit=="count"; recording allowlist =
+      6 verified scalar keys, per-file trees excluded)*
+- [x] `select_primary_gate_outcome()` — 4-step narrowing with
+      empty-step fall-through *(6-case test class green incl.
+      config-order-first-is-NOT-primary and missing-counterfactual
+      fall-through)*
+- [x] `build_collapse_fingerprint()` — raw metrics stored, bucketed
+      signature derived *(0.9612/0.9634 → same signature, raw values
+      preserved; recompute-from-raw test; no-allowlisted-metric →
+      None, nothing invented from prose)*
+- [x] `merge_fingerprint_history()` — inclusive-window expiry, count
       aggregation, model-key isolation, total-order sort, trim
-- [ ] Module docstring: determinism contract + §3.2 legacy invariant
+      *(canonical 1,2,5/window-3 example; boundary iter-3-retained/
+      iter-2-removed; window=1; representative-observation overwrite;
+      latest-8 source_exp_ids; purity — inputs not mutated)*
+- [x] Module docstring: determinism contract + governing rule verbatim
+
+**CB1 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/agent/schemas/test_health_feedback.py -q
+    → 39 passed in 0.10s
+pytest tests/unit/agent/schemas tests/unit/execute_tools/health_checks -q
+    → 438 passed in 1.26s          (regression, both suites)
+pytest tests/unit/execute_tools/health_checks/ -q
+    → 230 passed in 0.32s          (post-extraction, CB1-a)
+pytest tests/unit/execute_tools/health_checks/ tests/unit/core/ -q
+    → 700 passed in 3.33s          (post-extraction incl. resume, CB1-a)
+ruff check / ruff format --check   → clean on all touched files
+```
+
+Re-export identity asserted across all three import paths (runner /
+candidate_eligibility / package `__init__` — same objects). Round-trip
+presence-manufacture hazard pinned as an explicit test
+(`test_round_trip_manufactures_presence_documented_hazard`).
+Evidence-driven deviations from design shorthand (operator-approved
+2026-07-29): fingerprint identity = persisted `gate_name` (no
+gate-id→check-name mapping is invented or maintained); allowlist keyed
+by persisted `threshold.metric` with `threshold.unit` driving
+exact-vs-bucketed rendering — the REAL persisted vocabulary
+(`n_unique_int8_values` / `output_std_mv` / `dominant_mode_fraction`),
+not the design's shorthand names. CB2 and P3-V1 remain open.
 
 **Validation plan.** Unit only (new
 `tests/unit/agent/schemas/test_health_feedback.py`): selection-rule
