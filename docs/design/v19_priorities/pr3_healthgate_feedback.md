@@ -1651,17 +1651,63 @@ on: CB1, CB2.
 
 **Implementation plan.**
 
-- [ ] Input/output schema fields (typed history, `default_factory`)
-- [ ] Flag OFF short-circuit — rendering code unreachable; prompt
-      builder unchanged output
-- [ ] Flag ON rendering (§3.6 items 1-3), consuming the RESOLVED
-      retention policy parameter
-- [ ] Deterministic population + `merge_fingerprint_history` call —
-      before/after LLM, never from prose
-- [ ] Degraded path: deterministic merge runs regardless of LLM
-      degradation — current RoundHealth fingerprints merge into output
-      history; only LLM commentary is affected (§3.10 invariant)
-- [ ] `_stats` cache entries
+- [x] Goldens captured from PRE-change code + parity scaffold
+      *(2026-07-29, CB3-a: 3 golden files rendered at `f3a0b8c` clean
+      tree — per-model prompt on a collapse-heavy summary WITH
+      round_health populated, on a legacy summary, and the per-model
+      system prompt; `test_health_prompt_parity.py` 3 passed 0.89s
+      against them pre-change, exact string equality)*
+- [x] Input/output schema fields (typed history, `default_factory`)
+      *(CB3-b: InterpretationInput gains the flag, the two retention
+      knobs (`ge=1`, active_model_* convention) with a
+      `health_feedback_retention_policy()` resolver method, and the
+      typed history carry; InterpretationOutput gains the three
+      deterministic fields)*
+- [x] Flag OFF short-circuit — prompt builders byte-identical
+      *(golden string equality holds POST-change — the renderer now
+      contains the flag-gated code and parity still passes)*
+- [x] Flag ON rendering (§3.6 items 1-3) *(CB3-c: trajectory
+      `[GATE {action} — {signature-or-verbatim-failure_reason}]`
+      labels with `score=invalidated`; `### HealthGate summary`
+      section — validity counts, distinct fingerprints ×count with
+      round indices, best-round recording diagnostics, no empty
+      headers; `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` appended to the
+      per-model system prompt — verbatim-fingerprint,
+      invalid-high-score-is-failure, no-verdict-from-absence,
+      no-cross-model-transfer rules)*
+- [x] Deterministic population + `merge_fingerprint_history` call
+      *(CB3-b: `_collect_health_evidence()` + merge computed BEFORE
+      the LLM try-block, threaded into the cold-start, healthy, AND
+      degraded output dicts — the §3.10 invariant is structural)*
+- [x] Degraded path *(operator 5-condition scenario green: new
+      fingerprint merged with current-iteration bucket under
+      `is_degraded=True`, prior history intact, commentary empty;
+      plus a healthy-vs-degraded field-equality test)*
+- [x] `_stats` cache entries *(round_health_counts +
+      collapse_fingerprints on the deterministic side of the cache)*
+
+**CB3 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../test_health_prompt_parity.py -q     → 3 passed 0.90s
+    (goldens captured at f3a0b8c PRE-change; equality re-verified
+     POST-change — the strong form: health data present, flag OFF,
+     byte-identical)
+pytest tests/.../test_health_feedback_outputs.py -q  → 8 passed 0.98s
+    (3 initial failures were TEST bugs — expected counts misread
+     classify_candidate_health: a success round with an empty gate
+     list is UNKNOWN by the classifier's missing-required-gates rule,
+     not invalid; production verdicts were correct; assertions fixed)
+pytest tests/.../test_health_prompt_rendering.py -q  → 10 passed 0.94s
+pytest tests/unit/agent/result_interpretation_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 554 passed 1.47s   (block regression)
+ruff check + format --check → clean
+```
+
+NOT run at this stage: full repo suite, tuner suite, pseudo
+integration (deferred to P3-V1); synthesis-prompt rendering unchanged
+by design (§3.6 scopes items 1-3 to the per-model call).
 
 **Validation plan.** Unit: flag OFF ⇒ prompt strings byte-identical to
 goldens captured from pre-CB3 code (parity claim, exact string
