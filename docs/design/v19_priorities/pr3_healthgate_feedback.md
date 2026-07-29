@@ -164,7 +164,14 @@ Carried from the PR 1/PR 2 process (operator rules):
              CLI store_true + int) — not copied from this design doc.
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
              (flag OFF by default — no behavior change in production)
-[ ] P3-L2p — Layer-2 pilot (small; variance + runtime measured)
+[ ] P3-L2p — Layer-2 pilot (small; variance + runtime measured).
+             Protocol DRAFTED 2026-07-29 —
+             [`pr3_l2p_calibration_protocol.md`](pr3_l2p_calibration_protocol.md)
+             (arms C/T/D, scenarios S1+S2, pipeline-mode proposer
+             REQUIRED, 50-call nominal / 60 hard cap, pre-registered
+             LLM config + mechanism-relevance fields + rubric +
+             redesign triggers + full-campaign decision rule).
+             AWAITING operator approval — no launch from the draft.
 [ ] P3-L2  — Layer-2 synthetic real-LLM campaign complete + analyzed
 [ ] P3-L3  — Layer-3 bounded real-LLM + real-training Gate complete
              (operator-approved launch; docs/gates/ conventions)
