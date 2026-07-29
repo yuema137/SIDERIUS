@@ -42,6 +42,7 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.telemetry import LLMBridgeContextError
 from core.resume import ResumeError, restore_prior_state
@@ -332,6 +333,7 @@ def write_manifest(
     crashed: bool = False,
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
+    health_feedback_policy: dict | None = None,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
@@ -441,6 +443,13 @@ def write_manifest(
                 for chunk in iter(lambda: f.read(1 << 20), b""):
                     digest.update(chunk)
             manifest["run_output_sha256"] = digest.hexdigest()
+
+    # V19 PR 3 (§3.9) — the chain's structured-health-feedback CONTROL
+    # POLICY (flag + retention), stamped on EVERY manifest branch
+    # (completed / no_records / failed) so failed iterations stay
+    # auditable. Policy only: per-round gate evidence lives in the
+    # records and the interpretation digest — never duplicated here.
+    manifest["health_feedback_policy"] = health_feedback_policy
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -618,6 +627,32 @@ def build_parser() -> argparse.ArgumentParser:
         "reference; reconstruction, provenance, and manifest stamps still "
         "run unconditionally). Rollback = omit this flag; the pre-V19 "
         "fixed-0.0 reference is not restorable.",
+    )
+    parser.add_argument(
+        "--enable_structured_health_feedback",
+        action="store_true",
+        help="V19 PR 3: render structured HealthGate evidence (per-round "
+        "gate fields + collapse fingerprints) in the interpreter and "
+        "proposer prompts. Default OFF: prompts are byte-identical to "
+        "pre-PR3; the deterministic evidence is still recorded in "
+        "artifacts. Pinned in the run-invariants lock — changing it "
+        "mid-chain is a violation (use a new workspace).",
+    )
+    parser.add_argument(
+        "--health_feedback_history_window_iterations",
+        type=int,
+        default=3,
+        help="V19 PR 3: fingerprint-history retention window — TOTAL "
+        "iterations retained including the current one. Must be >= 1. "
+        "Pinned in the run-invariants lock.",
+    )
+    parser.add_argument(
+        "--health_feedback_history_max_entries_per_model",
+        type=int,
+        default=8,
+        help="V19 PR 3: retained fingerprint-history entries per model "
+        "(deterministic trim bound). Must be >= 1. Pinned in the "
+        "run-invariants lock.",
     )
     parser.add_argument(
         "--is_trial", action="store_true", help="Enable trial mode (default: True for production)."
@@ -1074,6 +1109,12 @@ def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
         # same workspace.
         ordering_override_strategy=args.order_strategy_override,
         ordering_override_file_order=args.file_order_override,
+        # V19 PR 3 — same rule for the structured-health-feedback policy.
+        structured_health_feedback_enabled=args.enable_structured_health_feedback,
+        health_feedback_history_window_iterations=(args.health_feedback_history_window_iterations),
+        health_feedback_history_max_entries_per_model=(
+            args.health_feedback_history_max_entries_per_model
+        ),
     )
     return invariants
 
@@ -1200,6 +1241,16 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         # silently rewrite the operator's permutation into ascending order.
         args.file_order_override = (
             parse_file_order_cli(args.file_order_override) if args.file_order_override else None
+        )
+        # V19 PR 3 — validate the retention policy at STARTUP (fail before
+        # any resume mutation or LLM work; ge=1 enforced by the schema).
+        # The resolved policy is only consumed by the interpreter, but a
+        # bad value must not produce a partial run. Pydantic's
+        # ValidationError is a ValueError, so the shared parser.error
+        # path below reports it and exits non-zero.
+        HealthFeedbackRetentionPolicy(
+            history_window_iterations=args.health_feedback_history_window_iterations,
+            max_entries_per_model=args.health_feedback_history_max_entries_per_model,
         )
     except ValueError as e:
         parser.error(str(e))
@@ -1523,6 +1574,17 @@ def main():
             # V19 PR 2 — operator ordering override for this chain.
             order_strategy_override=args.order_strategy_override,
             file_order_override=args.file_order_override,
+            # V19 PR 3 — structured-health-feedback policy + typed
+            # fingerprint-history carry-over (digest-only source via
+            # RestoredState; the interpreter is the only merge point).
+            enable_structured_health_feedback=args.enable_structured_health_feedback,
+            health_feedback_history_window_iterations=(
+                args.health_feedback_history_window_iterations
+            ),
+            health_feedback_history_max_entries_per_model=(
+                args.health_feedback_history_max_entries_per_model
+            ),
+            restored_collapse_fingerprint_history=state.collapse_fingerprint_history,
             # External agents (Commit 6) — see Design Decisions 1 + 2 in
             # docs/commit_plan_ml_literature_review.md. The enable flag is
             # resolved above (CLI > YAML > False); the config path
@@ -1569,6 +1631,13 @@ def main():
             else None
         ),
         chain_incumbent_source=state.chain_best_valid_formal_provenance,
+        # V19 PR 3 — control policy only (per-round evidence stays in the
+        # records / interpretation digest).
+        health_feedback_policy={
+            "enable_structured_health_feedback": (args.enable_structured_health_feedback),
+            "history_window_iterations": (args.health_feedback_history_window_iterations),
+            "max_entries_per_model": (args.health_feedback_history_max_entries_per_model),
+        },
     )
 
     # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON error

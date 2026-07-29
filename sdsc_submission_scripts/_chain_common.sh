@@ -94,6 +94,9 @@ RUNTIME_WATCHDOG=0
 ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=0  # V19 PR 1: consumption-only switch; matches Python default False
 ORDER_STRATEGY_OVERRIDE=""          # V19 PR 2: empty == omit == agent decides (default 'shuffle')
 FILE_ORDER_OVERRIDE=""              # V19 PR 2: empty == omit == ascending scope order
+ENABLE_STRUCTURED_HEALTH_FEEDBACK=0 # V19 PR 3: prompt-rendering flag; matches Python default False
+HEALTH_FEEDBACK_HISTORY_WINDOW_ITERATIONS=""   # V19 PR 3: empty == omit == Python default 3
+HEALTH_FEEDBACK_HISTORY_MAX_ENTRIES_PER_MODEL="" # V19 PR 3: empty == omit == Python default 8
 RUNTIME_SAFETY_FACTOR=1.0           # §3.2: matches Python default; V18 posture 1.5
 RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; V18 posture 2.0 (Wave-1A split)
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
@@ -217,6 +220,9 @@ parse_chain_args() {
         --enable_chain_incumbent_formal_gates) ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=1; shift ;;
         --order_strategy_override) ORDER_STRATEGY_OVERRIDE="$2"; shift 2 ;;
         --file_order_override)     FILE_ORDER_OVERRIDE="$2"; shift 2 ;;
+        --enable_structured_health_feedback) ENABLE_STRUCTURED_HEALTH_FEEDBACK=1; shift ;;
+        --health_feedback_history_window_iterations) HEALTH_FEEDBACK_HISTORY_WINDOW_ITERATIONS="$2"; shift 2 ;;
+        --health_feedback_history_max_entries_per_model) HEALTH_FEEDBACK_HISTORY_MAX_ENTRIES_PER_MODEL="$2"; shift 2 ;;
         --runtime_safety_factor)  RUNTIME_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_trial_safety_factor)  RUNTIME_TRIAL_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_formal_safety_factor) RUNTIME_FORMAL_SAFETY_FACTOR="$2"; shift 2 ;;
@@ -436,6 +442,18 @@ build_app_args() {
     fi
     if [ -n "$FILE_ORDER_OVERRIDE" ]; then
         APP_ARGS+=(--file_order_override "$FILE_ORDER_OVERRIDE")
+    fi
+    # V19 PR 3 — structured-health-feedback policy (default: omit, so
+    # Python argparse defaults OFF/3/8 apply and pre-PR3 argv is
+    # reproduced byte-identically when unset).
+    if [ "$ENABLE_STRUCTURED_HEALTH_FEEDBACK" -eq 1 ]; then
+        APP_ARGS+=(--enable_structured_health_feedback)
+    fi
+    if [ -n "$HEALTH_FEEDBACK_HISTORY_WINDOW_ITERATIONS" ]; then
+        APP_ARGS+=(--health_feedback_history_window_iterations "$HEALTH_FEEDBACK_HISTORY_WINDOW_ITERATIONS")
+    fi
+    if [ -n "$HEALTH_FEEDBACK_HISTORY_MAX_ENTRIES_PER_MODEL" ]; then
+        APP_ARGS+=(--health_feedback_history_max_entries_per_model "$HEALTH_FEEDBACK_HISTORY_MAX_ENTRIES_PER_MODEL")
     fi
     # FORCE_FORMAL_ROUND default 1 preserves prior chain behavior; only forward
     # the negation explicitly when set to 0 (run_one_iteration.py's argparse
