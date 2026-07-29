@@ -2382,6 +2382,15 @@ class HyperparamTuningAgent:
                         rejected_proposal=rejected_ordering,
                     )
                     print(f"[data_order] {ordering.describes_execution()}")
+                    # resolve_ordering ALWAYS produces a concrete strategy —
+                    # every branch assigns override, proposal, or the default.
+                    # Only the read-path constructors (not_executed) yield
+                    # None, and those never reach execution. Narrowed here so
+                    # the engine-facing TrialConfig keeps its non-null type.
+                    assert ordering.resolved_strategy is not None, (
+                        "resolve_ordering returned no strategy; a live resolution "
+                        "must always produce one"
+                    )
 
                     trial_config = TrialConfig(
                         is_trial=plan.is_trial,

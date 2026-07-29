@@ -22,6 +22,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 from typing import Any, Literal
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
+from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
@@ -75,7 +76,7 @@ def local_validated_model(
     # the tuner resolves it against each round's agent proposal. ``None``
     # = no override, so the agent's proposal decides and the default
     # ('shuffle') applies when it proposes nothing.
-    order_strategy_override: str | None = None,
+    order_strategy_override: OrderStrategy | None = None,
     file_order_override: list[int] | None = None,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,

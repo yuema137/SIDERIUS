@@ -82,6 +82,7 @@ from agent.schemas.interpretation import (
     InterpretationOutput,
     ModelRunSummary,
 )
+from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ExpertContextItem, VocabEntry
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
@@ -1470,7 +1471,7 @@ def run_workflow(
     # lock built below and the tuner input: the tuner locks the override
     # too, so a workflow that built a no-override lock in the same
     # workspace would collide with it and abort the run.
-    order_strategy_override: str | None = None,
+    order_strategy_override: OrderStrategy | None = None,
     file_order_override: list[int] | None = None,
     # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
     # When both are non-None, every agent constructed inside the iter loop
