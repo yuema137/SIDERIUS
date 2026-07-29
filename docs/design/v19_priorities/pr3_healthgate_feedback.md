@@ -1758,12 +1758,32 @@ routing. Unchanged: prompt byte-identical flag OFF. Depends on: CB3
 
 **Implementation plan.**
 
-- [ ] `ProposalInput` flag field
-- [ ] Block renderer reading `per_model_collapse_fingerprints` +
-      `per_model_round_health_counts` + history with `.get` defaults;
-      per-model labels (attribution, §3.8); relative iteration tags;
-      closing instruction incl. inappropriate-avoidance warning
-- [ ] Protocol threading
+- [x] Goldens captured from PRE-change code + parity scaffold
+      *(CB4-a `66efed8`, golden rendered at clean `2052fa2`: full
+      reasoning prompt from the STRONG typed fixture — real
+      InterpretationOutput.model_dump with two disjoint models
+      (diversity vs std collapse), multi-bucket retained history,
+      §14.N GateExhaustionInfo pinned inside the golden AND by a
+      standalone regression; exact full-string parity with the
+      structured fields PRESENT and flag OFF; leakage assertions
+      supplement, never replace, the full-string test)*
+- [x] `ProposalInput` flag field *(default OFF; docstring states the
+      informational-only, never-routing contract)*
+- [x] Block renderer *(`_format_healthgate_evidence_block()`: model-
+      grouped exactly as CB3 grouped it, nothing unlabelled; current-
+      iteration evidence vs retained history explicitly separated;
+      retained-window counts BY CONSTRUCTION — stored history is
+      post-retention, so bucket sums are window counts and bucket
+      iterations are ABSOLUTE tags (spec allows exact-or-relative;
+      absolute needs no new wiring); "Representative observation:"
+      labelling per §3.8; bounded source exp_ids surfaced; six-rule
+      closing instruction (bounded, <45 lines total); malformed
+      hand-built history entry ⇒ diagnostic ValueError naming the
+      model; legacy/empty ⇒ "" with no header; rendered AFTER and
+      visibly separate from the untouched §14.N block)*
+- [x] Protocol threading *(param default False; included in the result
+      dict only when True so the schema default governs legacy
+      callers)*
 
 **Validation plan.** Unit: flag OFF golden parity (string equality);
 flag ON block content exactness incl. model attribution (fingerprint
@@ -1776,6 +1796,38 @@ in a hand-built dict ⇒ diagnosable error.
 **Acceptance criteria.** Parity by golden string equality; the
 attribution test passes; the §14.N block's output is byte-identical
 before/after this commit on the same fixture.
+
+**CB4 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../ml_model_proposal_agent/test_health_prompt_parity.py \
+       tests/.../ml_model_proposal_agent/test_recent_gate_exhaustions.py -q
+    → 27 passed 1.01s   (CB4-a: parity 3 + full existing §14.N suite;
+                          golden source commit 2052fa2, clean tree)
+pytest tests/.../test_health_evidence_block.py \
+       tests/.../test_health_prompt_parity.py -q
+    → 15 passed 0.93s   (CB4-b flag-ON exactness: counts, signatures,
+                          retained-window 3-across-iters-3,5 not
+                          lifetime; representative-observation labels;
+                          bounded source ids; closing rules; ordering
+                          after §14.N; adversarial two-model
+                          non-contamination; legacy/empty/counts-only;
+                          malformed → ValueError; §14.N byte-identical
+                          both flag states; parity re-verified
+                          POST-change)
+pytest tests/unit/agent/ml_model_proposal_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 803 passed 1.58s  (block regression)
+ruff check + format --check → clean on all touched files
+```
+
+Deferred to P3-V1 (recorded per the staged-validation principle): full
+repository suite, tuner suite, pseudo interp→propose integration with
+context-snapshot assertion, workflow tests. Deviation note: iteration
+tags rendered ABSOLUTE (spec permits exact-or-relative) — relative tags
+would need the current iteration number, which the interpretation dump
+does not carry; absolute tags are fully deterministic from bucket data
+alone and avoid inventing CB5 wiring early.
 
 **Failure/edge cases.** Interpretation from a flag-OFF workspace fed to
 a flag-ON proposer (mixed inputs can only occur in hand-built tests —

@@ -597,6 +597,116 @@ def _format_recent_gate_exhaustions_block(
     return "\n".join(lines)
 
 
+def _format_healthgate_evidence_block(interp: dict[str, Any]) -> str:
+    """Render the flag-gated ``[HEALTHGATE EVIDENCE]`` block (V19 PR 3 §3.7).
+
+    Source of truth is EXCLUSIVELY the deterministic interpretation fields
+    (``per_model_round_health_counts``, ``per_model_collapse_fingerprints``,
+    ``collapse_fingerprint_history``) — never ``key_findings`` or any other
+    LLM prose. Distinct from the §14.N gate-exhaustion block (abort-class
+    resource failures), which is untouched and rendered separately.
+
+    Semantics:
+
+    * Legacy interpretation dicts (all three fields absent) and empty
+      evidence → ``""`` (no header — callers splice unconditionally).
+    * Evidence is grouped by model exactly as CB3 grouped it; nothing is
+      aggregated across models and nothing is rendered unlabelled.
+    * History entries are POST-retention (merge-time expiry, design §3.8),
+      so every occurrence bucket shown is inside the retained window —
+      counts here are retained-window counts by construction, never
+      lifetime totals; iteration tags are the buckets' absolute
+      iterations.
+    * Entry-level raw metrics follow the representative-observation rule
+      (§3.8) and are labelled as such — one representative value, not a
+      summary of every occurrence.
+    * A malformed hand-built history entry (missing required keys) raises
+      a diagnostic ``ValueError`` naming the model — never silent
+      evidence loss or cross-model misattribution.
+    """
+    counts_by_model = interp.get("per_model_round_health_counts") or {}
+    fps_by_model = interp.get("per_model_collapse_fingerprints") or {}
+    history_by_model = interp.get("collapse_fingerprint_history") or {}
+    if not counts_by_model and not fps_by_model and not history_by_model:
+        return ""
+
+    # Model order: interpretation's model_types first (matches the
+    # per-model scores section), then any evidence-only models — nothing
+    # silently dropped.
+    ordered = list(interp.get("model_types") or [])
+    for extra in sorted(set(counts_by_model) | set(fps_by_model) | set(history_by_model)):
+        if extra not in ordered:
+            ordered.append(extra)
+
+    lines = [
+        "[HEALTHGATE EVIDENCE] (deterministic, from the health-gate system — "
+        "distinct from the resource-gate report above)"
+    ]
+    rendered_any = False
+    for mt in ordered:
+        counts = counts_by_model.get(mt)
+        fps = fps_by_model.get(mt) or []
+        history = history_by_model.get(mt) or []
+        if not counts and not fps and not history:
+            continue
+        rendered_any = True
+        lines += ["", f"### {mt}"]
+        if counts:
+            lines.append(
+                f"Round validity (this iteration): {counts.get('valid', 0)} valid, "
+                f"{counts.get('invalid', 0)} invalid, {counts.get('unknown', 0)} unknown"
+            )
+        if fps:
+            lines.append("This iteration's collapse fingerprints:")
+            for fp in fps:
+                lines.append(f"  - {fp['signature']} — {fp.get('human_readable', '')}")
+        if history:
+            lines.append(
+                "Retained history (bounded window; counts are retained-window "
+                "occurrences, not lifetime totals):"
+            )
+            for entry in history:
+                try:
+                    signature = entry["signature"]
+                    occurrences = entry["occurrences"]
+                except (KeyError, TypeError) as e:
+                    raise ValueError(
+                        f"Malformed collapse_fingerprint_history entry for model "
+                        f"{mt!r}: missing {e} — refusing to render partial "
+                        f"evidence (silent loss / misattribution risk)"
+                    ) from e
+                total = sum(o["count"] for o in occurrences)
+                iters = ", ".join(str(o["iteration"]) for o in occurrences)
+                lines.append(f"  - {signature}: {total} occurrence(s) across iteration(s) {iters}")
+                metrics = entry.get("metrics") or {}
+                if metrics:
+                    rendered = "; ".join(f"{k}={v}" for k, v in sorted(metrics.items()))
+                    lines.append(f"      Representative observation: {rendered}")
+                source_ids = [i for o in occurrences for i in o.get("source_exp_ids", [])]
+                if source_ids:
+                    lines.append(
+                        f"      Source experiments (recent, bounded): {', '.join(source_ids)}"
+                    )
+    if not rendered_any:
+        return ""
+
+    lines += [
+        "",
+        "Rules for using this evidence:",
+        "  - Do not repeat a fingerprinted failure mode without naming a "
+        "concrete mechanism expected to break it.",
+        "  - The mechanism must change the actual relevant configuration "
+        "(architecture family, output activation, normalization, loss, "
+        "optimizer/training policy) — not merely the explanation text.",
+        "  - A high raw score from an invalid round is a failure, not a success.",
+        "  - Do not avoid unrelated healthy strategies merely because another model failed.",
+        "  - Do not transfer one model's failure evidence to another model without justification.",
+        "  - Do not claim this feedback was used unless the proposal actually "
+        "changes a relevant mechanism.",
+    ]
+    return "\n".join(lines)
+
+
 def _render_stage_user_prompt(accumulated: dict[str, Any]) -> str:
     """Render a pipeline-stage user prompt: native markdown + clean JSON.
 
@@ -949,6 +1059,16 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     gate_block = _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions)
     if gate_block:
         lines += [gate_block, ""]
+
+    # V19 PR 3 §3.7 (flag-gated) — structured HealthGate evidence, rendered
+    # AFTER and visibly separate from the §14.N resource-gate block (a
+    # different failure family). OFF (default): nothing rendered — the
+    # prompt stays byte-identical to pre-PR3 (golden-parity tested) even
+    # when the structured fields are present in the interpretation dump.
+    if inp.enable_structured_health_feedback:
+        health_block = _format_healthgate_evidence_block(interp)
+        if health_block:
+            lines += [health_block, ""]
 
     # NOTE: legacy ProposalInput.expert_advice render block was removed in
     # Commit P-d. The field was hard-removed from the schema; see proposal.py
