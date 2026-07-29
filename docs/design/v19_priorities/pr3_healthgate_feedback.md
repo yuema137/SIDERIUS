@@ -2400,3 +2400,70 @@ Retry instruction becomes truthful at the stage that owns the data;
 proposing-stage assembly unchanged; single source of truth preserved.
 Comparison-stage vocab fields: same latent pattern, zero observed
 failures — file as a follow-up issue rather than widening this fix.
+
+### 13.1 Operator decision and implementation evidence (2026-07-29)
+
+**Decision (operator)**: Option C approved — validate and retry the
+causal-stage-owned fields (`inherited_components`,
+`falsifiable_prediction`) at the causal stage itself; the causal stage
+remains the single source of truth. Explicitly rejected: expanding the
+proposing-stage contract to rewrite these fields; attempt-dependent
+merge behavior; relaxing the final validator; any broad citation
+sanitizer. At most two causal-stage correction retries. The
+comparison-stage vocab fields stay out of scope (no observed failure)
+— latent risk filed as a follow-up GitHub issue.
+
+**Implementation** (this commit):
+
+- `agent/schemas/proposal.py` — `CausalStageOwnedContent` (B.2a): a
+  validation-only partial schema mirroring ProposalOutput's contract
+  for exactly the two causal-owned fields (`falsifiable_prediction`
+  stays `| None` — the legacy allowance — so no behavior tightening).
+  A premature full ProposalOutput was rejected: implementation fields
+  do not exist at causal time and it would couple causal validation to
+  proposing-stage validators.
+- `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` —
+  `_MAX_CAUSAL_CORRECTION_RETRIES = 2`; a validation block placed
+  AFTER the boldness retry (which can replace the causal output with a
+  new, unvalidated response) and BEFORE the proposing stage. On
+  failure: focused error summary (same loc→msg format as the
+  structural loop), correction user prompt = the standard causal-stage
+  assembly (boldness-retry P-d order) + a "## VALIDATION ERROR —
+  CORRECT AND RESEND" block; IDENTICAL system prompt; label
+  `proposer.causal_reasoning.correction`; ≤2 retries then a
+  stage-naming RuntimeError raised BEFORE any proposing call is spent.
+  Write-back only when a correction replaced the output (a pipeline
+  with no causal stage is untouched). The stale "let the proposing
+  stage handle it" comment on the malformed-prediction swallow was
+  corrected in place.
+- Proposing-stage prompt, output contract, assembly, and structural
+  retry: UNCHANGED (asserted by tests).
+
+**Tests** (`tests/unit/agent/ml_model_proposal_agent/
+test_causal_stage_validation.py`, 9 tests, all green first run;
+proposer-suite regression 523 passed; proposer+prompts+protocols 605
+passed; ruff check + format clean):
+
+1. malformed causal citation → correction retry → corrected citation
+   present in the final ProposalOutput → success (4 calls);
+2. correction call carries the focused error (marker, field name,
+   offending value) and the `.correction` label;
+3. repeated malformed corrections exhaust (comparison + causal + 2
+   corrections, NO proposing call) with a stage-naming RuntimeError;
+4. degenerate falsifiable_prediction (predicted == current) corrected
+   through the same path, corrected value preserved;
+5. valid causal output: byte-preserved behavior — 3 calls, no
+   correction label, no marker in any prompt;
+6. proposing structural retry (duplicate model name) unaffected;
+7. correction system prompt byte-identical to the causal system
+   prompt; no fix marker in the proposing system prompt;
+8. disabled causal stage: 2 calls, no key insertion;
+9. partial-schema contract: empty/None legal, malformed citation and
+   degenerate prediction rejected.
+
+**Retry contract after the fix** (now truthful):
+causal stage produces invalid causal-owned data → causal validation
+fails → the causal stage receives the focused validation error →
+bounded causal-stage retry produces corrected data → corrected causal
+output becomes the accumulated source of truth → final ProposalOutput
+validation uses that corrected data.

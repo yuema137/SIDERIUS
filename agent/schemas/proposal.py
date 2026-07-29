@@ -206,6 +206,25 @@ class InheritedComponent(BaseModel):
         return self
 
 
+# B.2a — causal-stage-owned content (P-1 retry-discard fix; PR 3 audit §13)
+class CausalStageOwnedContent(BaseModel):
+    """Validation-only partial schema for the fields the causal-reasoning
+    stage owns and the proposing stage re-injects verbatim on every
+    structural attempt.
+
+    Mirrors ProposalOutput's contract for exactly these two fields and
+    nothing more: a premature full ProposalOutput cannot be constructed at
+    causal time (the implementation fields do not exist yet), and using it
+    would wrongly couple causal validation to proposing-stage validators.
+    The pipeline validates against this model immediately after the causal
+    stage returns, so validation errors are corrected by the stage whose
+    retry loop can actually reach the producing response.
+    """
+
+    inherited_components: list[InheritedComponent] = Field(default_factory=list)
+    falsifiable_prediction: FalsifiablePrediction | None = None
+
+
 # B.3 — Expert context item (polymorphic upstream input)
 class ExpertContextItem(BaseModel):
     """One piece of upstream context for the proposal agent.

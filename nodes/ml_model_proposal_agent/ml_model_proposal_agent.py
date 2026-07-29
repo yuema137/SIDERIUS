@@ -30,7 +30,12 @@ from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
-from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
+from agent.schemas.proposal import (
+    CausalStageOwnedContent,
+    FalsifiablePrediction,
+    ProposalInput,
+    ProposalOutput,
+)
 from agent.schemas.task_config import ForwardContract
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
@@ -45,6 +50,13 @@ _MAX_PROPOSING_RETRIES = 2
 
 # One retry when causal_reasoning produces a prediction below minimum_boldness.
 _MAX_REASONING_RETRIES = 1
+
+# P-1 fix (PR 3 audit §13): bounded correction retries when the causal stage's
+# owned fields (inherited_components / falsifiable_prediction) fail schema
+# validation. These fields are re-injected verbatim into ProposalOutput on
+# every proposing structural attempt, so they can only be corrected at the
+# causal stage itself. Total causal validation attempts = retries + 1.
+_MAX_CAUSAL_CORRECTION_RETRIES = 2
 
 # Fix 2 Commit 6 — total number of proposing-stage calls the pre-flight
 # revision loop is allowed. 1 initial draft + 2 revisions. The structural-
@@ -1657,7 +1669,110 @@ class MLModelProposalAgent:
                                 components=retry_audit["components"],
                             )
                 except (ValidationError, Exception):
-                    pass  # malformed prediction — let the proposing stage handle it
+                    # Malformed prediction — corrected by the causal-owned
+                    # validation block below (P-1 fix). The old assumption
+                    # ("let the proposing stage handle it") was wrong: the
+                    # proposing-stage retry re-injects this stage's values
+                    # verbatim and can never correct them.
+                    pass
+
+        # --- P-1 fix (PR 3 audit §13): validate causal-stage-owned fields ---
+        # inherited_components + falsifiable_prediction are extracted from
+        # accumulated["causal_reasoning"] below and re-injected verbatim into
+        # ProposalOutput.model_validate on EVERY proposing structural attempt.
+        # A validation error in them is therefore uncorrectable downstream —
+        # it must be corrected here, by the stage whose retry can reach the
+        # producing response. Runs AFTER the boldness block because a boldness
+        # retry may have replaced the causal output with a new, unvalidated
+        # response. A pipeline without a causal_reasoning stage validates the
+        # empty defaults and passes unchanged.
+        causal_raw = accumulated.get("causal_reasoning")
+        for causal_attempt in range(_MAX_CAUSAL_CORRECTION_RETRIES + 1):
+            causal_dict = causal_raw if isinstance(causal_raw, dict) else {}
+            try:
+                # Same extraction expressions as the proposing-stage assembly
+                # below — the two must agree on what gets validated.
+                CausalStageOwnedContent.model_validate(
+                    {
+                        "inherited_components": causal_dict.get("inherited_components", []),
+                        "falsifiable_prediction": causal_dict.get("falsifiable_prediction"),
+                    }
+                )
+                break
+            except ValidationError as exc:
+                error_summary = "; ".join(
+                    f"{' → '.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
+                )
+                if causal_attempt == _MAX_CAUSAL_CORRECTION_RETRIES:
+                    raise RuntimeError(
+                        f"Causal-reasoning stage output failed validation of its "
+                        f"causal-owned fields (inherited_components / "
+                        f"falsifiable_prediction) after "
+                        f"{_MAX_CAUSAL_CORRECTION_RETRIES} correction retries. "
+                        f"Last error: {error_summary}"
+                    ) from exc
+                print(
+                    f"   Stage 'causal_reasoning': causal-owned field validation "
+                    f"failed (attempt {causal_attempt + 1}/"
+                    f"{_MAX_CAUSAL_CORRECTION_RETRIES + 1}) — retrying with "
+                    f"focused error feedback."
+                )
+                correction_system = load_stage_prompt(
+                    "causal_reasoning_stage",
+                    exploration_mode=mode,
+                    template_vars=template_vars,
+                    mindset=inp.mindset,
+                )
+                clamped_accumulated = clamp_and_backstop_accumulated(
+                    accumulated,
+                    top_k=policy.comparative_analysis_top_k,
+                    max_chars=policy.prior_stage_max_chars,
+                    input_keys=_PROPOSER_INPUT_KEYS,
+                )
+                # P-d order — mirrors the boldness-retry assembly above.
+                correction_parts: list[str] = []
+                if hardware_block:
+                    correction_parts.append(hardware_block)
+                if data_scope_block:
+                    correction_parts.append(data_scope_block)
+                if constraints_block:
+                    correction_parts.append(constraints_block)
+                if agent_cards_block:
+                    correction_parts.append(agent_cards_block)
+                if expert_context_block:
+                    correction_parts.append(expert_context_block)
+                correction_parts.append(_render_stage_user_prompt(clamped_accumulated))
+                if vocab_block:
+                    correction_parts.append(vocab_block)
+                correction_user = "\n\n".join(correction_parts) + (
+                    "\n\n## VALIDATION ERROR — CORRECT AND RESEND\n"
+                    "Your previous response failed schema validation of "
+                    "causal-stage-owned fields:\n"
+                    f"{error_summary}\n"
+                    "Return the FULL corrected JSON object (same output schema "
+                    "as instructed above), fixing ONLY the invalid fields and "
+                    "keeping every other field unchanged."
+                )
+                correction_audit = _audit_proposer_components(
+                    inp=inp,
+                    accumulated=clamped_accumulated,
+                    agent_cards_block=agent_cards_block,
+                    expert_context_block=expert_context_block,
+                    vocab_block=vocab_block,
+                    system_prompt=correction_system,
+                    stage_name="causal_reasoning",
+                )
+                causal_raw = self.bridge.generate(
+                    correction_system,
+                    correction_user,
+                    label="proposer.causal_reasoning.correction",
+                    components=correction_audit["components"],
+                )
+        if causal_raw is not accumulated.get("causal_reasoning"):
+            # Only write back when a correction actually replaced the output —
+            # never insert a causal_reasoning key into a pipeline that has no
+            # causal stage.
+            accumulated["causal_reasoning"] = causal_raw
 
         # --- B.12 + B.22: Proposing stage (always runs last, retries on validation failure) ---
         proposing_prompt = load_stage_prompt(
