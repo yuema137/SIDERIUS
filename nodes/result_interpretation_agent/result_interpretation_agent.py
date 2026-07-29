@@ -147,7 +147,91 @@ def _build_per_model_system_prompt(inp: "InterpretationInput") -> str:
     is:" preamble has no payload (acceptable for tests, never reached in
     production).
     """
-    return PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
+    rendered = PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
+    # V19 PR 3 §3.6 item 3 (flag-gated): instruction block for handling the
+    # structured HealthGate evidence. OFF ⇒ byte-identical to pre-PR3
+    # (golden-parity tested).
+    if inp.enable_structured_health_feedback:
+        rendered += HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS
+    return rendered
+
+
+HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS = """
+
+### Structured HealthGate evidence (additional rules)
+
+The user prompt may contain a "HealthGate summary" section and per-round
+GATE labels. These are DETERMINISTIC facts from the health-gate system,
+not opinions. Rules:
+
+- Preserve every collapse fingerprint VERBATIM in your findings — the
+  exact signature string with its numbers (e.g.
+  "output_diversity_blocking:n_unique_int8_values=1"). Never paraphrase
+  the numbers away.
+- A high raw score on a round with invalid gate evidence is an INVALID
+  result. Report it as a failure mode, never as an achievement.
+- Rounds marked "unknown" or with legacy/no gate evidence carry NO
+  health verdict. Do not describe them as healthy or collapsed.
+- Attribute each fingerprint to exactly the model and rounds it came
+  from. Never transfer evidence between models."""
+
+
+def _render_health_summary_section(summary: ModelRunSummary) -> list[str]:
+    """Deterministic ``### HealthGate summary`` body (V19 PR 3 §3.6 item 2).
+
+    Reads ONLY the ``round_health`` data — never LLM prose. Returns [] when
+    every round is legacy/unknown with nothing to report, so the caller can
+    skip the header entirely.
+    """
+    counts = {"valid": 0, "invalid": 0, "unknown": 0}
+    fingerprint_rounds: dict[str, list[int]] = {}
+    fingerprint_by_sig: dict[str, object] = {}
+    for i, health in enumerate(summary.round_health):
+        counts[str(health.health_validity)] += 1
+        if health.fingerprint is not None:
+            sig = health.fingerprint.signature
+            fingerprint_rounds.setdefault(sig, []).append(i + 1)
+            fingerprint_by_sig.setdefault(sig, health.fingerprint)
+
+    lines = [
+        f"Round validity: {counts['valid']} valid, {counts['invalid']} invalid, "
+        f"{counts['unknown']} unknown (of {len(summary.round_health)})"
+    ]
+    if fingerprint_rounds:
+        lines.append(
+            "Distinct collapse fingerprints (deterministic, from persisted gate evidence):"
+        )
+        for sig in sorted(fingerprint_rounds):
+            rounds = fingerprint_rounds[sig]
+            fp = fingerprint_by_sig[sig]
+            lines.append(
+                f"  - {sig}  (x{len(rounds)}, round{'s' if len(rounds) > 1 else ''} "
+                f"{', '.join(str(r) for r in rounds)}) — {fp.human_readable}"
+            )
+
+    # Recording-only diagnostics for the best-scoring round, if any round
+    # carries them (e.g. pearson_dispersion — the misleading-high-score
+    # discriminator, design §2.4).
+    best_idx = None
+    best_score = None
+    for i, s in enumerate(summary.round_scores):
+        if s is not None and (best_score is None or s > best_score):
+            best_idx, best_score = i, s
+    if best_idx is not None and best_idx < len(summary.round_health):
+        recording = {
+            k: v
+            for outcome in summary.round_health[best_idx].gate_outcomes
+            if outcome.gate_name.endswith("_recording")
+            for k, v in outcome.key_metrics.items()
+        }
+        if recording:
+            rendered = ", ".join(f"{k}={v}" for k, v in sorted(recording.items()))
+            lines.append(f"Best-round recording diagnostics: {rendered}")
+
+    if counts["invalid"] == 0 and counts["valid"] == 0 and not fingerprint_rounds:
+        # All-unknown/legacy with no fingerprints: nothing informative.
+        return []
+    return lines
 
 
 def _build_per_model_prompt(
@@ -155,8 +239,18 @@ def _build_per_model_prompt(
     description: str,
     expert_advice_str: str = "",
     human_advice: str | None = None,
+    *,
+    structured_health_feedback: bool = False,
 ) -> str:
-    """Build the user prompt for a single model's summarization."""
+    """Build the user prompt for a single model's summarization.
+
+    ``structured_health_feedback`` (V19 PR 3 §3.6) gates the structured
+    HealthGate additions — the trajectory gate labels and the
+    ``### HealthGate summary`` section. OFF (default): output is
+    byte-identical to the pre-PR3 prompt, proven by golden-file equality
+    in ``test_health_prompt_parity.py`` — every PR 3 addition below must
+    stay behind this flag.
+    """
     lines = [
         f"## Model: {summary.model_type}",
         f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
@@ -237,7 +331,32 @@ def _build_per_model_prompt(
             extras.append(f"params={params:,}")
         extra_str = f" [{', '.join(extras)}]" if extras else ""
 
-        lines.append(f"  Round {i + 1}: score={score_str}{extra_str} — {conclusion}")
+        # V19 PR 3 §3.6 item 1 (flag-gated): label gate-invalidated rounds
+        # with the resolved action and the deterministic collapse identity,
+        # instead of the ambiguous bare "skipped".
+        gate_str = ""
+        if structured_health_feedback and i < len(summary.round_health):
+            health = summary.round_health[i]
+            if health.gate_action is not None and health.gate_action != "continue":
+                cause = (
+                    health.fingerprint.signature
+                    if health.fingerprint is not None
+                    else (health.failure_reason or "no persisted gate detail")
+                )
+                if score is None:
+                    score_str = "invalidated"
+                gate_str = f" [GATE {health.gate_action} — {cause}]"
+
+        lines.append(f"  Round {i + 1}: score={score_str}{extra_str}{gate_str} — {conclusion}")
+
+    # V19 PR 3 §3.6 item 2 (flag-gated): per-model HealthGate summary —
+    # validity counts, distinct fingerprints with occurrence counts and
+    # round indices, and recording-only diagnostics for the best round.
+    # Rendered ONLY when there is something to say (no empty headers).
+    if structured_health_feedback and summary.round_health:
+        health_lines = _render_health_summary_section(summary)
+        if health_lines:
+            lines += ["", "### HealthGate summary", *health_lines]
 
     if expert_advice_str:
         lines += [
@@ -1016,6 +1135,7 @@ class ResultInterpretationAgent:
                     description=model_descriptions[mt],
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
+                    structured_health_feedback=inp.enable_structured_health_feedback,
                 )
                 # T4b — system prompt has {TASK_DESCRIPTION} placeholder
                 # substituted at call time from inp.task_description; see
