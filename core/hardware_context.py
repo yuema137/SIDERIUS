@@ -34,7 +34,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import platform as _platform_mod
 import socket
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -46,6 +50,21 @@ logger = logging.getLogger(__name__)
 
 _SAFETY_FRACTION: float = 0.80  # §3.9.1: single source of truth for the cap
 _CPU_DEVICE_NAME: str = "cpu"  # stable marker for ``device_available=False``
+_PROBE_TIMEOUT_S: float = 5.0  # O1a: bound on every external probe
+
+
+class GpuDeviceProvenance(BaseModel):
+    """Per-visible-device provenance (V19 O1a). Ordered by logical index —
+    under ``CUDA_VISIBLE_DEVICES`` the logical indices are the mapped
+    subset; the raw env value is recorded on the parent context so the
+    physical identity stays recoverable."""
+
+    model_config = ConfigDict(frozen=True)
+
+    logical_index: int
+    name: str
+    total_memory_bytes: int
+    compute_capability: tuple[int, int]
 
 
 class HardwareContext(BaseModel):
@@ -54,6 +73,14 @@ class HardwareContext(BaseModel):
     Immutable (``frozen=True``). If the hardware changes (workspace moved
     between servers, GPU swapped), produce a NEW ``HardwareContext`` via
     ``discover()`` — do not mutate an existing one.
+
+    V19 O1a extends the manifest with optional run-level runtime
+    provenance (multi-GPU enumeration, driver version, environment
+    facts). All new fields are best-effort and defaulted: old manifests
+    load unchanged, collection failures are recorded in
+    ``collection_errors`` instead of aborting, and the
+    ``get_or_create`` mismatch check still keys ONLY on ``device_name``
+    + ``hostname`` — new fields never trigger regeneration.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -67,6 +94,32 @@ class HardwareContext(BaseModel):
     hostname: str
     device_available: bool
     discovered_at: datetime = Field(description="UTC timestamp of discover() invocation.")
+
+    # --- V19 O1a runtime provenance (optional, best-effort, recording-only) ---
+    platform: str | None = None  # platform.platform()
+    python_version: str | None = None
+    cuda_visible_devices: str | None = Field(
+        default=None,
+        description="Raw CUDA_VISIBLE_DEVICES value at discovery; None when unset.",
+    )
+    visible_device_count: int | None = None
+    devices: list[GpuDeviceProvenance] = Field(
+        default_factory=list,
+        description="ALL visible CUDA devices in deterministic logical-index order.",
+    )
+    driver_version: str | None = Field(
+        default=None,
+        description="NVIDIA driver version via bounded nvidia-smi probe; None on any failure.",
+    )
+    repo_commit: str | None = Field(
+        default=None,
+        description="git rev-parse HEAD of the running checkout; None outside a repo.",
+    )
+    collection_errors: list[str] = Field(
+        default_factory=list,
+        description="Explicit per-probe failures ('probe: error'); provenance gaps are "
+        "recorded as gaps, never fabricated.",
+    )
 
     @property
     def usable_cap_bytes(self) -> int:
@@ -86,6 +139,79 @@ class HardwareContext(BaseModel):
         return self.usable_cap_bytes / (1024**3)
 
 
+def _probe_driver_version(errors: list[str]) -> str | None:
+    """NVIDIA driver version via a bounded ``nvidia-smi`` call (O1a).
+
+    Best-effort by design: a missing binary, timeout, nonzero exit, or
+    malformed output records one ``collection_errors`` entry and yields
+    ``None`` — never a blocking dependency, never a fabricated value.
+    Multi-GPU hosts return one line per device; the first line is taken
+    (drivers are host-wide).
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+        )
+        if result.returncode != 0:
+            errors.append(f"driver_version: nvidia-smi exit {result.returncode}")
+            return None
+        first = result.stdout.strip().splitlines()
+        if not first or not first[0].strip():
+            errors.append("driver_version: empty nvidia-smi output")
+            return None
+        return first[0].strip()
+    except (OSError, subprocess.TimeoutExpired) as err:
+        errors.append(f"driver_version: {type(err).__name__}: {err}")
+        return None
+
+
+def _probe_repo_commit(errors: list[str]) -> str | None:
+    """``git rev-parse HEAD`` of the checkout containing this module (O1a)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+            cwd=Path(__file__).resolve().parent,
+        )
+        if result.returncode != 0:
+            errors.append(f"repo_commit: git exit {result.returncode}")
+            return None
+        commit = result.stdout.strip()
+        return commit or None
+    except (OSError, subprocess.TimeoutExpired) as err:
+        errors.append(f"repo_commit: {type(err).__name__}: {err}")
+        return None
+
+
+def _probe_devices(errors: list[str]) -> tuple[int | None, list[GpuDeviceProvenance]]:
+    """Enumerate ALL visible CUDA devices in logical-index order (O1a)."""
+    try:
+        count = int(torch.cuda.device_count())
+    except Exception as err:  # any torch failure is a recorded gap, never an abort
+        errors.append(f"devices: device_count: {type(err).__name__}: {err}")
+        return None, []
+    devices: list[GpuDeviceProvenance] = []
+    for idx in range(count):
+        try:
+            props = torch.cuda.get_device_properties(idx)
+            devices.append(
+                GpuDeviceProvenance(
+                    logical_index=idx,
+                    name=props.name,
+                    total_memory_bytes=int(props.total_memory),
+                    compute_capability=(int(props.major), int(props.minor)),
+                )
+            )
+        except Exception as err:
+            errors.append(f"devices[{idx}]: {type(err).__name__}: {err}")
+    return count, devices
+
+
 def discover() -> HardwareContext:
     """Build a ``HardwareContext`` from the current process's CUDA view.
 
@@ -94,10 +220,21 @@ def discover() -> HardwareContext:
     returns a stub with ``device_available=False`` and ``total_memory_bytes=0``.
     Consumers that require GPU must check ``device_available`` and early-return
     a CPU-mode verdict — the VRAM estimator does this today.
+
+    O1a provenance fields are collected once here (no repeated probing —
+    ``get_or_create`` reuses the stored manifest); every probe is
+    individually wrapped so a failure records a ``collection_errors``
+    entry instead of aborting.
     """
     now = datetime.now(UTC)
     hostname = socket.gethostname()
     torch_version = torch.__version__
+
+    errors: list[str] = []
+    plat = _platform_mod.platform()
+    python_version = sys.version.split()[0]
+    cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    repo_commit = _probe_repo_commit(errors)
 
     if not torch.cuda.is_available():
         return HardwareContext(
@@ -110,9 +247,19 @@ def discover() -> HardwareContext:
             hostname=hostname,
             device_available=False,
             discovered_at=now,
+            platform=plat,
+            python_version=python_version,
+            cuda_visible_devices=cuda_visible,
+            visible_device_count=0,
+            devices=[],
+            driver_version=None,  # not probed on CPU-only hosts (no fabrication)
+            repo_commit=repo_commit,
+            collection_errors=errors,
         )
 
     props = torch.cuda.get_device_properties(0)
+    visible_count, devices = _probe_devices(errors)
+    driver_version = _probe_driver_version(errors)
     return HardwareContext(
         device_name=props.name,
         total_memory_bytes=int(props.total_memory),
@@ -123,6 +270,14 @@ def discover() -> HardwareContext:
         hostname=hostname,
         device_available=True,
         discovered_at=now,
+        platform=plat,
+        python_version=python_version,
+        cuda_visible_devices=cuda_visible,
+        visible_device_count=visible_count,
+        devices=devices,
+        driver_version=driver_version,
+        repo_commit=repo_commit,
+        collection_errors=errors,
     )
 
 
