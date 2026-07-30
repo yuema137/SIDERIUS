@@ -1,4 +1,4 @@
-# V19 Launch Protocol — Runtime-Control Settings (DRAFT, audit-backed)
+# V19 Launch Protocol — Runtime-Control Settings (IMPLEMENTED, audit-backed)
 
 - **Status**: IMPLEMENTED AND FROZEN (2026-07-29) — the §4 minimal
   split shipped as `2a5a330` (tests `5e787b2`, 14 deterministic
@@ -57,7 +57,7 @@ Fallbacks and defaults (declared vs configured vs effective):
   formulas; they differ only through the resolved factor and the
   budget (None for trials).
 
-## 3. Independence audit — VERDICT: COUPLED
+## 3. Independence audit — HISTORICAL VERDICT: COUPLED (resolved by §4)
 
 - Trial admission vs trial watchdog: same resolved factor, BUT trial
   admission is inert (no budget) ⇒ **trial watchdog 3.5 is achievable
@@ -70,9 +70,14 @@ Fallbacks and defaults (declared vs configured vs effective):
   violates the "admission unchanged from V18" requirement.
 - Separate CLI flags for admission vs watchdog: **do not exist.**
 - ⇒ **Design conflict (operator plan §5): honoring watchdog=3.5 for
-  formals with V18 admission requires a minimal configuration split.**
+  formals with V18 admission required a minimal configuration split —
+  RESOLVED: the split is implemented and tested (§4, `2a5a330` +
+  `5e787b2`); the coupled behavior above is preserved as the audit
+  record of the PRE-SPLIT state and remains the exact fallback
+  behavior when the new flag is omitted.**
 
-## 4. Minimal split proposal (NOT implemented — for review)
+## 4. Minimal split — IMPLEMENTED (`2a5a330`, tests `5e787b2`; the
+text below is the approved design it implements)
 
 Add an optional watchdog-only factor consumed exclusively by the
 deadline provider; omitted → falls back to the effective
@@ -96,14 +101,15 @@ One flag (not per-phase) suffices for the operator's symmetric 3.5
 decision; per-phase watchdog factors can be added later if ever
 needed.
 
-## 5. Proposed V19 runtime values (pending the §4 split for formals)
+## 5. Effective V19 runtime values (the §4 split is implemented —
+these are the CURRENT launch values, not proposals)
 
 | Setting | V19 value | Note |
 |---|---|---|
 | Trial admission | unchanged = record-only (no budget) | inherited V18 behavior |
 | Formal admission | unchanged = `predicted × 2.0 ≤ 7200 s` (⇒ ≤ 60 min) | `--runtime_formal_safety_factor 2.0` kept |
-| Trial watchdog factor | **3.5** | via the new watchdog-only flag (or, equivalently today, trial factor 3.5 — but the flag keeps semantics uniform) |
-| Formal watchdog factor | **3.5** | REQUIRES the §4 split |
+| Trial watchdog factor | **3.5** | via `--runtime_watchdog_safety_factor` (uniform for both phases) |
+| Formal watchdog factor | **3.5** | via `--runtime_watchdog_safety_factor` (§4 split, implemented) |
 | Legacy fallback | 1.5 kept (inert) | unchanged |
 | Watchdog floor | 120 s | unchanged |
 
@@ -143,3 +149,21 @@ separate flags audited in their own PRs.
   formal 2.0 was consciously BOTH. No manifest contradiction found:
   launch scripts, schema provenance fields, and design-doc records
   agree on 1.5 / 3.0 / 2.0 / floor 120 / watchdog on.
+
+## 8. Scheduling revision (operator, 2026-07-29 — rev 2)
+
+The rev-1 serial eight-chain schedule was superseded BEFORE LAUNCH (no
+V19 run ever started under it) by the pairwise decision: each band's
+architecture and loss chains run CONCURRENTLY (exactly two chains, same
+band, never cross-band, never more than two), waves in band order
+15-19 → 10-14 → 4-9 → 0-3, each wave gated on both prior chains
+reaching a terminal queue state. Scientific settings are unchanged.
+Rationale (operational priority, not a scientific ranking): 15-19 has
+no prior evidence and the highest FCNet target; 10-14 carries the only
+prior valid formal for continuity; 4-9 next; 0-3 last per the operator
+order. VRAM basis: per-attempt 16 GB admission caps each chain
+(min(0.8×physical, budget)); aggregate 2×16 = 32 GB equals the 5090 —
+the residual aggregate-OOM risk and its frozen response are recorded in
+the launch report §5.1/§11. Queue implementation:
+`sdsc_submission_scripts/v19_queue_runner.sh` (pairwise waves,
+authoritative per-chain wave state, targeted serial `--only` recovery).
