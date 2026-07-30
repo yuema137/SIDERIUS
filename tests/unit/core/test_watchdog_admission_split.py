@@ -40,7 +40,18 @@ def _patch_sidecar(monkeypatch, predicted_seconds: float) -> str:
     reader with the minimal component block it returns)."""
     import core.sandbox_executor as se
 
-    block = {"components": {"training": {"prediction": {"predicted_seconds": predicted_seconds}}}}
+    # C8d: the deadline provider requires the production prediction shape —
+    # a component prediction declares its measurement-backed `source`.
+    block = {
+        "components": {
+            "training": {
+                "prediction": {
+                    "predicted_seconds": predicted_seconds,
+                    "source": "real_training_verification",
+                }
+            }
+        }
+    }
     monkeypatch.setattr(se, "_read_runtime_observation_sidecar", lambda path: block)
     return "unused-sidecar-path"
 
