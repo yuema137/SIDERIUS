@@ -142,6 +142,19 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 ## Key behavioral notes
 
 - **`[HEALTHGATE EVIDENCE]` block (V19 PR 3, flag-gated).** When `enable_structured_health_feedback=True`, `_format_healthgate_evidence_block()` renders ONE bounded block — delivered on BOTH execution modes: in legacy 2-call mode it is spliced into `_build_reasoning_prompt`; in the production 3-stage pipeline it renders through the `healthgate_evidence_block` template variable into `proposing_stage.md` (the JSON-emitting final stage — the same mechanism and placement as the §14.N `recent_gate_exhaustions_block` variable; the earlier stages deliberately do not receive it, avoiding duplicated context). The block is built from the deterministic interpretation fields (`per_model_round_health_counts`, `per_model_collapse_fingerprints`, `collapse_fingerprint_history`) — never from `key_findings` or any LLM prose. Per model (grouped exactly as the interpreter grouped them, nothing unlabelled): this-iteration validity counts and fingerprints, then retained history with retained-window occurrence counts (stored history is post-retention, so bucket sums ARE window counts — lifetime totals never render), absolute iteration tags, a "Representative observation:" line for the entry-level raw metrics, and bounded source experiment ids. Ends with six behavioral rules (no fingerprinted repeat without a named mechanism; the mechanism must change actual configuration; invalid high score = failure; no inappropriate avoidance; no cross-model transfer; no unsupported use-claims). Legacy interpretation dicts (fields absent) and empty evidence render NOTHING — no empty heading; a malformed hand-built history entry raises a diagnostic `ValueError` naming the model. The block renders AFTER and visibly separate from `[RECENT GATE EXHAUSTIONS]` — a different failure family (abort-class resource failures), whose rendering is byte-identical pre/post PR 3.
+
+> **Experimental status (V19 PR 3, final).** This optional feature is
+> fully implemented and operationally validated, but no universal
+> performance-improvement claim is made. A controlled 40-sample
+> descriptive evaluation (Control vs Treatment, 4 scenario families)
+> found more precise evidence grounding in some scenarios (exact gate
+> and fingerprint naming, supported feedback-use claims), no primary
+> behavioral improvement under the tested fixtures, and no observed
+> safety regressions in either arm. Its effect is context-dependent —
+> do not assume improvement without task-specific evaluation. The
+> default remains OFF; enabling it on an existing default-OFF
+> workspace is rejected by the run-invariants lock — use a new
+> workspace.
 - **Two execution modes auto-selected by `reasoning_pipeline.stages`.** Legacy mode (2 calls: `generate_text` reasoning → `generate` commit JSON) is the historical default and what the CLI exercises. Pipeline mode (3 stages: comparison → causal reasoning → proposing) engages when `reasoning_pipeline` has any enabled stage and is what the workflow uses in production. Both modes converge on the same `ProposalOutput` schema.
 - **Pre-flight revision loop** (`_MAX_PREFLIGHT_ATTEMPTS=3`). After each commit/proposing call, the proposer runs a static-formula wall-time estimate (`evaluate_time_skill`) against the active time budget. If `preflight_factor > 1.0` (over budget), the proposer appends a `[PRE-FLIGHT REJECTION]` block to the prompt and re-calls — up to 3 attempts. Structural validation retries (`_MAX_PROPOSING_RETRIES=2`) are nested inside each pre-flight slot; schema errors do not burn a pre-flight budget slot.
 - **Causal-reasoning minimum-boldness retry** (`_MAX_REASONING_RETRIES=1`). In pipeline mode, the causal-reasoning stage emits a `FalsifiablePrediction` with a `boldness` score. If the score falls below the configured minimum, the stage retries ONCE with a "be bolder" nudge. This is independent of the pre-flight loop.

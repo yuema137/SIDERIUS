@@ -245,6 +245,19 @@ with the defaults — but turning the flag ON over such a workspace is a
 canonical mismatch and requires a NEW workspace, exactly like a scope
 change or a HealthGate flip.
 
+> **Experimental status (V19 PR 3, final).** This optional feature is
+> fully implemented and operationally validated, but no universal
+> performance-improvement claim is made. A controlled 40-sample
+> descriptive evaluation (Control vs Treatment, 4 scenario families)
+> found more precise evidence grounding in some scenarios (exact gate
+> and fingerprint naming, supported feedback-use claims), no primary
+> behavioral improvement under the tested fixtures, and no observed
+> safety regressions in either arm. Its effect is context-dependent —
+> do not assume improvement without task-specific evaluation. The
+> default remains OFF; enabling it on an existing default-OFF
+> workspace is rejected by the run-invariants lock — use a new
+> workspace.
+
 Where to look afterwards: each iteration's `manifest.json` carries the
 `health_feedback_policy` control stamp (flag + the two retention
 values — policy only; per-round gate evidence stays in the records and
