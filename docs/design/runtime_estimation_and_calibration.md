@@ -2041,25 +2041,104 @@ revert = restore reject-revise branch. No artifact-format changes.
 (inspect first). Formal advice files untouched; the LLM may still
 voluntarily propose small models (§11.3). Deps: C1.
 **Implementation plan.**
-- [ ] Inspect the template contract for the parameter-count-limit
-      bullet's coupling to the VRAM gate; STOP AND ASK if removal
-      breaks a validated expectation.
-- [ ] §11.1 advisory wording verbatim (provenance, confidence, "do not
-      infer a permanent parameter-count ceiling").
-- [ ] Label every persisted runtime number with provenance+confidence.
-- [ ] Doc sync + fixture updates.
-**Unit validation.** Rendered prompts with/without advisory: label
-present, ceiling-mandate absent; ProposalOutput schema unchanged.
-**Pseudo integration.** §17.2 contamination guard end-to-end; mutation
-check recorded (guard fails when label stripped).
+- [x] Template contract inspected: the mandate existed in FOUR spots
+      (`ml_model_proposal_agent.py` legacy commit prompt, example +
+      hard-constraints bullet; `agent/prompt_templates/proposal/
+      proposing_stage.md`, example + rule 5). Enforcement audit: only
+      non-emptiness is validated
+      (`execute_tools/workflow_validation.py:107`);
+      `ExpertAdvice.constraints` has no content validation; the
+      validator agent only serializes advice as prompt guidance. The
+      STOP-AND-ASK condition did NOT materialize → removal proceeded
+      autonomously. All four spots now require a VRAM limit only, with
+      capacity constraints permitted "ONLY when justified by measured
+      evidence or explicit capacity arithmetic".
+- [x] §11.1 advisory labeling: SUPERSEDED in prompt form by the C1
+      operator decision (advisory stays artifact-only; the static
+      estimate is NOT reintroduced into prompts). The persisted
+      advisory note carries the §11.1 labels (done in C1).
+- [x] Persistence audit: repo-wide sweep shows `memo_consistency_notes`
+      has NO downstream prompt consumer — the C1 advisory cannot leak
+      into future prompts via any existing path.
+- [x] Additional contamination surfaces found and fixed: the
+      gate-exhaustion closing's unqualified "reduce parameter count"
+      order → provenance-qualified, workload-first, explicit
+      no-permanent-ceiling (multi-entry family-switch retained); the
+      stale `<10 GB VRAM` literal (real budget 16 GB — VRAM-side
+      small-model pressure) → defers to the `[HARDWARE CONTEXT]`
+      effective cap; the exploit-template "reduce parameter count
+      first" trade-off → workload-first per the operator's RESOURCE
+      USE advice clause.
+- [x] Doc sync + fixture updates (PR3 flag-OFF parity golden
+      regenerated from the same fixture; `[HEALTHGATE EVIDENCE]`
+      absence re-asserted post-regeneration).
+**Unit validation.** Rendered prompts: ceiling-mandate absent through
+the REAL loader in both explore/exploit modes; VRAM bullet retained;
+justification language present; qualified exhaustion closing;
+ProposalOutput schema unchanged.
+**Pseudo integration.** §17.2 contamination guard operates on real
+templates/loader/renderer output.
 **Acceptance.** (a) no template-mandated parameter ceiling (VRAM bullet
-retained); (b) all runtime numbers to the LLM carry provenance +
-confidence; (c) guard + mutation evidence recorded.
+retained) — MET; (b) prompt-side runtime numbers: the only remaining
+runtime-number prompt path is the gate-exhaustion block, now
+provenance-qualified; the static advisory never enters prompts
+(operator decision) — MET; (c) guard evidence recorded — MET.
 **Failure/edge.** Restored legacy contexts already containing ceilings
-(out of scope — fresh workspaces only); legacy fixtures.
+(out of scope — fresh workspaces only); legacy fixtures updated.
 **Migration/rollback.** Template-text change; revert restores old text.
 **Boundary.** Prompt/persistence only.
-- [ ] Evidence recorded.
+- [x] Evidence recorded (commit `a5a2d9d`):
+      `test_prompt_ceiling_policy.py` — 8 guards (mandate-free
+      templates via real loader both modes, justification language,
+      qualified closing, family-switch retention, stale-literal
+      removal); proposer dir **524 passed, 1.5 s**; golden parity
+      suite 3 passed post-regeneration; targeted ruff check + format
+      clean. One test-side fix during development: exact-substring
+      assert failed on line-wrapped text → whitespace-normalized
+      (test bug; production wording correct).
+
+#### Implementation record — 2026-07-30 / C2 (commit `a5a2d9d`)
+
+**Question encountered.** (a) Is the template mandate schema-validated
+anywhere? (b) The PR3 flag-OFF parity golden byte-pins the full
+reasoning prompt, embedding the exhaustion closing being reworded —
+regenerate or preserve? (c) Are the exhaustion closing's shrink order
+and the exploit-template capacity-first trade-off within C2 scope?
+
+**Audit evidence.**
+- `execute_tools/workflow_validation.py:107` — non-emptiness only;
+  `agent/schemas/proposal.py::ExpertAdvice.constraints` — free list;
+  validator agent — guidance-only consumer.
+- `test_health_prompt_parity.py` — golden exists to prove PR3 flag-OFF
+  byte-parity, not to freeze exhaustion wording.
+- Repo-wide `memo_consistency_notes` sweep — no prompt re-render path.
+- Gate-exhaustion TIME factors originate from pre-attempt gates that
+  may be `static_uncalibrated` (F-1) — an unqualified shrink order
+  from that data is exactly the §11 hazard.
+
+**Decision.** Remove the mandate (VRAM requirement + justification
+qualifier); regenerate the golden from the same fixture; reword the
+exhaustion single-entry closing; fix the `<10 GB` literal; reorder the
+exploit trade-off to workload-first.
+
+**Rationale.** Prompt-text-only, reversible, within C2's
+anti-contamination mandate; aligns templates with the operator's own
+V18r RESOURCE USE advice; no scientific setting, advice file, tuner,
+or authority change.
+
+**Validation.** As recorded above (524 proposer tests; 8 new guards;
+golden parity re-proven).
+
+**Status.** Final.
+
+#### Implementation record — 2026-07-30 / commit-discipline interpretation
+
+The autonomous-execution protocol §7 ("commits do not individually
+require approval; do not artificially stop after every small commit")
+conflicts with the appended legacy rule 3 ("stop before each full
+commit"). Interpretation adopted and disclosed in-session: §7 governs;
+reports at stage boundaries and mandatory gates. Reversible at any
+operator instruction. Status: Final unless operator overrides.
 
 ### C3 — `feat(runtime): canonical runtime evidence/provenance types`
 
