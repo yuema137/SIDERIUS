@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.inference_defaults import inference_batch_for
-from core.runtime_control.records import RuntimeObservation
+from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import DataScope, ScopeViolationError
@@ -435,10 +435,21 @@ def _watchdog_deadline_provider(
             candidates.append((policy.operator_budget_seconds, "operator_budget"))
         block = _read_runtime_observation_sidecar(rv_sidecar_path)
         if block:
+            components = (block.get("components") or {}).values()
+            # C8d: a deadline may only be derived from MEASUREMENT-BACKED
+            # component predictions (§7.4 watchdog column: static evidence
+            # is `never_used`, historical priors `never_used_alone`). Every
+            # prediction the RT2 session writes is measurement-backed by
+            # construction — setup measures itself, phases predict only
+            # after verifying — so this changes no production number; it
+            # closes the door on a prior ever setting a kill deadline.
+            # The arithmetic below is unchanged.
             predicted = [
-                c.get("prediction", {}).get("predicted_seconds")
-                for c in (block.get("components") or {}).values()
+                c["prediction"]["predicted_seconds"]
+                for c in components
                 if c.get("prediction") is not None
+                and c["prediction"].get("predicted_seconds") is not None
+                and c["prediction"].get("source") in MEASUREMENT_BACKED_SOURCES
             ]
             if predicted:
                 estimate = sum(predicted) * watchdog_factor

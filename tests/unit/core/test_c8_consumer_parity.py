@@ -199,6 +199,31 @@ class TestWatchdogDeadlineParity:
         provider = self._provider(monkeypatch, policy=policy, predicted_seconds=None)
         assert provider() == (None, "none")
 
+    def test_a_prior_backed_prediction_never_sets_a_deadline(self, monkeypatch):
+        """C8d: §7.4 watchdog column — static evidence is `never_used`.
+        A prior-sourced component cannot arm the kill deadline; the
+        operator budget remains the only bound."""
+        import core.sandbox_executor as se
+
+        block = {
+            "components": {
+                "training": {
+                    "prediction": {
+                        "predicted_seconds": 10.0,
+                        "source": "static_uncalibrated",
+                    }
+                }
+            }
+        }
+        monkeypatch.setattr(se, "_read_runtime_observation_sidecar", lambda _p: block)
+        deadline, source = _watchdog_deadline_provider(_formal_policy(), "unused")()
+        assert (deadline, source) == (7200.0, "operator_budget")  # not 120 s floor
+
+        no_budget = RuntimeControlPolicy(
+            watchdog=WatchdogConfig(enabled=True, safety_factor=WATCHDOG_FACTOR)
+        )
+        assert _watchdog_deadline_provider(no_budget, "unused")() == (None, "none")
+
 
 class TestTimeEvalGateParity:
     """The pre-flight wall-time gate as it behaves today: a private
