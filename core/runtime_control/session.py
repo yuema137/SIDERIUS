@@ -564,6 +564,10 @@ class RuntimeVerificationSession:
         if budget is None:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                # Explicit: an admitted record carries no failure class. Also
+                # keeps `**cost_fields` (float values) from being checked
+                # against this Literal parameter under strict pyright.
+                failure_class=None,
                 stage=stage,
                 reason=(
                     "record-only: no operator budget in force"
@@ -611,6 +615,7 @@ class RuntimeVerificationSession:
         else:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                failure_class=None,
                 stage=stage,
                 reason=(
                     f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "
