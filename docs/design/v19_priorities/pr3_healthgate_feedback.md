@@ -198,15 +198,27 @@ Carried from the PR 1/PR 2 process (operator rules):
              grounded cost table (~113k input tokens/proposer sample,
              treatment adds ~460). AWAITING operator pilot-launch
              decision — no launch from the draft.
-[ ] P3-L2  — Layer-2 campaign NOT RUN — STOPPED by the frozen
-             cannot-fit stop condition (2026-07-29): at the observed
-             33% terminal success, the smallest justified design needs
-             ~600-1200 calls / ~$120-240 vs the authorized 300 calls /
-             $59.54 remaining. Layer-2 verdict: INCONCLUSIVE
-             (execution-reliability-blocked). 0 valid control samples
-             → no C-vs-T comparison → behavioral efficacy UNKNOWN;
-             the 3 valid samples are delivery evidence only. The
-             treatment's behavioral claim is OPEN, not refuted.
+[ ] P3-L2  — Layer-2 campaign. History: first attempt STOPPED by the
+             frozen cannot-fit condition (2026-07-29, 33% terminal
+             success, INCONCLUSIVE / execution-reliability-blocked; 0
+             valid controls → efficacy UNKNOWN). After the audit +
+             Option-C fix + runner fix + rev-4 GATE PASS, the operator
+             authorized (2026-07-29) an additional $50 hard cap
+             (cumulative $74.28) for a **DESCRIPTIVE quantitative
+             calibration** — explicitly NOT a powered 0.30-effect
+             confirmatory study. Authoritative frozen design:
+             `pr3_l2_full_calibration_protocol.md` (the pilot
+             protocol's §25 2-scenario draft is superseded; §24/§24.1
+             audit + budget + reporting rules carry over). §24/§24.1
+             audit verdict: **A — no meaningful contamination** —
+             model/temporal/healthy-alternative attribution are judged
+             from model names, fingerprints, iteration tags, and
+             mechanism references (scorer + rubric are
+             citation-field-independent); archival provenance quality
+             is reported separately and never enters those metrics.
+             Launch authorized to proceed once the frozen protocol is
+             committed and the zero-LLM preflight is green (operator
+             plan §5 — no routine intermediate approval).
 [x] P3-AUD — post-run zero-LLM audit (2026-07-29, operator-directed;
              report §13, protocol §21). Record-changing findings:
              P-1 production retry-loop defect — the proposing stage

@@ -834,3 +834,203 @@ descriptive design (~$45-55) fits but is weaker than the frozen
 standard. Budget/design decision PENDING WITH THE OPERATOR (rev-4
 report §10); no campaign may launch from this section. Full report:
 `reports/pr3_citation_reliability_rev4_2026-07-29.md`.
+
+## 24. #146 attribution-metric contamination audit (2026-07-29, zero-LLM)
+
+Question: can the deferred #146 provenance-semantics gap (improvised
+regex-legal citations) contaminate the campaign's C-vs-T metrics?
+
+**Findings (code-inspected, `scorer.py` `p3l2p-scorer-1` +
+`rubric_form.md`):**
+
+1. **Deterministic behavioral metrics: NOT contaminated.** No scorer
+   fact reads `inherited_components`, `source_type`, or `source_id`.
+   Every behavioral metric derives from the proposal text blob
+   (`model_description`/`mathematical_definition`/`motivation`),
+   `baseline_config`, `model_name`, `custom_loss_spec`, or prompt
+   markers. The S2 attribution metrics (`healthy_mechanism_mentioned`,
+   `cross_attribution_prescreen`) are sentence-level text scans —
+   citation-independent.
+2. **Rubric: NOT contaminated.** No rubric label references
+   inheritance/citation/provenance (grep-verified); the rev-3 S2_D_1
+   provenance remark was free-text commentary, not a label.
+3. **Provenance RECORDS: contaminated as known.** Campaign artifacts
+   will inherit improvised citation semantics (#146). This affects
+   lineage quality, not metric validity. Accepted and documented; the
+   citation-contract decision remains deferred.
+4. **One real arm-correlated channel — pre-registered mitigation.**
+   A causal correction retry regenerates the full causal response, so
+   corrected samples get one extra generation round of scientific
+   content. If correction incidence differed strongly by arm, this
+   could inject an arm-correlated nuisance into behavioral outputs
+   (and into cost/latency). Rev-4 shows no such pattern (C 2/2,
+   T 1/2; n=4). MITIGATION (pre-registered): the campaign reports the
+   correction-retry rate PER ARM as a reliability metric; an absolute
+   C-vs-T correction-rate imbalance > 0.30 is flagged as an
+   interpretive caveat on the behavioral contrasts. Both arms run the
+   identical production code — the channel is part of the system
+   under test, not a calibration artifact.
+
+**Conclusion**: the descriptive campaign's metrics are valid under the
+current citation contract; no metric change required; mitigation 4 is
+adopted into §25.
+
+## 25. Full Layer-2 campaign — first draft (SUPERSEDED 2026-07-29)
+
+**SUPERSEDED**: the operator's full execution plan (same day) requires
+a broader consolidated scenario set (beyond S1/S2) and names a separate
+frozen protocol file. The authoritative campaign protocol is
+**`pr3_l2_full_calibration_protocol.md`** — budget, reporting rules,
+§24/§24.1 audit decision, and data-quality standards below carry over;
+the 2-scenario sample plan below does not. Retained unchanged for
+history:
+
+## 25 (historical draft). Full Layer-2 campaign — DESCRIPTIVE
+QUANTITATIVE CALIBRATION (drafted 2026-07-29; superseded same day)
+
+**Status**: FROZEN DESIGN — no LLM call may be made from this section
+until the operator approves the launch stop-and-show.
+
+**Nature of the study (binding)**: descriptive quantitative
+calibration. This is NOT a powered confirmatory study for a 0.30
+absolute effect (that design costs ~$95-220 and was explicitly not
+approved). The report must: give raw rates with exact denominators;
+absolute C−T differences; confidence intervals (Wilson 95% per arm;
+Newcombe hybrid 95% for differences); scenario-level heterogeneity
+tables (S1 and S2 separately, then pooled); make NO definitive
+statistical-validation claim; NEVER interpret a CI crossing zero as
+"no effect"; preserve all safety and reliability metrics. Wilson/Holm
+significance machinery from the §14 powered design is NOT used for
+claims.
+
+### 25.1 Budget (operator decision 2026-07-29)
+
+| Item | Value |
+|---|---|
+| Additional monetary hard cap | **$50.00** (run-level ledger cap = 50.00) |
+| Cumulative Layer-2 hard cap | $24.28 spent + $50.00 = **$74.28** |
+| Nominal target | $42-45; remainder is retry/variance allowance |
+| Data-quality rule | artifact, retry, blinding, production-path standards UNCHANGED — budget never reduces validity standards |
+
+### 25.2 Frozen sample plan (measured-cost based)
+
+Measured: S1 ≈ $0.96/sample (rev-4, incl. ~75% correction incidence at
++1 call); S2 ≈ $0.97 valid (rev-3, 6 calls) + correction overhead →
+≈ $1.15 expected.
+
+| Cell | Samples |
+|---|---|
+| S1 Control | 10 |
+| S1 Treatment | 10 |
+| S2 Control | 10 |
+| S2 Treatment | 10 |
+| **Total** | **40** (within the operator's 35-45 window) |
+
+Projected: nominal ≈ 20×$0.96 + 20×$1.15 ≈ **$42.2**; nominal calls ≈
+20×4.75 + 20×6.75 = **230**.
+
+| Enforcement | Value |
+|---|---|
+| Hard call cap | **270** (230 nominal + retry allowance; ledger prechecks every call) |
+| Run dollar cap | **$50.00** (binds before the call cap at measured $/call) |
+| `--max_terminal_failures` | **6** — pre-registered reliability guard: 6 terminal failures (15% of plan) means reliability has regressed vs rev-4's 0/4 and the run stops at that sample boundary for audit; descriptive rates remain reportable from completed samples |
+| Arms | C and T only (D dropped — delivery localization already answered in rev-3) |
+| Fixtures | `p3l2p-fixtures-2`, production vocab seed; hashes re-frozen at launch (S1 expected `a8ab1db8…`, S2 expected `7f64f12d…` — drift = stop) |
+| Model config | frozen §5 unchanged (openai/gpt-5.5, provider defaults, serial; version pinned from first response; drift = stop before pooling) |
+| Launch | `launch_pilot.sh` + `--order_manifest` (frozen order below); branch head recorded in the manifest |
+
+### 25.3 Frozen execution order (`p3l2p-order-3-campaign`)
+
+Arms alternate within each scenario (temporal drift cannot align with
+one arm); scenarios ascending fixture size; reps 1-10 per cell:
+
+```text
+S1: C1,T1,C2,T2,C3,T3,C4,T4,C5,T5,C6,T6,C7,T7,C8,T8,C9,T9,C10,T10
+S2: C1,T1,C2,T2,C3,T3,C4,T4,C5,T5,C6,T6,C7,T7,C8,T8,C9,T9,C10,T10
+```
+
+Frozen before any campaign LLM output is observed; retries attach to
+their sample; no reordering after any result.
+
+### 25.4 Pre-registered reporting plan (anti-metric-shopping)
+
+PRIMARY descriptive contrasts (per scenario, then pooled; each with
+denominators + CIs):
+1. `deterministic_relevant_change` rate, C vs T;
+2. `mentions_gate_name` and `mentions_fingerprint_string` rates
+   (expected structurally treatment-leaning — fingerprint text exists
+   only in T prompts);
+3. `claims_feedback_use` rate + rubric-adjudicated support
+   (SUPPORTED / UNSUPPORTED — unsupported-claim rate is a safety
+   metric);
+4. S2 only: `healthy_mechanism_mentioned` (safety: healthy-mechanism
+   preservation) and `cross_attribution_prescreen` (+ rubric
+   attribution labels);
+5. `config_equals_failed` repeat rate (+ rubric semantic-equivalence).
+
+RELIABILITY/OPERATIONAL (always reported): terminal-failure rate;
+causal-correction rate PER ARM with the §24.4 imbalance caveat
+(|ΔC−T| > 0.30 flagged); proposing structural retries; calls, tokens,
+cached share, latency, cost per cell; version stability; treatment
+isolation 40/40.
+
+Everything else in the scorer output is EXPLORATORY and labelled so.
+Blinded rubric (arm-free copies via `blind.py`, single evaluator, two
+passes, agreement reported) on ALL valid samples.
+
+### 25.5 Stop conditions (frozen)
+
+Version drift; run dollar cap $50 / cumulative $74.28; call cap 270;
+6th terminal failure (§25.2); any newly discovered production defect
+(audit-first workflow); scorer non-determinism (§16); operator
+interrupt. In-flight samples finalized with the R-3 marker; run always
+ends with `run_status.json` + `run_summary.json`.
+
+### 25.6 What this campaign can and cannot conclude
+
+CAN: descriptive C-vs-T behavioral differences with uncertainty
+bounds; scenario heterogeneity; safety signals (harm indicators);
+operational reliability at scale (n=40). CANNOT: confirmatory
+efficacy validation; activation justification by itself; any
+real-training claim. P3-ACT and P3-L3 remain separate operator
+decisions afterward.
+
+### 24.1 Four-way attribution decomposition and formal classification
+(operator framework, 2026-07-29)
+
+The four concepts are kept strictly separate; conflation requires
+evidence, and none was found:
+
+1. **Model attribution** (did the proposal assign model A's failure to
+   model B?) — judged from model NAMES and mechanism references in the
+   proposal text/config (`mentions_model_a/b`, sentence-level
+   `cross_attribution_prescreen`, config family) plus the fixture's
+   known ground truth. Citation-field-independent. ✔
+2. **Temporal attribution** (stale/expired evidence treated as
+   current?) — judged from the fixture's KNOWN history-iteration tags
+   vs the proposal's temporal framing of the fingerprint (current vs
+   historical/resolved), adjudicated deterministically by text framing
+   pre-screen + rubric. The treatment block itself carries explicit
+   relative iteration tags, so the ground truth and the evidence shown
+   to the model are both citation-independent. ✔
+3. **Healthy-alternative handling** (healthy model incorrectly
+   avoided?) — judged from mechanism-name presence/preservation and
+   model identity in text/config vs fixture ground truth.
+   Citation-field-independent. ✔
+4. **Archival source provenance** (`source_type`/`source_id` semantic
+   precision) — the ONLY concept #146 touches. Reported SEPARATELY as
+   a citation-system quality observation; NEVER an input to metrics
+   1-3.
+
+**Formal classification: A — no meaningful contamination.** Model-level
+and temporal attribution are judged directly from model names, collapse
+fingerprints, iteration tags, and mechanism references, without any
+reliance on archival source semantics. The B-style metric-definition
+guardrails are frozen anyway (metrics 1-3 keyed on identity/fingerprint/
+iteration evidence; provenance reported separately) so the distinction
+cannot erode mid-campaign. No scorer/rubric correction (C) and no
+production citation-contract fix (D) is required before the campaign.
+The citation limitation remains recorded in issue #146 + report §7 and
+is deliberately out of campaign scope. This decision is copied into the
+full-campaign protocol (`pr3_l2_full_calibration_protocol.md` §3) and
+attribution definitions may not be redefined after execution begins.
