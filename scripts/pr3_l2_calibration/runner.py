@@ -221,10 +221,10 @@ def run_sample(entry: dict, run_dir: Path, ledger: Ledger, first_gate_done: list
     vocab_seed = production_vocab_seed()
     interp_input = InterpretationInput(
         summaries=summaries,
-        storage={
-            "backend": "local",
-            "local": {"workspace": str(sample_dir / "interp_ws"), "run_name": sid},
-        },
+        storage=StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(sample_dir / "interp_ws"), run_name=sid),
+        ),
         iteration=spec["iteration"],
         enable_structured_health_feedback=interp_on,
         collapse_fingerprint_history=spec["carried_history"](),
@@ -495,8 +495,9 @@ def main():
     from dotenv import dotenv_values
 
     keys = dotenv_values(REPO / ".env")
-    assert keys.get("OPENAI_API_KEY"), "OPENAI_API_KEY not present in .env"
-    os.environ["OPENAI_API_KEY"] = keys["OPENAI_API_KEY"]
+    api_key = keys.get("OPENAI_API_KEY")
+    assert api_key, "OPENAI_API_KEY not present in .env"
+    os.environ["OPENAI_API_KEY"] = api_key
 
     run_dir = REPO / "reports" / "artifacts" / "pr3_l2p" / args.run_id
     run_dir.mkdir(parents=True, exist_ok=True)

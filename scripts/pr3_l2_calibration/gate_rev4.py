@@ -9,6 +9,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -26,7 +27,7 @@ def legal(ic):
 
 
 def main():
-    out = {"samples": {}, "gate": {}}
+    out: dict[str, Any] = {"samples": {}, "gate": {}}
     versions, total_calls = set(), 0
     correction_evidence = []
     failure_classes = []
