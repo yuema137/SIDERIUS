@@ -2493,10 +2493,20 @@ rollback flag. Deps: C3-C5.
       the probe's own timing spread); `probe_observations` → distinct
       training/inference `CalibrationObservation`s, `unvalidated`
       (C7 owns promotion).
-- [ ] C6b — PRODUCTION executors (`production_probe_executors`): real
-      torch + live plugin registry load (F-1b) + canonical dataset
-      path (F-1a) + `torch.cuda.max_memory_allocated` peak; realized
-      recomputation from the actual module.
+- [x] C6b-1 — PRODUCTION executors (`core/runtime_control/
+      probe_production.py` + `execute_tools/probe_data.py`): real torch
+      + LIVE `ml_models.models_sandbox.MODEL_REGISTRY` load (F-1b;
+      probe must run post-registration — enforced error otherwise) +
+      canonical dataset path via `data_paths.TIDMAD_DATA_DIR` (F-1a;
+      missing dataset raises — no synthetic fallback) + CUDA-event
+      timing + `torch.cuda.max_memory_allocated` peak; realized
+      properties recomputed from the instantiated module; optimizer
+      switch mirrors `train_engine_sandbox` (verified: AdamW default
+      w/ weight_decay, Adam, SGD); loss via the real `get_criterion`;
+      §9.1 profile collectors (`collect_hardware_compatibility_profile`
+      — no hostname; `collect_execution_environment_profile` —
+      installation UUID). All heavy imports lazy; real execution only
+      in the operator-gated GPU smoke / C12.
 - [ ] C6b — flag-gated workflow wiring (probe stage post-validation,
       default OFF until C8/C12; rollback parity) + registry/profile
       population (O1a §9.1 extension) + pseudo propagation test.
