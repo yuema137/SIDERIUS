@@ -1,0 +1,27 @@
+{
+  "mindset": [
+    "# V19 Gate 0 — ARCHITECTURE chain, lightweight end-to-end validation (NOT a scientific study)",
+    "This is an infrastructure Gate. The ONLY objective is to complete the full production loop — proposal, implementation, validation, real trial training, the forced formal path, inference, scoring, HealthGate evaluation, persistence, and the next iteration — under a deliberately reduced budget (trial 5 min, formal 30 min, tiny data portions).",
+    "Scientific competitiveness is explicitly NOT an objective of this Gate. Beating FCNet, beating V18, or maximizing denoising performance are all out of scope. A modest score with a correctly recorded outcome is a Gate success; an ambitious model that cannot finish is a Gate failure."
+  ],
+  "propose": [
+    "Propose a compact, low-risk ARCHITECTURE change whose purpose is to complete the full training, inference, scoring, HealthGate, persistence, and next-iteration workflow under the reduced Gate budget. The architecture chain must still propose an architecture change, not merely a loss-only change.",
+    "Prefer small parameter counts (roughly 0.1-2 M parameters), conventional PyTorch operations (Conv1d, small dilated stacks, GRU, LayerNorm/GroupNorm, embedding + softmax heads), stable output distributions, simple tensor shapes, and fast execution.",
+    "Avoid FCNet-scale capacity, large attention stacks, expensive multi-stage models, unusually large hidden dimensions, quadratic full-sequence attention, or components that require long training to become numerically stable.",
+    "Everything must work at max_epochs=1 with ~2% training portions and finish a trial attempt well inside a 5-minute wall budget and a formal attempt well inside 30 minutes. Plan step counts and batch sizes for these budgets explicitly.",
+    "Keep the loss conservative: prefer a registered built-in loss (Branch A). Only use a custom loss if strictly necessary for output-contract compatibility."
+  ],
+  "implement": [
+    "Implement through the existing model plugin contract with the simplest correct realization. Prioritize reliable implementation and numerical stability over any cleverness.",
+    "Keep tensor shapes simple and vectorized; no per-timestep Python loops in forward(). Keep the declared output contract ([B, T] int -> [B, 256, T] float) exactly.",
+    "If the proposal risks the Gate time budget, reduce step count or segment workload — for THIS Gate, small and finished beats large and killed."
+  ],
+  "tune": [
+    "Tune minimally: conservative learning rates, batch sizes that fit comfortably, no aggressive exploration. The Gate has max_rounds=2 (one trial + the forced formal path) — plan for completion, not for score.",
+    "Respect the reduced budgets: trial 5 minutes, formal 30 minutes, portions ~2%/1% — never plan workloads sized for the production 20/120-minute budgets.",
+    "A HealthGate-invalid round is acceptable Gate output if recorded correctly; do not chase validity with risky changes inside this Gate."
+  ],
+  "validate": [
+    "Validate strictly against the plugin contract; reject unimplementable or contract-violating code as usual. Gate speed is never a reason to weaken validation."
+  ]
+}
