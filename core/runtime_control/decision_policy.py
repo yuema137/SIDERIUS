@@ -153,7 +153,7 @@ _POLICY_MATRIX: dict[str, dict[str, str]] = {
     },
 }
 
-_BEHAVIORAL_RULES: dict[str, str] = {
+_BEHAVIORAL_RULES: dict[str, str | list[str]] = {
     "static_prior_advisory_only": "static estimates never revise or reject proposals",
     "historical_prior_non_blocking": "historical evidence alone never blocks a novel candidate",
     "unsupported_extrapolation": "may not block without a live probe",
