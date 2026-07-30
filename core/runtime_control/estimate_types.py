@@ -312,18 +312,25 @@ def from_time_eval_result(result: dict[str, Any]) -> RuntimeEstimate:
     """Wrap a TimeEval wrapper ``run_skill`` RESULT (tuner-side gate).
 
     Real shape (``wrapper.py:812-824``): ``status``, ``feasible``,
-    ``estimated_minutes``, ``breakdown.source`` (``static_uncalibrated``
-    or ``real_dataset_warmup``), ``phase_breakdown`` = {phase: estimator
-    result with ``seconds``}, ``inference_batch_uncalibrated``.
+    ``estimated_minutes``, ``breakdown.source`` (``static_uncalibrated``,
+    ``real_dataset_warmup``, or ``store``), ``phase_breakdown`` =
+    {phase: estimator result with ``seconds``},
+    ``inference_batch_uncalibrated``.
     Warmup-backed estimates are measurement-backed but NOT
     steady-state-verified at this layer, so they are blocking-capable
     per §7.4 yet never formal-eligible here (RT2 in-process
-    verification owns that)."""
+    verification owns that).
+
+    C8: ``store`` is the RT3 observation-store reuse path — a unit time
+    measured in an EARLIER attempt, i.e. a historical prior (tier 1). It
+    never blocks alone, which is why the wrapper stamps
+    ``formal_execution_eligible: False`` on it."""
     if result.get("status") != "success":
         raise ValueError(f"cannot wrap a non-success TimeEval result: {result.get('status')!r}")
-    source = (result.get("breakdown") or {}).get("source")
-    if source not in ("static_uncalibrated", "real_dataset_warmup"):
-        raise ValueError(f"unexpected TimeEval breakdown source: {source!r}")
+    raw_source = (result.get("breakdown") or {}).get("source")
+    if raw_source not in ("static_uncalibrated", "real_dataset_warmup", "store"):
+        raise ValueError(f"unexpected TimeEval breakdown source: {raw_source!r}")
+    source = "historical_observation_prior" if raw_source == "store" else raw_source
     phases = result.get("phase_breakdown") or {}
 
     def _phase_seconds(name: str) -> float | None:
@@ -334,7 +341,7 @@ def from_time_eval_result(result: dict[str, Any]) -> RuntimeEstimate:
     warn = result.get("inference_batch_uncalibrated")
     return make_estimate(
         provenance=source,  # type: ignore[arg-type]
-        confidence="low" if source == "static_uncalibrated" else "medium",
+        confidence="medium" if source == "real_dataset_warmup" else "low",
         expected_seconds=float(minutes) * 60.0 if minutes else None,
         training_seconds=_phase_seconds("training"),
         inference_seconds=_phase_seconds("inference"),

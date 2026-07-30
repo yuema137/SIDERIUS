@@ -56,6 +56,18 @@ CandidateStage = Literal["proposal", "post_implementation"]
 
 MeasuredFailure = Literal["oom", "wall_cap"]
 
+#: State of the evidence channel itself (C8, operator decision 2026-07-30).
+#: Distinguishes "the candidate is bad" from "we cannot obtain evidence":
+#:
+#: * ``ok``                     — evidence is whatever the estimate says;
+#: * ``probe_absent``           — no probe has run / no valid probe record
+#:                                exists yet for this candidate;
+#: * ``infrastructure_failure`` — the probe could not be produced or
+#:                                interpreted at all (configuration,
+#:                                data path, plugin loading, registry
+#:                                corruption, evidence-channel failure).
+EvidenceChannel = Literal["ok", "probe_absent", "infrastructure_failure"]
+
 
 class RuntimeBudget(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -167,6 +179,10 @@ _BEHAVIORAL_RULES: dict[str, str | list[str]] = {
         "foreign_contended",
         "unknown_contention",
     ],
+    # C8 (operator, 2026-07-30): missing evidence vs broken evidence channel.
+    "formal_probe_absent": "REQUEST_PROBE — never a silent static/historical fallback",
+    "infrastructure_failure": "ABORT — evidence-channel failure is not a candidate verdict",
+    "measured_candidate_failure": "REJECT — oom / wall_cap / deterministic capacity violation",
 }
 
 _POLICY_SEMVER = "1.0.0"
@@ -214,6 +230,7 @@ class RuntimeDecisionPolicy:
         *,
         capacity_check: CapacityCheck | None = None,
         measured_failure: MeasuredFailure | None = None,
+        evidence_channel: EvidenceChannel = "ok",
     ) -> RuntimeDecision:
         reasons: list[str] = []
 
@@ -224,6 +241,18 @@ class RuntimeDecisionPolicy:
                 evidence_provenance=estimate.provenance,
                 evidence_rank=estimate.rank,
             )
+
+        # ── Evidence channel before evidence content (C8) ────────────────
+        # A broken channel is an EXECUTION-SYSTEM failure, not a verdict on
+        # the candidate: it can never be answered by falling back to a
+        # prior, and it is never a REJECT.
+        if evidence_channel == "infrastructure_failure":
+            reasons.append(
+                "the runtime evidence channel failed (configuration, data "
+                "path, plugin loading, registry, or probe interpretation) — "
+                "no runtime decision can be made from priors"
+            )
+            return _decision("ABORT")
 
         # ── Measured hard failures: strongest candidate-local evidence ──
         if measured_failure is not None:
@@ -270,6 +299,22 @@ class RuntimeDecisionPolicy:
                 f"budget {budget.vram_gb:.2f} GB (non-blocking provenance — advisory)"
             )
             return _decision("ADVISORY")
+
+        # ── Missing probe in formal mode (C8) ────────────────────────────
+        # A formal decision may not rest on a prior. When no probe has run
+        # and the evidence in hand cannot block, the answer is to GET the
+        # measurement — never to quietly accept the prior's number.
+        if (
+            evidence_channel == "probe_absent"
+            and mode.phase == "formal"
+            and not estimate.blocking_eligible
+        ):
+            reasons.append(
+                f"no valid probe record for this candidate and the available "
+                f"evidence ({estimate.provenance}, tier {estimate.rank}) cannot "
+                "carry formal authority — a bounded live measurement is required"
+            )
+            return _decision("REQUEST_PROBE")
 
         # ── Time budget ─────────────────────────────────────────────────
         over_budget = (
