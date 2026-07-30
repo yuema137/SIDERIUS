@@ -245,8 +245,23 @@ unscheduled candidates live in `candidate_features_v19.md`.)
       `6678d19`; coupling flag OFF — P1-ACT activation is a separate
       pending operator decision, tracked in the PR 1 Delivery
       checkpoints and the design doc §0)*
-- [ ] PR 2 — Data ordering as an optimization dimension
-- [ ] PR 3 — Structured HealthGate feedback propagation
+- [x] PR 2 — Data ordering as an optimization dimension *(COMPLETE —
+      operator decision 2026-07-29 revising the 2026-07-27 completion
+      lock: PR 2's purpose was a reliable, configurable, resume-safe
+      ordering MECHANISM, not proof that one strategy is universally
+      better. Evidence: PR #140 merged `2c1a0b6` 2026-07-28;
+      P2-A/D/CA/CB/V1/V2/DOC all evidence-backed in
+      `pr2_data_ordering.md` §0 incl. the Gate 2 real-smoke PASS WITH
+      DOCUMENTED LIMITATIONS; default remains "shuffle". P2-E is a
+      non-blocking deferred observation item: ordering-strategy
+      effects will be evaluated during subsequent V19 real runs — no
+      standalone matched-budget campaign is required for PR 2 or V19
+      completion.)*
+- [ ] PR 3 — Structured HealthGate feedback propagation *(all work
+      complete except the merge itself: Layer 1 PASS, Layer 2 campaign
+      done — NOT SUPPORTED on primaries / zero harm, L3 N/A per the
+      2026-07-29 completion-claim revision (§2.0), PR #145 in final
+      merge review at head `65b0eb1`; flag default OFF)*
 
 ### Parallel operational work
 
@@ -530,14 +545,21 @@ the PR-specific documents, not in this priorities file.
   empirical evidence and operator review support a change; if
   `sequential` does not improve the target metrics, it remains an
   available option but is not promoted.
-- **Completion semantics (lock revision, 2026-07-27)**: the PR 2
-  ordering implementation may merge after deterministic correctness,
-  compatibility, provenance, runtime-control, memory, and
-  default-parity validation pass. The top-level PR 2 work item is
-  marked complete only after the matched-budget empirical strategy
-  evaluation has been reviewed. Strategy recommendation, planner
-  exposure, and production-default changes remain separate
-  evidence-based decisions. Lifecycle:
+- **Completion semantics (lock revision, 2026-07-27; REVISED by
+  operator decision 2026-07-29)**: the PR 2 ordering implementation
+  may merge after deterministic correctness, compatibility,
+  provenance, runtime-control, memory, and default-parity validation
+  pass. ~~The top-level PR 2 work item is marked complete only after
+  the matched-budget empirical strategy evaluation has been
+  reviewed.~~ **2026-07-29 revision: a standalone matched-budget
+  shuffle-vs-sequential campaign is NOT required for PR 2 completion.
+  PR 2's purpose was to implement a reliable, configurable,
+  resume-safe data-ordering mechanism — not to prove one strategy
+  universally better. Ordering-strategy effects will be observed and
+  evaluated naturally during subsequent V19 real runs (P2-E becomes a
+  non-blocking deferred observation item).** Strategy recommendation,
+  planner exposure, and production-default changes remain separate
+  evidence-based decisions. Original lifecycle (historical record):
 
   ```text
   ordering capability implemented and deterministically validated
@@ -557,64 +579,83 @@ the PR-specific documents, not in this priorities file.
 
 ##### PR 2 progress checkpoints
 
-*Design and genericity seam*
+*(Checkbox sync 2026-07-29 from `pr2_data_ordering.md` §0 evidence —
+the boxes below had drifted; PR 2 work closed 2026-07-28 with PR #140
+merge `2c1a0b6`.)*
 
-- [ ] Current loader and ordering behavior re-audited from code
-- [ ] Minimal indexed-dataset contract approved
-- [ ] TIDMAD coupling ledger created or updated
-- [ ] Synthetic second-dataset fixture designed
-- [ ] `shuffle` and `sequential` semantics approved
-- [ ] Within-file ordering semantics approved
-- [ ] `file_order` validation semantics approved
-- [ ] Operator-only versus planner-selectable decision resolved
-- [ ] Runtime-control compatibility design approved
+*Design and genericity seam* *(P2-A audit + P2-D rev 3 re-approval,
+2026-07-28)*
 
-*Commit A — bounded genericity work*
+- [x] Current loader and ordering behavior re-audited from code
+- [x] Minimal indexed-dataset contract approved
+- [x] TIDMAD coupling ledger created or updated
+- [x] Synthetic second-dataset fixture designed
+- [x] `shuffle` and `sequential` semantics approved
+- [x] Within-file ordering semantics approved
+- [x] `file_order` validation semantics approved
+- [x] Operator-only versus planner-selectable decision resolved
+      *(proposal/override/resolution design — agent may propose,
+      operator may override, resolved value governs)*
+- [x] Runtime-control compatibility design approved
 
-- [ ] Minimal indexed-dataset seam implemented
-- [ ] TIDMAD path-template coupling extracted where required
-- [ ] Coupling ledger updated
-- [ ] Second-dataset contract tests passed
-- [ ] Canonical TIDMAD metric and current default behavior unchanged
+*Commit A — bounded genericity work* *(P2-CA; contract-test limitation
+documented as FU-P2-4, issue #138)*
 
-*Commit B — ordering implementation*
+- [x] Minimal indexed-dataset seam implemented
+- [x] TIDMAD path-template coupling extracted where required
+- [x] Coupling ledger updated
+- [x] Second-dataset contract tests passed *(one reference-consistency
+      test xfailed as the documented FU-P2-4 defect)*
+- [x] Canonical TIDMAD metric and current default behavior unchanged
 
-- [ ] `order_strategy` schema implemented
-- [ ] `file_order` schema and validation implemented
-- [ ] Default global-shuffle parity verified
-- [ ] Sequential file visitation implemented
-- [ ] Exact visited file sequence tests passed
-- [ ] Within-file behavior tests passed
-- [ ] DataScope boundary tests passed
-- [ ] Resume and provenance behavior passed
-- [ ] Runtime-control workload and setup accounting updated
-- [ ] Memory behavior measured
-- [ ] CLI, workflow, tuner, and comparison-script propagation verified
+*Commit B — ordering implementation* *(P2-CB + P2-V1: pseudo
+integration for every resolution case, unit 4475 passed / 1 xfailed)*
 
-*Empirical strategy evaluation*
+- [x] `order_strategy` schema implemented
+- [x] `file_order` schema and validation implemented
+- [x] Default global-shuffle parity verified
+- [x] Sequential file visitation implemented
+- [x] Exact visited file sequence tests passed *(P2-V2: non-ascending
+      permutation [9,7,5,4,8,6] verified at six layers on real
+      training)*
+- [x] Within-file behavior tests passed
+- [x] DataScope boundary tests passed
+- [x] Resume and provenance behavior passed *(incl. the not_executed
+      provenance fix e0a376d found by the Gate)*
+- [x] Runtime-control workload and setup accounting updated *(RT2
+      within ±2.5% in the Gate)*
+- [x] Memory behavior measured
+- [x] CLI, workflow, tuner, and comparison-script propagation verified
 
-- [ ] Matched-budget comparison design approved
-- [ ] Validation runtime and cost estimated
-- [ ] Small pilot completed
-- [ ] `shuffle` comparison runs completed
-- [ ] `sequential` comparison runs completed
-- [ ] HealthGate-valid rate compared
-- [ ] HealthGate-valid formal score compared
-- [ ] Runtime and memory compared
-- [ ] Prediction-quality impact compared
-- [ ] Uncertainty and run-to-run variation reported
-- [ ] Strategy recommendation made from evidence
+*Ordering-strategy observation (REVISED 2026-07-29 — non-blocking,
+deferred)*
+
+- P2-E — **ordering-strategy effects will be evaluated during
+  subsequent V19 real runs. No standalone matched-budget campaign is
+  required for PR 2 or V19 completion** (operator decision
+  2026-07-29). The original matched-budget comparison checklist is
+  preserved in `pr2_data_ordering.md` §7.3 as the template for any
+  future dedicated study; no such study has been run — the empirical
+  comparison remains unperformed, deliberately deferred, and its
+  absence limits strategy claims (no recommendation between `shuffle`
+  and `sequential` exists; the default remains `shuffle`).
 
 *Delivery and activation*
 
-- [ ] Stop-and-show approved
-- [ ] Ordering implementation merged
-- [ ] Matched-budget evaluation completed
-- [ ] Strategy recommendation reviewed
-- [ ] Planner-selectable ordering approved, if applicable
-- [ ] Production-default change approved, if applicable
-- [ ] Post-activation evidence reviewed
-- [ ] Top-level PR 2 complete (implementation + empirical evaluation reviewed)
+- [x] Stop-and-show approved *(P2-S review 2026-07-28)*
+- [x] Ordering implementation merged *(PR #140, `2c1a0b6`,
+      2026-07-28; default remains "shuffle")*
+- n/a — Matched-budget evaluation *(deferred observation item per the
+      2026-07-29 revision above — not unfinished required work)*
+- n/a — Strategy recommendation *(requires future evidence; none made)*
+- [ ] Planner-selectable ordering approved, if applicable *(optional,
+      separate decision — the schema supports proposals today; no
+      promotion decision made)*
+- [ ] Production-default change approved, if applicable *(optional,
+      separate decision)*
+- n/a — Post-activation evidence review *(no activation)*
+- [x] Top-level PR 2 complete *(per the 2026-07-29 revised completion
+      semantics: implementation + validation + docs + merge)*
 
 **PR 3 — Propagate structured HealthGate evidence (agent-behavior)**
 
@@ -661,70 +702,114 @@ the PR-specific documents, not in this priorities file.
   A merge commit or prompt-plumbing test alone must never mark the
   top-level PR complete.
 
+##### PR 3 completion-claim revision (approved operator decision, 2026-07-29)
+
+The operator revised the PR 3 merge claim after the full Layer-2
+campaign: **keep both the recording infrastructure and the optional
+prompt treatment; the merge claim is implementation-focused** — an
+optional, default-OFF structured-feedback mechanism with deterministic
+recording and validated delivery, making **no universal
+behavioral-improvement claim**. Consequences (recorded in
+`pr3_healthgate_feedback.md` §14): the Layer-2 verdict stays NOT
+SUPPORTED on the pre-registered primary hierarchy (ceiling/floor-
+limited; zero observed harm; better evidence specificity in some
+scenarios); **Layer 3 is N/A for the current merge claim** (not
+"failed" — deferred to future task-specific evaluation, since the PR
+no longer claims a real-training behavioral improvement); production
+activation (P3-ACT) remains a separate, unauthorized decision. The
+original three-layer lifecycle below is preserved as the record of
+what a future BEHAVIORAL claim would still require.
+
 ##### PR 3 progress checkpoints
 
 *Design and behavioral contract*
 
-- [ ] Current gate-information path re-audited from code
-- [ ] Structured gate-field schema approved
-- [ ] Collapse-fingerprint representation approved
-- [ ] Control and treatment conditions defined
-- [ ] Superficial-compliance rubric defined
-- [ ] Behavioral success and failure metrics defined
-- [ ] Relevant Layer-2 scenario subset selected and justified
-- [ ] Expected sample size and uncertainty plan defined
-- [ ] Validation wall time and API cost estimated
-- [ ] Layer-3 Gate design aligned with `docs/gates/`
+- [x] Current gate-information path re-audited from code *(P3-CA)*
+- [x] Structured gate-field schema approved *(design rev 4, P3-D lock)*
+- [x] Collapse-fingerprint representation approved
+- [x] Control and treatment conditions defined *(calibration protocol §2)*
+- [x] Superficial-compliance rubric defined *(rubric_form.md, 8 labels)*
+- [x] Behavioral success and failure metrics defined *(protocol §8-§10)*
+- [x] Relevant Layer-2 scenario subset selected and justified
+      *(4 consolidated families; full-campaign protocol §4)*
+- [x] Expected sample size and uncertainty plan defined *(descriptive
+      design, operator budget decision 2026-07-29)*
+- [x] Validation wall time and API cost estimated *(and measured:
+      Layer 2 total 320 calls / $62.47)*
+- n/a — Layer-3 Gate design *(L3 N/A for the current merge claim —
+      operator decision 2026-07-29 above)*
 
-*Layer 1 — deterministic delivery*
+*Layer 1 — deterministic delivery* *(P3-V1 PASS, incl. the
+production-pipeline reopen fix `0f1f3d0`)*
 
-- [ ] Per-round gate fields added to `ModelRunSummary`
-- [ ] Legacy records remain compatible
-- [ ] Interpreter receives accurate structured evidence
-- [ ] Interpreter preserves collapse fingerprints
-- [ ] Proposer receives the correct interpreted evidence
-- [ ] Stale or unrelated evidence is not substituted
-- [ ] Prompt/context snapshots validated
-- [ ] No production routing behavior changed
+- [x] Per-round gate fields added to `ModelRunSummary`
+- [x] Legacy records remain compatible
+- [x] Interpreter receives accurate structured evidence
+- [x] Interpreter preserves collapse fingerprints
+- [x] Proposer receives the correct interpreted evidence *(BOTH legacy
+      and production three-stage pipeline modes)*
+- [x] Stale or unrelated evidence is not substituted
+- [x] Prompt/context snapshots validated *(golden parity OFF; rendering
+      tests ON)*
+- [x] No production routing behavior changed
 
-*Layer 2 — true LLM with synthetic pseudo campaign*
+*Layer 2 — true LLM with synthetic pseudo campaign* *(rev-2/rev-3
+blocked → audits → Option-C fix `5c8e483` + runner fix `5c43ece` →
+rev-4 gate PASS → 40-sample descriptive campaign, all evidence in
+`pr3_l2p_calibration_protocol.md` + `pr3_l2_full_calibration_protocol.md`)*
 
-- [ ] Small pilot completed
-- [ ] Runtime and variance estimate updated
-- [ ] Full bounded sample plan approved
-- [ ] Control samples completed
-- [ ] Treatment samples completed
-- [ ] Repeated-collapse scenarios completed
-- [ ] Distinct-fingerprint scenarios completed
-- [ ] Invalid-high-score scenarios completed
-- [ ] Conflicting and near-threshold gate scenarios completed
-- [ ] Recovery-after-failure scenarios completed
-- [ ] Semantically equivalent repeat proposals evaluated
-- [ ] Behavioral metrics aggregated
-- [ ] Confidence intervals or uncertainty summary reported
-- [ ] Hallucinated or unsupported feedback-use claims categorized
+- [x] Small pilot completed *(rev-4: 4/4 valid, all 10 gate conditions)*
+- [x] Runtime and variance estimate updated *(measured-cost sizing)*
+- [x] Full bounded sample plan approved *(frozen `f8fa72c` pre-launch)*
+- [x] Control samples completed *(20/20 valid)*
+- [x] Treatment samples completed *(20/20 valid)*
+- [x] Repeated-collapse scenarios completed *(S1)*
+- [x] Distinct-fingerprint scenarios completed *(S4 std-family
+      fingerprint, distinct from S1's diversity signature)*
+- [x] Invalid-high-score scenarios completed *(S1, deceptive 4.85)*
+- [x] Conflicting and near-threshold gate scenarios completed *(S4,
+      0.9 vs 1.0 mV marginal fail + clean pass)*
+- [x] Recovery-after-failure scenarios completed *(S3 + stale history)*
+- [x] Semantically equivalent repeat proposals evaluated *(blinded
+      two-pass rubric: 0/40 equivalent repeats)*
+- [x] Behavioral metrics aggregated *(Wilson/Newcombe CIs, per-scenario
+      + pooled)*
+- [x] Confidence intervals or uncertainty summary reported
+- [x] Hallucinated or unsupported feedback-use claims categorized
+      *(11/20 T claims, all verified SUPPORTED; 0 unsupported)*
+- **Layer-2 outcome**: NOT SUPPORTED on the pre-registered primary
+  hierarchy (both arms saturated the primaries — ceiling/floor);
+  consistent secondary specific-evidence grounding (several CIs
+  excluding zero); zero observed harm. Descriptive, not powered.
 
 *Layer 3 — true LLM with true training*
 
-- [ ] Relevant Gate documentation reread
-- [ ] Minimal real-training scope designed
-- [ ] Expected GPU time, wall time, and API cost reported
-- [ ] Operator approval obtained
-- [ ] Real HealthGate feedback produced
-- [ ] Feedback reached the next agent context
-- [ ] Meaningful decision change evaluated
-- [ ] End-to-end artifacts and provenance validated
-- [ ] Real-system limitations reported
+- n/a — **N/A for the current merge claim** (operator decision
+  2026-07-29): the PR makes no real-training-improvement claim; the
+  feature ships optional and default OFF; no safety signal requires an
+  L3 investigation. Deferred to future task-specific evaluation. A
+  future behavioral claim (or activation proposal resting on one)
+  reactivates this checklist in full.
 
 *Merge and activation*
 
-- [ ] Deterministic plumbing stop-and-show approved
-- [ ] Deterministic plumbing merged (behavior disabled / recording-only)
-- [ ] Behavioral validation completed (Layers 2–3 done and reviewed)
-- [ ] Production activation approved
-- [ ] Rollback path verified
-- [ ] Post-activation HealthGate-valid rate reviewed
-- [ ] Top-level PR 3 complete (all layers support the claimed behavioral improvement)
+- [x] Deterministic plumbing stop-and-show approved *(P3-V1 +
+      per-commit stop-and-shows CB1-CB5)*
+- [ ] PR #145 merged *(draft; final merge-readiness review in
+      `pr3_healthgate_feedback.md` §14 — pending CI-green confirmation
+      and operator merge decision)*
+- [x] Behavioral validation completed and reviewed *(Layer 2 complete;
+      L3 N/A per the 2026-07-29 completion-claim revision above)*
+- [ ] Production activation approved *(P3-ACT — NOT AUTHORIZED;
+      separate decision)*
+- [x] Rollback path verified *(feature is default-OFF and
+      run-invariants-locked; OFF is golden-parity byte-identical to
+      pre-PR3 — disabling IS the rollback)*
+- n/a — Post-activation HealthGate-valid rate review *(no activation)*
+- [ ] Top-level PR 3 complete *(per the 2026-07-29 revision: completes
+      on PR #145 merge with the implementation-focused claim; the
+      universal-behavioral-improvement completion path is explicitly
+      not claimed)*
 
 **Candidate features (formerly PR 4a / 4b / 5 / 6 / 7+)**
 

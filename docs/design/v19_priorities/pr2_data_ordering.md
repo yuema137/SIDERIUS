@@ -79,13 +79,22 @@ green with recorded evidence.
             dirs, all covered, + docs/running_chain_test.md;
             agent/skills/training_skill/training_skill.md CREATED —
             the repo's first skill .md)
-[ ] P2-S  — stop-and-show; implementation PR merged (default remains
-            "shuffle"; no strategy recommendation implied)
-[ ] P2-E  — matched-budget empirical strategy evaluation (separate
-            operator-approved campaign; top-level PR 2 completion
-            requires its review — baseline §2.0 completion semantics)
+[x] P2-S  — stop-and-show approved; implementation PR MERGED
+            (PR #140, merge `2c1a0b6`, 2026-07-28; default remains
+            "shuffle"; no strategy recommendation implied).
+            (Checkbox synced 2026-07-29 — the merge predated this
+            update; the box had drifted.)
+[—] P2-E  — REVISED (operator decision 2026-07-29): ordering-strategy
+            effects will be evaluated during subsequent V19 real
+            runs. No standalone matched-budget campaign is required
+            for PR 2 or V19 completion. The §7.3 comparison design is
+            preserved as the template for any future dedicated study.
+            The empirical comparison has NOT been run — no
+            recommendation between "shuffle" and "sequential" exists,
+            and strategy claims remain limited accordingly.
 [ ] P2-ACT — optional planner exposure / production-default change
-            (separate evidence-based operator decisions)
+            (separate evidence-based operator decisions; unaffected
+            by the 2026-07-29 revision)
 ```
 
 Scope rule: P2-CA is bounded genericity work (baseline §1.3 —
