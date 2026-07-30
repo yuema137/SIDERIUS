@@ -1454,6 +1454,11 @@ def _build_runtime_policy(
         "watchdog": {
             "enabled": agent_input.runtime_watchdog_enabled,
             "floor_seconds": agent_input.runtime_watchdog_floor_seconds,
+            # V19 split (2026-07-29): watchdog-only multiplier; None →
+            # the deadline falls back to the phase-effective
+            # safety_factor above (V18 behavior). Admission never reads
+            # this field.
+            "safety_factor": agent_input.runtime_watchdog_safety_factor,
         },
     }
 

@@ -73,7 +73,9 @@ class WatchdogConfig(BaseModel):
     """Runtime-watchdog policy (RT4, §4).
 
     Deadline = ``max(floor, min(operator_budget, verified_estimate ×
-    safety_factor))`` — every number here is a schema-level input
+    effective_watchdog_factor))`` where the effective watchdog factor is
+    ``watchdog.safety_factor`` when set, else the shared policy
+    ``safety_factor`` (V19 split) — every number here is a schema-level input
     recorded in provenance, never a protocol constant. Disabled by
     default: enabling is an explicit operator/chain decision (RT6).
     """
@@ -95,6 +97,18 @@ class WatchdogConfig(BaseModel):
         default=60.0,
         ge=0.0,
         description="Configurable deadline floor — prevents degenerate deadlines for near-zero estimates (§4).",
+    )
+    safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "V19 watchdog-only multiplier override (admission/watchdog "
+            "split, 2026-07-29). None (default) → the watchdog deadline "
+            "uses the shared RuntimeControlPolicy.safety_factor — "
+            "byte-identical V18 behavior. When set, ONLY the watchdog "
+            "deadline estimate term uses this value; admission continues "
+            "to read RuntimeControlPolicy.safety_factor."
+        ),
     )
 
 
