@@ -303,3 +303,89 @@ class TestSelfPidExclusion:
         monkeypatch.setattr(subprocess, "run", _fake_run)
         snap = capture_contention_snapshot()
         assert snap.foreign_compute_processes == 1
+
+    # ── C7/D3 telemetry enrichment ─────────────────────────────────────
+    def test_descendant_pids_finds_a_real_child(self):
+        import os
+        import subprocess
+
+        from core.runtime_control.probe import descendant_pids
+
+        child = subprocess.Popen(["sleep", "5"])
+        try:
+            assert child.pid in descendant_pids(os.getpid())
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_child_pids_are_excluded_from_the_foreign_set(self, monkeypatch):
+        """D3: a probe's own dataloader/worker subprocesses are not
+        foreign — only genuinely external PIDs are."""
+        import os
+        import subprocess
+        from types import SimpleNamespace
+
+        from core.runtime_control import probe as probe_mod
+
+        own, child, stranger = os.getpid(), 424242, 999999
+        monkeypatch.setattr(probe_mod, "descendant_pids", lambda _pid: frozenset({child}))
+        monkeypatch.setattr(probe_mod, "_query_throttle_reasons", lambda: 0x4)
+
+        def _fake_run(cmd, **kw):
+            if "--query-gpu=utilization.gpu,memory.used" in cmd[1]:
+                return SimpleNamespace(stdout="7, 2048\n")
+            return SimpleNamespace(stdout=f"{own}\n{child}\n{stranger}\n")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        snap = capture_contention_snapshot()
+        assert snap.compute_process_pids == (own, child, stranger)
+        assert snap.foreign_compute_pids == (stranger,)
+        assert snap.foreign_compute_processes == 1
+        assert own in snap.excluded_pids and child in snap.excluded_pids
+        assert snap.throttle_reasons_hex == 0x4
+
+    def test_explicitly_excluded_pids_are_honored(self, monkeypatch):
+        import os
+        import subprocess
+        from types import SimpleNamespace
+
+        from core.runtime_control import probe as probe_mod
+
+        monkeypatch.setattr(probe_mod, "descendant_pids", lambda _pid: frozenset())
+        monkeypatch.setattr(probe_mod, "_query_throttle_reasons", lambda: None)
+
+        def _fake_run(cmd, **kw):
+            if "--query-gpu=utilization.gpu,memory.used" in cmd[1]:
+                return SimpleNamespace(stdout="7, 2048\n")
+            return SimpleNamespace(stdout=f"{os.getpid()}\n555\n")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        assert capture_contention_snapshot().foreign_compute_processes == 1
+        snap = capture_contention_snapshot(exclude_pids=[555])
+        assert snap.foreign_compute_processes == 0
+        assert snap.throttle_reasons_hex is None
+
+    def test_probe_observations_carry_the_declared_family(self):
+        from core.runtime_control.probe import probe_observations
+
+        records = probe_observations(
+            _probe(),
+            hardware_compatibility_id="sha256:" + "a" * 64,
+            execution_environment_id="sha256:" + "b" * 64,
+            workload={"batch_size": 8},
+            software_stack={"torch": "2.7.0"},
+            source_run={"run_name": "t"},
+            model_family="punet",
+        )
+        assert {r.model_family for r in records} == {"punet"}
+        assert {
+            r.model_family
+            for r in probe_observations(
+                _probe(),
+                hardware_compatibility_id="sha256:" + "a" * 64,
+                execution_environment_id="sha256:" + "b" * 64,
+                workload={"batch_size": 8},
+                software_stack={"torch": "2.7.0"},
+                source_run={"run_name": "t"},
+            )
+        } == {"unknown"}

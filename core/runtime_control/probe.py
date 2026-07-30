@@ -25,8 +25,13 @@ LLM-authored estimate is never trusted past this point.
 
 Concurrency identity (C6, D3-neutral): classification is by the
 PRESENCE of other GPU compute processes (count-based) plus the
-launcher-declared peer expectation — no utilization thresholds are
-introduced (D3 remains open for C7):
+launcher-declared peer expectation — no utilization thresholds here.
+D3 was resolved in C7: the WINDOWED, threshold-bearing classifier lives
+in ``calibration_policy.classify_contention_window`` and consumes the
+same snapshots; wiring it into the probe engine is a C8 production
+change. What C7 added HERE is the raw evidence the policy needs — the
+reported PID list, the excluded (self + descendant) PID set and the
+throttle bitmask — recorded on every snapshot:
 
 * no foreign process                   → single_candidate_idle
 * foreign processes, peer expected     → pairwise_expected_peer
@@ -36,8 +41,9 @@ introduced (D3 remains open for C7):
 
 from __future__ import annotations
 
+import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from statistics import median
 from typing import Any, Literal
 
@@ -68,12 +74,35 @@ class ProbeCaps(BaseModel):
 
 
 class ContentionSnapshot(BaseModel):
+    """One raw telemetry sample. D3 (C7) requires the sample to carry the
+    PID-level evidence it was classified from — never just a count — and
+    to name the PIDs it excluded (self + descendants), so a stored
+    observation can be re-classified and audited after the fact."""
+
     model_config = ConfigDict(frozen=True)
 
     foreign_compute_processes: int | None = None
     gpu_utilization_pct: float | None = None
     gpu_memory_used_gb: float | None = None
     telemetry_available: bool = False
+    compute_process_pids: tuple[int, ...] = Field(
+        default=(), description="Every compute PID reported by telemetry (raw)."
+    )
+    foreign_compute_pids: tuple[int, ...] = Field(
+        default=(), description="Reported PIDs minus the excluded set."
+    )
+    excluded_pids: tuple[int, ...] = Field(
+        default=(),
+        description="Self + descendant (+ explicitly excluded) PIDs — D3: "
+        "the probing process's own contexts are never foreign.",
+    )
+    throttle_reasons_hex: int | None = Field(
+        default=None,
+        description="nvidia-smi clocks_throttle_reasons.active bitmask, or "
+        "None when the field is unavailable (an OPTIONAL signal: its "
+        "absence is not evidence of throttling — core telemetry "
+        "availability is what governs `unknown_contention`).",
+    )
 
 
 class RealizedModelProperties(BaseModel):
@@ -131,9 +160,68 @@ def classify_concurrency(
     return "pairwise_expected_peer" if expected_peer else "foreign_contended"
 
 
-def capture_contention_snapshot() -> ContentionSnapshot:
+def descendant_pids(root_pid: int) -> frozenset[int]:
+    """Transitive children of ``root_pid`` from /proc (Linux). D3: a
+    probe's own worker/dataloader subprocesses are NOT foreign. Any
+    failure (non-Linux, race on process exit) yields the empty set —
+    a gap, never a guess."""
+    children: dict[int, list[int]] = {}
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/status", encoding="utf-8") as fh:
+                    status = fh.read()
+            except OSError:
+                continue  # process exited mid-scan
+            for line in status.splitlines():
+                if line.startswith("PPid:"):
+                    children.setdefault(int(line.split()[1]), []).append(int(entry))
+                    break
+    except OSError:
+        return frozenset()
+    found: set[int] = set()
+    queue = list(children.get(root_pid, ()))
+    while queue:
+        pid = queue.pop()
+        if pid in found:
+            continue
+        found.add(pid)
+        queue.extend(children.get(pid, ()))
+    return frozenset(found)
+
+
+def _query_throttle_reasons() -> int | None:
+    """Optional supplementary signal; any failure → None (unavailable),
+    which is NOT the same as 'no throttling' and never fabricated."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=clocks_throttle_reasons.active",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        return int(out.splitlines()[0].strip(), 16)
+    except Exception:
+        return None
+
+
+def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) -> ContentionSnapshot:
     """Best-effort GPU telemetry via nvidia-smi (production path); a gap
-    is recorded as a gap (telemetry_available=False), never guessed."""
+    is recorded as a gap (telemetry_available=False), never guessed.
+
+    D3: the calling process AND its descendants are excluded from the
+    foreign set; ``exclude_pids`` adds further known-own PIDs. The raw
+    PID list, the excluded set and the throttle bitmask are all recorded
+    on the snapshot for after-the-fact audit."""
     import subprocess
 
     try:
@@ -164,17 +252,20 @@ def capture_contention_snapshot() -> ContentionSnapshot:
         # process's own CUDA context must not count (C6 GPU-smoke
         # finding 2026-07-30 — self-counting misclassified probe B as
         # foreign_contended after probe A initialized CUDA in-process).
-        import os as _os
-
-        own_pid = str(_os.getpid())
-        n_foreign = len(
-            [line for line in procs.splitlines() if line.strip() and line.strip() != own_pid]
-        )
+        # D3 extends this to the probe's descendants.
+        own = os.getpid()
+        excluded = {own} | set(descendant_pids(own)) | set(exclude_pids or ())
+        reported = tuple(int(line.strip()) for line in procs.splitlines() if line.strip().isdigit())
+        foreign = tuple(pid for pid in reported if pid not in excluded)
         return ContentionSnapshot(
-            foreign_compute_processes=n_foreign,
+            foreign_compute_processes=len(foreign),
             gpu_utilization_pct=util_pct,
             gpu_memory_used_gb=mem_mib / 1024.0,
             telemetry_available=True,
+            compute_process_pids=reported,
+            foreign_compute_pids=foreign,
+            excluded_pids=tuple(sorted(excluded)),
+            throttle_reasons_hex=_query_throttle_reasons(),
         )
     except Exception:
         return ContentionSnapshot(telemetry_available=False)
@@ -375,10 +466,17 @@ def probe_observations(
     software_stack: dict[str, Any],
     source_run: dict[str, Any],
     timestamp_metadata: str | None = None,
+    model_family: str = "unknown",
 ) -> list[CalibrationObservation]:
     """Immutable registry records from an ok probe — training and
     inference DISTINCT (§16.6). Written as ``unvalidated``; C7's policy
-    owns promotion to ``validated``."""
+    owns promotion to ``validated``.
+
+    ``model_family`` (D5) must come from explicit implementation
+    metadata / deterministic structural features
+    (``calibration_policy.classify_model_family``); the default
+    ``"unknown"`` is a first-class bucket, never the nearest known
+    family."""
     if result.status != "ok" or result.realized is None:
         raise ValueError(f"only ok probes produce observations (status={result.status})")
     producer = f"runtime_probe@{PROBE_PRODUCER_SEMVER}"
@@ -394,6 +492,7 @@ def probe_observations(
             measured_value_ms=value_ms,
             workload=workload,
             realized_model=realized_payload,
+            model_family=model_family,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
             concurrency_identity=result.concurrency_identity,
