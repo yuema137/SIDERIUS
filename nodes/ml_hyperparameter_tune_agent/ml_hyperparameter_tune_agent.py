@@ -168,6 +168,21 @@ def _validate_data_config(
             )
 
 
+def _runtime_phase_for(is_trial: bool) -> str:
+    """C8c: the phase the shared runtime policy decides under.
+
+    A module-level helper rather than an inline conditional because
+    ``run()`` sits at pyright's strict-mode complexity ceiling — one more
+    branch inside it makes the whole method unanalyzable.
+
+    No bounded live probe feeds the tuner pre-flight: the authoritative
+    formal measurement is the RT2 in-subprocess verification, so a formal
+    prior-tier projection resolves to REQUEST_PROBE (proceed into that
+    measurement) rather than being priced from a prior.
+    """
+    return "trial" if is_trial else "formal"
+
+
 def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
@@ -2802,14 +2817,8 @@ class HyperparamTuningAgent:
                                 sandbox.base_dir, "runtime_observations"
                             ),
                             # C8c: the phase the shared runtime policy decides
-                            # under. No bounded live probe feeds this
-                            # pre-flight — the authoritative formal
-                            # measurement is the in-subprocess verification
-                            # (RT2), so `probe_record_available` stays False
-                            # and a formal prior-tier projection resolves to
-                            # REQUEST_PROBE rather than a silent prior-priced
-                            # decision.
-                            runtime_phase="trial" if plan.is_trial else "formal",
+                            # under (see _runtime_phase_for).
+                            runtime_phase=_runtime_phase_for(plan.is_trial),
                         )
                         if time_check.get("status") == "error":
                             # Includes the policy's ABORT path: an
