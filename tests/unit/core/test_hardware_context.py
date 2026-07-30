@@ -184,3 +184,167 @@ def test_discover_timestamp_is_fresh(monkeypatch):
     ctx = discover()
     after = datetime.now(UTC)
     assert before <= ctx.discovered_at <= after
+
+
+# ── V19 O1a — runtime provenance (multi-GPU, driver, env, errors) ───────────
+
+
+class _FakeCompleted:
+    def __init__(self, returncode: int, stdout: str):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+def _patch_probes(
+    monkeypatch,
+    *,
+    driver: str | Exception | _FakeCompleted = "580.65.06\n580.65.06",
+    commit: str | Exception | _FakeCompleted = "a" * 40,
+):
+    """Mock both external probes (nvidia-smi + git) deterministically."""
+    import core.hardware_context as hc
+
+    def fake_run(argv, **kwargs):
+        target = driver if argv[0] == "nvidia-smi" else commit
+        if isinstance(target, Exception):
+            raise target
+        if isinstance(target, _FakeCompleted):
+            return target
+        return _FakeCompleted(0, str(target) + "\n")
+
+    monkeypatch.setattr(hc.subprocess, "run", fake_run)
+
+
+def _patch_multi_gpu(monkeypatch, names: list[str]):
+    props_by_idx = {
+        i: SimpleNamespace(
+            name=n,
+            total_memory=(i + 1) * 1024**3,
+            major=8,
+            minor=0,
+            multi_processor_count=100 + i,
+        )
+        for i, n in enumerate(names)
+    }
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: len(names))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda idx: props_by_idx[idx])
+    monkeypatch.setattr(torch.version, "cuda", "12.8", raising=False)
+
+
+def test_provenance_multi_gpu_deterministic_order(monkeypatch):
+    _patch_probes(monkeypatch)
+    _patch_multi_gpu(monkeypatch, ["GPU-A", "GPU-B", "GPU-C"])
+    ctx = discover()
+    assert ctx.visible_device_count == 3
+    assert [d.logical_index for d in ctx.devices] == [0, 1, 2]
+    assert [d.name for d in ctx.devices] == ["GPU-A", "GPU-B", "GPU-C"]
+    assert ctx.devices[1].total_memory_bytes == 2 * 1024**3
+    assert ctx.driver_version == "580.65.06"  # first line of multi-GPU output
+    assert ctx.repo_commit == "a" * 40
+    assert ctx.collection_errors == []
+
+
+def test_provenance_cpu_only_explicit_unavailable(monkeypatch):
+    _patch_probes(monkeypatch)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    ctx = discover()
+    assert ctx.device_available is False
+    assert ctx.visible_device_count == 0
+    assert ctx.devices == []
+    assert ctx.driver_version is None  # not probed — no fabrication on CPU hosts
+    assert ctx.platform  # stdlib facts still populated
+    assert ctx.python_version
+
+
+def test_provenance_nvidia_smi_missing_records_error_without_abort(monkeypatch):
+    _patch_probes(monkeypatch, driver=FileNotFoundError("nvidia-smi not found"))
+    _patch_multi_gpu(monkeypatch, ["GPU-A"])
+    ctx = discover()  # must not raise
+    assert ctx.driver_version is None
+    assert any(e.startswith("driver_version:") for e in ctx.collection_errors)
+    assert ctx.devices and ctx.devices[0].name == "GPU-A"  # other probes unaffected
+
+
+def test_provenance_nvidia_smi_malformed_and_nonzero(monkeypatch):
+    _patch_multi_gpu(monkeypatch, ["GPU-A"])
+    _patch_probes(monkeypatch, driver=_FakeCompleted(0, "   \n"))
+    assert discover().driver_version is None
+    _patch_probes(monkeypatch, driver=_FakeCompleted(9, ""))
+    ctx = discover()
+    assert ctx.driver_version is None
+    assert any("exit 9" in e for e in ctx.collection_errors)
+
+
+def test_provenance_cuda_visible_devices_recorded(monkeypatch):
+    _patch_probes(monkeypatch)
+    _patch_multi_gpu(monkeypatch, ["GPU-A"])
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+    assert discover().cuda_visible_devices == "2,3"
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    assert discover().cuda_visible_devices is None
+
+
+def test_provenance_device_probe_failure_recorded_without_abort(monkeypatch):
+    _patch_probes(monkeypatch)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+
+    def flaky_props(idx):
+        if idx == 1:
+            raise RuntimeError("device 1 lost")
+        return SimpleNamespace(
+            name="GPU-A", total_memory=1024, major=1, minor=0, multi_processor_count=1
+        )
+
+    monkeypatch.setattr(torch.cuda, "get_device_properties", flaky_props)
+    monkeypatch.setattr(torch.version, "cuda", "12.8", raising=False)
+    ctx = discover()
+    assert len(ctx.devices) == 1  # device 0 recorded, device 1 a recorded gap
+    assert any(e.startswith("devices[1]:") for e in ctx.collection_errors)
+
+
+def test_provenance_backward_compatible_manifest_load():
+    """A pre-O1a manifest (only the original 9 fields) still validates —
+    every provenance field defaults."""
+    legacy = {
+        "device_name": "NVIDIA GeForce RTX 5090",
+        "total_memory_bytes": 32 * 1024**3,
+        "compute_capability": [12, 0],
+        "multiprocessor_count": 170,
+        "cuda_runtime_version": "12.8",
+        "torch_version": "2.10.0+cu128",
+        "hostname": "old-host",
+        "device_available": True,
+        "discovered_at": "2026-04-23T00:00:00Z",
+    }
+    ctx = HardwareContext.model_validate(legacy)
+    assert ctx.devices == []
+    assert ctx.driver_version is None
+    assert ctx.collection_errors == []
+    assert ctx.platform is None
+
+
+def test_provenance_serialization_round_trip(monkeypatch):
+    _patch_probes(monkeypatch)
+    _patch_multi_gpu(monkeypatch, ["GPU-A", "GPU-B"])
+    ctx = discover()
+    payload = ctx.model_dump(mode="json")
+    restored = HardwareContext.model_validate(payload)
+    assert restored.devices == ctx.devices
+    assert restored.driver_version == ctx.driver_version
+    assert restored == ctx
+
+
+def test_provenance_no_secret_env_capture(monkeypatch):
+    """Only CUDA_VISIBLE_DEVICES may appear from the environment — a
+    sentinel secret must never leak into the serialized manifest."""
+    _patch_probes(monkeypatch)
+    _patch_multi_gpu(monkeypatch, ["GPU-A"])
+    monkeypatch.setenv("SECRET_SENTINEL_TOKEN", "sk-THIS-MUST-NOT-APPEAR")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    import json as _json
+
+    dump = _json.dumps(discover().model_dump(mode="json"))
+    assert "sk-THIS-MUST-NOT-APPEAR" not in dump
+    assert '"cuda_visible_devices": "0"' in dump
