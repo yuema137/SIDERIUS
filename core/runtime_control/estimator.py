@@ -26,6 +26,7 @@ from core.runtime_control.decision_policy import RuntimeDecisionPolicy
 from core.runtime_control.estimate_types import (
     RuntimeEstimate,
     RuntimeEstimateRequest,
+    evidence_rank,
     from_proposer_preflight,
 )
 from core.runtime_control.identity import component_identity
@@ -39,43 +40,107 @@ _ESTIMATOR_SEMVER = "1.0.0"
 StaticPriorProducer = Callable[[RuntimeEstimateRequest], dict[str, Any]]
 
 
+#: A lookup producer prices a request from EXISTING evidence (a probe
+#: record, the calibration registry, historical observations). Returns
+#: None when it holds nothing applicable — absence is a gap, never a
+#: fabricated estimate.
+EvidenceLookup = Callable[[RuntimeEstimateRequest], RuntimeEstimate | None]
+
+
 class RuntimeEstimator(Protocol):
     identity: str
 
-    def estimate(self, request: RuntimeEstimateRequest) -> RuntimeEstimate: ...
+    def estimate(
+        self,
+        request: RuntimeEstimateRequest,
+        *,
+        caller_measurement: RuntimeEstimate | None = ...,
+    ) -> RuntimeEstimate: ...
 
 
 class DefaultRuntimeEstimator:
-    """§8.4-ordered assembly over the configured producers.
+    """§8.4-ordered assembly over every configured evidence source (C9a).
 
-    C4 resolution order (highest available evidence wins):
-      1. (C6+) bounded live probe — not configured yet;
-      2. (C7+) historical/similarity priors — not configured yet;
-      3. static prior producer (tier 0) — always available.
+    Resolution order — the HIGHEST-RANKED available evidence wins, and
+    measurement-backed evidence is NEVER downgraded to a prior:
 
-    The returned estimate's authority is entirely type-derived: a
-    static-produced estimate can never be blocking-eligible regardless
-    of what a consumer does with it.
+      1. caller-supplied in-process measurement (TimeEval's warmup, RT2's
+         verification — the caller already ran the workload);
+      2. bounded live probe observation (C6/C9b);
+      3. validated local calibration / historical prior (C5/C7 registry);
+      4. static prior producer (tier 0) — always available, last.
+
+    Ranking uses `evidence_rank` on the canonical provenance vocabulary,
+    so the order is a property of the EVIDENCE, not of the call site: a
+    consumer cannot promote a prior by passing it in a stronger slot,
+    and cannot demote a measurement by passing it in a weaker one.
+
+    The returned estimate's authority remains entirely type-derived.
     """
 
     def __init__(
         self,
         *,
         static_producer: StaticPriorProducer,
+        probe_lookup: EvidenceLookup | None = None,
+        history_lookup: EvidenceLookup | None = None,
         identity_payload_extra: dict[str, Any] | None = None,
     ) -> None:
         self._static_producer = static_producer
-        payload = estimator_identity_payload()
+        self._probe_lookup = probe_lookup
+        self._history_lookup = history_lookup
+        payload = estimator_identity_payload(
+            probe_lookup=probe_lookup is not None,
+            history_lookup=history_lookup is not None,
+        )
         if identity_payload_extra:
             payload = {**payload, "extra": identity_payload_extra}
         self.identity = component_identity("runtime_estimator", _ESTIMATOR_SEMVER, payload)
 
-    def estimate(self, request: RuntimeEstimateRequest) -> RuntimeEstimate:
-        verdict = self._static_producer(request)
-        return from_proposer_preflight(verdict)
+    def estimate(
+        self,
+        request: RuntimeEstimateRequest,
+        *,
+        caller_measurement: RuntimeEstimate | None = None,
+    ) -> RuntimeEstimate:
+        """Assemble the best available evidence for ``request``.
+
+        ``caller_measurement`` is evidence the caller measured itself. It
+        is ranked, not trusted: a caller that passes a static estimate
+        here gets static authority, because eligibility is derived from
+        provenance.
+        """
+        candidates: list[tuple[str, RuntimeEstimate]] = []
+        if caller_measurement is not None:
+            candidates.append(("caller_measurement", caller_measurement))
+        for name, lookup in (
+            ("probe", self._probe_lookup),
+            ("history", self._history_lookup),
+        ):
+            if lookup is None:
+                continue
+            found = lookup(request)
+            if found is not None:
+                candidates.append((name, found))
+        candidates.append(("static", from_proposer_preflight(self._static_producer(request))))
+
+        # Deterministic: highest evidence tier wins; ties broken by the
+        # source order above (earlier = closer to this workload).
+        _, (best_name, best) = max(
+            enumerate(candidates),
+            key=lambda item: (evidence_rank(item[1][1].provenance), -item[0]),
+        )
+        considered = ", ".join(
+            f"{name}({estimate.provenance}, tier {evidence_rank(estimate.provenance)})"
+            for name, estimate in candidates
+        )
+        note = f"assembled by {self.identity}: chose {best_name}; considered {considered}"
+        return best.model_copy(update={"warnings": (*best.warnings, note)})
 
 
-def estimator_identity_payload() -> dict[str, Any]:
+def estimator_identity_payload(
+    *, probe_lookup: bool = False, history_lookup: bool = False
+) -> dict[str, Any]:
     """Behavioral payload: resolution order + the legacy static-formula
     constants that shape tier-0 estimates (policy-relevant defaults —
     a change to the formula constants changes the identity). Lazy
@@ -88,8 +153,17 @@ def estimator_identity_payload() -> dict[str, Any]:
     from core.inference_defaults import _DEFAULT_INFERENCE_BATCH
 
     return {
-        "resolution_order": ["bounded_live_probe", "historical_prior", "static_prior"],
-        "configured_producers": ["static_prior"],
+        "resolution_order": [
+            "caller_measurement",
+            "bounded_live_probe",
+            "historical_prior",
+            "static_prior",
+        ],
+        "configured_producers": [
+            *(["probe_lookup"] if probe_lookup else []),
+            *(["history_lookup"] if history_lookup else []),
+            "static_prior",
+        ],
         "static_formula_constants": {
             "static_ms_per_flop": _STATIC_MS_PER_FLOP,
             "min_ms_per_step": _MIN_MS_PER_STEP,
@@ -103,12 +177,24 @@ class RuntimeEstimatorFactory:
     """One estimator + one policy per run (§7.1: created through a shared
     factory and passed to all runtime consumers at C8)."""
 
-    def __init__(self, *, static_producer: StaticPriorProducer) -> None:
+    def __init__(
+        self,
+        *,
+        static_producer: StaticPriorProducer,
+        probe_lookup: EvidenceLookup | None = None,
+        history_lookup: EvidenceLookup | None = None,
+    ) -> None:
         self._static_producer = static_producer
+        self._probe_lookup = probe_lookup
+        self._history_lookup = history_lookup
 
     def build(self) -> tuple[DefaultRuntimeEstimator, RuntimeDecisionPolicy]:
         return (
-            DefaultRuntimeEstimator(static_producer=self._static_producer),
+            DefaultRuntimeEstimator(
+                static_producer=self._static_producer,
+                probe_lookup=self._probe_lookup,
+                history_lookup=self._history_lookup,
+            ),
             RuntimeDecisionPolicy(),
         )
 
