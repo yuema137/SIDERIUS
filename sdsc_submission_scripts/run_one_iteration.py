@@ -126,6 +126,33 @@ def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     return new
 
 
+def _infrastructure_abort_reason(results: list) -> str | None:
+    """C9c: the tuner's typed infrastructure-abort signal, if it fired.
+
+    ``termination_reason == "infrastructure_abort"`` means the runtime
+    EVIDENCE CHANNEL failed — registry, persistence, schema/protocol,
+    probe executor, telemetry, communication, or a policy invariant. It is
+    deliberately distinct from a candidate rejection (attempt-local), gate
+    exhaustion (``no_records``, chain continues), an operator stop, and an
+    ordinary subprocess crash.
+    """
+    for output in results or []:
+        if getattr(output, "termination_reason", None) == "infrastructure_abort":
+            return getattr(output, "status", None) or "infrastructure_abort"
+    return None
+
+
+def _write_halt_marker(workspace: str, payload: dict) -> str:
+    """Write the chain-halt sentinel. Shared by the consecutive-failure
+    brake and the C9c infrastructure abort; ``reason`` distinguishes them
+    so an operator (and the next process) can tell WHY the chain stopped.
+    """
+    halt_path = os.path.join(workspace, ".chain_halted")
+    with open(halt_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return halt_path
+
+
 def _check_halt_marker(workspace: str) -> bool:
     """Return True iff the consecutive-failure brake has already fired
     in this workspace (Stage 4 / Commit 4.6).
@@ -1293,16 +1320,17 @@ def main():
         args.max_failed_iterations,
     )
     if _failed_streak is not None:
-        halt_path = os.path.join(args.workspace, ".chain_halted")
-        halt_payload = {
-            "halted_at": datetime.now(UTC).isoformat(),
-            "workspace": os.path.abspath(args.workspace),
-            "max_failed_iterations": args.max_failed_iterations,
-            "failed_iters": _failed_streak,
-            "next_iteration_was": args.start_iteration,
-        }
-        with open(halt_path, "w", encoding="utf-8") as f:
-            json.dump(halt_payload, f, indent=2)
+        halt_path = _write_halt_marker(
+            args.workspace,
+            {
+                "halted_at": datetime.now(UTC).isoformat(),
+                "workspace": os.path.abspath(args.workspace),
+                "reason": "consecutive_failure_brake",
+                "max_failed_iterations": args.max_failed_iterations,
+                "failed_iters": _failed_streak,
+                "next_iteration_was": args.start_iteration,
+            },
+        )
         print(
             f"[HALT] consecutive failure brake fired "
             f"(N={args.max_failed_iterations}); failed iters: "
@@ -1648,6 +1676,36 @@ def main():
             "max_entries_per_model": (args.health_feedback_history_max_entries_per_model),
         },
     )
+
+    # C9c — infrastructure ABORT halts the CHAIN, not just this attempt.
+    # Checked immediately after the manifest is written so the iteration's
+    # diagnostics and artifacts are preserved before we stop: the operator
+    # needs them precisely because the environment is broken. The sentinel
+    # is what stops a queued next iteration (SDSC `afterany` starts the
+    # next job regardless of exit code), and exit 3 is what stops the
+    # foreground loop.
+    _abort_reason = _infrastructure_abort_reason(results)
+    if _abort_reason is not None:
+        halt_path = _write_halt_marker(
+            args.workspace,
+            {
+                "halted_at": datetime.now(UTC).isoformat(),
+                "workspace": os.path.abspath(args.workspace),
+                "reason": "infrastructure_abort",
+                "iteration": args.start_iteration,
+                "iteration_dir": iter_dir,
+                "manifest_status": manifest.get("status"),
+                "detail": _abort_reason,
+            },
+        )
+        print(
+            "[HALT] runtime evidence-channel failure (infrastructure) — the chain "
+            "stops rather than running another candidate on the same broken "
+            f"environment. Iteration artifacts preserved in {iter_dir}. "
+            f"Marker: {halt_path}",
+            file=sys.stderr,
+        )
+        sys.exit(3)
 
     # Per-iter [TOKEN_ITER] rollup (§1.6). Best-effort: any IO/JSON error
     # in the rollup must never break the chain — token_usage.jsonl is

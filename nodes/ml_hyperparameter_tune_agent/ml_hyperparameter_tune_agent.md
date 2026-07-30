@@ -150,7 +150,7 @@ Strategies:
 | `attempts_per_formal_round` | `int` | Echo of the input value used for this run. |
 | `max_fail_rounds` | `int` | Echo of the input value used for this run. |
 | `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
-| `termination_reason` | `Literal["completed", "aborted_fail_rounds"]` | Why the loop exited. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
 

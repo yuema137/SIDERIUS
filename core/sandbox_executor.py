@@ -891,7 +891,21 @@ class TidmadSandbox:
                 runtime_verification is not None
                 and (runtime_verification.get("admission") or {}).get("decision") == "rejected"
             ):
-                reason = (runtime_verification.get("admission") or {}).get("reason", "")
+                admission_block = runtime_verification.get("admission") or {}
+                reason = admission_block.get("reason", "")
+                # C9c: an infrastructure-class refusal is NOT a verdict on
+                # this candidate — it says the evidence channel is broken.
+                # Surfacing it as a candidate rejection would send the chain
+                # to the next candidate and straight back into the same
+                # failure. Legacy records carry no failure_class and keep the
+                # historical (conservative) candidate-rejection path.
+                if admission_block.get("failure_class") == "infrastructure":
+                    print(f"--- Runtime Evidence-Channel Failure (ABORT) ---\n{reason}")
+                    return {
+                        "status": "aborted_infrastructure",
+                        "message": f"runtime evidence channel failed: {reason}",
+                        "runtime_verification": runtime_verification,
+                    }
                 print(f"--- Runtime Verification Rejected ---\n{reason}")
                 return {
                     "status": "rejected_time_risk",

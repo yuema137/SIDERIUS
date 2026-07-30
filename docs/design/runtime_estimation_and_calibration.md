@@ -3042,6 +3042,102 @@ Audit table (production paths only):
 | probe | n/a (evidence producer) | `extrapolate_probe` → `make_estimate` | writes observations — but no production caller (Finding 1) | not wired |
 | reporting | none | none | none | not wired |
 
+### C9 — scope expanded after the C8 closure audit (operator, 2026-07-30)
+
+The audit's three findings are C9 work, not C12 validation:
+
+```text
+C9a  shared evidence assembly (measured / probe / registry / static)
+C9b  REQUEST_PROBE -> probe -> persist -> re-evaluate
+C9c  admission failure classification + chain-level ABORT
+C9d  launch guard + run-invariant lock (against the FINAL lifecycle)
+```
+
+**C9a — shared evidence assembly.** [x]
+`DefaultRuntimeEstimator.estimate(request, caller_measurement=...)`
+ranks caller measurement > probe > history > static by
+`evidence_rank`. Rank is a property of the EVIDENCE: a prior passed as
+`caller_measurement` keeps prior authority, and a measurement is never
+downgraded to static (the C8 gap). Lookups are injected and may return
+None — an absent source is a recorded gap, never a fabricated estimate.
+Configured producers are part of the estimator identity.
+Evidence: `tests/unit/core/test_probe_lifecycle.py` (8 assembly tests).
+
+**C9b — REQUEST_PROBE lifecycle.** [x]
+`core/runtime_control/probe_lifecycle.py`. `ProbeResolver` is stateful
+per attempt, which is what makes a loop structurally impossible rather
+than merely unlikely: a second REQUEST_PROBE after a completed probe is
+an invariant failure (ABORT), a failed probe is never retried, and a
+re-decision that somehow returns REQUEST_PROBE is caught and converted
+to ABORT. `resolve()` cannot return REQUEST_PROBE — asserted over every
+probe status. Measured OOM / wall-cap → REJECT; load failure, executor
+error, unexpected exception, or a successful measurement that cannot be
+PERSISTED → ABORT (deciding from unrecorded evidence would leave a
+formal decision unauditable). No static fallback on any path.
+A failed probe is never extrapolated: projecting a rate measured up to
+the moment of failure would invent a completion that did not happen.
+Evidence: 16 lifecycle tests.
+
+**C9c — failure classification and chain termination.** [x]
+
+*Schema (operator decision: Option B).* `AdmissionRecord.failure_class:
+Literal["candidate","infrastructure"] | None = None`. The persisted
+`decision` literal is UNCHANGED — no `"aborted"` value — because three
+production readers key on `== "rejected"` (two of them stop training,
+one excludes from calibration) and a new value would have silently
+turned an abort into "not rejected" at exactly those points. Legacy
+records validate with `failure_class=None`, and every reader treats
+None conservatively: an unclassified refusal is an absence of
+classification, never a claim that the run was clean.
+
+*Mapping.* ALLOW → admitted/None. Measured over budget, verification
+failure under a working verifier → rejected/candidate. Evidence-channel
+failure → rejected/infrastructure, via the new
+`session.record_evidence_channel_failure(reason)`, which takes
+precedence over EVERY other admission outcome including record-only
+mode (a record-only run still depends on the channel to record).
+
+*Propagation — the chain halts.* Reusing the mechanism the repository
+already had for non-continuable states rather than inventing one:
+
+```text
+session (infrastructure)      -> sidecar admission.failure_class
+sandbox_executor               -> status="aborted_infrastructure"
+tuner                          -> RuntimeEvidenceChannelError (typed)
+                               -> termination_reason="infrastructure_abort"
+run_one_iteration.py           -> .chain_halted sentinel (reason field)
+                               -> sys.exit(3)
+```
+
+The sentinel is what stops a QUEUED iteration — SDSC's `afterany`
+dependency starts the next job whatever the exit code was — and exit 3
+stops the foreground loop. The sentinel's `reason` field distinguishes
+this from the consecutive-failure brake, so an operator can tell why the
+chain stopped. The halt runs AFTER the manifest is written: the
+diagnostics are exactly what a broken environment needs preserved.
+`infrastructure_abort` outranks `scope_violation` in
+`_compute_termination_state` — with a broken channel, this run's other
+classifications are themselves untrustworthy.
+
+Distinct from: operator stop (a kill, not exit 3), gate exhaustion
+(`no_records`, exit 0, chain continues), candidate rejection
+(attempt-local), and an ordinary crash (exit 1).
+
+Evidence: `tests/unit/core/test_c9c_failure_classification.py` (17 —
+schema defaults and legacy validation, the unchanged decision literal,
+all four classification paths, infrastructure precedence over budget and
+over record-only, sidecar persistence, calibration exclusion for both
+classes AND for legacy-unclassified, executor status routing);
+`tests/unit/sdsc_submission_scripts/test_c9c_chain_termination.py` (15 —
+precedence incl. outranking every other reason, the untouched existing
+precedence, abort detection, the four non-halting reasons, sentinel
+reason/typing, exit-3-after-manifest ordering, gate exhaustion still
+exiting 0). Full `tests/unit` — **5032 passed, 4 xfailed**.
+
+**C9d — launch guard.** [ ] Implemented against the FINAL lifecycle
+(operator sequencing decision: no partial guard in parallel with C9c,
+so the guard never validates an intermediate architecture).
+
 ### C9 — `feat(runtime): formal launch invariant, behavioral self-test, and run-invariant locking`
 
 **Goal.** §12 with the typed-policy guard (NO introspection): construct

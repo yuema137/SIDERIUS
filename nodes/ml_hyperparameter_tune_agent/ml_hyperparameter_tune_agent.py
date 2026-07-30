@@ -746,6 +746,22 @@ def _should_skip_to_formal(
     return resolved_action is GateAction.SKIP_TO_FORMAL and not is_formal_round
 
 
+def _non_retryable_termination_message(
+    *, scope_violation_reason: str | None, evidence_channel_failure: str | None
+) -> str:
+    """Operator-facing line for a non-retryable termination. The evidence
+    channel outranks the scope violation (C9c): if the channel is broken,
+    every other classification this run made is suspect."""
+    if evidence_channel_failure:
+        return (
+            "  [RUNTIME] Evidence-channel failure (infrastructure) — terminating "
+            f"the chain: {evidence_channel_failure}"
+        )
+    return (
+        f"  [DATASCOPE] Non-retryable scope violation — terminating run: {scope_violation_reason}"
+    )
+
+
 def _compute_termination_state(
     *,
     completed_rounds: int,
@@ -754,10 +770,16 @@ def _compute_termination_state(
     max_fail_rounds: int,
     gate_aborted: bool,
     scope_violation_reason: str | None = None,
+    evidence_channel_failure: str | None = None,
 ) -> tuple[str, str]:
     """Compute ``(run_status, termination_reason)`` from loop-exit state.
 
     Precedence (highest → lowest):
+     -1. ``evidence_channel_failure`` set (C9c) → ``("failed",
+         "infrastructure_abort")``. Outranks everything, including a
+         scope violation: when the evidence channel is broken we cannot
+         even trust the classification of the other failures, and the
+         chain must halt rather than retry into the same environment.
       0. ``scope_violation_reason`` set (DataScope DS5) → ``("failed",
          "scope_violation")``. A configuration/invariant failure —
          deterministic on retry, so it outranks even the deliberate gate
@@ -774,6 +796,8 @@ def _compute_termination_state(
     See ``docs/design/pluggable_health_checks.md`` §4 and the audit
     Gap #3 fix in the follow-up to commit-5b.
     """
+    if evidence_channel_failure:
+        return "failed", "infrastructure_abort"
     if scope_violation_reason:
         return "failed", "scope_violation"
     if gate_aborted:
@@ -1614,6 +1638,34 @@ def _handle_in_subprocess_rejection(
     return True
 
 
+class RuntimeEvidenceChannelError(RuntimeError):
+    """C9c: the runtime evidence channel failed (infrastructure class).
+
+    Distinct from every other terminal signal in this loop: it is not a
+    candidate verdict (the model was never judged), not a watchdog kill,
+    not gate exhaustion, not an operator stop, and not a budget stop. It
+    means the machinery that produces runtime evidence is broken, so the
+    chain must stop instead of feeding the next candidate into it.
+    """
+
+    def __init__(self, message: str, rv_block: dict | None = None):
+        super().__init__(message)
+        self.rv_block = dict(rv_block or {})
+
+
+def _raise_if_evidence_channel_failure(status: dict, sandbox, run_name: str) -> None:
+    """Convert an executor infrastructure ABORT into the typed error the
+    loop terminates on. The partial observation is appended first — a
+    broken channel is still evidence of what happened."""
+    if status.get("status") != "aborted_infrastructure":
+        return
+    rv_block = status.get("runtime_verification")
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    raise RuntimeEvidenceChannelError(
+        status.get("message", "runtime evidence channel failed"), rv_block
+    )
+
+
 class WallClockTimeoutError(RuntimeError):
     """A watchdog deadline kill (RT4, §4). Carries the §4 timeout
     provenance so the attempt_failure record can surface
@@ -2181,6 +2233,9 @@ class HyperparamTuningAgent:
         # a bug; it is deterministic on retry, so the run terminates instead
         # of consuming attempt retries or waiting for max_fail_rounds.
         _scope_violation_reason: str | None = None
+        # C9c: set when the runtime EVIDENCE CHANNEL fails. Terminates
+        # the chain, not just the attempt (infrastructure class).
+        _evidence_channel_failure: str | None = None
         # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
         # Appended to on every evaluate_vram_skill feasible=False event.
         # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
@@ -2971,6 +3026,7 @@ class HyperparamTuningAgent:
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
                     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
+                    _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
                     if _handle_in_subprocess_rejection(
                         train_status,
                         sandbox=sandbox,
@@ -3042,6 +3098,7 @@ class HyperparamTuningAgent:
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
                         inference_time = round(time.time() - t0, 1)
                         _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
+                        _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
                         if inf_status.get("status") == "error":
                             # DataScope DS5 — non-retryable: terminate the run.
                             if inf_status.get("error_type") == "scope_violation":
@@ -3862,6 +3919,12 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    if isinstance(e, RuntimeEvidenceChannelError):
+                        # C9c: infrastructure class — the machinery that
+                        # produces runtime evidence is broken, so no further
+                        # candidate can be judged. Terminates the chain.
+                        _evidence_channel_failure = str(e)
+                        break
                     if isinstance(e, PlanOverridesError):
                         # FU-10 — deterministic operator-configuration error;
                         # retrying cannot change it and recording it as an
@@ -3931,10 +3994,12 @@ class HyperparamTuningAgent:
             # DataScope DS5 — a scope violation is deterministic on retry:
             # terminate the run immediately, before any retry/fail-round
             # bookkeeping.
-            if _scope_violation_reason:
+            if _scope_violation_reason or _evidence_channel_failure:
                 print(
-                    f"  [DATASCOPE] Non-retryable scope violation — terminating "
-                    f"run: {_scope_violation_reason}"
+                    _non_retryable_termination_message(
+                        scope_violation_reason=_scope_violation_reason,
+                        evidence_channel_failure=_evidence_channel_failure,
+                    )
                 )
                 break
 
@@ -4004,6 +4069,7 @@ class HyperparamTuningAgent:
             max_fail_rounds=max_fail_rounds_setting,
             gate_aborted=_gate_aborted,
             scope_violation_reason=_scope_violation_reason,
+            evidence_channel_failure=_evidence_channel_failure,
         )
         all_records = sandbox.get_summary()
         successful_records = [

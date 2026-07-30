@@ -144,7 +144,11 @@ def component_calibration_eligible(obs: RuntimeObservation, phase: RuntimePhase)
         return False
     if obs.watchdog_status is not None:
         return False
-    if obs.admission is not None and obs.admission.decision == "rejected":
+    if obs.admission is not None and obs.admission.decision != "admitted":
+        # C9c: BOTH failure classes are excluded, and so is a legacy record
+        # that carries no class at all — an unclassified refusal is not a
+        # claim that the run was clean. Checking `!= "admitted"` rather than
+        # `== "rejected"` keeps that true for any future decision value.
         return False
     component = obs.components.get(phase)
     if component is None or component.measurement is None:

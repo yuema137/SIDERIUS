@@ -2411,7 +2411,11 @@ class HyperparamTuningOutput(BaseModel):
         ),
     )
     termination_reason: Literal[
-        "completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation"
+        "completed",
+        "aborted_fail_rounds",
+        "aborted_by_gate",
+        "scope_violation",
+        "infrastructure_abort",
     ] = Field(
         default="completed",
         description=(
@@ -2422,7 +2426,14 @@ class HyperparamTuningOutput(BaseModel):
             "before max_rounds — see docs/design/pluggable_health_checks.md "
             "§4; 'scope_violation' = a DataScope violation reached an "
             "executor (non-retryable configuration/invariant failure, "
-            "status='failed' — docs/design/enable_partial_file_list.md DS5)."
+            "status='failed' — docs/design/enable_partial_file_list.md DS5); "
+            "'infrastructure_abort' = the runtime EVIDENCE CHANNEL failed "
+            "(C9c) — registry/persistence/schema/probe-executor/telemetry/"
+            "communication failure or a policy invariant breach. Outranks "
+            "every other reason: nothing measured in this run can be "
+            "trusted, and the chain must halt instead of retrying the next "
+            "candidate into the same broken environment "
+            "(docs/design/runtime_estimation_and_calibration.md §23-C9c)."
         ),
     )
 

@@ -312,6 +312,23 @@ class AdmissionRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     decision: Literal["admitted", "rejected"]
+    failure_class: Literal["candidate", "infrastructure"] | None = Field(
+        default=None,
+        description=(
+            "C9c: WHY a non-admitted attempt was refused. 'candidate' = the "
+            "model itself (over budget, measured OOM, no steady state, "
+            "initialization failure under a working verifier) — attempt-local, "
+            "the chain may try another candidate. 'infrastructure' = the "
+            "evidence channel (registry corruption, persistence failure, "
+            "schema/protocol mismatch, probe executor failure, telemetry or "
+            "communication failure, policy invariant failure, uninterpretable "
+            "provenance) — the chain must stop rather than retry into the same "
+            "broken environment. None on admitted records AND on legacy "
+            "records written before this field existed: readers must treat "
+            "None conservatively (it is an absence of classification, never a "
+            "claim that the failure was benign)."
+        ),
+    )
     stage: str = Field(
         min_length=1,
         description='e.g. "pre_launch_screen", "post_setup_runtime_verification"',
