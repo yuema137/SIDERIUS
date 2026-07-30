@@ -230,9 +230,22 @@ Carried from the PR 1/PR 2 process (operator rules):
              reliability estimate (P-1 removed the assumed recovery
              channel). Unblock path: fix P-1 + #146 (operator-gated)
              → rev-4 reliability pilot → campaign re-sizing.
-[ ] P3-L2p-r4 — rev-4 citation-reliability pilot: protocol DESIGNED
-             (`pr3_l2p_calibration_protocol.md` §22, 2026-07-29;
-             rescaled per operator decision same day) — operational
+[x] P3-L2p-r4 — rev-4 citation-reliability pilot EXECUTED 2026-07-29:
+             **GATE PASS (all 10 pre-registered conditions)** — 4/4
+             terminal-valid (C 2/2, T 2/2), 19 calls, $3.82,
+             gpt-5.5-2026-04-23 stable, runner `completed`/exit 0.
+             3/4 samples hit the rev-3 #146 citation classes and each
+             recovered via ONE causal correction retry with corrected
+             values verified in the final ProposalOutput (P-1 fix
+             live). Provenance semantics remain improvised (#146
+             contract gap, deferred — report §7). Cumulative Layer 2
+             $24.28/$80. Campaign budget/design decision pending with
+             the operator (powered design ≈$95-220 exceeds $55.72
+             remaining). Report:
+             `reports/pr3_citation_reliability_rev4_2026-07-29.md`;
+             protocol §22.7; behavioral efficacy remains UNKNOWN.
+             Original design parameters (superseded checklist follows):
+             protocol `pr3_l2p_calibration_protocol.md` §22 — operational
              endpoint only (terminal ProposalOutput success),
              **S1 only, 4 samples (C×2 + T×2)**, 16 nominal /
              24 hard-cap calls, ≈$3.2-4.8, gate pre-registered in

@@ -718,10 +718,21 @@ re-audit; no further LLM spend without a new operator decision.
    (2026-07-29, zero LLM calls): full unit suite **4655 passed,
    4 xfailed**; pseudo-mode integration **136 passed, 130 skipped**
    (the skips are exactly the real-API tiers).
-5. [ ] Rev-4 fixture hashes re-frozen at launch (S1 with production
-   vocab seed; recompute + record here before call 1).
-6. [ ] Explicit operator launch approval referencing this document —
-   NOT YET GIVEN. No rev-4 LLM call may be made without it.
+5. [x] Rev-4 fixture hashes re-frozen at launch (2026-07-29, before
+   call 1): S1 `a8ab1db8e45f44e2bef8139fc29df49a42dc42bcb68cf9ee3d71`
+   `59ebabf8ca29` (byte-identical to rev-3's frozen S1 hash —
+   fixture stability across revisions), fixtures `p3l2p-fixtures-2`,
+   production vocab seed 21 entries. Full freeze evidence (preflight
+   invariants, NEW P-1-active proof through the calibration assembly,
+   25 deterministic runner/causal tests, price re-check $5/$0.50/$30
+   per M confirmed current, measured-cost projection nominal $3.29 /
+   worst $5.43 vs $59.54 remaining, run ledger cap $10) persisted in
+   `reports/artifacts/pr3_l2p/pilot_rev4_20260729/launch_freeze.json`
+   + `launch_manifest.json` (order `p3l2p-order-2-rev4`).
+6. [x] Explicit operator launch approval: granted 2026-07-29
+   (operator kickoff §4 — approval effective once deterministic
+   preconditions green; all green at launch). Branch head at launch:
+   `340b45d` (code identical to tested `5c43ece`).
 
 ### 22.5 Stop conditions (frozen)
 
@@ -790,3 +801,36 @@ error on missing log argument.
 Known limitation (documented, accepted): a SIGKILL (uncatchable) still
 skips the finally block — `run_status.json` will then be absent, which
 itself distinguishes an external hard kill from every soft state.
+
+### 22.7 Rev-4 outcome (2026-07-29): GATE PASS
+
+Executed at branch head `340b45d` (code = tested `5c43ece`) after the
+green launch freeze: **4/4 terminal-valid (C 2/2, T 2/2), 19 calls
+(16 nominal + 3 causal correction retries), $3.82, ~9.5 min,
+`gpt-5.5-2026-04-23` stable on all calls, runner outcome `completed`
+with exit 0 propagated by the wrapper. All 10 pre-registered gate
+conditions PASS** (`gate_verdict.json`, reproducible via
+`scripts/pr3_l2_calibration/gate_rev4.py`).
+
+Central operational finding: 3/4 samples produced the exact rev-3 #146
+malformed-citation classes at the causal stage (registry loss as
+external_agent; Vocabulary-section refs as human) and each was
+recovered by ONE causal correction retry with the corrected values
+verified in the final ProposalOutput — the previously
+terminally-fatal class is now recoverable at +1 call (~$0.19).
+
+Documented limitation (not a gate failure): provenance SEMANTICS remain
+improvised (regex-legal but invented prefixes/free-text ids) — the
+deferred #146 contract gap (prompt examples / expressiveness), to be
+weighed at the citation-contract decision point (rev-4 report §7).
+
+Standing interpretation: operational reliability only; behavioral
+efficacy remains UNKNOWN (no C-vs-T behavioral comparison has ever
+existed). Cumulative Layer 2: 115 calls, $24.28 of $80 ($55.72
+remaining). Campaign feasibility arithmetic: a 0.30-planning-effect
+powered design needs ~86 samples pooled (≈$95-110) or ~172 per-scenario
+(≈$190-220) — both exceed the remaining allowance; a reduced
+descriptive design (~$45-55) fits but is weaker than the frozen
+standard. Budget/design decision PENDING WITH THE OPERATOR (rev-4
+report §10); no campaign may launch from this section. Full report:
+`reports/pr3_citation_reliability_rev4_2026-07-29.md`.
