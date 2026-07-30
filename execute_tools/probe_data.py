@@ -22,10 +22,15 @@ def load_probe_batch(*, data_dir: str, batch_size: int, segment_length: int):
     files = sorted(glob.glob(os.path.join(data_dir, "abra_training_*.h5")))
     if not files:
         raise RuntimeError(f"no abra_training_*.h5 files under {data_dir!r}")
+    # sample_size=1: the probe reads SEQUENTIAL segments (the production
+    # sampling stride of 20 exists to decorrelate training windows and
+    # would demand 20x the data just to index one segment — a probe batch
+    # needs real bytes, not decorrelation).
     dataset = TIDMADDataset(
         data_dir,
         [os.path.basename(files[0])],
         segmentation_size=segment_length,
+        sample_size=1,
         max_segments=batch_size,
     )
     if len(dataset) < batch_size:

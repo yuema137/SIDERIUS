@@ -105,7 +105,8 @@ def production_probe_executors(
                 f"model_type {model_type!r} is not in the live MODEL_REGISTRY — "
                 "the probe must run AFTER validation/registration"
             )
-        torch.cuda.reset_peak_memory_stats()
+        if device.startswith("cuda"):
+            torch.cuda.reset_peak_memory_stats()
         config_cls = get_config_class(model_type)
         if config_cls is None:
             raise RuntimeError(f"no config class registered for {model_type!r}")
@@ -168,38 +169,42 @@ def production_probe_executors(
         )
 
     def _train_step() -> float:
+        import time as _time
+
         torch = state["torch"]
         model, batch = state["model"], state["batch"]
         optimizer, loss_fn = state["optimizer"], state["loss_fn"]
-        torch.cuda.synchronize()
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
+        use_cuda = device.startswith("cuda")
+        if use_cuda:
+            torch.cuda.synchronize()
+        t0 = _time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         logits = model(batch)
         loss = loss_fn(logits, batch)
         loss.backward()
         optimizer.step()
-        end.record()
-        torch.cuda.synchronize()
-        return float(start.elapsed_time(end))
+        if use_cuda:
+            torch.cuda.synchronize()
+        return (_time.perf_counter() - t0) * 1000.0
 
     def _inference_batch() -> float:
+        import time as _time
+
         torch = state["torch"]
         model, batch = state["model"], state["batch"]
-        torch.cuda.synchronize()
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
+        use_cuda = device.startswith("cuda")
+        if use_cuda:
+            torch.cuda.synchronize()
+        t0 = _time.perf_counter()
         with torch.no_grad():
-            start.record()
             model(batch)
-            end.record()
-        torch.cuda.synchronize()
-        return float(start.elapsed_time(end))
+        if use_cuda:
+            torch.cuda.synchronize()
+        return (_time.perf_counter() - t0) * 1000.0
 
     def _peak_vram_gb() -> float | None:
         torch = state.get("torch")
-        if torch is None:
+        if torch is None or not device.startswith("cuda"):
             return None
         return float(torch.cuda.max_memory_allocated()) / 2**30 or None
 

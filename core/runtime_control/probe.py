@@ -287,6 +287,31 @@ def run_bounded_probe(
     )
 
 
+# ── §16.6 explicit inference-unit conversions ───────────────────────────────
+
+
+def total_eval_segments(*, n_files: int, segments_per_file: int, eval_portion: float) -> int:
+    """`segments_per_file × n_files × eval_portion` (§16.6), floored at 1
+    segment per evaluated file when any evaluation happens at all."""
+    if not 0.0 <= eval_portion <= 1.0:
+        raise ValueError(f"eval_portion must be in [0,1]; got {eval_portion}")
+    if n_files <= 0 or segments_per_file <= 0:
+        raise ValueError("n_files and segments_per_file must be positive")
+    if eval_portion == 0.0:
+        return 0
+    per_file = max(1, int(segments_per_file * eval_portion))
+    return per_file * n_files
+
+
+def batches_for_segments(total_segments: int, inference_batch: int) -> int:
+    """`ceil(total_segments / inference_batch)` (§16.6)."""
+    if inference_batch <= 0:
+        raise ValueError(f"inference_batch must be positive; got {inference_batch}")
+    if total_segments < 0:
+        raise ValueError(f"total_segments must be >= 0; got {total_segments}")
+    return -(-total_segments // inference_batch)
+
+
 # ── extrapolation (§8.2 layer 2) ────────────────────────────────────────────
 
 

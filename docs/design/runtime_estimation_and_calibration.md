@@ -2507,12 +2507,30 @@ rollback flag. Deps: C3-C5.
       — no hostname; `collect_execution_environment_profile` —
       installation UUID). All heavy imports lazy; real execution only
       in the operator-gated GPU smoke / C12.
-- [ ] C6b — flag-gated workflow wiring (probe stage post-validation,
-      default OFF until C8/C12; rollback parity) + registry/profile
-      population (O1a §9.1 extension) + pseudo propagation test.
-- [ ] Doc sync (tuner `.md`, §8/§13) with C6b.
+- [x] C6b-2 — device-aware executors (CPU probes legal for tests; no
+      fabricated VRAM on CPU); §16.6 explicit unit conversions
+      (`total_eval_segments` with the per-file 1-segment floor,
+      `batches_for_segments`); F-1a/F-1b DIRECT tests (fresh REAL
+      nn.Module registered into the LIVE registries and probed on CPU
+      with hand-verified realized counts; unregistered type hard-errors;
+      canonical-path resolution + no-synthetic-fallback proven);
+      zero-LLM end-to-end chain test: implementation → REAL CPU probe →
+      estimate → C4 policy ALLOW → C5 registry artifacts with realized
+      supersession. One production defect found/fixed during testing:
+      `probe_data` inherited the dataset's production sampling stride
+      (sample_size=20 → 0 segments on small files); probe reads
+      sequential segments (sample_size=1) — diagnosed from the dataset
+      indexing math before fixing.
+- [x] Workflow wiring DEFERRED to C8 per the operator's C6 directive
+      ("C6 produces evidence only; decisions remain owned by the C4
+      policy") — the original C6 wiring bullet is superseded; recorded
+      here, not silently dropped. Reuse assessment: the probe shares
+      the dataset loader + the 3+7 posture; step-timing convergence
+      with TimeEval's warmup happens at C8 when TimeEval is rewired
+      onto the estimator (no third long-term divergent timing path).
 - [ ] GPU smoke (one registered + one freshly implemented plugin,
-      bounded) — **OPERATOR APPROVAL REQUIRED before execution**.
+      bounded) — **OPERATOR APPROVAL REQUIRED before execution** (gate
+      report issued).
 **Unit validation.** caps honored; fast-fail; contended flag; realized
 supersession; unit conversions (§16.6) with sentinels; fallback-25
 never blocking.
