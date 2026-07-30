@@ -348,39 +348,48 @@ def probe_observations(
     if result.status != "ok" or result.realized is None:
         raise ValueError(f"only ok probes produce observations (status={result.status})")
     producer = f"runtime_probe@{PROBE_PRODUCER_SEMVER}"
-    common = dict(
-        workload=workload,
-        realized_model=result.realized.model_dump(mode="json"),
-        hardware_compatibility_id=hardware_compatibility_id,
-        execution_environment_id=execution_environment_id,
-        concurrency_identity=result.concurrency_identity,
-        contention_telemetry=result.contention.model_dump(mode="json"),
-        software_stack=software_stack,
-        producer_identity=producer,
-        provenance="bounded_live_probe",
-        source_run=source_run,
-        validation_status="unvalidated",
-        timestamp_metadata=timestamp_metadata,
-    )
-    records = []
+    realized_payload = result.realized.model_dump(mode="json")
+    contention_payload = result.contention.model_dump(mode="json")
+
+    def _record(
+        operation: str, unit: str, value_ms: float, spread: tuple[float, float] | None
+    ) -> CalibrationObservation:
+        return CalibrationObservation(
+            operation=operation,  # type: ignore[arg-type]
+            measurement_unit=unit,
+            measured_value_ms=value_ms,
+            workload=workload,
+            realized_model=realized_payload,
+            hardware_compatibility_id=hardware_compatibility_id,
+            execution_environment_id=execution_environment_id,
+            concurrency_identity=result.concurrency_identity,
+            contention_telemetry=contention_payload,
+            software_stack=software_stack,
+            producer_identity=producer,
+            provenance="bounded_live_probe",
+            uncertainty_inputs={"spread_ms": list(spread or ())},
+            source_run=source_run,
+            validation_status="unvalidated",
+            timestamp_metadata=timestamp_metadata,
+        )
+
+    records: list[CalibrationObservation] = []
     if result.train_ms_per_step is not None:
         records.append(
-            CalibrationObservation(
-                operation="training",
-                measurement_unit="optimizer_step",
-                measured_value_ms=result.train_ms_per_step,
-                uncertainty_inputs={"spread_ms": list(result.train_ms_spread or ())},
-                **common,
+            _record(
+                "training",
+                "optimizer_step",
+                result.train_ms_per_step,
+                result.train_ms_spread,
             )
         )
     if result.inference_ms_per_batch is not None:
         records.append(
-            CalibrationObservation(
-                operation="inference",
-                measurement_unit="inference_batch",
-                measured_value_ms=result.inference_ms_per_batch,
-                uncertainty_inputs={"spread_ms": list(result.inference_ms_spread or ())},
-                **common,
+            _record(
+                "inference",
+                "inference_batch",
+                result.inference_ms_per_batch,
+                result.inference_ms_spread,
             )
         )
     return records
