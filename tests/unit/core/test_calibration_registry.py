@@ -71,7 +71,9 @@ def _obs(hw_id: str, env_id: str, **over) -> CalibrationObservation:
         software_stack={"torch": "2.7.0"},
         producer_identity="runtime_probe@0.0.0+test",
         provenance="bounded_live_probe",
-        validation_status="validated",
+        # C7/D4: producers always write candidates; authority comes from
+        # a CalibrationPromotion, never from this field.
+        validation_status="unvalidated",
         timestamp_metadata="2026-07-30T12:00:00Z",
     )
     base.update(over)
@@ -219,23 +221,117 @@ class TestProfilesAndCrossMachine:
 
     def test_cross_machine_evidence_is_historical_prior_only(self, registry):
         obs = _obs(HW.profile_id, ENV_REMOTE.profile_id)
-        est = registry.as_estimate(obs, current_environment_id=ENV_LOCAL.profile_id)
+        est = registry.as_estimate(
+            obs, current_environment_id=ENV_LOCAL.profile_id, validation_level="validated"
+        )
         assert est.provenance == "historical_observation_prior"
         assert est.blocking_eligible is False
         assert any("cross-machine" in w for w in est.warnings)
 
     def test_local_validated_evidence_keeps_measured_provenance(self, registry):
+        # C7/D4: authority comes from the bucket's PROMOTION level, never
+        # from a self-declared status on the immutable observation.
         obs = _obs(HW.profile_id, ENV_LOCAL.profile_id)
-        est = registry.as_estimate(obs, current_environment_id=ENV_LOCAL.profile_id)
+        est = registry.as_estimate(
+            obs, current_environment_id=ENV_LOCAL.profile_id, validation_level="validated"
+        )
         assert est.provenance == "bounded_live_probe"
         assert est.blocking_eligible is True
         assert est.training_seconds is not None and est.inference_seconds is None
 
-    def test_local_unvalidated_is_demoted(self, registry):
-        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id, validation_status="unvalidated")
+    def test_local_unpromoted_bucket_is_demoted(self, registry):
+        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id)
+        # No promotion recorded → bucket_status() == "unvalidated".
         est = registry.as_estimate(obs, current_environment_id=ENV_LOCAL.profile_id)
         assert est.provenance == "historical_observation_prior"
         assert est.blocking_eligible is False
+        assert any("validation level" in w for w in est.warnings)
+
+    def test_provisional_is_not_calibration_authoritative(self, registry):
+        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id)
+        est = registry.as_estimate(
+            obs, current_environment_id=ENV_LOCAL.profile_id, validation_level="provisional"
+        )
+        assert est.provenance == "historical_observation_prior"
+        assert est.blocking_eligible is False
+
+
+class TestPromotionPersistence:
+    """C7/D4: promotions are DERIVED, immutable, content-addressed records
+    that never mutate the observations they cite."""
+
+    def _promoted(self, registry, values=(20.0, 21.0, 22.0)):
+        from core.runtime_control.calibration_policy import evaluate_promotions
+
+        obs = [_obs(HW.profile_id, ENV_LOCAL.profile_id, measured_value_ms=v) for v in values]
+        for o in obs:
+            registry.record_observation(o)
+        promos = evaluate_promotions(obs, generation=registry.load_manifest().generation)
+        return obs, promos
+
+    def test_record_load_and_index(self, registry):
+        obs, promos = self._promoted(registry)
+        assert len(promos) == 1
+        pid = registry.record_promotion(promos[0])
+        manifest = registry.load_manifest()
+        assert manifest.promotion_ids == [pid]
+        assert registry.load_promotion(pid) == promos[0]
+        assert (registry.root / "promotions").is_dir()
+        # observations on disk are untouched by the promotion
+        for o in obs:
+            assert registry.load_observation(o.observation_id).validation_status == "unvalidated"
+
+    def test_bucket_status_is_the_authority(self, registry):
+        from core.runtime_control.calibration_policy import bucket_key
+
+        obs, promos = self._promoted(registry)
+        key = bucket_key(obs[0])
+        assert registry.bucket_status(key) == ("unvalidated", None)
+        registry.record_promotion(promos[0])
+        level, promo = registry.bucket_status(key)
+        assert level == "validated" and promo is not None
+        assert registry.bucket_status("some|other|bucket") == ("unvalidated", None)
+
+    def test_validated_bucket_restores_measured_authority_end_to_end(self, registry):
+        obs, promos = self._promoted(registry)
+        registry.record_promotion(promos[0])
+        est = registry.as_estimate(obs[0], current_environment_id=ENV_LOCAL.profile_id)
+        assert est.provenance == "bounded_live_probe"
+        assert est.blocking_eligible is True
+
+    def test_promotion_cannot_cite_unindexed_observations(self, registry):
+        from core.runtime_control.calibration_policy import evaluate_promotions
+
+        obs = [_obs(HW.profile_id, ENV_LOCAL.profile_id, measured_value_ms=v) for v in (20.0, 21.0)]
+        promo = evaluate_promotions(obs, generation=0)[0]
+        with pytest.raises(ValueError, match="absent from the index"):
+            registry.record_promotion(promo)
+
+    def test_recording_the_same_promotion_twice_is_idempotent(self, registry):
+        _, promos = self._promoted(registry)
+        first = registry.record_promotion(promos[0])
+        gen = registry.load_manifest().generation
+        assert registry.record_promotion(promos[0]) == first
+        assert registry.load_manifest().generation == gen
+
+    def test_rebuild_drops_promotions_whose_sources_vanished(self, registry):
+        obs, promos = self._promoted(registry)
+        registry.record_promotion(promos[0])
+        victim = registry.root / "observations" / f"{obs[0].observation_id.split(':')[1]}.json"
+        victim.unlink()
+        manifest, rejected = registry.rebuild_index()
+        assert manifest.promotion_ids == []
+        assert any("missing observations" in r for r in rejected)
+
+    def test_tampered_promotion_is_detected(self, registry):
+        _, promos = self._promoted(registry)
+        pid = registry.record_promotion(promos[0])
+        path = registry.root / "promotions" / f"{pid.split(':')[1]}.json"
+        payload = json.loads(path.read_text())
+        payload["rate_median_ms"] = 1.0
+        path.write_text(json.dumps(payload))
+        with pytest.raises(ValueError, match="content-hash mismatch"):
+            registry.load_promotion(pid)
 
 
 class TestDerivedApplicability:

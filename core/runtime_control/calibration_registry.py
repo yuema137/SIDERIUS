@@ -12,6 +12,7 @@ runtime_calibration/
     hardware_profiles/<64hex>.json
     environment_profiles/<64hex>.json
     observations/<64hex>.json   # one immutable file per observation
+    promotions/<64hex>.json     # C7 derived D4 promotion records
     summaries/<name>.json       # derived caches (rebuildable)
     installation_id             # stable local UUID (never hostname)
 ```
@@ -53,6 +54,7 @@ from typing import Any
 from core.runtime_control.estimate_types import RuntimeEstimate, make_estimate
 from core.runtime_control.registry_schemas import (
     CalibrationObservation,
+    CalibrationPromotion,
     CalibrationSummary,
     ExecutionEnvironmentProfile,
     HardwareCompatibilityProfile,
@@ -85,7 +87,14 @@ class CalibrationRegistry:
         self._hw_dir = self.root / "hardware_profiles"
         self._env_dir = self.root / "environment_profiles"
         self._summary_dir = self.root / "summaries"
-        for d in (self._obs_dir, self._hw_dir, self._env_dir, self._summary_dir):
+        self._promo_dir = self.root / "promotions"
+        for d in (
+            self._obs_dir,
+            self._hw_dir,
+            self._env_dir,
+            self._summary_dir,
+            self._promo_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
         self._index_path = self.root / "registry.json"
         self._lock_path = self.root / "registry.lock"
@@ -192,6 +201,31 @@ class CalibrationRegistry:
         self._locked_index_update(_mutate)
         return oid
 
+    def record_promotion(self, promotion: CalibrationPromotion) -> str:
+        """Persist a DERIVED D4 promotion record (C7). Same atomicity
+        contract as observations; the sources it names are verified to be
+        indexed first — a promotion can never cite evidence the registry
+        does not hold. Observations are NEVER mutated: the promotion is
+        the authoritative status for its bucket."""
+        manifest = self.load_manifest()
+        missing = [
+            oid for oid in promotion.source_observation_ids if oid not in manifest.observation_ids
+        ]
+        if missing:
+            raise ValueError(f"promotion cites observations absent from the index: {missing}")
+        pid = promotion.promotion_id
+        self._write_record(self._promo_dir, pid, promotion.model_dump(mode="json"))
+
+        def _mutate(m: RegistryManifest) -> bool:
+            if pid in m.promotion_ids:
+                return False
+            m.promotion_ids.append(pid)
+            m.promotion_ids.sort()
+            return True
+
+        self._locked_index_update(_mutate)
+        return pid
+
     def reference_legacy_source(self, ref: LegacySourceReference) -> None:
         def _mutate(m: RegistryManifest) -> bool:
             if any(
@@ -218,6 +252,40 @@ class CalibrationRegistry:
     def iter_observations(self) -> Iterator[CalibrationObservation]:
         for oid in self.load_manifest().observation_ids:
             yield self.load_observation(oid)
+
+    def load_promotion(self, full_id: str) -> CalibrationPromotion:
+        path = self._promo_dir / f"{_digest_of(full_id)}.json"
+        promo = CalibrationPromotion.model_validate_json(path.read_text())
+        if promo.promotion_id != full_id:
+            raise ValueError(
+                f"content-hash mismatch for {path.name}: stored content hashes "
+                f"to {promo.promotion_id} (corruption or tampering)"
+            )
+        return promo
+
+    def iter_promotions(self) -> Iterator[CalibrationPromotion]:
+        for pid in self.load_manifest().promotion_ids:
+            yield self.load_promotion(pid)
+
+    def bucket_status(self, bucket_key: str) -> tuple[str, CalibrationPromotion | None]:
+        """Authoritative D4 status for a bucket: the promotion derived
+        from the MOST evidence wins ties by (n_observations, route,
+        generation) — deterministic, and never stronger than the
+        evidence that produced it. No promotion ⇒ ``"unvalidated"``
+        (candidate-only)."""
+        promos = [p for p in self.iter_promotions() if p.bucket_key == bucket_key]
+        if not promos:
+            return "unvalidated", None
+        best = max(
+            promos,
+            key=lambda p: (
+                p.level == "validated",
+                p.n_observations,
+                p.derived_from_generation,
+                p.promotion_id,
+            ),
+        )
+        return best.level, best
 
     # ── reconstruction + verification ──────────────────────────────────
     def rebuild_index(self) -> tuple[RegistryManifest, list[str]]:
@@ -251,11 +319,30 @@ class CalibrationRegistry:
             self._env_dir,
             lambda p: ExecutionEnvironmentProfile.model_validate_json(p.read_text()).profile_id,
         )
+        promo_ids = _collect(
+            self._promo_dir,
+            lambda p: CalibrationPromotion.model_validate_json(p.read_text()).promotion_id,
+        )
+        # A promotion whose sources did not survive rebuild would cite
+        # evidence the registry no longer holds — dropped and reported.
+        kept_promotions: list[str] = []
+        for pid in promo_ids:
+            promo = CalibrationPromotion.model_validate_json(
+                (self._promo_dir / f"{_digest_of(pid)}.json").read_text()
+            )
+            orphaned = [s for s in promo.source_observation_ids if s not in obs_ids]
+            if orphaned:
+                rejected.append(
+                    f"{_digest_of(pid)}.json: promotion cites missing observations {orphaned}"
+                )
+            else:
+                kept_promotions.append(pid)
 
         def _mutate(m: RegistryManifest) -> bool:
             m.observation_ids = sorted(obs_ids)
             m.hardware_profile_ids = sorted(hw_ids)
             m.environment_profile_ids = sorted(env_ids)
+            m.promotion_ids = sorted(kept_promotions)
             return True
 
         manifest = self._locked_index_update(_mutate)
@@ -316,15 +403,31 @@ class CalibrationRegistry:
 
     # ── cross-machine authority rule (§3.3) ────────────────────────────
     def as_estimate(
-        self, obs: CalibrationObservation, *, current_environment_id: str
+        self,
+        obs: CalibrationObservation,
+        *,
+        current_environment_id: str,
+        validation_level: str | None = None,
     ) -> RuntimeEstimate:
         """Wrap an observation as decision evidence. Evidence collected in
         a DIFFERENT execution environment is demoted to
         ``historical_observation_prior`` (tier 1 — never blocking alone),
-        even under an identical hardware compatibility profile."""
+        even under an identical hardware compatibility profile.
+
+        C7: authority comes from the bucket's PROMOTION record, not from
+        the (immutable, always-``unvalidated``) observation — observations
+        are never mutated, so promotion is the only status source.
+        ``validation_level`` overrides the lookup for callers that already
+        resolved it; only ``"validated"`` keeps measured provenance
+        (``"provisional"`` is explicitly not calibration-authoritative)."""
+        from core.runtime_control.calibration_policy import bucket_key
+
+        level = validation_level
+        if level is None:
+            level, _ = self.bucket_status(bucket_key(obs))
         local = obs.execution_environment_id == current_environment_id
         seconds = obs.measured_value_ms / 1000.0
-        if local and obs.validation_status == "validated":
+        if local and level == "validated":
             return make_estimate(
                 provenance=obs.provenance,
                 confidence="medium",
@@ -341,8 +444,11 @@ class CalibrationRegistry:
                 "historical prior only — requires local live validation for "
                 "blocking authority (§3.3)"
             )
-        if obs.validation_status != "validated":
-            warnings.append(f"validation_status={obs.validation_status}")
+        if level != "validated":
+            warnings.append(
+                f"bucket validation level={level!r} (D4: only 'validated' is "
+                "calibration-authoritative)"
+            )
         return make_estimate(
             provenance="historical_observation_prior",
             confidence="low",
