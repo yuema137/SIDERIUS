@@ -2258,14 +2258,33 @@ demoted to typed prior producers inside the estimator; NO consumer
 rewiring yet (C8). Proposer must not load calibration tables directly;
 no consumer keeps a private authoritative formula after C8. Deps: C3.
 **Implementation plan.**
-- [ ] Inspect existing assembly (`total_assembly.py`, session,
-      verifier) — the estimator must WRAP these, not duplicate.
-- [ ] `RuntimeEstimateRequest` finalized against actual typed inputs.
-- [ ] Factory (per-run identity, hardware profile handle, registry
-      handle, policy handle).
-- [ ] Decision policy = §7.4 matrix, table-driven + unit-proven cell by
-      cell.
-- [ ] Doc sync.
+- [x] Layering audit: only agent→core imports exist; producers are
+      DEPENDENCY-INJECTED; production wiring uses function-level lazy
+      imports (`production_estimator_factory`) — no module-level
+      core→agent edge.
+- [x] `core/runtime_control/identity.py`: canonical structured payload
+      → sorted-keys JSON → SHA-256[:12]; sets REJECTED (order must be
+      explicit); `<name>@<semver>+<hash12>` per the approved scheme.
+- [x] `core/runtime_control/decision_policy.py`: table-driven §7.4
+      matrix (`_POLICY_MATRIX` — declarative rows feed the identity
+      payload) + behavioral rules; decision vocabulary
+      ADVISORY/REQUEST_PROBE/ALLOW/REJECT/ABORT with REJECT
+      candidate-local vs ABORT unsafe-workflow documented and
+      enforced; `CapacityCheck` (deterministic accounting, `realized`
+      flag) implements the post-implementation-only VRAM placement;
+      measured OOM/wall-cap/peak-violation → REJECT; uncalibrated
+      clean probe blocks on time ONLY beyond its own optimistic bound
+      (no new thresholds — D3/D4/D5 untouched).
+- [x] `core/runtime_control/estimator.py`: `RuntimeEstimator` protocol,
+      `DefaultRuntimeEstimator` (tier-0 static producer wired; C6/C7
+      producers arrive through the same seams), `RuntimeEstimatorFactory`
+      (one estimator+policy per run), identities incl. the legacy
+      static-formula constants in the estimator payload (a formula
+      change moves the identity).
+- [x] Characterization: tier-0 estimates numerically identical to the
+      legacy `estimate_proposal_time` across 4 shapes incl. the wave-1
+      18.4M rejected-draft shape.
+- [x] Doc sync (this section).
 **Unit validation.** every §7.4 matrix cell; policy refuses
 non-derived eligibility; factory identity stability; request
 validation.
@@ -2279,7 +2298,54 @@ identities stable and serializable.
 estimates, §12); no CUDA host (CI!) → static/prior paths only.
 **Migration/rollback.** Additive; consumers still on legacy paths.
 **Boundary.** Estimator layer only, no rewiring.
-- [ ] Evidence recorded.
+- [x] Evidence recorded: `tests/unit/core/test_runtime_decision_policy.py`
+      — **28 tests** (all matrix cells; priors never REJECT/ABORT on
+      budget; realized-capacity REJECT vs LLM-authored ADVISORY vs
+      pre-implementation ADVISORY; measured oom/wall_cap/peak-VRAM
+      REJECT; over-budget-never-ABORT sweep; ABORT reserved for the
+      invalid measured-failure+prior-provenance combination; identity
+      format, cross-process determinism (subprocess ×2), insertion-order
+      invariance, behavioral-change hash movement, precedence-order-as-
+      behavior, no environmental inputs, set rejection, semver
+      validation; 4-shape characterization parity). Full
+      `tests/unit/core/` — **561 passed, 5.1 s**; ruff check+format
+      clean; `git diff` over nodes/agent/workflows/execute_tools/
+      launcher = EMPTY (no consumer rewired).
+
+#### Implementation record — 2026-07-30 / C4
+
+**Question encountered.** (a) How do core-layer modules reach the
+legacy agent-layer producers without inverting the dependency
+direction? (b) What belongs in the estimator identity payload beyond
+the resolution order? (c) How does an uncalibrated clean probe block on
+time without introducing a D3/D4/D5-class threshold? (d) When is ABORT
+legitimate?
+
+**Audit evidence.**
+- Import sweep: `agent.skills.* → core.*` edges exist
+  (inference_defaults, server_configs); zero `core → agent` edges.
+- `training_skill/estimator.py:57,65,81` + `core/inference_defaults.py:60`
+  — the behaviorally relevant static constants.
+- §7.4 row "live probe, clean but not historically corrected":
+  "conditional with explicit uncertainty".
+
+**Decision.** (a) Injection + lazy production wiring. (b) The static
+formula constants are policy-relevant defaults → included (formula
+drift moves the identity; hardware/paths/timestamps excluded and
+test-asserted absent). (c) The probe's OWN uncertainty bound: REJECT
+on time alone only when `lower_seconds > budget` — uses the estimate's
+uncertainty, no new policy threshold. (d) ABORT only for unsafe input
+states (e.g. a measured failure reported with prior provenance —
+evidence-channel corruption); over-budget never ABORTs (test-swept).
+
+**Rationale.** Preserves layering; makes behavioral drift lock-visible
+per the approved identity scheme; §6.4 authority-follows-evidence
+without pre-empting C7 threshold decisions.
+
+**Validation.** The 28-test suite + characterization parity above.
+
+**Status.** Final (producers beyond tier-0 arrive in C6/C7; consumer
+rewiring in C8).
 
 ### C5 — `feat(runtime): versioned hardware/environment profile and calibration registry`
 
