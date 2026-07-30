@@ -2575,3 +2575,10 @@ The PR 3 implementation item may be marked complete once the final
 scope audit, CI review, and merge-readiness checklist pass. The
 completion statement refers to implementation and validation — never
 to universal behavioral improvement.
+
+**MERGED (2026-07-29)**: PR #145 merged with operator approval —
+merge commit `6fea68a`, method merge-commit, final PR head `bd52714`,
+CI run 30512294918 green (ruff / format / strict pyright / pytest).
+`enable_structured_health_feedback` remains `False`; P3-ACT remains a
+separate, unauthorized decision. Top-level PR 3 is complete under the
+implementation-focused claim.

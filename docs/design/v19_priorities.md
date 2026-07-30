@@ -257,16 +257,25 @@ unscheduled candidates live in `candidate_features_v19.md`.)
       effects will be evaluated during subsequent V19 real runs — no
       standalone matched-budget campaign is required for PR 2 or V19
       completion.)*
-- [ ] PR 3 — Structured HealthGate feedback propagation *(all work
-      complete except the merge itself: Layer 1 PASS, Layer 2 campaign
-      done — NOT SUPPORTED on primaries / zero harm, L3 N/A per the
-      2026-07-29 completion-claim revision (§2.0), PR #145 in final
-      merge review at head `65b0eb1`; flag default OFF)*
+- [x] PR 3 — Structured HealthGate feedback propagation *(COMPLETE
+      AND MERGED — PR #145, merge `6fea68a`, 2026-07-29, final head
+      `bd52714`, CI green incl. strict pyright. Layer 1 PASS;
+      execution reliability PASS; descriptive Layer-2 campaign
+      complete — no primary behavioral improvement under the tested
+      fixtures, no observed safety regressions; prompt treatment
+      retained as optional and DEFAULT OFF; L3 N/A for the merge
+      claim per the 2026-07-29 completion-claim revision (§2.0);
+      P3-ACT remains separate and NOT AUTHORIZED)*
 
 ### Parallel operational work
 
-- [ ] O1a — GPU clock/utilization/contention provenance
-- [ ] O2 — Single-chain launcher selector
+*(Scheduled 2026-07-29 as the next small V19 operator-tooling PR on
+`feat/v19-operator-provenance-launch-selection` — design draft
+`v19_priorities/o1a_o2_operator_tooling.md`. Optional, non-blocking:
+they do not gate or invalidate PR 1-3 completion.)*
+
+- [ ] O1a — GPU clock/utilization/contention provenance *(pending)*
+- [ ] O2 — Single-chain launcher selector *(pending)*
 
 ### Unscheduled candidate features
 
@@ -795,9 +804,9 @@ rev-4 gate PASS → 40-sample descriptive campaign, all evidence in
 
 - [x] Deterministic plumbing stop-and-show approved *(P3-V1 +
       per-commit stop-and-shows CB1-CB5)*
-- [ ] PR #145 merged *(draft; final merge-readiness review in
-      `pr3_healthgate_feedback.md` §14 — pending CI-green confirmation
-      and operator merge decision)*
+- [x] PR #145 merged *(operator approval 2026-07-29; merge commit
+      `6fea68a`, method: merge commit, final head `bd52714`, CI run
+      30512294918 green — ruff/format/strict-pyright/pytest)*
 - [x] Behavioral validation completed and reviewed *(Layer 2 complete;
       L3 N/A per the 2026-07-29 completion-claim revision above)*
 - [ ] Production activation approved *(P3-ACT — NOT AUTHORIZED;
@@ -806,10 +815,10 @@ rev-4 gate PASS → 40-sample descriptive campaign, all evidence in
       run-invariants-locked; OFF is golden-parity byte-identical to
       pre-PR3 — disabling IS the rollback)*
 - n/a — Post-activation HealthGate-valid rate review *(no activation)*
-- [ ] Top-level PR 3 complete *(per the 2026-07-29 revision: completes
-      on PR #145 merge with the implementation-focused claim; the
+- [x] Top-level PR 3 complete *(2026-07-29, on the PR #145 merge
+      `6fea68a` with the implementation-focused claim; the
       universal-behavioral-improvement completion path is explicitly
-      not claimed)*
+      not claimed; flag remains OFF)*
 
 **Candidate features (formerly PR 4a / 4b / 5 / 6 / 7+)**
 
