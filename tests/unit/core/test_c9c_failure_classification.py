@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from core.runtime_control.observation_store import component_calibration_eligible
 from core.runtime_control.records import AdmissionRecord, RuntimeObservation
@@ -86,7 +87,7 @@ class TestSchemaCompatibility:
     def test_the_decision_literal_is_unchanged(self):
         """Option B: no "aborted" value — every existing reader that keys
         on "admitted"/"rejected" keeps behaving correctly."""
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             AdmissionRecord(decision="aborted", stage="s")  # type: ignore[arg-type]
 
 

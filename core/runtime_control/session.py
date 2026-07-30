@@ -553,8 +553,7 @@ class RuntimeVerificationSession:
                 stage=stage,
                 avoided_predicted_runtime_seconds=adjusted or None,
                 reason=(
-                    "evidence-channel failure (infrastructure): "
-                    f"{self._evidence_channel_failure}"
+                    f"evidence-channel failure (infrastructure): {self._evidence_channel_failure}"
                 ),
                 **cost_fields,
             )
