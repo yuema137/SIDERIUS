@@ -2,11 +2,24 @@
 
 Purpose
 -------
-Catch architecturally infeasible proposals **before** the implementor runs,
-by asking the static formula from ``evaluate_time_skill`` what the draft
-config would cost. The proposer's reasoning stage (Commit 6) calls this
-wrapper on every draft; if ``factor > 1.0`` it reject-revises up to N
-times before committing.
+Surface a LOW-CONFIDENCE runtime risk signal for a draft proposal
+**before** the implementor runs, by asking the static formula from
+``evaluate_time_skill`` what the draft config would cost.
+
+C1 authority contract (docs/design/runtime_estimation_and_calibration.md
+§8.1, 2026-07-30): this estimate is ``static_uncalibrated`` provenance
+and is ADVISORY ONLY. It must never trigger proposal rejection or
+revision — the V19 wave-1 incident showed the static formula rejecting
+an 18.4M-parameter draft at a fabricated 84.64× factor and locking a
+"<400K parameters" constraint into trajectory context. Blocking runtime
+authority belongs exclusively to measured evidence (bounded live probe,
+in-process verification) via the shared decision policy (C4/C8).
+
+The ``provenance`` / ``advisory_only`` keys returned here are an
+INTERIM BRIDGE: they are producer-derived constants of this static
+path, not caller-settable policy. C3/C4 replace this dictionary
+authority with canonical typed provenance and policy-derived decisions
+(``runtime_decision_policy.decide(estimate, budget, mode)``).
 
 Why not call ``evaluate_time_skill.run_skill`` directly
 -------------------------------------------------------
@@ -126,8 +139,12 @@ def estimate_proposal_time(
 
     Returns:
         ``{"estimated_minutes": float, "factor": float, "verdict": str,
-           "feasible": bool}``. ``factor = estimated_minutes /
-        time_budget_minutes``.
+           "feasible": bool, "provenance": "static_uncalibrated",
+           "advisory_only": True}``. ``factor = estimated_minutes /
+        time_budget_minutes``. ``provenance`` and ``advisory_only`` are
+        constants of this static producer (see the module docstring):
+        callers must treat the result as advisory evidence and must not
+        derive blocking behavior from it.
 
     Raises:
         ValueError: ``num_params`` ≤ 0 or ``time_budget_minutes`` ≤ 0.
@@ -181,4 +198,9 @@ def estimate_proposal_time(
         "factor": round(factor, 3),
         "verdict": _verdict_phrase(feasible, total_min, time_budget_minutes),
         "feasible": feasible,
+        # Producer-derived constants of the static path — NOT caller-settable
+        # policy (interim bridge until C3/C4 typed provenance; see module
+        # docstring).
+        "provenance": "static_uncalibrated",
+        "advisory_only": True,
     }

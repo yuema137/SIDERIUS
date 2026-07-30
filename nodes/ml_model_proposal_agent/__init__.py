@@ -16,7 +16,6 @@ via the package path automatically.
 """
 
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
-    _MAX_PREFLIGHT_ATTEMPTS,
     _MAX_PROPOSING_RETRIES,
     _PROPOSER_INPUT_KEYS,
     PROPOSAL_COMMIT_PROMPT,
@@ -24,7 +23,7 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     LLMBridge,
     MLModelProposalAgent,
     _audit_proposer_components,
-    _build_preflight_rejection_block,
+    _build_preflight_advisory_note,
     _build_reasoning_prompt,
     _check_citation_discipline,
     _format_recent_gate_exhaustions_block,
@@ -36,13 +35,12 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
 __all__ = [
     "PROPOSAL_COMMIT_PROMPT",
     "PROPOSAL_REASONING_PROMPT",
-    "_MAX_PREFLIGHT_ATTEMPTS",
     "_MAX_PROPOSING_RETRIES",
     "_PROPOSER_INPUT_KEYS",
     "LLMBridge",
     "MLModelProposalAgent",
     "_audit_proposer_components",
-    "_build_preflight_rejection_block",
+    "_build_preflight_advisory_note",
     "_build_reasoning_prompt",
     "_check_citation_discipline",
     "_format_recent_gate_exhaustions_block",
