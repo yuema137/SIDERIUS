@@ -127,6 +127,7 @@ def local_validated_model(
     runtime_safety_factor: float = 1.0,
     runtime_trial_safety_factor: float | None = None,
     runtime_formal_safety_factor: float | None = None,
+    runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
 ) -> HyperparamTuningInput:
     """
@@ -296,6 +297,7 @@ def local_validated_model(
         runtime_safety_factor=runtime_safety_factor,
         runtime_trial_safety_factor=runtime_trial_safety_factor,
         runtime_formal_safety_factor=runtime_formal_safety_factor,
+        runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
     )
 

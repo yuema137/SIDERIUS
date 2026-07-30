@@ -1478,6 +1478,18 @@ class HyperparamTuningInput(BaseModel):
             "calibrated base factor."
         ),
     )
+    runtime_watchdog_safety_factor: float | None = Field(
+        default=None,
+        ge=1.0,
+        description=(
+            "V19 watchdog-only deadline multiplier (admission/watchdog "
+            "split, 2026-07-29). None (default) → the watchdog uses the "
+            "phase-effective admission factor exactly as V18 — omitting "
+            "this flag reproduces V18 behavior. When set, ONLY the "
+            "watchdog deadline uses it (both phases); admission keeps "
+            "the phase-effective factor. V19 5090 launch posture: 3.5."
+        ),
+    )
     runtime_watchdog_floor_seconds: float = Field(
         default=60.0,
         ge=0.0,

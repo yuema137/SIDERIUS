@@ -944,7 +944,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Phase-specific factor for TRIAL attempts; wins over "
-        "--runtime_safety_factor when set. V18 posture 2.0.",
+        "--runtime_safety_factor when set. Effective V18r posture 3.0.",
     )
     parser.add_argument(
         "--runtime_formal_safety_factor",
@@ -952,6 +952,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Phase-specific factor for FORMAL attempts; wins over "
         "--runtime_safety_factor when set.",
+    )
+    parser.add_argument(
+        "--runtime_watchdog_safety_factor",
+        type=float,
+        default=None,
+        help="V19 watchdog-only deadline multiplier (admission/watchdog "
+        "split). Omitted -> watchdog uses the phase-effective admission "
+        "factor exactly as V18. V19 5090 posture: 3.5.",
     )
     parser.add_argument(
         "--runtime_watchdog_floor_seconds",
@@ -1539,6 +1547,7 @@ def main():
             runtime_safety_factor=args.runtime_safety_factor,
             runtime_trial_safety_factor=args.runtime_trial_safety_factor,
             runtime_formal_safety_factor=args.runtime_formal_safety_factor,
+            runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
             runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
             # Advice
             human_advice_interpret=args.human_advice_interpret,

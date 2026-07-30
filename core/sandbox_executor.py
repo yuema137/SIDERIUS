@@ -410,6 +410,12 @@ def _watchdog_deadline_provider(
 ) -> Callable[[], tuple[float | None, str]]:
     """§4 deadline: ``max(floor, min(operator_budget, verified × safety))``.
 
+    The safety multiplier is the WATCHDOG-EFFECTIVE factor:
+    ``policy.watchdog.safety_factor`` when set (V19 admission/watchdog
+    split, 2026-07-29), else the shared ``policy.safety_factor`` —
+    admission always reads the shared factor, so setting the watchdog
+    override can never change admission behavior.
+
     The verified estimate comes from the attempt's LIVE observation
     sidecar (the RT2 event log) — the deadline tightens mid-flight as
     soon as the in-subprocess verification lands component predictions.
@@ -417,6 +423,11 @@ def _watchdog_deadline_provider(
     estimate_source)``; ``None`` disables the deadline (nothing to
     enforce yet).
     """
+    watchdog_factor = (
+        policy.watchdog.safety_factor
+        if policy.watchdog.safety_factor is not None
+        else policy.safety_factor
+    )
 
     def provider() -> tuple[float | None, str]:
         candidates: list[tuple[float, str]] = []
@@ -430,7 +441,7 @@ def _watchdog_deadline_provider(
                 if c.get("prediction") is not None
             ]
             if predicted:
-                estimate = sum(predicted) * policy.safety_factor
+                estimate = sum(predicted) * watchdog_factor
                 candidates.append((estimate, "verified_components"))
         if not candidates:
             return None, "none"
