@@ -104,7 +104,7 @@ Section status index:
 | §17 testing strategy | [PROPOSED] (maps into §23 validation plans) |
 | §18 acceptance criteria | [PROPOSED] — 33 restart-blocking criteria (operator-resolved list) |
 | §19 recovery plan | [OPEN] operator-gated; stop + forensics steps [x] done; restart gated on the COMPLETE architecture (§21 resolved) |
-| §20 decisions | D1/D2/D6/D7/D8 [RESOLVED — operator 2026-07-30]; D3/D4/D5 [OPEN, must resolve before the §24 campaign] |
+| §20 decisions | D1-D8 all [RESOLVED — operator 2026-07-30]; D3/D4/D5 resolved at the C7 gate and implemented in `calibration_policy.py` |
 | §22 design invariant | [CONFIRMED] as documented intent (RT1 rev 4), [PROPOSED] as enforced behavior at every edge |
 
 ---
@@ -975,7 +975,7 @@ Static predictions and LLM self-reported parameter counts must not update
 measured calibration tables.
 
 **Resolved update-eligibility policy** (operator, 2026-07-30 — baseline;
-D4 thresholds still open):
+D4 thresholds resolved at the C7 gate, see §20-D4):
 
 ```text
 clean live probe:
@@ -1868,21 +1868,87 @@ block on: deterministic post-implementation capacity impossibility;
 measured probe OOM; measured peak VRAM exceeding the configured
 budget.
 
-### D3. Contention threshold — OPEN (must be resolved before the §25 real-GPU campaign)
+### D3. Contention threshold — RESOLVED (operator, 2026-07-30)
 
-What telemetry thresholds define a contended probe?
+Contention is classified from **pre-probe external state and process
+identity**, never from the probe's own utilization:
 
-### D4. Calibration update policy — OPEN (baseline policy in §21-policy below; thresholds must be resolved before the §25 campaign)
+```text
+known foreign GPU process present                       → foreign_contended
+pre-probe external GPU memory > max(1 GiB, 10% of VRAM)  → foreign_contended
+pre-probe sustained GPU utilization >= 20% for >= 10 s   → foreign_contended
+telemetry unavailable OR unexplained clock/power throttling → unknown_contention
+only the current probe process                          → single_candidate_idle
+only the current probe + the explicitly registered peer  → pairwise_expected_peer
+```
 
-Which observations may update persistent calibration automatically?
+Self PID **and** child PIDs are excluded. An intended peer must be
+identified **explicitly** (registered PID), never inferred from a
+process name. Classification uses a **bounded sampling window**, not one
+instantaneous `nvidia-smi` sample. **All raw telemetry used for the
+classification is recorded.** These thresholds are **policy-versioned**
+(`calibration_policy@<semver>+<config-hash>`) and may change only
+through an explicit design update.
 
-### D5. Unknown model families — OPEN (must be resolved before the §25 real-GPU campaign)
+Implementation: `core/runtime_control/calibration_policy.py`
+(`CalibrationPolicy`, `classify_contention_window`,
+`sample_contention_window`) — see the §23-C7 record for the two derived
+implementation decisions (throttle-bit mask; unidentified foreign
+counts).
 
-When no similar history exists, should the system:
+### D4. Calibration update policy — RESOLVED (operator, 2026-07-30)
 
-* run a generic bounded probe;
-* run family-identification probes;
-* use a broad conservative prior before probing?
+Two-stage lifecycle: **candidate observation → validated observation →
+calibration-eligible**. Every measured observation is persisted as an
+immutable candidate when schema and content validation pass; it becomes
+calibration-authoritative only when provenance is measurement-backed, no
+foreign contention is present, hardware/environment compatibility
+passes, units and workload metadata are complete, the record hash and
+schema validate, it belongs to the correct concurrency bucket, no
+unsupported extrapolation is being treated as observation, and the
+required later comparison evidence exists.
+
+```text
+1 clean observation                            → persisted candidate only
+2 mutually consistent clean observations       → provisional calibration
+>= 3 consistent, no drift violation            → validated calibration
+consistency criterion: max rate / min rate <= 1.5 within one bucket
+```
+
+Setup, training, inference, I/O, idle and pairwise-concurrency buckets
+stay separate. Measured OOM, wall-cap hits and abnormal termination are
+valuable **failure evidence** but must never update throughput
+calibration. In-process verification and complete execution may validate
+an earlier probe only when their operation/workload units are
+comparable. All promotions are deterministic, versioned, and recorded as
+**new derived records** — an observation is never mutated in place.
+
+Implementation: `CalibrationPromotion` (`registry_schemas.py`),
+`evaluate_bucket` / `validate_against_verification` /
+`evaluate_promotions` / `detect_drift` (`calibration_policy.py`),
+`record_promotion` / `bucket_status` (`calibration_registry.py`).
+
+### D5. Unknown model families — RESOLVED (operator, 2026-07-30)
+
+An unknown family must **not** prevent the bounded live probe:
+
+```text
+proposal stage       → static/historical evidence is advisory only
+post-implementation  → run the generic bounded live probe on the actual candidate
+after measurement    → classify into an existing family ONLY when supported by
+                       explicit implementation metadata or deterministic
+                       structural features
+otherwise            → model_family = "unknown" (or a generic feature bucket)
+```
+
+The candidate is never forced into the nearest known family, and an
+unknown candidate never receives historical-family calibration authority
+before local measurement. A dedicated family-identification probe is
+deferred as an optimization — not required for the V19 restart.
+
+Implementation: `classify_model_family` + family-keyed buckets
+(`calibration_policy.py`), `CalibrationObservation.model_family`,
+`probe_observations(..., model_family=...)`.
 
 ### D6. Probe reuse — RESOLVED (operator, 2026-07-30)
 
@@ -2604,15 +2670,37 @@ derivation, D3/D4/D5 resolution REQUIRED before this stage's contention
 thresholds finalize (STOP AND ASK = operator decision point). Deps:
 C5, C6.
 **Implementation plan.**
-- [ ] Update-eligibility enforcement (§10.3 table) at the single write
-      seam.
-- [ ] Uncertainty per component (empirical error distributions from
-      history).
-- [ ] Applicability labels + confidence/eligibility downgrade on
-      unsupported extrapolation.
-- [ ] Drift/staleness rules (software-stack identity comparison).
-- [ ] Concurrency buckets (idle vs pairwise never cross-written).
-- [ ] Doc sync.
+- [x] Update-eligibility enforcement (§10.3 table) at the single
+      PROMOTION seam — `eligibility_problems()` /
+      `evaluate_bucket()`. Per D4's two-stage lifecycle the WRITE seam
+      stays open to every schema-valid measurement (candidates are
+      evidence); eligibility governs whether a candidate may back
+      calibration authority. Priors can never enter at all: the
+      `CalibrationObservation` schema rejects non-measurement
+      provenance.
+- [x] Uncertainty per component (`bucket_uncertainty`): cross-observation
+      max/min ratio + the widest producer-recorded within-observation
+      spread. No distribution is invented where none was measured.
+- [x] Applicability labels + authority downgrade
+      (`classify_applicability`, `applicability_for_request`,
+      `downgrade_for_applicability` — demotes provenance to
+      `historical_observation_prior`, which is what removes blocking
+      eligibility since eligibility is derived, never assigned).
+- [x] Drift/staleness rules (`detect_drift`): software-stack identity is
+      part of the bucket key, so a stack change starts a fresh bucket by
+      construction; ratio violations are reported, never averaged away.
+- [x] Concurrency buckets (idle vs pairwise never cross-written) —
+      plus operation, unit, hardware, EXECUTION ENVIRONMENT and family.
+- [x] D5 unknown-family handling (`classify_model_family`,
+      `CalibrationObservation.model_family`,
+      `probe_observations(model_family=...)`).
+- [x] D3 windowed contention classifier + the raw PID/throttle telemetry
+      it needs (`classify_contention_window`, `sample_contention_window`,
+      `probe.descendant_pids`, enriched `ContentionSnapshot`).
+- [x] Deterministic promotion records persisted
+      (`CalibrationPromotion`, `registry.record_promotion` /
+      `load_promotion` / `bucket_status`, rebuild + tamper detection).
+- [x] Doc sync (§20-D3/D4/D5 resolutions + this record).
 **Unit validation.** every eligibility row; label boundaries;
 drift cases (§17.8); bucket isolation; static/LLM values can never
 reach the write path (type-enforced).
@@ -2627,7 +2715,99 @@ floor); clock skew in recency.
 **Migration/rollback.** write path additive; legacy table still
 read-only.
 **Boundary.** Calibration lifecycle only.
-- [ ] Evidence recorded.
+
+**Implementation record (C7).**
+
+*Files.* `core/runtime_control/calibration_policy.py` (new, ~700 lines);
+`registry_schemas.py` (+`CalibrationPromotion`, `model_family`,
+`"provisional"` status, non-authoritative `validation_status` doc);
+`calibration_registry.py` (+`promotions/` directory, `record_promotion`,
+`load_promotion`, `iter_promotions`, `bucket_status`, promotion-aware
+`rebuild_index` and `as_estimate`); `probe.py` (+`descendant_pids`,
+`_query_throttle_reasons`, PID-level `ContentionSnapshot`,
+`probe_observations(model_family=...)`).
+
+*Authority chain.* observation (immutable candidate, always
+`unvalidated`) → `CalibrationPromotion` (derived, content-addressed,
+cites ≥2 source observation IDs) → `registry.bucket_status()` →
+`as_estimate()`. Because observations are never mutated, the promotion
+record is the ONLY status source; `as_estimate` now consults it.
+
+*Derived decisions taken during implementation* (each is
+policy-versioned or documented, none silently chosen):
+
+1. **`provisional` is not calibration-authoritative.** D4 names the
+   middle state "provisional calibration"; `as_estimate` keeps measured
+   provenance only at `validated` and demotes `provisional` to a
+   historical prior with an explicit warning. Conservative reading —
+   raising it later is a one-line policy change.
+2. **Throttle-bit mask.** D3 says "unexplained clock/power throttling →
+   unknown_contention", but `clocks_throttle_reasons.active` reports
+   benign states too. The idle RTX 5090 on this deployment reports
+   `0x4` (SwPowerCap) continuously, so treating any active bit as
+   throttling would mark EVERY measurement `unknown_contention`. The
+   policy therefore treats only genuine derating bits as unexplained:
+   `HwSlowdown 0x08 | SyncBoost 0x10 | SwThermalSlowdown 0x20 |
+   HwThermalSlowdown 0x40 | HwPowerBrakeSlowdown 0x80`
+   (`DEFAULT_DERATING_THROTTLE_MASK`). It is a policy field, so changing
+   it changes the policy identity. **Operator may revise.**
+3. **Missing throttle telemetry is not evidence of throttling.** The
+   field is optional (older drivers / non-NVIDIA); `None` leaves the
+   verdict to the core telemetry-availability rule.
+4. **A foreign COUNT without PIDs still contends.** If telemetry reports
+   N compute processes but no PID detail, the unidentified remainder is
+   treated as foreign — a peer must be positively identified, never
+   assumed.
+5. **Execution environment is part of the bucket key.** §3.3 grants
+   local authority only to local evidence, so cross-machine
+   observations form their own bucket and can never be promoted into
+   local blocking authority.
+6. **`bounded_extrapolation` is RESERVED, never assigned.** Choosing how
+   far past measured evidence authority may travel is a margin
+   decision; inventing one would recreate the uncalibrated-extrapolation
+   failure this subsystem exists to prevent. Anything outside the
+   measured range is `unsupported_extrapolation` until an operator fixes
+   a margin. **Operator decision pending — not restart-blocking** (the
+   conservative label is strictly safer).
+
+*Boundary honored.* No production consumer was rewired: the probe engine
+still uses its C6 count-based classifier, and the windowed D3 classifier
+is exercised by tests only until C8 wires it. No budget, portion, or
+scientific setting changed. V19 remains stopped.
+
+- [x] Evidence recorded: `tests/unit/core/test_calibration_policy.py` —
+      **61 tests** (D3: idle / unregistered-PID / registered-peer /
+      peer+stranger / no-name-inference / count-without-PIDs / 10 %
+      threshold on a large device / 1 GiB floor on a small device /
+      sustained-vs-spike utilization / telemetry gap / derating throttle
+      / benign power-cap / absent throttle field / policy-versioned
+      thresholds / bounded 5-sample window with no trailing sleep / raw
+      telemetry payload. D4: 1→candidate, 2→provisional, 3→validated,
+      ratio 2.0 blocked, ratio exactly 1.5 promoted, determinism under
+      input reordering, observations unmutated, mixed-bucket and dirty
+      input rejected, failure-outcome evidence excluded, 8 bucket
+      dimensions separated, idle-vs-pairwise isolation, cross-machine
+      isolation, verification-agreement route incl. incomparable units /
+      disagreement / wrong provenance / contended verification. D5:
+      declared metadata, structural feature, uncertain→unknown, unknown
+      never folded into a known family, unknown promotes on its own
+      evidence. Drift/uncertainty/applicability incl. acceptance (b)).
+      `test_calibration_registry.py` — **+7** promotion-persistence
+      tests (index, bucket_status authority, end-to-end authority
+      restoration, unindexed-source rejection, idempotent re-record,
+      rebuild dropping orphaned promotions, tamper detection); two
+      pre-C7 tests updated because they asserted authority from a
+      self-declared `validation_status`, which D4 forbids.
+      `test_runtime_probe.py` — **+4** (real-child `descendant_pids`,
+      child-PID exclusion, explicit `exclude_pids`, declared family on
+      observations). Pseudo integration:
+      `tests/integration/workflows/test_calibration_lifecycle_pseudo.py`
+      — **4 tests** (candidate-only has no authority; 3 consistent
+      probes promote both buckets and restore measured authority;
+      contended probes persist but never promote; validated history
+      cannot price an 18.4M-parameter request).
+      Full `tests/unit/core/` — **685 passed, 5.9 s**; targeted ruff
+      check + format clean.
 
 ### C8 — `refactor(runtime): wire proposer, tuner, admission, watchdog, and reporting to the shared estimator`
 
