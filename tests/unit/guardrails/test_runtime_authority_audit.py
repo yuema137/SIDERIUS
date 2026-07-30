@@ -132,3 +132,40 @@ def test_no_second_authoritative_contention_classifier():
     assert not hasattr(probe, "classify_concurrency")
     source = _source("core/runtime_control/probe.py")
     assert "sample_contention_window" in source
+
+
+def test_all_consumers_resolve_one_shared_policy_identity():
+    """C8g closure: the proposer and the TimeEval gate must decide with the
+    SAME policy object, resolved from the process-wide factory — not with
+    two independently constructed equals that could drift apart."""
+    from agent.skills.evaluate_time_skill import wrapper as time_wrapper
+    from core.runtime_control.estimator import shared_runtime_components
+    from nodes.ml_model_proposal_agent.ml_model_proposal_agent import _runtime_policy
+
+    estimator, policy = shared_runtime_components()
+    assert shared_runtime_components() is shared_runtime_components()  # one per process
+    assert _runtime_policy() is policy
+
+    gate = time_wrapper._gate_decision(
+        result_shape={
+            "status": "success",
+            "estimated_minutes": 1.0,
+            "breakdown": {"source": "static_uncalibrated"},
+            "phase_breakdown": {},
+            "inference_batch_uncalibrated": False,
+        },
+        effective_budget_minutes=10.0,
+        runtime_phase="trial",
+    )
+    assert gate["policy_identity"] == policy.identity
+    assert estimator.identity.startswith("runtime_estimator@")
+
+
+def test_no_consumer_constructs_its_own_policy():
+    """A private `RuntimeDecisionPolicy()` in a consumer is the divergence
+    this closure removes; the factory is the only construction site."""
+    for rel, _ in CONSUMERS:
+        code = _code_only(rel)
+        assert "RuntimeDecisionPolicy()" not in code, (
+            f"{rel} constructs its own policy — resolve shared_runtime_components() instead (C8g)"
+        )

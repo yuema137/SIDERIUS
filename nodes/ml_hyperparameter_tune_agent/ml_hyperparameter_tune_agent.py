@@ -183,6 +183,48 @@ def _runtime_phase_for(is_trial: bool) -> str:
     return "trial" if is_trial else "formal"
 
 
+def _run_time_preflight(
+    *,
+    sandbox,
+    active_params: dict,
+    time_budget_minutes: float,
+    data_dir: str | None,
+    memory_history: list,
+    is_trial: bool,
+) -> dict:
+    """Invoke the wall-time pre-flight gate for one attempt.
+
+    Extracted from ``run()`` (C8g): that method sits at pyright's
+    strict-mode complexity ceiling, and this block carried three inline
+    conditionals plus an eight-argument call. Behavior is unchanged —
+    the same skill, the same arguments, the same log line.
+
+    ``inference_per_psd_seg_ms_hint`` is the most recent successful trial
+    round's measured per-PSD-segment inference cost; the wrapper prefers
+    it over the legacy x2.7 ratio when present and > 0.
+    ``allow_store_reuse`` is trial-only (RT3 §3): a formal round's
+    authority is the in-subprocess verification, never a stored prior.
+    """
+    inference_hint = _latest_trial_inference_marginal(memory_history)
+    hint_text = f"{inference_hint:.2f} ms/psd_seg" if inference_hint else "none"
+    mode = _runtime_phase_for(is_trial)
+    print(
+        f"\n[Pre-flight 2/2] Time check (mode={mode}, "
+        f"budget={time_budget_minutes} min, inf_hint={hint_text})..."
+    )
+    return _run_skill(
+        "evaluate_time_skill",
+        sandbox,
+        **active_params,
+        time_budget_minutes=time_budget_minutes,
+        data_dir=data_dir,
+        inference_per_psd_seg_ms_hint=inference_hint,
+        allow_store_reuse=is_trial,
+        observation_store_root=os.path.join(sandbox.base_dir, "runtime_observations"),
+        runtime_phase=mode,
+    )
+
+
 def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
@@ -2792,33 +2834,13 @@ class HyperparamTuningAgent:
                         # branches. ``memory_history`` is fetched from
                         # ``sandbox.get_summary()`` earlier in this attempt
                         # and is iter-scoped under the chain runner.
-                        inference_hint = _latest_trial_inference_marginal(memory_history)
-                        print(
-                            f"\n[Pre-flight 2/2] Time check "
-                            f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                            f"budget={chosen_time_budget} min, "
-                            f"inf_hint="
-                            f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
-                            f")..."
-                        )
-                        time_check = _run_skill(
-                            "evaluate_time_skill",
-                            sandbox,
-                            **active_params,
+                        time_check = _run_time_preflight(
+                            sandbox=sandbox,
+                            active_params=active_params,
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
-                            inference_per_psd_seg_ms_hint=inference_hint,
-                            # RT3 (§3 table): trial rounds may reuse a valid
-                            # store hit instead of warming up; formal rounds
-                            # never (their authority is the in-subprocess
-                            # verification).
-                            allow_store_reuse=plan.is_trial,
-                            observation_store_root=os.path.join(
-                                sandbox.base_dir, "runtime_observations"
-                            ),
-                            # C8c: the phase the shared runtime policy decides
-                            # under (see _runtime_phase_for).
-                            runtime_phase=_runtime_phase_for(plan.is_trial),
+                            memory_history=memory_history,
+                            is_trial=plan.is_trial,
                         )
                         if time_check.get("status") == "error":
                             # Includes the policy's ABORT path: an

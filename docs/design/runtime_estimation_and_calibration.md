@@ -2969,6 +2969,79 @@ production prediction carries.
       green on a clean checkout / in CI). Full `tests/integration` —
       **142 passed, 130 skipped** (real-API tiers skip without keys).
 
+### C8 closure audit (operator-requested, 2026-07-30)
+
+A read-only trace of the two residual limitations reported at C8
+completion. Findings, with the evidence that produced them:
+
+**Finding 1 — `REQUEST_PROBE` has no executor in production.**
+`run_bounded_probe` has ZERO production call sites (grep over the repo,
+excluding tests and the operator-gated smoke script). Likewise
+`production_probe_executors`, `probe_observations` and
+`CalibrationRegistry(...)`. Consequently: no probe runs, no probe record
+is ever persisted, no estimate is rebuilt from one, and the C5/C7
+registry is never written outside tests.
+
+There is NO infinite-loop risk: `REQUEST_PROBE` is non-blocking at the
+pre-flight seam (`feasible = kind != "REJECT"`), so the round proceeds
+into training, where the RT2 in-subprocess verification produces real
+measured evidence and `decide_admission` acts on it. So formal EXECUTION
+is governed by measurement — but the decision vocabulary promises a
+probe that nothing runs, and the pre-flight decision itself is made
+without one.
+
+Classification: **production wiring gap, not C12 validation work.**
+Wiring it changes LIFECYCLE ORDERING (a bounded probe would run between
+implementation and formal execution) and requires real GPU execution to
+validate, both of which are operator stop conditions. Proposed for C9
+scope — see the C9 entry — rather than implemented autonomously here.
+
+**Finding 2 — consumers did not share an estimator/policy instance.**
+Before this closure, `RuntimeDecisionPolicy()` was constructed
+independently in two places (the proposer, cached; the TimeEval gate, per
+call) and `production_estimator_factory()` had no production caller at
+all. The identities matched — the policy is stateless and its identity is
+a pure function of its payload — but nothing enforced that.
+
+Fixed here (**C8g**): `estimator.shared_runtime_components()` is the
+process-wide resolution point; both consumers now resolve it, and two
+guardrail tests assert that they get the SAME object and that no consumer
+constructs its own policy.
+
+**Finding 3 (new, found during this audit) — admission decides outside
+the policy.** `RuntimeVerificationSession.decide_admission`
+(`train_engine_sandbox.py:715,829`) computes `adjusted > budget` →
+reject privately, and never calls `RuntimeDecisionPolicy`. Its evidence
+IS measurement-backed, so the policy would return the same verdict for
+the same input, and its numerics are pinned by C8a — but "no consumer
+computes authoritative runtime decisions outside the shared policy" is
+not yet literally true. Routing it through the policy needs a decision on
+how "verification failed → fail closed (§2.11)" maps into the decision
+vocabulary, which the policy has no rule for today. **Not invented
+here** — proposed as a C9 item with an explicit semantics decision.
+
+**Why the estimator OBJECT is still not the single assembly path.**
+`DefaultRuntimeEstimator.estimate()` resolves only the tier-0 static
+producer. Consumers that already hold better evidence — TimeEval's
+warmup measurement, RT2's verification, a probe record — assemble
+through the canonical adapters in `estimate_types` instead. Routing them
+through the estimator TODAY would downgrade measured evidence to a
+static prior, which is the opposite of the design intent. The correct
+fix is to let the estimator accept caller-supplied measured evidence and
+resolve §8.4 precedence over {probe record, registry history, caller
+measurement, static}. That is a factory-lifecycle change → C9.
+
+Audit table (production paths only):
+
+| Consumer | Policy source | Estimate assembly | Registry | Verdict |
+|---|---|---|---|---|
+| proposer | shared factory (C8g) | `from_proposer_preflight` | none | policy-decided |
+| TimeEval gate | shared factory (C8g) | `from_time_eval_result` | none | policy-decided |
+| watchdog | shared vocabulary (`MEASUREMENT_BACKED_SOURCES`) | none — sums component predictions | none | produces a DEADLINE, not a decision kind; no policy call by design |
+| admission (RT2) | **none** | none — sums `RuntimePrediction` | none | **Finding 3: private comparison** |
+| probe | n/a (evidence producer) | `extrapolate_probe` → `make_estimate` | writes observations — but no production caller (Finding 1) | not wired |
+| reporting | none | none | none | not wired |
+
 ### C9 — `feat(runtime): formal launch invariant, behavioral self-test, and run-invariant locking`
 
 **Goal.** §12 with the typed-policy guard (NO introspection): construct

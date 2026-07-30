@@ -544,14 +544,14 @@ def _gate_decision(
     provenance — and therefore its authority — is derived from the
     measurement path the estimate actually came from, never asserted here.
     """
-    from core.runtime_control.decision_policy import (
-        RuntimeBudget,
-        RuntimeDecisionPolicy,
-        RuntimeMode,
-    )
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
     from core.runtime_control.estimate_types import from_time_eval_result
+    from core.runtime_control.estimator import shared_runtime_components
 
-    policy = RuntimeDecisionPolicy()
+    # C8g: the process-wide policy, not a per-call construction — the
+    # proposer, this gate, and any future consumer must demonstrably
+    # decide with the SAME policy identity.
+    policy = shared_runtime_components()[1]
     try:
         estimate = from_time_eval_result(result_shape)
     except ValueError as exc:

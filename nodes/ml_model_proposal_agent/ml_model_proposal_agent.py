@@ -110,11 +110,13 @@ def _live_model_registry_names(registry: CapabilityRegistry) -> list[str]:
 
 @lru_cache(maxsize=1)
 def _runtime_policy():
-    """The one shared decision policy (C8). Cached: constructing it hashes
-    the behavioral payload into the policy identity."""
-    from core.runtime_control.decision_policy import RuntimeDecisionPolicy
+    """The one shared decision policy (C8g): resolved from the process-wide
+    `shared_runtime_components()` factory, so the proposer and the tuner's
+    pre-flight demonstrably decide with the same policy identity rather
+    than with two independently constructed equals."""
+    from core.runtime_control.estimator import shared_runtime_components
 
-    return RuntimeDecisionPolicy()
+    return shared_runtime_components()[1]
 
 
 def _build_preflight_advisory_note(

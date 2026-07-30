@@ -19,6 +19,7 @@ injection seams.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Any, Protocol
 
 from core.runtime_control.decision_policy import RuntimeDecisionPolicy
@@ -110,6 +111,35 @@ class RuntimeEstimatorFactory:
             DefaultRuntimeEstimator(static_producer=self._static_producer),
             RuntimeDecisionPolicy(),
         )
+
+
+@lru_cache(maxsize=1)
+def shared_runtime_components() -> tuple[DefaultRuntimeEstimator, RuntimeDecisionPolicy]:
+    """The ONE estimator + policy pair for this process (C8g).
+
+    §7.1 requires every runtime consumer to resolve the same factory, so
+    that a decision made in the proposer and a decision made at the
+    pre-flight gate are demonstrably the same subsystem — same estimator
+    identity, same policy identity, same vocabulary. Consumers call this
+    instead of constructing their own ``RuntimeDecisionPolicy()``.
+
+    Cached per process: both objects are stateless and identity-stable,
+    so sharing them costs nothing and makes divergence impossible rather
+    than merely unlikely.
+
+    KNOWN LIMITATION (C8 closure audit, 2026-07-30): the estimator object
+    itself currently resolves only the tier-0 static producer, so
+    consumers that already hold BETTER evidence — TimeEval's warmup
+    measurement, RT2's in-process verification, a C6 probe record —
+    assemble their estimate through the canonical adapters in
+    ``estimate_types`` rather than by calling ``estimator.estimate()``.
+    Routing them through the estimator would today DOWNGRADE measured
+    evidence to a static prior. Making the estimator accept
+    caller-supplied measured evidence and resolve §8.4 precedence over
+    {probe record, registry history, caller measurement, static} is the
+    remaining half of "one subsystem" and is tracked as C9 scope.
+    """
+    return production_estimator_factory().build()
 
 
 def production_estimator_factory() -> RuntimeEstimatorFactory:
