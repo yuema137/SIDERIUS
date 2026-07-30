@@ -13,6 +13,9 @@
 #   bash sdsc_submission_scripts/launch_v18_wave1.sh 1a            # LAUNCH 1a
 #   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b --dry-run
 #   bash sdsc_submission_scripts/launch_v18_wave1.sh 1b            # LAUNCH 1b
+#   bash sdsc_submission_scripts/launch_v18_wave1.sh 1a --only v18r_loss_04_09
+#       # V19 O2: launch a subset of the phase roster (comma-separated
+#       # run_names; canonical order; invalid selections fail pre-preflight)
 #
 # !!! VRAM REQUIREMENT (portability audit 2026-07-24) !!!
 #   Each chain carries --trial_vram_budget_gb 16 / --formal_vram_budget_gb 16.

@@ -1168,29 +1168,52 @@ tuner-input/chain-CLI plumbing level.
      error-ledger-driven per-phase safety factors instead of fixed
      operator constants, driven by O1a data.
 
-   **O1a progress checkpoints**
+   **O1a progress checkpoints** *(implemented 2026-07-29 as stable
+   run-level environment provenance — design
+   `v19_priorities/o1a_o2_operator_tooling.md` §1: the operator scope
+   decision preferred stable facts over live clock/utilization
+   monitoring, which remains out of scope)*
 
-   - [ ] Required GPU clock/utilization/contention fields selected
-   - [ ] Collection overhead estimated
-   - [ ] Recording-only implementation completed
-   - [ ] Observation-schema compatibility verified
-   - [ ] Missing-sensor degradation verified
-   - [ ] Multi-chain provenance validated
-   - [ ] No admission or watchdog behavior change confirmed
+   - [x] Required fields selected *(design §1.2: multi-GPU enumeration,
+         driver, CUDA_VISIBLE_DEVICES, platform/python, repo commit,
+         collection_errors)*
+   - [x] Collection overhead estimated *(one discovery per run; two
+         bounded 5s external probes)*
+   - [x] Recording-only implementation completed *(commit `ab339ea` —
+         extends the canonical HardwareContext manifest)*
+   - [x] Observation-schema compatibility verified *(pre-O1a manifests
+         load with defaults; regression test)*
+   - [x] Missing-sensor degradation verified *(nvidia-smi missing/
+         timeout/malformed → explicit collection_errors, never abort)*
+   - [x] Multi-chain provenance validated *(manifest is per
+         run_name/workspace — unchanged lifecycle, consumer suites
+         green)*
+   - [x] No admission or watchdog behavior change confirmed
+         *(recording-only; 1206 core/consumer tests passed)*
    - [ ] PR merged
 2. **Launcher single-chain selector (O2)** — `launch_v18_wave1.sh {1a|1b}`
    cannot restart one chain of a pair (the Wave-1A loss restart needed a
    hand-mirrored `run_chain.sh` command). Add `--only <run_name>`.
 
-   **O2 progress checkpoints**
+   **O2 progress checkpoints** *(implemented 2026-07-29 — design
+   `v19_priorities/o1a_o2_operator_tooling.md` §2)*
 
-   - [ ] Current launcher behavior audited
-   - [ ] `--only <run_name>` interface approved
-   - [ ] Valid-chain selection implemented
-   - [ ] Invalid-chain rejection implemented
-   - [ ] Pair-launch default behavior preserved
-   - [ ] Dry-run and shell-parity tests passed
-   - [ ] Documentation updated
+   - [x] Current launcher behavior audited *(unit = chains in the
+         per-phase roster; queue-runner selector excluded, recorded
+         follow-up)*
+   - [x] `--only <run_name[,run_name...]>` interface approved
+         *(duplicates rejected; canonical order — operator decisions
+         2026-07-29)*
+   - [x] Valid-chain selection implemented *(`filter_roster()` in
+         `_chain_common.sh`, side-effect-free; commit `4b3f469`)*
+   - [x] Invalid-chain rejection implemented *(unknown/duplicate/blank
+         fail BEFORE preflight, valid names listed, no fallback)*
+   - [x] Pair-launch default behavior preserved *(omitted `--only` =
+         identity; tested)*
+   - [x] Dry-run and shell-parity tests passed *(13 new selection
+         tests + shell-parity/sdsc suites 131 passed)*
+   - [x] Documentation updated *(running_chain_test.md + launcher
+         header)*
    - [ ] PR merged
 
 ## 4. Validation and Evaluation Standard (V19-wide — operator revisions, 2026-07-27)

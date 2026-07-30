@@ -163,6 +163,39 @@ new launch plans against `launch_v18_wave1.sh`, not against the
 previous PR's command. Full note:
 `docs/memories/project_watchdog_safety_factor_lilab.md`.
 
+### Selective launching and runtime provenance (V19 O1a/O2)
+
+**Selective launching (`--only`)** — `launch_v18_wave1.sh` accepts an
+optional chain filter within the phase roster:
+
+```bash
+bash sdsc_submission_scripts/launch_v18_wave1.sh 1a --only v18r_loss_04_09
+bash sdsc_submission_scripts/launch_v18_wave1.sh 1b --only v18r_arch_10_14 --dry-run
+```
+
+Omitting `--only` launches the full phase roster exactly as before.
+Names come from the phase's roster; unknown names, duplicates, and
+blank selections fail BEFORE preflight (listing the valid names), with
+no fallback to the full set. Multiple names are comma-separated and
+always launch in canonical roster order regardless of the order given;
+the resolved selection is echoed as `[selection]`. Launch selection is
+operational only — it does not touch any chain's workspace,
+run-invariants lock, or resume semantics.
+
+**Runtime hardware provenance (recording-only)** — every run's
+canonical hardware manifest `{workspace}/{run_name}_hardware.json`
+(written at run start, reused by subprocesses) now also records:
+platform, Python version, `CUDA_VISIBLE_DEVICES`, ALL visible GPUs in
+logical-index order (name/memory/compute capability), the NVIDIA
+driver version (bounded best-effort `nvidia-smi` probe), the repo
+commit, and `collection_errors`. All new fields are best-effort: a
+failed probe records an explicit error entry and leaves the field
+null — collection can never abort a run, values are never fabricated,
+CPU-only hosts record an explicit unavailable state, and no
+environment variable other than `CUDA_VISIBLE_DEVICES` is captured.
+Old manifests remain loadable; behavior (training, admission,
+watchdog, scoring) is unchanged.
+
 ### Chain formal-incumbent coupling (V19 PR 1)
 
 Two related tuner inputs, forwarded from the chain layer:
