@@ -2359,13 +2359,40 @@ compatibility; content hashing; corruption detection; NO writers except
 the validated observation path (C7). Deps: C3 (types), C4 (factory
 consumes). 
 **Implementation plan.**
-- [ ] Inspect O1a fields vs §9.1 list; extend collection.
-- [ ] Registry schema (all §10.2 fields), atomic IO, hash identity.
-- [ ] Compatibility checker (hardware/software/dtype/schema) — explicit
-      verdicts, never silent reuse.
-- [ ] Legacy k-table read-only adapter (extends the existing
-      `to_legacy_prior_entries` seam).
-- [ ] Doc sync.
+- [x] `core/runtime_control/registry_schemas.py`: versioned typed
+      schemas — RegistryManifest, HardwareCompatibilityProfile,
+      ExecutionEnvironmentProfile (operator amendment §3: TWO separate
+      hardware concepts; no hostname anywhere; stable installation
+      UUID), CalibrationObservation (full field list per the approval
+      §6; content hash EXCLUDES timestamp_metadata; validation_status
+      IS content — a status change is a NEW record; schema-enforced:
+      prior provenance can never be stored as a measured observation,
+      closing the fallback-25 masquerade), CalibrationSummary (derived
+      view with source IDs + generation anchor), LegacySourceReference.
+      Full-digest IDs `sha256:<64hex>`; 12-char display alias only.
+- [x] `core/runtime_control/calibration_registry.py`: split layout
+      (registry.json index + per-record content-named files under
+      observations/ hardware_profiles/ environment_profiles/ +
+      rebuildable summaries/ + installation_id), tmp+rename atomic
+      writes, advisory flock for index read-modify-write,
+      record-before-index commit ordering (crash → orphan re-adopted,
+      never a dangling index entry), rebuild_index with per-file hash
+      verification (corruption/tamper exclusion + report),
+      derive_summary + versioned stale-detected cache,
+      SIDERIUS_CALIBRATION_DIR honored (registry coexists with the
+      legacy files under the same override dir).
+- [x] Cross-machine authority rule (§3.3): `as_estimate` demotes
+      evidence from a different execution environment (or unvalidated
+      local evidence) to `historical_observation_prior` — tier 1,
+      never blocking alone; local validated evidence keeps measured
+      provenance.
+- [x] Legacy k-table adapter `adapt_legacy_k_table`: read-only
+      (byte-identity asserted), content-hash + adapter-version
+      reference, entries stamped legacy provenance via the existing C3
+      adapter.
+- [x] Doc sync (this section). O1a §9.1 field extension deferred to C6
+      (the probe producer collects the profile inputs — recorded as a
+      C6 dependency, not silently dropped).
 **Unit validation.** schema round-trip; corruption → detected; 
 incompatible keys → explicit rejection (each §17.8 case); adapter on
 the REAL 720-entry table; env override.
@@ -2379,7 +2406,55 @@ existing k-table).
 **Migration/rollback.** Old file untouched (read-only adapter);
 registry additive.
 **Boundary.** Profile + registry + adapter.
-- [ ] Evidence recorded.
+- [x] Evidence recorded: `tests/unit/core/test_calibration_registry.py`
+      — **25 tests** covering the operator §7 list: deterministic
+      canonical IDs; full-digest + display alias; identical-record
+      dedup vs semantic-difference non-dedup; 8-thread × 40-record
+      concurrent writes with index integrity + per-record hash
+      verification; interrupted-write invisibility; index
+      reconstruction; tamper detection (load raises, rebuild excludes
+      + reports); orphan re-adoption; stale-cache detection via
+      generation + source-ID subset; environment separation under an
+      identical compatibility profile; cross-machine → historical-
+      prior-only; local-validated keeps measured provenance;
+      local-unvalidated demoted; env-var override; read-only legacy
+      adapter (source bytes unchanged, idempotent referencing);
+      adapted entries stay `legacy_calibration_prior`; corrupt-index
+      error names rebuild_index; generation increments only on
+      change. Full `tests/unit/core/` — **586 passed, 5.1 s**; ruff
+      check + format clean; consumer diff EMPTY.
+
+#### Implementation record — 2026-07-30 / C5
+
+**Question encountered.** (a) How to make concurrent observation
+writes safe without a heavyweight store? (b) Where does the
+installation UUID live? (c) Is `validation_status` content or
+metadata? (d) O1a profile-collection extension — in C5 or C6?
+
+**Audit evidence.**
+- Existing `observation_store.py` calibration keys/eligibility — the
+  registry reuses the concepts at cross-run scope; name collision with
+  records.RuntimeObservation avoided via `CalibrationObservation`.
+- Existing k-table atomic write (tmp+rename) — same primitive adopted;
+  index read-modify-write additionally flock-guarded (rename alone
+  cannot close the read-modify-write race).
+
+**Decision.** Content-named one-file-per-record (idempotent concurrent
+writes, natural dedup, tamper-evident filenames); flock only around
+the small index; record-before-index ordering; installation UUID file
+inside the registry root; validation_status IN the hash (immutable
+records — revalidation is a new record); profile COLLECTION deferred
+to C6 where the probe producer gathers the inputs (schemas are C5,
+population is C6).
+
+**Rationale.** Matches the approval's atomicity principles with the
+smallest reliable mechanism; keeps records immutable and the index
+rebuildable; no privacy-sensitive identifiers.
+
+**Validation.** The 25-test suite above.
+
+**Status.** Final (C6 populates profiles + observations; C7 owns the
+validated write policy).
 
 ### C6 — `feat(runtime): post-implementation bounded live probe (setup, training, inference, VRAM)`
 
