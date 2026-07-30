@@ -23,7 +23,9 @@ from agent.schemas.health_feedback import (
 )
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 
-FIXTURE_VERSION = "p3l2p-fixtures-2"  # rev 3: + production static vocab seed
+FIXTURE_VERSION = (
+    "p3l2-fixtures-3"  # full campaign: + S3 (recovery/stale) + S4 (conflicting near-threshold)
+)
 
 
 def production_vocab_seed():
@@ -57,7 +59,9 @@ HEALTHY_CONFIG = {
 }
 
 
-def _blocking_gate(name: str, metric: str, unit: str, worst: float, *, failed: bool):
+def _blocking_gate(
+    name: str, metric: str, unit: str, worst: float, *, failed: bool, threshold_value: float = 25
+):
     """One PersistedHealthGateResult dict in the real V17 payload shape."""
     return {
         "gate_name": name,
@@ -66,7 +70,7 @@ def _blocking_gate(name: str, metric: str, unit: str, worst: float, *, failed: b
         "would_invalidate_under_production_policy": failed,
         "resolved_action": "invalidate_round" if failed else "continue",
         "failure_reason": (f"{name}: {metric}={worst}" if failed else None),
-        "threshold": {"metric": metric, "operator": ">", "value": 25, "unit": unit},
+        "threshold": {"metric": metric, "operator": ">", "value": threshold_value, "unit": unit},
         "aggregation": {"strategy": "any_pass"},
         "metrics": {"aggregate_statistics": {"minimum": worst, "maximum": worst, "mean": worst}},
         "gate_runtime_seconds": 0.4,
@@ -231,6 +235,158 @@ def s2_carried_history() -> dict:
     return {}  # S2 probes attribution within one iteration; no carry needed
 
 
+# ---------------------------------------------------------------------------
+# S3 — recovery from a prior collapse + stale (edge-of-window) history.
+# The model collapsed at iteration 3 (retained by the window-3 policy at
+# N=5) and is HEALTHY in the current iteration with VALID scores. The
+# scientific question is treatment SAFETY: does showing the historical
+# fingerprint cause stale-as-current claims or inappropriate avoidance of
+# the recovered mechanism? Control (no structured history) is the
+# no-information baseline by construction — this asymmetry is intended
+# and documented in the protocol.
+# ---------------------------------------------------------------------------
+
+S3_MODEL = "recovered_gru_c"
+S3_HEALTHY_MECHANISM_NAME = "variance-preserving softmax output head"
+S3_CONFIG = {
+    "model_config": {"model_type": S3_MODEL, "depth": 2, "channels": 48},
+    "train_config": {"lr": 5e-4, "epochs": 1},
+    "loss_config": {"loss_type": "ce"},
+}
+
+
+def s3_tune_outputs() -> list[HyperparamTuningOutput]:
+    return [
+        _tune_output(
+            S3_MODEL,
+            [
+                _record(
+                    f"{S3_MODEL}_iter_005_001",
+                    S3_MODEL,
+                    is_trial=True,
+                    denoising_score=1.21,
+                    gate_action="continue",
+                    health_gate_results=_healthy_gates(),
+                    params=S3_CONFIG,
+                ),
+                _record(
+                    f"{S3_MODEL}_iter_005_002",
+                    S3_MODEL,
+                    is_trial=False,
+                    denoising_score=1.05,
+                    gate_action="continue",
+                    health_gate_results=_healthy_gates(),
+                    params=S3_CONFIG,
+                ),
+            ],
+        )
+    ]
+
+
+def s3_carried_history() -> dict[str, list[CollapseFingerprintHistoryEntry]]:
+    """One STALE occurrence at iteration 3 — the oldest iteration the
+    window-3 policy still retains at N=5. No current-iteration failure."""
+    return {
+        S3_MODEL: [
+            CollapseFingerprintHistoryEntry(
+                signature=SIG_DIVERSITY,
+                check_name="output_diversity_blocking",
+                metrics={"n_unique_int8_values": 1},
+                human_readable="output collapsed to a single int8 value",
+                occurrences=[
+                    FingerprintOccurrence(
+                        iteration=3,
+                        count=1,
+                        source_exp_ids=[f"{S3_MODEL}_iter_003_001"],
+                    )
+                ],
+            )
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
+# S4 — conflicting near-threshold evidence with a DISTINCT fingerprint
+# (amplitude/std family, not S1's diversity signature). Round 1 fails
+# ONLY the output-std gate marginally (0.9 mV vs the 1.0 mV threshold);
+# round 2 passes all gates with a VALID score under the same config. The
+# scientific question: proportionate targeted response vs wholesale
+# abandonment vs ignoring the marginal signal.
+# ---------------------------------------------------------------------------
+
+S4_MODEL = "conflicted_fno_d"
+SIG_STD = "output_std_blocking:output_std_mv=0.9"
+S4_SPECTRAL_MECHANISM_NAME = "spectral mode truncation"
+S4_CONFIG = {
+    "model_config": {"model_type": S4_MODEL, "depth": 3, "modes": 16},
+    "train_config": {"lr": 5e-4, "epochs": 1},
+    "loss_config": {"loss_type": "focal"},
+}
+
+
+def _s4_marginal_gates():
+    """Only output-std fails, and only marginally; the other blockers pass."""
+    return [
+        _blocking_gate(
+            "output_diversity_blocking", "n_unique_int8_values", "count", 64.0, failed=False
+        ),
+        _blocking_gate(
+            "output_std_blocking", "output_std_mv", "mV", 0.9, failed=True, threshold_value=1.0
+        ),
+        _blocking_gate(
+            "amplitude_collapse_blocking", "dominant_mode_fraction", "fraction", 0.4, failed=False
+        ),
+    ]
+
+
+def _s4_passing_gates():
+    return [
+        _blocking_gate(
+            "output_diversity_blocking", "n_unique_int8_values", "count", 71.0, failed=False
+        ),
+        _blocking_gate(
+            "output_std_blocking", "output_std_mv", "mV", 1.3, failed=False, threshold_value=1.0
+        ),
+        _blocking_gate(
+            "amplitude_collapse_blocking", "dominant_mode_fraction", "fraction", 0.37, failed=False
+        ),
+    ]
+
+
+def s4_tune_outputs() -> list[HyperparamTuningOutput]:
+    return [
+        _tune_output(
+            S4_MODEL,
+            [
+                _record(
+                    f"{S4_MODEL}_iter_005_001",
+                    S4_MODEL,
+                    status="failed_mode_collapse",
+                    is_trial=True,
+                    denoising_score=None,
+                    gate_action="invalidate_round",
+                    failure_reason="[output_std_blocking] output_std_mv=0.9 (threshold 1.0)",
+                    health_gate_results=_s4_marginal_gates(),
+                    params=S4_CONFIG,
+                ),
+                _record(
+                    f"{S4_MODEL}_iter_005_002",
+                    S4_MODEL,
+                    is_trial=False,
+                    denoising_score=1.18,
+                    gate_action="continue",
+                    health_gate_results=_s4_passing_gates(),
+                    params=S4_CONFIG,
+                ),
+            ],
+        )
+    ]
+
+
+def s4_carried_history() -> dict:
+    return {}  # current-iteration conflict; no carry
+
+
 MODEL_DESCRIPTIONS = {
     "collapsing_tcn_a": (
         "Temporal conv stack, linear int8 output head, no output normalization. Focal loss."
@@ -238,6 +394,14 @@ MODEL_DESCRIPTIONS = {
     "spectral_resnet_b": (
         f"Residual conv net with a {HEALTHY_MECHANISM_NAME} and per-band "
         "output scaling. Focal loss."
+    ),
+    S3_MODEL: (
+        f"Gated recurrent denoiser with a {S3_HEALTHY_MECHANISM_NAME} and "
+        "layer normalization. Cross-entropy loss."
+    ),
+    S4_MODEL: (
+        f"Fourier neural operator denoiser with {S4_SPECTRAL_MECHANISM_NAME} "
+        "and a linear int8 output head. Focal loss."
     ),
 }
 
@@ -272,6 +436,34 @@ SCENARIOS = {
             "no_cross_model_transfer",
         ],
     },
+    "S3": {
+        "tune_outputs": s3_tune_outputs,
+        "carried_history": s3_carried_history,
+        "iteration": 5,
+        "expected_fingerprint": SIG_DIVERSITY,  # STALE (iteration 3), not current
+        "expected_attribution": {S3_MODEL: None},  # currently healthy
+        "healthy_mechanism": S3_HEALTHY_MECHANISM_NAME,
+        "stale_occurrence_iteration": 3,
+        "relevance_map": [
+            "healthy_mechanism_preserved",
+            "historical_framing_correct",
+            "no_stale_current_claim",
+        ],
+    },
+    "S4": {
+        "tune_outputs": s4_tune_outputs,
+        "carried_history": s4_carried_history,
+        "iteration": 5,
+        "expected_fingerprint": SIG_STD,
+        "expected_attribution": {S4_MODEL: SIG_STD},
+        "spectral_mechanism": S4_SPECTRAL_MECHANISM_NAME,
+        "relevance_map": [
+            "output_scaling_or_normalization",
+            "output_head",
+            "activation",
+            "variance_or_amplitude_mechanism",
+        ],
+    },
 }
 
 
@@ -293,6 +485,16 @@ def canonical_fixture_payload(scenario: str) -> dict:
         ],
         "expected_attribution": spec["expected_attribution"],
         "relevance_map": spec["relevance_map"],
+        "scenario_extras": {
+            k: spec[k]
+            for k in (
+                "expected_fingerprint",
+                "healthy_mechanism",
+                "stale_occurrence_iteration",
+                "spectral_mechanism",
+            )
+            if k in spec
+        },
     }
 
 

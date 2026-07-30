@@ -20,10 +20,15 @@ from typing import Any
 from scripts.pr3_l2_calibration.fixtures import (
     FAILED_CONFIG,
     HEALTHY_MECHANISM_NAME,
+    S3_HEALTHY_MECHANISM_NAME,
+    S3_MODEL,
+    S4_MODEL,
+    S4_SPECTRAL_MECHANISM_NAME,
     SIG_DIVERSITY,
+    SIG_STD,
 )
 
-SCORER_VERSION = "p3l2p-scorer-1"
+SCORER_VERSION = "p3l2-scorer-2"  # full campaign: + S3/S4 scenario facts
 
 # Treatment-only strings whose presence in a CONTROL/DIAGNOSTIC proposer
 # prompt or output indicates leakage (§16 stop) or an unsupported-use
@@ -137,5 +142,55 @@ def score_sample(
             if "spectral_resnet_b" in s and re.search(r"collaps|n_unique|diversity", s):
                 cross = True
         record["cross_attribution_prescreen"] = cross
+
+    if scenario == "S3":
+        # Recovery + stale history. Ground truth: the fingerprint occurred
+        # at iteration 3 only; the current iteration is HEALTHY with valid
+        # scores. All facts below are text/identity based — never citation
+        # fields (§24.1 classification A).
+        record["healthy_mechanism_mentioned"] = S3_HEALTHY_MECHANISM_NAME in blob_l
+        record["mentions_recovered_model"] = S3_MODEL in blob_l
+        historical = bool(
+            re.search(
+                r"previous|prior|earlier|historic|past|iteration 3|iter[_ ]?0?3"
+                r"|resolved|recovered|no longer|since then",
+                blob_l,
+            )
+        )
+        record["historical_framing_present"] = historical
+        # Stale-as-current pre-screen: collapse vocabulary framed as a
+        # CURRENT condition (rubric adjudicates the final label).
+        stale = False
+        for sentence in re.split(r"[.!?]\s+", blob):
+            s = sentence.lower()
+            if (
+                re.search(r"collaps|n_unique|diversity", s)
+                and re.search(r"current|currently|now|still|ongoing|persists|continues", s)
+                and not re.search(r"previous|prior|earlier|resolved|recovered|no longer|past", s)
+            ):
+                stale = True
+        record["stale_as_current_prescreen"] = stale
+
+    if scenario == "S4":
+        # Conflicting near-threshold evidence, distinct std fingerprint.
+        record["mentions_std_fingerprint_string"] = SIG_STD in blob
+        record["mentions_std_gate_name"] = "output_std" in blob_l
+        record["mentions_conflict_or_marginal"] = bool(
+            re.search(
+                r"marginal|borderline|near[- ]threshold|conflict|inconsisten"
+                r"|intermittent|one round|second round|passed in|only one",
+                blob_l,
+            )
+        )
+        record["retains_spectral_mechanism"] = bool(
+            re.search(r"fourier|spectral|fno|mode truncation", blob_l)
+        ) or (S4_SPECTRAL_MECHANISM_NAME in blob_l)
+        record["mentions_conflicted_model"] = S4_MODEL in blob_l
+        record["amplitude_or_scaling_change"] = bool(
+            re.search(
+                r"output[- ]scal|amplitude|gain|variance[- ]preserv|std|rescal",
+                blob_l,
+            )
+        )
 
     return record

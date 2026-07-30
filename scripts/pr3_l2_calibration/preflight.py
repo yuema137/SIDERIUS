@@ -204,7 +204,8 @@ def rev3_vocab_and_tee_checks() -> dict:
     # 1-2: non-empty + byte-equivalent to the production static seed file.
     seed = production_vocab_seed()
     checks["vocab_nonempty"] = len(seed) > 0
-    raw_file = _json.load(open(REPO / "agent" / "schemas" / "vocab_seed.json"))
+    with open(REPO / "agent" / "schemas" / "vocab_seed.json") as fh:
+        raw_file = _json.load(fh)
     loaded = [v.model_dump(mode="json") if hasattr(v, "model_dump") else v for v in seed]
     raw_names = (
         {
@@ -347,3 +348,48 @@ def main() -> dict:
 if __name__ == "__main__":
     out = main()
     print(json.dumps(out, indent=2))
+
+
+def campaign_preflight() -> dict:
+    """Full-campaign zero-LLM preflight (`pr3_l2_full_calibration_protocol.md`
+    §4-§9): all four scenarios × C/T through the production assembly with
+    mocked LLMs; treatment-only C-vs-T difference per scenario; fixture
+    hash stability; vocab/tee checks. NO LLM CALLS."""
+    import re as _re
+
+    from scripts.pr3_l2_calibration.fixtures import fixture_hash
+
+    results: dict = {}
+    scenarios = ("S1", "S2", "S3", "S4")
+    for scenario in scenarios:
+        for arm in ("C", "T"):
+            r = run_arm(scenario, arm)
+            assert r["pipeline_mode"], f"{scenario}/{arm}: pipeline mode not selected"
+            assert not r["placeholder_unresolved"], f"{scenario}/{arm}: unresolved placeholder"
+            assert r["proposer_block_present"] == (arm == "T"), (
+                f"{scenario}/{arm}: proposer treatment block wrong "
+                f"(present={r['proposer_block_present']})"
+            )
+            assert r["interp_block_present"] == (arm == "T"), (
+                f"{scenario}/{arm}: interp block wrong"
+            )
+            results[f"{scenario}_{arm}"] = r
+    for s in scenarios:
+        assert fixture_hash(s) == fixture_hash(s), f"{s}: fixture hash unstable"
+    results["fixture_hashes"] = {s: fixture_hash(s) for s in scenarios}
+    norm = lambda x: _re.sub(r"\s+", " ", x).strip()  # noqa: E731
+    for s in scenarios:
+        t_prompt = results[f"{s}_T"].pop("proposing_prompt")
+        c_prompt = results[f"{s}_C"].pop("proposing_prompt")
+        start = t_prompt.index("[HEALTHGATE EVIDENCE]")
+        end = t_prompt.index("changes a relevant mechanism.") + len("changes a relevant mechanism.")
+        t_stripped = t_prompt[:start] + t_prompt[end:]
+        assert norm(t_stripped) == norm(c_prompt), (
+            f"{s}: C-vs-T proposing prompt differs beyond the treatment block"
+        )
+        results[f"{s}_treatment_only_difference"] = True
+        results[f"{s}_treatment_token_increase"] = (
+            results[f"{s}_T"]["proposer_chars"] - results[f"{s}_C"]["proposer_chars"]
+        ) // 4
+    results["vocab_and_tee_checks"] = rev3_vocab_and_tee_checks()
+    return results
