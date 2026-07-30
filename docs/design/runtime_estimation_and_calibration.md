@@ -2807,7 +2807,22 @@ scientific setting changed. V19 remains stopped.
       contended probes persist but never promote; validated history
       cannot price an 18.4M-parameter request).
       Full `tests/unit/core/` — **685 passed, 5.9 s**; targeted ruff
-      check + format clean.
+      check + format clean. Full local `tests/unit` — **4931 passed, 4
+      xfailed, 3 m 53 s**.
+
+*C7 stage closure.* Commits `5150eef`, `4523681`, `3cd3605`, `63aa48e`,
+`83efe86`, `46df5e8`, plus the Principle 5 follow-up `cdf91b2`. CI green
+on head **`cdf91b2`** (run 30584752115): ruff check, ruff format,
+strict pyright, and the full unit suite (guardrails included) all pass.
+
+The first CI attempt (`46df5e8`) failed one guardrail — the derating-mask
+comment named a specific accelerator model, which
+`tests/unit/guardrails/test_no_hardcoded_device_literals.py` forbids
+anywhere under `core/`. The device fact was removed from the source
+rather than annotated past the allow-list; the deployment-specific
+observation lives in decision 2 above. `DEFAULT_DERATING_THROTTLE_MASK`
+stayed `0xF8` and the policy identity was verified byte-identical across
+the fix (`calibration_policy@1.0.0+b83994605c57`).
 
 ### C8 — `refactor(runtime): wire proposer, tuner, admission, watchdog, and reporting to the shared estimator`
 
@@ -2819,11 +2834,35 @@ TimeEval → estimator; admission/watchdog → estimator-mediated evidence
 (preserving RT2 measured semantics EXACTLY — characterization tests
 first); reporting/provenance surfaces. Deps: C4-C7.
 **Implementation plan.**
-- [ ] Characterization suites capturing CURRENT admission/watchdog
-      numeric behavior before rewiring (byte-parity requirement).
-- [ ] Rewire consumer by consumer, each with its own parity proof.
-- [ ] Remove/deprecate private formula call sites (grep-audited).
-- [ ] Doc sync.
+- [x] **C8a** Characterization suites capturing CURRENT admission/
+      watchdog/TimeEval numeric behavior before rewiring
+      (`tests/unit/core/test_c8_consumer_parity.py`, 18 fixtures with
+      hand-derived LITERAL expectations — admission 2.0 / watchdog 3.5 /
+      floor 120 / budget 7200 / TimeEval 10 % slack).
+- [x] **C8b** Proposer → shared policy: the advisory note is emitted on
+      `RuntimeDecisionPolicy.decide(...)` at `phase="proposal"`, not on a
+      private `factor > 1.0`. A REJECT/ABORT at this stage raises —
+      the advisory-only invariant is now enforced, not merely intended.
+      The policy identity travels in the note.
+- [x] **C8c** TimeEval → shared policy: `feasible` is DERIVED from the
+      decision kind. Measured evidence keeps identical numerics
+      (effective budget incl. slack is what the policy is asked about);
+      prior-tier evidence can no longer gate. Formal + prior + no probe
+      → REQUEST_PROBE; uninterpretable evidence → ABORT → error result.
+- [x] **C8d** Watchdog → measurement-backed evidence only: the deadline
+      arithmetic is untouched, but a component prediction must declare a
+      measurement-backed `source` to arm it (§7.4 watchdog column:
+      static `never_used`). Every RT2-written prediction already
+      qualifies, so no production number moves.
+- [x] **C8e** Production probe adopts the D3 windowed PID-aware
+      classifier; `classify_concurrency` DELETED (no second
+      authoritative path). Full raw window persisted on the result and
+      into the observation.
+- [x] **C8f** Authority audit
+      (`tests/unit/guardrails/test_runtime_authority_audit.py`) — a
+      mechanical guard that each consumer resolves the shared policy and
+      that no private gate returns.
+- [x] Doc sync (this record).
 **Unit validation.** consumer parity (§17.4): same estimator identity,
 same vocabulary, compatible workloads/units; admission/watchdog
 numeric parity on recorded fixtures.
@@ -2838,7 +2877,97 @@ probe record at admission time (explicit policy, never silent static).
 **Migration/rollback.** per-consumer flags during transition; final
 state removes them.
 **Boundary.** Rewiring only; no policy-value changes.
-- [ ] Evidence recorded.
+
+**Implementation record (C8).**
+
+*Behavior deltas — deliberate, and the point of the stage.* Numeric
+parity was preserved everywhere it was required (admission, watchdog,
+measured TimeEval). THREE behaviors changed, all of them removals of
+authority that the §7.4 matrix never granted:
+
+1. **A static projection can no longer skip a round.** Previously
+   `evaluate_time_skill` compared its own projection to the budget and
+   the tuner emitted `skipped_time_risk` on the result — including when
+   the projection came from the uncalibrated static formula (no CUDA, no
+   `data_dir`, or an unregistered architecture). That is the wave-1
+   mechanism. The projection is still computed, still reported, still
+   carries its suggestion — it simply cannot gate. Measured (warmup)
+   evidence gates exactly as before.
+2. **A store-reused (historical prior) projection can no longer skip a
+   round** — same rule, tier 1 (`historical_observation_prior`).
+   Trial-only path, since formal never reuses the store.
+3. **A prior-sourced component prediction can no longer arm the watchdog
+   kill deadline.** No production record is affected (every RT2
+   prediction is measurement-backed by construction); the hole is
+   closed structurally.
+
+*Autonomous decisions taken during implementation.*
+
+* **Observation vs authority were separated in TimeEval.** The verdict
+  text and the improvement suggestion now key off
+  `over_effective_budget` (an observation), while `feasible` keys off
+  the policy decision (authority). Conflating them would have deleted
+  the operator-facing overshoot warning along with the blocking power —
+  the C8 mandate is to remove authority from priors, not to silence
+  them. New breakdown keys: `over_effective_budget`,
+  `runtime_decision`, `runtime_decision_reasons`,
+  `runtime_decision_provenance`, `runtime_policy_identity`.
+* **REQUEST_PROBE at the pre-flight means "proceed to the authoritative
+  measurement", not "stall".** The tuner's authoritative formal evidence
+  is the RT2 in-subprocess verification, and no C6 probe runs at
+  pre-flight time; `probe_record_available=False` is therefore declared
+  honestly and REQUEST_PROBE lets the round proceed INTO the measured
+  admission path rather than pricing it from a prior.
+* **An uninterpretable evidence source is ABORT, not "infeasible".** The
+  adapter accepts exactly the sources production can emit; anything else
+  is an evidence-channel failure surfaced as an ERROR result (the tuner
+  raises), never as a candidate verdict. This also hardened
+  `_query_throttle_reasons`, which previously hex-parsed any output —
+  a bare decimal string would have fabricated a throttle mask.
+* **The contention window runs BEFORE setup, serially.** The operator
+  permits overlapping it with CPU-only setup; that optimization is
+  deliberately NOT taken. Running the window first is simpler and
+  strictly more correct — the probe's own CUDA context does not exist
+  yet, so nothing of ours can contaminate the external-state reading.
+  Cost: ~10 s per probe, the accepted price. `device_vram_gb` is a
+  REQUIRED probe argument (the D3 memory threshold has no safe default);
+  `probe_production.probe_device_vram_gb()` resolves it in production.
+* **Policy identity changed** (expected): `EvidenceChannel` and the
+  three new behavioral rules (`formal_probe_absent`,
+  `infrastructure_failure`, `measured_candidate_failure`) are part of
+  the identity payload, so the C4 policy hash moves. That is the
+  designed signal that decision behavior changed.
+
+*Tests changed rather than added* (each an encoding of superseded
+authority, not a production regression):
+`test_evaluate_time_skill.py::test_run_skill_infeasible_large_model` and
+four `test_inference_hint_path.py` slack cases now assert
+`over_effective_budget` + the ADVISORY decision instead of
+`feasible is False`; `test_inference_hint_path.py`'s stub emitted
+`ms_source="fake_stub"`, a value production cannot produce, and now uses
+`static_uncalibrated`; the watchdog stubs in
+`test_watchdog_admission_split.py` gained the `source` field that every
+production prediction carries.
+
+- [x] Evidence recorded: `test_c8_consumer_parity.py` — **18** (admission
+      within/over/boundary/record-only/fail-closed/watchdog-override-
+      independence; watchdog deadline table incl. floor clamp, budget
+      clamp, factor fallback, disabled, and prior-backed evidence never
+      arming a deadline; TimeEval under/over/at-budget + slack applied
+      and not applied). `test_c8_timeeval_authority.py` — **15**
+      (measured keeps authority incl. formal; static/store/wave-1 shape
+      cannot gate; formal missing-probe REQUEST_PROBE incl. the
+      within-budget case; probe-present removes it; ABORT paths).
+      `test_runtime_authority_audit.py` — **6** (consumers resolve the
+      shared policy; `feasible` derived from the decision by AST;
+      proposer invariant present and `factor > 1.0` absent from
+      executable code; watchdog measurement-backed guard;
+      `classify_concurrency` gone). `test_runtime_probe.py` — windowed-
+      classifier conversion + **4** new concurrency tests.
+      Full `tests/unit` — **4974 passed, 4 xfailed** (the single
+      `test_pr3_l2p_preflight` failure is its dirty-working-tree check,
+      green on a clean checkout / in CI). Full `tests/integration` —
+      **142 passed, 130 skipped** (real-API tiers skip without keys).
 
 ### C9 — `feat(runtime): formal launch invariant, behavioral self-test, and run-invariant locking`
 
