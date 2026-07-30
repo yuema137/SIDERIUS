@@ -292,7 +292,7 @@ Output a JSON object with exactly these fields:
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
-    "constraints": ["Hard limits — must include at least one VRAM limit and one parameter count limit"],
+    "constraints": ["Hard limits — must include at least one VRAM limit (relative to the effective cap in [HARDWARE CONTEXT])"],
     "known_failures": ["Configs or approaches to avoid, based on patterns in the interpretation"],
     "suggested_directions": [
       "Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'",
@@ -323,7 +323,10 @@ Hard constraints — violating any of these makes the proposal invalid:
 - model_name must be snake_case: lowercase letters, digits, and underscores only
 - The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
 - baseline_config must be conservative: fits comfortably within the effective cap shown in the [HARDWARE CONTEXT] (the VRAM gate rejects anything above it)
-- expert_advice.constraints must include at least one VRAM limit and one parameter count limit
+- expert_advice.constraints must include at least one VRAM limit (relative to
+  the effective cap shown in the [HARDWARE CONTEXT]). Capacity constraints such
+  as parameter-count ceilings may be included ONLY when justified by measured
+  evidence or explicit capacity arithmetic — never as unexamined defaults
 - parameter_count_estimate must be a positive integer — your best estimate of the total
   trainable parameter count at the baseline_config. An order-of-magnitude estimate is
   sufficient; be realistic about multi-head attention, state dims, dilated stacks, etc.
@@ -613,8 +616,12 @@ def _format_recent_gate_exhaustions_block(
         "in multiple entries above, that is a strong signal the family is",
         "structurally infeasible under the active budgets — propose a",
         "different family, not a smaller variant of the same family. If only",
-        "a single entry is shown, reduce parameter count and/or layer count",
-        "enough that the resulting baseline estimates land below the budgets.",
+        "a single entry is shown, treat it as one bounded report from the",
+        "pre-attempt gates (whose time estimates may be uncalibrated): first",
+        "adjust the workload plan (optimizer steps, batch size, segment",
+        "sizing) to fit the budgets, reducing capacity only where the gate",
+        "report shows a VRAM limit. Do not derive a permanent",
+        "parameter-count ceiling from a single gate report.",
     ]
     return "\n".join(lines)
 
