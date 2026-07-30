@@ -1034,3 +1034,23 @@ The citation limitation remains recorded in issue #146 + report §7 and
 is deliberately out of campaign scope. This decision is copied into the
 full-campaign protocol (`pr3_l2_full_calibration_protocol.md` §3) and
 attribution definitions may not be redefined after execution begins.
+
+## Final operator interpretation (2026-07-29 — applies to the record above; history preserved unchanged)
+
+Rev-2 and rev-3 exposed real production and runner defects; those were
+fixed (Option-C `5c8e483`, runner `5c43ece`) and rev-4 proved the
+reliability recovery (4/4). The full descriptive campaign then
+completed successfully (40/40 valid). Primary behavioral improvement
+was NOT observed under the tested fixtures; no safety harm was
+observed in either arm. Operator decision: the feature REMAINS
+IMPLEMENTED as optional and default OFF — the campaign result limits
+the permissible claims but does not require deleting the feature. The
+Layer-2 verdict stays **NOT SUPPORTED on the pre-registered primary
+behavioral hierarchy**; product interpretation: "not supported"
+applies to the tested primary efficacy hypothesis, NOT to
+implementation correctness or the value of the recording
+infrastructure. Structured prompt feedback is an optional experimental
+feature — fully implemented and operationally tested, with no general
+performance benefit claimed. No L3 is planned for this PR (N/A for the
+merge claim). Activation (P3-ACT) remains a separate, unauthorized
+decision.

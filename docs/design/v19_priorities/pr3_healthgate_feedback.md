@@ -237,13 +237,16 @@ Carried from the PR 1/PR 2 process (operator rules):
              feedback_full_layer2_descriptive_calibration_2026-07-29.md.
 [x] P3-L2  → CLOSED with the verdict above (this entry's earlier
              text preserved as history).
-[ ] P3-L3  — **NOT JUSTIFIED** (operator plan §9: NOT SUPPORTED → do
-             not run L3; real training cannot be justified to look
-             for a primary benefit absent under deliberately
-             favorable synthetic conditions). The open fixture-design
-             question (treatment advantage under a DILUTED prose
-             channel) would be a revised Layer-2, not an L3 —
-             recorded, unscheduled.
+[—] P3-L3  — **N/A FOR CURRENT MERGE CLAIM** (operator decision
+             2026-07-29; not "failed"). L3 would test a
+             real-training-improvement claim this PR does not make:
+             the feature ships optional and default OFF with no
+             universal performance claim, and no safety signal
+             requires an L3 investigation. Deferred to future
+             task-specific evaluation. (The open fixture-design
+             question — treatment advantage under a DILUTED prose
+             channel — would be a revised Layer-2, not an L3;
+             recorded, unscheduled.)
 [x] P3-AUD — post-run zero-LLM audit (2026-07-29, operator-directed;
              report §13, protocol §21). Record-changing findings:
              P-1 production retry-loop defect — the proposing stage
@@ -2517,3 +2520,58 @@ fails → the causal stage receives the focused validation error →
 bounded causal-stage retry produces corrected data → corrected causal
 output becomes the accumulated source of truth → final ProposalOutput
 validation uses that corrected data.
+
+## 14. Final PR 3 status (operator decision, 2026-07-29)
+
+**Operator decision**: keep BOTH the recording infrastructure and the
+optional prompt treatment in PR #145. The merge claim is
+implementation-focused; no universal behavioral-improvement claim is
+made or required.
+
+### 14.1 Scope completed
+
+Structured HealthGate recording; deterministic evidence classification;
+collapse fingerprinting; bounded per-model cross-iteration history;
+interpretation-digest persistence and typed resume restore; optional
+prompt rendering (interpreter + PRODUCTION three-stage proposer);
+run-invariants policy locking; CLI/shell/manifest/run-config operator
+surfaces; legacy and degraded-path handling; recording-only behavior
+when rendering is OFF. Plus the two production reliability fixes found
+during validation (pipeline delivery gap `0f1f3d0`; causal-stage
+retry-discard `5c8e483`) and the calibration runner fixes (`5c43ece`).
+
+### 14.2 Behavioral evaluation interpretation (binding wording)
+
+Full Layer-2 descriptive campaign: 40 samples, all terminal-valid;
+primary metrics saturated in BOTH arms (repeats 0/20 vs 0/20; relevant
+change 20/20 vs 20/20) → no primary treatment effect measurable under
+the tested fixtures; treatment improved evidence naming and grounding
+in some scenarios (several CIs excluding zero); no observed safety
+regressions in either arm; descriptive design, not fully powered
+confirmatory evidence. **The behavioral calibration informs the
+feature documentation but is not a requirement for retaining the
+optional implementation.**
+
+Permitted claims: available as an experimental optional control;
+disabled by default; effect is context-dependent; users should not
+assume improvement without task-specific evaluation. Forbidden claims:
+proven to improve agents; ineffective in all settings; harmful; should
+be enabled by default; requires L3 before merge.
+
+### 14.3 P3-L3
+
+`N/A for current merge claim` — deferred to future task-specific
+evaluation (§0 tracker; not marked failed).
+
+### 14.4 P3-ACT
+
+**NOT AUTHORIZED.** The production default remains
+`enable_structured_health_feedback = False`. Merge does not authorize
+activation; changing the default is a separate operator decision.
+
+### 14.5 Top-level completion
+
+The PR 3 implementation item may be marked complete once the final
+scope audit, CI review, and merge-readiness checklist pass. The
+completion statement refers to implementation and validation — never
+to universal behavioral improvement.
