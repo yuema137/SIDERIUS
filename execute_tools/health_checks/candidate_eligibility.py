@@ -10,20 +10,20 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from execute_tools.health_checks.config import load_health_gates_config
-from execute_tools.health_checks.schemas import BLOCKING_ACTIONS
 
-
-class CandidateHealthValidity(StrEnum):
-    """Eligibility state for scientific/execution candidate selection."""
-
-    VALID = "valid"
-    INVALID = "invalid"
-    UNKNOWN = "unknown"
+# CandidateHealthValidity moved to schemas.py (V19 PR 3 CB1 — the enum is
+# pure vocabulary needed by schema-level consumers; the classifier
+# functions below, which read gate config, stay here). Re-imported so
+# every existing ``from ...candidate_eligibility import
+# CandidateHealthValidity`` call site keeps working unchanged.
+from execute_tools.health_checks.schemas import (
+    BLOCKING_ACTIONS,
+    CandidateHealthValidity,
+)
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:

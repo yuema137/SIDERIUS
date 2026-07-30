@@ -1293,6 +1293,37 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- V19 PR 3 — structured-health-feedback policy PASS-THROUGH
+    #     (pr3_healthgate_feedback.md §3.9, §6 'tuner lock site'). The
+    #     tuner has NO PR 3 behavior of its own: these exist solely so the
+    #     tuner's run-invariants lock call and run_config stamps carry the
+    #     chain's policy consistently with the workflow and chain runner.
+    enable_structured_health_feedback: bool = Field(
+        default=False,
+        description=(
+            "V19 PR 3 chain policy pass-through: whether structured "
+            "HealthGate feedback prompt rendering is enabled for the "
+            "chain's interpreter/proposer. The tuner only locks and "
+            "stamps it — no tuner behavior changes with the flag."
+        ),
+    )
+    health_feedback_history_window_iterations: int = Field(
+        default=3,
+        ge=1,
+        description=(
+            "V19 PR 3 retention-policy pass-through (locked + stamped "
+            "only; consumed by the interpreter, not the tuner)."
+        ),
+    )
+    health_feedback_history_max_entries_per_model: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "V19 PR 3 retention-policy pass-through (locked + stamped "
+            "only; consumed by the interpreter, not the tuner)."
+        ),
+    )
+
     degenerate_penalty_score: float | None = Field(
         default=None,
         description=(

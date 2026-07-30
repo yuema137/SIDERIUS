@@ -81,6 +81,8 @@ making the same mistake unless the shape is fixed at emission time.**
 
 {recent_gate_exhaustions_block}
 
+{healthgate_evidence_block}
+
 {known_constraints_block}
 ## Rules
 

@@ -24,6 +24,14 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
+from agent.schemas.health_feedback import (
+    CollapseFingerprint,
+    RoundHealth,
+    build_collapse_fingerprint,
+    build_gate_outcomes,
+    classify_round_provenance,
+    merge_fingerprint_history,
+)
 from agent.schemas.hyperparam_tuning import ExperimentRecord, serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -140,7 +148,91 @@ def _build_per_model_system_prompt(inp: "InterpretationInput") -> str:
     is:" preamble has no payload (acceptable for tests, never reached in
     production).
     """
-    return PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
+    rendered = PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
+    # V19 PR 3 §3.6 item 3 (flag-gated): instruction block for handling the
+    # structured HealthGate evidence. OFF ⇒ byte-identical to pre-PR3
+    # (golden-parity tested).
+    if inp.enable_structured_health_feedback:
+        rendered += HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS
+    return rendered
+
+
+HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS = """
+
+### Structured HealthGate evidence (additional rules)
+
+The user prompt may contain a "HealthGate summary" section and per-round
+GATE labels. These are DETERMINISTIC facts from the health-gate system,
+not opinions. Rules:
+
+- Preserve every collapse fingerprint VERBATIM in your findings — the
+  exact signature string with its numbers (e.g.
+  "output_diversity_blocking:n_unique_int8_values=1"). Never paraphrase
+  the numbers away.
+- A high raw score on a round with invalid gate evidence is an INVALID
+  result. Report it as a failure mode, never as an achievement.
+- Rounds marked "unknown" or with legacy/no gate evidence carry NO
+  health verdict. Do not describe them as healthy or collapsed.
+- Attribute each fingerprint to exactly the model and rounds it came
+  from. Never transfer evidence between models."""
+
+
+def _render_health_summary_section(summary: ModelRunSummary) -> list[str]:
+    """Deterministic ``### HealthGate summary`` body (V19 PR 3 §3.6 item 2).
+
+    Reads ONLY the ``round_health`` data — never LLM prose. Returns [] when
+    every round is legacy/unknown with nothing to report, so the caller can
+    skip the header entirely.
+    """
+    counts = {"valid": 0, "invalid": 0, "unknown": 0}
+    fingerprint_rounds: dict[str, list[int]] = {}
+    fingerprint_by_sig: dict[str, CollapseFingerprint] = {}
+    for i, health in enumerate(summary.round_health):
+        counts[str(health.health_validity)] += 1
+        if health.fingerprint is not None:
+            sig = health.fingerprint.signature
+            fingerprint_rounds.setdefault(sig, []).append(i + 1)
+            fingerprint_by_sig.setdefault(sig, health.fingerprint)
+
+    lines = [
+        f"Round validity: {counts['valid']} valid, {counts['invalid']} invalid, "
+        f"{counts['unknown']} unknown (of {len(summary.round_health)})"
+    ]
+    if fingerprint_rounds:
+        lines.append(
+            "Distinct collapse fingerprints (deterministic, from persisted gate evidence):"
+        )
+        for sig in sorted(fingerprint_rounds):
+            rounds = fingerprint_rounds[sig]
+            fp = fingerprint_by_sig[sig]
+            lines.append(
+                f"  - {sig}  (x{len(rounds)}, round{'s' if len(rounds) > 1 else ''} "
+                f"{', '.join(str(r) for r in rounds)}) — {fp.human_readable}"
+            )
+
+    # Recording-only diagnostics for the best-scoring round, if any round
+    # carries them (e.g. pearson_dispersion — the misleading-high-score
+    # discriminator, design §2.4).
+    best_idx = None
+    best_score = None
+    for i, s in enumerate(summary.round_scores):
+        if s is not None and (best_score is None or s > best_score):
+            best_idx, best_score = i, s
+    if best_idx is not None and best_idx < len(summary.round_health):
+        recording = {
+            k: v
+            for outcome in summary.round_health[best_idx].gate_outcomes
+            if outcome.gate_name.endswith("_recording")
+            for k, v in outcome.key_metrics.items()
+        }
+        if recording:
+            rendered = ", ".join(f"{k}={v}" for k, v in sorted(recording.items()))
+            lines.append(f"Best-round recording diagnostics: {rendered}")
+
+    if counts["invalid"] == 0 and counts["valid"] == 0 and not fingerprint_rounds:
+        # All-unknown/legacy with no fingerprints: nothing informative.
+        return []
+    return lines
 
 
 def _build_per_model_prompt(
@@ -148,8 +240,18 @@ def _build_per_model_prompt(
     description: str,
     expert_advice_str: str = "",
     human_advice: str | None = None,
+    *,
+    structured_health_feedback: bool = False,
 ) -> str:
-    """Build the user prompt for a single model's summarization."""
+    """Build the user prompt for a single model's summarization.
+
+    ``structured_health_feedback`` (V19 PR 3 §3.6) gates the structured
+    HealthGate additions — the trajectory gate labels and the
+    ``### HealthGate summary`` section. OFF (default): output is
+    byte-identical to the pre-PR3 prompt, proven by golden-file equality
+    in ``test_health_prompt_parity.py`` — every PR 3 addition below must
+    stay behind this flag.
+    """
     lines = [
         f"## Model: {summary.model_type}",
         f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
@@ -230,7 +332,32 @@ def _build_per_model_prompt(
             extras.append(f"params={params:,}")
         extra_str = f" [{', '.join(extras)}]" if extras else ""
 
-        lines.append(f"  Round {i + 1}: score={score_str}{extra_str} — {conclusion}")
+        # V19 PR 3 §3.6 item 1 (flag-gated): label gate-invalidated rounds
+        # with the resolved action and the deterministic collapse identity,
+        # instead of the ambiguous bare "skipped".
+        gate_str = ""
+        if structured_health_feedback and i < len(summary.round_health):
+            health = summary.round_health[i]
+            if health.gate_action is not None and health.gate_action != "continue":
+                cause = (
+                    health.fingerprint.signature
+                    if health.fingerprint is not None
+                    else (health.failure_reason or "no persisted gate detail")
+                )
+                if score is None:
+                    score_str = "invalidated"
+                gate_str = f" [GATE {health.gate_action} — {cause}]"
+
+        lines.append(f"  Round {i + 1}: score={score_str}{extra_str}{gate_str} — {conclusion}")
+
+    # V19 PR 3 §3.6 item 2 (flag-gated): per-model HealthGate summary —
+    # validity counts, distinct fingerprints with occurrence counts and
+    # round indices, and recording-only diagnostics for the best round.
+    # Rendered ONLY when there is something to say (no empty headers).
+    if structured_health_feedback and summary.round_health:
+        health_lines = _render_health_summary_section(summary)
+        if health_lines:
+            lines += ["", "### HealthGate summary", *health_lines]
 
     if expert_advice_str:
         lines += [
@@ -755,6 +882,15 @@ class ResultInterpretationAgent:
                 ),
                 runtime_vocab=inp.runtime_vocab,
                 cold_start=True,
+                # V19 PR 3 — the deterministic merge runs on every path
+                # (a cold start has no summaries, so this is retention
+                # applied to the carried history — normally empty).
+                collapse_fingerprint_history=merge_fingerprint_history(
+                    inp.collapse_fingerprint_history,
+                    {},
+                    inp.iteration,
+                    inp.health_feedback_retention_policy(),
+                ),
             )
 
         # --- Effective model types ---
@@ -886,6 +1022,27 @@ class ResultInterpretationAgent:
         # Serialize expert advice (soft edge input)
         expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
 
+        # --- Structured HealthGate feedback: deterministic aggregates +
+        #     history merge (V19 PR 3, design §3.6/§3.8/§3.10) ---
+        # Computed BEFORE the LLM try-block and threaded into BOTH the
+        # healthy and degraded output dicts, so the §3.10 invariant is
+        # structural: an interpreter LLM failure cannot lose this
+        # iteration's real gate evidence. Inputs are the deterministic
+        # RoundHealth data on the summaries — never LLM prose. Populated
+        # regardless of enable_structured_health_feedback (recording-only
+        # provenance; the flag gates PROMPTS only).
+        (
+            per_model_round_health_counts,
+            per_model_collapse_fingerprints,
+            _health_merge_input,
+        ) = _collect_health_evidence(inp.summaries)
+        collapse_fingerprint_history = merge_fingerprint_history(
+            inp.collapse_fingerprint_history,
+            _health_merge_input,
+            inp.iteration,
+            inp.health_feedback_retention_policy(),
+        )
+
         print(
             f"Interpreting {len(inp.summaries)} model summary(ies) across "
             f"{len(effective_types)} model(s): {effective_types} "
@@ -979,6 +1136,7 @@ class ResultInterpretationAgent:
                     description=model_descriptions[mt],
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
+                    structured_health_feedback=inp.enable_structured_health_feedback,
                 )
                 # T4b — system prompt has {TASK_DESCRIPTION} placeholder
                 # substituted at call time from inp.task_description; see
@@ -1004,6 +1162,13 @@ class ResultInterpretationAgent:
                     "best_valid_config": summary.best_valid_config,
                     "formal_score": summary.formal_score,
                     "model_description": model_descriptions.get(mt),
+                    # V19 PR 3 — deterministic side of the cache (§3.6):
+                    # cached (non-active) models keep their health facts
+                    # without a fresh LLM call.
+                    "round_health_counts": per_model_round_health_counts.get(mt, {}),
+                    "collapse_fingerprints": [
+                        fp.model_dump() for fp in per_model_collapse_fingerprints.get(mt, [])
+                    ],
                 }
 
                 if cache_entry is None:
@@ -1400,6 +1565,11 @@ class ResultInterpretationAgent:
                     "best_config": overall_best_config,
                     "best_valid_config": overall_best_valid_config,
                     "model_knowledge_cache": model_knowledge_cache,
+                    # V19 PR 3 — deterministic health evidence, computed
+                    # before the LLM block (never from prose).
+                    "per_model_round_health_counts": per_model_round_health_counts,
+                    "per_model_collapse_fingerprints": per_model_collapse_fingerprints,
+                    "collapse_fingerprint_history": collapse_fingerprint_history,
                     "key_findings": llm_findings,
                     "bottlenecks": llm_bottlenecks,
                     # Enriched fields
@@ -1482,6 +1652,13 @@ class ResultInterpretationAgent:
                     "best_config": overall_best_config,
                     "best_valid_config": overall_best_valid_config,
                     "model_knowledge_cache": dict(inp.model_knowledge_cache),
+                    # V19 PR 3 §3.10 invariant: the deterministic merge ran
+                    # BEFORE the LLM block, so this iteration's real gate
+                    # evidence is recorded even though the LLM failed.
+                    # Degradation affects LLM commentary only.
+                    "per_model_round_health_counts": per_model_round_health_counts,
+                    "per_model_collapse_fingerprints": per_model_collapse_fingerprints,
+                    "collapse_fingerprint_history": collapse_fingerprint_history,
                     "key_findings": [],
                     "bottlenecks": [],
                     "take_home_message": (
@@ -1712,6 +1889,74 @@ def _round_ordering(record) -> RoundOrdering:
     )
 
 
+def _round_health(record) -> RoundHealth:
+    """Condense one record's HealthGate evidence for the interpreter.
+
+    Deterministic — never reads LLM output (V19 PR 3,
+    ``docs/design/v19_priorities/pr3_healthgate_feedback.md`` §3.2/§3.5).
+    Classification follows the evidence-precedence ladder in
+    ``classify_round_provenance``: persisted gate evidence is never
+    discarded by a status rule, and nothing is inferred from missing
+    fields — a round without evidence is carried LABELED (its
+    ``provenance``), never guessed at.
+
+    ``failure_reason`` is carried verbatim for every provenance. On
+    ``gate_not_evaluated`` records (attempt failures, pre-gate errors)
+    it holds the execution failure, NOT gate evidence — the provenance
+    label is what keeps downstream from misreading it (the §2.5
+    field-overload finding).
+    """
+    # Same lazy-import precedent as the summary builder below.
+    from execute_tools.health_checks.candidate_eligibility import (
+        classify_candidate_health,
+    )
+
+    provenance = classify_round_provenance(record)
+    gate_results = record.health_gate_results if provenance == "gated" else []
+    return RoundHealth(
+        exp_id=record.exp_id,
+        status=record.status,
+        health_validity=classify_candidate_health(record),
+        gate_action=record.gate_action,
+        failure_reason=record.failure_reason,
+        gate_outcomes=build_gate_outcomes(gate_results),
+        fingerprint=build_collapse_fingerprint(gate_results, record.gate_action),
+        provenance=provenance,
+    )
+
+
+def _collect_health_evidence(
+    summaries: list[ModelRunSummary],
+) -> tuple[
+    dict[str, dict[str, int]],
+    dict[str, list],
+    dict[str, list],
+]:
+    """Deterministic per-iteration health aggregates from ``round_health``.
+
+    Returns ``(counts_by_model, distinct_fingerprints_by_model,
+    merge_input_by_model)`` where merge_input maps model_type →
+    ``[(fingerprint, exp_id)]`` in CHRONOLOGICAL round order (the
+    representative-observation rule relies on this order — design §3.8).
+    Reads ONLY the deterministic RoundHealth data CB2 placed on the
+    summary — never LLM output (§3.1 principle 5).
+    """
+    counts: dict[str, dict[str, int]] = {}
+    distinct: dict[str, list] = {}
+    merge_input: dict[str, list] = {}
+    for summary in summaries:
+        mt = summary.model_type
+        for health in summary.round_health:
+            bucket = counts.setdefault(mt, {"valid": 0, "invalid": 0, "unknown": 0})
+            bucket[str(health.health_validity)] += 1
+            if health.fingerprint is not None:
+                merge_input.setdefault(mt, []).append((health.fingerprint, health.exp_id))
+                seen = distinct.setdefault(mt, [])
+                if health.fingerprint.signature not in {f.signature for f in seen}:
+                    seen.append(health.fingerprint)
+    return counts, distinct, merge_input
+
+
 def tuning_output_to_model_run_summary(
     output: "HyperparamTuningOutput",
 ) -> ModelRunSummary:
@@ -1730,6 +1975,7 @@ def tuning_output_to_model_run_summary(
     round_trial_portions: list[float | None] = []
     round_model_params: list[int | None] = []
     round_ordering: list[RoundOrdering] = []
+    round_health: list[RoundHealth] = []
 
     for r in records:
         round_scores.append(r.denoising_score)
@@ -1740,6 +1986,7 @@ def tuning_output_to_model_run_summary(
         else:
             round_conclusions.append(r.memory.conclusion or "")
         round_ordering.append(_round_ordering(r))
+        round_health.append(_round_health(r))
 
     from execute_tools.health_checks.candidate_eligibility import (
         CandidateHealthValidity,
@@ -1814,6 +2061,7 @@ def tuning_output_to_model_run_summary(
         round_scores=round_scores,
         round_conclusions=round_conclusions,
         round_ordering=round_ordering,
+        round_health=round_health,
         # Per-file performance (raw primitive retained per §7.2 scope note)
         best_file_vector=best_rec.file_vector if best_rec else None,
         formal_score=formal_rec.denoising_score if formal_rec else None,

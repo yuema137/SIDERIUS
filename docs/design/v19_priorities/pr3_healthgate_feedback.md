@@ -64,23 +64,241 @@ Carried from the PR 1/PR 2 process (operator rules):
              file list fixed (§6). Provenance taxonomy left extensible
              per operator direction — smallest typed model chosen at
              CB1/CB2 under the §3.2 governing rule.
-[ ] P3-CB1 — commit block 1: RoundHealth + CollapseFingerprint schemas
-             (delivery data model, no consumers)
-[ ] P3-CB2 — commit block 2: summary-builder extraction
-             (tuning_output_to_model_run_summary → per-round health)
-[ ] P3-CB3 — commit block 3: interpreter delivery
-             (flag-gated prompt rendering + InterpretationOutput carry)
-[ ] P3-CB4 — commit block 4: proposer delivery
-             (flag-gated [HEALTHGATE EVIDENCE] block)
-[ ] P3-CB5 — commit block 5: chain/workflow wiring + cross-iteration
-             carry + retention policy + CLI flags + run_config/manifest
-             stamps + run-invariants lock fields (all three sites)
-[ ] P3-V1  — Layer-1 deterministic validation complete (all §7.1 checks)
-[ ] P3-DOC — node/skill .md sync + operator-surface docs (last pre-merge)
+[x] P3-CB1 — commit block 1 COMPLETE (2026-07-29): extractions
+             `153ec72` + health_feedback module `f2dcbf7`; 39 new
+             tests; CI green incl. first pyright pass (§11-CB1
+             evidence)
+[x] P3-CB2 — commit block 2 COMPLETE (2026-07-29): `f3a0b8c`;
+             RoundHealth into ModelRunSummary; 12 new tests over the
+             three real artifact vintages (§11-CB2 evidence)
+[x] P3-CB3 — commit block 3 COMPLETE (2026-07-29): goldens `23c3fbe`,
+             deterministic outputs + degraded-merge `e4cb62b`,
+             flag-gated rendering `2052fa2` (+ pyright annotation fix
+             `394ec86`); byte-identical flag-OFF parity vs pre-change
+             goldens; 21 new tests (§11-CB3 evidence)
+[x] P3-CB4 — commit block 4 COMPLETE (2026-07-29): goldens `66efed8`,
+             proposer [HEALTHGATE EVIDENCE] block `4b04723`; §14.N
+             pinned byte-identical; 15 new tests (§11-CB4 evidence)
+[x] P3-CB5 — commit block 5 IMPLEMENTED + validated (2026-07-29,
+             operator-revised a/b/c boundaries): CB5-a lock policy +
+             tuner pass-through `76f602a`; CB5-b workflow/resume carry
+             `4d5390e`; CB5-c chain CLI + stamps + lock-collision
+             closure + all-three-sites regression + the three
+             workspace cases — implemented, 31 new tests green, block
+             regression 980 passed; CB5-c commits pending
+             stop-and-show approval (§11-CB5 evidence)
+[x] P3-V1  — RESTORED after reopen-fix (2026-07-29): verdict PASS
+             WITH DOCUMENTED LIMITATIONS. Reopen history: the blocking
+             claim "structured evidence reaches the production
+             proposer" was CONTRADICTED in pipeline mode — CB4 spliced
+             the block into _build_reasoning_prompt (legacy 2-call mode
+             only) while production uses _run_pipeline's template
+             assembly (source :481); every proposer-prompt test had
+             validated the non-production path (the audit's own
+             false-positive pattern; found by the L2p call-count
+             design). Fix: healthgate_evidence_block template variable
+             mirroring the §14.N mechanism ("" when OFF/no evidence) +
+             the {healthgate_evidence_block} placeholder in
+             proposing_stage.md — the narrowest production stage (the
+             JSON-emitting final stage; audit: the §14.N placeholder
+             exists ONLY there, explore/exploit files are injected
+             fragments, earlier stages would duplicate context).
+             Corrected claim-G evidence (production path, direct):
+             test_health_evidence_pipeline.py 6 passed 0.96s — real
+             MLModelProposalAgent.run() pipeline with captured stage
+             prompts: flag-ON exact fingerprints/attribution/window
+             counts/representative metrics in the ACTUAL proposing-
+             stage prompt; block in EXACTLY one stage; §14.N inside the
+             prompt byte-identical and ordered before it; flag-OFF no
+             leak + placeholder substituted + byte-identical to a
+             legacy-payload prompt; legacy dict + flag ON renders
+             nothing. Cross-iteration production path:
+             workspace Case-1 pipeline variant — iter-1 record → digest
+             → typed restore → iter-2 REAL pipeline proposing-stage
+             prompt contains the fingerprint with iteration tags 1, 2
+             (5 passed 1.12s). Regressions: proposer+protocols+schemas+
+             workflows 1029 passed 13.13s; repo ruff + format clean.
+             _build_reasoning_prompt evidence is NOT counted for this
+             claim. Original closure evidence retained below (all
+             non-G claims unaffected):
+             Layer-1 deterministic validation had reported (2026-07-29):
+             verdict PASS WITH DOCUMENTED LIMITATIONS. Full unit suite
+             4617 passed / 4 xfailed / 216.20s locally (repo venv);
+             CI run 30472894670 head 14f2891 SUCCESS — ruff clean,
+             format clean, pyright strict 0 errors (CI is the
+             type-check source of truth; not runnable on lilab),
+             pytest 4617 passed / 1 skipped / 3 xfailed / 269.73s.
+             Local-vs-CI count difference explained: the issue #138
+             Path-A reference test runs+xfails on lilab (real data
+             present) and skips on CI (data absent) — 4 xfailed vs
+             3 xfailed + 1 skipped, same test, environment-dependent
+             mode, no regression. Claim-to-evidence matrix in §7.1a:
+             all 12 operator categories (A-L) directly proven; 4 audit
+             gaps closed by test_health_feedback_p3v1_audit.py (6
+             tests). Branch diff audited d811226..HEAD = exactly the
+             §6 file list. Limitations (do NOT hide gaps): (1) Layer 1
+             proves delivery + deterministic persistence ONLY — no
+             behavioral-improvement claim; (2) the interp→propose
+             pseudo full-loop lives in tests/unit as composed
+             mock-LLM tests, not the tests/integration dual-mode
+             harness (functionally equivalent); (3) real-environment
+             chain execution deferred to P3-L3; (4) two CI-red rounds
+             during CB3/CB5 (pyright annotation, ruff format) were
+             mechanical, fixed same-day, final state green.
+[x] P3-DOC — node/skill .md sync + operator-surface docs COMPLETE
+             (2026-07-29): result_interpretation_agent.md (input flag +
+             retention knobs + typed history rows; three deterministic
+             output-field rows; recording-vs-rendering behavioral note
+             incl. degraded invariant, one-way history flow, lock/resume
+             semantics); ml_model_proposal_agent.md (input flag row;
+             [HEALTHGATE EVIDENCE] note covering BOTH modes — legacy
+             splice + production pipeline template variable in
+             proposing_stage.md); ml_hyperparameter_tune_agent.md
+             (three pass-through rows stating lock+stamp-only with the
+             two-references regression note; run_config policy-stamp
+             note); docs/running_chain_test.md (three-flag table with
+             defaults off/3/8, startup validation, resume-rule and
+             legacy-workspace paragraphs, where-to-look-afterwards).
+             Every flag and default cross-checked against MERGED source
+             by schema/argparse introspection (False/3/8 everywhere;
+             CLI store_true + int) — not copied from this design doc.
 [ ] P3-S   — stop-and-show; Layer-1 plumbing PR merged
              (flag OFF by default — no behavior change in production)
-[ ] P3-L2p — Layer-2 pilot (small; variance + runtime measured)
-[ ] P3-L2  — Layer-2 synthetic real-LLM campaign complete + analyzed
+[x] P3-L2p — Layer-2 pilot EXECUTED (2026-07-29): rev-2 ABORTED
+             (production-context fixture mismatch + runner artifact
+             gap; behavioral outputs excluded); rev-3 executed to the
+             60-call cap — terminal valid-sample rate 3/9 (33%) vs the
+             70% floor, ALL failures the pre-existing #146 citation
+             reliability class (both arms, zero valid control
+             samples). Delivery invariants 10/10; version stable;
+             cumulative Layer-2 spend 96 calls / $20.46 of $80.
+             Full report:
+             reports/pr3_structured_health_feedback_layer2_calibration_2026-07-29.md.
+             Protocol DRAFTED 2026-07-29 —
+             [`pr3_l2p_calibration_protocol.md`](pr3_l2p_calibration_protocol.md)
+             (arms C/T/D, scenarios S1+S2, pipeline-mode proposer
+             REQUIRED, 50-call nominal / 60 hard cap, pre-registered
+             LLM config + mechanism-relevance fields + rubric +
+             redesign triggers + full-campaign decision rule).
+             REVISED to rev 2 per the operator protocol review
+             (2026-07-29): exact 10-sample allocation table summing to
+             50 nominal / 60 hard; normative production-pipeline sample
+             invariant with per-sample auditable proposing-stage
+             prompts; frozen LLM config with explicit
+             provider-default-not-set entries + version-drift stop
+             rule; narrow retry semantics (schema-repair counts as an
+             LLM call); metric denominators incl. the
+             acknowledgment-not-possible rule; frozen
+             mechanism-relevance maps; deterministic-before-rubric
+             scoring with separate outputs; 8-label blinded rubric with
+             second-review rule; diagnostic-arm restrictions; 0.30 as a
+             PLANNING effect with the Primary-1/Primary-2/safety
+             hierarchy; Wilson/Holm reserved for the frozen full
+             campaign; transition + stop conditions; dry-render-
+             grounded cost table (~113k input tokens/proposer sample,
+             treatment adds ~460). AWAITING operator pilot-launch
+             decision — no launch from the draft.
+[ ] P3-L2  — Layer-2 campaign. History: first attempt STOPPED by the
+             frozen cannot-fit condition (2026-07-29, 33% terminal
+             success, INCONCLUSIVE / execution-reliability-blocked; 0
+             valid controls → efficacy UNKNOWN). After the audit +
+             Option-C fix + runner fix + rev-4 GATE PASS, the operator
+             authorized (2026-07-29) an additional $50 hard cap
+             (cumulative $74.28) for a **DESCRIPTIVE quantitative
+             calibration** — explicitly NOT a powered 0.30-effect
+             confirmatory study. Authoritative frozen design:
+             `pr3_l2_full_calibration_protocol.md` (the pilot
+             protocol's §25 2-scenario draft is superseded; §24/§24.1
+             audit + budget + reporting rules carry over). §24/§24.1
+             audit verdict: **A — no meaningful contamination** —
+             model/temporal/healthy-alternative attribution are judged
+             from model names, fingerprints, iteration tags, and
+             mechanism references (scorer + rubric are
+             citation-field-independent); archival provenance quality
+             is reported separately and never enters those metrics.
+             Launch authorized to proceed once the frozen protocol is
+             committed and the zero-LLM preflight is green (operator
+             plan §5 — no routine intermediate approval).
+             **EXECUTED 2026-07-29** (protocol commit `f8fa72c`,
+             branch head at launch): 40/40 valid, 205 calls, $38.19,
+             version stable, zero deviations, zero terminal failures.
+             **Layer-2 verdict: NOT SUPPORTED on the primary
+             hierarchy (ceiling/floor-limited — the Control prose
+             channel already carries the failure evidence in these
+             fixtures), consistent secondary specific-evidence
+             grounding (several CIs excluding zero: S1 fingerprint/
+             gate naming +0.60, S4 gate naming +0.80, S4 targeted
+             amplitude changes +0.60, S4 supported feedback claims
+             +1.00), ZERO observed harm (blinded two-pass rubric:
+             0 wrong attribution / stale claims / avoidance /
+             superficial compliance in either arm).** Descriptive
+             verdict, not powered confirmation. Cumulative Layer 2:
+             $62.47 of $74.28. Report: reports/pr3_structured_health_
+             feedback_full_layer2_descriptive_calibration_2026-07-29.md.
+[x] P3-L2  → CLOSED with the verdict above (this entry's earlier
+             text preserved as history).
+[—] P3-L3  — **N/A FOR CURRENT MERGE CLAIM** (operator decision
+             2026-07-29; not "failed"). L3 would test a
+             real-training-improvement claim this PR does not make:
+             the feature ships optional and default OFF with no
+             universal performance claim, and no safety signal
+             requires an L3 investigation. Deferred to future
+             task-specific evaluation. (The open fixture-design
+             question — treatment advantage under a DILUTED prose
+             channel — would be a revised Layer-2, not an L3;
+             recorded, unscheduled.)
+[x] P3-AUD — post-run zero-LLM audit (2026-07-29, operator-directed;
+             report §13, protocol §21). Record-changing findings:
+             P-1 production retry-loop defect — the proposing stage
+             re-injects the CAUSAL stage's inherited_components on
+             every structural attempt (agent :1689/:1781), discarding
+             the model's corrected citations; a malformed causal-stage
+             citation is a guaranteed terminal failure (proven from
+             rev-3 raw bodies, S2_C_1). P-2 refines #146: causal-stage
+             origin (memo never validated there), two malformed
+             classes (external_agent+iteration/registry tags,
+             human+"## Vocabulary" refs), semantically-correct
+             provenance with no legal encoding, no worked
+             prefix:identifier example in any prompt; observed under
+             gpt-5.4 (v16 production — NOT gemini as earlier written)
+             and gpt-5.5; treatment-independent. Runner findings
+             R-1..R-4 (calibration-only): §19.1 stop rule was a
+             MID-RUN PROTOCOL AMENDMENT (not pre-registration) and was
+             never enforced; mid-sample cap crash left S2_T_2 unmarked
+             + run_summary unwritten; wrapper echo masked the nonzero
+             exit; launch command unarchived. 33% is NOT a clean
+             reliability estimate (P-1 removed the assumed recovery
+             channel). Unblock path: fix P-1 + #146 (operator-gated)
+             → rev-4 reliability pilot → campaign re-sizing.
+[x] P3-L2p-r4 — rev-4 citation-reliability pilot EXECUTED 2026-07-29:
+             **GATE PASS (all 10 pre-registered conditions)** — 4/4
+             terminal-valid (C 2/2, T 2/2), 19 calls, $3.82,
+             gpt-5.5-2026-04-23 stable, runner `completed`/exit 0.
+             3/4 samples hit the rev-3 #146 citation classes and each
+             recovered via ONE causal correction retry with corrected
+             values verified in the final ProposalOutput (P-1 fix
+             live). Provenance semantics remain improvised (#146
+             contract gap, deferred — report §7). Cumulative Layer 2
+             $24.28/$80. Campaign budget/design decision pending with
+             the operator (powered design ≈$95-220 exceeds $55.72
+             remaining). Report:
+             `reports/pr3_citation_reliability_rev4_2026-07-29.md`;
+             protocol §22.7; behavioral efficacy remains UNKNOWN.
+             Original design parameters (superseded checklist follows):
+             protocol `pr3_l2p_calibration_protocol.md` §22 — operational
+             endpoint only (terminal ProposalOutput success),
+             **S1 only, 4 samples (C×2 + T×2)**, 16 nominal /
+             24 hard-cap calls, ≈$3.2-4.8, gate pre-registered in
+             the doc (4/4 valid [≥80% at n=4], ≥1 valid/arm, no
+             dominant failure class, corrected retry values
+             preserved, no provenance corruption, complete
+             artifacts, runner stop + exit-code proven, exact
+             treatment isolation). S2/larger runs must NOT be added
+             merely for more samples if the gate fails.
+             Preconditions: operator-approved production fix +
+             runner fixes R-1..R-4 + green deterministic tests.
+             LAUNCH REQUIRES SEPARATE OPERATOR APPROVAL — not
+             launched.
 [ ] P3-L3  — Layer-3 bounded real-LLM + real-training Gate complete
              (operator-approved launch; docs/gates/ conventions)
 [ ] P3-ACT — production activation decision (operator; separate from merge)
@@ -1137,6 +1355,44 @@ Not touched: gate execution (`execute_tools/health_checks/*` behavior),
   and tuner control flow untouched (no diff outside §6's file list — the
   PR 2 override-surface test pattern).
 
+### 7.1a P3-V1 closure — claim-to-evidence matrix (2026-07-29)
+
+Verdict and run evidence are recorded in §0 (P3-V1 entry). Audit method:
+every §7.1 bullet and every operator §1.4 category (A-L) mapped to a
+DIRECT test whose assertions were inspected — never inferred from test
+proximity. Four gaps found; each closed by a focused test in
+`tests/unit/agent/schemas/test_health_feedback_p3v1_audit.py` (6 tests).
+
+| Claim (category) | Direct evidence | Status |
+|---|---|---|
+| A. Extraction/classification: 8 record classes; presence not emptiness; evidence precedence; no invented verdicts | `test_health_feedback.py::TestProvenance` (9) + `test_round_health_summary.py` vintage suite (8) incl. error-with-evidence → gated; presence-manufacture hazard pinned | proven |
+| B. Primary fingerprint: 4-step selection; persisted gate_name/threshold.metric identity; raw kept, signature bucketed; recompute-from-raw; prose excluded; allowlist bounding | `TestPrimarySelection` (6) + `TestFingerprint` (6) | proven |
+| C. History/retention: buckets per iter; boundaries; non-contiguous expiry; windowed≠lifetime; drop-after-expiry; deterministic order+trim; latest-8 sources; representative rule; window variants; invalid policy fails | `TestWindowedCounts` (5) + `TestHistoryMerge` (7) + `TestHistoryEntryValidation` (6); incidental-order invariance + composed windowed-vs-lifetime→prompt added at P3-V1 (audit tests) | proven |
+| D. Summary boundary: 1:1 alignment; exact fields; no fabricated fingerprints; legacy loadable; pre-PR3 fields unchanged | `test_round_health_summary.py` alignment/backward-compat/round-trip + mixed-stream lockstep audit test | proven |
+| E. Deterministic outputs + degraded invariant | `test_health_feedback_outputs.py` (8) — incl. healthy≡degraded field equality (the strongest LLM-independence form) and the operator 5-condition scenario | proven |
+| F. Interpreter parity + treatment | goldens committed BEFORE renderer (`23c3fbe` < `2052fa2`, git-order-proven); full-string equality with health data present; `test_health_prompt_rendering.py` (10) | proven |
+| G. Proposer parity + treatment + §14.N | REOPENED + FIXED 2026-07-29: the original evidence covered legacy mode only (production gap — pipeline mode missed the block). Now proven on the PRODUCTION path: `test_health_evidence_pipeline.py` (6) — real pipeline run, captured proposing-stage prompts, ON exactness + OFF byte-parity vs legacy payload + exactly-one-stage + §14.N ordering; cross-iteration pipeline workspace case. Legacy-mode evidence (`test_health_evidence_block.py`, 12) retained for the legacy path | proven (both modes) |
+| H. Flag/policy/lock matrix + three sites | `test_run_invariants_health_feedback.py` (10) + all-three-sites window-scan regression | proven |
+| I. One-directional history flow | write-site count (exactly 2) + no-reverse-construction assertions; healthy≡degraded equality proves fields cannot derive from LLM output; digest-only restore suite (6) | proven |
+| J. CLI/shell/run_config/manifest | `test_health_feedback_chain_wiring.py` (12) + shell parity (15) with the two documented overrides; startup rejection ×3 pre-execution | proven |
+| K. Three-workspace contract | `test_health_feedback_workspace_cases.py` (4) — context snapshots on ACTUAL prompt strings | proven |
+| L. No routing/scientific change | branch diff = exactly the §6 file list (audited `d811226..HEAD`, zero files outside §6 + tests/docs); tuner consumption surface = exactly 2 references per policy field (audit test); gate YAML/checks/runner logic untouched except the approved vocabulary extraction | proven |
+
+Notes recorded during the audit:
+
+- §7.1 "renderer consumes the RESOLVED policy" transformed structurally:
+  renderers never need the policy because stored history is
+  post-retention; the enforceable form — merge takes policy as a
+  REQUIRED parameter; renderers import no retention constant — is now
+  asserted directly (audit tests).
+- §7.1 "dual-mode pseudo full-loop": covered by the composed
+  interp→propose workspace-case tests (predefined LLM responses, real
+  production code, context-snapshot assertions) living in `tests/unit`
+  rather than the `tests/integration` dual-mode harness — functionally
+  equivalent, location noted as a limitation, not a gap.
+- pyright strict is CI-only (Node v10 on lilab) — the CI run is the
+  type-check source of truth.
+
 ### 7.2 Layer 2 — synthetic real-LLM campaign (P3-L2p → P3-L2)
 
 Per §4's contract and §5's budget: pseudo training/scoring with
@@ -1348,6 +1604,47 @@ Template rules (binding for every commit block):
 - Update this document immediately after each implementation or test
   checkpoint — never batched.
 
+#### Test scope by development stage (operator principle, 2026-07-29)
+
+Do not run the full repository test suite or wait for a complete CI
+run after every commit by default. Use staged validation:
+
+**Before an individual commit** — run only: tests directly covering
+the changed behavior; the smallest relevant regression suite for the
+touched modules; lint and formatting checks on touched files; type
+checking where locally available and proportionate to the change.
+Record exactly what was and was not run.
+
+**After a logical commit block** — run a broader targeted regression
+across the modules integrated by that block.
+
+**Before opening, updating for final review, or merging the PR** — run
+the complete PR validation plan: full required unit/regression suites;
+blocking type checks; repository lint/format checks; required pseudo
+integrations; any approved Gate validation.
+
+A full CI run does not need to finish before every intermediate
+commit. Waiting for CI is required only when the result is necessary
+to validate an environment-specific risk, a locally unavailable
+blocking check, or the final PR state. (On lilab, pyright is the
+standing locally-unavailable blocking check — Node v10 — so a CI wait
+is justified when a change plausibly affects typing; otherwise
+continue working and read the verdict when it lands.)
+
+PR 3 CI usage (operator, 2026-07-29 — draft PR #145 kept open so
+pyright can run): push once per completed commit block, not per
+micro-commit; CI runs asynchronously; no blocking watcher after a push
+(one exception granted: the first pyright pass over the new CB1 schema
+module); continue working unless CI reports a relevant failure; review
+the latest CI result at the next block boundary; run and wait for the
+full final CI only before final PR review or merge.
+
+Governing principle:
+
+> Validation should be proportional to the scope and risk of the
+> current change. Local commit evidence is targeted; full-repository
+> evidence is collected before PR completion.
+
 ### CB1 — schemas + deterministic logic (`agent/schemas/health_feedback.py`)
 
 **Goal.** Create the complete typed data model and ALL deterministic
@@ -1394,27 +1691,76 @@ necessary.
 
 **Implementation plan.**
 
-- [ ] Minimal extractions into `health_checks/schemas.py`
+- [x] Minimal extractions into `health_checks/schemas.py`
       (`severity_of`/`_SEVERITY` from runner, `CandidateHealthValidity`
       from candidate_eligibility, `GateExecutionStatus` alias);
       compatibility re-exports at both origin modules; serialized
-      values unchanged
-- [ ] Models per §3.2/§3.3/§3.8 with the §9 type/validation decisions
-      (canonical-type reuse, `default_factory`, `ge=1`, `min_length=1`,
-      occurrence-bucket validators); provenance = the SMALLEST typed
-      model covering the §3.2 confirmed cases (re-inspect lifecycle +
-      record shapes first; stop-and-propose if a real case doesn't fit)
-- [ ] Metric allowlist dict with exact NESTED extraction paths
-      (`per_file.{idx}.metrics.*` + `aggregate_statistics` — §2.5),
-      authored against real-V17-payload fixtures + `bucket_signature()`
-      (2 sig figs, floats only; sorted keys)
-- [ ] `select_primary_gate_outcome()` — 4-step narrowing with
-      empty-step fall-through (§3.3)
-- [ ] `build_collapse_fingerprint()` — raw metrics stored, bucketed
-      signature derived
-- [ ] `merge_fingerprint_history()` — inclusive-window expiry, count
+      values unchanged *(2026-07-29: PersistedHealthGateResult
+      execution_status retyped to the alias — same Literal values;
+      runner re-export via the redundant-alias idiom `import X as X`
+      (F401-exempt, no noqa); identity asserted across all three
+      import paths (runner / candidate_eligibility / package init);
+      ruff + format clean; health_checks suite 230 passed 0.32s;
+      health_checks+core 700 passed 3.33s)*
+- [x] Models per §3.2/§3.3/§3.8 with the §9 type/validation decisions
+      *(2026-07-29, `agent/schemas/health_feedback.py`:
+      CandidateHealthValidity + GateAction + GateExecutionStatus reused
+      from health_checks.schemas; default_factory everywhere; ge=1 /
+      min_length=1; occurrence ascending-unique model_validator.
+      Provenance = 5-value Literal — every value maps to an observed
+      §2.5 record shape, none speculative; docstring records the
+      per-value evidence. Two CB1 implementation decisions recorded:
+      (1) fingerprint.check_name holds the persisted gate_name — the
+      check's registered name is not persisted, so the gate id is the
+      strongest identity actually present; (2) blocking allowlist keyed
+      by the persisted threshold.metric name, self-describing, no
+      gate-id mapping table)*
+- [x] Metric allowlist authored from the REAL V17 payload *(real names
+      differ from design shorthand: n_unique_int8_values /
+      output_std_mv / dominant_mode_fraction; worst-case via
+      aggregate_statistics minimum|maximum per collapse direction;
+      exactness from threshold.unit=="count"; recording allowlist =
+      6 verified scalar keys, per-file trees excluded)*
+- [x] `select_primary_gate_outcome()` — 4-step narrowing with
+      empty-step fall-through *(6-case test class green incl.
+      config-order-first-is-NOT-primary and missing-counterfactual
+      fall-through)*
+- [x] `build_collapse_fingerprint()` — raw metrics stored, bucketed
+      signature derived *(0.9612/0.9634 → same signature, raw values
+      preserved; recompute-from-raw test; no-allowlisted-metric →
+      None, nothing invented from prose)*
+- [x] `merge_fingerprint_history()` — inclusive-window expiry, count
       aggregation, model-key isolation, total-order sort, trim
-- [ ] Module docstring: determinism contract + §3.2 legacy invariant
+      *(canonical 1,2,5/window-3 example; boundary iter-3-retained/
+      iter-2-removed; window=1; representative-observation overwrite;
+      latest-8 source_exp_ids; purity — inputs not mutated)*
+- [x] Module docstring: determinism contract + governing rule verbatim
+
+**CB1 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/agent/schemas/test_health_feedback.py -q
+    → 39 passed in 0.10s
+pytest tests/unit/agent/schemas tests/unit/execute_tools/health_checks -q
+    → 438 passed in 1.26s          (regression, both suites)
+pytest tests/unit/execute_tools/health_checks/ -q
+    → 230 passed in 0.32s          (post-extraction, CB1-a)
+pytest tests/unit/execute_tools/health_checks/ tests/unit/core/ -q
+    → 700 passed in 3.33s          (post-extraction incl. resume, CB1-a)
+ruff check / ruff format --check   → clean on all touched files
+```
+
+Re-export identity asserted across all three import paths (runner /
+candidate_eligibility / package `__init__` — same objects). Round-trip
+presence-manufacture hazard pinned as an explicit test
+(`test_round_trip_manufactures_presence_documented_hazard`).
+Evidence-driven deviations from design shorthand (operator-approved
+2026-07-29): fingerprint identity = persisted `gate_name` (no
+gate-id→check-name mapping is invented or maintained); allowlist keyed
+by persisted `threshold.metric` with `threshold.unit` driving
+exact-vs-bucketed rendering — the REAL persisted vocabulary
+(`n_unique_int8_values` / `output_std_mv` / `dominant_mode_fraction`),
+not the design's shorthand names. CB2 and P3-V1 remain open.
 
 **Validation plan.** Unit only (new
 `tests/unit/agent/schemas/test_health_feedback.py`): selection-rule
@@ -1470,16 +1816,47 @@ signal + evidence-precedence order are P3-CA-resolved — §2.5, §3.2).
 
 **Implementation plan.**
 
-- [ ] Re-inspect lifecycle + record shapes (§3.2 process step 1) and
-      confirm the CB1 provenance model covers them; stop-and-propose
-      on any real case that doesn't fit cleanly
-- [ ] `_round_health(record)` — classification per the §3.2
-      evidence-precedence order (governing rule binding); validity via
-      `classify_candidate_health` (reuse, §2.1); fingerprint via CB1
-      builders
-- [ ] `round_health` populated parallel to `round_scores` (alignment
-      guaranteed by the shared loop)
-- [ ] Protocol docstring update
+- [x] Re-inspect lifecycle + record shapes (§3.2 process step 1)
+      *(2026-07-29: records reach the builder as models validated FROM
+      dicts on both production paths — tuner `:4094`/`:4130` fresh,
+      `model_exploration.py:254` reparse — so `model_fields_set`
+      mirrors authored keys; gate config is process-cached
+      (`_CACHED_GATES`) so per-record `classify_candidate_health` is
+      cheap, matching the existing per-record `is_valid_candidate`
+      precedent; no record shape outside the CB1 provenance model
+      surfaced — stop-and-propose not triggered)*
+- [x] `_round_health(record)` — classification per the §3.2
+      evidence-precedence order; validity via
+      `classify_candidate_health` (reuse); fingerprint via CB1 builders
+      *(placed beside `_round_ordering`, same lazy-import precedent;
+      gate evidence passed to builders only under `gated` provenance;
+      `failure_reason` carried verbatim for every provenance with the
+      §2.5 field-overload finding documented in the docstring — the
+      provenance label is what disambiguates exception text from gate
+      evidence)*
+- [x] `round_health` populated parallel to `round_scores` (alignment
+      guaranteed by the shared loop) *(field added after
+      `round_ordering` on ModelRunSummary, default_factory=list —
+      legacy digests without the field validate to empty)*
+- [x] Protocol docstring update *(consumed list names round_health)*
+
+**CB2 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/agent/result_interpretation_agent/test_round_health_summary.py -q
+    → 12 passed in 0.93s   (new suite: 8 vintage/precedence cases +
+                            alignment + backward-compat + JSON
+                            round-trip + malformed-entry negative)
+pytest tests/unit/agent/result_interpretation_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 533 passed in 1.28s  (block regression)
+ruff check / ruff format --check → clean on the 4 touched files
+```
+
+NOT run at this stage (per the staged-validation principle): full repo
+suite, tuner suite, pseudo integrations — deferred to P3-V1/PR-final.
+CB1 CI on draft PR #145 (run 30425698414, head `2dfaf63`): SUCCESS —
+first pyright pass over the new module clean.
 
 **Validation plan.** Unit: `_round_health` across the §3.5 record-class
 list + the §7.1 provenance-classification suite with fixtures authored
@@ -1530,17 +1907,63 @@ on: CB1, CB2.
 
 **Implementation plan.**
 
-- [ ] Input/output schema fields (typed history, `default_factory`)
-- [ ] Flag OFF short-circuit — rendering code unreachable; prompt
-      builder unchanged output
-- [ ] Flag ON rendering (§3.6 items 1-3), consuming the RESOLVED
-      retention policy parameter
-- [ ] Deterministic population + `merge_fingerprint_history` call —
-      before/after LLM, never from prose
-- [ ] Degraded path: deterministic merge runs regardless of LLM
-      degradation — current RoundHealth fingerprints merge into output
-      history; only LLM commentary is affected (§3.10 invariant)
-- [ ] `_stats` cache entries
+- [x] Goldens captured from PRE-change code + parity scaffold
+      *(2026-07-29, CB3-a: 3 golden files rendered at `f3a0b8c` clean
+      tree — per-model prompt on a collapse-heavy summary WITH
+      round_health populated, on a legacy summary, and the per-model
+      system prompt; `test_health_prompt_parity.py` 3 passed 0.89s
+      against them pre-change, exact string equality)*
+- [x] Input/output schema fields (typed history, `default_factory`)
+      *(CB3-b: InterpretationInput gains the flag, the two retention
+      knobs (`ge=1`, active_model_* convention) with a
+      `health_feedback_retention_policy()` resolver method, and the
+      typed history carry; InterpretationOutput gains the three
+      deterministic fields)*
+- [x] Flag OFF short-circuit — prompt builders byte-identical
+      *(golden string equality holds POST-change — the renderer now
+      contains the flag-gated code and parity still passes)*
+- [x] Flag ON rendering (§3.6 items 1-3) *(CB3-c: trajectory
+      `[GATE {action} — {signature-or-verbatim-failure_reason}]`
+      labels with `score=invalidated`; `### HealthGate summary`
+      section — validity counts, distinct fingerprints ×count with
+      round indices, best-round recording diagnostics, no empty
+      headers; `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` appended to the
+      per-model system prompt — verbatim-fingerprint,
+      invalid-high-score-is-failure, no-verdict-from-absence,
+      no-cross-model-transfer rules)*
+- [x] Deterministic population + `merge_fingerprint_history` call
+      *(CB3-b: `_collect_health_evidence()` + merge computed BEFORE
+      the LLM try-block, threaded into the cold-start, healthy, AND
+      degraded output dicts — the §3.10 invariant is structural)*
+- [x] Degraded path *(operator 5-condition scenario green: new
+      fingerprint merged with current-iteration bucket under
+      `is_degraded=True`, prior history intact, commentary empty;
+      plus a healthy-vs-degraded field-equality test)*
+- [x] `_stats` cache entries *(round_health_counts +
+      collapse_fingerprints on the deterministic side of the cache)*
+
+**CB3 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../test_health_prompt_parity.py -q     → 3 passed 0.90s
+    (goldens captured at f3a0b8c PRE-change; equality re-verified
+     POST-change — the strong form: health data present, flag OFF,
+     byte-identical)
+pytest tests/.../test_health_feedback_outputs.py -q  → 8 passed 0.98s
+    (3 initial failures were TEST bugs — expected counts misread
+     classify_candidate_health: a success round with an empty gate
+     list is UNKNOWN by the classifier's missing-required-gates rule,
+     not invalid; production verdicts were correct; assertions fixed)
+pytest tests/.../test_health_prompt_rendering.py -q  → 10 passed 0.94s
+pytest tests/unit/agent/result_interpretation_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 554 passed 1.47s   (block regression)
+ruff check + format --check → clean
+```
+
+NOT run at this stage: full repo suite, tuner suite, pseudo
+integration (deferred to P3-V1); synthesis-prompt rendering unchanged
+by design (§3.6 scopes items 1-3 to the per-model call).
 
 **Validation plan.** Unit: flag OFF ⇒ prompt strings byte-identical to
 goldens captured from pre-CB3 code (parity claim, exact string
@@ -1591,12 +2014,32 @@ routing. Unchanged: prompt byte-identical flag OFF. Depends on: CB3
 
 **Implementation plan.**
 
-- [ ] `ProposalInput` flag field
-- [ ] Block renderer reading `per_model_collapse_fingerprints` +
-      `per_model_round_health_counts` + history with `.get` defaults;
-      per-model labels (attribution, §3.8); relative iteration tags;
-      closing instruction incl. inappropriate-avoidance warning
-- [ ] Protocol threading
+- [x] Goldens captured from PRE-change code + parity scaffold
+      *(CB4-a `66efed8`, golden rendered at clean `2052fa2`: full
+      reasoning prompt from the STRONG typed fixture — real
+      InterpretationOutput.model_dump with two disjoint models
+      (diversity vs std collapse), multi-bucket retained history,
+      §14.N GateExhaustionInfo pinned inside the golden AND by a
+      standalone regression; exact full-string parity with the
+      structured fields PRESENT and flag OFF; leakage assertions
+      supplement, never replace, the full-string test)*
+- [x] `ProposalInput` flag field *(default OFF; docstring states the
+      informational-only, never-routing contract)*
+- [x] Block renderer *(`_format_healthgate_evidence_block()`: model-
+      grouped exactly as CB3 grouped it, nothing unlabelled; current-
+      iteration evidence vs retained history explicitly separated;
+      retained-window counts BY CONSTRUCTION — stored history is
+      post-retention, so bucket sums are window counts and bucket
+      iterations are ABSOLUTE tags (spec allows exact-or-relative;
+      absolute needs no new wiring); "Representative observation:"
+      labelling per §3.8; bounded source exp_ids surfaced; six-rule
+      closing instruction (bounded, <45 lines total); malformed
+      hand-built history entry ⇒ diagnostic ValueError naming the
+      model; legacy/empty ⇒ "" with no header; rendered AFTER and
+      visibly separate from the untouched §14.N block)*
+- [x] Protocol threading *(param default False; included in the result
+      dict only when True so the schema default governs legacy
+      callers)*
 
 **Validation plan.** Unit: flag OFF golden parity (string equality);
 flag ON block content exactness incl. model attribution (fingerprint
@@ -1609,6 +2052,38 @@ in a hand-built dict ⇒ diagnosable error.
 **Acceptance criteria.** Parity by golden string equality; the
 attribution test passes; the §14.N block's output is byte-identical
 before/after this commit on the same fixture.
+
+**CB4 evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../ml_model_proposal_agent/test_health_prompt_parity.py \
+       tests/.../ml_model_proposal_agent/test_recent_gate_exhaustions.py -q
+    → 27 passed 1.01s   (CB4-a: parity 3 + full existing §14.N suite;
+                          golden source commit 2052fa2, clean tree)
+pytest tests/.../test_health_evidence_block.py \
+       tests/.../test_health_prompt_parity.py -q
+    → 15 passed 0.93s   (CB4-b flag-ON exactness: counts, signatures,
+                          retained-window 3-across-iters-3,5 not
+                          lifetime; representative-observation labels;
+                          bounded source ids; closing rules; ordering
+                          after §14.N; adversarial two-model
+                          non-contamination; legacy/empty/counts-only;
+                          malformed → ValueError; §14.N byte-identical
+                          both flag states; parity re-verified
+                          POST-change)
+pytest tests/unit/agent/ml_model_proposal_agent \
+       tests/unit/agent/schemas tests/unit/agent/protocols -q
+    → 803 passed 1.58s  (block regression)
+ruff check + format --check → clean on all touched files
+```
+
+Deferred to P3-V1 (recorded per the staged-validation principle): full
+repository suite, tuner suite, pseudo interp→propose integration with
+context-snapshot assertion, workflow tests. Deviation note: iteration
+tags rendered ABSOLUTE (spec permits exact-or-relative) — relative tags
+would need the current iteration number, which the interpretation dump
+does not carry; absolute tags are fully deterministic from bucket data
+alone and avoid inventing CB5 wiring early.
 
 **Failure/edge cases.** Interpretation from a flag-OFF workspace fed to
 a flag-ON proposer (mixed inputs can only occur in hand-built tests —
@@ -1637,15 +2112,139 @@ behavior change with defaults (flag OFF + default policy ⇒ lock
 equality with pre-PR3 expectations must hold for legacy workspaces).
 Depends on: CB1-CB4.
 
+**Revised commit boundaries (operator, 2026-07-29, post-audit)**:
+CB5-a = canonical lock policy + tuner pass-through (workflow/chain
+sites intentionally rely on builder defaults — an INTERMEDIATE state,
+not completed three-site propagation; the all-three-sites regression
+is deferred to CB5-c). CB5-b = workflow + resume carry. CB5-c = chain
+CLI + final stamps + all-three-sites regression + the three approved
+workspace cases (the end-to-end legacy+CLI-ON rejection belongs here —
+the CLI surface does not exist earlier).
+
 **Implementation plan.**
 
-- [ ] `RunInvariants` fields + docstring resume matrix
-- [ ] All three lock sites pass the fields consistently
-- [ ] Workflow: params threaded, history carried, degraded-safe
-- [ ] Resume: typed entries restored from digest (`.get` default)
-- [ ] CLI flags (`--enable_structured_health_feedback`, retention
-      flags) + `run_chain.sh` passthrough
-- [ ] run_config + per-iteration manifest stamps
+- [x] CB5-a: `RunInvariants` three fields + `_CANONICAL` + docstring
+      resume matrix; `build_run_invariants` params (defaults keep every
+      pre-PR3 call site producing an unchanged OFF/3/8 lock);
+      `HyperparamTuningInput` three pass-through fields (tuner has NO
+      PR 3 behavior — lock + stamp only); tuner lock call passes all
+      three explicitly; tuner run_config stamps the three POLICY values
+      (policy only — per-round evidence stays in records/digest, never
+      duplicated). *(2026-07-29 evidence: new
+      `test_run_invariants_health_feedback.py` 10 passed 0.09s — same
+      policy accepted; changed flag rejected naming field + both
+      values; changed window rejected; changed max-entries rejected;
+      legacy lock loads OFF/3/8 and validates; ON-over-legacy rejected;
+      tuner lock-call + run_config surface assertions; builder-default
+      equivalence. Block regression core+schemas+tuner-suite: 1 failure
+      diagnosed as a TEST-CONTRACT update — `test_lock_file_is_plain_json`
+      pins the exact on-disk key set and legitimately grows by the
+      three approved fields (same evolution it records for PR 2);
+      after the update core suite 480 passed 2.99s; full regression
+      1382 passed 177s pre-fix, tuner suite unaffected. ruff + format
+      clean.)*
+- [x] CB5-b: Workflow: params threaded, history carried, degraded-safe;
+      workflow lock call passes the policy explicitly *(2026-07-29:
+      `run_workflow` gains the flag + the two knobs + typed
+      `restored_collapse_fingerprint_history` (all pre-PR3-default);
+      workflow lock call passes the policy triple; carry is
+      one-directional and has exactly two write sites — restored seed
+      and interpreter-output replacement (asserted by source-surface
+      test incl. a no-reverse-construction check); interpreter input
+      + proposer protocol threading. Degraded-safe by CB3
+      construction: the interpreter's degraded output still carries
+      the merged history, so the loop replacement is total.)*
+- [x] CB5-b: Resume: typed entries restored from digest *(2026-07-29:
+      `load_latest_fingerprint_history` sibling loader, latest-wins —
+      each digest is already the merged post-retention history, so
+      concatenation would double-merge; `RestoredState` typed field +
+      population. Failure policy split recorded: FILE-level problems
+      warn+skip like every sibling loader; DATA-level corruption inside
+      a parseable digest raises a diagnostic ValueError naming iter +
+      model per the §11-CB5 failure contract — deterministic policy
+      data is never silently dropped. Legacy digest → {} via .get.)*
+
+**CB5-b evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/unit/core/test_resume_fingerprint_history.py \
+       tests/unit/workflows/test_health_feedback_wiring.py -q
+    → 11 passed 0.93s  (typed round-trip; latest-wins; legacy empty;
+                         missing-file soft-fail warning; corrupted
+                         entry raises naming iter+model; first-iter
+                         short-circuit; signature defaults; workflow
+                         lock/interp/proposer threading; carry
+                         one-directionality with write-site count)
+pytest tests/unit/core tests/unit/workflows \
+       tests/unit/agent/result_interpretation_agent -q
+    → 959 passed 14.67s  (block regression)
+ruff check + format → clean
+```
+
+One test fix during authoring (diagnosed before change): the carry
+one-directionality test used whitespace-exact source matches that
+`ruff format` legitimately collapsed — test made format-robust; the
+production wiring was correct. run_one_iteration forwarding of
+`state.collapse_fingerprint_history` is CB5-c (chain wiring).
+- [x] CB5-c: CLI flags + `run_chain.sh` passthrough *(2026-07-29:
+      three argparse flags with startup retention validation in
+      `normalize_args` — Pydantic ge=1 via the resolved policy, routed
+      through the shared `parser.error` path so an invalid value exits
+      non-zero BEFORE any resume mutation or LLM work; `_chain_common.sh`
+      vars + parse arms + forward-when-set (unset policy reproduces
+      pre-PR3 argv byte-identically); parity contract extended — the two
+      retention knobs registered in `SHELL_DEFAULT_OVERRIDES` with the
+      documented shell-""≡omit vs Python-3/8 rationale)*
+- [x] CB5-c: run_config + per-iteration manifest stamps *(run_config
+      stamped at CB5-a; `write_manifest` gains `health_feedback_policy`
+      — stamped on EVERY branch (completed/no_records/failed) so failed
+      iterations stay auditable; policy only, no per-round evidence)*
+- [x] CB5-c: lock-collision closure *(the CB5-b audit gap found during
+      implementation: the workflow threads tuner inputs through
+      `ml_model_valid_to_ml_model_tune`, which lacked the policy triple
+      — a flag-ON workflow + OFF-defaulted tuner would have written
+      contradictory locks, the exact PR 2 failure mode. Protocol +
+      workflow tune-call now thread all three; chain lock call passes
+      them; the ALL-THREE-SITES regression (window-scan over every
+      `build_run_invariants(` call) pins it)*
+- [x] CB5-c: three approved workspace cases *(composed end-to-end
+      pseudo over real components, mock LLM only; context snapshots
+      asserted on ACTUAL prompt strings: Case 1 — ws A flag-ON, iter-1
+      interpreter digest → typed restore → iter-2 merge shows buckets
+      [1, 2] → the iteration-2 PROPOSER prompt contains
+      "- {SIG}: 2 occurrence(s) across iteration(s) 1, 2"; manifest and
+      lock policy stamps agree. Case 2 — ws A resumed OFF →
+      RunInvariantsViolation naming the field + locked=True vs this
+      run=False. Case 3 — ws B OFF from creation: the actual bridge
+      prompts carry no treatment text while the digest carries the
+      recording-only structured provenance; proposer prompt has no
+      block and no signature)*
+
+**CB5-c evidence (2026-07-29)** — exact commands (repo venv python):
+
+```text
+pytest tests/.../test_health_feedback_chain_wiring.py -q
+    → 12 passed 0.98s   (three-site lock regression; CLI defaults/parse/
+                          startup rejection ×3; run_workflow forwarding
+                          incl. typed history; manifest policy stamp +
+                          legacy-None)
+pytest tests/.../test_health_feedback_workspace_cases.py -q
+    → 4 passed 0.97s    (the three operator cases + stamp agreement)
+pytest tests/unit/scripts/test_chain_consistency.py -q
+    → 15 passed 1.14s   (shell parity incl. the two documented overrides)
+pytest tests/unit/sdsc_submission_scripts tests/unit/scripts \
+       tests/unit/workflows tests/unit/core tests/unit/agent/protocols -q
+    → 980 passed 15.04s (block regression)
+bash -n _chain_common.sh → syntax ok; ruff + format clean
+```
+
+Authoring-time fixes (each diagnosed before change): startup-validation
+insertion initially landed outside the existing try/except (syntax);
+missing --run_name in CLI test fixtures; window-scan replacing a
+non-greedy regex defeated by inner parens; manifest iter_dir not created
+by a test. One production improvement made during test authoring: the
+manifest policy stamp moved from the completed-branch dict to a single
+post-branch assignment so ALL manifest branches carry it.
 
 **Validation plan.** Unit: the §3.9 five-row resume matrix as five
 tests; three-site regression test (parse each
@@ -1690,3 +2289,289 @@ counts/time recorded here.
 **Commit boundary.** Operator-surface wiring only; no schema or prompt
 logic changes (those are CB1-CB4); P3-DOC (node/skill .md sync) follows
 as its own commit before merge per the standing rule.
+
+## 12. P3-AUD follow-up — production fix options (recorded 2026-07-29; NOT implemented; operator decision pending)
+
+Source of evidence: report §13, protocol doc §21. Two production
+defects (P-1 retry-loop discard; P-2 = #146 interface + expressiveness
+gap). Options compared per the operator's audit-first instruction; no
+code changed.
+
+**Option A — prompt clarification (targets P-2 induction).** Add to
+`causal_reasoning_stage.md` (the stage of origin) and mirror in
+`proposing_stage.md`: one worked example PER source type (incl. an
+`external_agent` `prefix:identifier` example and a human example);
+explicit instructions that registry losses/models inherited from past
+iterations are `source_type='experiment'` with the introducing
+`model_type` as `source_id` (+ `from_run` when known); that vocabulary
+items are cited with a designated stable form; and the regex stated
+where the schema is described. Cheap, zero schema/migration risk,
+directly addresses the "no worked example" evidence. Cannot by itself
+fix P-1 (corrections would still be discarded) and leaves the
+provenance vocabulary semantically overloaded.
+
+**Option B — narrow deterministic normalization.** Pre-validation
+normalizer for UNAMBIGUOUS malformed forms only (e.g.
+`Vocabulary:x`/`vocabulary.x` → the designated vocabulary form;
+`iter_NNN`-style external_agent ids → a canonical iteration form),
+with every rewrite recorded in provenance. Risk: silently converts a
+possibly-wrong attribution into a legal-looking one — it can hide
+attribution errors the validator exists to catch. If adopted at all,
+only as a RECORDED normalization with the original preserved, never a
+silent fix. Not recommended as the primary fix.
+
+**Option C — extend the source representation (targets P-2
+expressiveness).** Add legal source types/forms for what prompts
+actually expose: e.g. `registry` (loss/model registry entries, id =
+registry name + introducing iteration) and `vocabulary` (id = vocab
+item name), or equivalently structured origin fields. Removes the
+overload where everything collapses to `experiment`; makes the
+semantically-correct citations the model already produces legal.
+Cost: schema migration (validator, prompts, tests, any consumers of
+`source_type`), medium scope; must keep old records readable.
+
+**Option D — relax validation. REJECTED as primary.** Widening the
+regex or accepting malformed ids raises pass rate by corrupting the
+provenance record (`iter_004` as an external_agent id is precisely the
+ambiguity the contract exists to prevent). Only defensible as a
+temporary diagnostic mode, never as the fix.
+
+**P-1 fix (required regardless of A-D).** In pipeline mode, validate
+`inherited_components` at the CAUSAL stage (fail fast where the
+feedback loop can actually reach the producing response) AND/OR accept
+the proposing response's corrected `inherited_components` when the
+injected causal values fail validation. Smallest coherent form:
+validate the memo's citations inside the causal-stage retry loop with
+the same `InheritedComponent` contract, so the retry instruction
+becomes satisfiable; keep the proposing-stage injection unchanged.
+
+**Recommendation (evidence-based): P-1 fix + Option A now; Option C
+as the durable follow-up** (separate migration commit or PR); B/D
+rejected. Rationale: rev-3 raw bodies prove the model produces correct
+semantics and, when told, correct syntax — the failures are induced by
+missing guidance (A), unexpressible sources (C), and an unfixable
+retry seam (P-1). Deterministic validation before any rev-4: contract
+tests for each malformed class (must fail with instructive messages),
+prompt-render tests asserting the worked examples appear in both
+stages, and a causal-stage-retry test proving a malformed memo
+citation is corrected within the causal loop.
+
+**Runner fixes (calibration scope, separate from production fix):**
+R-1 enforce protocol stop conditions in the sample loop (count
+terminal failures at each `run_sample` return; stop when the floor
+becomes unattainable); R-2 top-level try/finally writing
+`run_status.json` with outcome ∈ {completed, protocol_stop,
+budget_stop, technical_failure} (+ always write `run_summary.json`);
+R-3 mark an in-flight sample aborted by a cap (`aborted_incomplete`
+marker in its dir); R-4 archive the exact launch command + wrapper in
+the run dir; wrapper must propagate the runner's exit status (no
+trailing echo as last command).
+
+## 13. Retry-assembly pre-edit audit (2026-07-29; read-only; answers the operator's eight questions before any P-1 fix)
+
+Inspected: `_run_pipeline` stage loop (`ml_model_proposal_agent.py:1495-1579`),
+assembly (`:1681-1789`), structural-retry loop (`:1717-1835`),
+`agent/schemas/proposal.py` (DiscoveryMemo `:376`, ProposalOutput
+`:912`), `causal_reasoning_stage.md`, `proposing_stage.md`, git history
+of the extraction lines (`301037d`, `510ec3d`, phase-c).
+
+1. **Why immutable across retries?** Stage-ownership design from
+   phase-c: the reasoning stages own the memo's scientific content
+   (citations, prediction, vocab proposals); the proposing stage owns
+   implementation; stages 1+2 are never re-run from either retry loop
+   (cost control). The comment "these don't change on retry" encodes
+   the ASSUMPTION that injected scientific fields cannot fail
+   validation — never reconciled with the structural-retry feedback
+   that names errors in exactly those fields. The defect is that
+   assumption, not the ownership design.
+2. **Can the proposing stage return/correct inherited_components?**
+   Its declared output contract says NO — the "What you produce" JSON
+   in `proposing_stage.md` lists 9 fields and does NOT include
+   `inherited_components` (or any injected field). The corrected
+   citations observed in rev-3 retries were spontaneous,
+   outside-contract responses to error feedback. The causal stage's
+   contract DOES include `inherited_components` (worked example at
+   `causal_reasoning_stage.md:117-125`).
+3. **Fields discarded/overwritten by earlier-stage values** (assembly
+   `:1773-1789`): `inherited_components` (causal),
+   `falsifiable_prediction` (causal), `proposed_vocab_links`
+   (comparison), `proposed_vocab_candidates` (comparison+causal),
+   `proposed_discoveries` (comparison+causal). All other
+   ProposalOutput fields come from the proposing response and ARE
+   correctable by structural retry.
+4. **Other fields with the same uncorrectable pattern**: YES —
+   `falsifiable_prediction` carries the
+   `_prediction_differs_from_current` model validator (plus numeric
+   type coercion); a causal-stage violation is exactly as terminal
+   and unfixable as P-1 (latent, not yet observed).
+   `proposed_vocab_links` (status Literal + str coercion),
+   `proposed_vocab_candidates` (dict[str,str] coercion) and
+   `proposed_discoveries` (VocabEntry) can fail on type/Literal
+   errors — same pattern, lower likelihood, partly comparison-stage
+   origin. No stage output is Pydantic-validated at its own stage:
+   `accumulated[stage.name]` stores the raw bridge dict (`:1569/:1577`).
+5. **Intended source of truth**: the causal stage, for all attempts —
+   by design there is no "corrected retry" source because the design
+   assumed no correction would ever be needed. First attempt / retry /
+   corrected retry all currently read the same stale causal values.
+6. **Would accepting the retry response violate causal invariants?**
+   Partially: `proposing_stage.md` Rule 2 audits the implementation
+   AGAINST the memo's component list; letting the proposing stage
+   rewrite the list makes it self-referential and lets the
+   implementation stage alter scientific attribution produced with
+   fuller causal context. Downstream consumers
+   (`ml_code_validator_agent._check_inherited_components`,
+   `interpretation_helpers`, vocab accumulation) key on `component`
+   NAMES only — `source_type`/`source_id` are archival lineage — so
+   the blast radius of a wrong correction is provenance records, not
+   behavior.
+7. **Merge rule**: keep ONE rule for all attempts. Correcting at the
+   producing stage (Option C) preserves the uniform injection rule at
+   the proposing stage; per-attempt or error-field-selective merge
+   rules (Options A/B) introduce attempt-dependent semantics and a
+   second source of truth.
+8. **Compat/provenance risk per option**: A — proposing contract must
+   grow the field; citations restated each attempt can drift from a
+   VALID memo; largest surface. B — smallest happy-path delta but
+   implementation-stage attribution edits + per-index merge
+   complexity; corrections made without the causal context. C —
+   validation moves to the producing stage inside its own bounded
+   retry; no contract change to the proposing stage; existing tests
+   that inject malformed memos will fail earlier (test updates, which
+   is the point); adds ≤N causal retry calls on failure only. D — C
+   plus a proposing-stage override reintroduces two sources of truth;
+   only justified if causal-retry exhaustion were unacceptable, but
+   terminal-with-clear-message + the production workflow-level retry
+   already cover that.
+
+**Recommendation (pending operator approval): Option C, scoped to the
+causal stage's scientific subset** — validate `inherited_components` +
+`falsifiable_prediction` (one small partial model) immediately after
+the causal stage returns, inside a bounded causal-stage retry (≤2,
+error summary fed back; same feedback style as the structural loop).
+Retry instruction becomes truthful at the stage that owns the data;
+proposing-stage assembly unchanged; single source of truth preserved.
+Comparison-stage vocab fields: same latent pattern, zero observed
+failures — file as a follow-up issue rather than widening this fix.
+
+### 13.1 Operator decision and implementation evidence (2026-07-29)
+
+**Decision (operator)**: Option C approved — validate and retry the
+causal-stage-owned fields (`inherited_components`,
+`falsifiable_prediction`) at the causal stage itself; the causal stage
+remains the single source of truth. Explicitly rejected: expanding the
+proposing-stage contract to rewrite these fields; attempt-dependent
+merge behavior; relaxing the final validator; any broad citation
+sanitizer. At most two causal-stage correction retries. The
+comparison-stage vocab fields stay out of scope (no observed failure)
+— latent risk filed as a follow-up GitHub issue.
+
+**Implementation** (this commit):
+
+- `agent/schemas/proposal.py` — `CausalStageOwnedContent` (B.2a): a
+  validation-only partial schema mirroring ProposalOutput's contract
+  for exactly the two causal-owned fields (`falsifiable_prediction`
+  stays `| None` — the legacy allowance — so no behavior tightening).
+  A premature full ProposalOutput was rejected: implementation fields
+  do not exist at causal time and it would couple causal validation to
+  proposing-stage validators.
+- `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` —
+  `_MAX_CAUSAL_CORRECTION_RETRIES = 2`; a validation block placed
+  AFTER the boldness retry (which can replace the causal output with a
+  new, unvalidated response) and BEFORE the proposing stage. On
+  failure: focused error summary (same loc→msg format as the
+  structural loop), correction user prompt = the standard causal-stage
+  assembly (boldness-retry P-d order) + a "## VALIDATION ERROR —
+  CORRECT AND RESEND" block; IDENTICAL system prompt; label
+  `proposer.causal_reasoning.correction`; ≤2 retries then a
+  stage-naming RuntimeError raised BEFORE any proposing call is spent.
+  Write-back only when a correction replaced the output (a pipeline
+  with no causal stage is untouched). The stale "let the proposing
+  stage handle it" comment on the malformed-prediction swallow was
+  corrected in place.
+- Proposing-stage prompt, output contract, assembly, and structural
+  retry: UNCHANGED (asserted by tests).
+
+**Tests** (`tests/unit/agent/ml_model_proposal_agent/
+test_causal_stage_validation.py`, 9 tests, all green first run;
+proposer-suite regression 523 passed; proposer+prompts+protocols 605
+passed; ruff check + format clean):
+
+1. malformed causal citation → correction retry → corrected citation
+   present in the final ProposalOutput → success (4 calls);
+2. correction call carries the focused error (marker, field name,
+   offending value) and the `.correction` label;
+3. repeated malformed corrections exhaust (comparison + causal + 2
+   corrections, NO proposing call) with a stage-naming RuntimeError;
+4. degenerate falsifiable_prediction (predicted == current) corrected
+   through the same path, corrected value preserved;
+5. valid causal output: byte-preserved behavior — 3 calls, no
+   correction label, no marker in any prompt;
+6. proposing structural retry (duplicate model name) unaffected;
+7. correction system prompt byte-identical to the causal system
+   prompt; no fix marker in the proposing system prompt;
+8. disabled causal stage: 2 calls, no key insertion;
+9. partial-schema contract: empty/None legal, malformed citation and
+   degenerate prediction rejected.
+
+**Retry contract after the fix** (now truthful):
+causal stage produces invalid causal-owned data → causal validation
+fails → the causal stage receives the focused validation error →
+bounded causal-stage retry produces corrected data → corrected causal
+output becomes the accumulated source of truth → final ProposalOutput
+validation uses that corrected data.
+
+## 14. Final PR 3 status (operator decision, 2026-07-29)
+
+**Operator decision**: keep BOTH the recording infrastructure and the
+optional prompt treatment in PR #145. The merge claim is
+implementation-focused; no universal behavioral-improvement claim is
+made or required.
+
+### 14.1 Scope completed
+
+Structured HealthGate recording; deterministic evidence classification;
+collapse fingerprinting; bounded per-model cross-iteration history;
+interpretation-digest persistence and typed resume restore; optional
+prompt rendering (interpreter + PRODUCTION three-stage proposer);
+run-invariants policy locking; CLI/shell/manifest/run-config operator
+surfaces; legacy and degraded-path handling; recording-only behavior
+when rendering is OFF. Plus the two production reliability fixes found
+during validation (pipeline delivery gap `0f1f3d0`; causal-stage
+retry-discard `5c8e483`) and the calibration runner fixes (`5c43ece`).
+
+### 14.2 Behavioral evaluation interpretation (binding wording)
+
+Full Layer-2 descriptive campaign: 40 samples, all terminal-valid;
+primary metrics saturated in BOTH arms (repeats 0/20 vs 0/20; relevant
+change 20/20 vs 20/20) → no primary treatment effect measurable under
+the tested fixtures; treatment improved evidence naming and grounding
+in some scenarios (several CIs excluding zero); no observed safety
+regressions in either arm; descriptive design, not fully powered
+confirmatory evidence. **The behavioral calibration informs the
+feature documentation but is not a requirement for retaining the
+optional implementation.**
+
+Permitted claims: available as an experimental optional control;
+disabled by default; effect is context-dependent; users should not
+assume improvement without task-specific evaluation. Forbidden claims:
+proven to improve agents; ineffective in all settings; harmful; should
+be enabled by default; requires L3 before merge.
+
+### 14.3 P3-L3
+
+`N/A for current merge claim` — deferred to future task-specific
+evaluation (§0 tracker; not marked failed).
+
+### 14.4 P3-ACT
+
+**NOT AUTHORIZED.** The production default remains
+`enable_structured_health_feedback = False`. Merge does not authorize
+activation; changing the default is a separate operator decision.
+
+### 14.5 Top-level completion
+
+The PR 3 implementation item may be marked complete once the final
+scope audit, CI review, and merge-readiness checklist pass. The
+completion statement refers to implementation and validation — never
+to universal behavioral improvement.

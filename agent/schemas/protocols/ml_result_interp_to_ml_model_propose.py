@@ -63,6 +63,8 @@ def local_full_context(
     data_dir: str | None = None,
     # --- Cross-iteration feedback (Phase K.7 → Phase N — see §10.13, §14.N) ---
     recent_tune_outputs: Sequence[HyperparamTuningOutput] = (),
+    # --- Structured HealthGate feedback flag (V19 PR 3 §3.7/§3.9) ---
+    enable_structured_health_feedback: bool = False,
 ) -> ProposalInput:
     """
     Local in-memory protocol — transfers the complete interpretation directly.
@@ -246,6 +248,14 @@ def local_full_context(
     ]
     if collected_gate_exhaustions:
         result["recent_gate_exhaustions"] = collected_gate_exhaustions
+
+    # V19 PR 3 §3.7 — thread the structured-health prompt flag. The
+    # structured EVIDENCE always travels inside the interpretation dump;
+    # this flag only decides whether the proposer prompt renders it.
+    # Included only when enabled so the schema default (False) governs
+    # legacy callers.
+    if enable_structured_health_feedback:
+        result["enable_structured_health_feedback"] = True
 
     return ProposalInput.model_validate(result)
 

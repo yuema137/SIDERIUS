@@ -1,0 +1,53 @@
+## Interpretation Summary
+Models analysed     : ['model_a', 'model_b']
+Total experiments   : 7
+Overall raw best    : 1.9
+Overall best valid  : None
+Overall worst score : -0.4
+
+### Per-model scores
+  model_a: raw_best=1.9 (health=unknown) best_valid=None worst=-0.4
+  model_b: raw_best=0.4 (health=unknown) best_valid=None worst=0.1
+
+### Key Findings
+  - model_a collapses on diversity.
+  - model_b collapses on std.
+
+### Bottlenecks
+  - Mode collapse dominates.
+
+### Take-home message
+Break the collapse mechanisms.
+
+### Prediction Track Record
+  Cumulative information gain : 0.000
+
+## Existing Architecture Descriptions
+### model_a
+Arch A.
+
+### model_b
+Arch B.
+
+## Constraints
+Existing model type keys (your model_name must NOT be any of these): ['model_a', 'model_b']
+
+[RECENT GATE EXHAUSTIONS (last 1 iteration)]
+iter N-1 (most recent):
+All 9 attempts were rejected by the resource gate.
+
+Resource accounting:
+  Mode active:       trial
+  VRAM budget:       4.0 GB
+  Time budget:       20.0 min
+  Baseline factors:  VRAM 1.60×   Time 0.40×
+  Worst factors:     VRAM 2.00×      Time 0.60×
+  Attempt counts:    9 total, 7 VRAM-gated,
+                     2 time-gated, 0 other failures
+
+For this iteration: if the same architecture family or scale appears
+in multiple entries above, that is a strong signal the family is
+structurally infeasible under the active budgets — propose a
+different family, not a smaller variant of the same family. If only
+a single entry is shown, reduce parameter count and/or layer count
+enough that the resulting baseline estimates land below the budgets.

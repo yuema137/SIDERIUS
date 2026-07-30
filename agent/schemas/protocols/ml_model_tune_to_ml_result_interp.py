@@ -40,8 +40,11 @@ def local_all_records(
         best_file_vector / formal_file_vector; populated by the tuner per
         Phase 3-B. Threaded into the ModelRunSummary so downstream agents
         can read the pre-rendered markdown directly.)
-      - all_records (used to extract round_scores and round_conclusions,
-        then discarded — raw records are NOT passed to the interpretation agent)
+      - all_records (used to extract round_scores, round_conclusions,
+        round_ordering, and round_health — the per-round condensed
+        HealthGate evidence incl. collapse fingerprints, V19 PR 3 —
+        then discarded; raw records are NOT passed to the
+        interpretation agent)
 
     Populates in ml-result-interp (InterpretationInput):
       - summaries    : [ModelRunSummary] — condensed run summary

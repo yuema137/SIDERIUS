@@ -1,0 +1,1056 @@
+# PR 3 — P3-L2p Pilot Calibration Protocol (rev 2 — operator revision 2026-07-29)
+
+- **Status**: DRAFT rev 2 — design only, awaiting operator approval.
+  NO LLM call or training run may be launched from this document until
+  the operator gives an explicit pilot-launch decision.
+- **Parent**: [`pr3_healthgate_feedback.md`](pr3_healthgate_feedback.md)
+  §4/§5/§7.2; baseline `v19_priorities.md` §4.2-§4.4.
+
+## 0. Governing calibration principle
+
+**Agent-system behavior must be measured empirically. Adding a module,
+field, schema, or prompt block does not establish that the agent uses
+it correctly or that behavior improves.**
+
+The three validation layers have different roles:
+
+- **Layer 1** — deterministic correctness and information delivery
+  (closed: P3-V1).
+- **Layer 2** — broad quantitative calibration with REAL LLMs and
+  controlled pseudo training/scoring. This is the PRIMARY source of
+  statistical coverage, because difficult, rare, and conflicting
+  feedback combinations can be constructed deliberately and repeated
+  cheaply. Layer 2 is not merely a cheap integration test.
+- **Layer 3** — a SMALL real-LLM + real-training confirmation that the
+  Layer-2 behavior survives the true production system. Layer 3 is
+  never the primary source of statistical power.
+
+**Synthetic outcomes must never be reported as real HealthGate-valid
+outcomes.**
+
+## 1. Pilot goals and non-goals
+
+The pilot is NOT an efficacy test and must not be used for activation.
+No statistical significance is required from it, and PR 3 is never
+declared behaviorally successful from pilot results.
+
+Goals: verify both scenarios are behaviorally informative; verify
+metric observability; validate the deterministic scorer; test rubric
+clarity; estimate response variance; estimate parse/schema failure
+rates; measure call counts, latency, tokens, cost; detect
+ceiling/floor effects; detect wording-only treatment effects;
+determine whether the diagnostic arm identifies a delivery bottleneck;
+estimate the practical full-campaign sample size.
+
+## 2. Experimental arms
+
+| Arm | Interpreter flag | Proposer flag | Role |
+|---|---|---|---|
+| Control (C) | OFF | OFF | pre-PR3 condition |
+| Treatment (T) | ON | ON | full structured feedback |
+| Diagnostic (D) — pilot only | ON | OFF | delivery-chain localization ONLY (§12) |
+
+Comparability: identical synthetic records, carried-history fixtures,
+retention policy (3/8), model configuration, and sampling settings
+across comparable arms; the feedback flag(s) are the ONLY intended
+difference. Arms run in separate scratch workspaces.
+
+**Seed statement**: the provider API offers no honored random-seed
+control through `LLMBridge`. Samples are therefore **independent
+stochastic repetitions under identical configuration, not paired-seed
+samples** — no "paired" language applies anywhere in this study.
+
+## 3. Pilot scenarios (exactly two)
+
+**S1 — Repeated diversity collapse with a deceptively high invalid raw
+score (single model).** `model_a` collapses in iterations N-1 and N
+with the same fingerprint
+(`output_diversity_blocking:n_unique_int8_values=1`); the iteration-N
+collapse round carries a HIGH raw score that is gate-invalid (the V17
+"class-127 phantom" family — the empirically dominant failure mode).
+Carried history gives the treatment proposer a 2-occurrence retained
+window. Probes: repeated-fingerprint re-proposal; semantic-equivalent
+re-proposal; invalid-high-score handling; acknowledgment; mechanism
+change.
+
+**S2 — Two-model attribution with a healthy alternative.** `model_a`
+diversity-collapsed (fingerprinted); `model_b` healthy with a VALID
+moderate score and a distinct named mechanism. Probes: attribution;
+inappropriate avoidance; correct-model mechanism grounding;
+unsupported use-claims.
+
+Fixtures are typed constructions serialized with `model_dump` (real
+persisted shapes — the CB-suite vocabulary), frozen before launch.
+
+## 4. Sample definition (normative)
+
+```text
+fixed synthetic ExperimentRecords                     [deterministic]
+→ tuning_output_to_model_run_summary /
+  InterpretationInput construction                    [deterministic]
+→ ResultInterpretationAgent.run()                     [REAL LLM]
+→ deterministic InterpretationOutput health fields    [deterministic —
+                                                       computed outside
+                                                       the LLM path]
+→ local_full_context(...) protocol                    [deterministic]
+→ MLModelProposalAgent.run() — PRODUCTION
+  PIPELINE MODE (_run_pipeline, stage-template
+  assembly, proposing_stage.md)                       [REAL LLM ×3]
+→ parsed ProposalOutput / configuration               [deterministic]
+→ deterministic scoring                               [deterministic]
+→ blinded rubric scoring where required               [human]
+→ persisted sample artifact bundle                    [deterministic]
+```
+
+**Protocol invariant (production path)**: *Every pilot and
+full-campaign proposer sample must use production pipeline mode. The
+captured proposing-stage prompt is an auditable artifact for every
+sample.* A sample that used `_build_reasoning_prompt()` or legacy mode
+is INVALID for the study (recorded as invalid, never scored, and its
+calls still count against the cap).
+
+**Persisted per sample** (`{scenario}_{arm}_{k}/`): proposer execution
+mode; every stage prompt; the final proposing-stage prompt; the
+resolved template variables; the exact `InterpretationInput` and
+`ProposalInput` dumps; every raw LLM response; retry history with
+reasons; parsed `ProposalOutput` (or terminal-failure record);
+response-reported model/version metadata; token usage; timestamps;
+the deterministic-scoring record. Arm and scenario identifiers live in
+a SEPARATE evaluation manifest; the scoring copy given to blinded
+reviewers exposes neither the arm label nor arm-revealing
+paths/filenames (§11 notes the inherent-blinding limit).
+
+## 5. Frozen LLM configuration and version policy
+
+| Setting | Value |
+|---|---|
+| Provider | `openai` (the intended production configuration for this study; matches the standard chain launch) |
+| Model | `gpt-5.5` (interpreter AND proposer) |
+| Model-version identifier | persisted from EVERY response; the pilot's registered version is pinned from the first response before further samples |
+| temperature | **not set by the bridge; provider default used** |
+| top-p | **not set by the bridge; provider default used** |
+| max output tokens | **not set by the bridge; provider default used** |
+| reasoning effort / equivalent | **not set by the bridge; provider default used** |
+| timeout | bridge/provider defaults, unchanged |
+| Concurrency | serial (1) — clean per-sample token/latency attribution |
+| Schema validation | the nodes' production Pydantic validation, unchanged |
+| Schema repair | the nodes' production validation-retry loops, unchanged; each repair call IS an LLM call and counts toward the 60-call cap |
+| Retry conditions | §6 only |
+| Maximum retries | bridge envelope `max_retries=3` per call (interactive posture — not the chain's infinite-quota mode) |
+
+**Version-drift rule**: if the service-reported model/version changes
+during the pilot, STOP before pooling samples across versions and
+request operator review. Model versions are never mixed in one
+analysis without an explicit protocol revision.
+
+No setting above may change after observing favorable or unfavorable
+results without a documented protocol revision.
+
+## 6. Retry semantics (narrow, pre-registered)
+
+Retries are allowed ONLY for: transport/API failure; timeout; empty
+response; unparseable response; schema-validation failure; documented
+transient provider error.
+
+Retries are NEVER allowed because: the answer is low quality; the
+proposal repeats the failed mechanism; the treatment appears
+ineffective; the evaluator dislikes a valid output; the result is
+unfavorable to the hypothesis.
+
+Accounting: a schema-repair call IS a retry and IS an LLM call; both
+count toward the 60-call hard cap. Every failed attempt is retained
+with its reason; sample-level and call-level failure rates are
+reported. **The sample output is the first schema-valid response**; a
+valid response is never replaced, silently or otherwise.
+
+## 7. Sample allocation and call arithmetic (exact)
+
+Per-sample LLM calls in production pipeline mode (counted from code;
+NOT the earlier legacy-mode sketch): S1 = 1 interpreter (single model;
+synthesis skipped) + 3 proposer = **4**; S2 = 3 interpreter (2
+per-model + 1 synthesis) + 3 proposer = **6**. Diagnostic samples run
+the full pipeline (the proposer executes with the flag OFF), so they
+cost the same as C/T samples.
+
+| Scenario | Arm | Repetitions | Interp calls/sample | Proposer calls/sample | Nominal calls |
+|---|---|---|---|---|---|
+| S1 | C | 2 | 1 | 3 | 8 |
+| S1 | T | 2 | 1 | 3 | 8 |
+| S1 | D | 1 | 1 | 3 | 4 |
+| S2 | C | 2 | 3 | 3 | 12 |
+| S2 | T | 2 | 3 | 3 | 12 |
+| S2 | D | 1 | 3 | 3 | 6 |
+| **Total** | | **10** | | | **50** |
+
+Nominal 50 ≤ 50 ✓; retry/schema-repair allowance 10; **hard maximum
+60** — retries count against it, and NO unlisted exploratory calls are
+permitted. Diagnostic samples never enter the C-vs-T efficacy
+comparison.
+
+Allocation rationale: samples are BALANCED per scenario and per C/T
+arm (2/2); only D is smaller (1 per scenario) because it is a
+qualitative delivery-localization probe, not a compared arm. The
+scenarios' call totals differ (20 vs 30) purely because S2's
+two-model interpreter leg costs more per sample — an unequal
+CALL split, not an unequal sample design.
+
+## 8. Metrics — three classes with explicit denominators
+
+Handling rules common to all rates: terminal-invalid parsed outputs
+and `unscorable` samples are EXCLUDED from behavioral-rate
+denominators and reported as their own rates (never treated as
+success); retries do not create extra denominator entries (one sample
+= one output); there are no abstentions in this design (a sample
+either yields a schema-valid proposal or is a terminal failure);
+missing proposals = terminal failures.
+
+**8.1 Direct behavioral (primary Layer-2 outcomes)** — per metric:
+numerator / denominator:
+
+- Repeated-collapse-fingerprint proposal rate — samples whose proposal
+  reproduces the fingerprinted mechanism (deterministic pre-screen +
+  rubric) / samples whose supplied history contains a collapse
+  fingerprint and where a repeat is meaningfully possible (all S1+S2
+  samples with valid parsed proposals).
+- Semantically equivalent repeat rate — rubric `Semantically
+  equivalent repeat` labels / same denominator as above.
+- Actual relevant mechanism-change rate — samples whose parsed
+  proposal/config changes ≥1 pre-registered relevant mechanism (§9,
+  deterministic) / samples with a valid parsed proposal and a defined
+  relevant-mechanism set.
+- Explicit acknowledgment rate — samples accurately acknowledging the
+  supplied failure evidence / samples where the evidence was actually
+  visible to that agent arm (T proposer samples; interpreter-side
+  acknowledgment measured separately on T+D). **C and D proposer
+  outputs are NEVER counted as acknowledgment failures** — no
+  acknowledgment was possible; they instead feed the
+  unsupported-use-claim metric.
+- Wrong-model attribution rate — samples attributing model_a evidence
+  to model_b or vice versa / S2 samples (≥2 distinguishable models)
+  with valid parsed proposals.
+- Stale-evidence attribution rate — samples citing evidence from an
+  iteration/model not present in the supplied window / T samples with
+  valid parsed proposals.
+- Unsupported-feedback-use claim rate — samples whose explanation
+  claims use of structured feedback that their arm's prompts did not
+  contain / C and D-proposer samples with valid parsed proposals.
+- Inappropriate-avoidance rate — S2 samples abandoning model_b's
+  healthy mechanism citing model_a's failure / S2 samples with valid
+  parsed proposals.
+- Schema-validation failure rate — reported at BOTH levels: failing
+  calls / all calls, and terminal-failure samples / all samples.
+
+**8.2 Synthetic downstream outcomes** — the pilot assigns NONE (no
+training, no scoring; neither scenario needs one). If the full
+campaign adds a scripted next-round result, it is labeled **synthetic
+downstream outcome** everywhere and never called a HealthGate-valid
+rate, real valid-round rate, or real score improvement.
+
+**8.3 Operational** — interpreter and proposer input/output tokens;
+total tokens per sample; latency per call and per sample; retry count;
+parse failures; schema-repair calls; API cost; **prompt-length
+increase from treatment** (measured: ≈1.8k chars ≈ 460 tokens on the
+dry render — §14).
+
+## 9. Pre-registered mechanism-relevance map (frozen at pilot approval)
+
+Deterministic comparison of the parsed proposal/config against the
+fingerprinted configuration decides "mechanism changed"; explanation
+text can only upgrade (acknowledgment) or downgrade (unsupported
+claim) — never substitute.
+
+**S1 (output-diversity collapse)** — counts as relevant: output
+activation change; output quantization/clipping behavior;
+normalization scheme; architecture output head / family; loss terms
+plausibly tied to diversity or variance (incl. a populated
+`custom_loss_spec`); optimizer/training-policy changes plausibly
+addressing collapse (lr regime, epochs); another mechanism ONLY with
+an explicit collapse link adjudicated by rubric. Does NOT count:
+renaming the model; superficial layer-count change with the same
+output mechanism; explanation-only change; unrelated data-order
+changes without a mechanism link; changing an irrelevant
+hyperparameter to appear different.
+
+**S2 (attribution/avoidance)** — relevant success: correctly
+identifying which model produced the fingerprint; modifying the FAILED
+model's relevant mechanism (S1 list); preserving or building on
+model_b's named healthy mechanism (its component present in
+`mathematical_definition`/`inherited_components`) rather than avoiding
+both; not transferring model_a's collapse diagnosis to model_b.
+
+This map is FROZEN before execution; changing it mid-pilot requires
+stopping and revising the protocol before further samples.
+
+## 10. Deterministic scoring before rubric scoring
+
+Deterministic scorer (typed-field comparison; outputs its own record,
+separate from the rubric): exact fingerprint/gate-name reference
+present; model names referenced vs supplied; architecture-family
+change; output-activation change; normalization change; loss change
+(`loss_type` / `custom_loss_spec`); optimizer-policy change
+(`train_config` fields); schema validity; presence of treatment-only
+evidence strings in C-arm outputs (leak check); proposal equality on
+typed fields vs the fingerprinted config. Determinism check: the
+scorer re-run on identical artifacts must produce identical records
+(a §17 stop condition if not).
+
+Rubric-only judgments: semantic equivalence despite different syntax;
+plausible collapse-relevance of a novel mechanism; inappropriate
+avoidance; indirectly-expressed unsupported claims; whether the failed
+mechanism materially changed. The deterministic scorer and the rubric
+output SEPARATE fields — never one collapsed subjective success label.
+
+## 11. Blinded rubric
+
+**Sample-level labels** (multiple failure labels allowed):
+`Genuine relevant change` / `Superficial compliance` /
+`Semantically equivalent repeat` / `Wrong attribution` /
+`Inappropriate avoidance` / `Unsupported use claim` /
+`Valid but irrelevant change` / `Unscorable`.
+
+Adjudication: the reviewer reads ONLY the scoring copy — parsed
+proposal + scenario fixture + deterministic-scorer record (arm-free)
+— never the prompts or arm labels, and is not told the study
+hypothesis. Required evidence per label: each label must cite the
+specific proposal/config field or quoted sentence that grounds it.
+Explanation text is supporting evidence only; proposal/config fields
+decide mechanism questions. Ambiguity → `Unscorable` + verbatim note,
+never force-labeled.
+
+Reviewers: one blinded reviewer scores every sample; **all ambiguous
+samples and all rubric-primary samples (any sample whose primary
+metrics depend on a rubric judgment rather than the deterministic
+scorer) receive a second review**. Disagreements are resolved by
+discussion to an adjudicated label; RAW agreement and adjudicated
+results are reported separately.
+
+Blinding limit (stated plainly): a treatment proposal may itself quote
+fingerprint text, making arm inference possible from content — perfect
+blinding is impossible; the manifest/path hygiene above removes every
+avoidable channel.
+
+## 12. Diagnostic arm — role and restrictions
+
+Interpreter ON / proposer OFF. It answers ONLY: did the interpreter
+preserve the fingerprint accurately in its LLM text? were the
+deterministic fields populated? did the proposer output remain
+control-like without the block? do unsupported-use claims appear with
+no proposer-visible block?
+
+Restrictions: never enters the C-vs-T efficacy comparison; a
+favorable diagnostic sample is never evidence that the full treatment
+works; diagnostic findings never alter the already-running pilot —
+any change they motivate requires stopping and revising this protocol
+before further samples.
+
+## 13. Effect-size interpretation and analysis boundaries
+
+**0.30 absolute difference is a PLANNING effect size** — used to
+assess whether a full campaign is practically worthwhile and to
+estimate sample requirements. It is NOT a pilot significance
+threshold, NOT an activation threshold, NOT proof of improvement, and
+NOT a reason to stop early on a few favorable samples.
+
+Pre-registered primary hierarchy it applies to:
+
+- **Primary 1**: repeated-collapse-fingerprint rate DECREASES (T vs C).
+- **Primary 2**: relevant mechanism-change rate INCREASES (T vs C).
+- **Safety constraints** (must not materially worsen): wrong
+  attribution, inappropriate avoidance, unsupported-use claims, schema
+  failures, token cost.
+
+Full-campaign "worthwhile" requires Primary 1; Primary 2 corroborates.
+No composite score exists (none is pre-registered).
+
+**Analysis boundaries**: pilot results are DESCRIPTIVE — simple
+proportions with at most an informal uncertainty summary; no formal
+efficacy conclusion. Wilson confidence intervals and Holm correction
+belong to the FROZEN full campaign only, applied to its pre-registered
+comparison family (listed in the full-campaign protocol before it
+runs: the two primaries + the named safety constraints, T vs C). No
+multiple-testing machinery is applied to exploratory pilot
+observations.
+
+## 14. Complete pilot cost table
+
+Grounded by a deterministic dry render (2026-07-29, zero LLM calls:
+the exact stage prompts for one sample per scenario/arm were assembled
+through the real production pipeline and measured; chars/4 ≈ tokens).
+Caveat recorded: the proposing-stage prompt embeds this machine's live
+plugin/loss registries (57 plugins at render time), which dominate its
+size; the launch-day dry render re-measures with the then-current
+registry.
+
+| Item | S1 | S2 | Total |
+|---|---|---|---|
+| Nominal samples | 5 | 5 | 10 |
+| Interpreter calls | 5 | 15 | 20 |
+| Proposer calls | 15 | 15 | 30 |
+| Nominal LLM calls | 20 | 30 | 50 |
+| Retry allowance | — | — | 10 |
+| **Hard maximum calls** | | | **60** |
+| Est. input tokens / sample | ≈115k (proposer 3-stage ≈113k + interp ≈2k) | ≈120k (+ interp ≈6k) | ≈1.2M nominal |
+| Est. output tokens | method: unknown a priori — measured from the pilot's first sample per scenario; planning bound 1-3k/call → 15-45k total | | |
+| Est. wall time | serial, 1-3 min/sample | | ≈15-40 min |
+| Est. API cost | method: input/output token totals × the live gpt-5.5 price sheet, computed and entered here at launch-day freeze — no ungrounded number | | |
+| Treatment prompt increase | measured: ≈1.8k chars ≈ 460 tokens (proposer) | | |
+
+## 15. Pilot-to-full-campaign transition rule
+
+The full L2 protocol is a SEPARATE document, frozen before the
+campaign runs. The pilot report must provide: per-arm rates for every
+metric with eligible-sample counts; parse/schema failure rates;
+unscorable rate; token and cost distributions; scenario ceiling/floor
+observations; preliminary T-C differences (descriptive); rubric raw
+agreement; model/version consistency; actual calls consumed.
+
+Full-campaign sample size derives from: the pre-registered primaries;
+the 0.30 planning effect; a target interval precision or justified
+power criterion; observed pilot variance (used cautiously — the pilot
+is small); scenario count; the operator-approved call budget; the
+observed retry rate. Never a pilot size × arbitrary factor.
+
+Decision outcomes: **Proceed unchanged** (both scenarios scorable,
+costs acceptable, no major ceiling/floor or rubric problem) /
+**Revise before full campaign** (a scenario, scorer, rubric, or prompt
+condition is uninformative or unreliable — revised before the full
+protocol freezes) / **Stop the study** (treatment cannot be isolated;
+production execution unstable; excessive schema failures; rubric
+unreliable; expected cost exceeds the approved bound). Any scenario
+added, removed, or rewritten after the pilot is documented before the
+campaign starts.
+
+## 16. Explicit pilot stop conditions
+
+Stop before the maximum if ANY occurs: production pipeline mode not
+used; model/version metadata changes; cumulative calls reach 60;
+repeated technical failures make the remaining allocation impossible;
+schema-valid output rate falls below the pilot floor (< 70% of calls);
+treatment/control inputs differ beyond the intended flag; persisted
+artifacts incomplete; arm labels leak into blinded evaluation files;
+a production defect is discovered; token or monetary cost exceeds the
+hard cap; the deterministic scorer produces inconsistent results on
+identical artifacts.
+
+Stopping is not failure concealment: all collected artifacts are
+preserved and the reason reported. Stopped samples are never silently
+replaced.
+
+## 17. P3-S boundary (merge vs behavioral validation)
+
+P3-S may proceed independently once the final CI is green. The merge
+claim is LIMITED to: *Layer-1 structured-evidence plumbing implemented
+and deterministically validated, with the production flag OFF by
+default.* Merge does NOT mean PR 3 is complete, that structured
+feedback improves behavior, that the treatment should be activated,
+that this pilot is approved, or that the default may change. Stages
+remain separate: P3-S (Layer-1 merge, flag OFF) → P3-L2p (this pilot)
+→ P3-L2 (full calibration) → P3-L3 (small real-training confirmation)
+→ P3-ACT (separate operator activation decision).
+
+## 18. Remaining TBD values (resolved BEFORE launch, none during)
+
+| TBD | Resolution method |
+|---|---|
+| Model-version string | pinned from the first pilot response |
+| Output tokens / API cost | launch-day dry render (input) + live price sheet + first-sample-per-scenario measurement (output) |
+| Registry-dependent prompt size | launch-day dry re-render against the then-current plugin/loss registries |
+| Scenario fixture freeze | fixtures committed to the repo before the launch request |
+
+## 19. Rev 3 (operator-approved, 2026-07-29) — post-abort revision
+
+**Rev-2 pilot: ABORTED — production-context fixture mismatch and
+artifact-completeness failure.** It does NOT state that the treatment
+failed. Stopped at 6/10 samples by the pre-registered §3.6 floor
+(terminal success 3/6 = 50% < 70%); 36 calls, $8.49; version stable
+(`gpt-5.5-2026-04-23`); delivery invariants green on every completed
+sample. All rev-2 behavioral outputs — including the three successes,
+which were produced under the SAME incomplete context and differ only
+through stochastic schema-validity outcomes — are EXCLUDED from pilot
+and campaign behavioral estimates. Token/latency/cost/retry/failure
+evidence is retained. Artifacts preserved unchanged:
+`reports/artifacts/pr3_l2p/pilot_20260729/`.
+
+**Root-cause classification (operator-accepted):**
+
+1. PRIMARY calibration defect — the rev-2 fixture passed
+   `vocab_seed=[]` while production chains load the non-empty static
+   seed on iteration 1 (later the runtime vocabulary). Material: the
+   vocabulary changes proposal distribution and inheritance choices.
+2. Independent latent production robustness issue — malformed
+   `external_agent` citations (`ce_plus_hf_spectral_loss`,
+   `emd_ordinal_loss`, `iter_007`) against the
+   `InheritedComponent.source_id` contract; same structural failure
+   observed terminally in a real production chain (v16 — proposer LLM
+   gpt-5.4; the doc's earlier "gemini" attribution was wrong, gemini
+   was the tuner planner — corrected by the §21 audit); no
+   worked `prefix:identifier` example exists in any stage prompt.
+   Recorded as: a pre-existing production prompt/schema reliability
+   weakness, amplified under gpt-5.5, OUTSIDE this calibration fix's
+   scope. Follow-up: issue #146. No production prompt/schema/validator
+   change in this revision.
+3. Calibration runner defect — raw response bodies were not persisted
+   (violated §4.3). Rev 3 persists EVERY attempt's body, including
+   parse-/validation-failing responses.
+
+**Rev-3 changes (calibration package only):** production static vocab
+seed loaded through the production path
+(`workflows.model_exploration._load_vocab_seed`, 21 entries) wired into
+the interpreter's `runtime_vocab` and the proposer's `vocab_seed` —
+identical content across C/T/D; `expert_context=[]`/`agent_cards=[]`
+retained (production-consistent with lit-review off); response-body
+persistence in the runner tee; fixture hashes re-frozen
+(S1 `a8ab1db8...`, S2 `7f64f12d...`). Prompt-change statement,
+precisely: stage templates, schemas, retry logic, and PR 3 treatment
+rendering DO NOT change; the RESOLVED prompt content DOES change
+because the production vocabulary block is now populated — rev-3
+prompts are not globally identical to rev-2 prompts.
+
+**Rev-3 zero-LLM evidence (all green pre-launch):** vocab non-empty +
+matches the production seed file + identical across computations +
+production loader exercised; treatment-only C-vs-T difference proven by
+string surgery on the proposing-stage prompt (T minus block ≡ C);
+placeholders resolve; pipeline mode; tee captures schema-INVALID mocked
+bodies with distinct per-attempt artifacts; `git diff` clean of
+production files.
+
+**Rev-3 budget (operator decision):** up to 60 additional calls
+(50 nominal + 10 retry/schema-repair); rev-2 spend stands (36 calls /
+$8.49); Layer-2 monetary hard cap unchanged at $80 → remaining
+allowance **$71.51**, enforced by the ledger at every call. The
+full-campaign budget is NOT yet frozen — it is derived from rev-3 pilot
+evidence and separately approved.
+
+### 19.1 Rev-3 floor-evaluation rule (MID-RUN PROTOCOL AMENDMENT,
+2026-07-29, after sample 1 and before any further sample completed)
+
+**Methodological status (corrected 2026-07-29, operator instruction):**
+this rule was introduced AFTER the rev-3 run had begun — it is a
+mid-run protocol amendment, NOT pre-registration, and cannot serve as
+confirmatory pre-registered evidence. At introduction, one terminal
+failure (S1_C_1) had already been observed. It was added to remove
+post-hoc stop discretion by making the §3.6 floor an attainability
+rule. The runner never enforced it (no automated stop-condition check
+existed — report §13.3); the run overshot the 4th terminal failure by
+~26 calls to the 60-call cap. The original text below is preserved
+unchanged.
+
+The §3.6 floor (sample-level terminal success >= 70%) is evaluated as
+an ATTAINABILITY rule over the 10-sample plan: the pilot stops at the
+moment the floor becomes unreachable — i.e., at the FOURTH terminal
+sample failure (6/10 < 70%). Three or fewer failures allow completion
+(7/10 = 70% attainable). This matches the rev-2 stop logic and removes
+any post-hoc stop discretion. Terminal failures remain recorded, their
+calls count, and the run otherwise continues sample by sample.
+
+## 20. Final rev-3 outcome (2026-07-29)
+
+Rev-3 executed to the 60-call cap: 3/9 completed samples valid (33% vs
+the 70% floor); all six terminal failures were the #146 citation class
+in BOTH arms (all four control samples failed — no C-vs-T comparison
+exists); the populated production vocabulary did not reduce the rate
+(rev-2 50% → rev-3 67% terminal). Delivery invariants 10/10; version
+`gpt-5.5-2026-04-23` stable across all 96 Layer-2 calls; cumulative
+spend $20.46 of $80. Full campaign NOT RUN — the frozen (set in the
+pre-execution authorization) cannot-fit stop condition applies (justified design ≈600-1200 calls /
+$120-240 vs 300 calls / $59.54 authorized). Layer-2 verdict:
+INCONCLUSIVE (execution-reliability-blocked). Deviations recorded in
+the report §5.4 (incl. the §19.1 mid-run enforcement gap in the
+runner). Complete report:
+`reports/pr3_structured_health_feedback_layer2_calibration_2026-07-29.md`.
+
+**Interpretation lock (operator, 2026-07-29): 0 valid control samples
+→ no Control-vs-Treatment comparison → behavioral efficacy remains
+UNKNOWN. The three valid rev-3 samples are delivery/descriptive
+evidence only, never efficacy evidence.**
+
+## 21. Post-run audit (2026-07-29, zero-LLM) — corrected root cause
+
+Full detail: report §13. Summary of record-changing findings:
+
+1. **P-1 (production, NEW)**: the proposing-stage structural-retry
+   loop extracts `inherited_components` from the causal stage ONCE
+   (`ml_model_proposal_agent.py:1689`) and re-injects it on every
+   validation attempt (`:1781`), discarding the proposing response's
+   own corrected citations. Any malformed causal-stage citation is
+   therefore a guaranteed terminal node failure — proven from raw
+   bodies (S2_C_1: proposing attempts 2-3 regex-legal, sample still
+   failed with the causal-stage errors all three times).
+2. **P-2 (production, refines #146)**: all rev-3 terminal citations
+   originated in the CAUSAL stage (never validated there — the memo is
+   a raw dict until ProposalOutput); malformed classes are
+   `external_agent`+iteration/registry tags AND `human`+"## Vocabulary"
+   section references; the underlying provenance is semantically
+   correct but has no documented legal encoding (schema expressiveness
+   + missing worked examples). Even valid samples are provenance-lossy
+   (everything cited as `experiment`). Observed under gpt-5.4
+   (production v16) and gpt-5.5 (pilots); treatment-independent.
+3. **R-1..R-4 (calibration runner)**: no automated protocol-stop
+   enforcement (only call/dollar caps + version drift); mid-sample
+   `BudgetExceeded` crashes the run leaving the in-flight sample
+   unmarked and `run_summary.json` unwritten (both revisions ended
+   this way); launch wrapper's trailing `echo` masked the nonzero
+   exit and the wrapper command was not archived; per-sample bundles
+   otherwise complete for all 15 completed samples.
+4. Rev-3's 33% terminal-success rate is NOT a clean model-reliability
+   estimate: the retry recovery channel the design assumed did not
+   exist (P-1). Post-fix reliability must be re-measured (rev-4)
+   before any campaign sizing.
+
+## 22. Rev 4 — citation-reliability pilot (DESIGN ONLY, operator-gated)
+
+**Status**: DRAFT — awaiting operator approval. **No launch from this
+section.** Launch requires an explicit, separate operator decision
+AFTER the production citation fix (PR 3 doc §12/§13, option chosen by
+the operator) and the runner fixes (R-1..R-4) are implemented and
+deterministically validated. This is NOT a Layer-2 behavioral campaign
+and must not be interpreted as one — it answers exactly one
+operational question. Evidence base: report §13, §21 above.
+(Consolidated from the short-lived separate file
+`pr3_l2p_rev4_reliability_protocol.md`, removed 2026-07-29 per the
+operator's one-protocol-doc rule.)
+
+### 22.1 Question and endpoints
+
+**Primary question**: after the production fix, is citation
+reliability high enough to make a valid behavioral calibration
+operationally possible?
+
+**Primary endpoint (operational, not behavioral)**:
+sample-level terminal `ProposalOutput` success rate.
+
+**Secondary endpoints**: citation-validation failure rate (per attempt
+and per sample, by malformed class); retries per sample (causal-stage
+and proposing-stage separately); calls and dollars per valid sample;
+citation provenance correctness on valid samples (deterministic audit
+against fixture ground truth); artifact completeness (incl. the new
+`run_status.json`); runner stop-condition enforcement; treatment
+isolation and production-pipeline invariants (unchanged from rev 3).
+
+**Explicit non-endpoints**: no efficacy estimation, no C-vs-T
+behavioral comparison, no rubric adjudication (deterministic scorer +
+citation audit only). Eight samples cannot support behavioral claims
+and none will be made.
+
+### 22.2 Design (smallest useful)
+
+| Item | Value |
+|---|---|
+| Scenarios | **S1 only** (operator decision 2026-07-29: smallest useful initial design; S2 and any larger run are NOT to be added merely to obtain more samples if this gate fails) |
+| Arms | Control (both flags OFF) and Treatment (both ON) — verifies reliability is arm-independent and isolation invariants hold; D arm dropped |
+| Repetitions | 2 per arm → **4 samples** (S1_C_1, S1_C_2, S1_T_1, S1_T_2) |
+| Nominal calls/sample | S1 = 4 (measured in rev 3: 1 interp + comparison + causal + proposing) |
+| Nominal total | 4×4 = **16 calls** |
+| Retry allowance | ≤2 additional retry calls per sample (structural and/or post-fix causal-validation retries combined) |
+| **Hard call cap** | **24** (16 nominal + 8 retry allowance; worst case may truncate the final sample — R-3 marks it `aborted_incomplete`) |
+| Estimated cost | nominal ≈ $3.20, cap-bounded worst ≈ $4.80 (rev-3 measured $0.20/call avg; re-check prices at launch) |
+| Model config | frozen as rev 3: openai/gpt-5.5, provider defaults, version pinned from first response, drift = hard stop |
+| Fixtures | `p3l2p-fixtures-2` with production vocab seed, hashes re-frozen at launch |
+| Execution order (FROZEN) | S1_C_1, S1_T_1, S1_C_2, S1_T_2 — written to `launch_manifest.json` before call 1 |
+| Artifacts | `reports/artifacts/pr3_l2p/pilot_rev4_<DATE>/` (per-sample bundle as rev 3 + `run_status.json` + archived launch command) |
+| Report | `reports/pr3_citation_reliability_rev4_<DATE>.md` |
+| Budget source | remaining Layer-2 allowance ($59.54 of the $80 cap as of 2026-07-29); ledger-enforced per call |
+
+### 22.3 Pre-registered reliability gate (registered HERE, before any
+execution — this document is committed before launch and not amended
+mid-run; any mid-run change must be labelled a mid-run protocol
+amendment and cannot count as confirmatory)
+
+The gate PASSES only if ALL of:
+
+1. Terminal success rate **≥ 80%** → with n=4 this means **4/4 valid**
+   (3/4 = 75% fails the gate; stated explicitly to remove rounding
+   discretion).
+2. **≥ 1 valid sample in each arm** (C and T) — implied by 4/4, kept
+   as an explicit condition in case of a truncated run.
+3. **No dominant repeated citation-failure class**: no single
+   malformed-id class (as classified in report §13.2) appears in ≥ 2
+   samples.
+4. **Corrected retry values preserved**: if any sample requires a
+   citation-correction retry, the corrected values must appear in the
+   final validated `ProposalOutput` (deterministic check against the
+   retry response body) — the P-1 fix demonstrably working live.
+5. **No provenance corruption**: deterministic citation audit on every
+   valid sample matches fixture ground truth under the fixed contract
+   (no legal-but-wrong attributions introduced by the fix, e.g. by any
+   normalization).
+6. **Complete artifacts**: every attempted sample has a full bundle or
+   an explicit `aborted_incomplete` marker; `run_status.json` +
+   `run_summary.json` written; launch command archived.
+7. **Correct runner stop and exit-code behavior**: enforcement path
+   proven by the zero-LLM preflight simulation; if a live stop
+   triggers, it fires at the first eligible sample boundary; the
+   wrapper preserves the process exit status.
+8. **Treatment isolation exact**: the C-vs-T proposing-prompt
+   difference is exactly the treatment block (rev-3 invariant,
+   re-verified per sample).
+
+Gate PASS → campaign re-sizing may be proposed (§22.6). Gate FAIL → stop;
+re-audit; no further LLM spend without a new operator decision.
+
+### 22.4 Preconditions — LAUNCH CHECKLIST (status as of 2026-07-29)
+
+1. [x] Production fix chosen and implemented: **Option C** (operator
+   decision 2026-07-29; PR 3 doc §13.1) — causal-stage validation of
+   `inherited_components` + `falsifiable_prediction` with ≤2 focused
+   correction retries. **Commit `5c8e483`**. Note the scope decided by
+   the operator: the citation CONTRACT (source types, regex, prompt
+   worked examples, registry/vocabulary provenance) is deliberately
+   UNCHANGED — rev 4 measures the remaining reliability with only the
+   retry seam fixed; prompt/schema expansion is a separate
+   post-rev-4 decision (an earlier draft of this item required prompt
+   worked-example tests; that requirement is superseded).
+2. [x] Deterministic validation green for the production fix:
+   9 focused tests (`test_causal_stage_validation.py`) — malformed
+   citation corrected and preserved into the final ProposalOutput;
+   bounded exhaustion before any proposing call; degenerate-prediction
+   path; happy-path call parity; proposing structural retry intact;
+   identical correction system prompt; disabled-stage passthrough;
+   partial-schema contract. Proposer suite 523 passed.
+3. [x] Runner fixes R-1..R-4 implemented and tested: **commit
+   `5c43ece`** — 15 deterministic tests (all five terminal states,
+   boundary-exact stop, abort markers, always-written
+   `run_status.json`/`run_summary.json`, distinct exit codes, ledger
+   precheck, wrapper exit propagation). Scripts suite 107 passed.
+   Rev-4 invocation MUST pass `--max_terminal_failures 1` and launch
+   via `scripts/pr3_l2_calibration/launch_pilot.sh`.
+4. [x] Combined final preflight at branch head **`5c43ece`**
+   (2026-07-29, zero LLM calls): full unit suite **4655 passed,
+   4 xfailed**; pseudo-mode integration **136 passed, 130 skipped**
+   (the skips are exactly the real-API tiers).
+5. [x] Rev-4 fixture hashes re-frozen at launch (2026-07-29, before
+   call 1): S1 `a8ab1db8e45f44e2bef8139fc29df49a42dc42bcb68cf9ee3d71`
+   `59ebabf8ca29` (byte-identical to rev-3's frozen S1 hash —
+   fixture stability across revisions), fixtures `p3l2p-fixtures-2`,
+   production vocab seed 21 entries. Full freeze evidence (preflight
+   invariants, NEW P-1-active proof through the calibration assembly,
+   25 deterministic runner/causal tests, price re-check $5/$0.50/$30
+   per M confirmed current, measured-cost projection nominal $3.29 /
+   worst $5.43 vs $59.54 remaining, run ledger cap $10) persisted in
+   `reports/artifacts/pr3_l2p/pilot_rev4_20260729/launch_freeze.json`
+   + `launch_manifest.json` (order `p3l2p-order-2-rev4`).
+6. [x] Explicit operator launch approval: granted 2026-07-29
+   (operator kickoff §4 — approval effective once deterministic
+   preconditions green; all green at launch). Branch head at launch:
+   `340b45d` (code identical to tested `5c43ece`).
+
+### 22.5 Stop conditions (frozen)
+
+- Model-version drift → hard stop before pooling.
+- Call cap 24 or dollar precheck → stop; in-flight sample marked
+  (56 was the superseded 8-sample draft's cap — corrected to match
+  §22.2 during the checklist update).
+- Protocol stop: floor-unattainability rule — the §22.3 gate becomes
+  unreachable at the FIRST terminal failure (3/4 = 75% < 80%) → the
+  runner stops at that sample boundary automatically (R-1). Remaining
+  budget is not spent on samples that cannot change the verdict.
+- Any newly discovered production defect → stop, audit-first workflow.
+- Operator interrupt at any time.
+
+### 22.6 After the pilot
+
+- Gate PASS: propose (do not launch) a re-sized behavioral campaign
+  using the measured post-fix success rate; the campaign needs its own
+  operator authorization (calls + dollars) and remains subject to the
+  standing rule against weakening statistical design to fit budget.
+- Gate FAIL: verdict stays INCONCLUSIVE; findings feed the next
+  audit round; merge options in report §10 unchanged.
+- Either way: no P3-L3, no activation, no merge state change from this
+  pilot alone.
+
+## 23. Runner stop/status fixes (R-1..R-4 implemented, 2026-07-29)
+
+Implements the §21.3 runner findings; calibration scope only, separate
+from the production citation fix (commit `5c8e483`).
+
+- **R-1 stop enforcement**: `run_order()` evaluates the terminal-failure
+  count immediately after EVERY completed sample and never launches the
+  next sample once `--max_terminal_failures` (new REQUIRED CLI arg;
+  rev-4 gate value: 1) is reached. The per-call ledger precheck
+  (call + dollar caps before every LLM call) is unchanged.
+- **R-2 status records**: `main()` wraps execution in try/finally —
+  `run_summary.json` AND the new `run_status.json` (outcome, detail,
+  exit_code, samples_completed, terminal_failures, calls, cost,
+  pinned version) are ALWAYS written. Outcome enum: `completed` /
+  `protocol_stop` (incl. version drift) / `budget_stop` /
+  `technical_failure` / `external_interruption`, with distinct process
+  exit codes (0 / 3 / 4 / 1 / 130).
+- **R-3 in-flight finalization**: `BudgetExceeded`, `VersionDrift`,
+  `KeyboardInterrupt`, and unexpected exceptions caught at the sample
+  loop finalize the in-flight sample with an `aborted_incomplete.json`
+  marker (no-op if the sample already wrote `sample_meta.json`).
+- **R-4 launch archival + wrapper**: `main()` archives
+  `launch_command.json` (argv, cwd, timestamp) in the run dir; the new
+  `launch_pilot.sh` wrapper (`<log-file>` + runner args) tees output to
+  the log and exits with `PIPESTATUS[0]` — trailing logging can no
+  longer mask the runner's exit status. Paths resolve relative to the
+  script (portability rule); `PILOT_PYTHON` overrides the interpreter
+  for tests.
+
+Tests (`tests/unit/scripts/test_pr3_l2p_runner_status.py`, 15, all
+green; scripts suite 107 passed; ruff + format clean): completed;
+protocol stop at the exact boundary with no next-sample launch
+(threshold 1 and cross-sample threshold 2); budget stop with marker +
+retained results; version drift → protocol_stop; technical failure with
+marker; external interruption; marker no-op cases; records always
+written with correct exit-code mapping; distinct exit codes for all
+five states; ledger precheck-before-call; wrapper propagates nonzero
+(7) and zero exits from a stub interpreter with cwd-independence; usage
+error on missing log argument.
+
+Known limitation (documented, accepted): a SIGKILL (uncatchable) still
+skips the finally block — `run_status.json` will then be absent, which
+itself distinguishes an external hard kill from every soft state.
+
+### 22.7 Rev-4 outcome (2026-07-29): GATE PASS
+
+Executed at branch head `340b45d` (code = tested `5c43ece`) after the
+green launch freeze: **4/4 terminal-valid (C 2/2, T 2/2), 19 calls
+(16 nominal + 3 causal correction retries), $3.82, ~9.5 min,
+`gpt-5.5-2026-04-23` stable on all calls, runner outcome `completed`
+with exit 0 propagated by the wrapper. All 10 pre-registered gate
+conditions PASS** (`gate_verdict.json`, reproducible via
+`scripts/pr3_l2_calibration/gate_rev4.py`).
+
+Central operational finding: 3/4 samples produced the exact rev-3 #146
+malformed-citation classes at the causal stage (registry loss as
+external_agent; Vocabulary-section refs as human) and each was
+recovered by ONE causal correction retry with the corrected values
+verified in the final ProposalOutput — the previously
+terminally-fatal class is now recoverable at +1 call (~$0.19).
+
+Documented limitation (not a gate failure): provenance SEMANTICS remain
+improvised (regex-legal but invented prefixes/free-text ids) — the
+deferred #146 contract gap (prompt examples / expressiveness), to be
+weighed at the citation-contract decision point (rev-4 report §7).
+
+Standing interpretation: operational reliability only; behavioral
+efficacy remains UNKNOWN (no C-vs-T behavioral comparison has ever
+existed). Cumulative Layer 2: 115 calls, $24.28 of $80 ($55.72
+remaining). Campaign feasibility arithmetic: a 0.30-planning-effect
+powered design needs ~86 samples pooled (≈$95-110) or ~172 per-scenario
+(≈$190-220) — both exceed the remaining allowance; a reduced
+descriptive design (~$45-55) fits but is weaker than the frozen
+standard. Budget/design decision PENDING WITH THE OPERATOR (rev-4
+report §10); no campaign may launch from this section. Full report:
+`reports/pr3_citation_reliability_rev4_2026-07-29.md`.
+
+## 24. #146 attribution-metric contamination audit (2026-07-29, zero-LLM)
+
+Question: can the deferred #146 provenance-semantics gap (improvised
+regex-legal citations) contaminate the campaign's C-vs-T metrics?
+
+**Findings (code-inspected, `scorer.py` `p3l2p-scorer-1` +
+`rubric_form.md`):**
+
+1. **Deterministic behavioral metrics: NOT contaminated.** No scorer
+   fact reads `inherited_components`, `source_type`, or `source_id`.
+   Every behavioral metric derives from the proposal text blob
+   (`model_description`/`mathematical_definition`/`motivation`),
+   `baseline_config`, `model_name`, `custom_loss_spec`, or prompt
+   markers. The S2 attribution metrics (`healthy_mechanism_mentioned`,
+   `cross_attribution_prescreen`) are sentence-level text scans —
+   citation-independent.
+2. **Rubric: NOT contaminated.** No rubric label references
+   inheritance/citation/provenance (grep-verified); the rev-3 S2_D_1
+   provenance remark was free-text commentary, not a label.
+3. **Provenance RECORDS: contaminated as known.** Campaign artifacts
+   will inherit improvised citation semantics (#146). This affects
+   lineage quality, not metric validity. Accepted and documented; the
+   citation-contract decision remains deferred.
+4. **One real arm-correlated channel — pre-registered mitigation.**
+   A causal correction retry regenerates the full causal response, so
+   corrected samples get one extra generation round of scientific
+   content. If correction incidence differed strongly by arm, this
+   could inject an arm-correlated nuisance into behavioral outputs
+   (and into cost/latency). Rev-4 shows no such pattern (C 2/2,
+   T 1/2; n=4). MITIGATION (pre-registered): the campaign reports the
+   correction-retry rate PER ARM as a reliability metric; an absolute
+   C-vs-T correction-rate imbalance > 0.30 is flagged as an
+   interpretive caveat on the behavioral contrasts. Both arms run the
+   identical production code — the channel is part of the system
+   under test, not a calibration artifact.
+
+**Conclusion**: the descriptive campaign's metrics are valid under the
+current citation contract; no metric change required; mitigation 4 is
+adopted into §25.
+
+## 25. Full Layer-2 campaign — first draft (SUPERSEDED 2026-07-29)
+
+**SUPERSEDED**: the operator's full execution plan (same day) requires
+a broader consolidated scenario set (beyond S1/S2) and names a separate
+frozen protocol file. The authoritative campaign protocol is
+**`pr3_l2_full_calibration_protocol.md`** — budget, reporting rules,
+§24/§24.1 audit decision, and data-quality standards below carry over;
+the 2-scenario sample plan below does not. Retained unchanged for
+history:
+
+## 25 (historical draft). Full Layer-2 campaign — DESCRIPTIVE
+QUANTITATIVE CALIBRATION (drafted 2026-07-29; superseded same day)
+
+**Status**: FROZEN DESIGN — no LLM call may be made from this section
+until the operator approves the launch stop-and-show.
+
+**Nature of the study (binding)**: descriptive quantitative
+calibration. This is NOT a powered confirmatory study for a 0.30
+absolute effect (that design costs ~$95-220 and was explicitly not
+approved). The report must: give raw rates with exact denominators;
+absolute C−T differences; confidence intervals (Wilson 95% per arm;
+Newcombe hybrid 95% for differences); scenario-level heterogeneity
+tables (S1 and S2 separately, then pooled); make NO definitive
+statistical-validation claim; NEVER interpret a CI crossing zero as
+"no effect"; preserve all safety and reliability metrics. Wilson/Holm
+significance machinery from the §14 powered design is NOT used for
+claims.
+
+### 25.1 Budget (operator decision 2026-07-29)
+
+| Item | Value |
+|---|---|
+| Additional monetary hard cap | **$50.00** (run-level ledger cap = 50.00) |
+| Cumulative Layer-2 hard cap | $24.28 spent + $50.00 = **$74.28** |
+| Nominal target | $42-45; remainder is retry/variance allowance |
+| Data-quality rule | artifact, retry, blinding, production-path standards UNCHANGED — budget never reduces validity standards |
+
+### 25.2 Frozen sample plan (measured-cost based)
+
+Measured: S1 ≈ $0.96/sample (rev-4, incl. ~75% correction incidence at
++1 call); S2 ≈ $0.97 valid (rev-3, 6 calls) + correction overhead →
+≈ $1.15 expected.
+
+| Cell | Samples |
+|---|---|
+| S1 Control | 10 |
+| S1 Treatment | 10 |
+| S2 Control | 10 |
+| S2 Treatment | 10 |
+| **Total** | **40** (within the operator's 35-45 window) |
+
+Projected: nominal ≈ 20×$0.96 + 20×$1.15 ≈ **$42.2**; nominal calls ≈
+20×4.75 + 20×6.75 = **230**.
+
+| Enforcement | Value |
+|---|---|
+| Hard call cap | **270** (230 nominal + retry allowance; ledger prechecks every call) |
+| Run dollar cap | **$50.00** (binds before the call cap at measured $/call) |
+| `--max_terminal_failures` | **6** — pre-registered reliability guard: 6 terminal failures (15% of plan) means reliability has regressed vs rev-4's 0/4 and the run stops at that sample boundary for audit; descriptive rates remain reportable from completed samples |
+| Arms | C and T only (D dropped — delivery localization already answered in rev-3) |
+| Fixtures | `p3l2p-fixtures-2`, production vocab seed; hashes re-frozen at launch (S1 expected `a8ab1db8…`, S2 expected `7f64f12d…` — drift = stop) |
+| Model config | frozen §5 unchanged (openai/gpt-5.5, provider defaults, serial; version pinned from first response; drift = stop before pooling) |
+| Launch | `launch_pilot.sh` + `--order_manifest` (frozen order below); branch head recorded in the manifest |
+
+### 25.3 Frozen execution order (`p3l2p-order-3-campaign`)
+
+Arms alternate within each scenario (temporal drift cannot align with
+one arm); scenarios ascending fixture size; reps 1-10 per cell:
+
+```text
+S1: C1,T1,C2,T2,C3,T3,C4,T4,C5,T5,C6,T6,C7,T7,C8,T8,C9,T9,C10,T10
+S2: C1,T1,C2,T2,C3,T3,C4,T4,C5,T5,C6,T6,C7,T7,C8,T8,C9,T9,C10,T10
+```
+
+Frozen before any campaign LLM output is observed; retries attach to
+their sample; no reordering after any result.
+
+### 25.4 Pre-registered reporting plan (anti-metric-shopping)
+
+PRIMARY descriptive contrasts (per scenario, then pooled; each with
+denominators + CIs):
+1. `deterministic_relevant_change` rate, C vs T;
+2. `mentions_gate_name` and `mentions_fingerprint_string` rates
+   (expected structurally treatment-leaning — fingerprint text exists
+   only in T prompts);
+3. `claims_feedback_use` rate + rubric-adjudicated support
+   (SUPPORTED / UNSUPPORTED — unsupported-claim rate is a safety
+   metric);
+4. S2 only: `healthy_mechanism_mentioned` (safety: healthy-mechanism
+   preservation) and `cross_attribution_prescreen` (+ rubric
+   attribution labels);
+5. `config_equals_failed` repeat rate (+ rubric semantic-equivalence).
+
+RELIABILITY/OPERATIONAL (always reported): terminal-failure rate;
+causal-correction rate PER ARM with the §24.4 imbalance caveat
+(|ΔC−T| > 0.30 flagged); proposing structural retries; calls, tokens,
+cached share, latency, cost per cell; version stability; treatment
+isolation 40/40.
+
+Everything else in the scorer output is EXPLORATORY and labelled so.
+Blinded rubric (arm-free copies via `blind.py`, single evaluator, two
+passes, agreement reported) on ALL valid samples.
+
+### 25.5 Stop conditions (frozen)
+
+Version drift; run dollar cap $50 / cumulative $74.28; call cap 270;
+6th terminal failure (§25.2); any newly discovered production defect
+(audit-first workflow); scorer non-determinism (§16); operator
+interrupt. In-flight samples finalized with the R-3 marker; run always
+ends with `run_status.json` + `run_summary.json`.
+
+### 25.6 What this campaign can and cannot conclude
+
+CAN: descriptive C-vs-T behavioral differences with uncertainty
+bounds; scenario heterogeneity; safety signals (harm indicators);
+operational reliability at scale (n=40). CANNOT: confirmatory
+efficacy validation; activation justification by itself; any
+real-training claim. P3-ACT and P3-L3 remain separate operator
+decisions afterward.
+
+### 24.1 Four-way attribution decomposition and formal classification
+(operator framework, 2026-07-29)
+
+The four concepts are kept strictly separate; conflation requires
+evidence, and none was found:
+
+1. **Model attribution** (did the proposal assign model A's failure to
+   model B?) — judged from model NAMES and mechanism references in the
+   proposal text/config (`mentions_model_a/b`, sentence-level
+   `cross_attribution_prescreen`, config family) plus the fixture's
+   known ground truth. Citation-field-independent. ✔
+2. **Temporal attribution** (stale/expired evidence treated as
+   current?) — judged from the fixture's KNOWN history-iteration tags
+   vs the proposal's temporal framing of the fingerprint (current vs
+   historical/resolved), adjudicated deterministically by text framing
+   pre-screen + rubric. The treatment block itself carries explicit
+   relative iteration tags, so the ground truth and the evidence shown
+   to the model are both citation-independent. ✔
+3. **Healthy-alternative handling** (healthy model incorrectly
+   avoided?) — judged from mechanism-name presence/preservation and
+   model identity in text/config vs fixture ground truth.
+   Citation-field-independent. ✔
+4. **Archival source provenance** (`source_type`/`source_id` semantic
+   precision) — the ONLY concept #146 touches. Reported SEPARATELY as
+   a citation-system quality observation; NEVER an input to metrics
+   1-3.
+
+**Formal classification: A — no meaningful contamination.** Model-level
+and temporal attribution are judged directly from model names, collapse
+fingerprints, iteration tags, and mechanism references, without any
+reliance on archival source semantics. The B-style metric-definition
+guardrails are frozen anyway (metrics 1-3 keyed on identity/fingerprint/
+iteration evidence; provenance reported separately) so the distinction
+cannot erode mid-campaign. No scorer/rubric correction (C) and no
+production citation-contract fix (D) is required before the campaign.
+The citation limitation remains recorded in issue #146 + report §7 and
+is deliberately out of campaign scope. This decision is copied into the
+full-campaign protocol (`pr3_l2_full_calibration_protocol.md` §3) and
+attribution definitions may not be redefined after execution begins.
+
+## Final operator interpretation (2026-07-29 — applies to the record above; history preserved unchanged)
+
+Rev-2 and rev-3 exposed real production and runner defects; those were
+fixed (Option-C `5c8e483`, runner `5c43ece`) and rev-4 proved the
+reliability recovery (4/4). The full descriptive campaign then
+completed successfully (40/40 valid). Primary behavioral improvement
+was NOT observed under the tested fixtures; no safety harm was
+observed in either arm. Operator decision: the feature REMAINS
+IMPLEMENTED as optional and default OFF — the campaign result limits
+the permissible claims but does not require deleting the feature. The
+Layer-2 verdict stays **NOT SUPPORTED on the pre-registered primary
+behavioral hierarchy**; product interpretation: "not supported"
+applies to the tested primary efficacy hypothesis, NOT to
+implementation correctness or the value of the recording
+infrastructure. Structured prompt feedback is an optional experimental
+feature — fully implemented and operationally tested, with no general
+performance benefit claimed. No L3 is planned for this PR (N/A for the
+merge claim). Activation (P3-ACT) remains a separate, unauthorized
+decision.

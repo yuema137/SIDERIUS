@@ -30,7 +30,12 @@ from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
-from agent.schemas.proposal import FalsifiablePrediction, ProposalInput, ProposalOutput
+from agent.schemas.proposal import (
+    CausalStageOwnedContent,
+    FalsifiablePrediction,
+    ProposalInput,
+    ProposalOutput,
+)
 from agent.schemas.task_config import ForwardContract
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
@@ -45,6 +50,13 @@ _MAX_PROPOSING_RETRIES = 2
 
 # One retry when causal_reasoning produces a prediction below minimum_boldness.
 _MAX_REASONING_RETRIES = 1
+
+# P-1 fix (PR 3 audit §13): bounded correction retries when the causal stage's
+# owned fields (inherited_components / falsifiable_prediction) fail schema
+# validation. These fields are re-injected verbatim into ProposalOutput on
+# every proposing structural attempt, so they can only be corrected at the
+# causal stage itself. Total causal validation attempts = retries + 1.
+_MAX_CAUSAL_CORRECTION_RETRIES = 2
 
 # Fix 2 Commit 6 — total number of proposing-stage calls the pre-flight
 # revision loop is allowed. 1 initial draft + 2 revisions. The structural-
@@ -597,6 +609,116 @@ def _format_recent_gate_exhaustions_block(
     return "\n".join(lines)
 
 
+def _format_healthgate_evidence_block(interp: dict[str, Any]) -> str:
+    """Render the flag-gated ``[HEALTHGATE EVIDENCE]`` block (V19 PR 3 §3.7).
+
+    Source of truth is EXCLUSIVELY the deterministic interpretation fields
+    (``per_model_round_health_counts``, ``per_model_collapse_fingerprints``,
+    ``collapse_fingerprint_history``) — never ``key_findings`` or any other
+    LLM prose. Distinct from the §14.N gate-exhaustion block (abort-class
+    resource failures), which is untouched and rendered separately.
+
+    Semantics:
+
+    * Legacy interpretation dicts (all three fields absent) and empty
+      evidence → ``""`` (no header — callers splice unconditionally).
+    * Evidence is grouped by model exactly as CB3 grouped it; nothing is
+      aggregated across models and nothing is rendered unlabelled.
+    * History entries are POST-retention (merge-time expiry, design §3.8),
+      so every occurrence bucket shown is inside the retained window —
+      counts here are retained-window counts by construction, never
+      lifetime totals; iteration tags are the buckets' absolute
+      iterations.
+    * Entry-level raw metrics follow the representative-observation rule
+      (§3.8) and are labelled as such — one representative value, not a
+      summary of every occurrence.
+    * A malformed hand-built history entry (missing required keys) raises
+      a diagnostic ``ValueError`` naming the model — never silent
+      evidence loss or cross-model misattribution.
+    """
+    counts_by_model = interp.get("per_model_round_health_counts") or {}
+    fps_by_model = interp.get("per_model_collapse_fingerprints") or {}
+    history_by_model = interp.get("collapse_fingerprint_history") or {}
+    if not counts_by_model and not fps_by_model and not history_by_model:
+        return ""
+
+    # Model order: interpretation's model_types first (matches the
+    # per-model scores section), then any evidence-only models — nothing
+    # silently dropped.
+    ordered = list(interp.get("model_types") or [])
+    for extra in sorted(set(counts_by_model) | set(fps_by_model) | set(history_by_model)):
+        if extra not in ordered:
+            ordered.append(extra)
+
+    lines = [
+        "[HEALTHGATE EVIDENCE] (deterministic, from the health-gate system — "
+        "distinct from the resource-gate report above)"
+    ]
+    rendered_any = False
+    for mt in ordered:
+        counts = counts_by_model.get(mt)
+        fps = fps_by_model.get(mt) or []
+        history = history_by_model.get(mt) or []
+        if not counts and not fps and not history:
+            continue
+        rendered_any = True
+        lines += ["", f"### {mt}"]
+        if counts:
+            lines.append(
+                f"Round validity (this iteration): {counts.get('valid', 0)} valid, "
+                f"{counts.get('invalid', 0)} invalid, {counts.get('unknown', 0)} unknown"
+            )
+        if fps:
+            lines.append("This iteration's collapse fingerprints:")
+            for fp in fps:
+                lines.append(f"  - {fp['signature']} — {fp.get('human_readable', '')}")
+        if history:
+            lines.append(
+                "Retained history (bounded window; counts are retained-window "
+                "occurrences, not lifetime totals):"
+            )
+            for entry in history:
+                try:
+                    signature = entry["signature"]
+                    occurrences = entry["occurrences"]
+                except (KeyError, TypeError) as e:
+                    raise ValueError(
+                        f"Malformed collapse_fingerprint_history entry for model "
+                        f"{mt!r}: missing {e} — refusing to render partial "
+                        f"evidence (silent loss / misattribution risk)"
+                    ) from e
+                total = sum(o["count"] for o in occurrences)
+                iters = ", ".join(str(o["iteration"]) for o in occurrences)
+                lines.append(f"  - {signature}: {total} occurrence(s) across iteration(s) {iters}")
+                metrics = entry.get("metrics") or {}
+                if metrics:
+                    rendered = "; ".join(f"{k}={v}" for k, v in sorted(metrics.items()))
+                    lines.append(f"      Representative observation: {rendered}")
+                source_ids = [i for o in occurrences for i in o.get("source_exp_ids", [])]
+                if source_ids:
+                    lines.append(
+                        f"      Source experiments (recent, bounded): {', '.join(source_ids)}"
+                    )
+    if not rendered_any:
+        return ""
+
+    lines += [
+        "",
+        "Rules for using this evidence:",
+        "  - Do not repeat a fingerprinted failure mode without naming a "
+        "concrete mechanism expected to break it.",
+        "  - The mechanism must change the actual relevant configuration "
+        "(architecture family, output activation, normalization, loss, "
+        "optimizer/training policy) — not merely the explanation text.",
+        "  - A high raw score from an invalid round is a failure, not a success.",
+        "  - Do not avoid unrelated healthy strategies merely because another model failed.",
+        "  - Do not transfer one model's failure evidence to another model without justification.",
+        "  - Do not claim this feedback was used unless the proposal actually "
+        "changes a relevant mechanism.",
+    ]
+    return "\n".join(lines)
+
+
 def _render_stage_user_prompt(accumulated: dict[str, Any]) -> str:
     """Render a pipeline-stage user prompt: native markdown + clean JSON.
 
@@ -949,6 +1071,16 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     gate_block = _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions)
     if gate_block:
         lines += [gate_block, ""]
+
+    # V19 PR 3 §3.7 (flag-gated) — structured HealthGate evidence, rendered
+    # AFTER and visibly separate from the §14.N resource-gate block (a
+    # different failure family). OFF (default): nothing rendered — the
+    # prompt stays byte-identical to pre-PR3 (golden-parity tested) even
+    # when the structured fields are present in the interpretation dump.
+    if inp.enable_structured_health_feedback:
+        health_block = _format_healthgate_evidence_block(interp)
+        if health_block:
+            lines += [health_block, ""]
 
     # NOTE: legacy ProposalInput.expert_advice render block was removed in
     # Commit P-d. The field was hard-removed from the schema; see proposal.py
@@ -1337,6 +1469,17 @@ class MLModelProposalAgent:
             "recent_gate_exhaustions_block": _format_recent_gate_exhaustions_block(
                 inp.recent_gate_exhaustions
             ),
+            # V19 PR 3 (§3.7) — structured HealthGate evidence for the
+            # PRODUCTION pipeline path (P3-V1 reopen fix: the legacy-mode
+            # splice in _build_reasoning_prompt never reached pipeline
+            # mode). Same mechanism as the §14.N variable above; ""
+            # when the flag is OFF or no supported evidence exists, so
+            # the placeholder collapses and the OFF prompt is unchanged.
+            "healthgate_evidence_block": (
+                _format_healthgate_evidence_block(inp.interpretation)
+                if inp.enable_structured_health_feedback
+                else ""
+            ),
             # T3 — task config injection. {FORWARD_CONTRACT} is rendered into
             # proposing_stage.md (line 68 area); {TASK_DESCRIPTION} is rendered
             # into any future template that wants the bare task string. Both
@@ -1526,7 +1669,110 @@ class MLModelProposalAgent:
                                 components=retry_audit["components"],
                             )
                 except (ValidationError, Exception):
-                    pass  # malformed prediction — let the proposing stage handle it
+                    # Malformed prediction — corrected by the causal-owned
+                    # validation block below (P-1 fix). The old assumption
+                    # ("let the proposing stage handle it") was wrong: the
+                    # proposing-stage retry re-injects this stage's values
+                    # verbatim and can never correct them.
+                    pass
+
+        # --- P-1 fix (PR 3 audit §13): validate causal-stage-owned fields ---
+        # inherited_components + falsifiable_prediction are extracted from
+        # accumulated["causal_reasoning"] below and re-injected verbatim into
+        # ProposalOutput.model_validate on EVERY proposing structural attempt.
+        # A validation error in them is therefore uncorrectable downstream —
+        # it must be corrected here, by the stage whose retry can reach the
+        # producing response. Runs AFTER the boldness block because a boldness
+        # retry may have replaced the causal output with a new, unvalidated
+        # response. A pipeline without a causal_reasoning stage validates the
+        # empty defaults and passes unchanged.
+        causal_raw = accumulated.get("causal_reasoning")
+        for causal_attempt in range(_MAX_CAUSAL_CORRECTION_RETRIES + 1):
+            causal_dict = causal_raw if isinstance(causal_raw, dict) else {}
+            try:
+                # Same extraction expressions as the proposing-stage assembly
+                # below — the two must agree on what gets validated.
+                CausalStageOwnedContent.model_validate(
+                    {
+                        "inherited_components": causal_dict.get("inherited_components", []),
+                        "falsifiable_prediction": causal_dict.get("falsifiable_prediction"),
+                    }
+                )
+                break
+            except ValidationError as exc:
+                error_summary = "; ".join(
+                    f"{' → '.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors()[:5]
+                )
+                if causal_attempt == _MAX_CAUSAL_CORRECTION_RETRIES:
+                    raise RuntimeError(
+                        f"Causal-reasoning stage output failed validation of its "
+                        f"causal-owned fields (inherited_components / "
+                        f"falsifiable_prediction) after "
+                        f"{_MAX_CAUSAL_CORRECTION_RETRIES} correction retries. "
+                        f"Last error: {error_summary}"
+                    ) from exc
+                print(
+                    f"   Stage 'causal_reasoning': causal-owned field validation "
+                    f"failed (attempt {causal_attempt + 1}/"
+                    f"{_MAX_CAUSAL_CORRECTION_RETRIES + 1}) — retrying with "
+                    f"focused error feedback."
+                )
+                correction_system = load_stage_prompt(
+                    "causal_reasoning_stage",
+                    exploration_mode=mode,
+                    template_vars=template_vars,
+                    mindset=inp.mindset,
+                )
+                clamped_accumulated = clamp_and_backstop_accumulated(
+                    accumulated,
+                    top_k=policy.comparative_analysis_top_k,
+                    max_chars=policy.prior_stage_max_chars,
+                    input_keys=_PROPOSER_INPUT_KEYS,
+                )
+                # P-d order — mirrors the boldness-retry assembly above.
+                correction_parts: list[str] = []
+                if hardware_block:
+                    correction_parts.append(hardware_block)
+                if data_scope_block:
+                    correction_parts.append(data_scope_block)
+                if constraints_block:
+                    correction_parts.append(constraints_block)
+                if agent_cards_block:
+                    correction_parts.append(agent_cards_block)
+                if expert_context_block:
+                    correction_parts.append(expert_context_block)
+                correction_parts.append(_render_stage_user_prompt(clamped_accumulated))
+                if vocab_block:
+                    correction_parts.append(vocab_block)
+                correction_user = "\n\n".join(correction_parts) + (
+                    "\n\n## VALIDATION ERROR — CORRECT AND RESEND\n"
+                    "Your previous response failed schema validation of "
+                    "causal-stage-owned fields:\n"
+                    f"{error_summary}\n"
+                    "Return the FULL corrected JSON object (same output schema "
+                    "as instructed above), fixing ONLY the invalid fields and "
+                    "keeping every other field unchanged."
+                )
+                correction_audit = _audit_proposer_components(
+                    inp=inp,
+                    accumulated=clamped_accumulated,
+                    agent_cards_block=agent_cards_block,
+                    expert_context_block=expert_context_block,
+                    vocab_block=vocab_block,
+                    system_prompt=correction_system,
+                    stage_name="causal_reasoning",
+                )
+                causal_raw = self.bridge.generate(
+                    correction_system,
+                    correction_user,
+                    label="proposer.causal_reasoning.correction",
+                    components=correction_audit["components"],
+                )
+        if causal_raw is not accumulated.get("causal_reasoning"):
+            # Only write back when a correction actually replaced the output —
+            # never insert a causal_reasoning key into a pipeline that has no
+            # causal stage.
+            accumulated["causal_reasoning"] = causal_raw
 
         # --- B.12 + B.22: Proposing stage (always runs last, retries on validation failure) ---
         proposing_prompt = load_stage_prompt(

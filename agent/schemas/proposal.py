@@ -206,6 +206,25 @@ class InheritedComponent(BaseModel):
         return self
 
 
+# B.2a — causal-stage-owned content (P-1 retry-discard fix; PR 3 audit §13)
+class CausalStageOwnedContent(BaseModel):
+    """Validation-only partial schema for the fields the causal-reasoning
+    stage owns and the proposing stage re-injects verbatim on every
+    structural attempt.
+
+    Mirrors ProposalOutput's contract for exactly these two fields and
+    nothing more: a premature full ProposalOutput cannot be constructed at
+    causal time (the implementation fields do not exist yet), and using it
+    would wrongly couple causal validation to proposing-stage validators.
+    The pipeline validates against this model immediately after the causal
+    stage returns, so validation errors are corrected by the stage whose
+    retry loop can actually reach the producing response.
+    """
+
+    inherited_components: list[InheritedComponent] = Field(default_factory=list)
+    falsifiable_prediction: FalsifiablePrediction | None = None
+
+
 # B.3 — Expert context item (polymorphic upstream input)
 class ExpertContextItem(BaseModel):
     """One piece of upstream context for the proposal agent.
@@ -783,6 +802,17 @@ class ProposalInput(BaseModel):
         default_factory=list,
         description="Hard limits the proposed architecture must respect "
         "(e.g. 'VRAM < 10 GB', 'params < 50M', 'no external dependencies').",
+    )
+    enable_structured_health_feedback: bool = Field(
+        default=False,
+        description="V19 PR 3 (pr3_healthgate_feedback.md §3.7): gates the "
+        "[HEALTHGATE EVIDENCE] block in the proposer prompt, rendered from "
+        "the deterministic structured fields of the interpretation dump "
+        "(per_model_round_health_counts, per_model_collapse_fingerprints, "
+        "collapse_fingerprint_history). OFF (default): the prompt is "
+        "byte-identical to the pre-PR3 condition even when those fields "
+        "are present in the payload. Informational only — never routes or "
+        "rejects proposals.",
     )
     # NOTE: ProposalInput.expert_advice was hard-removed in Commit P-d.
     # Rationale: for the Proposal node specifically, human directives and

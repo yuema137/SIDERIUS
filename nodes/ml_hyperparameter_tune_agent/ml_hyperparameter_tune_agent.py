@@ -1794,6 +1794,15 @@ class HyperparamTuningAgent:
             # since it may vary when no override is in force (§3.8).
             ordering_override_strategy=agent_input.order_strategy_override,
             ordering_override_file_order=agent_input.file_order_override,
+            # V19 PR 3 — structured-health-feedback policy (pass-through:
+            # the tuner locks + stamps it, never consumes it).
+            structured_health_feedback_enabled=(agent_input.enable_structured_health_feedback),
+            health_feedback_history_window_iterations=(
+                agent_input.health_feedback_history_window_iterations
+            ),
+            health_feedback_history_max_entries_per_model=(
+                agent_input.health_feedback_history_max_entries_per_model
+            ),
         )
         health_config_sha256 = run_invariants.health_config_sha256
         if _effective_config_path is not None:
@@ -1993,6 +2002,16 @@ class HyperparamTuningAgent:
             "chain_incumbent_provided": agent_input.current_run_best_formal_score,
             "enable_chain_incumbent_formal_gates": (
                 agent_input.enable_chain_incumbent_formal_gates
+            ),
+            # V19 PR 3 — structured-health-feedback POLICY stamps (flag +
+            # retention). Policy only: per-round gate evidence stays in
+            # the records / interpretation digest, never duplicated here.
+            "enable_structured_health_feedback": (agent_input.enable_structured_health_feedback),
+            "health_feedback_history_window_iterations": (
+                agent_input.health_feedback_history_window_iterations
+            ),
+            "health_feedback_history_max_entries_per_model": (
+                agent_input.health_feedback_history_max_entries_per_model
             ),
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,

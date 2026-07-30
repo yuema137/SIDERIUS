@@ -185,6 +185,14 @@ CONTRACT_FLAGS = [
     # argv on both layers. See pr2_data_ordering.md §3.3.
     "order_strategy_override",
     "file_order_override",
+    # V19 PR 3 — structured-health-feedback policy. Boolean shell 0/1
+    # forwarded-when-set (Python store_true default OFF); the two
+    # retention knobs use shell "" ≡ omit (Python argparse defaults 3/8),
+    # so an unset policy reproduces pre-PR3 argv on both layers. See
+    # pr3_healthgate_feedback.md §3.9.
+    "enable_structured_health_feedback",
+    "health_feedback_history_window_iterations",
+    "health_feedback_history_max_entries_per_model",
 ]
 
 # Flags whose shell default intentionally diverges from Python's argparse
@@ -193,7 +201,16 @@ CONTRACT_FLAGS = [
 # /home/klz/Data/TIDMAD/ — until PR #127 commit 44b2d94 dropped the
 # hardcoded shell default for server portability. data_dir now goes
 # through the normal parity check: shell "" ≡ Python None.)
-SHELL_DEFAULT_OVERRIDES: dict[str, str] = {}
+#
+# V19 PR 3 retention knobs: Python argparse defaults are 3/8, but the
+# shell deliberately uses "" ≡ OMIT (forward-only-when-set) so an unset
+# policy reproduces pre-PR3 argv byte-identically — Python then applies
+# its own 3/8 defaults. Semantically identical defaults, intentionally
+# different raw representations. See pr3_healthgate_feedback.md §3.9.
+SHELL_DEFAULT_OVERRIDES: dict[str, str | None] = {
+    "health_feedback_history_window_iterations": None,
+    "health_feedback_history_max_entries_per_model": None,
+}
 
 
 # Flag → shell variable name. Convention: uppercase-snake of the flag.

@@ -22,6 +22,12 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent.schemas.health_feedback import (
+    CollapseFingerprint,
+    CollapseFingerprintHistoryEntry,
+    HealthFeedbackRetentionPolicy,
+    RoundHealth,
+)
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.proposal import VocabEntry
 from agent.schemas.score_table import ScoreComparisonTable
@@ -148,6 +154,18 @@ class ModelRunSummary(BaseModel):
         "chronological order as round_scores. Kept per round because ordering "
         "may legitimately differ between rounds when no operator override is "
         "in force. Empty on runs that predate the ordering option.",
+    )
+    round_health: list[RoundHealth] = Field(
+        default_factory=list,
+        description="Condensed HealthGate evidence per round, in the same "
+        "chronological order as round_scores (V19 PR 3, "
+        "docs/design/v19_priorities/pr3_healthgate_feedback.md §3.2). Built "
+        "deterministically from each record's persisted gate fields under "
+        "the evidence-precedence rule — never from LLM prose. Provenance "
+        "labels the evidence source (gated / gates_disabled / "
+        "round_fields_only / gate_not_evaluated / legacy); a round without "
+        "evidence is carried labeled, never guessed at. Empty on summaries "
+        "built before this field existed.",
     )
     model_description: str | None = Field(
         default=None,
@@ -338,6 +356,51 @@ class InterpretationInput(BaseModel):
         "where that link was confirmed. Populated by "
         "InterpretationOutput.vocab_link_confirmations. Empty on first iteration.",
     )
+
+    # --- Structured HealthGate feedback (V19 PR 3 —
+    #     docs/design/v19_priorities/pr3_healthgate_feedback.md §3.6/§3.8/§3.9) ---
+    enable_structured_health_feedback: bool = Field(
+        default=False,
+        description="Gates the PROMPT rendering of structured HealthGate "
+        "evidence (§3.6 trajectory labels, HealthGate summary section, "
+        "system-prompt instruction block). OFF (default): prompts are "
+        "byte-identical to the pre-PR3 condition. The OUTPUT fields below "
+        "are populated deterministically REGARDLESS of this flag "
+        "(recording-only provenance). Part of the run-invariants lock — "
+        "flipping it mid-workspace is rejected at startup.",
+    )
+    collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = Field(
+        default_factory=dict,
+        description="Carry-forward from the previous "
+        "InterpretationOutput.collapse_fingerprint_history: model_type → "
+        "bounded per-iteration occurrence history of collapse fingerprints. "
+        "Deterministic data — never LLM-derived. Empty on the first "
+        "iteration and on legacy digests without the field.",
+    )
+    health_feedback_history_window_iterations: int = Field(
+        default=3,
+        ge=1,
+        description="Retention window for the fingerprint history: the TOTAL "
+        "number of iterations retained INCLUDING the current one "
+        "(minimum_retained_iter = current_iter - window + 1). Part of the "
+        "run-invariants lock. Follows the active_model_* typed-knob "
+        "convention; consumed as a resolved HealthFeedbackRetentionPolicy, "
+        "never as a module constant.",
+    )
+    health_feedback_history_max_entries_per_model: int = Field(
+        default=8,
+        ge=1,
+        description="Deterministic trim bound on retained fingerprint history "
+        "entries per model. Part of the run-invariants lock.",
+    )
+
+    def health_feedback_retention_policy(self) -> HealthFeedbackRetentionPolicy:
+        """The RESOLVED retention policy (design §3.8) — the single object
+        renderers and the history merge consume."""
+        return HealthFeedbackRetentionPolicy(
+            history_window_iterations=self.health_feedback_history_window_iterations,
+            max_entries_per_model=self.health_feedback_history_max_entries_per_model,
+        )
 
     storage: StorageConfig = Field(
         default_factory=lambda: StorageConfig(
@@ -603,6 +666,32 @@ class InterpretationOutput(BaseModel):
         "'feature:capability' → list of run_names where the link was confirmed. "
         "Carry forward as InterpretationInput.vocab_link_confirmations "
         "in the next iteration.",
+    )
+
+    # --- Structured HealthGate feedback (V19 PR 3 — deterministic, NEVER
+    #     LLM-derived; populated regardless of the prompt flag and of
+    #     interpreter degradation, per the §3.10 invariant) ---
+    per_model_round_health_counts: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="model_type → {'valid': n, 'invalid': n, 'unknown': n} "
+        "over this iteration's rounds, from each round's deterministic "
+        "health_validity classification. Computed from RoundHealth, not "
+        "from LLM findings.",
+    )
+    per_model_collapse_fingerprints: dict[str, list[CollapseFingerprint]] = Field(
+        default_factory=dict,
+        description="model_type → distinct collapse fingerprints observed "
+        "THIS iteration (deduped by signature, chronological first-seen "
+        "order). Deterministic — built from persisted gate evidence only.",
+    )
+    collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = Field(
+        default_factory=dict,
+        description="Bounded cross-iteration fingerprint history AFTER this "
+        "iteration's deterministic merge and retention "
+        "(pr3_healthgate_feedback.md §3.8). Carry forward as "
+        "InterpretationInput.collapse_fingerprint_history. The merge runs "
+        "regardless of interpreter LLM success or degradation — real gate "
+        "evidence is never lost to an LLM failure.",
     )
 
     # --- Degraded-mode flag (V8 hardening Domain 2b) ---

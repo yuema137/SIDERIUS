@@ -78,6 +78,14 @@ def local_validated_model(
     # ('shuffle') applies when it proposes nothing.
     order_strategy_override: OrderStrategy | None = None,
     file_order_override: list[int] | None = None,
+    # V19 PR 3 — structured-health-feedback POLICY pass-through. The tuner
+    # has no PR 3 behavior; it locks the policy into run_invariants and
+    # stamps run_config. Must match what the workflow locks for this
+    # workspace or the two would write contradictory locks (the PR 2
+    # lock-collision lesson).
+    enable_structured_health_feedback: bool = False,
+    health_feedback_history_window_iterations: int = 3,
+    health_feedback_history_max_entries_per_model: int = 8,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
@@ -259,6 +267,11 @@ def local_validated_model(
         enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
         order_strategy_override=order_strategy_override,
         file_order_override=file_order_override,
+        enable_structured_health_feedback=enable_structured_health_feedback,
+        health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+        health_feedback_history_max_entries_per_model=(
+            health_feedback_history_max_entries_per_model
+        ),
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,

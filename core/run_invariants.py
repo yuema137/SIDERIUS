@@ -64,8 +64,33 @@ class RunInvariants(BaseModel):
             the chain's ordering CONTROL POLICY, not its outcome — see below.
         ordering_override_file_order: The operator-forced file visitation
             order, or ``None``.
+        structured_health_feedback_enabled: Whether the structured
+            HealthGate feedback PROMPT rendering is enabled (V19 PR 3,
+            ``docs/design/v19_priorities/pr3_healthgate_feedback.md``
+            §3.9). Locked because it changes the agents' decision context
+            — the chain's behavioral policy — even though it changes no
+            data or scoring.
+        health_feedback_history_window_iterations: Fingerprint-history
+            retention window (total iterations retained, including the
+            current one). Locked with the flag: retention affects agent
+            context.
+        health_feedback_history_max_entries_per_model: Deterministic trim
+            bound on retained history entries per model. Locked with the
+            flag.
         created_at: ISO-8601 creation timestamp. Provenance only — never
             part of equality.
+
+    PR 3 resume matrix (the generic ``_CANONICAL`` comparison enforces it;
+    defaults below make a pre-PR3 lock file validate into the pre-feature
+    state):
+
+        same flag + same policy values        → accepted
+        changed flag, same workspace          → RunInvariantsViolation
+        changed window or entry limit         → RunInvariantsViolation
+        legacy workspace (no PR3 keys)        → resolves OFF / 3 / 8; accepted
+        enabling ON on a legacy/OFF workspace → rejected (canonical
+                                                 mismatch); use a NEW
+                                                 workspace
 
     Why the ordering OVERRIDE is locked but the RESOLVED ordering is not:
     an override is a chain-level control decision, and silently changing it
@@ -87,6 +112,11 @@ class RunInvariants(BaseModel):
     # the corruption guard in load_run_invariants().
     ordering_override_strategy: str | None = None
     ordering_override_file_order: list[int] | None = None
+    # V19 PR 3 — defaults chosen so a pre-PR3 lock file validates into the
+    # pre-feature state (OFF / 3 / 8), same mechanism as the ordering keys.
+    structured_health_feedback_enabled: bool = False
+    health_feedback_history_window_iterations: int = 3
+    health_feedback_history_max_entries_per_model: int = 8
     created_at: str | None = None
 
     # Fields participating in lock equality. created_at (and any future
@@ -97,6 +127,9 @@ class RunInvariants(BaseModel):
         "health_config_sha256",
         "ordering_override_strategy",
         "ordering_override_file_order",
+        "structured_health_feedback_enabled",
+        "health_feedback_history_window_iterations",
+        "health_feedback_history_max_entries_per_model",
     )
 
     def canonical(self) -> dict:
@@ -239,6 +272,9 @@ def build_run_invariants(
     workspace: str,
     ordering_override_strategy: str | None = None,
     ordering_override_file_order: list[int] | None = None,
+    structured_health_feedback_enabled: bool = False,
+    health_feedback_history_window_iterations: int = 3,
+    health_feedback_history_max_entries_per_model: int = 8,
 ) -> tuple[RunInvariants, str | None]:
     """Compute a run's invariants — the ONE shared path for every entry point.
 
@@ -263,6 +299,13 @@ def build_run_invariants(
             producing an unchanged, no-override lock.
         ordering_override_file_order: The operator-forced file order, or
             ``None``.
+        structured_health_feedback_enabled: V19 PR 3 structured-feedback
+            prompt flag (chain behavioral policy — locked). Defaults keep
+            every pre-PR3 call site producing an unchanged OFF lock.
+        health_feedback_history_window_iterations: PR 3 retention window
+            (locked policy).
+        health_feedback_history_max_entries_per_model: PR 3 retention trim
+            bound (locked policy).
 
     Returns:
         ``(invariants, effective_config_path)`` — the path is ``None`` when
@@ -293,6 +336,11 @@ def build_run_invariants(
                 list(ordering_override_file_order)
                 if ordering_override_file_order is not None
                 else None
+            ),
+            structured_health_feedback_enabled=structured_health_feedback_enabled,
+            health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+            health_feedback_history_max_entries_per_model=(
+                health_feedback_history_max_entries_per_model
             ),
         ),
         effective_path,
