@@ -264,3 +264,42 @@ class TestProbeObservations:
                 software_stack={},
                 source_run={},
             )
+
+
+class TestSelfPidExclusion:
+    def test_own_process_is_not_foreign(self, monkeypatch):
+        """C6 GPU-smoke regression (2026-07-30): the probing process's own
+        CUDA context appeared in --query-compute-apps and was counted as
+        foreign, misclassifying an idle GPU as foreign_contended."""
+        import os
+        import subprocess
+        from types import SimpleNamespace
+
+        own = str(os.getpid())
+
+        def _fake_run(cmd, **kw):
+            if "--query-gpu=utilization.gpu,memory.used" in cmd[1]:
+                return SimpleNamespace(stdout="5, 1024\n")
+            return SimpleNamespace(stdout=f"{own}\n")  # only ourselves
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        snap = capture_contention_snapshot()
+        assert snap.telemetry_available is True
+        assert snap.foreign_compute_processes == 0
+        assert classify_concurrency(snap, expected_peer=False) == "single_candidate_idle"
+
+    def test_other_processes_still_counted(self, monkeypatch):
+        import os
+        import subprocess
+        from types import SimpleNamespace
+
+        own = str(os.getpid())
+
+        def _fake_run(cmd, **kw):
+            if "--query-gpu=utilization.gpu,memory.used" in cmd[1]:
+                return SimpleNamespace(stdout="50, 8000\n")
+            return SimpleNamespace(stdout=f"{own}\n12345\n")
+
+        monkeypatch.setattr(subprocess, "run", _fake_run)
+        snap = capture_contention_snapshot()
+        assert snap.foreign_compute_processes == 1

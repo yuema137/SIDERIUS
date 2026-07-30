@@ -2528,9 +2528,36 @@ rollback flag. Deps: C3-C5.
       the dataset loader + the 3+7 posture; step-timing convergence
       with TimeEval's warmup happens at C8 when TimeEval is rewired
       onto the estimator (no third long-term divergent timing path).
-- [ ] GPU smoke (one registered + one freshly implemented plugin,
-      bounded) — **OPERATOR APPROVAL REQUIRED before execution** (gate
-      report issued).
+- [x] GPU smoke EXECUTED (operator-approved, 2026-07-30) — **PASS**,
+      46.3 s total wall (cap 300 s), idle 5090, isolated registry
+      `/home/klz/Data/SIDEREIS_DATA/c6_smoke_registry`, zero LLM, no
+      V19/forensic paths (asserted in-script):
+      * registered probe `punet_ce_loss_control_nano`: realized
+        45,408 params; setup 22.5 s (CUDA context + H5 index
+        dominate); train 17.62 ms/step (spread 17.60-17.65); inference
+        3.17 ms/batch (3.16-3.18); peak VRAM 1.60 GB alloc / 1.61 GB
+        reserved.
+      * FRESH plugin `c6_smoke_fresh_probe` (written moments before,
+        loaded via the REAL `register_model_in_memory` loader,
+        asserted previously absent — F-1b on hardware): realized
+        59,536 params; setup 21.9 s; train 8.06 ms/step; inference
+        2.10 ms/batch; peak 1.62/2.23 GB.
+      * Both probes `single_candidate_idle`; extrapolated estimates
+        `bounded_live_probe` + blocking-eligible; training/inference
+        measured separately; 4 observations (2 per probe, distinct
+        train/inference) registered + hash-verified on reload;
+        registry generation 8; NO fallback/downgrade path (no
+        inference_defaults involvement by construction).
+      * SMOKE FINDING → production fix: the contention snapshot
+        counted the probing process's OWN CUDA context as a foreign
+        compute app, misclassifying probe B as `foreign_contended`
+        after probe A initialized CUDA in-process (the in-script
+        contention guard STOPPED the first attempt — working as
+        designed). Fix: self-PID exclusion in
+        `capture_contention_snapshot` + 2 regression tests; the smoke
+        re-ran clean. This finding also matters for C12: same-process
+        sequential probes must self-exclude; PEER processes remain
+        counted (test-proven).
 **Unit validation.** caps honored; fast-fail; contended flag; realized
 supersession; unit conversions (§16.6) with sentinels; fallback-25
 never blocking.

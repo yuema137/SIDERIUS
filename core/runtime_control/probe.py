@@ -160,7 +160,16 @@ def capture_contention_snapshot() -> ContentionSnapshot:
             timeout=10,
             check=True,
         ).stdout.strip()
-        n_foreign = len([line for line in procs.splitlines() if line.strip()])
+        # FOREIGN means processes other than ourselves: the probing
+        # process's own CUDA context must not count (C6 GPU-smoke
+        # finding 2026-07-30 — self-counting misclassified probe B as
+        # foreign_contended after probe A initialized CUDA in-process).
+        import os as _os
+
+        own_pid = str(_os.getpid())
+        n_foreign = len(
+            [line for line in procs.splitlines() if line.strip() and line.strip() != own_pid]
+        )
         return ContentionSnapshot(
             foreign_compute_processes=n_foreign,
             gpu_utilization_pct=util_pct,
