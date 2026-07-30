@@ -56,6 +56,14 @@ PredictionSource = Literal[
     "bounded_negligible",
     # Component-derived total (§1.1).
     "derived_total",
+    # C3 vocabulary extension (runtime_estimation_and_calibration.md §7.3
+    # mapping table): the post-implementation bounded live probe (C6
+    # producer) and its historically-corrected form, plus the
+    # complete-execution observation tier (§8.4). Additive — no existing
+    # value changes meaning; nothing produces these until C6/C7.
+    "bounded_live_probe",
+    "bounded_live_probe_calibrated",
+    "complete_observation",
 ]
 
 #: Sources backed by a live measurement of the actual configuration —
@@ -67,6 +75,15 @@ MEASUREMENT_BACKED_SOURCES: frozenset[str] = frozenset(
         "real_inference_verification",
         "measured_representative_scoring",
         "real_dataset_warmup",
+        # C3 extension: live measurements of the ACTUAL implemented
+        # candidate (design contract §8.2/§8.4). The RuntimePrediction
+        # admission invariant applies unchanged: formal eligibility still
+        # requires verification="passed" + steady_state + measurement
+        # provenance — a contended or non-steady probe can never be
+        # formal-eligible.
+        "bounded_live_probe",
+        "bounded_live_probe_calibrated",
+        "complete_observation",
     }
 )
 

@@ -2155,13 +2155,33 @@ observations, k-corrected warmup; reconcile `PredictionSource` /
 §7.3 rule). No consumer decision-path switches yet. Deps: none (may
 land parallel to C1/C2).
 **Implementation plan.**
-- [ ] Vocabulary reconciliation audit (records.py, total_assembly.py,
-      provenance.py) → final single-source table here.
-- [ ] Pydantic models; eligibility derivation function; validator
-      rejects static+blocking.
-- [ ] `evidence_rank()` per §8.4 (pure, total order).
-- [ ] Adapters, tested against REAL forensic fixtures.
-- [ ] Doc sync (§7 concrete field list).
+- [x] Vocabulary reconciliation audit: `records.PredictionSource` is
+      canonical, EXTENDED with three additive values
+      (`bounded_live_probe`, `bounded_live_probe_calibrated`,
+      `complete_observation`), all classified MEASUREMENT_BACKED; the
+      existing `RuntimePrediction` admission invariant governs them
+      unchanged (probe without verification+steady state can never be
+      formal-eligible — test-proven). NAMING RESOLVED per the §7.3
+      rule: `formal_execution_eligible` KEPT (records.py usage is
+      documented and schema-enforced); no `formal_decision_eligible`
+      synonym introduced. `HISTORICAL_EVIDENCE_SOURCES` unchanged.
+- [x] `core/runtime_control/estimate_types.py`: `RuntimeEstimateRequest`
+      + `RuntimeEstimate` (frozen Pydantic; separate
+      training/inference/setup seconds per §16.6; applicability +
+      concurrency-identity vocabularies; warnings). Eligibility is
+      DERIVED (`derive_decision_eligibility`): priors advisory-only;
+      measurement-backed blocks unless contended; formal additionally
+      requires verification+steady state. Validator makes
+      static/historical + blocking/formal UNREPRESENTABLE;
+      `make_estimate` is the sole supported construction path.
+- [x] `evidence_rank()` — §8.4 six-tier total order covering EXACTLY
+      the canonical Literal (set-equality test).
+- [x] Four read-only adapters: proposer pre-flight (real C1 verdict),
+      TimeEval result (REAL wrapper result shape, `wrapper.py:812-824`
+      — corrected from an initially guessed shape during
+      implementation), RT2 observation record (REAL wave-1 forensic
+      sidecars as committed fixtures), legacy k-table entry.
+- [x] Doc sync (this section).
 **Unit validation.** every provenance value; derivation rules;
 precedence order + idempotence; adapter round-trips on forensic
 fixtures; unknown provenance rejected.
@@ -2174,7 +2194,55 @@ low-confidence, never raise on optional absence; malformed → named
 error.
 **Migration/rollback.** Additive module; no consumers changed.
 **Boundary.** Types + adapters + tests.
-- [ ] Evidence recorded.
+- [x] Evidence recorded: `tests/unit/core/test_estimate_types.py` —
+      **20 tests** (vocabulary/tier set-equality, six-tier order,
+      priors-never-block sweep over the full Literal, unrepresentable
+      illegal states, contended-probe demotion, bounds ordering,
+      adapters on real artifacts incl. both forensic sidecars);
+      adjacent runtime-control suites
+      (test_runtime_control_model/test_total_assembly/
+      test_watchdog_admission_split) — combined **70 passed, 1.2 s**;
+      ruff check + format clean.
+
+#### Implementation record — 2026-07-30 / C3
+
+**Question encountered.** (a) Extend `formal_execution_eligible` or
+introduce `formal_decision_eligible`? (b) Are the three new sources
+measurement-backed (formal-eligibility-capable)? (c) The wave-1 TRIAL
+forensic record has `components.inference.prediction = None` — how does
+the observation adapter represent an absent prediction?
+
+**Audit evidence.**
+- `records.py:88-101` — `formal_execution_eligible` carries a
+  documented, schema-enforced admission invariant → the §7.3 rule's
+  "documented and unambiguous" branch applies: KEEP the name.
+- `records.py` prior/measurement split + §8.2/§8.4 — a bounded live
+  probe IS a live measurement of the actual configuration →
+  measurement-backed; the unchanged admission invariant still denies
+  formal eligibility without verification+steady state, and the
+  §7.4 matrix's contended-probe demotion is enforced at the envelope.
+- `provenance.py` module contract — "a provenance gap is recorded as a
+  gap, never fabricated": my first adapter draft defaulted a missing
+  prediction to static provenance — a fabrication; corrected.
+- Wave-1 trial sidecar (fixture) — inference prediction absent by
+  design (adaptive inference verification had not formed one).
+
+**Decision.** Keep `formal_execution_eligible`; classify the three new
+sources measurement-backed; observation adapter EXCLUDES unpriced
+components from the total, takes the weakest source over PRICED
+components only, and emits an explicit "expected_seconds does NOT
+cover it" warning per gap.
+
+**Rationale.** One canonical vocabulary, no synonym drift; provenance
+honesty over completeness; the existing invariant remains the single
+authority for formal eligibility.
+
+**Validation.** The 20-test suite above; the trial-fixture test proves
+the gap path (measurement-backed weakest-priced provenance +
+inference=None + warning); the formal-fixture test proves the
+fully-priced path with §16.6 separation.
+
+**Status.** Final (adapters read-only until C4/C8 consumers).
 
 ### C4 — `feat(runtime): unified RuntimeEstimator, factory, and RuntimeDecisionPolicy`
 
