@@ -688,28 +688,47 @@ The gate PASSES only if ALL of:
 Gate PASS → campaign re-sizing may be proposed (§22.6). Gate FAIL → stop;
 re-audit; no further LLM spend without a new operator decision.
 
-### 22.4 Preconditions (ALL required before the launch request)
+### 22.4 Preconditions — LAUNCH CHECKLIST (status as of 2026-07-29)
 
-1. Operator has chosen the production fix option (PR 3 doc §12) and
-   the fix is implemented on the branch — stop-and-show rule applies.
-2. Deterministic validation green: citation-contract tests (each §13.2
-   malformed class rejected with instructive messages), prompt-render
-   tests (worked examples present in causal + proposing stages),
-   P-1 tests (malformed memo citation corrected within the
-   causal-stage retry loop; proposing retry instruction satisfiable).
-3. Runner fixes R-1..R-4 implemented with zero-LLM preflight proofs
-   (simulated terminal failures trigger the stop at the right sample
-   boundary; `run_status.json` outcome enum correct for completed /
-   protocol_stop / budget_stop / technical_failure; abort marker
-   written on simulated mid-sample cap; wrapper propagates exit
-   status).
-4. Rev-4 fixture hashes frozen and committed; this protocol committed.
-5. Explicit operator launch approval referencing this document.
+1. [x] Production fix chosen and implemented: **Option C** (operator
+   decision 2026-07-29; PR 3 doc §13.1) — causal-stage validation of
+   `inherited_components` + `falsifiable_prediction` with ≤2 focused
+   correction retries. **Commit `5c8e483`**. Note the scope decided by
+   the operator: the citation CONTRACT (source types, regex, prompt
+   worked examples, registry/vocabulary provenance) is deliberately
+   UNCHANGED — rev 4 measures the remaining reliability with only the
+   retry seam fixed; prompt/schema expansion is a separate
+   post-rev-4 decision (an earlier draft of this item required prompt
+   worked-example tests; that requirement is superseded).
+2. [x] Deterministic validation green for the production fix:
+   9 focused tests (`test_causal_stage_validation.py`) — malformed
+   citation corrected and preserved into the final ProposalOutput;
+   bounded exhaustion before any proposing call; degenerate-prediction
+   path; happy-path call parity; proposing structural retry intact;
+   identical correction system prompt; disabled-stage passthrough;
+   partial-schema contract. Proposer suite 523 passed.
+3. [x] Runner fixes R-1..R-4 implemented and tested: **commit
+   `5c43ece`** — 15 deterministic tests (all five terminal states,
+   boundary-exact stop, abort markers, always-written
+   `run_status.json`/`run_summary.json`, distinct exit codes, ledger
+   precheck, wrapper exit propagation). Scripts suite 107 passed.
+   Rev-4 invocation MUST pass `--max_terminal_failures 1` and launch
+   via `scripts/pr3_l2_calibration/launch_pilot.sh`.
+4. [x] Combined final preflight at branch head **`5c43ece`**
+   (2026-07-29, zero LLM calls): full unit suite **4655 passed,
+   4 xfailed**; pseudo-mode integration **136 passed, 130 skipped**
+   (the skips are exactly the real-API tiers).
+5. [ ] Rev-4 fixture hashes re-frozen at launch (S1 with production
+   vocab seed; recompute + record here before call 1).
+6. [ ] Explicit operator launch approval referencing this document —
+   NOT YET GIVEN. No rev-4 LLM call may be made without it.
 
 ### 22.5 Stop conditions (frozen)
 
 - Model-version drift → hard stop before pooling.
-- Call cap 56 or dollar precheck → stop; in-flight sample marked.
+- Call cap 24 or dollar precheck → stop; in-flight sample marked
+  (56 was the superseded 8-sample draft's cap — corrected to match
+  §22.2 during the checklist update).
 - Protocol stop: floor-unattainability rule — the §22.3 gate becomes
   unreachable at the FIRST terminal failure (3/4 = 75% < 80%) → the
   runner stops at that sample boundary automatically (R-1). Remaining
