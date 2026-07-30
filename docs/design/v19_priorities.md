@@ -274,8 +274,12 @@ unscheduled candidates live in `candidate_features_v19.md`.)
 `v19_priorities/o1a_o2_operator_tooling.md`. Optional, non-blocking:
 they do not gate or invalidate PR 1-3 completion.)*
 
-- [ ] O1a — GPU clock/utilization/contention provenance *(pending)*
-- [ ] O2 — Single-chain launcher selector *(pending)*
+- [x] O1a — GPU clock/utilization/contention provenance *(COMPLETE —
+      PR #148 merge `006265b`, 2026-07-29; scoped to stable
+      environment provenance per the operator decision; O1b adaptive
+      margins remain a separate future item)*
+- [x] O2 — Single-chain launcher selector *(COMPLETE — PR #148 merge
+      `006265b`, 2026-07-29)*
 
 ### Unscheduled candidate features
 
@@ -1190,7 +1194,7 @@ tuner-input/chain-CLI plumbing level.
          green)*
    - [x] No admission or watchdog behavior change confirmed
          *(recording-only; 1206 core/consumer tests passed)*
-   - [ ] PR merged
+   - [x] PR merged *(PR #148, merge `006265b`, 2026-07-29)*
 2. **Launcher single-chain selector (O2)** — `launch_v18_wave1.sh {1a|1b}`
    cannot restart one chain of a pair (the Wave-1A loss restart needed a
    hand-mirrored `run_chain.sh` command). Add `--only <run_name>`.
@@ -1214,7 +1218,7 @@ tuner-input/chain-CLI plumbing level.
          tests + shell-parity/sdsc suites 131 passed)*
    - [x] Documentation updated *(running_chain_test.md + launcher
          header)*
-   - [ ] PR merged
+   - [x] PR merged *(PR #148, merge `006265b`, 2026-07-29)*
 
 ## 4. Validation and Evaluation Standard (V19-wide — operator revisions, 2026-07-27)
 
