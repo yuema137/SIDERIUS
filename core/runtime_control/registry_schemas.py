@@ -34,7 +34,10 @@ from core.runtime_control.records import PredictionSource
 REGISTRY_SCHEMA_VERSION = "1.0.0"
 
 ObservationOperation = Literal["setup", "training", "inference", "io"]
-ValidationStatus = Literal["validated", "unvalidated", "rejected"]
+#: D4 lifecycle (operator, 2026-07-30): "unvalidated" IS the candidate
+#: stage; promotions to provisional/validated are DERIVED records
+#: (CalibrationPromotion) — observations are never mutated in place.
+ValidationStatus = Literal["validated", "provisional", "unvalidated", "rejected"]
 
 
 def content_id(payload: dict[str, Any]) -> str:
@@ -128,6 +131,15 @@ class CalibrationObservation(BaseModel):
         description="Realized (recomputed) model properties (§16.7) — "
         "never LLM-authored estimates.",
     )
+    model_family: str = Field(
+        default="unknown",
+        min_length=1,
+        description="D5: explicit family from implementation metadata or "
+        "deterministic structural features ONLY — never the nearest known "
+        "family. 'unknown' is a first-class value; unknown-family "
+        "candidates never inherit known-family calibration authority "
+        "(bucket separation).",
+    )
     hardware_compatibility_id: str
     execution_environment_id: str
     concurrency_identity: ConcurrencyIdentity
@@ -142,7 +154,13 @@ class CalibrationObservation(BaseModel):
     provenance: PredictionSource
     uncertainty_inputs: dict[str, Any] = Field(default_factory=dict)
     source_run: dict[str, Any] = Field(default_factory=dict)
-    validation_status: ValidationStatus = "unvalidated"
+    validation_status: ValidationStatus = Field(
+        default="unvalidated",
+        description="Producer-declared status ONLY. C7/D4: calibration "
+        "authority is read from the bucket's CalibrationPromotion record "
+        "(observations are immutable, so this field can never be raised "
+        "in place) — never trust it as authority.",
+    )
     timestamp_metadata: str | None = Field(
         default=None, description="Excluded from the content hash."
     )
@@ -206,6 +224,37 @@ class CalibrationSummary(BaseModel):
     newest_timestamp: str | None = None
 
 
+class CalibrationPromotion(BaseModel):
+    """D4 deterministic promotion record — a DERIVED, immutable record
+    naming its source observations; the authoritative status source for
+    a bucket. Never mutates observations."""
+
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: str = REGISTRY_SCHEMA_VERSION
+    bucket_key: str
+    level: Literal["provisional", "validated"]
+    source_observation_ids: tuple[str, ...] = Field(min_length=2)
+    consistency_ratio: float = Field(gt=0.0)
+    n_observations: int = Field(ge=2)
+    rate_median_ms: float = Field(gt=0.0)
+    rate_min_ms: float = Field(gt=0.0)
+    rate_max_ms: float = Field(gt=0.0)
+    policy_identity: str
+    derived_from_generation: int = Field(ge=0)
+    validation_route: Literal["consistency", "verification_agreement"]
+    timestamp_metadata: str | None = Field(default=None)
+
+    def hash_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        payload.pop("timestamp_metadata", None)
+        return payload
+
+    @property
+    def promotion_id(self) -> str:
+        return content_id(self.hash_payload())
+
+
 class RegistryManifest(BaseModel):
     """Compact index + schema entry point (registry.json). Rebuildable
     from the record files; ``generation`` increments on every committed
@@ -217,3 +266,4 @@ class RegistryManifest(BaseModel):
     hardware_profile_ids: list[str] = Field(default_factory=list)
     environment_profile_ids: list[str] = Field(default_factory=list)
     legacy_sources: list[LegacySourceReference] = Field(default_factory=list)
+    promotion_ids: list[str] = Field(default_factory=list)
