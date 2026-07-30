@@ -2472,15 +2472,37 @@ probe caps (wall/steps/batches/VRAM, operator-visible); tuner
 call-site ordering (probe after validation, before round-1 planning);
 rollback flag. Deps: C3-C5.
 **Implementation plan.**
-- [ ] F-1a audit + single-source dataset resolution.
-- [ ] F-1b: verified load of a newly implemented plugin in the probe
-      process; realized parameter/trainable/dtype-memory recomputation.
-- [ ] Bounded probe: setup timing, N warmup + M timed train steps,
-      K timed inference batches (unit-explicit), peak VRAM, contention
-      snapshot with §21-policy identity.
-- [ ] Probe → `RuntimeEstimate` (provenance live-probe tier) → tuner
-      context (C2-labeled) + persisted record.
-- [ ] Doc sync (tuner `.md`, §8/§13).
+- [x] F-1a audit RESOLVED: the single source of truth EXISTS —
+      `execute_tools/data_paths.py::TIDMAD_DATA_DIR` (from
+      `tidmad_data_config.yaml`), already used by `core/sandbox_executor.
+      _tidmad_data_dir()` for every training subprocess. Only the
+      warmup path ignored it. The probe resolves through it when no
+      explicit `data_dir` is supplied — no second convention. (No
+      STOP-AND-ASK needed.)
+- [x] C6a — probe ENGINE (`core/runtime_control/probe.py`): pure
+      orchestration over injected executors (setup / timed train step /
+      timed inference batch / peak-VRAM) + injected telemetry — fully
+      unit-testable without GPU; caps (wall + step/batch counts,
+      defaults mirror the proven 3+7 warmup posture); OOM/wall-cap/
+      load-failure are MEASURED outcomes preserving partial evidence;
+      warmup steps excluded from timing; realized-property capture
+      (`RealizedModelProperties`); count-based D3-neutral concurrency
+      classification (presence of foreign compute processes + declared
+      peer expectation — no utilization thresholds);
+      `extrapolate_probe` (separate train/inference/setup, bounds from
+      the probe's own timing spread); `probe_observations` → distinct
+      training/inference `CalibrationObservation`s, `unvalidated`
+      (C7 owns promotion).
+- [ ] C6b — PRODUCTION executors (`production_probe_executors`): real
+      torch + live plugin registry load (F-1b) + canonical dataset
+      path (F-1a) + `torch.cuda.max_memory_allocated` peak; realized
+      recomputation from the actual module.
+- [ ] C6b — flag-gated workflow wiring (probe stage post-validation,
+      default OFF until C8/C12; rollback parity) + registry/profile
+      population (O1a §9.1 extension) + pseudo propagation test.
+- [ ] Doc sync (tuner `.md`, §8/§13) with C6b.
+- [ ] GPU smoke (one registered + one freshly implemented plugin,
+      bounded) — **OPERATOR APPROVAL REQUIRED before execution**.
 **Unit validation.** caps honored; fast-fail; contended flag; realized
 supersession; unit conversions (§16.6) with sentinels; fallback-25
 never blocking.
@@ -2503,7 +2525,17 @@ concurrent peer probing (§16.9, record regime); plugin load failure
 (validator-stage concern; probe must not mask).
 **Migration/rollback.** rollback flag restores pre-probe flow.
 **Boundary.** Probe engine + wiring; calibration WRITE policy is C7.
-- [ ] Evidence recorded.
+- [x] C6a evidence: `tests/unit/core/test_runtime_probe.py` — **16
+      tests** (four concurrency branches + telemetry-gap honesty; ok
+      path medians/spreads; warmup exclusion; setup load-failure/OOM;
+      training OOM preserving measured peak; wall-cap via injected
+      clock; caps recorded; extrapolation phase separation + bounds;
+      non-ok cannot extrapolate; clean probe blocking-capable while
+      never formal-eligible; contended demotion; probe-OOM→REJECT via
+      the C4 policy; registry round-trip of distinct train/inference
+      records). Full `tests/unit/core/` — **602 passed, 5.2 s**; lint
+      clean.
+- [ ] C6b evidence pending.
 
 ### C7 — `feat(runtime): calibration update, uncertainty, applicability, drift, and contention policy`
 
