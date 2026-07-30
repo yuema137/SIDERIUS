@@ -1,46 +1,57 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# V19 serial queue runner — single RTX 5090, eight chains, one at a time
-# (frozen plan: reports/v19_20260729_2136.md; protocol:
-# docs/design/v19_priorities/v19_launch_protocol.md).
+# V19 pairwise queue runner — single RTX 5090, four waves of TWO chains
+# (operator revision 2026-07-29: pairwise per-band concurrency, reversed
+# band order; supersedes the serial eight-chain schedule, which was never
+# launched). Frozen plan: reports/v19_20260729_2136.md; protocol:
+# docs/design/v19_priorities/v19_launch_protocol.md.
 #
-# Scientific matrix: 4 bands x 2 advice families. Frozen order (operator
-# 2026-07-29): all four ARCH chains first (one chain of evidence per band
-# early, covering the never-run bands 0-3 and 15-19), then the four LOSS
-# chains. Arch and loss chains are fully independent (separate workspaces,
-# separate incumbent state, no shared artifacts) — audited before freezing.
+# Execution waves (frozen; a later wave starts only after BOTH chains of
+# the current wave reach a terminal state under the continuation policy):
+#   Wave 1: v19_arch_15_19 + v19_loss_15_19    (band 15-19)
+#   Wave 2: v19_arch_10_14 + v19_loss_10_14    (band 10-14)
+#   Wave 3: v19_arch_04_09 + v19_loss_04_09    (band 4-9)
+#   Wave 4: v19_arch_00_03 + v19_loss_00_03    (band 0-3)
+# Concurrency: exactly the two chains of the active wave (one arch + one
+# loss, SAME band) — never chains from different bands, never more than 2.
 #
-# V19 deltas from the V18r command (everything else V18r-identical):
-#   * --enable_chain_incumbent_formal_gates          (PR 1 coupling ON)
-#   * --order_strategy_override sequential
-#     --file_order_override <ascending band files>   (PR 2, explicit)
-#   * --enable_structured_health_feedback
-#     --health_feedback_history_window_iterations 3
-#     --health_feedback_history_max_entries_per_model 8   (PR 3 ON)
-#   * --runtime_watchdog_safety_factor 3.5           (5090 watchdog-only
-#     override; admission factors stay trial 3.0 / formal 2.0 — the V19
-#     runtime split keeps admission byte-identical to V18)
+# VRAM: each chain carries a 16 GB per-attempt admission cap
+# (min(0.8 x physical, budget) in evaluate_vram_skill). Aggregate
+# 2 x 16 GB equals the 5090's 32 GB — there is NO combined-VRAM admission
+# (operator decision; V18r-measured models ran far below cap). An
+# aggregate OOM is handled by the continuation policy: preserve both
+# workspaces/logs, identify the failed process, restart ONLY the failed
+# chain via --only, record the contention event.
 #
-# Concurrency: MAX_CONC=1 — the 5090 (32 GB) fits ONE 16 GB-budget chain;
-# V18r's 4-way rolling topology was sized for the H100 80 GB box.
+# Continuation policy (frozen):
+#   both EXIT=0            -> next wave
+#   one/both chain failed  -> STOP before the next wave; report per-chain
+#                             status; targeted restart via
+#                             V19_RESUME=1 ... --only <run_name>; on queue
+#                             restart, completed chains are skipped from
+#                             the authoritative wave-state record and the
+#                             earliest incomplete wave resumes.
+#   HealthGate-invalid rounds / per-candidate admission rejections /
+#   watchdog kills that the chain survives: normal in-chain outcomes,
+#   never queue events. A watchdog/API failure that makes the chain
+#   process terminal follows the chain-failure rule above.
 #
-# Selective runs: V19 O2 —
-#   bash sdsc_submission_scripts/v19_queue_runner.sh --only v19_arch_10_14
-# filters the queue (canonical order, unknown/duplicate/blank names fail
-# before anything launches). Omitting --only runs the full frozen queue.
+# Authoritative per-chain status: $WS_ROOT/v19_wave_state.jsonl (one JSON
+# line per finished chain attempt: run, wave, exit, start, end) — NOT log
+# text. Exit codes come from per-chain markers ($EXIT_DIR/<run>.exit,
+# EXIT=<n>) written inside each chain screen exactly as in V18r.
 #
-# Runs inside its own screen session (siderius-v19queue — deliberately NO
-# underscore after "v19" so running_count, which greps "siderius-v19_",
-# never counts the runner itself).
+# Selective/targeted runs (V19 O2):
+#   V19_RESUME=1 bash sdsc_submission_scripts/v19_queue_runner.sh --only v19_loss_15_19
+# --only executions run the selection SERIALLY (one chain at a time) —
+# targeted recovery never needs pairing and serial is always
+# cross-band-safe. Unknown/duplicate/blank names fail before any launch.
 #
-# Restart semantics: progress index in $STATE advances after every launch
-# attempt (even guarded skips — never loops on a blocked entry); restarting
-# the runner resumes from the first not-yet-attempted chain. A chain that
-# must be re-run after review: V19_RESUME=1 + --only <run_name> (resume
-# uses --auto_resume inside the chain; the run-invariants lock rejects any
-# changed policy on resume).
-#
-# Log: $WS_ROOT/v19_queue_runner.log   State: $WS_ROOT/v19_queue_state
+# Runs inside screen -S v19_queue (session name deliberately without the
+# "v19_" prefix pattern used by chain screens, so running_count never
+# counts the runner). Env consumed: WS_ROOT (default
+# /home/klz/Data/SIDEREIS_DATA/v19), EXIT_DIR (default /tmp),
+# V19_RESUME (default 0). No other hidden state.
 # ---------------------------------------------------------------------------
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -48,24 +59,37 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO/sdsc_submission_scripts/_chain_common.sh"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
-MAX_CONC=1
+MAX_CONC=2
 LOGF="$WS_ROOT/v19_queue_runner.log"
-STATE="$WS_ROOT/v19_queue_state"
+WAVE_STATE="$WS_ROOT/v19_wave_state.jsonl"
 
-# Frozen queue (operator 2026-07-29): run_name : scope : monitored : advice
-QUEUE=(
-  "v19_arch_00_03:0-3:0,1,2,3:arch"
-  "v19_arch_04_09:4-9:4,5,6,7,8,9:arch"
-  "v19_arch_10_14:10-14:10,11,12,13,14:arch"
-  "v19_arch_15_19:15-19:15,16,17,18,19:arch"
-  "v19_loss_00_03:0-3:0,1,2,3:loss"
-  "v19_loss_04_09:4-9:4,5,6,7,8,9:loss"
-  "v19_loss_10_14:10-14:10,11,12,13,14:loss"
-  "v19_loss_15_19:15-19:15,16,17,18,19:loss"
+# Frozen waves (operator 2026-07-29): wave : scope : monitored files.
+# Chain names derive as v19_{arch,loss}_<band-tag>; both families of a
+# wave launch together.
+WAVES=(
+  "1:15-19:15,16,17,18,19"
+  "2:10-14:10,11,12,13,14"
+  "3:4-9:4,5,6,7,8,9"
+  "4:0-3:0,1,2,3"
 )
 
-# Explicit ascending file order per scope (PR 2: the resolved list is an
-# EXPLICIT launch value, not an implicit sorted default).
+# Full roster in wave order (for --only validation + targeted serial runs).
+ROSTER=(
+  "v19_arch_15_19:15-19:15,16,17,18,19:arch"
+  "v19_loss_15_19:15-19:15,16,17,18,19:loss"
+  "v19_arch_10_14:10-14:10,11,12,13,14:arch"
+  "v19_loss_10_14:10-14:10,11,12,13,14:loss"
+  "v19_arch_04_09:4-9:4,5,6,7,8,9:arch"
+  "v19_loss_04_09:4-9:4,5,6,7,8,9:loss"
+  "v19_arch_00_03:0-3:0,1,2,3:arch"
+  "v19_loss_00_03:0-3:0,1,2,3:loss"
+)
+
+band_tag() {  # 15-19 -> 15_19
+  echo "${1//-/_}" | awk -F_ '{ printf "%02d_%02d", $1, $2 }'
+}
+
+# Explicit ascending file order per scope (PR 2: an EXPLICIT launch value).
 file_order_for_scope() {
   case "$1" in
     0-3)   echo "0,1,2,3" ;;
@@ -78,10 +102,27 @@ file_order_for_scope() {
 
 log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$LOGF"; }
 
-next_index() { [ -f "$STATE" ] && cat "$STATE" || echo 0; }
+# Authoritative completion check: a v19_wave_state.jsonl record with
+# "exit": 0 for this run name (persisted status, never log text).
+chain_completed() {
+  local RUN="$1"
+  [ -f "$WAVE_STATE" ] || return 1
+  grep "\"run\": \"$RUN\"" "$WAVE_STATE" | grep -q "\"exit\": 0"
+}
 
-running_count() { screen -ls 2>/dev/null | grep -c "siderius-v19_" || true; }
+record_chain() {  # run wave exit start end [pid]
+  printf '{"run": "%s", "wave": %s, "exit": %s, "start": "%s", "end": "%s", "pid": "%s"}\n' \
+    "$1" "$2" "$3" "$4" "$5" "${6:-unknown}" >> "$WAVE_STATE"
+}
 
+record_wave_summary() {  # wave band arch_run loss_run arch_pid loss_pid arch_exit loss_exit start end disposition
+  printf '{"wave_summary": %s, "band": "%s", "arch_run": "%s", "loss_run": "%s", "arch_pid": "%s", "loss_pid": "%s", "arch_exit": %s, "loss_exit": %s, "start": "%s", "end": "%s", "disposition": "%s"}\n' \
+    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" >> "$WAVE_STATE"
+}
+
+chain_screen_alive() { screen -ls 2>/dev/null | grep -qF ".siderius-$1"$'\t'; }
+
+# Launch one chain in its own screen; marker carries the exit code.
 launch_chain() {
   local RUN="$1" SCOPE="$2" FILES="$3" FLAVOR="$4"
   local WS="$WS_ROOT/$RUN"
@@ -91,16 +132,12 @@ launch_chain() {
   local ORDER
   ORDER="$(file_order_for_scope "$SCOPE")" || { log "ERROR $RUN: unknown scope $SCOPE"; return 1; }
 
-  # Duplicate-run guards (never launch over an existing run). Cold-start
-  # contract: an existing workspace is only reused under explicit
-  # V19_RESUME=1 (the chain's --auto_resume + run-invariants lock then
-  # govern the resume).
   if [ -e "$WS" ] && [ "${V19_RESUME:-0}" != "1" ]; then
-    log "ERROR $RUN: workspace exists — SKIPPED (set V19_RESUME=1 with --only $RUN for an intentional resume)"; return 1
+    log "ERROR $RUN: workspace exists — NOT launched (set V19_RESUME=1 for an intentional resume; completed chains are skipped automatically)"; return 1
   fi
-  if screen -ls 2>/dev/null | grep -qF ".$SESSION"$'\t'; then log "ERROR $RUN: screen $SESSION already exists — SKIPPED"; return 1; fi
+  if chain_screen_alive "$RUN"; then log "ERROR $RUN: screen $SESSION already exists — NOT launched"; return 1; fi
   if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
-    log "ERROR $RUN: live process referencing $WS_ROOT/$RUN — SKIPPED"; return 1
+    log "ERROR $RUN: live process referencing $WS_ROOT/$RUN — NOT launched"; return 1
   fi
 
   rm -f "$MARKER"
@@ -151,21 +188,54 @@ launch_chain() {
     exit \"\$status\"
   "
   sleep 3
-  if screen -ls 2>/dev/null | grep -qF ".$SESSION"$'\t'; then
-    log "LAUNCHED $RUN scope=$SCOPE monitored=$FILES order=$ORDER log=$LOG"
+  if chain_screen_alive "$RUN"; then
+    local SPID
+    SPID="$(screen -ls 2>/dev/null | grep -F ".$SESSION"$'\t' | grep -oE '^[[:space:]]*[0-9]+' | tr -d '[:space:]')"
+    echo "$SPID" > "$EXIT_DIR/${RUN}.pid"
+    log "LAUNCHED $RUN scope=$SCOPE monitored=$FILES order=$ORDER screen_pid=${SPID:-unknown} log=$LOG"
     return 0
   fi
   log "ERROR $RUN: screen did not start"
   return 1
 }
 
-# Test hook: `V19_QUEUE_NO_MAIN=1 source v19_queue_runner.sh` loads the
-# queue definition and functions without parsing args or launching.
+chain_pid() {  # run -> recorded screen pid or "unknown"
+  local F="$EXIT_DIR/$1.pid"
+  if [ -f "$F" ]; then cat "$F"; else echo "unknown"; fi
+}
+
+marker_exit() {  # run -> exit code or "missing"
+  local MARKER="$EXIT_DIR/$1.exit"
+  if [ -f "$MARKER" ]; then sed -n 's/^EXIT=//p' "$MARKER" | head -1; else echo "missing"; fi
+}
+
+# Wait for a set of chains to finish; record each individually.
+wait_and_record() {  # wave start_ts run1 [run2]
+  local WAVE="$1" START="$2"; shift 2
+  local RUNS=("$@")
+  while true; do
+    local alive=0 r
+    for r in "${RUNS[@]}"; do chain_screen_alive "$r" && alive=1; done
+    [ "$alive" = 0 ] && break
+    sleep 60
+  done
+  local END; END="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+  local all_ok=1
+  for r in "${RUNS[@]}"; do
+    local code; code="$(marker_exit "$r")"
+    [ "$code" = "0" ] || all_ok=0
+    record_chain "$r" "$WAVE" "${code/missing/-1}" "$START" "$END" "$(chain_pid "$r")"
+    log "WAVE $WAVE chain $r finished: EXIT=$code"
+  done
+  return $(( 1 - all_ok ))
+}
+
+# Test hook: V19_QUEUE_NO_MAIN=1 source ... loads definitions only.
 if [ "${V19_QUEUE_NO_MAIN:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
 fi
 
-# --- V19 O2 selective launching -------------------------------------------
+# --- argument parsing / O2 selection ---------------------------------------
 ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -175,39 +245,90 @@ while [ $# -gt 0 ]; do
     *) echo "[v19-queue] unknown argument: $1 (usage: v19_queue_runner.sh [--only <names>])" >&2; exit 1 ;;
   esac
 done
-SELECTED=()
-while IFS= read -r line; do SELECTED+=("$line"); done < <(
-  filter_roster "$ONLY" "${QUEUE[@]}"
-)
-[ "${#SELECTED[@]}" -gt 0 ] || { echo "[v19-queue] selection resolved to nothing (see error above)" >&2; exit 1; }
-QUEUE=("${SELECTED[@]}")
-if [ -n "$ONLY" ]; then
-  # Targeted runs get their OWN transient progress file: the persistent
-  # full-queue index (possibly already at queue end) must never suppress
-  # an explicit --only retry, and a targeted run must never advance the
-  # full queue's restart position.
-  STATE="$WS_ROOT/v19_queue_state_only.$$"
-  rm -f "$STATE"
-fi
 
 mkdir -p "$WS_ROOT"
-log "v19 queue runner started: MAX_CONC=$MAX_CONC queue_from_index=$(next_index) queue_len=${#QUEUE[@]} only='${ONLY:-<full>}'"
-while true; do
-  idx=$(next_index)
-  if [ "$idx" -ge "${#QUEUE[@]}" ]; then
-    if [ "$(running_count)" -eq 0 ]; then
-      log "ALL DONE: queue empty and no v19 chains running — exiting"
-      exit 0
+
+if [ -n "$ONLY" ]; then
+  # Targeted SERIAL recovery: validate against the roster, then run the
+  # selected chains one at a time (never pairs — always cross-band-safe).
+  SELECTED=()
+  while IFS= read -r line; do SELECTED+=("$line"); done < <(
+    filter_roster "$ONLY" "${ROSTER[@]}"
+  )
+  [ "${#SELECTED[@]}" -gt 0 ] || { echo "[v19-queue] selection resolved to nothing (see error above)" >&2; exit 1; }
+  log "targeted serial run: $ONLY"
+  for spec in "${SELECTED[@]}"; do
+    IFS=: read -r RUN SCOPE FILES FLAVOR <<< "$spec"
+    if chain_completed "$RUN"; then log "SKIP $RUN: already completed (wave-state)"; continue; fi
+    START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+    if launch_chain "$RUN" "$SCOPE" "$FILES" "$FLAVOR"; then
+      wait_and_record "only" "$START" "$RUN" || { log "targeted chain $RUN failed — stopping"; exit 1; }
+    else
+      log "targeted chain $RUN could not be launched — stopping"; exit 1
     fi
-    sleep 120
+  done
+  log "targeted serial run complete"
+  exit 0
+fi
+
+# --- pairwise wave loop ----------------------------------------------------
+log "v19 pairwise queue started: waves=${#WAVES[@]} max_conc=$MAX_CONC resume=${V19_RESUME:-0}"
+for wave_spec in "${WAVES[@]}"; do
+  IFS=: read -r WAVE SCOPE FILES <<< "$wave_spec"
+  TAG="$(band_tag "$SCOPE")"
+  ARCH_RUN="v19_arch_$TAG"
+  LOSS_RUN="v19_loss_$TAG"
+
+  NEEDED=()
+  for RUN in "$ARCH_RUN" "$LOSS_RUN"; do
+    if chain_completed "$RUN"; then
+      log "WAVE $WAVE: $RUN already completed (wave-state) — skipped"
+    else
+      NEEDED+=("$RUN")
+    fi
+  done
+  if [ "${#NEEDED[@]}" -eq 0 ]; then
+    log "WAVE $WAVE (band $SCOPE): both chains already complete — next wave"
     continue
   fi
-  if [ "$(running_count)" -lt "$MAX_CONC" ]; then
-    IFS=: read -r RUN SCOPE FILES FLAVOR <<< "${QUEUE[$idx]}"
-    log "slot free ($(running_count)/$MAX_CONC running) — launching queue[$idx]=$RUN"
-    launch_chain "$RUN" "$SCOPE" "$FILES" "$FLAVOR"
-    echo $((idx + 1)) > "$STATE"   # advance even on guarded skip: never loop on a blocked entry
-    sleep 90
+
+  log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]}"
+  START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+  LAUNCHED=()
+  for RUN in "${NEEDED[@]}"; do
+    FLAVOR="arch"; [ "${RUN#v19_loss_}" != "$RUN" ] && FLAVOR="loss"
+    if launch_chain "$RUN" "$SCOPE" "$FILES" "$FLAVOR"; then
+      LAUNCHED+=("$RUN")
+      sleep 90   # stagger the pair (V18r posture: bounded startup contention)
+    else
+      log "WAVE $WAVE: $RUN could not be launched — stopping the queue for operator review"
+      log "  targeted restart: V19_RESUME=1 bash sdsc_submission_scripts/v19_queue_runner.sh --only $RUN"
+      # Any already-launched partner keeps running; wait for it so its
+      # status is recorded before the queue exits.
+      [ "${#LAUNCHED[@]}" -gt 0 ] && wait_and_record "$WAVE" "$START" "${LAUNCHED[@]}"
+      exit 1
+    fi
+  done
+
+  if wait_and_record "$WAVE" "$START" "${LAUNCHED[@]}"; then
+    DISPOSITION="complete"
+  else
+    DISPOSITION="failed"
   fi
-  sleep 60
+  END_TS="$(date -u '+%Y-%m-%dT%H:%M:%S')"
+  record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
+    "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
+    "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
+    "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
+    "$START" "$END_TS" "$DISPOSITION"
+  if [ "$DISPOSITION" = "complete" ]; then
+    log "WAVE $WAVE (band $SCOPE): both chains EXIT=0 — proceeding"
+  else
+    log "WAVE $WAVE (band $SCOPE): chain failure — QUEUE STOPPED before the next wave (frozen continuation policy)"
+    log "  review logs, then: V19_RESUME=1 bash sdsc_submission_scripts/v19_queue_runner.sh --only <failed_run>"
+    log "  after recovery, rerun the queue: completed chains are skipped and the earliest incomplete wave resumes"
+    exit 1
+  fi
 done
+log "ALL WAVES COMPLETE — v19 campaign queue finished"
+exit 0
