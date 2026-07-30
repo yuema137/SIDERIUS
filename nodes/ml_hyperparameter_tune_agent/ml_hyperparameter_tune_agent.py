@@ -2801,8 +2801,20 @@ class HyperparamTuningAgent:
                             observation_store_root=os.path.join(
                                 sandbox.base_dir, "runtime_observations"
                             ),
+                            # C8c: the phase the shared runtime policy decides
+                            # under. No bounded live probe feeds this
+                            # pre-flight — the authoritative formal
+                            # measurement is the in-subprocess verification
+                            # (RT2), so `probe_record_available` stays False
+                            # and a formal prior-tier projection resolves to
+                            # REQUEST_PROBE rather than a silent prior-priced
+                            # decision.
+                            runtime_phase="trial" if plan.is_trial else "formal",
                         )
                         if time_check.get("status") == "error":
+                            # Includes the policy's ABORT path: an
+                            # evidence-channel failure is an execution-system
+                            # failure, never a candidate verdict.
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
 
                         # Post-v15 bypass-time-budget gate: when the formal
