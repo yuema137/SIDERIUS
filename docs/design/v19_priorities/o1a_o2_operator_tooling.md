@@ -216,3 +216,37 @@ as N/A rather than a new rejection surface).
 5. **O1a optional extras**: CPU model / total RAM — cheap via
    `platform`/`/proc/meminfo`; include or skip (default: skip unless
    requested).
+
+## 6. OV — final validation evidence (2026-07-29)
+
+Commits: OA `d6cb0c2` (design) → OB `ab339ea` (O1a provenance) → OC
+`4b3f469` (O2 selection) → OD `c16e405` (operator docs + tracker) →
+OV (this record). Branch `feat/v19-operator-provenance-launch-selection`
+from post-PR#145 master `e3b75ce`.
+
+- Focused: hardware-context suite 19 passed (incl. 9 new provenance
+  tests); O2 selection suite 13 passed; core + hardware-context
+  consumers 1206 passed; shell-parity + sdsc suites 131 passed.
+- Full unit suite: **4692 passed, 4 xfailed** (pre-existing), 3:44.
+- Pseudo integration (affected surface, zero-LLM):
+  tests/integration/execute_tools 64 passed.
+- Static: `ruff check .` + `ruff format --check .` clean (544 files);
+  strict pyright via CI on the pushed head (source of truth).
+- One defect caught and fixed during implementation: sourcing
+  `_chain_common.sh` after flag parsing would have let the library's
+  plain-assignment `DRY_RUN=0` clobber the parsed flag — the source
+  now precedes parsing (commit OC message records it).
+
+### Compatibility matrix
+
+| Condition | Expected behavior | Test evidence | Result |
+|---|---|---|---|
+| no GPU | run continues; explicit unavailable provenance (devices=[], count=0, driver None — not probed) | `test_provenance_cpu_only_explicit_unavailable` | ✅ |
+| one GPU | correct typed record | `test_discover_on_fake_rtx_5090` + provenance suite | ✅ |
+| multi-GPU | deterministic logical-index device records | `test_provenance_multi_gpu_deterministic_order` | ✅ |
+| probe failure | recorded gap, never abort, never fabricate | nvidia-smi missing/malformed/nonzero + device-probe-failure tests | ✅ |
+| pre-O1a manifest | loads with defaults; regeneration keys unchanged | `test_provenance_backward_compatible_manifest_load` | ✅ |
+| no `--only` | exact old launch set, original order | `test_omitted_only_is_identity_in_order` | ✅ |
+| valid subset | only selected chains, canonical order | single/reversed/all-names tests | ✅ |
+| invalid name / duplicate / blank | fail before execution, valid names listed, no fallback | filter + launcher error-path tests (pre-preflight) | ✅ |
+| resume | unchanged — selection is operational, not workspace scope (design §2.1) | shell-parity + sdsc suites green; no invariants surface touched | ✅ (N/A by design) |
