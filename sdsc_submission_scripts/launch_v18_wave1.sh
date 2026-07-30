@@ -40,6 +40,11 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# V19 O2: shared library sourced BEFORE flag parsing — its plain-assignment
+# defaults (e.g. DRY_RUN=0) must never clobber flags parsed below. Only
+# filter_roster() is used from it here.
+# shellcheck source=_chain_common.sh
+source "$REPO/sdsc_submission_scripts/_chain_common.sh"
 WS_ROOT="${WS_ROOT:-/workspace/DATA/SIDERIUS_DATA}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 DATE="$(date +%Y%m%d_%H%M)"
@@ -47,9 +52,23 @@ DATE="$(date +%Y%m%d_%H%M)"
 fail() { echo "[LAUNCH-ABORT] $*" >&2; exit 1; }
 
 # Phase argument is REQUIRED — there is no all-four invocation.
+# V19 O2: optional selective launching within the phase roster:
+#   launch_v18_wave1.sh {1a|1b} [--only <run_name[,run_name...]>] [--dry-run]
+# Flags after the phase are order-independent. Omitting --only launches
+# the full phase roster exactly as before.
 PHASE="${1:-}"
 DRY_RUN=0
-[ "${2:-}" = "--dry-run" ] && DRY_RUN=1
+ONLY=""
+shift $(( $# > 0 ? 1 : 0 ))
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --only)
+      [ -n "${2:-}" ] || fail "--only requires a comma-separated run_name list"
+      ONLY="$2"; shift 2 ;;
+    *) fail "unknown argument: $1 (usage: launch_v18_wave1.sh {1a|1b} [--only <names>] [--dry-run])" ;;
+  esac
+done
 
 # Rosters: run_name : scope : monitored(all in-scope) : advice flavor
 # v18r_* = fresh relaunch campaign under the runtime-control protocol
@@ -65,8 +84,20 @@ WAVE1B=(
 case "$PHASE" in
   1a) ROSTER=("${WAVE1A[@]}") ;;
   1b) ROSTER=("${WAVE1B[@]}") ;;
-  *)  fail "usage: launch_v18_wave1.sh {1a|1b} [--dry-run] — phase 1b requires an approved Wave-1A checkpoint" ;;
+  *)  fail "usage: launch_v18_wave1.sh {1a|1b} [--only <names>] [--dry-run] — phase 1b requires an approved Wave-1A checkpoint" ;;
 esac
+
+# V19 O2: resolve the selection BEFORE preflight — invalid selections
+# fail before any launch work, with no fallback to the full roster.
+SELECTED=()
+while IFS= read -r line; do SELECTED+=("$line"); done < <(
+  filter_roster "$ONLY" "${ROSTER[@]}"
+) || true
+[ "${#SELECTED[@]}" -gt 0 ] || fail "selection resolved to nothing — see the filter_roster error above"
+ROSTER=("${SELECTED[@]}")
+if [ -n "$ONLY" ]; then
+  echo "[selection] --only resolved to (canonical order): $(for s in "${ROSTER[@]}"; do printf '%s ' "${s%%:*}"; done)"
+fi
 
 preflight() {
   # screen is only needed for a real launch (documented prerequisite:
