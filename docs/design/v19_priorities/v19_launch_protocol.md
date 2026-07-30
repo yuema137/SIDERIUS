@@ -167,3 +167,116 @@ the residual aggregate-OOM risk and its frozen response are recorded in
 the launch report §5.1/§11. Queue implementation:
 `sdsc_submission_scripts/v19_queue_runner.sh` (pairwise waves,
 authoritative per-chain wave state, targeted serial `--only` recovery).
+
+## 9. Gate 0 attempt 1 — FAIL — PRODUCTION PATH (2026-07-29 22:35)
+
+Launched after CI green on PR #149 head `9119f14`. Both chains died in
+< 2 min, pre-LLM ($0 API, zero training, zero GPU work):
+
+```text
+TypeError: run_workflow() got an unexpected keyword argument
+'runtime_watchdog_safety_factor'    (run_one_iteration.py:1500)
+```
+
+Missing edge: the §4 split wired the new flag through shell
+(`_chain_common.sh:309,507`), CLI + call site
+(`run_one_iteration.py:957,1550`), schema (`hyperparam_tuning.py:1481`),
+protocol (`ml_model_valid_to_ml_model_tune.py:130,300`) and tuner
+(`ml_hyperparameter_tune_agent.py:1461`) — but NOT through
+`workflows/model_exploration.py::run_workflow` (signature + the
+`local_validated_model(...)` forwarding). Test gap: no test asserted
+CLI↔workflow kwarg parity; the pseudo-loop tests call `run_workflow`
+without the new kwarg, so all 14 split tests passed.
+
+Fix (2 lines, commit `5d7f30f`): add
+`runtime_watchdog_safety_factor: float | None = None` to the
+`run_workflow` signature and forward it into
+`local_validated_model(...)`. Regression: AST kwarg-parity guard
+(`tests/unit/core/test_watchdog_admission_split.py::TestWorkflowKwargParity`)
+— demonstrated to report exactly `['runtime_watchdog_safety_factor']`
+against the pre-fix signature. Full evidence:
+`reports/v19_gate0_20260729_2209.md` §8 (attempt-1 record preserved;
+never overwritten by later attempts).
+
+## 10. V19 Launch-Critical Propagation Matrix (audit, 2026-07-29)
+
+Audit standard (operator): every launch-critical value → accepted at
+every layer → forwarded without mutation → consumed by the intended
+subsystem → recorded consistently in artifacts. A row is PASS only when
+a test demonstrates the final consumer and artifact receive the
+intended (sentinel) value — name-matching alone proves nothing.
+
+**Layer chain audited** (Gate 0 / formal V19 launch path):
+
+```text
+gate_chain_args (v19_gate0_pair_runner.sh — single source of truth)
+→ parse_chain_args / build_app_args   (_chain_common.sh)
+→ argparse + normalize_args           (run_one_iteration.py)
+→ run_workflow(...) call site         (run_one_iteration.py:1500)
+→ run_workflow                        (workflows/model_exploration.py)
+→ protocol functions                  (agent/schemas/protocols/*)
+→ typed inputs (Interpretation/Proposal/HyperparamTuning)
+→ final consumers (tuner policy, admission, deadline provider,
+   ordering sampler/loader, HealthGate config, renderers)
+→ run-invariants lock / manifests / run_config provenance
+```
+
+**Generic boundary contracts** (close the attempt-1 class for EVERY
+flag, present and future):
+
+| Boundary | Guard | Test |
+|---|---|---|
+| shell → CLI | every emittable `APP_ARGS` flag accepted by argparse (incl. `--no-*` BooleanOptionalAction forms) | `test_launch_surface_parity.py::TestShellToCli` |
+| call site → run_workflow | AST kwarg parity, fails on any future caller/callee gap; no `**kwargs` masking | `test_watchdog_admission_split.py::TestWorkflowKwargParity` |
+| run_workflow → protocols | every kwarg of all 5 protocol calls accepted by the protocol signature | `test_launch_surface_parity.py::TestWorkflowToProtocols` |
+| protocols → schemas | every schema-constructor kwarg is a declared field/alias — CRITICAL: schemas default to `extra="ignore"`, so a typo would be SILENTLY dropped (worse than attempt 1: no crash) | `test_launch_surface_parity.py::TestProtocolsToSchemas` |
+
+**Value-level propagation** (frozen Gate command → resolved CLI:
+`test_gate0_config_propagation.py`, real shell + real argparse + real
+normalize_args, both flavors; workflow → typed inputs + lock:
+`test_launch_config_propagation_pseudo.py`, real run_workflow with
+sentinels, agents mocked at the boundary only).
+
+| # | Setting family | Gate 0 value | Resolved-CLI proof | Consumer-level proof | Artifact proof | Result |
+|---|---|---|---|---|---|---|
+| 1 | PR 1 coupling flag + deltas (0.0 / 0.5) | ON, 0.0, 0.5 | `test_incumbent_and_feedback` | delta-gate decision logic consumes resolver verbatim, fire/no-fire at exact deltas incl. 0.0-skip and +margin-bypass: `test_delta_gates.py` (20) | manifest `chain_incumbent_used`/`chain_incumbent_source`: `test_chain_incumbent_pseudo.py` A/B/C | PASS |
+| 2 | PR 1 incumbent restore (valid-formal decision, trial context-only, invalid excluded) | restore ON | — | `test_chain_incumbent_pseudo.py` (branch A numeric 1.25 → iter-2 tuner input; B null; C flag-off), `test_valid_candidate_selection.py` (7), `test_resume.py` (70) | same + Invariant II local-score isolation | PASS |
+| 3 | PR 2 ordering (sequential, 15,16,17,18,19) | sequential, ascending | `test_scope_and_ordering` (typed lists, no sort hazard) | DESCENDING sentinel `[19,18,17,16,15]` reaches tuner input un-re-sorted (`test_launch_config_propagation_pseudo`); sampler/loader visit order proven at the engine (`test_ordering_engine.py` — blocks visited in file order, loader iterates sampler order, non-permutation rejected); tuner formal branch (`test_ordering_formal_branch.py`) | lock `ordering_override_*` = canonical fields (`run_invariants.py:128`); sentinel equality in lock dump | PASS |
+| 4 | PR 3 feedback (ON, 3, 8) | ON, 3, 8 | `test_incumbent_and_feedback` | sentinels True/7/11 reach InterpretationInput AND ProposalInput flag AND tuner input; typed history channel (`collapse_fingerprint_history`) restore: `test_resume_fingerprint_history.py`; renderers: PR #145 P3 suites | lock `structured_health_feedback_enabled`/window/max sentinel equality; all-three-lock-sites guard (`test_health_feedback_chain_wiring.py`) | PASS |
+| 5 | Runtime factors (1.5 / 3.0 / 2.0 / wd 3.5 / floor 120) | as frozen | `test_runtime_control` | REAL `decide_admission` + REAL `_watchdog_deadline_provider`: `test_watchdog_admission_split.py` (18) — formal 2.0 boundary preserved with/without override, trial record-only, deadlines at 3.5, floor/budget clamps; non-crossing: `test_trial_formal_safety_split.py` | policy provenance carries both factors; tuner policy dict both phases | PASS |
+| 6 | Budgets (5 / 30 min; 24 / 24 GB) | as frozen | `test_budgets` | sentinels 7/31/23/25 reach tuner input; budget→policy: `_build_runtime_policy` tests (7200-s formal budget path) | run_config stamps (existing tuner provenance tests) | PASS |
+| 7 | Portions (0.02/1.0/0.01 × trial+formal) | as frozen | `test_portions` | sentinels .037/.93/.017/.041/.97/.019 reach tuner input exactly | run_config provenance (existing) | PASS |
+| 8 | Scope + HealthGate files (15-19; 15,16,17,18,19) | as frozen | `test_scope_and_ordering` (typed `DataScope`) | tuner input typed scope + monitored list sentinel; enforcement layers: DS suites (constructive/boundary/direct-access), `validate_sample_set` at sandbox | lock `resolved_data_scope` + effective-config sha256; peek-subset validation (`test_run_invariants.py` partial-scope cases) | PASS |
+| 9 | Execution controls (iters 2, rounds 2, attempts 3, epochs 1, force-formal ON, cold start) | as frozen | `test_execution_controls` (incl. `force_formal_round is True` default and empty seed_paths) | rounds/epochs sentinels 4/2 reach tuner input; force-formal consumed by tuner round planner (existing force-formal suite) | manifest per-iteration record | PASS |
+| 10 | Advice (per-flavor Gate files) | arch/loss Gate advice | `test_advice_resolves_per_flavor` — normalize_args loads the JSON; arch≠loss content; correct flavor phrases; no beat-FCNet | stage-scoped sentinels: interp advice reaches InterpretationInput only; propose advice reaches ProposalInput via the Commit-2d channel (`expert_context` item source="human" + human AgentCard — the legacy `ProposalInput.human_advice` field is intentionally unset); tune advice reaches tuner `human_advice` | advice path stamped in resolved argv provenance; hashes re-verified: gate `f945fa8…`/`5bacafe…`, formal `427a6c62…`/`380c5f5e…` UNCHANGED | PASS |
+| 11 | LLM config (openai_tiered_v1.json) | as frozen | `test_strategies_and_configs` | `WorkflowLLMConfig` precedence over `--llm_model` shorthand (`model_exploration.py:2888`); per-role `llm_config.get(...)` at all five agent constructions. KNOWN COSMETIC: shell banner prints the deprecated shorthand default (`gemini-3.1-pro-preview`) — the tiered file governs | resolved argv provenance | PASS (banner-lie documented) |
+| 12 | Watchdog switch + floor | ON, 120 s | `test_runtime_control` | deadline provider floor test (`test_floor_remains_active`) | provenance | PASS |
+| 13 | Resume/legacy (all locked fields) | — | — | same-policy accepted; changed flag/window/max/scope/enabled/sha rejected NAMING field+values; legacy lock resolves OFF-3-8; enabling over legacy REJECTED (no silent upgrade): `test_run_invariants*.py`; ordering pair canonical → generic drift rejection; corrupted-history restore raises naming iter+model | lock is the artifact | PASS |
+| 14 | Pair-runner (Gate) | frozen command | arch/loss diff exactly {workspace, run_name, advice}; all frozen values; forbidden flags absent; every flag parseable | full main-flow scenarios via screen shim: stagger blocks loss on arch failure; both exits preserved; summary on every exit path; wrapper PID self-reported | `gate0_pair_summary.json` schema incl. `loss_launched` | PASS |
+
+**Audit summary**: 14 families / ~45 individual settings audited; **0 new
+propagation gaps found** beyond the already-fixed attempt-1 defect
+(matrix row 5's missing workflow edge). One intentional-design finding
+documented (row 10: proposer advice travels via `expert_context`, not
+the legacy field — Commit-2d design, not a gap). One cosmetic finding
+re-confirmed (row 11 banner-lie). New guards added so the attempt-1
+class cannot recur silently at ANY boundary: 4 generic boundary
+contracts + 12 resolved-value tests + 2 sentinel workflow tests +
+12 pair-runner tests.
+
+**Fix/guard commits**: `5d7f30f` fix(runtime) workflow propagation +
+parity regression; `ea239cb` fix(v19) hardened Gate pair runner +
+frozen Gate advice; `a32d6f1` test(v19) propagation contracts + value
+sentinels.
+
+**Gate 0 attempt 2 precondition**: CI green on the head carrying the
+fix + these guards; workspaces attempt-1-preserved (renamed) + fresh
+cold; then the standing relaunch authorization applies.
+
+**Follow-up (operator decision required, before the FORMAL launch)**:
+`v19_queue_runner.sh` still launches each wave's pair with the
+attempt-1-era pattern (no stagger health check; `screen -ls`-parsed
+PID). Recommend porting the Gate runner's hardening (stagger check +
+in-session wrapper-PID self-report + marker-grace wait) to the queue
+runner as its own PR before the formal V19 launch. Not done in the
+audit repair — out of its narrowly-scoped mandate.
