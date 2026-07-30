@@ -26,7 +26,6 @@ from core.runtime_control.probe import (
     ProbeExecutors,
     RealizedModelProperties,
     capture_contention_snapshot,
-    classify_concurrency,
     extrapolate_probe,
     probe_observations,
     run_bounded_probe,
@@ -71,22 +70,73 @@ def _executors(
     )
 
 
+def _window(samples, *, peer_pids=()):
+    """C8e: the probe now consumes a bounded WINDOW. Tests inject a
+    deterministic one built by the real D3 classifier, so the engine's
+    behavior is exercised against the production classification path."""
+    from core.runtime_control.calibration_policy import sample_contention_window
+
+    def _sampler(**kwargs):
+        it = iter(samples)
+        last = samples[-1]
+        return sample_contention_window(
+            device_vram_gb=kwargs.get("device_vram_gb", 32.0),
+            expected_peer_pids=kwargs.get("expected_peer_pids", peer_pids),
+            capture=lambda *a, **k: next(it, last),
+            sleep=lambda _s: None,
+        )
+
+    return _sampler
+
+
 def _probe(**kw):
     defaults = dict(
         model_identity="probe_target",
         executors=_executors(),
-        telemetry=lambda: IDLE,
+        device_vram_gb=32.0,
+        contention_window=_window([IDLE] * 5),
     )
     defaults.update(kw)
     return run_bounded_probe(**defaults)
 
 
 class TestConcurrencyClassification:
-    def test_four_branches(self):
-        assert classify_concurrency(IDLE, expected_peer=False) == "single_candidate_idle"
-        assert classify_concurrency(BUSY, expected_peer=True) == "pairwise_expected_peer"
-        assert classify_concurrency(BUSY, expected_peer=False) == "foreign_contended"
-        assert classify_concurrency(BLIND, expected_peer=False) == "unknown_contention"
+    def test_probe_uses_the_windowed_classifier(self):
+        """C8e: no count-based fallback remains — the identity on the
+        result is the D3 window's verdict, and every raw sample it rests
+        on is carried on the result."""
+        result = _probe()
+        assert result.concurrency_identity == "single_candidate_idle"
+        assert len(result.contention_telemetry["samples"]) == 5
+        assert result.contention_telemetry["policy_identity"].startswith("calibration_policy@")
+        assert result.contention_telemetry["reasons"]
+
+    def test_foreign_process_contends_and_peer_pid_does_not(self):
+        busy = ContentionSnapshot(
+            foreign_compute_processes=1,
+            foreign_compute_pids=(4242,),
+            gpu_utilization_pct=5.0,
+            gpu_memory_used_gb=0.5,
+            telemetry_available=True,
+        )
+        assert _probe(contention_window=_window([busy] * 5)).concurrency_identity == (
+            "foreign_contended"
+        )
+        paired = _probe(
+            contention_window=_window([busy] * 5, peer_pids=(4242,)),
+            expected_peer_pids=(4242,),
+        )
+        assert paired.concurrency_identity == "pairwise_expected_peer"
+
+    def test_telemetry_gap_is_unknown_contention(self):
+        assert _probe(contention_window=_window([BLIND] * 5)).concurrency_identity == (
+            "unknown_contention"
+        )
+
+    def test_count_based_classifier_is_gone(self):
+        import core.runtime_control.probe as probe_mod
+
+        assert not hasattr(probe_mod, "classify_concurrency")
 
     def test_snapshot_failure_records_gap(self, monkeypatch):
         import subprocess
@@ -150,7 +200,12 @@ class TestProbeEngine:
             inference_batch=lambda: 1.0,
             peak_vram_gb=lambda: 30.5,
         )
-        r = run_bounded_probe(model_identity="m", executors=ex, telemetry=lambda: IDLE)
+        r = run_bounded_probe(
+            model_identity="m",
+            executors=ex,
+            device_vram_gb=32.0,
+            contention_window=_window([IDLE] * 5),
+        )
         assert r.status == "oom"
         assert r.peak_vram_gb == 30.5  # measured peak preserved
         assert r.realized == REALIZED
@@ -174,7 +229,8 @@ class TestProbeEngine:
         r = run_bounded_probe(
             model_identity="m",
             executors=ex,
-            telemetry=lambda: IDLE,
+            device_vram_gb=32.0,
+            contention_window=_window([IDLE] * 5),
             caps=ProbeCaps(max_wall_seconds=90.0),
             clock=_clock,
         )
@@ -214,7 +270,7 @@ class TestExtrapolationAndAuthority:
         assert est.formal_execution_eligible is False  # verification is RT2's job
 
     def test_contended_probe_estimate_is_demoted(self):
-        r = _probe(telemetry=lambda: BUSY)
+        r = _probe(contention_window=_window([BUSY] * 5))
         est = extrapolate_probe(r, train_steps=25_000, inference_batches=400, producer_identity="p")
         assert est.concurrency_identity == "foreign_contended"
         assert est.blocking_eligible is False
@@ -286,7 +342,12 @@ class TestSelfPidExclusion:
         snap = capture_contention_snapshot()
         assert snap.telemetry_available is True
         assert snap.foreign_compute_processes == 0
-        assert classify_concurrency(snap, expected_peer=False) == "single_candidate_idle"
+        from core.runtime_control.calibration_policy import classify_contention_window
+
+        assert (
+            classify_contention_window([snap] * 5, device_vram_gb=32.0)[0]
+            == "single_candidate_idle"
+        )
 
     def test_other_processes_still_counted(self, monkeypatch):
         import os

@@ -23,20 +23,16 @@ F-1b: the production builder loads the ACTUAL implemented plugin from
 the live registry and recomputes realized properties (§16.7) — the
 LLM-authored estimate is never trusted past this point.
 
-Concurrency identity (C6, D3-neutral): classification is by the
-PRESENCE of other GPU compute processes (count-based) plus the
-launcher-declared peer expectation — no utilization thresholds here.
-D3 was resolved in C7: the WINDOWED, threshold-bearing classifier lives
-in ``calibration_policy.classify_contention_window`` and consumes the
-same snapshots; wiring it into the probe engine is a C8 production
-change. What C7 added HERE is the raw evidence the policy needs — the
-reported PID list, the excluded (self + descendant) PID set and the
-throttle bitmask — recorded on every snapshot:
-
-* no foreign process                   → single_candidate_idle
-* foreign processes, peer expected     → pairwise_expected_peer
-* foreign processes, no peer expected  → foreign_contended
-* telemetry unavailable                → unknown_contention
+Concurrency identity (C8e): the probe classifies contention through the
+D3 windowed, PID-aware policy
+(``calibration_policy.sample_contention_window``) — a bounded 10-second
+window of samples taken before any candidate CUDA work, classified from
+external process identity, external memory and sustained utilization,
+with self + descendant PIDs excluded and an intended peer identified by
+registered PID. The C6 count-based single-sample classifier has been
+REMOVED: there is no second authoritative path (operator decision,
+2026-07-30). Every raw sample the verdict rests on is persisted on the
+observation.
 """
 
 from __future__ import annotations
@@ -130,7 +126,16 @@ class ProbeResult(BaseModel):
     inference_ms_spread: tuple[float, float] | None = None
     peak_vram_gb: float | None = Field(default=None, gt=0.0)
     concurrency_identity: ConcurrencyIdentity
-    contention: ContentionSnapshot
+    contention: ContentionSnapshot = Field(
+        description="Last sample of the pre-probe window (compact view)."
+    )
+    contention_telemetry: dict[str, Any] = Field(
+        default_factory=dict,
+        description="The FULL D3 window: every raw sample, the verdict, its "
+        "reasons, the registered peer PIDs and the policy identity — what "
+        "gets persisted on the observation (D3: record all raw telemetry "
+        "used for classification).",
+    )
     caps: ProbeCaps
     wall_seconds: float = Field(ge=0.0)
     error: str | None = None
@@ -148,16 +153,6 @@ class ProbeExecutors(BaseModel):
     train_step: Callable[[], float]
     inference_batch: Callable[[], float]
     peak_vram_gb: Callable[[], float | None]
-
-
-def classify_concurrency(
-    snapshot: ContentionSnapshot, *, expected_peer: bool
-) -> ConcurrencyIdentity:
-    if not snapshot.telemetry_available or snapshot.foreign_compute_processes is None:
-        return "unknown_contention"
-    if snapshot.foreign_compute_processes == 0:
-        return "single_candidate_idle"
-    return "pairwise_expected_peer" if expected_peer else "foreign_contended"
 
 
 def descendant_pids(root_pid: int) -> frozenset[int]:
@@ -209,7 +204,14 @@ def _query_throttle_reasons() -> int | None:
             timeout=10,
             check=True,
         ).stdout.strip()
-        return int(out.splitlines()[0].strip(), 16)
+        first = out.splitlines()[0].strip()
+        # nvidia-smi renders this field as `0x<16 hex>`. Anything else is an
+        # output shape we do not recognize: report UNAVAILABLE rather than
+        # coerce it — a bare decimal string would parse as hex and fabricate
+        # a throttle mask out of unrelated output.
+        if not first.lower().startswith("0x"):
+            return None
+        return int(first, 16)
     except Exception:
         return None
 
@@ -276,15 +278,43 @@ def run_bounded_probe(
     model_identity: str,
     executors: ProbeExecutors,
     caps: ProbeCaps | None = None,
-    expected_peer: bool = False,
-    telemetry: Callable[[], ContentionSnapshot] = capture_contention_snapshot,
+    device_vram_gb: float,
+    expected_peer_pids: Iterable[int] = (),
+    contention_window: Callable[..., Any] | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> ProbeResult:
     """Run the bounded probe. Cap breaches and OOM are MEASURED outcomes
-    (valid evidence, per §7.4 they may block) — never silent retries."""
+    (valid evidence, per §7.4 they may block) — never silent retries.
+
+    Concurrency identity comes from the D3 WINDOWED, PID-aware classifier
+    (C8e, operator decision 2026-07-30): a bounded 10-second window of
+    samples taken BEFORE any candidate CUDA work begins, classified from
+    external process identity, memory and sustained utilization. The
+    count-based single-sample classifier is gone — there is no second
+    authoritative path.
+
+    Ordering (C8e implementation decision): the window runs to completion
+    BEFORE setup, serially. The operator permits overlapping it with
+    CPU-only setup as a non-semantic optimization; that is deliberately
+    not taken here, because running the window first is both simpler and
+    strictly more correct — the probe's own CUDA context does not exist
+    yet, so nothing of ours can contaminate the external-state reading.
+    The ~10 s cost is the accepted price.
+
+    ``device_vram_gb`` is REQUIRED: the D3 memory threshold is
+    ``max(1 GiB, 10 % of device VRAM)`` and there is no safe default for
+    an unknown device.
+    """
+    from core.runtime_control.calibration_policy import sample_contention_window
+
     caps = caps or ProbeCaps()
-    snapshot = telemetry()
-    concurrency = classify_concurrency(snapshot, expected_peer=expected_peer)
+    sampler = contention_window or sample_contention_window
+    window = sampler(
+        device_vram_gb=device_vram_gb,
+        expected_peer_pids=tuple(expected_peer_pids),
+    )
+    concurrency = window.classification
+    snapshot = window.samples[-1] if window.samples else ContentionSnapshot()
     start = clock()
 
     def _elapsed() -> float:
@@ -296,6 +326,7 @@ def run_bounded_probe(
             model_identity=model_identity,
             concurrency_identity=concurrency,
             contention=snapshot,
+            contention_telemetry=window.raw_telemetry(),
             caps=caps,
             wall_seconds=_elapsed(),
             error=error,
@@ -481,7 +512,9 @@ def probe_observations(
         raise ValueError(f"only ok probes produce observations (status={result.status})")
     producer = f"runtime_probe@{PROBE_PRODUCER_SEMVER}"
     realized_payload = result.realized.model_dump(mode="json")
-    contention_payload = result.contention.model_dump(mode="json")
+    # D3: the FULL window is the evidence; the single snapshot is only a
+    # fallback for results produced before the windowed classifier (C8e).
+    contention_payload = result.contention_telemetry or result.contention.model_dump(mode="json")
 
     def _record(
         operation: str, unit: str, value_ms: float, spread: tuple[float, float] | None

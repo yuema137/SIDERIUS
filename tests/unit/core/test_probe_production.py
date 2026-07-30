@@ -35,6 +35,19 @@ FRESH_TYPE = "c6_probe_fresh_candidate"
 IDLE = ContentionSnapshot(foreign_compute_processes=0, telemetry_available=True)
 
 
+def _idle_window(**kwargs):
+    """C8e: the probe consumes a bounded D3 window; this test drives the
+    REAL classifier with a deterministic idle sample set (no nvidia-smi)."""
+    from core.runtime_control.calibration_policy import sample_contention_window
+
+    return sample_contention_window(
+        device_vram_gb=kwargs.get("device_vram_gb", 32.0),
+        expected_peer_pids=kwargs.get("expected_peer_pids", ()),
+        capture=lambda *a, **k: IDLE,
+        sleep=lambda _s: None,
+    )
+
+
 @pytest.fixture
 def fresh_plugin():
     """Register a tiny REAL model + config into the LIVE registries (the
@@ -183,7 +196,8 @@ class TestEndToEndPseudoChain:
                 n_timed_train_steps=3,
                 n_timed_inference_batches=2,
             ),
-            telemetry=lambda: IDLE,
+            device_vram_gb=32.0,
+            contention_window=_idle_window,
         )
         assert result.status == "ok"
         assert result.realized is not None

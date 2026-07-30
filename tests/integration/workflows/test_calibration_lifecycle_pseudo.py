@@ -83,13 +83,30 @@ def env(tmp_path):
     return registry, hw_id, env_id
 
 
+def _window(snapshot):
+    """C8e: the probe consumes a bounded D3 window; drive the REAL
+    classifier with a deterministic sample (no nvidia-smi, no sleeping)."""
+    from core.runtime_control.calibration_policy import sample_contention_window
+
+    def _sampler(**kwargs):
+        return sample_contention_window(
+            device_vram_gb=kwargs.get("device_vram_gb", 32.0),
+            expected_peer_pids=kwargs.get("expected_peer_pids", ()),
+            capture=lambda *a, **k: snapshot,
+            sleep=lambda _s: None,
+        )
+
+    return _sampler
+
+
 def _probe_and_record(env, *, train_ms, contention=IDLE, family="unknown"):
     registry, hw_id, env_id = env
     result = run_bounded_probe(
         model_identity="pseudo_candidate",
         executors=_executors(train_ms, train_ms * 2),
         caps=CAPS,
-        telemetry=lambda: contention,
+        device_vram_gb=32.0,
+        contention_window=_window(contention),
     )
     assert result.status == "ok"
     records = probe_observations(

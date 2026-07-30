@@ -58,6 +58,20 @@ def collect_hardware_compatibility_profile() -> HardwareCompatibilityProfile:
     )
 
 
+def probe_device_vram_gb() -> float:
+    """Total VRAM of the probe device — the D3 memory threshold input
+    (``max(1 GiB, 10 % of VRAM)``). Raises rather than guessing: a probe
+    that cannot see its device cannot classify contention (C8e)."""
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "device VRAM is required to classify contention (D3) and CUDA is "
+            "unavailable — the caller must supply it explicitly"
+        )
+    return torch.cuda.get_device_properties(0).total_memory / 2**30
+
+
 def collect_execution_environment_profile(
     *,
     installation_id: str,
