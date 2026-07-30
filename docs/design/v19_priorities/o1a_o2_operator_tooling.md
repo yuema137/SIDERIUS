@@ -1,7 +1,10 @@
 # O1a + O2 — Operator Tooling: Runtime Hardware Provenance and Selective Chain Launching
 
-- **Status**: DESIGN DRAFT — audits complete (2026-07-29, read-only);
-  awaiting operator approval before any production implementation.
+- **Status**: IMPLEMENTED (2026-07-29) — design approved by the
+  operator same day (recommended options confirmed: duplicates
+  rejected; canonical order; queue runner excluded; driver probe
+  included; CPU/RAM extras skipped); validation evidence in §6.
+  PR merge pending operator review.
 - **Parent**: `../v19_priorities.md` §3 items 1a (O1a) and 2 (O2) +
   §2.0 parallel operational track. Both are deterministic,
   non-agent-behavior operator-tooling items; neither blocks V19
