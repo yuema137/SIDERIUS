@@ -254,3 +254,142 @@ for a in "${{APP_ARGS[@]}}"; do echo "$a"; done
         )
         assert r2.returncode == 0, r2.stderr
         assert "--runtime_watchdog_safety_factor" not in r2.stdout.splitlines()
+
+
+RUNTIME_SURFACE_KWARGS = frozenset(
+    {
+        "runtime_watchdog_enabled",
+        "runtime_safety_factor",
+        "runtime_trial_safety_factor",
+        "runtime_formal_safety_factor",
+        "runtime_watchdog_safety_factor",
+        "runtime_watchdog_floor_seconds",
+    }
+)
+
+
+def _run_workflow_call_kwargs() -> set[str]:
+    """Keyword names passed at the run_workflow(...) call site(s) in
+    run_one_iteration.py, extracted from the AST (no import of the
+    script — it is not a package)."""
+    import ast
+
+    source_path = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+    tree = ast.parse(source_path.read_text())
+    kwargs: set[str] = set()
+    found_call = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "run_workflow"
+        ):
+            found_call = True
+            for kw in node.keywords:
+                assert kw.arg is not None, (
+                    "run_workflow is called with a **dict expansion; the "
+                    "kwarg-parity guard cannot see through it — pass "
+                    "explicit keywords instead"
+                )
+                kwargs.add(kw.arg)
+    assert found_call, "no run_workflow(...) call found in run_one_iteration.py"
+    return kwargs
+
+
+class TestWorkflowKwargParity:
+    """Gate 0 attempt-1 regression (2026-07-29): run_one_iteration.py passed
+    runtime_watchdog_safety_factor but run_workflow() did not accept it —
+    an immediate pre-LLM TypeError that no test caught because nothing
+    asserted CLI↔workflow kwarg parity. These tests close that class of gap
+    for EVERY kwarg, not just the runtime surface."""
+
+    def test_every_run_one_iteration_kwarg_accepted_by_run_workflow(self):
+        import inspect
+
+        from workflows.model_exploration import run_workflow
+
+        sig = inspect.signature(run_workflow)
+        assert not any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()), (
+            "run_workflow grew **kwargs; this parity guard is now vacuous"
+        )
+        unknown = _run_workflow_call_kwargs() - set(sig.parameters)
+        assert not unknown, (
+            f"run_one_iteration.py passes kwargs run_workflow() does not "
+            f"accept (this is the exact Gate 0 attempt-1 failure): {sorted(unknown)}"
+        )
+
+    def test_runtime_surface_present_at_every_layer(self):
+        """The six runtime-control kwargs exist at the call site, the
+        workflow signature, the protocol signature, and the schema."""
+        import inspect
+
+        from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+        from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import (
+            local_validated_model,
+        )
+        from workflows.model_exploration import run_workflow
+
+        call_kwargs = _run_workflow_call_kwargs()
+        workflow_params = set(inspect.signature(run_workflow).parameters)
+        protocol_params = set(inspect.signature(local_validated_model).parameters)
+        schema_fields = set(HyperparamTuningInput.model_fields)
+        for name in sorted(RUNTIME_SURFACE_KWARGS):
+            assert name in call_kwargs, f"{name} not passed by run_one_iteration"
+            assert name in workflow_params, f"{name} missing from run_workflow()"
+            assert name in protocol_params, f"{name} missing from local_validated_model()"
+            assert name in schema_fields, f"{name} missing from HyperparamTuningInput"
+
+    def test_workflow_forwards_watchdog_factor_into_protocol_call(self):
+        """run_workflow forwards its runtime_watchdog_safety_factor parameter
+        (same-named variable) into the local_validated_model(...) call."""
+        import ast
+
+        source_path = REPO_ROOT / "workflows" / "model_exploration.py"
+        tree = ast.parse(source_path.read_text())
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "local_validated_model"
+            ):
+                for kw in node.keywords:
+                    if kw.arg == "runtime_watchdog_safety_factor":
+                        assert (
+                            isinstance(kw.value, ast.Name)
+                            and kw.value.id == "runtime_watchdog_safety_factor"
+                        )
+                        return
+        raise AssertionError(
+            "local_validated_model(...) call does not forward runtime_watchdog_safety_factor"
+        )
+
+    def test_cli_value_reaches_watchdog_config(self):
+        """Propagation end: agent input carrying 3.5 produces a validated
+        RuntimeControlPolicy whose WatchdogConfig.safety_factor is 3.5 while
+        formal admission keeps factor 2.0 (both phases)."""
+        from types import SimpleNamespace
+
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            _build_runtime_policy,
+        )
+
+        agent_input = SimpleNamespace(
+            runtime_safety_factor=1.5,
+            runtime_trial_safety_factor=V18_TRIAL_FACTOR,
+            runtime_formal_safety_factor=V18_FORMAL_FACTOR,
+            runtime_watchdog_enabled=True,
+            runtime_watchdog_safety_factor=V19_WATCHDOG_FACTOR,
+            runtime_watchdog_floor_seconds=V18_FLOOR_S,
+        )
+        for is_trial, budget in ((False, 120.0), (True, 5.0)):
+            d = _build_runtime_policy(
+                agent_input, is_trial=is_trial, chosen_time_budget=budget, base_dir="/t"
+            )
+            policy = RuntimeControlPolicy.model_validate(
+                {k: v for k, v in d.items() if k != "observation_store_root"}
+            )
+            assert policy.watchdog.safety_factor == V19_WATCHDOG_FACTOR
+        formal = _build_runtime_policy(
+            agent_input, is_trial=False, chosen_time_budget=120.0, base_dir="/t"
+        )
+        assert formal["safety_factor"] == V18_FORMAL_FACTOR

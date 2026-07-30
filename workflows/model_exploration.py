@@ -1413,6 +1413,7 @@ def run_workflow(
     runtime_safety_factor: float = 1.0,
     runtime_trial_safety_factor: float | None = None,
     runtime_formal_safety_factor: float | None = None,
+    runtime_watchdog_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float = 60.0,
     # --- Reasoning pipeline ---
     exploration_mode: ExplorationMode = "auto",
@@ -2515,6 +2516,7 @@ def run_workflow(
             runtime_safety_factor=runtime_safety_factor,
             runtime_trial_safety_factor=runtime_trial_safety_factor,
             runtime_formal_safety_factor=runtime_formal_safety_factor,
+            runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
             runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
             # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
             # protocol parameter (two-state design, design doc §3.4).
