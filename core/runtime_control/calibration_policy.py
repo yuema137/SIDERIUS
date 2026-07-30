@@ -62,10 +62,12 @@ _POLICY_SEMVER = "1.0.0"
 #: HwThermalSlowdown 0x40 | HwPowerBrakeSlowdown 0x80.
 #: DELIBERATELY EXCLUDED as benign/expected: GpuIdle 0x01,
 #: ApplicationsClocksSetting 0x02, SwPowerCap 0x04, DisplayClock 0x100 —
-#: an idle RTX 5090 on this deployment reports 0x04 continuously, so
-#: treating power-capping as throttling would mark EVERY measurement
+#: idle consumer NVIDIA accelerators commonly report 0x04 continuously,
+#: so treating power-capping as throttling would mark EVERY measurement
 #: unknown_contention. Policy-versioned: changing this mask changes the
-#: policy identity (see the C7 implementation record).
+#: policy identity. The specific deployment and driver stack this was
+#: observed on are recorded in the §23-C7 implementation record — device
+#: facts belong in the design doc, not in a core/ constant (Principle 5).
 DEFAULT_DERATING_THROTTLE_MASK = 0x08 | 0x10 | 0x20 | 0x40 | 0x80
 
 
