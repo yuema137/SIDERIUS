@@ -280,3 +280,30 @@ PID). Recommend porting the Gate runner's hardening (stagger check +
 in-session wrapper-PID self-report + marker-grace wait) to the queue
 runner as its own PR before the formal V19 launch. Not done in the
 audit repair — out of its narrowly-scoped mandate.
+
+## 11. Gate 0 attempt 2 — PASS; formal V19 campaign launched (2026-07-30)
+
+Attempt 2 ran from CI-green head `00e3ab6` (2026-07-29 23:53 →
+2026-07-30 00:22, wall 29 m 37 s, ~$1.86 API, 42 LLM calls, 416 s
+GPU-process time). Both chains EXIT=0; every §12 criterion verified
+from artifacts — real trial (record-only admission, factor 3.0) and
+real forced formal (budget 1800 s, factor 2.0) per sidecar records,
+watchdog 3.5 + floor 120 on every attempt, 6 HealthGate results per
+round with no phantom scores, iteration-2 chain-local incumbent restore
+(`chain_incumbent_used` from the iter-1 formal record in both chains),
+structured-feedback restore (policy ON/3/8 + fingerprint history to the
+iter-2 interpreter), executed scope/order exactly sequential
+[15,16,17,18,19] (formal `file_vector` non-null indices), full artifact
+checklist, no arch/loss cross-contamination. The hardened runner's
+stagger health check and PID self-report worked in the live launch.
+Verdict: **PASS** (full record: `reports/v19_gate0_20260729_2209.md`
+§8-§10).
+
+Consequences (operator-approved): PR #149 merged to master as
+`4a2b0de`; the **formal V19 campaign launched 2026-07-30 00:23:22**
+from master — `screen -S v19_queue` running
+`sdsc_submission_scripts/v19_queue_runner.sh`, wave 1 (band 15-19)
+pairwise (`v19_arch_15_19` 00:23:25, `v19_loss_15_19` 00:24:58), waves
+proceeding automatically under the frozen continuation policy. The §10
+queue-runner hardening port remains an open follow-up (operator
+accepted launching with the current tested runner).
