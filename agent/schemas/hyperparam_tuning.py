@@ -1487,7 +1487,7 @@ class HyperparamTuningInput(BaseModel):
             "phase-effective admission factor exactly as V18 — omitting "
             "this flag reproduces V18 behavior. When set, ONLY the "
             "watchdog deadline uses it (both phases); admission keeps "
-            "the phase-effective factor. V19 5090 launch posture: 3.5."
+            "the phase-effective factor. V19 single-GPU launch posture: 3.5."
         ),
     )
     runtime_watchdog_floor_seconds: float = Field(
