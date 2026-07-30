@@ -22,6 +22,7 @@ Node contract:
 import argparse
 import json
 import os
+from functools import lru_cache
 from typing import Any
 
 from pydantic import ValidationError
@@ -107,11 +108,21 @@ def _live_model_registry_names(registry: CapabilityRegistry) -> list[str]:
     return sorted(indexed & live)
 
 
+@lru_cache(maxsize=1)
+def _runtime_policy():
+    """The one shared decision policy (C8). Cached: constructing it hashes
+    the behavioral payload into the policy identity."""
+    from core.runtime_control.decision_policy import RuntimeDecisionPolicy
+
+    return RuntimeDecisionPolicy()
+
+
 def _build_preflight_advisory_note(
     num_params: int,
     estimated_minutes: float,
     factor: float,
     budget_minutes: float,
+    policy_identity: str = "",
 ) -> str:
     """Render the labeled ADVISORY note for an over-budget static estimate.
 
@@ -122,6 +133,7 @@ def _build_preflight_advisory_note(
     reject the proposal. The wave-1 incident showed this formula
     rejecting an 18.4M-parameter draft at a fabricated 84.64× factor.
     """
+    suffix = f" [decided by {policy_identity}]" if policy_identity else ""
     return (
         f"PREFLIGHT_ADVISORY (provenance=static_uncalibrated, "
         f"confidence=low, blocking_eligible=no): the static cost model "
@@ -130,7 +142,7 @@ def _build_preflight_advisory_note(
         f"estimated {num_params:,} parameters. This estimate has not been "
         f"validated on the implemented model; runtime decisions are made "
         f"from measured evidence after implementation. Do not infer a "
-        f"parameter-count ceiling from this advisory."
+        f"parameter-count ceiling from this advisory." + suffix
     )
 
 
@@ -182,13 +194,37 @@ def _run_preflight_check(
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
     factor = float(verdict["factor"])
-    if factor > 1.0:
+
+    # C8b: the note is emitted on the SHARED policy's decision, not on a
+    # private `factor > 1.0` comparison. The static producer's numbers are
+    # unchanged; what changed is that the authority to act on them now
+    # lives in exactly one place. A static estimate is structurally
+    # incapable of REJECT/ABORT here (type-derived eligibility + §7.4
+    # matrix row `static_prior/proposal = advisory_only`) — the assertion
+    # below turns any future regression of that invariant into a crash
+    # rather than a silently rejected proposal.
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+    from core.runtime_control.estimate_types import from_proposer_preflight
+
+    policy = _runtime_policy()
+    decision = policy.decide(
+        from_proposer_preflight(verdict),
+        RuntimeBudget(time_seconds=budget * 60.0),
+        RuntimeMode(phase="proposal", candidate_stage="proposal"),
+    )
+    if decision.kind in ("REJECT", "ABORT"):
+        raise AssertionError(
+            f"proposal-stage static evidence produced {decision.kind}: "
+            f"{decision.reasons} — the C1/C8 advisory-only invariant is broken"
+        )
+    if decision.kind != "ALLOW":
         output.memo_consistency_notes.append(
             _build_preflight_advisory_note(
                 num_params=num_params,
                 estimated_minutes=float(verdict["estimated_minutes"]),
                 factor=factor,
                 budget_minutes=budget,
+                policy_identity=policy.identity,
             )
         )
     return factor
