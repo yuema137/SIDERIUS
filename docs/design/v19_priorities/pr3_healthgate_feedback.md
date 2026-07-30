@@ -219,6 +219,31 @@ Carried from the PR 1/PR 2 process (operator rules):
              Launch authorized to proceed once the frozen protocol is
              committed and the zero-LLM preflight is green (operator
              plan §5 — no routine intermediate approval).
+             **EXECUTED 2026-07-29** (protocol commit `f8fa72c`,
+             branch head at launch): 40/40 valid, 205 calls, $38.19,
+             version stable, zero deviations, zero terminal failures.
+             **Layer-2 verdict: NOT SUPPORTED on the primary
+             hierarchy (ceiling/floor-limited — the Control prose
+             channel already carries the failure evidence in these
+             fixtures), consistent secondary specific-evidence
+             grounding (several CIs excluding zero: S1 fingerprint/
+             gate naming +0.60, S4 gate naming +0.80, S4 targeted
+             amplitude changes +0.60, S4 supported feedback claims
+             +1.00), ZERO observed harm (blinded two-pass rubric:
+             0 wrong attribution / stale claims / avoidance /
+             superficial compliance in either arm).** Descriptive
+             verdict, not powered confirmation. Cumulative Layer 2:
+             $62.47 of $74.28. Report: reports/pr3_structured_health_
+             feedback_full_layer2_descriptive_calibration_2026-07-29.md.
+[x] P3-L2  → CLOSED with the verdict above (this entry's earlier
+             text preserved as history).
+[ ] P3-L3  — **NOT JUSTIFIED** (operator plan §9: NOT SUPPORTED → do
+             not run L3; real training cannot be justified to look
+             for a primary benefit absent under deliberately
+             favorable synthetic conditions). The open fixture-design
+             question (treatment advantage under a DILUTED prose
+             channel) would be a revised Layer-2, not an L3 —
+             recorded, unscheduled.
 [x] P3-AUD — post-run zero-LLM audit (2026-07-29, operator-directed;
              report §13, protocol §21). Record-changing findings:
              P-1 production retry-loop defect — the proposing stage

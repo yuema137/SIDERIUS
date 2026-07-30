@@ -216,3 +216,40 @@ pooled summaries, reliability + §3 mitigation. Verdict vocabulary
 (operator plan §7.2): SUPPORTED / MIXED / NOT SUPPORTED / HARMFUL /
 INCONCLUSIVE — explicitly a descriptive quantitative verdict. Report:
 `reports/pr3_structured_health_feedback_full_layer2_descriptive_calibration_2026-07-29.md`.
+
+## 13. Campaign outcome (2026-07-29) — executed exactly as frozen
+
+40/40 samples terminal-valid (0 failures), 205 calls, $38.19,
+`gpt-5.5-2026-04-23` on every call, runner `completed`/exit 0, frozen
+order followed, no protocol amendment, no interim analysis, isolation
+40/40. Cumulative Layer 2: **$62.47 of $74.28**. One pre-launch
+incident (mis-pathed first launch, 1 orphaned interpreter call $0.044,
+killed immediately, artifacts preserved, relaunched) — recorded in
+`launch_freeze.json`; not a protocol deviation (no sample had begun
+under the frozen order).
+
+**Verdict: NOT SUPPORTED on the primary hierarchy (ceiling/floor-
+limited), consistent secondary evidence of specific-evidence grounding,
+ZERO observed harm.** Primaries: P1 repeats 0/20 vs 0/20 (floor); P2
+relevant change 20/20 vs 20/20 (ceiling) — the Control prose channel
+already carries the failure evidence in these fixtures. Secondary
+(CIs excluding zero): S1 gate/fingerprint naming +0.60 [0.03,0.88];
+S4 gate naming +0.80 [0.19,0.96]; S4 targeted amplitude/scaling
+changes +0.60 [0.03,0.88]; S4 supported feedback-use claims +1.00
+[0.39,1.00] (all 11 T claims verified against fixture ground truth;
+0 unsupported). Safety (blinded two-pass rubric, 40/40 scored, zero
+disagreements): 0 wrong attribution (all 10 S2 prescreen hits
+adjudicated benign contrast), 0 stale-as-current, 0 inappropriate
+avoidance, 0 superficial compliance, 0 equivalent repeats, 0
+unscorable; one proportionality note (S4_T_2). Corrections C 50% vs
+T 75% (imbalance 0.25 < 0.30 caveat). Deterministic-metric
+brittleness (3 prescreens; rubric supersedes) recorded in report §4.5.
+
+Decisions that follow (operator plan §9): **no P3-L3** (NOT SUPPORTED
+→ real training unjustified); merge recommendation: **recording
+infrastructure only** (final call at PR review); activation: out of
+the question on current evidence; the open fixture-design question
+(does the treatment's advantage appear when the prose channel is
+diluted?) is recorded, unscheduled, and would be a revised Layer-2,
+not an L3. Full report:
+`reports/pr3_structured_health_feedback_full_layer2_descriptive_calibration_2026-07-29.md`.
