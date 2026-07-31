@@ -111,9 +111,9 @@ sequential
 --formal_time_budget_minutes
 30
 --trial_vram_budget_gb
-16
+24
 --formal_vram_budget_gb
-16
+24
 --runtime_watchdog
 --runtime_safety_factor
 1.5

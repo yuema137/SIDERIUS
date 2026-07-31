@@ -115,9 +115,7 @@ class TestSignalTerminatedIteration:
 
     @pytest.mark.parametrize("signal_code,signal_number", [(137, 9), (143, 15), (130, 2)])
     def test_a_signalled_child_stops_the_loop(self, tmp_path, signal_code, signal_number):
-        code, entered, ws = _run_chain(
-            tmp_path, iterations=4, FAIL_ITER=2, FAIL_CODE=signal_code
-        )
+        code, entered, ws = _run_chain(tmp_path, iterations=4, FAIL_ITER=2, FAIL_CODE=signal_code)
         assert entered == [1, 2], "a signal-killed iteration must not be followed by another"
         assert code == signal_code
         record = _stop_record(ws)
