@@ -46,6 +46,7 @@ from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
     _aggregate_inference_file_timings,
 )
+from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
     VRAM_FACTOR_THRESHOLD,
@@ -84,6 +85,54 @@ from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
 
 SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def _raise_if_inconclusive(resource_check: dict) -> None:
+    """Turn an INCONCLUSIVE pre-flight into its own typed failure.
+
+    An inconclusive pre-flight measured nothing. Treating it as a resource
+    rejection is what invalidated the V19 campaign stopped on 2026-07-31:
+    a batch-search timeout became "model too large", and the agent
+    downsized until it was proposing toy models. The attempt still cannot
+    proceed without a footprint, but it is recorded as an inspection gap
+    and MUST NOT enter capacity feedback.
+
+    Module-level rather than inline: `run()` already sits at pyright's
+    complexity-analysis ceiling, and adding this branch inline pushed it
+    over.
+    """
+    if resource_check.get("status") != "inconclusive":
+        return
+    print(
+        "    [VRAM] INCONCLUSIVE pre-flight — recorded as an inspection gap, "
+        "NOT as evidence about this model."
+    )
+    raise InconclusivePreflight(
+        str(resource_check.get("message", "")),
+        record=resource_check.get("timeout_record") or {},
+    )
+
+
+def _classify_attempt_failure(exc: BaseException, failure_stage: str | None) -> str:
+    """Name what went wrong, keeping "we could not measure" separate from
+    "the model misbehaved".
+
+    `inconclusive_preflight` exists because the alternative — classifying a
+    pre-flight timeout as `model_forward_error` — is what invalidated the
+    V19 campaign stopped on 2026-07-31. Downstream feedback keys off this
+    name, so conflating the two teaches the agent that its model is at
+    fault when the measurement simply never finished.
+
+    Module-level rather than inline: the caller's `try` already sits at
+    pyright's complexity-analysis ceiling.
+    """
+    if isinstance(exc, InconclusivePreflight):
+        return "inconclusive_preflight"
+    if isinstance(exc, WallClockTimeoutError):
+        return "wall_clock_timeout"  # §4 status-audit decision (RT4)
+    if failure_stage == "vram_structural_probe" and isinstance(exc, RuntimeError):
+        return "model_forward_error"
+    return type(exc).__name__
 
 
 def _build_denoised_filename(
@@ -2800,6 +2849,8 @@ class HyperparamTuningAgent:
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
+                    _raise_if_inconclusive(resource_check)
+
                     # Phase D.4 — constraint-aware retry. The wrapper returns
                     # ``status="schema_violation"`` when the plugin's
                     # ``PLUGIN_CONFIG_CLASS(**model_cfg)`` call raised a
@@ -4068,13 +4119,7 @@ class HyperparamTuningAgent:
                     print(f"Loop Error: {e}")
                     traceback.print_exc()
                     failure_reason = str(e)
-                    failure_type = (
-                        "wall_clock_timeout"  # §4 status-audit decision (RT4)
-                        if isinstance(e, WallClockTimeoutError)
-                        else "model_forward_error"
-                        if failure_stage == "vram_structural_probe" and isinstance(e, RuntimeError)
-                        else type(e).__name__
-                    )
+                    failure_type = _classify_attempt_failure(e, failure_stage)
                     traceback_summary = traceback.format_exc()[-4000:]
                     failure_record = {
                         "record_type": "attempt_failure",

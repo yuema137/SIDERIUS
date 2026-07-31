@@ -4198,3 +4198,282 @@ candidate (§17-restart-contamination test in C13/C14).
   (realized properties / deterministic accounting / measured peak);
   C4/C8 place VRAM blocking after implementation, never in the proposer
   loop.
+
+
+---
+
+## VRAM pre-flight — host-memory isolation (2026-07-31)
+
+Two defects, found in sequence, both in the same pre-flight path. The
+second was created by the repair for the first, which is the part worth
+remembering.
+
+### Defect 1 — one budget doing four jobs
+
+`_FORWARD_PASS_TIMEOUT_S = 60` wrapped the ENTIRE inference-batch search.
+That search probes seven candidate batches `(64, 32, 16, 8, 4, 2, 1)`,
+running a full `torchinfo.summary(depth=10)` trace for each, on CPU. For
+a 24-block WaveNet at T=16000 the cumulative cost exceeds 60 s by
+construction — a property of the search, not of the candidate.
+
+It failed in the direction that compounds. The timeout surfaced as a hard
+`Resource check error` whose text asserted the most common cause was a
+loop "inside `nn.Module.forward`" — blaming the candidate for a loop that
+was ours. The agent downsized. Nine timeouts later both V19 chains were
+proposing models at 2-3 % of their VRAM budget. The same configuration
+failed and passed minutes apart depending on CPU load, which is what
+proves it was never capacity evidence.
+
+Repair: `ProbeBudgets` gives each operation its own budget; a timeout
+returns `inconclusive`, never a capacity verdict; only a MEASURED OOM or
+measured peak above the cap may reject for capacity or ask an agent to
+shrink anything.
+
+### Defect 2 — the timeout was also, accidentally, a memory bound
+
+The comment above that constant recorded the real reason it existed:
+*"A Python time-loop inside `forward()` at long T will burn host RAM
+linearly under autograd… at T=200,000 the V11 kill mode reached 28 GB
+anon-rss before the kernel OOM-killed the process. SIGALRM trips long
+before that point."*
+
+Wall time was standing in for a memory bound. Raising the budgets removed
+that second, unrecognised protection, and the host OOM it guarded against
+happened on the first GPU validation: a Transformer pre-flight reached
+**60.5 GB anon-rss on a 61 GB host** and the kernel reaped the whole
+validation process (exit 137). The GPU sat at 273 MiB — VRAM was never
+the constraint, and nothing was measured about that candidate.
+
+The arithmetic is exact. The candidate list is DESCENDING, so B=64 is
+tried first, and a full self-attention matrix at T=8000 with 4 heads is
+
+    64 x 4 x 8000 x 8000 x 4 bytes = 61.0 GiB
+
+against an observed kill at 57.7 GiB. The process died allocating that
+single tensor, and a batch that would have probed fine was never reached.
+
+### The invariant
+
+No candidate model, inspection, `torchinfo` call, forward probe, or
+batch-resolution search may exhaust the parent process or the host.
+
+Every expensive candidate operation runs in an isolated worker:
+
+```text
+parent validates a LIGHTWEIGHT config       (never builds the model)
+  -> ONE worker per candidate, own process group
+     -> worker applies RLIMIT_AS BEFORE importing torch
+     -> worker builds, inspects, probes, writes bounded JSON
+  -> parent samples worker-tree RSS and the deadline
+     -> TERM group -> bounded grace -> KILL
+  -> parent reaps descendants and assigns a TYPED disposition
+```
+
+The parent must never instantiate the candidate: a limit applied after
+the model is resident protects nothing.
+
+### Worker memory limit — 24 GiB, derived not chosen
+
+Host has ~61.8 GiB with ~3.6 GiB in OS services. Production runs TWO
+chains concurrently, each able to hold a pre-flight worker:
+
+    2 x 24 GiB = 48.0    workers
+    + ~4 GiB             OS and services
+    + ~1 GiB             both parents
+    = ~53 GiB of 61.8    leaving ~8.8 GiB headroom
+
+24 GiB also sits far above any legitimate candidate — the 323M FCNet
+pre-flight completed in 6.79 s well inside it. Overridable via
+`SIDERIUS_PREFLIGHT_WORKER_MEM_GIB`; never inferred from free memory,
+which would make the bound irreproducible.
+
+### Dispositions and authority
+
+| disposition | may reject for VRAM | may ask to reduce host memory |
+|---|---|---|
+| `COMPLETED_MEASUREMENT` | - | - |
+| `MEASURED_CUDA_OOM` | **yes** | no |
+| `MEASURED_PEAK_ABOVE_VRAM_CAP` | **yes** | no |
+| `MEASURED_HOST_MEMORY_EXCEEDED` | **no** | **yes** |
+| `MEASURED_HARD_TIMEOUT` | no | no |
+| `SCHEMA_REJECTED` | no | no |
+| `PROBE_INFRASTRUCTURE_FAILURE` | no | no |
+
+A host-memory excess is never phrased as a VRAM verdict: the candidate
+may fit the GPU perfectly and still have blown up CPU tracing. A schema
+rejection points only at the invalid field.
+
+### Batch search robustness
+
+A candidate batch that cannot be probed is a verdict on that BATCH, not
+on the model. The search now catches memory-shaped failures per candidate
+and continues to the next smaller one, so a model that fits at B=8 is no
+longer lost because B=64 could not be allocated. `torch.cuda.OutOfMemoryError`
+subclasses `RuntimeError`, so recognition is by type name and message,
+not by type alone.
+
+### Validation harness
+
+Schema validation now happens in the controller BEFORE any worker is
+launched, and each candidate runs in its own worker. The first version
+guessed `residual_channels=256` for WaveNet against a schema cap of 128
+and then reported the rejection as "completed" — a harness that mislabels
+its own failures cannot validate anything.
+
+### Status
+
+First GPU validation: **FAIL — UNEXPECTED EXECUTION** (host OOM).
+Evidence preserved at
+`runtime_validation/vram_preflight/repair_0213614_20260731T163543Z/`.
+FCNet 323M did complete there in 6.79 s at 5.73 GB against C12's measured
+6.04 GiB, which is the positive result showing defect 1 was genuinely
+fixed.
+
+The repair is NOT complete until the second GPU validation passes.
+PR #151 remains unmerged; formal V19 remains stopped.
+
+
+### Defect 3 — RLIMIT_AS bounds reservation, not consumption (2026-07-31)
+
+The second GPU validation (SHA `d83f397`) failed all three candidates.
+The isolation architecture itself worked — the parent survived, no host
+OOM, no orphans, GPU returned to idle — but every candidate failed to
+allocate while its resident memory was only 3.9-5.7 GiB against a 24 GiB
+ceiling.
+
+Measured directly:
+
+```text
+before importing torch : VmSize    38 MiB   VmRSS  13 MiB
+after importing torch  : VmSize   5.9 GiB   VmRSS 0.5 GiB
+after initialising CUDA: VmSize  19.0 GiB   VmRSS 0.65 GiB
+```
+
+`RLIMIT_AS` bounds VIRTUAL ADDRESS SPACE. PyTorch and CUDA reserve
+~19.0 GiB of it while holding ~0.65 GiB resident, so a 24 GiB limit left
+about 5 GiB for real work. Reservation is not consumption; using one to
+bound the other is structurally the same error as using wall time to
+bound memory.
+
+**`RLIMIT_AS` is removed.** The parent's process-tree RSS monitor is the
+authoritative host-memory enforcement, because it measures what actually
+consumes the host. It was already implemented and sampled correctly
+throughout the failed run (4.4 / 5.66 / 3.96 GiB).
+
+A second defect surfaced with it. PyTorch reports a CPU allocation
+failure as a plain `RuntimeError`:
+
+```text
+[enforce fail at alloc_cpu.cpp:127] err == 0. DefaultCPUAllocator:
+can't allocate memory: you tried to allocate 3152543744 bytes.
+Error code 12 (Cannot allocate memory)
+```
+
+`except MemoryError` did not catch it, so two candidates were recorded as
+`PROBE_INFRASTRUCTURE_FAILURE` — "our machinery is broken" — when the
+machinery worked and the CANDIDATE could not be allocated. FCNet took the
+torchinfo path and was recorded as a timeout after 3.771 s against a
+600 s deadline. The batch resolver had its own check looking for
+"cannot allocate" while PyTorch says "can't allocate".
+
+Recognition is now one helper, `classify_host_memory_exception`, used by
+the worker, the batch resolver, the torchinfo path and the wrapper. It
+covers `MemoryError`, `bad_alloc`, `OutOfMemoryError`, `DefaultCPUAllocator`,
+both apostrophe forms, `Error code 12`, and `ENOMEM`, and separates host
+from device.
+
+`HOST_MEMORY_ALLOCATION_FAILURE` is added as a CANDIDATE-level
+disposition, distinct from `MEASURED_HOST_MEMORY_EXCEEDED` (the parent
+stopping a worker whose measured RSS crossed the ceiling) and from
+`PROBE_INFRASTRUCTURE_FAILURE` (the measurement system itself failing).
+Both host outcomes may ask for lighter host behaviour; neither may be
+phrased as a VRAM verdict or recommend reducing GPU parameter count.
+
+Schema impact: none. `PreflightOutcome` is consumed only by the
+validation harness and its tests, is absent from `agent/schemas/`, and
+the production tuner is not yet wired to it — so no persisted version
+changes, no consumer breaks, no migration.
+
+
+### Third GPU validation and defect 4 — inconclusive is not timeout
+
+Third validation (SHA `3d3866e`) proved the safety mechanisms on real
+execution:
+
+| candidate | outcome | evidence |
+|---|---|---|
+| 323 M baseline | `COMPLETED_MEASUREMENT` | 323,281,352 params, 5.732 GB vs 12 GB cap, 7.79 s, peak RSS 7.05 GiB |
+| 17 M dilated-conv | `MEASURED_HOST_MEMORY_EXCEEDED` | peak RSS 26.176 GiB vs the 24 GiB ceiling; TERM sufficed, no KILL, no orphan |
+| quadratic-attention | mislabelled (see below) | peak RSS 12.295 GiB, 65.556 s |
+
+The parent survived all three, no global host OOM occurred, no orphan
+remained, and high virtual-address reservation no longer triggered false
+enforcement. RSS enforcement fired exactly once, on a real crossing.
+
+One defect remained. The worker mapped EVERY `inconclusive` status to
+`MEASURED_HARD_TIMEOUT`, so a structural-tracing failure that finished in
+65.556 s was reported as a timeout against a 600 s deadline — with no
+deadline elapsed, no allocator error, no RSS crossing and no CUDA OOM.
+
+`INCONCLUSIVE_MEASUREMENT` now exists for what that actually is: a
+bounded inspection that ended before any deadline without producing an
+authoritative measurement. It carries NO authority — not capacity
+rejection, not GPU downsizing, not host-memory reduction — and its
+agent-facing text says so explicitly.
+
+A real deadline now travels as its own status with provenance (operation,
+budget, elapsed), and the result schema REFUSES a `MEASURED_HARD_TIMEOUT`
+whose elapsed time is below its own budget. The claim is checkable rather
+than asserted.
+
+Schema impact: none. `PreflightOutcome` remains consumed only by the
+validation harness and its tests, absent from `agent/schemas/`, with the
+production tuner not yet wired to it.
+
+Verdict: `GPU VALIDATION FAIL — CAPACITY CLASSIFICATION`. The execution
+control was correct; the terminal semantic label was not. The repair is
+not validated until a fourth GPU validation passes on one exact SHA.
+
+
+### Fourth GPU validation — PASS (SHA `8f853c5`)
+
+All three candidates produced their expected typed result on one exact
+SHA, with candidate hashes byte-identical to the reviewed package.
+
+| candidate | outcome | evidence |
+|---|---|---|
+| 323 M baseline | `COMPLETED_MEASUREMENT` | 323,281,352 params, 5.732 GB vs 12 GB cap, 7.80 s, peak RSS 7.94 GiB |
+| 17 M dilated-conv | `MEASURED_HOST_MEMORY_EXCEEDED` | peak RSS 25.99 GiB vs 24 GiB ceiling, `parent_rss_monitor`, exit -15, TERM sufficed, no orphan |
+| quadratic-attention | `INCONCLUSIVE_MEASUREMENT` | `torchinfo_trace` phase, 64.6 s, no timeout provenance, peak RSS 12.28 GiB |
+
+Authority resolved correctly in every case: the host-memory result
+carried host authority only and was phrased as a host limit, never a VRAM
+verdict; the inconclusive result carried no authority at all.
+
+All 16 acceptance criteria met: parent survived, no global host OOM, no
+orphans, no timeout below its deadline, no host result mislabelled as
+VRAM, no training, no LLM calls, GPU and host memory returned to
+baseline.
+
+Four repairs were needed, and they share one shape — each time a signal
+was standing in for something it did not measure:
+
+```text
+1  a search timeout        standing in for  capacity
+2  wall time               standing in for  memory
+3  address-space reservation standing in for  resident memory
+4  "inconclusive"          standing in for  "a deadline elapsed"
+```
+
+Every conclusion is now supported by a measurement of its own kind, and
+the result schema refuses a timeout claim that cannot evidence its own
+deadline.
+
+**Open, separate from this repair:** the 17 M candidate used ~26 GiB of
+host RSS during PRE-FLIGHT. The protection classified it correctly, but a
+legitimate medium-scale candidate being stopped by inspection overhead
+would keep the original problem alive in a new form — the agent would
+still be pushed toward smaller models. Whether that 26 GiB is the
+candidate's real requirement or an artifact of the inspection method
+(CPU tracing at long sequence length, descending batch search, retained
+intermediates) is a preflight-efficiency question, tracked separately.

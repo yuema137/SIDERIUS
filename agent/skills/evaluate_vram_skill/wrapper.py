@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import gc
 import inspect
+import math
 import signal
 from contextlib import contextmanager
 
@@ -49,11 +50,19 @@ import torch
 from pydantic import ValidationError
 
 from agent.skills.evaluate_vram_skill import compute_intensity, killer_report
-from agent.skills.evaluate_vram_skill.batch_resolver import resolve_inference_batch
+from agent.skills.evaluate_vram_skill.batch_resolver import (
+    BatchSearchTimeout,
+    resolve_inference_batch,
+)
 from agent.skills.evaluate_vram_skill.overhead import (
     cuda_context_bytes,
     cudnn_backward_workspace_bytes,
     training_overhead_bytes,
+)
+from agent.skills.evaluate_vram_skill.probe_budgets import (
+    ProbeBudgets,
+    ProbeTimeoutRecord,
+    classify_host_memory_exception,
 )
 from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
@@ -85,7 +94,13 @@ _DEFAULT_OPTIMIZER: str = "adam"
 # inside `forward()` at long T will burn host RAM linearly under autograd;
 # at T=200,000 the V11 kill mode reached 28 GB anon-rss before the kernel
 # OOM-killed the process. SIGALRM trips long before that point.
+#: Superseded by `_BUDGETS`. Retained only so external references keep
+#: importing successfully; nothing in this module reads it any more.
 _FORWARD_PASS_TIMEOUT_S: int = 60
+
+#: Per-operation budgets. One number can no longer bound four different
+#: operations — see probe_budgets for why that mattered.
+_BUDGETS = ProbeBudgets()
 
 
 class ForwardPassTimeoutError(Exception):
@@ -93,7 +108,7 @@ class ForwardPassTimeoutError(Exception):
 
 
 @contextmanager
-def _forward_pass_timeout(seconds: int, label: str):
+def _forward_pass_timeout(seconds: float, label: str):
     """SIGALRM-based watchdog around a forward-pass probe call.
 
     On Linux, installs a SIGALRM handler that raises
@@ -106,15 +121,22 @@ def _forward_pass_timeout(seconds: int, label: str):
         return
 
     def _handler(signum, frame):
+        # Deliberately makes NO claim about the candidate. The previous
+        # text asserted the most common cause was a loop inside
+        # `nn.Module.forward`, which sent agents chasing their own model
+        # when the loop responsible was SIDERIUS's own batch search.
         raise ForwardPassTimeoutError(
-            f"Forward-pass probe '{label}' exceeded {seconds}s. "
-            f"Most common cause: a Python `for`/`while` loop over the "
-            f"time dimension inside `nn.Module.forward(...)`. Use "
-            f"vectorized ops (FFT, linear attention, associative scans)."
+            f"Bounded pre-flight step '{label}' exceeded its {seconds}s budget. "
+            f"This is an INCONCLUSIVE inspection result: the measurement did "
+            f"not complete, so it says nothing about whether this model fits "
+            f"or how fast it is. It is not a reason to reduce model capacity "
+            f"or batch size."
         )
 
     old_handler = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(seconds)
+    # `signal.alarm` takes whole seconds; budgets are floats. Round UP so a
+    # fractional budget is never silently truncated toward zero.
+    signal.alarm(max(1, math.ceil(seconds)))
     try:
         yield
     finally:
@@ -517,7 +539,7 @@ def run_skill(sandbox, **kwargs):
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
         x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type, loss_name)
-        with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "training_probe"):
+        with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "training_probe"):
             training_probe = probe_activation_footprint(
                 model=model_for_train,
                 loss_module=loss_module,
@@ -559,17 +581,22 @@ def run_skill(sandbox, **kwargs):
         inference_err: str | None = None
         try:
             model_for_resolve = _build_model(model_type, model_cfg, loss_type)
-            with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "resolve_inference_batch"):
-                inference_batch = resolve_inference_batch(
-                    model_for_resolve,
-                    segmentation_size=seg_size,
-                    cap_bytes=cap_bytes,
-                )
+            # No enclosing alarm here: `resolve_inference_batch` now times
+            # each candidate AND the whole search separately, so wrapping it
+            # in one more budget would recreate the very conflation this
+            # replaced.
+            inference_batch = resolve_inference_batch(
+                model_for_resolve,
+                segmentation_size=seg_size,
+                cap_bytes=cap_bytes,
+                budgets=_BUDGETS,
+                model_identity=model_type,
+            )
             del model_for_resolve
             gc.collect()
 
             model_for_bd = _build_model(model_type, model_cfg, loss_type)
-            with _forward_pass_timeout(_FORWARD_PASS_TIMEOUT_S, "inference_probe"):
+            with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "inference_probe"):
                 inference_probe = probe_activation_footprint(
                     model=model_for_bd,
                     loss_module=None,
@@ -677,6 +704,75 @@ def run_skill(sandbox, **kwargs):
             "memory_killer": report.memory_killer.model_dump(),
         }
 
+    except BatchSearchTimeout as e:
+        # A bounded search step ran out of time. The candidate measured
+        # nothing, so this must not reach the tuner as a capacity verdict.
+        # `timeout` rather than `inconclusive`: a deadline ACTUALLY
+        # elapsed here, and the caller must be able to tell that from an
+        # inspection that simply failed. Conflating the two produced a
+        # 65.6 s "timeout" against a 600 s deadline on 2026-07-31.
+        print(f"!!! [VRAMEval] TIMEOUT: {e.record.agent_facing_summary()}")
+        return {
+            "status": "timeout",
+            "message": e.record.agent_facing_summary(),
+            "timeout_record": e.record.model_dump(mode="json"),
+        }
+    except ForwardPassTimeoutError as e:
+        record = ProbeTimeoutRecord(
+            operation="model_inspection",
+            budget_seconds=_BUDGETS.single_probe_seconds,
+            elapsed_seconds=_BUDGETS.single_probe_seconds,
+            model_identity=model_type,
+            disposition="inconclusive",
+        )
+        print(f"!!! [VRAMEval] TIMEOUT: {e}")
+        return {
+            "status": "timeout",
+            "message": str(e),
+            "timeout_record": record.model_dump(mode="json"),
+        }
+    except RuntimeError as e:
+        # An allocation failure is a CANDIDATE-level fact and must be
+        # reported as one. On 2026-07-31 a baseline-scale candidate's
+        # torchinfo trace failed because the allocator refused it, and
+        # this handler filed it as "inconclusive" — which downstream
+        # became a TIMEOUT, after 3.771 s against a 600 s deadline.
+        memory_kind = classify_host_memory_exception(e)
+        if memory_kind is not None:
+            print(f"!!! [VRAMEval] {memory_kind.upper()} ALLOCATION FAILURE: {str(e)[:160]}")
+            return {
+                "status": "cuda_oom" if memory_kind == "cuda" else "host_memory",
+                "message": str(e)[:600],
+            }
+        # `torchinfo` tracing failure that is NOT an allocation problem. It
+        # is a DIAGNOSTIC convenience, not a capacity oracle: the
+        # authoritative parameter count already comes from the
+        # instantiated model, and real memory comes from the bounded CUDA
+        # probe. A tracing failure leaves the question open rather than
+        # answering it against the candidate.
+        if "torchinfo" not in str(e):
+            raise
+        record = ProbeTimeoutRecord(
+            operation="model_inspection",
+            budget_seconds=_BUDGETS.single_inspection_seconds,
+            elapsed_seconds=0.0,
+            model_identity=model_type,
+            phase="torchinfo_trace",
+            disposition="inconclusive",
+        )
+        # NO deadline elapsed here — tracing simply failed. Reported as
+        # inconclusive, never as a timeout.
+        print(f"!!! [VRAMEval] INCONCLUSIVE (torchinfo trace failed): {str(e)[:160]}")
+        return {
+            "status": "inconclusive",
+            "message": (
+                "VRAM pre-flight did not complete: structural tracing (torchinfo) "
+                "failed. This is an INCONCLUSIVE inspection result, not a "
+                "measurement of this model, and not a reason to reduce model "
+                "capacity or batch size."
+            ),
+            "timeout_record": record.model_dump(mode="json"),
+        }
     except Exception as e:
         import traceback
 
