@@ -3912,9 +3912,149 @@ chain log or forensic artifact, but it overwrote
 of the previous summary was recoverable from `gate0_runner.log` and has
 been restored with an explicit `reconstructed_from` note.
 
-- [ ] Operator approval for the deletion inventory (cold start).
-- [ ] Operator decision on the VRAM-budget conflict.
-- [ ] C14 executed.
+- [x] Operator approval for the deletion inventory (2026-07-31): the
+  pre-C14 Gate state was ARCHIVED, not deleted, to
+  `gate0/archive/pre_c14_20260730/` — 250 files, every SHA-256 verified
+  after the move, originals proven absent, archive made read-only, with
+  `SHA256SUMS.txt` written inside it.
+- [x] Operator decision on the VRAM-budget conflict (2026-07-31):
+  resolved AGAINST the generic Gate standard's 24/24. This final
+  V19-aligned Gate uses the formal V19 admission budget, and the operator
+  set that budget to **12/12** for both C14 and formal V19 — 2 x 12 =
+  24 GiB, which fits under both the 28 GiB pair ceiling and this host's
+  29.30 GiB quota, so a pair at cap cannot trip the host watchdog.
+- [x] C14 executed.
+
+---
+
+## C14 FINAL REPORT — verdict: **C14 PASS**
+
+**Launch SHA** `7f5f0c92d1b157eb602c5af84d2597e743235c51`
+**CI** run `30609654129` — ruff check, ruff format --check, strict
+pyright, pytest (guardrails included) all green on that exact head.
+
+### Execution
+
+| | |
+|---|---|
+| start / end | 2026-07-31 06:38:27 -> 07:14:05 UTC |
+| wall time | **35 min 38 s** (6 h cap unused) |
+| arch exit / loss exit | **0 / 0** (`/tmp/v19_c14_*.exit`) |
+| disposition | `pass_pending_analysis` |
+| iterations | **2/2 in both chains**, `completed_rounds=2` each |
+| orphans | none — screens gone, GPU back to 273 MiB idle |
+
+### Settings actually resolved (not merely passed)
+
+`--data_scope 15-19` with `--health_gate_files 15,16,17,18,19`;
+`num_iterations 2`, `max_rounds 2`, `max_proposal_attempts 3`,
+`max_epochs 1`; portions `0.02 / 1.0 / 0.01` for trial and formal;
+budgets 5 / 30 min; production LLM config
+`llm_configs/openai_tiered_v1.json`; HealthGate config
+`configs/health_checks_baseline_observe_mode.yaml`
+(sha256 `b1caccaf…`); lightweight Gate advice
+`advice/workflow/v19_gate0_{arch,loss}.json`
+(`f945fa8f…` / `5bacafe3…`); cold start, `--seed_paths` ABSENT.
+
+Fresh, unambiguous workspaces `v19_c14_{arch,loss}_15_19`, so this Gate's
+state can never be confused with the archived 2026-07-30 attempt or with
+formal V19.
+
+### Real lifecycle — every required stage exercised
+
+| Stage | arch | loss |
+|---|---|---|
+| real LLM proposal | `compact_wavenet_ce_budget_coldstart` | `compact_wavenet_label_smoothing_probe`, `wavenet_progressive_hardness_loss_probe` |
+| real implementation | yes | yes |
+| **REQUEST_PROBE -> bounded live probe** | **3** | **2** |
+| trial execution | 2 | 2 |
+| **forced formal** | 2 (+1 admission-skipped) | 2 |
+| iteration-2 restore | incumbent 2.4197, `basis=persisted` | incumbent 0.0506, `basis=persisted` |
+
+### The core invariant, observed in production
+
+Every probe resolution logged:
+
+```text
+Feasible : YES  (policy REQUEST_PROBE, evidence static_uncalibrated)
+[PROBE] Resolving REQUEST_PROBE with a bounded live probe of ...
+```
+
+The `static_uncalibrated` tier — the same tier that fabricated V19's
+84.64x and 8.12x rejections — was ADVISORY ONLY and forced a measurement
+instead of deciding. This is the redesign's reason for existing, seen on
+the production path rather than in a test.
+
+### Runtime evidence
+
+| Value | Evidence |
+|---|---|
+| admission factor **2.25** | `"formal_safety_factor": 2.25` x20 arch, x16 loss |
+| watchdog **3.5**, floor **120 s** | `"safety_factor": 3.5` x20 arch, x16 loss; `"watchdog": {"enabled": true}` |
+| VRAM budget **12.0** | `"vram_budget_gb": 12.0` x12 per chain |
+| CUDA OOM | **0** |
+| ABORT / infrastructure failure | **0** |
+
+Admission genuinely exercised blocking authority: arch iteration 1 has a
+formal attempt recorded `status=skipped_time_risk` — rejected before it
+ran, not rubber-stamped.
+
+### Pair aggregate VRAM
+
+Pre-launch guard: 24.00 GiB predicted against the 28.00 GiB ceiling, host
+quota 29.30 GiB (30,000 MiB) — PASS. Peak actually observed with both
+chains training concurrently: **1600 MiB total** (two processes at
+658 MiB). **No host-watchdog kill** during the run window; the failure
+that reaped the C12 probe did not recur.
+
+### HealthGate
+
+12 `gate_action: "continue"` per chain — every EXECUTED round evaluated.
+The single `gate_action: null` belongs to the `skipped_time_risk` round
+that never ran, so no completed round lacks a gate action. All 24
+recorded scores are FINITE; no phantom score was accepted.
+
+### Restore and isolation
+
+Both run-invariant locks: scope `[15,16,17,18,19]`,
+`health_gate_enabled: true`, ordering `sequential [15,16,17,18,19]`,
+`structured_health_feedback_enabled: true` (window 3, max 8), estimator
+`runtime_estimator@1.0.0+7b74a26d6843`, policy
+`runtime_decision_policy@1.0.0+7b0bce111d3d` — identical across chains.
+Chain incumbent coupling carried iteration 1 -> 2 with
+`provided == used` and a source naming `iter_idx: 1`. No arch/loss
+cross-contamination, no seed ingress, no formal relic reuse.
+
+### Artifacts and cost
+
+arch **131** files, loss **116** files: manifests, run-invariant locks,
+resolved configs, proposals, implementations, probe observations,
+runtime/admission records, HealthGate records, interpretation and
+feedback records, chain logs, token ledgers, pair summary.
+
+**41 API calls, 1,996,208 tokens**, all OpenAI (gpt-5.4 x29,
+gpt-5.4-mini x4, gpt-5.4-nano x8). The ledger records tokens but NOT
+billed cost, so no dollar figure is asserted here; at gpt-5.4 rates this
+is roughly $3-6, inside the $5-15 pre-registered estimate.
+
+### Verdict and unresolved limitation
+
+**C14 PASS.** Recommendation: **READY FOR FRESH V19 RESTART.**
+
+UNRESOLVED, non-blocking (carried forward from C12 F-1):
+`pairwise_expected_peer` remains **unreachable** whenever a registered
+peer is actually computing. In `classify_contention_window` the
+device-wide memory and sustained-utilization branches are evaluated
+BEFORE PID attribution, and both read device-wide telemetry, so an
+actively-training registered partner is indistinguishable from a
+stranger and is conservatively labelled `foreign_contended`. This is a
+precision loss, not a safety failure — a contended window is never
+mistaken for an idle one, so no contended measurement can contaminate an
+idle bucket. It is NOT fixed, and C14 did not re-test it (the two
+chains' probes did not overlap).
+
+Formal V19 was NOT launched by C14 and requires separate explicit
+operator approval.
 
 **Goal.** §26 Layers 4-5: bounded cold-start production smoke (real
 candidate, real probe, real estimator, real artifacts, no trajectory
