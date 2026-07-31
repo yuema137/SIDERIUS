@@ -164,6 +164,17 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             device_vram_gb=probe_device_vram_gb(),
         )
     except Exception as exc:
+        # An OOM is a MEASURED statement about the candidate, not about our
+        # infrastructure — classifying it as the latter would both mislabel
+        # the evidence and (via the C9b resolver) halt a chain for a model
+        # that merely does not fit.
+        from core.runtime_control.probe import is_out_of_memory
+
+        if is_out_of_memory(exc):
+            return _cell(
+                status="measured_failure",
+                failure_detail=f"probe OOM: {exc}",
+            )
         return _cell(
             status="infrastructure_failure",
             failure_detail=f"probe could not be built or run: {exc!r}",

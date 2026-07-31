@@ -450,3 +450,95 @@ class TestSelfPidExclusion:
                 source_run={"run_name": "t"},
             )
         } == {"unknown"}
+
+
+class TestRealCudaOomClassification:
+    """C12 finding (2026-07-31): `torch.cuda.OutOfMemoryError` subclasses
+    RuntimeError, NOT MemoryError. Every OOM handler caught MemoryError,
+    so a real CUDA OOM escaped unclassified — and the C9b resolver then
+    turned that into ABORT, halting the chain for a candidate that merely
+    did not fit. These tests use a CUDA-SHAPED exception, because the old
+    ones used MemoryError, a shape production cannot produce.
+    """
+
+    class _CudaOom(RuntimeError):
+        """Same name and base class as torch.cuda.OutOfMemoryError."""
+
+        __name__ = "OutOfMemoryError"
+
+    def _cuda_oom(self):
+        exc = type("OutOfMemoryError", (RuntimeError,), {})(
+            "CUDA out of memory. Tried to allocate 158.00 MiB. GPU 0 has a total "
+            "capacity of 31.34 GiB of which 115.31 MiB is free."
+        )
+        return exc
+
+    def test_the_detector_recognises_a_real_cuda_oom(self):
+        from core.runtime_control.probe import is_out_of_memory
+
+        assert is_out_of_memory(self._cuda_oom()) is True
+        assert is_out_of_memory(MemoryError("host oom")) is True
+        # message-based fallback for backends this repo does not import
+        assert is_out_of_memory(RuntimeError("HIP out of memory")) is True
+        # and it must not swallow unrelated failures
+        assert is_out_of_memory(RuntimeError("shape mismatch")) is False
+        assert is_out_of_memory(KeyError("missing")) is False
+
+    def test_a_cuda_oom_during_setup_is_measured_not_a_load_failure(self):
+        def _boom():
+            raise self._cuda_oom()
+
+        result = _probe(executors=_executors(setup=_boom))
+        assert result.status == "oom"  # was "load_failure" before the fix
+        assert "setup OOM" in (result.error or "")
+
+    def test_a_cuda_oom_during_training_is_measured_not_an_escape(self):
+        timings = iter([20.0, 20.0, 20.0, 21.0])
+
+        def _train():
+            try:
+                return next(timings)
+            except StopIteration:
+                raise self._cuda_oom() from None
+
+        result = _probe(
+            executors=ProbeExecutors(
+                setup=lambda: REALIZED,
+                train_step=_train,
+                inference_batch=lambda: 1.0,
+                peak_vram_gb=lambda: 30.9,
+            )
+        )
+        assert result.status == "oom"
+        assert result.peak_vram_gb == 30.9  # the measured peak survives
+
+    def test_a_cuda_oom_during_inference_is_measured(self):
+        def _infer():
+            raise self._cuda_oom()
+
+        result = _probe(
+            executors=ProbeExecutors(
+                setup=lambda: REALIZED,
+                train_step=lambda: 20.0,
+                inference_batch=_infer,
+                peak_vram_gb=lambda: 12.0,
+            )
+        )
+        assert result.status == "oom"
+        assert "inference OOM" in (result.error or "")
+
+    def test_a_non_oom_runtime_error_still_propagates(self):
+        """The fix must not turn every RuntimeError into an OOM."""
+
+        def _train():
+            raise RuntimeError("expected 3 channels, got 1")
+
+        with pytest.raises(RuntimeError, match="expected 3 channels"):
+            _probe(
+                executors=ProbeExecutors(
+                    setup=lambda: REALIZED,
+                    train_step=_train,
+                    inference_batch=lambda: 1.0,
+                    peak_vram_gb=lambda: 1.0,
+                )
+            )

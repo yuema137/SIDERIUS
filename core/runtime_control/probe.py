@@ -273,6 +273,29 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
         return ContentionSnapshot(telemetry_available=False)
 
 
+def is_out_of_memory(exc: BaseException) -> bool:
+    """Is this exception an out-of-memory condition?
+
+    CRITICAL (C12 finding, 2026-07-31): ``torch.cuda.OutOfMemoryError``
+    subclasses **RuntimeError, not MemoryError**. Every handler here used
+    to catch `MemoryError`, so a REAL CUDA OOM was never classified as a
+    measured failure — it escaped as an unclassified exception, which the
+    C9b resolver then turned into ABORT, halting the whole chain for a
+    candidate that merely did not fit. The unit tests never caught this
+    because they all raised `MemoryError`, a shape production cannot
+    produce.
+
+    Detection stays torch-free (this module must import no torch): the
+    exception TYPE NAME and message are checked instead, which also
+    covers accelerator backends this repo does not import.
+    """
+    if isinstance(exc, MemoryError):
+        return True
+    if type(exc).__name__ in ("OutOfMemoryError", "CudaOutOfMemoryError"):
+        return True
+    return isinstance(exc, RuntimeError) and "out of memory" in str(exc).lower()
+
+
 def run_bounded_probe(
     *,
     model_identity: str,
@@ -338,9 +361,9 @@ def run_bounded_probe(
         setup_start = clock()
         realized = executors.setup()
         setup_seconds = clock() - setup_start
-    except MemoryError as exc:
-        return _result("oom", error=f"setup OOM: {exc}")
     except Exception as exc:
+        if is_out_of_memory(exc):
+            return _result("oom", error=f"setup OOM: {exc}")
         return _result("load_failure", error=f"candidate load failed: {exc}")
     if _elapsed() > caps.max_wall_seconds:
         return _result(
@@ -369,7 +392,9 @@ def run_bounded_probe(
                     peak_vram_gb=executors.peak_vram_gb(),
                     error=f"wall cap hit after {i + 1} training steps",
                 )
-    except MemoryError as exc:
+    except Exception as exc:
+        if not is_out_of_memory(exc):
+            raise
         return _result(
             "oom",
             realized=realized,
@@ -395,7 +420,9 @@ def run_bounded_probe(
                     peak_vram_gb=executors.peak_vram_gb(),
                     error=f"wall cap hit after {i + 1} inference batches",
                 )
-    except MemoryError as exc:
+    except Exception as exc:
+        if not is_out_of_memory(exc):
+            raise
         return _result(
             "oom",
             realized=realized,
