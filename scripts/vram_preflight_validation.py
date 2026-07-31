@@ -91,10 +91,11 @@ def plan() -> dict:
 
 def run_candidate(entry: dict, output_root: Path) -> dict:
     """Run one pre-flight and reduce it to a single typed disposition."""
-    from agent.skills.evaluate_vram_skill.wrapper import main as vram_main
+    from agent.skills.evaluate_vram_skill.wrapper import run_skill
 
     started = time.perf_counter()
-    result = vram_main(
+    result = run_skill(
+        None,  # no sandbox: this harness probes in-process, like the tuner's pre-flight
         model_type=entry["model_type"],
         model_config=dict(entry["config"]),
         train_config={"batch_size": entry["config"].get("batch_size", 1), "device": "cuda"},

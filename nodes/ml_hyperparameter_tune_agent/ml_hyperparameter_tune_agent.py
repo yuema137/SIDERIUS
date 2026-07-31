@@ -87,6 +87,32 @@ from nodes.scoring_reference import load_reference_scores
 SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
 
 
+def _raise_if_inconclusive(resource_check: dict) -> None:
+    """Turn an INCONCLUSIVE pre-flight into its own typed failure.
+
+    An inconclusive pre-flight measured nothing. Treating it as a resource
+    rejection is what invalidated the V19 campaign stopped on 2026-07-31:
+    a batch-search timeout became "model too large", and the agent
+    downsized until it was proposing toy models. The attempt still cannot
+    proceed without a footprint, but it is recorded as an inspection gap
+    and MUST NOT enter capacity feedback.
+
+    Module-level rather than inline: `run()` already sits at pyright's
+    complexity-analysis ceiling, and adding this branch inline pushed it
+    over.
+    """
+    if resource_check.get("status") != "inconclusive":
+        return
+    print(
+        "    [VRAM] INCONCLUSIVE pre-flight — recorded as an inspection gap, "
+        "NOT as evidence about this model."
+    )
+    raise InconclusivePreflight(
+        str(resource_check.get("message", "")),
+        record=resource_check.get("timeout_record") or {},
+    )
+
+
 def _classify_attempt_failure(exc: BaseException, failure_stage: str | None) -> str:
     """Name what went wrong, keeping "we could not measure" separate from
     "the model misbehaved".
@@ -2823,22 +2849,7 @@ class HyperparamTuningAgent:
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
-                    # An INCONCLUSIVE pre-flight measured nothing. Treating it
-                    # as a resource rejection is what invalidated the V19
-                    # campaign stopped on 2026-07-31: a batch-search timeout
-                    # became "model too large", and the agent downsized until
-                    # it was proposing toy models. The attempt still cannot
-                    # proceed without a footprint, but it is recorded as an
-                    # inspection gap and MUST NOT enter capacity feedback.
-                    if resource_check.get("status") == "inconclusive":
-                        print(
-                            "    [VRAM] INCONCLUSIVE pre-flight — recorded as an "
-                            "inspection gap, NOT as evidence about this model."
-                        )
-                        raise InconclusivePreflight(
-                            str(resource_check.get("message", "")),
-                            record=resource_check.get("timeout_record") or {},
-                        )
+                    _raise_if_inconclusive(resource_check)
 
                     # Phase D.4 — constraint-aware retry. The wrapper returns
                     # ``status="schema_violation"`` when the plugin's
