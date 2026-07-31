@@ -3804,7 +3804,64 @@ references).
 races.
 **Migration/rollback.** shell-only.
 **Boundary.** Queue/chain stop semantics + cleanup.
-- [ ] Evidence recorded.
+- [x] Stop semantics implemented and tested (code below).
+- [ ] Recovery cleanup — deletion inventory NOT yet presented; blocked on
+  operator approval (destructive).
+
+**Implementation record (C13 stop semantics, 2026-07-31).**
+
+*The defect, reproduced as a test.* `run_chain()` in
+`_chain_common.sh` looped `for ITER in $(seq ...)` and ignored
+`submit_iteration`'s status entirely. Killing the iteration Python ended
+one child; the loop then built iteration 2 and ran it. Every test in
+`tests/unit/sdsc_submission_scripts/test_c13_stop_semantics.py` drives
+the REAL loop with a stub `submit_iteration` that records which
+iterations were entered, so the guarantee is asserted, not described.
+
+*Two stop channels, because the two real situations differ.* A stop FILE
+(`$WORKSPACE/STOP`, overridable via `CHAIN_STOP_FILE`) is the graceful
+request an operator can make without touching a running process. A
+SIGNAL — TERM/INT/HUP trapped by the script, or an iteration child that
+exits `128+N` — is the chain being killed from outside. Either stops the
+loop at its next checkpoint, writes `chain_stopped.json`, and starts
+nothing further. The trap deliberately records and defers rather than
+dying mid-iteration, so the stop always leaves a record.
+
+*Scope decision (from the C13 spec wording "no automatic
+next-iteration respawn after an OPERATOR-DIRECTED stop").* An ordinary
+non-zero iteration exit is NOT treated as a stop — the frozen
+continuation policy is unchanged. Only a signalled child or an explicit
+stop ends the loop. A test pins both directions.
+
+*Queue runner.* The same two channels (`$WS_ROOT/STOP`,
+`QUEUE_STOP_FILE`, or a signal), checked before each wave and after each
+wave completes; a `queue_stopped` record appended to
+`v19_wave_state.jsonl`; exit 99. A chain that exited 99 is logged as
+stopped-on-request and suppresses the targeted-restart suggestion.
+`wait_and_record` gained a bounded wall cap (`WAVE_WALL_SECONDS`,
+default 86400): on breach the QUEUE stops and records
+`wave_wall_cap_exceeded`, and the running chains are deliberately left
+alone — killing them stays an operator act, and a queue that kills its
+own chains on a timer would destroy exactly the evidence a stalled wave
+needs. A pair summary is now written on EVERY exit path, including the
+previously silent failed-launch path (`disposition: launch_failed`).
+
+*Already present from the Gate-runner port (verified, not re-done).*
+90 s pair stagger, in-session screen-PID self-report
+(`$EXIT_DIR/<run>.pid`), marker-based completion
+(`$EXIT_DIR/<run>.exit`), authoritative per-chain status in
+`v19_wave_state.jsonl` rather than log text, and persistent logs under
+`$WS_ROOT` (`screen -L -Logfile`) with only small markers in `/tmp` —
+no full stdout duplication.
+
+*Tests.* 14 new (193 in the shell suite): stop-file up front / mid-chain
+/ relocated, no-stop control, signalled child at 137/143/130, ordinary
+failure continues, record content and validity, queue stop-file, queue
+stop record, bounded and configurable wall cap, stop exit code.
+
+*Operator surface.* `docs/running_chain_test.md` gains a "Stopping a
+chain or the queue" section with both channels, both env overrides, the
+record fields and the exit code.
 
 ### C14 — `docs(runtime): acceptance evidence, cold-start smoke, and V19 restart stop-and-show`
 

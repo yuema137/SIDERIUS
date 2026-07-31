@@ -62,6 +62,15 @@ EXIT_DIR="${EXIT_DIR:-/tmp}"
 MAX_CONC=2
 LOGF="$WS_ROOT/v19_queue_runner.log"
 WAVE_STATE="$WS_ROOT/v19_wave_state.jsonl"
+# C13: a wave cannot wait forever. On breach the queue STOPS and reports;
+# it never kills a running chain on its own — that stays an operator act.
+WAVE_WALL_SECONDS="${WAVE_WALL_SECONDS:-86400}"
+# C13: operator stop. Either touch this file or signal the runner; the
+# queue then finishes what is already running and starts nothing new.
+QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$WS_ROOT/STOP}"
+#: Exit code a chain uses when it stopped on request (run_chain.sh).
+CHAIN_STOP_EXIT_CODE=99
+QUEUE_STOP_SIGNAL=""
 
 # Frozen waves (operator 2026-07-29): wave : scope : monitored files.
 # Chain names derive as v19_{arch,loss}_<band-tag>; both families of a
@@ -101,6 +110,29 @@ file_order_for_scope() {
 }
 
 log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$LOGF"; }
+
+_queue_note_signal() {
+  QUEUE_STOP_SIGNAL="$1"
+  log "STOP: $1 received — no further wave will be launched"
+}
+trap '_queue_note_signal SIGTERM' TERM
+trap '_queue_note_signal SIGINT'  INT
+trap '_queue_note_signal SIGHUP'  HUP
+
+queue_stop_requested() {
+  [ -n "$QUEUE_STOP_SIGNAL" ] && return 0
+  [ -e "$QUEUE_STOP_FILE" ] && return 0
+  return 1
+}
+
+# Explicit stopped-wave state, written on every stop path so the reason
+# is a record rather than something inferred from log text.
+record_queue_stop() {  # reason wave detail
+  printf '{"queue_stopped": true, "reason": "%s", "signal": "%s", "wave": "%s", "detail": "%s", "stopped_at": "%s", "runner_pid": %s, "respawn": false}\n' \
+    "$1" "${QUEUE_STOP_SIGNAL:-none}" "$2" "$3" \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$$" >> "$WAVE_STATE"
+  log "QUEUE STOPPED ($1) at wave $2: $3"
+}
 
 # Authoritative completion check: a v19_wave_state.jsonl record with
 # "exit": 0 for this run name (persisted status, never log text).
@@ -213,17 +245,31 @@ marker_exit() {  # run -> exit code or "missing"
 wait_and_record() {  # wave start_ts run1 [run2]
   local WAVE="$1" START="$2"; shift 2
   local RUNS=("$@")
+  local WAITED=0
   while true; do
     local alive=0 r
     for r in "${RUNS[@]}"; do chain_screen_alive "$r" && alive=1; done
     [ "$alive" = 0 ] && break
+    if [ "$WAITED" -ge "$WAVE_WALL_SECONDS" ]; then
+      # Bounded, and deliberately non-destructive: the chains keep running
+      # and keep their workspaces; the QUEUE stops so an operator decides.
+      record_queue_stop "wave_wall_cap_exceeded" "$WAVE" \
+        "waited ${WAITED}s (cap ${WAVE_WALL_SECONDS}s) for: ${RUNS[*]}"
+      return 1
+    fi
     sleep 60
+    WAITED=$(( WAITED + 60 ))
   done
   local END; END="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   local all_ok=1
   for r in "${RUNS[@]}"; do
     local code; code="$(marker_exit "$r")"
     [ "$code" = "0" ] || all_ok=0
+    if [ "$code" = "$CHAIN_STOP_EXIT_CODE" ]; then
+      # The chain stopped on request. That is not a fault to restart from.
+      log "WAVE $WAVE chain $r STOPPED on request (EXIT=$code) — no restart suggested"
+      QUEUE_STOP_SIGNAL="${QUEUE_STOP_SIGNAL:-chain_stop_$r}"
+    fi
     record_chain "$r" "$WAVE" "${code/missing/-1}" "$START" "$END" "$(chain_pid "$r")"
     log "WAVE $WAVE chain $r finished: EXIT=$code"
   done
@@ -275,6 +321,13 @@ fi
 log "v19 pairwise queue started: waves=${#WAVES[@]} max_conc=$MAX_CONC resume=${V19_RESUME:-0}"
 for wave_spec in "${WAVES[@]}"; do
   IFS=: read -r WAVE SCOPE FILES <<< "$wave_spec"
+
+  # C13: an operator stop ends the QUEUE LOOP, not just one chain.
+  if queue_stop_requested; then
+    record_queue_stop "operator_stop_requested" "$WAVE" \
+      "stop observed before wave $WAVE (band $SCOPE) was launched"
+    exit "$CHAIN_STOP_EXIT_CODE"
+  fi
   TAG="$(band_tag "$SCOPE")"
   ARCH_RUN="v19_arch_$TAG"
   LOSS_RUN="v19_loss_$TAG"
@@ -306,6 +359,13 @@ for wave_spec in "${WAVES[@]}"; do
       # Any already-launched partner keeps running; wait for it so its
       # status is recorded before the queue exits.
       [ "${#LAUNCHED[@]}" -gt 0 ] && wait_and_record "$WAVE" "$START" "${LAUNCHED[@]}"
+      # C13: a pair summary on EVERY exit path, including this one — an
+      # aborted wave must not be the one case that leaves no summary.
+      record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
+        "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
+        "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
+        "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
+        "$START" "$(date -u '+%Y-%m-%dT%H:%M:%S')" "launch_failed"
       exit 1
     fi
   done
@@ -321,6 +381,11 @@ for wave_spec in "${WAVES[@]}"; do
     "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
     "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
     "$START" "$END_TS" "$DISPOSITION"
+  if queue_stop_requested && [ "$DISPOSITION" != "complete" ]; then
+    record_queue_stop "operator_stop_requested" "$WAVE" \
+      "wave $WAVE ended under an operator stop — no further wave launched"
+    exit "$CHAIN_STOP_EXIT_CODE"
+  fi
   if [ "$DISPOSITION" = "complete" ]; then
     log "WAVE $WAVE (band $SCOPE): both chains EXIT=0 — proceeding"
   else

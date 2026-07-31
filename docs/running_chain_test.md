@@ -99,6 +99,56 @@ idempotent rerun is the expected behaviour for cron-driven chains.
 | `--dry-run` | OFF | Walk the full chain loop printing the exact command per iter (with `DRYRUN_iter_NNN` placeholders for sdsc dependency wiring) **without touching the workspace, calling python, or submitting jobs**. Side-effect-free; `${WORKSPACE}` is never created. Use for sanity-checking arg parsing + dependency chain before committing to a real run. |
 | `--num_iterations N` | 2 | Total iters to walk. |
 
+### Stopping a chain or the queue (C13, operator surface)
+
+Killing the iteration Python used to end only that child — `run_chain.sh`
+then started the next iteration anyway (the V19 wave-1 respawn). Stopping
+now ends the LOOP, and every stop leaves an explicit record.
+
+**Stop one chain.** Either is sufficient:
+
+```bash
+touch "$WORKSPACE/STOP"          # graceful: finishes the current iteration
+kill -TERM <run_chain.sh pid>    # same effect; the trap stops the loop
+```
+
+The chain finishes the iteration it is in, starts no further iteration,
+writes `$WORKSPACE/chain_stopped.json`, and exits **99**. Killing the
+iteration Python directly also works: a child that exits `128+N` is
+treated as an external stop, and the loop does not continue.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `CHAIN_STOP_FILE` | `$WORKSPACE/STOP` | Where the chain looks for a stop request. |
+
+`chain_stopped.json` records `reason`, `signal`,
+`stopped_before_iteration`, `iterations_planned`, `run_name`,
+`workspace`, `chain_pid`, `stopped_at` and `respawn: false`.
+
+**Stop the queue.** Same two channels, at the runner:
+
+```bash
+touch "$WS_ROOT/STOP"            # or: kill -TERM <v19_queue_runner.sh pid>
+```
+
+The queue lets the running wave finish, launches no further wave, appends
+a `queue_stopped` record to `v19_wave_state.jsonl`, and exits 99. A chain
+that exited 99 is logged as stopped-on-request and does **not** produce a
+targeted-restart suggestion.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `QUEUE_STOP_FILE` | `$WS_ROOT/STOP` | Where the queue looks for a stop request. |
+| `WAVE_WALL_SECONDS` | `86400` | Bound on how long one wave may be waited on. On breach the QUEUE stops and records `wave_wall_cap_exceeded`; running chains are left alone — killing them stays an operator act. |
+
+Reasons: `operator_stop_requested`, `iteration_terminated_by_signal`,
+`wave_wall_cap_exceeded`. A wave summary is written on every exit path,
+including a failed launch (`disposition: launch_failed`).
+
+An ordinary non-zero iteration is **not** a stop: the frozen continuation
+policy is unchanged, because the no-respawn rule is scoped to an
+operator-directed stop.
+
 ### §3.2 flags (full input contract)
 The full set of `--max_rounds`, `--max_proposal_attempts`,
 `--data_dir`, etc. is the §3.2 contract (`--trial_strategy` and

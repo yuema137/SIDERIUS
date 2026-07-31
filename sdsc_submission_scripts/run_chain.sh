@@ -308,7 +308,15 @@ case "$MODE" in
     sdsc)  HEADER_LABEL="SDSC (Slurm afterany)" ;;
 esac
 print_chain_header "$HEADER_LABEL"
-run_chain
+CHAIN_STATUS=0
+run_chain || CHAIN_STATUS=$?
+
+# An operator-stopped chain reports the stop as its own outcome: it did
+# NOT complete, and printing a completion banner would misreport it.
+# run_chain has already written the stopped-chain state record.
+if [ "$CHAIN_STATUS" -ne 0 ]; then
+    exit "$CHAIN_STATUS"
+fi
 
 echo ""
 echo "############################################################"
