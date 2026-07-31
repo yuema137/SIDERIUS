@@ -4032,10 +4032,18 @@ resolved configs, proposals, implementations, probe observations,
 runtime/admission records, HealthGate records, interpretation and
 feedback records, chain logs, token ledgers, pair summary.
 
-**41 API calls, 1,996,208 tokens**, all OpenAI (gpt-5.4 x29,
-gpt-5.4-mini x4, gpt-5.4-nano x8). The ledger records tokens but NOT
-billed cost, so no dollar figure is asserted here; at gpt-5.4 rates this
-is roughly $3-6, inside the $5-15 pre-registered estimate.
+**41 API calls, 998,104 tokens** (arch 541,102 + loss 457,002), all
+OpenAI (gpt-5.4 x29, gpt-5.4-mini x4, gpt-5.4-nano x8). The ledger
+records usage but NOT billed cost, so no billed figure is asserted; at a
+conservative blended $3.00/1M this is about **$3.00**, inside the $5-15
+pre-registered estimate.
+
+An earlier draft of this section reported 1,996,208 tokens. That was
+exactly double, from summing a ledger record's `tokens` object whose
+`total` key already includes `prompt` and `completion`. The figure above
+comes from `scripts/campaign_spend.py`, which addresses `tokens.total`
+explicitly — the same trap would have inflated the campaign cost cap,
+since a record also carries a `chars.total`.
 
 ### Verdict and unresolved limitation
 

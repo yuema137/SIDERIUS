@@ -219,7 +219,12 @@ class TestLaunchCommandContent:
 
     def test_v18_settings_unchanged(self):
         for flag in (
-            "--num_iterations 20",
+            # 20 -> 10 (operator 2026-07-31): the fresh campaign runs a
+            # 10-iteration treatment to bound cost, wall time and GPU use.
+            # Rendered from CAMPAIGN_ITERATIONS, deliberately NOT
+            # NUM_ITERATIONS — _chain_common.sh sets that to 2, and a
+            # `${NUM_ITERATIONS:-10}` here silently resolved to 2.
+            "--num_iterations $CAMPAIGN_ITERATIONS",
             "--max_rounds 3",
             "--max_epochs 1",
             "--skip_formal_min_delta 0.0",

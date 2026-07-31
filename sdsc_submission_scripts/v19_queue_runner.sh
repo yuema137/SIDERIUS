@@ -59,14 +59,46 @@ set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=_chain_common.sh
 source "$REPO/sdsc_submission_scripts/_chain_common.sh"
+# Campaign identity (operator 2026-07-31). Every name the campaign
+# produces derives from this one value — run names, workspaces, queue
+# state, logs, summaries, screens — so a fresh campaign cannot collide
+# with, or be mistaken for, the stopped uncalibrated-preflight campaign
+# or any Gate. Required: there is no safe default, because a default
+# would silently reuse someone else's identity.
+CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"
+#: 10 iterations per chain (operator 2026-07-31), replacing the frozen
+#: 20-iteration plan, to bound API cost, wall time and GPU use while
+#: keeping multi-iteration scientific evolution.
+#:
+#: Deliberately NOT named NUM_ITERATIONS: this file sources
+#: _chain_common.sh, which sets NUM_ITERATIONS=2 as its own default, so a
+#: `${NUM_ITERATIONS:-10}` here silently resolved to 2. A campaign-scoped
+#: name cannot be shadowed by a library default, now or later.
+CAMPAIGN_ITERATIONS="${CAMPAIGN_ITERATIONS:-10}"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 MAX_CONC=2
-LOGF="$WS_ROOT/v19_queue_runner.log"
-WAVE_STATE="$WS_ROOT/v19_wave_state.jsonl"
+LOGF="$WS_ROOT/${CAMPAIGN_ID}_queue_runner.log"
+WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
 # C13: a wave cannot wait forever. On breach the queue STOPS and reports;
 # it never kills a running chain on its own — that stays an operator act.
-WAVE_WALL_SECONDS="${WAVE_WALL_SECONDS:-86400}"
+# 72 h per wave (operator 2026-07-31). The former 24 h was sized for a
+# Gate; a formal wave at production portions runs far longer. This is a
+# conservative safety bound, NOT a target — the 10-iteration treatment is
+# expected to finish well inside it.
+WAVE_WALL_SECONDS="${WAVE_WALL_SECONDS:-259200}"
+#: 12 days for the whole campaign.
+CAMPAIGN_WALL_SECONDS="${CAMPAIGN_WALL_SECONDS:-1036800}"
+#: Hard token and estimated-cost ceilings for the campaign. Crossing
+#: either stops the queue cleanly; neither may be raised mid-campaign
+#: without explicit operator approval.
+CAMPAIGN_TOKEN_CAP="${CAMPAIGN_TOKEN_CAP:-60000000}"
+CAMPAIGN_COST_CAP_USD="${CAMPAIGN_COST_CAP_USD:-180}"
+#: Conservative blended $/1M tokens used only when the ledger records no
+#: billed cost, which it currently does not. Documented rather than
+#: hidden, so the number in the report is auditable.
+COST_PER_MTOK_USD="${COST_PER_MTOK_USD:-3.00}"
+CAMPAIGN_START_EPOCH="$(date -u +%s)"
 # C13: operator stop. Either touch this file or signal the runner; the
 # queue then finishes what is already running and starts nothing new.
 QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$WS_ROOT/STOP}"
@@ -89,14 +121,14 @@ WAVES=(
 
 # Full roster in wave order (for --only validation + targeted serial runs).
 ROSTER=(
-  "v19_arch_15_19:15-19:15,16,17,18,19:arch"
-  "v19_loss_15_19:15-19:15,16,17,18,19:loss"
-  "v19_arch_10_14:10-14:10,11,12,13,14:arch"
-  "v19_loss_10_14:10-14:10,11,12,13,14:loss"
-  "v19_arch_04_09:4-9:4,5,6,7,8,9:arch"
-  "v19_loss_04_09:4-9:4,5,6,7,8,9:loss"
-  "v19_arch_00_03:0-3:0,1,2,3:arch"
-  "v19_loss_00_03:0-3:0,1,2,3:loss"
+  "${CAMPAIGN_ID}_arch_15_19:15-19:15,16,17,18,19:arch"
+  "${CAMPAIGN_ID}_loss_15_19:15-19:15,16,17,18,19:loss"
+  "${CAMPAIGN_ID}_arch_10_14:10-14:10,11,12,13,14:arch"
+  "${CAMPAIGN_ID}_loss_10_14:10-14:10,11,12,13,14:loss"
+  "${CAMPAIGN_ID}_arch_04_09:4-9:4,5,6,7,8,9:arch"
+  "${CAMPAIGN_ID}_loss_04_09:4-9:4,5,6,7,8,9:loss"
+  "${CAMPAIGN_ID}_arch_00_03:0-3:0,1,2,3:arch"
+  "${CAMPAIGN_ID}_loss_00_03:0-3:0,1,2,3:loss"
 )
 
 band_tag() {  # 15-19 -> 15_19
@@ -159,6 +191,18 @@ record_wave_summary() {  # wave band arch_run loss_run arch_pid loss_pid arch_ex
 
 chain_screen_alive() { screen -ls 2>/dev/null | grep -qF ".siderius-$1"$'\t'; }
 
+# Campaign spend, summed from every chain's own token ledger. Returns
+# "<tokens> <estimated_usd>". Reading the ledgers rather than keeping a
+# running total means a queue restart cannot lose what was already spent.
+campaign_spend() {
+  # Delegated to Python: a ledger record nests BOTH a token total and a
+  # character total, so a shell scan for "total" silently inflates the
+  # number the cost cap depends on.
+  "$REPO/.venv/bin/python" "$REPO/scripts/campaign_spend.py" \
+      --root "$WS_ROOT" --campaign-id "$CAMPAIGN_ID" \
+      --cost-per-mtok "$COST_PER_MTOK_USD" 2>/dev/null || echo "0 0.00"
+}
+
 # Launch one chain in its own screen; marker carries the exit code.
 launch_chain() {
   local RUN="$1" SCOPE="$2" FILES="$3" FLAVOR="$4"
@@ -188,10 +232,17 @@ launch_chain() {
       --mode lilab \
       --workspace '$WS' \
       --run_name '$RUN' \
-      --num_iterations 20 \
+      --num_iterations $CAMPAIGN_ITERATIONS \
       --auto_resume \
       --max_rounds 3 \
+      --max_proposal_attempts 3 \
       --max_epochs 1 \
+      --trial_portion 0.1 \
+      --train_portion 0.1 \
+      --eval_portion 0.1 \
+      --formal_portion 0.1 \
+      --formal_train_portion 1.0 \
+      --formal_eval_portion 1.0 \
       --data_scope '$SCOPE' \
       --health_gate_files '$FILES' \
       --enable_chain_incumbent_formal_gates \
@@ -327,6 +378,29 @@ log "v19 pairwise queue started: waves=${#WAVES[@]} max_conc=$MAX_CONC resume=${
 for wave_spec in "${WAVES[@]}"; do
   IFS=: read -r WAVE SCOPE FILES <<< "$wave_spec"
 
+  # Campaign wall cap.
+  ELAPSED=$(( $(date -u +%s) - CAMPAIGN_START_EPOCH ))
+  if [ "$ELAPSED" -ge "$CAMPAIGN_WALL_SECONDS" ]; then
+    record_queue_stop "campaign_wall_cap_exceeded" "$WAVE" \
+      "elapsed ${ELAPSED}s of ${CAMPAIGN_WALL_SECONDS}s before wave $WAVE"
+    exit 1
+  fi
+
+  # Token / cost caps. Counted from the per-chain ledgers rather than a
+  # running total the queue keeps, so a restart cannot lose the spend.
+  read -r SPENT_TOKENS SPENT_COST <<< "$(campaign_spend)"
+  log "WAVE $WAVE budget: ${SPENT_TOKENS} tokens (cap ${CAMPAIGN_TOKEN_CAP}), \$${SPENT_COST} (cap \$${CAMPAIGN_COST_CAP_USD}), elapsed ${ELAPSED}s of ${CAMPAIGN_WALL_SECONDS}s"
+  if [ "$SPENT_TOKENS" -ge "$CAMPAIGN_TOKEN_CAP" ]; then
+    record_queue_stop "token_cap_reached" "$WAVE" \
+      "${SPENT_TOKENS} tokens >= cap ${CAMPAIGN_TOKEN_CAP}"
+    exit 1
+  fi
+  if [ "$(printf '%.0f' "$SPENT_COST")" -ge "$CAMPAIGN_COST_CAP_USD" ]; then
+    record_queue_stop "cost_cap_reached" "$WAVE" \
+      "estimated \$${SPENT_COST} >= cap \$${CAMPAIGN_COST_CAP_USD}"
+    exit 1
+  fi
+
   # C13: an operator stop ends the QUEUE LOOP, not just one chain.
   if queue_stop_requested; then
     record_queue_stop "operator_stop_requested" "$WAVE" \
@@ -334,8 +408,8 @@ for wave_spec in "${WAVES[@]}"; do
     exit "$CHAIN_STOP_EXIT_CODE"
   fi
   TAG="$(band_tag "$SCOPE")"
-  ARCH_RUN="v19_arch_$TAG"
-  LOSS_RUN="v19_loss_$TAG"
+  ARCH_RUN="${CAMPAIGN_ID}_arch_$TAG"
+  LOSS_RUN="${CAMPAIGN_ID}_loss_$TAG"
 
   NEEDED=()
   for RUN in "$ARCH_RUN" "$LOSS_RUN"; do
