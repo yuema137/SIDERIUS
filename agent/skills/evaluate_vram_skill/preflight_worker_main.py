@@ -7,33 +7,28 @@ else: model construction, structural inspection, and the bounded CUDA
 probe. The parent stays small so that it survives whatever this process
 does.
 
-Ordering inside this file is load-bearing. `RLIMIT_AS` is applied
-BEFORE torch is imported and before anything is constructed, because a
-limit set after allocation protects nothing. That is the mistake the
-2026-07-31 host OOM made structurally possible: the pre-flight ran in the
-long-lived process, so by the time memory grew there was no boundary left
-to enforce.
+Host memory is bounded by the PARENT, which samples this process tree's
+resident memory. `RLIMIT_AS` is deliberately NOT used.
+
+That was tried and measured on 2026-07-31 (SHA d83f397). `RLIMIT_AS`
+bounds VIRTUAL ADDRESS SPACE, and importing torch plus touching CUDA
+reserves ~19.0 GiB of address space while holding ~0.65 GiB resident:
+
+    before torch : VmSize    38 MiB   VmRSS  13 MiB
+    after torch  : VmSize  5.9 GiB    VmRSS 0.5 GiB
+    after cuda   : VmSize 19.0 GiB    VmRSS 0.65 GiB
+
+A 24 GiB address-space limit therefore left ~5 GiB for real work, and all
+three validation candidates failed to allocate while their resident
+memory was only 3.9-5.7 GiB. Reservation is not consumption; using one to
+bound the other is the same error as using wall time to bound memory.
 """
 
 from __future__ import annotations
 
 import json
-import resource
 import sys
 from pathlib import Path
-
-
-def _apply_memory_limit(limit_bytes: int) -> None:
-    """Bound this process's address space, before importing torch.
-
-    Uses the soft limit only, and never raises the hard limit, so the
-    worker can be bounded further by an outer mechanism but never loosen
-    itself.
-    """
-    _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    ceiling = limit_bytes if hard == resource.RLIM_INFINITY else min(limit_bytes, hard)
-    resource.setrlimit(resource.RLIMIT_AS, (ceiling, hard))
-    print(f"[worker] RLIMIT_AS soft limit set to {ceiling / 1024**3:.2f} GiB", flush=True)
 
 
 def _write(result_path: str, payload: dict) -> None:
@@ -53,8 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     spec = json.loads(Path(args[0]).read_text(encoding="utf-8"))
     result_path = spec["result_path"]
 
-    # FIRST, before torch exists in this process.
-    _apply_memory_limit(int(spec["worker_memory_limit_bytes"]))
+    limit_gib = int(spec["worker_memory_limit_bytes"]) / 1024**3
+    print(
+        f"[worker] host memory bounded by the parent RSS monitor at "
+        f"{limit_gib:.1f} GiB (RLIMIT_AS deliberately not used)",
+        flush=True,
+    )
 
     try:
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
@@ -68,20 +67,39 @@ def main(argv: list[str] | None = None) -> int:
             loss_config=dict(spec.get("loss_config") or {}),
             vram_budget_gb=spec["vram_budget_gb"],
         )
-    except MemoryError as exc:
-        # RLIMIT_AS refused an allocation. The candidate exceeded its host
-        # allowance, which is a real measured fact — and a different fact
-        # from "it does not fit the GPU".
-        _write(
-            result_path,
-            {
-                "outcome": "MEASURED_HOST_MEMORY_EXCEEDED",
-                "detail": f"allocation refused by RLIMIT_AS: {exc}",
-                "phase": "worker_allocation",
-            },
+    except BaseException as exc:
+        from agent.skills.evaluate_vram_skill.probe_budgets import (
+            classify_host_memory_exception,
         )
-        return 0
-    except Exception as exc:
+
+        # A CANDIDATE that cannot be allocated is a candidate-level fact,
+        # not a broken measurement system. PyTorch reports CPU allocation
+        # failure as a plain RuntimeError, which `except MemoryError`
+        # missed — two candidates were filed as infrastructure failures
+        # on 2026-07-31 for exactly that reason.
+        memory_kind = classify_host_memory_exception(exc)
+        if memory_kind == "host":
+            _write(
+                result_path,
+                {
+                    "outcome": "HOST_MEMORY_ALLOCATION_FAILURE",
+                    "detail": f"{type(exc).__name__}: {exc}"[:800],
+                    "phase": "worker_allocation",
+                },
+            )
+            return 0
+        if memory_kind == "cuda":
+            _write(
+                result_path,
+                {
+                    "outcome": "MEASURED_CUDA_OOM",
+                    "detail": f"{type(exc).__name__}: {exc}"[:800],
+                    "phase": "cuda_probe",
+                },
+            )
+            return 0
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
         _write(
             result_path,
             {
@@ -116,6 +134,18 @@ def _classify(outcome: dict) -> dict:
             "schema_message": str(first.get("message") or outcome.get("message") or "")[:300],
             "phase": "schema_validation",
         }
+    if status == "host_memory":
+        return {
+            "outcome": "HOST_MEMORY_ALLOCATION_FAILURE",
+            "detail": str(outcome.get("message") or "")[:400],
+            "phase": "host_allocation",
+        }
+    if status == "cuda_oom":
+        return {
+            "outcome": "MEASURED_CUDA_OOM",
+            "detail": str(outcome.get("message") or "")[:400],
+            "phase": "cuda_probe",
+        }
     if status == "inconclusive":
         return {
             "outcome": "MEASURED_HARD_TIMEOUT",
@@ -123,12 +153,19 @@ def _classify(outcome: dict) -> dict:
             "phase": (outcome.get("timeout_record") or {}).get("operation") or "inspection",
         }
     if status == "error":
+        from agent.skills.evaluate_vram_skill.probe_budgets import (
+            classify_host_memory_exception,
+        )
+
         message = str(outcome.get("message") or "")
-        if "out of memory" in message.lower() or "OutOfMemoryError" in message:
+        kind = classify_host_memory_exception(RuntimeError(message))
+        if kind == "cuda":
+            return {"outcome": "MEASURED_CUDA_OOM", "detail": message[:400], "phase": "cuda_probe"}
+        if kind == "host":
             return {
-                "outcome": "MEASURED_CUDA_OOM",
+                "outcome": "HOST_MEMORY_ALLOCATION_FAILURE",
                 "detail": message[:400],
-                "phase": "cuda_probe",
+                "phase": "host_allocation",
             }
         return {
             "outcome": "PROBE_INFRASTRUCTURE_FAILURE",

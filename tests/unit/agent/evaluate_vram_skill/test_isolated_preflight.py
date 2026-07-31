@@ -280,13 +280,36 @@ class TestParentStaysSmall:
         source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
         assert "import torch" not in source
 
-    def test_the_worker_applies_its_limit_before_importing_torch(self):
+    def test_the_worker_does_not_use_rlimit_as(self):
+        """RLIMIT_AS bounds VIRTUAL ADDRESS SPACE, and torch+CUDA reserve
+        ~19.0 GiB of it while holding ~0.65 GiB resident. Using it as a
+        memory bound made all three validation candidates fail to allocate
+        at 3.9-5.7 GiB RSS (2026-07-31, SHA d83f397)."""
+        import ast
+
+        path = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+        tree = ast.parse(path.read_text())
+        # Executable code only: the module docstring and one log line
+        # deliberately NAME RLIMIT_AS to record why it is not used.
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        assert "resource" not in imported
+        calls = {
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert "setrlimit" not in calls
+
+    def test_the_worker_states_who_bounds_its_memory(self):
         source = (
             REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
         ).read_text()
-        limit_at = source.index("_apply_memory_limit(int(spec[")
-        import_at = source.index("from agent.skills.evaluate_vram_skill.wrapper import run_skill")
-        assert limit_at < import_at, "the limit must be set before torch can be loaded"
+        assert "parent RSS monitor" in source
 
     def test_the_worker_runs_in_its_own_process_group(self):
         source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/isolated_probe.py").read_text()
@@ -463,14 +486,14 @@ class TestBatchSearchSurvivesAnUnprobeableCandidate:
         ],
     )
     def test_every_memory_shaped_error_is_recognised(self, exc):
-        from agent.skills.evaluate_vram_skill.batch_resolver import _is_memory_error
+        from agent.skills.evaluate_vram_skill.probe_budgets import is_memory_exception
 
-        assert _is_memory_error(exc) is True
+        assert is_memory_exception(exc) is True
 
     def test_an_unrelated_runtime_error_is_not(self):
-        from agent.skills.evaluate_vram_skill.batch_resolver import _is_memory_error
+        from agent.skills.evaluate_vram_skill.probe_budgets import is_memory_exception
 
-        assert _is_memory_error(RuntimeError("shape mismatch")) is False
+        assert is_memory_exception(RuntimeError("shape mismatch")) is False
 
 
 def _raising_probe(fail_above: int):
@@ -504,3 +527,157 @@ def _raising_probe(fail_above: int):
         )
 
     return _probe
+
+
+class TestRssIsAuthoritativeNotAddressSpace:
+    """Reservation is not consumption.
+
+    Measured on 2026-07-31 (SHA d83f397): importing torch and touching
+    CUDA reserves ~19.0 GiB of VIRTUAL address space while holding
+    ~0.65 GiB resident. A 24 GiB `RLIMIT_AS` therefore left ~5 GiB for
+    real work, and all three validation candidates failed to allocate
+    while their resident memory was only 3.9-5.7 GiB.
+    """
+
+    def test_high_virtual_reservation_with_low_rss_is_allowed(self, tmp_path):
+        """A worker that RESERVES far more than the ceiling but stays
+        resident-small must complete normally."""
+        body = (
+            "import json, mmap\n"
+            # 8 GiB of reserved-but-untouched address space
+            "reserved = mmap.mmap(-1, 8 * 1024**3)\n"
+            f"json.dump({{'outcome': 'COMPLETED_MEASUREMENT'}}, open(r'{tmp_path / 'result.json'}', 'w'))\n"
+        )
+        result = run_isolated_preflight(
+            _spec(tmp_path, limit_mib=4096),  # ceiling BELOW the reservation
+            deadline_seconds=60.0,
+            command=_worker(tmp_path, body),
+        )
+        assert result.outcome == "COMPLETED_MEASUREMENT", (
+            "address-space reservation must not be mistaken for consumption"
+        )
+        assert result.host_memory is not None
+        assert result.host_memory.exceeded is False
+
+    def test_the_enforcement_field_names_the_rss_monitor(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path, limit_mib=512),
+            deadline_seconds=60.0,
+            command=_worker(tmp_path, GROWS_FOREVER),
+        )
+        assert result.outcome == "MEASURED_HOST_MEMORY_EXCEEDED"
+        assert result.host_memory is not None
+        assert result.host_memory.enforcement == "parent_rss_monitor"
+
+
+class TestHostAllocationFailureIsCandidateLevel:
+    """An allocator refusal is about the candidate, not our machinery."""
+
+    def test_it_is_not_infrastructure_failure(self, tmp_path):
+        body = (
+            "import json\n"
+            f"json.dump({{'outcome': 'HOST_MEMORY_ALLOCATION_FAILURE',\n"
+            f"  'detail': \"DefaultCPUAllocator: can't allocate memory\",\n"
+            f"  'phase': 'host_allocation'}}, open(r'{tmp_path / 'result.json'}', 'w'))\n"
+        )
+        result = run_isolated_preflight(
+            _spec(tmp_path), deadline_seconds=30.0, command=_worker(tmp_path, body)
+        )
+        assert result.outcome == "HOST_MEMORY_ALLOCATION_FAILURE"
+        assert result.outcome != "PROBE_INFRASTRUCTURE_FAILURE"
+        assert result.outcome != "MEASURED_HARD_TIMEOUT"
+
+    def test_it_carries_host_authority_not_vram_authority(self):
+        r = IsolatedProbeResult(
+            label="x", outcome="HOST_MEMORY_ALLOCATION_FAILURE", vram_cap_gb=12.0
+        )
+        assert r.may_recommend_host_memory_reduction is True
+        assert r.may_recommend_vram_downsizing is False
+
+    def test_its_message_is_never_a_vram_verdict(self):
+        r = IsolatedProbeResult(
+            label="x", outcome="HOST_MEMORY_ALLOCATION_FAILURE", vram_cap_gb=12.0
+        )
+        message = r.agent_facing_message()
+        assert "HOST memory result" in message
+        assert "NOT a GPU VRAM verdict" in message
+        assert "Do not reduce GPU parameter count" in message
+
+
+class TestNoFalseTimeout:
+    def test_a_fast_completion_cannot_be_a_timeout(self, tmp_path):
+        """FCNet was filed as MEASURED_HARD_TIMEOUT after 3.771 s against
+        a 600 s deadline. A timeout must at least have reached its own
+        deadline."""
+        result = run_isolated_preflight(
+            _spec(tmp_path),
+            deadline_seconds=600.0,
+            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+        )
+        assert result.elapsed_seconds < 600.0
+        assert result.outcome != "MEASURED_HARD_TIMEOUT"
+
+    def test_a_real_timeout_reaches_its_deadline(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path),
+            deadline_seconds=1.0,
+            grace_seconds=0.5,
+            command=_worker(tmp_path, STALLS),
+        )
+        assert result.outcome == "MEASURED_HARD_TIMEOUT"
+        assert result.elapsed_seconds >= 1.0
+
+
+class TestOneClassifierEverywhere:
+    """Two near-identical string checks is how the last one was missed:
+    the resolver looked for 'cannot allocate' while PyTorch says
+    "can't allocate"."""
+
+    PYTORCH_CPU_OOM = (
+        "[enforce fail at alloc_cpu.cpp:127] err == 0. DefaultCPUAllocator: "
+        "can't allocate memory: you tried to allocate 3152543744 bytes. "
+        "Error code 12 (Cannot allocate memory)"
+    )
+
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            (MemoryError("x"), "host"),
+            (RuntimeError(PYTORCH_CPU_OOM), "host"),
+            (RuntimeError("cannot allocate memory"), "host"),
+            (RuntimeError("std::bad_alloc"), "host"),
+            (RuntimeError("ENOMEM"), "host"),
+            (RuntimeError("Error code 12"), "host"),
+            (RuntimeError("CUDA out of memory. Tried to allocate 11 GiB"), "cuda"),
+            (RuntimeError("shape mismatch"), None),
+            (ValueError("unrelated"), None),
+        ],
+    )
+    def test_the_classifier_covers_every_observed_form(self, exc, expected):
+        from agent.skills.evaluate_vram_skill.probe_budgets import (
+            classify_host_memory_exception,
+        )
+
+        assert classify_host_memory_exception(exc) == expected
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "agent/skills/evaluate_vram_skill/batch_resolver.py",
+            "agent/skills/evaluate_vram_skill/wrapper.py",
+            "agent/skills/evaluate_vram_skill/preflight_worker_main.py",
+        ],
+    )
+    def test_every_path_uses_the_shared_helper(self, path):
+        source = (REPO_ROOT / path).read_text()
+        assert "probe_budgets import" in source
+        assert ("is_memory_exception" in source) or ("classify_host_memory_exception" in source)
+
+    def test_no_path_defines_its_own_memory_check(self):
+        for path in (
+            "agent/skills/evaluate_vram_skill/batch_resolver.py",
+            "agent/skills/evaluate_vram_skill/wrapper.py",
+            "agent/skills/evaluate_vram_skill/preflight_worker_main.py",
+        ):
+            source = (REPO_ROOT / path).read_text()
+            assert "def _is_memory_error" not in source, path

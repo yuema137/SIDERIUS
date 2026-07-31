@@ -43,7 +43,11 @@ import torch.nn as nn
 
 from agent.skills.evaluate_vram_skill import compute_intensity
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
-from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets, ProbeTimeoutRecord
+from agent.skills.evaluate_vram_skill.probe_budgets import (
+    ProbeBudgets,
+    ProbeTimeoutRecord,
+    is_memory_exception,
+)
 from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
@@ -86,22 +90,6 @@ def _build_probe_input(batch_size: int, segmentation_size: int) -> torch.Tensor:
 
 
 # ── Public entry point ──────────────────────────────────────────────────────
-
-
-def _is_memory_error(exc: BaseException) -> bool:
-    """Host OOM, CUDA OOM, or an allocator refusal — all "not at this batch".
-
-    `torch.cuda.OutOfMemoryError` subclasses RuntimeError rather than
-    MemoryError, so the type alone is not enough.
-    """
-    if isinstance(exc, MemoryError):
-        return True
-    if type(exc).__name__ in ("OutOfMemoryError", "CudaOutOfMemoryError"):
-        return True
-    text = str(exc).lower()
-    return isinstance(exc, RuntimeError) and (
-        "out of memory" in text or "cannot allocate" in text or "bad_alloc" in text
-    )
 
 
 class BatchSearchTimeout(Exception):
@@ -205,7 +193,7 @@ def resolve_inference_batch(
             # (64 x 4 heads x 8000 x 8000 x 4 bytes). On 2026-07-31 that
             # allocation took the whole host down at 57.7 GiB anon-rss —
             # a model that would have probed fine at B=8 was never reached.
-            if not _is_memory_error(exc):
+            if not is_memory_exception(exc):
                 raise
             last_peak, last_vram_ok, last_intensity_ok, last_B = 0, False, True, B
             continue

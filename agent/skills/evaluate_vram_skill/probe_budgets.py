@@ -186,3 +186,84 @@ class InconclusivePreflight(Exception):
     def __init__(self, message: str, *, record: dict | None = None):
         self.record = record or {}
         super().__init__(message)
+
+
+# ── Host-memory exception recognition (single source of truth) ──────────────
+#
+# The second GPU validation (2026-07-31, SHA d83f397) failed because this
+# recognition was scattered and incomplete. PyTorch reports a CPU
+# allocation failure as a plain `RuntimeError`:
+#
+#     RuntimeError: [enforce fail at alloc_cpu.cpp:127] err == 0.
+#     DefaultCPUAllocator: can't allocate memory: you tried to allocate
+#     3152543744 bytes. Error code 12 (Cannot allocate memory)
+#
+# `except MemoryError` did not catch it, so two candidates were recorded
+# as PROBE_INFRASTRUCTURE_FAILURE — i.e. "our machinery is broken" — when
+# the machinery worked and the CANDIDATE could not be allocated. A third
+# was recorded as a timeout after 3.771 s against a 600 s deadline.
+#
+# One helper, used by every path, because the previous version had two
+# near-identical string checks and the batch resolver's looked for
+# "cannot allocate" while PyTorch says "can't allocate".
+
+#: Exception type NAMES that always mean a memory failure, wherever they
+#: are raised from. Matched by name so a torch import is never required
+#: to classify.
+_MEMORY_EXCEPTION_NAMES = frozenset(
+    {
+        "MemoryError",
+        "OutOfMemoryError",
+        "CudaOutOfMemoryError",
+        "OutOfMemoryException",
+    }
+)
+
+#: Message fragments, lower-cased. Both apostrophe forms are listed
+#: because PyTorch says "can't" and glibc says "cannot".
+_MEMORY_MESSAGE_FRAGMENTS = (
+    "out of memory",
+    "can't allocate memory",
+    "cannot allocate memory",
+    "can not allocate memory",
+    "bad_alloc",
+    "defaultcpuallocator",
+    "error code 12",
+    "enomem",
+    "not enough memory",
+    "failed to allocate",
+    "unable to allocate",
+)
+
+#: Fragments that specifically indicate the GPU rather than the host.
+_CUDA_MESSAGE_FRAGMENTS = ("cuda", "gpu", "hip")
+
+
+def is_memory_exception(exc: BaseException) -> bool:
+    """Any allocation failure, host or device."""
+    if isinstance(exc, MemoryError):
+        return True
+    if type(exc).__name__ in _MEMORY_EXCEPTION_NAMES:
+        return True
+    text = str(exc).lower()
+    return any(fragment in text for fragment in _MEMORY_MESSAGE_FRAGMENTS)
+
+
+def classify_host_memory_exception(exc: BaseException) -> str | None:
+    """Name the memory failure, or None if it is not one.
+
+    Returns ``"host"`` for a CPU/host allocation failure, ``"cuda"`` for a
+    device one. The distinction decides which advice an agent may be
+    given: a host failure must never be phrased as a VRAM verdict, because
+    the model may fit the GPU perfectly and still have exhausted CPU
+    tracing memory.
+    """
+    if not is_memory_exception(exc):
+        return None
+    text = str(exc).lower()
+    name = type(exc).__name__
+    if name in ("OutOfMemoryError", "CudaOutOfMemoryError") or any(
+        fragment in text for fragment in _CUDA_MESSAGE_FRAGMENTS
+    ):
+        return "cuda"
+    return "host"

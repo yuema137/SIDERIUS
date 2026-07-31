@@ -58,6 +58,7 @@ PreflightOutcome = Literal[
     "MEASURED_PEAK_ABOVE_VRAM_CAP",
     "MEASURED_HARD_TIMEOUT",
     "MEASURED_HOST_MEMORY_EXCEEDED",
+    "HOST_MEMORY_ALLOCATION_FAILURE",
     "SCHEMA_REJECTED",
     "PROBE_INFRASTRUCTURE_FAILURE",
 ]
@@ -66,7 +67,13 @@ PreflightOutcome = Literal[
 VRAM_CAPACITY_OUTCOMES = frozenset({"MEASURED_CUDA_OOM", "MEASURED_PEAK_ABOVE_VRAM_CAP"})
 #: This establishes a HOST-memory problem — a different constraint, and
 #: not evidence that GPU parameters must shrink.
-HOST_MEMORY_OUTCOMES = frozenset({"MEASURED_HOST_MEMORY_EXCEEDED"})
+#: Both are candidate-level HOST-memory facts. The first is the parent
+#: stopping a worker whose measured RSS crossed the ceiling; the second is
+#: the allocator refusing the candidate outright. Neither says anything
+#: about VRAM.
+HOST_MEMORY_OUTCOMES = frozenset(
+    {"MEASURED_HOST_MEMORY_EXCEEDED", "HOST_MEMORY_ALLOCATION_FAILURE"}
+)
 #: These establish nothing about the candidate's size.
 NO_DOWNSIZING_AUTHORITY = frozenset(
     {
@@ -134,7 +141,7 @@ class HostMemoryEvidence(BaseModel):
     limit_gib: float = Field(gt=0.0)
     peak_worker_rss_bytes: int = Field(default=0, ge=0)
     peak_worker_rss_gib: float = Field(default=0.0, ge=0.0)
-    enforcement: Literal["rlimit_as", "parent_rss_monitor", "none"] = "none"
+    enforcement: Literal["parent_rss_monitor", "allocator_refusal", "none"] = "none"
     exceeded: bool = False
 
 
@@ -210,6 +217,15 @@ class IsolatedProbeResult(BaseModel):
                 f"exceed {self.vram_cap_gb} GB. Reduce host-memory-heavy preflight "
                 f"behaviour: sequence handling, tracing cost, or construction "
                 f"footprint. Do not reduce GPU parameter count on this basis alone."
+            )
+        if self.outcome == "HOST_MEMORY_ALLOCATION_FAILURE":
+            return (
+                "The candidate could not be allocated in host (CPU) memory during "
+                "preflight. This is a HOST memory result, NOT a GPU VRAM verdict — "
+                f"the model's VRAM footprint was not shown to exceed {self.vram_cap_gb} GB. "
+                "Reduce host-memory-heavy preflight behaviour (sequence handling, "
+                "tracing cost, construction footprint). Do not reduce GPU parameter "
+                "count on this basis alone."
             )
         if self.outcome == "MEASURED_HARD_TIMEOUT":
             return (
@@ -354,7 +370,7 @@ def run_isolated_preflight(
         limit_gib=round(limit_gib, 2),
         peak_worker_rss_bytes=peak_rss,
         peak_worker_rss_gib=round(peak_rss / 1024**3, 3),
-        enforcement="parent_rss_monitor" if host_exceeded else "rlimit_as",
+        enforcement="parent_rss_monitor" if host_exceeded else "none",
         exceeded=host_exceeded,
     )
 

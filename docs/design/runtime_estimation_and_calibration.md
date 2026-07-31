@@ -4331,3 +4331,65 @@ fixed.
 
 The repair is NOT complete until the second GPU validation passes.
 PR #151 remains unmerged; formal V19 remains stopped.
+
+
+### Defect 3 — RLIMIT_AS bounds reservation, not consumption (2026-07-31)
+
+The second GPU validation (SHA `d83f397`) failed all three candidates.
+The isolation architecture itself worked — the parent survived, no host
+OOM, no orphans, GPU returned to idle — but every candidate failed to
+allocate while its resident memory was only 3.9-5.7 GiB against a 24 GiB
+ceiling.
+
+Measured directly:
+
+```text
+before importing torch : VmSize    38 MiB   VmRSS  13 MiB
+after importing torch  : VmSize   5.9 GiB   VmRSS 0.5 GiB
+after initialising CUDA: VmSize  19.0 GiB   VmRSS 0.65 GiB
+```
+
+`RLIMIT_AS` bounds VIRTUAL ADDRESS SPACE. PyTorch and CUDA reserve
+~19.0 GiB of it while holding ~0.65 GiB resident, so a 24 GiB limit left
+about 5 GiB for real work. Reservation is not consumption; using one to
+bound the other is structurally the same error as using wall time to
+bound memory.
+
+**`RLIMIT_AS` is removed.** The parent's process-tree RSS monitor is the
+authoritative host-memory enforcement, because it measures what actually
+consumes the host. It was already implemented and sampled correctly
+throughout the failed run (4.4 / 5.66 / 3.96 GiB).
+
+A second defect surfaced with it. PyTorch reports a CPU allocation
+failure as a plain `RuntimeError`:
+
+```text
+[enforce fail at alloc_cpu.cpp:127] err == 0. DefaultCPUAllocator:
+can't allocate memory: you tried to allocate 3152543744 bytes.
+Error code 12 (Cannot allocate memory)
+```
+
+`except MemoryError` did not catch it, so two candidates were recorded as
+`PROBE_INFRASTRUCTURE_FAILURE` — "our machinery is broken" — when the
+machinery worked and the CANDIDATE could not be allocated. FCNet took the
+torchinfo path and was recorded as a timeout after 3.771 s against a
+600 s deadline. The batch resolver had its own check looking for
+"cannot allocate" while PyTorch says "can't allocate".
+
+Recognition is now one helper, `classify_host_memory_exception`, used by
+the worker, the batch resolver, the torchinfo path and the wrapper. It
+covers `MemoryError`, `bad_alloc`, `OutOfMemoryError`, `DefaultCPUAllocator`,
+both apostrophe forms, `Error code 12`, and `ENOMEM`, and separates host
+from device.
+
+`HOST_MEMORY_ALLOCATION_FAILURE` is added as a CANDIDATE-level
+disposition, distinct from `MEASURED_HOST_MEMORY_EXCEEDED` (the parent
+stopping a worker whose measured RSS crossed the ceiling) and from
+`PROBE_INFRASTRUCTURE_FAILURE` (the measurement system itself failing).
+Both host outcomes may ask for lighter host behaviour; neither may be
+phrased as a VRAM verdict or recommend reducing GPU parameter count.
+
+Schema impact: none. `PreflightOutcome` is consumed only by the
+validation harness and its tests, is absent from `agent/schemas/`, and
+the production tuner is not yet wired to it — so no persisted version
+changes, no consumer breaks, no migration.

@@ -59,7 +59,11 @@ from agent.skills.evaluate_vram_skill.overhead import (
     cudnn_backward_workspace_bytes,
     training_overhead_bytes,
 )
-from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets, ProbeTimeoutRecord
+from agent.skills.evaluate_vram_skill.probe_budgets import (
+    ProbeBudgets,
+    ProbeTimeoutRecord,
+    classify_host_memory_exception,
+)
 from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
@@ -724,11 +728,24 @@ def run_skill(sandbox, **kwargs):
             "timeout_record": record.model_dump(mode="json"),
         }
     except RuntimeError as e:
-        # `torchinfo` tracing failure. It is a DIAGNOSTIC convenience, not a
-        # capacity oracle: the authoritative parameter count already comes
-        # from the instantiated model, and real memory comes from the
-        # bounded CUDA probe. A tracing failure therefore leaves the
-        # question open rather than answering it against the candidate.
+        # An allocation failure is a CANDIDATE-level fact and must be
+        # reported as one. On 2026-07-31 FCNet's torchinfo trace failed
+        # because the allocator refused it, and this handler filed it as
+        # "inconclusive" — which downstream became a TIMEOUT, after
+        # 3.771 s against a 600 s deadline.
+        memory_kind = classify_host_memory_exception(e)
+        if memory_kind is not None:
+            print(f"!!! [VRAMEval] {memory_kind.upper()} ALLOCATION FAILURE: {str(e)[:160]}")
+            return {
+                "status": "cuda_oom" if memory_kind == "cuda" else "host_memory",
+                "message": str(e)[:600],
+            }
+        # `torchinfo` tracing failure that is NOT an allocation problem. It
+        # is a DIAGNOSTIC convenience, not a capacity oracle: the
+        # authoritative parameter count already comes from the
+        # instantiated model, and real memory comes from the bounded CUDA
+        # probe. A tracing failure leaves the question open rather than
+        # answering it against the candidate.
         if "torchinfo" not in str(e):
             raise
         record = ProbeTimeoutRecord(
