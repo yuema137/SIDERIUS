@@ -529,6 +529,64 @@ def _store_reuse_decision(
         return None, None, None
 
 
+def _gate_decision(
+    *,
+    result_shape: dict,
+    effective_budget_minutes: float,
+    runtime_phase: str,
+    probe_record_available: bool = False,
+) -> dict:
+    """Ask the shared runtime policy whether this projection may gate the
+    round (C8c).
+
+    Returns a plain dict so the skill's result stays JSON-serialisable for
+    the record. The estimate is built by the canonical adapter, so its
+    provenance — and therefore its authority — is derived from the
+    measurement path the estimate actually came from, never asserted here.
+    """
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+    from core.runtime_control.estimate_types import from_time_eval_result
+    from core.runtime_control.estimator import shared_runtime_components
+
+    # C8g: the process-wide policy, not a per-call construction — the
+    # proposer, this gate, and any future consumer must demonstrably
+    # decide with the SAME policy identity.
+    policy = shared_runtime_components()[1]
+    try:
+        estimate = from_time_eval_result(result_shape)
+    except ValueError as exc:
+        # An evidence source this subsystem cannot interpret is an
+        # EVIDENCE-CHANNEL failure, not a verdict on the candidate
+        # (operator decision, C8 §2). It must never be silently converted
+        # into "infeasible" — the caller turns ABORT into an error.
+        return {
+            "kind": "ABORT",
+            "reasons": [f"uninterpretable runtime evidence: {exc}"],
+            "evidence_provenance": "unknown",
+            "evidence_rank": -1,
+            "policy_identity": policy.identity,
+        }
+    phase = runtime_phase if runtime_phase in ("proposal", "trial", "formal") else "trial"
+    decision = policy.decide(
+        estimate,
+        RuntimeBudget(time_seconds=max(effective_budget_minutes, 1e-9) * 60.0),
+        RuntimeMode(phase=phase, candidate_stage="post_implementation"),  # type: ignore[arg-type]
+        # No bounded live probe feeds this pre-flight today (the tuner's
+        # authoritative formal measurement is the in-subprocess
+        # verification, RT2). Declaring the absence honestly is what makes
+        # a formal prior-tier projection return REQUEST_PROBE instead of
+        # quietly pricing the round from a prior.
+        evidence_channel="ok" if probe_record_available else "probe_absent",
+    )
+    return {
+        "kind": decision.kind,
+        "reasons": list(decision.reasons),
+        "evidence_provenance": decision.evidence_provenance,
+        "evidence_rank": decision.evidence_rank,
+        "policy_identity": policy.identity,
+    }
+
+
 def run_skill(sandbox, **kwargs) -> dict:
     """Estimate wall-time (training + inference + scoring) for the proposed
     config and gate against the time budget.
@@ -743,7 +801,6 @@ def run_skill(sandbox, **kwargs) -> dict:
     else:
         effective_budget_min = budget_min
         slack_applied = False
-    feasible = total_min <= effective_budget_min
 
     # Flat breakdown: preserves the pre-K.2.5 contract so
     # nodes/ml_hyperparameter_tune_agent.py can still read `source` +
@@ -784,19 +841,72 @@ def run_skill(sandbox, **kwargs) -> dict:
         ),
     }
 
+    # C8c — the gate verdict comes from the SHARED decision policy, not from
+    # a private comparison in this skill. The arithmetic is unchanged: the
+    # effective budget (including the measured-inference slack) is what the
+    # policy is asked about, so a MEASURED estimate over budget still
+    # REJECTs exactly as before. What changes is that a static or
+    # historical-prior estimate can no longer reject a round on its own —
+    # the authority rule the V19 wave-1 incident violated (§7.4 matrix
+    # rows static_prior/historical_prior_only = cannot_block).
+    runtime_decision = _gate_decision(
+        result_shape={
+            "status": "success",
+            "estimated_minutes": round(total_min, 2),
+            "breakdown": breakdown,
+            "phase_breakdown": phase_breakdown,
+            "inference_batch_uncalibrated": inference_batch_uncalibrated,
+        },
+        effective_budget_minutes=effective_budget_min,
+        runtime_phase=str(kwargs.get("runtime_phase", "trial")),
+        probe_record_available=bool(kwargs.get("probe_record_available", False)),
+    )
+    if runtime_decision["kind"] == "ABORT":
+        # Execution-system failure — surfaced as an ERROR result, which the
+        # tuner raises on. Never presented as a candidate-level verdict.
+        return {
+            "status": "error",
+            "message": (
+                "TimeEval evidence-channel failure (ABORT): "
+                + "; ".join(runtime_decision["reasons"])
+            ),
+        }
+    feasible = runtime_decision["kind"] != "REJECT"
+    breakdown["runtime_decision"] = runtime_decision["kind"]
+    breakdown["runtime_decision_reasons"] = runtime_decision["reasons"]
+    breakdown["runtime_decision_provenance"] = runtime_decision["evidence_provenance"]
+    breakdown["runtime_policy_identity"] = runtime_decision["policy_identity"]
+
+    # The projection exceeding the budget is an OBSERVATION; whether it may
+    # gate the round is the POLICY's call. Keeping them separate means an
+    # advisory-only (static / historical) overshoot still tells the
+    # operator what it saw and which lever to pull — it just cannot stop
+    # the round. Conflating them would have silently deleted the warning
+    # along with the authority.
+    over_budget = total_min > effective_budget_min
+    breakdown["over_effective_budget"] = over_budget
     slack_note = (
         f" (within +{int(SLACK_FRACTION_WHEN_MEASURED * 100)}% slack on measured inference)"
-        if slack_applied and feasible and total_min > budget_min
+        if slack_applied and not over_budget and total_min > budget_min
         else ""
     )
+    authority_note = (
+        ""
+        if not over_budget or not feasible
+        else (
+            f" [{runtime_decision['kind']}: not blocking — "
+            f"{runtime_decision['evidence_provenance']} evidence cannot gate "
+            f"this round]"
+        )
+    )
     verdict = (
-        f"{'✅ FITS' if feasible else '❌ OVER BUDGET'} — "
+        f"{'✅ FITS' if not over_budget else '❌ OVER BUDGET'} — "
         f"Est {total_min:.1f} min vs budget {budget_min:.1f} min "
         f"(train {training['seconds']:.1f}s + inf {inference['seconds']:.1f}s "
         f"+ score {scoring['seconds']:.1f}s). Dominant phase: {dominant}."
-        f"{slack_note}"
+        f"{slack_note}{authority_note}"
     )
-    suggestion = "" if feasible else _suggest_lever(tbd["ms_per_step"], seg_size, batch_size)
+    suggestion = "" if not over_budget else _suggest_lever(tbd["ms_per_step"], seg_size, batch_size)
 
     print(f"    Parameters   : {num_params:,}")
     print(f"    Train steps  : {tbd['total_train_steps']:,}")
@@ -806,7 +916,11 @@ def run_skill(sandbox, **kwargs) -> dict:
         f"inf={inference['seconds']:.1f} score={scoring['seconds']:.1f}"
     )
     print(f"    Est minutes  : {total_min:.1f} / budget {budget_min:.1f}  (dominant: {dominant})")
-    print(f"    Feasible     : {'YES' if feasible else 'NO'}")
+    print(
+        f"    Feasible     : {'YES' if feasible else 'NO'}  "
+        f"(policy {runtime_decision['kind']}, evidence "
+        f"{runtime_decision['evidence_provenance']})"
+    )
     if suggestion:
         print(f"    Suggestion   : {suggestion}")
 

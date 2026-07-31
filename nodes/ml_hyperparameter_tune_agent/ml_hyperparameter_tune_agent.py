@@ -168,6 +168,170 @@ def _validate_data_config(
             )
 
 
+def _runtime_phase_for(is_trial: bool) -> str:
+    """C8c: the phase the shared runtime policy decides under.
+
+    A module-level helper rather than an inline conditional because
+    ``run()`` sits at pyright's strict-mode complexity ceiling — one more
+    branch inside it makes the whole method unanalyzable.
+
+    No bounded live probe feeds the tuner pre-flight: the authoritative
+    formal measurement is the RT2 in-subprocess verification, so a formal
+    prior-tier projection resolves to REQUEST_PROBE (proceed into that
+    measurement) rather than being priced from a prior.
+    """
+    return "trial" if is_trial else "formal"
+
+
+def _run_time_preflight(
+    *,
+    sandbox,
+    active_params: dict,
+    time_budget_minutes: float,
+    data_dir: str | None,
+    memory_history: list,
+    is_trial: bool,
+) -> dict:
+    """Invoke the wall-time pre-flight gate for one attempt.
+
+    Extracted from ``run()`` (C8g): that method sits at pyright's
+    strict-mode complexity ceiling, and this block carried three inline
+    conditionals plus an eight-argument call. Behavior is unchanged —
+    the same skill, the same arguments, the same log line.
+
+    ``inference_per_psd_seg_ms_hint`` is the most recent successful trial
+    round's measured per-PSD-segment inference cost; the wrapper prefers
+    it over the legacy x2.7 ratio when present and > 0.
+    ``allow_store_reuse`` is trial-only (RT3 §3): a formal round's
+    authority is the in-subprocess verification, never a stored prior.
+    """
+    inference_hint = _latest_trial_inference_marginal(memory_history)
+    hint_text = f"{inference_hint:.2f} ms/psd_seg" if inference_hint else "none"
+    mode = _runtime_phase_for(is_trial)
+    print(
+        f"\n[Pre-flight 2/2] Time check (mode={mode}, "
+        f"budget={time_budget_minutes} min, inf_hint={hint_text})..."
+    )
+    return _run_skill(
+        "evaluate_time_skill",
+        sandbox,
+        **active_params,
+        time_budget_minutes=time_budget_minutes,
+        data_dir=data_dir,
+        inference_per_psd_seg_ms_hint=inference_hint,
+        allow_store_reuse=is_trial,
+        observation_store_root=os.path.join(sandbox.base_dir, "runtime_observations"),
+        runtime_phase=mode,
+    )
+
+
+def _resolve_time_check_probe_request(
+    time_check: dict,
+    *,
+    model_type: str,
+    active_params: dict,
+    time_budget_minutes: float,
+    is_trial: bool,
+    data_dir: str | None,
+    run_name: str,
+    exp_id: str,
+) -> str:
+    """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
+
+    This is the production edge the C8 closure audit found missing. When
+    the shared policy asks for a measurement, we take one:
+
+        REQUEST_PROBE -> bounded probe -> persisted observation
+                      -> rebuilt estimate -> re-run policy
+                      -> ALLOW / REJECT / ABORT
+
+    Mutates ``time_check`` in place (mirroring the bypass gate) and
+    returns the action for the caller: ``"proceed"``, ``"skip"`` (the
+    existing attempt-local skipped_time_risk path) or ``"abort"`` (chain
+    halt). Any other pre-flight decision returns ``"proceed"`` untouched.
+
+    When the environment cannot build a real probe runner — CPU box, no
+    dataset, pseudo run — the request is recorded as a VISIBLY TYPED
+    advisory rather than resolved. A real formal launch never reaches
+    that branch: the launch guard refuses to start when a production run
+    cannot probe (`require_probe_runner=True`).
+    """
+    breakdown = time_check.get("breakdown") or {}
+    if breakdown.get("runtime_decision") != "REQUEST_PROBE":
+        return "proceed"
+
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+    from core.runtime_control.probe_lifecycle import ProbeRequest
+    from core.runtime_control.probe_wiring import (
+        build_production_probe_runner,
+        build_registry_persist,
+        probe_runner_availability,
+    )
+
+    available, detail = probe_runner_availability()
+    if not available:
+        breakdown["probe_resolution"] = "unavailable"
+        breakdown["probe_resolution_detail"] = detail
+        print(
+            f"  [PROBE] REQUEST_PROBE could not be resolved by measurement in this "
+            f"environment ({detail}). Recorded as advisory — this is NOT a measured "
+            f"production decision."
+        )
+        return "proceed"
+
+    request = ProbeRequest(
+        model_identity=model_type,
+        train_steps=int(breakdown.get("total_train_steps") or 0),
+        inference_batches=0,
+        workload={
+            "batch_size": int((active_params.get("train_config") or {}).get("batch_size", 1)),
+            "segment_length": int(
+                (active_params.get("model_config") or {}).get("segmentation_size", 0)
+            ),
+        },
+    )
+    print(f"  [PROBE] Resolving REQUEST_PROBE with a bounded live probe of {model_type}...")
+    from core.runtime_control.probe_wiring import resolve_request_probe
+
+    resolution = resolve_request_probe(
+        request=request,
+        budget=RuntimeBudget(time_seconds=max(time_budget_minutes, 1e-9) * 60.0),
+        mode=RuntimeMode(
+            phase="trial" if is_trial else "formal",
+            candidate_stage="post_implementation",
+            probe_available=True,
+        ),
+        run_probe=build_production_probe_runner(
+            model_type=model_type,
+            model_config=active_params.get("model_config") or {},
+            train_config=active_params.get("train_config") or {},
+            loss_config=active_params.get("loss_config") or {},
+            data_dir=data_dir,
+        ),
+        persist=build_registry_persist(
+            workload=request.workload,
+            software_stack={},
+            source_run={"run_name": run_name, "exp_id": exp_id},
+        ),
+    )
+    breakdown["probe_resolution"] = resolution.decision.kind
+    breakdown["probe_resolution_reasons"] = list(resolution.decision.reasons)
+    breakdown["probe_observation_ids"] = list(resolution.observation_ids)
+    breakdown["probe_status"] = resolution.probe_status
+    if resolution.estimate is not None:
+        breakdown["probe_expected_seconds"] = resolution.estimate.expected_seconds
+
+    if resolution.decision.kind == "ABORT":
+        return "abort"
+    if resolution.decision.kind == "REJECT":
+        time_check["feasible"] = False
+        time_check["verdict"] = (
+            f"❌ REJECTED by bounded live probe — {'; '.join(resolution.decision.reasons)}"
+        )
+        return "skip"
+    return "proceed"
+
+
 def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
@@ -689,6 +853,22 @@ def _should_skip_to_formal(
     return resolved_action is GateAction.SKIP_TO_FORMAL and not is_formal_round
 
 
+def _non_retryable_termination_message(
+    *, scope_violation_reason: str | None, evidence_channel_failure: str | None
+) -> str:
+    """Operator-facing line for a non-retryable termination. The evidence
+    channel outranks the scope violation (C9c): if the channel is broken,
+    every other classification this run made is suspect."""
+    if evidence_channel_failure:
+        return (
+            "  [RUNTIME] Evidence-channel failure (infrastructure) — terminating "
+            f"the chain: {evidence_channel_failure}"
+        )
+    return (
+        f"  [DATASCOPE] Non-retryable scope violation — terminating run: {scope_violation_reason}"
+    )
+
+
 def _compute_termination_state(
     *,
     completed_rounds: int,
@@ -697,10 +877,16 @@ def _compute_termination_state(
     max_fail_rounds: int,
     gate_aborted: bool,
     scope_violation_reason: str | None = None,
+    evidence_channel_failure: str | None = None,
 ) -> tuple[str, str]:
     """Compute ``(run_status, termination_reason)`` from loop-exit state.
 
     Precedence (highest → lowest):
+     -1. ``evidence_channel_failure`` set (C9c) → ``("failed",
+         "infrastructure_abort")``. Outranks everything, including a
+         scope violation: when the evidence channel is broken we cannot
+         even trust the classification of the other failures, and the
+         chain must halt rather than retry into the same environment.
       0. ``scope_violation_reason`` set (DataScope DS5) → ``("failed",
          "scope_violation")``. A configuration/invariant failure —
          deterministic on retry, so it outranks even the deliberate gate
@@ -717,6 +903,8 @@ def _compute_termination_state(
     See ``docs/design/pluggable_health_checks.md`` §4 and the audit
     Gap #3 fix in the follow-up to commit-5b.
     """
+    if evidence_channel_failure:
+        return "failed", "infrastructure_abort"
     if scope_violation_reason:
         return "failed", "scope_violation"
     if gate_aborted:
@@ -1557,6 +1745,34 @@ def _handle_in_subprocess_rejection(
     return True
 
 
+class RuntimeEvidenceChannelError(RuntimeError):
+    """C9c: the runtime evidence channel failed (infrastructure class).
+
+    Distinct from every other terminal signal in this loop: it is not a
+    candidate verdict (the model was never judged), not a watchdog kill,
+    not gate exhaustion, not an operator stop, and not a budget stop. It
+    means the machinery that produces runtime evidence is broken, so the
+    chain must stop instead of feeding the next candidate into it.
+    """
+
+    def __init__(self, message: str, rv_block: dict | None = None):
+        super().__init__(message)
+        self.rv_block = dict(rv_block or {})
+
+
+def _raise_if_evidence_channel_failure(status: dict, sandbox, run_name: str) -> None:
+    """Convert an executor infrastructure ABORT into the typed error the
+    loop terminates on. The partial observation is appended first — a
+    broken channel is still evidence of what happened."""
+    if status.get("status") != "aborted_infrastructure":
+        return
+    rv_block = status.get("runtime_verification")
+    _append_runtime_observation(sandbox, run_name, rv_block)
+    raise RuntimeEvidenceChannelError(
+        status.get("message", "runtime evidence channel failed"), rv_block
+    )
+
+
 class WallClockTimeoutError(RuntimeError):
     """A watchdog deadline kill (RT4, §4). Carries the §4 timeout
     provenance so the attempt_failure record can surface
@@ -2124,6 +2340,9 @@ class HyperparamTuningAgent:
         # a bug; it is deterministic on retry, so the run terminates instead
         # of consuming attempt retries or waiting for max_fail_rounds.
         _scope_violation_reason: str | None = None
+        # C9c: set when the runtime EVIDENCE CHANNEL fails. Terminates
+        # the chain, not just the attempt (infrastructure class).
+        _evidence_channel_failure: str | None = None
         # Phase 6.6 WS-B B.3 — per-attempt VRAM-gate rejection buffer.
         # Appended to on every evaluate_vram_skill feasible=False event.
         # Flushed to HyperparamTuningOutput.physical_rejections at run exit.
@@ -2777,33 +2996,43 @@ class HyperparamTuningAgent:
                         # branches. ``memory_history`` is fetched from
                         # ``sandbox.get_summary()`` earlier in this attempt
                         # and is iter-scoped under the chain runner.
-                        inference_hint = _latest_trial_inference_marginal(memory_history)
-                        print(
-                            f"\n[Pre-flight 2/2] Time check "
-                            f"(mode={'trial' if plan.is_trial else 'formal'}, "
-                            f"budget={chosen_time_budget} min, "
-                            f"inf_hint="
-                            f"{f'{inference_hint:.2f} ms/psd_seg' if inference_hint else 'none'}"
-                            f")..."
-                        )
-                        time_check = _run_skill(
-                            "evaluate_time_skill",
-                            sandbox,
-                            **active_params,
+                        time_check = _run_time_preflight(
+                            sandbox=sandbox,
+                            active_params=active_params,
                             time_budget_minutes=chosen_time_budget,
                             data_dir=time_data_dir,
-                            inference_per_psd_seg_ms_hint=inference_hint,
-                            # RT3 (§3 table): trial rounds may reuse a valid
-                            # store hit instead of warming up; formal rounds
-                            # never (their authority is the in-subprocess
-                            # verification).
-                            allow_store_reuse=plan.is_trial,
-                            observation_store_root=os.path.join(
-                                sandbox.base_dir, "runtime_observations"
-                            ),
+                            memory_history=memory_history,
+                            is_trial=plan.is_trial,
                         )
                         if time_check.get("status") == "error":
+                            # Includes the policy's ABORT path: an
+                            # evidence-channel failure is an execution-system
+                            # failure, never a candidate verdict.
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
+
+                        # C9d — resolve a REQUEST_PROBE by taking the
+                        # measurement (see _resolve_time_check_probe_request).
+                        if (
+                            _resolve_time_check_probe_request(
+                                time_check,
+                                model_type=model_type,
+                                active_params=active_params,
+                                time_budget_minutes=chosen_time_budget,
+                                is_trial=plan.is_trial,
+                                data_dir=time_data_dir,
+                                run_name=run_name,
+                                exp_id=exp_id,
+                            )
+                            == "abort"
+                        ):
+                            raise RuntimeEvidenceChannelError(
+                                "bounded live probe could not produce evidence: "
+                                + "; ".join(
+                                    (time_check.get("breakdown") or {}).get(
+                                        "probe_resolution_reasons", []
+                                    )
+                                )
+                            )
 
                         # Post-v15 bypass-time-budget gate: when the formal
                         # round is gated by the time estimator, but the
@@ -2928,6 +3157,7 @@ class HyperparamTuningAgent:
                     train_status = _run_skill("training_skill", sandbox, **active_params)
                     train_time = round(time.time() - t0, 1)
                     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
+                    _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
                     if _handle_in_subprocess_rejection(
                         train_status,
                         sandbox=sandbox,
@@ -2999,6 +3229,7 @@ class HyperparamTuningAgent:
                         inf_status = _run_skill("inference_skill", sandbox, **active_params)
                         inference_time = round(time.time() - t0, 1)
                         _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
+                        _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
                         if inf_status.get("status") == "error":
                             # DataScope DS5 — non-retryable: terminate the run.
                             if inf_status.get("error_type") == "scope_violation":
@@ -3819,6 +4050,12 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    if isinstance(e, RuntimeEvidenceChannelError):
+                        # C9c: infrastructure class — the machinery that
+                        # produces runtime evidence is broken, so no further
+                        # candidate can be judged. Terminates the chain.
+                        _evidence_channel_failure = str(e)
+                        break
                     if isinstance(e, PlanOverridesError):
                         # FU-10 — deterministic operator-configuration error;
                         # retrying cannot change it and recording it as an
@@ -3888,10 +4125,12 @@ class HyperparamTuningAgent:
             # DataScope DS5 — a scope violation is deterministic on retry:
             # terminate the run immediately, before any retry/fail-round
             # bookkeeping.
-            if _scope_violation_reason:
+            if _scope_violation_reason or _evidence_channel_failure:
                 print(
-                    f"  [DATASCOPE] Non-retryable scope violation — terminating "
-                    f"run: {_scope_violation_reason}"
+                    _non_retryable_termination_message(
+                        scope_violation_reason=_scope_violation_reason,
+                        evidence_channel_failure=_evidence_channel_failure,
+                    )
                 )
                 break
 
@@ -3961,6 +4200,7 @@ class HyperparamTuningAgent:
             max_fail_rounds=max_fail_rounds_setting,
             gate_aborted=_gate_aborted,
             scope_violation_reason=_scope_violation_reason,
+            evidence_channel_failure=_evidence_channel_failure,
         )
         all_records = sandbox.get_summary()
         successful_records = [

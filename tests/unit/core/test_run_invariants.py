@@ -145,6 +145,9 @@ class TestViolationMatrix:
             "structured_health_feedback_enabled",
             "health_feedback_history_window_iterations",
             "health_feedback_history_max_entries_per_model",
+            # C9d — the runtime subsystem's behavioral identities.
+            "runtime_estimator_identity",
+            "runtime_policy_identity",
             "created_at",
         }
 

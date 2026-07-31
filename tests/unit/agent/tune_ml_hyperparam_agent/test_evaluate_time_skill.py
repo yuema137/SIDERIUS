@@ -167,10 +167,19 @@ def test_run_skill_infeasible_large_model(monkeypatch):
     # blows past 60 min, well before inference + scoring are added.
     _patch_count_params(monkeypatch, 50_000_000)
     result = ts.run_skill(FakeSandbox(), **_base_kwargs(time_budget_minutes=60.0))
-    assert result["feasible"] is False
     assert "OVER BUDGET" in result["verdict"]
     assert result["suggestion"]  # non-empty
     assert result["estimated_minutes"] > 60.0
+    assert result["breakdown"]["over_effective_budget"] is True
+    # C8c authority change (operator-approved 2026-07-30): with no CUDA and
+    # no data_dir this projection is `static_uncalibrated` — the same
+    # uncalibrated formula that fabricated the V19 wave-1 84x rejection. It
+    # still reports the overshoot and the lever to pull, but it may no
+    # longer gate the round: only measured evidence can (§7.4 matrix row
+    # static_prior/trial = cannot_block).
+    assert result["breakdown"]["runtime_decision"] == "ADVISORY"
+    assert result["breakdown"]["runtime_decision_provenance"] == "static_uncalibrated"
+    assert result["feasible"] is True
 
 
 def test_run_skill_error_on_malformed_model_config(monkeypatch):

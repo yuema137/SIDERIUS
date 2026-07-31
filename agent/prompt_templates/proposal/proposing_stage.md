@@ -43,7 +43,7 @@ A JSON object with these fields:
   "motivation": "Why this architecture addresses the bottleneck identified in the DiscoveryMemo. Must reference proposed_change and causal_hypothesis verbatim.",
   "expert_advice": {
     "focus_areas": ["What to prioritize during hyperparameter tuning"],
-    "constraints": ["At least one VRAM limit and one parameter count limit"],
+    "constraints": ["At least one VRAM limit (relative to the effective cap in [HARDWARE CONTEXT])"],
     "known_failures": ["Based on the DiscoveryMemo's predicted_failure_modes"],
     "suggested_directions": ["Concrete first experiments", "Trial strategy guidance"],
     "rationale": "Why this guidance is appropriate for this architecture."
@@ -109,9 +109,12 @@ making the same mistake unless the shape is fixed at emission time.**
 
    This is non-negotiable.
 
-5. **Conservative baseline.** The `baseline_config` must fit in <10 GB VRAM.
-   `expert_advice.constraints` must include at least one VRAM limit and one
-   parameter count limit.
+5. **Conservative baseline.** The `baseline_config` must fit comfortably
+   within the effective VRAM cap shown in `[HARDWARE CONTEXT]` (when present).
+   `expert_advice.constraints` must include at least one VRAM limit. Capacity
+   constraints such as parameter-count ceilings may be included ONLY when
+   justified by measured evidence or explicit capacity arithmetic — never as
+   unexamined defaults.
 
 6. **Cite sparingly.** If expert context items influenced your design, they
    should already be cited in the DiscoveryMemo. Do not add new citations

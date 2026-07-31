@@ -96,6 +96,7 @@ from core.run_invariants import (
     ensure_run_invariants,
     validate_stamped_invariants,
 )
+from core.runtime_control.launch_guard import run_launch_self_test
 from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
 from execute_tools.dataset_config import DataScope
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
@@ -1532,6 +1533,16 @@ def run_workflow(
     # See ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
     bridge_factory: Callable | None = None,
     sandbox_factory: Callable | None = None,
+    # C9d — does this launch REQUIRE a buildable bounded-probe runner?
+    # True only for a real training launch: a formal runtime decision
+    # there must resolve to measured evidence, so a machine that cannot
+    # probe must not start one. Default False keeps CPU boxes, dry runs
+    # and unit tests working — the guard still runs every behavioral
+    # check, it just does not demand a device. Deriving this from the
+    # factory arguments was wrong: factory identity says nothing about
+    # whether GPU training will happen, and it made workflow startup
+    # silently GPU-dependent.
+    require_probe_runner: bool = False,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -1801,6 +1812,21 @@ def run_workflow(
             full_scope=list(range(_DATASET_CONFIG.num_files)),
             source=f"seed/restored output '{_output.run_name}' ({_output.model_type})",
         )
+    # C9d — runtime-control launch guard. Runs BEFORE any LLM call or
+    # trajectory mutation and EXERCISES the lifecycle (shared estimator +
+    # policy, static-cannot-block, measured-can-block, REQUEST_PROBE
+    # resolving through the production entry point, exactly-once probing,
+    # infrastructure failure aborting). A real launch additionally
+    # requires a buildable bounded-probe runner: without one, a formal
+    # decision would have no measured evidence to resolve to.
+    _launch_report = run_launch_self_test(require_probe_runner=require_probe_runner)
+    print(
+        f"[RUNTIME] Launch self-test passed in {_launch_report.elapsed_seconds:.2f}s "
+        f"({len(_launch_report.checks)} checks) | estimator="
+        f"{_launch_report.estimator_identity} | policy="
+        f"{_launch_report.policy_identity} | probe_runner="
+        f"{_launch_report.probe_runner_detail}"
+    )
     ensure_run_invariants(workspace, _run_invariants)
     if _scope_is_partial:
         print(

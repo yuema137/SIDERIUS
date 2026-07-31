@@ -407,14 +407,15 @@ def _make_fake_proposing(
 def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
     """End-to-end: iter-1's `disallowed_architectural_patterns` must reach
     iter-2's proposer system prompt AS a `[DISALLOWED PATTERNS]` block
-    (Fix 1); an over-budget draft must be rejected by the pre-flight gate
-    and `[PRE-FLIGHT REJECTION]` must surface in the next proposing call's
-    user prompt (Fix 2); the eventually-emitted proposal must carry
-    audit fields proving the gate ran and passed on the retry.
+    (Fix 1); an over-budget draft is emitted with a labeled
+    ``PREFLIGHT_ADVISORY`` and NO revision (C1, 2026-07-30 —
+    runtime_estimation_and_calibration.md §23-C1; the former Fix 2
+    reject-revise guard is retired); the emitted proposal must carry
+    audit fields proving the advisory estimate ran.
 
-    Per Decision 6 (design doc §9 Commit 6): Stages 1-2 must NOT be re-run
-    on pre-flight rejection. Bridge call count for iter-2 is therefore
-    exactly 4 — comparison + reasoning + draft-1 + draft-2."""
+    Bridge call count for iter-2 is therefore exactly 3 — comparison +
+    reasoning + draft-1; the queued draft-2 proves no revision call was
+    made."""
     # Seed tuning data so the workflow can bootstrap iteration 1.
     _write_tuning_output(tmp_path, "punet", run="v1", score=1.5)
 
@@ -548,67 +549,63 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         f"description for scan_over_T; got:\n{iter2_prompt[-2000:]}"
     )
 
-    # === Guard 3 — Fix 2 pre-flight revision loop ===
+    # === Guard 3 — C1 pre-flight ADVISORY (2026-07-30; replaces the Fix 2
+    # revision-loop guard — runtime_estimation_and_calibration.md §23-C1) ===
     iter2_bridge = bridges_by_iter.get(2)
     assert iter2_bridge is not None, "iter-2 bridge was not captured"
-    # Decision 6 invariant — Stages 1+2 are NOT re-run on pre-flight
-    # rejection; the outer loop only re-runs Stage 3.
-    assert iter2_bridge.generate.call_count == 4, (
-        f"Decision 6 broken: iter-2 bridge.generate should be called "
-        f"exactly 4 times (comparison + reasoning + draft-1 + draft-2), "
+    # The over-budget draft-1 is emitted WITHOUT a revision: exactly
+    # 3 calls (comparison + reasoning + draft-1). draft-2 remains queued
+    # in the mock, proving it was never consumed.
+    assert iter2_bridge.generate.call_count == 3, (
+        f"C1 broken: iter-2 bridge.generate should be called exactly "
+        f"3 times (comparison + reasoning + draft-1; no revision), "
         f"got {iter2_bridge.generate.call_count}."
     )
 
-    # call_args_list[N][0] is the positional args tuple; bridge.generate
-    # is called as (system_prompt, user_prompt), so [1] is the user prompt.
-    fourth_call_user_prompt = iter2_bridge.generate.call_args_list[3][0][1]
-    assert "[PRE-FLIGHT REJECTION]" in fourth_call_user_prompt, (
-        "Fix 2 broken: iter-2's 4th bridge call (proposing retry) must "
-        "carry [PRE-FLIGHT REJECTION] in its USER prompt. "
-        f"Got user prompt tail:\n{fourth_call_user_prompt[-1500:]}"
-    )
-    # Decision 7 — all four prescriptive numeric substitutions must appear.
-    assert f"{_OVERBUDGET_PARAM_COUNT:,}" in fourth_call_user_prompt, (
-        "Fix 2 broken: rejection block missing num_params substitution "
-        f"({_OVERBUDGET_PARAM_COUNT:,})."
-    )
-    # factor ≈ 335.1×; the rendered "{factor:.1f}x" is "335.1x" (see the
-    # num_params calibration comment — recalibrated 2026-07-23 for the
-    # current estimator constants at epochs=1).
-    assert "335.1x" in fourth_call_user_prompt, (
-        "Fix 2 broken: rejection block missing factor=335.1x substitution "
-        "(derived from 50M params × seg=40000 × 1 epoch vs 20-min budget)."
-    )
-    assert f"{_PREFLIGHT_TRIAL_BUDGET_MIN:.1f} min budget" in fourth_call_user_prompt, (
-        "Fix 2 broken: rejection block missing budget_minutes substitution "
-        f"({_PREFLIGHT_TRIAL_BUDGET_MIN:.1f} min)."
-    )
+    # No prompt may carry the retired rejection block or any advisory text.
+    for call_idx, call in enumerate(iter2_bridge.generate.call_args_list):
+        user_prompt = call[0][1]
+        assert "[PRE-FLIGHT REJECTION]" not in user_prompt, (
+            f"C1 broken: bridge call {call_idx} carries the retired [PRE-FLIGHT REJECTION] block."
+        )
+        assert "PREFLIGHT_ADVISORY" not in user_prompt, (
+            f"C1 broken: bridge call {call_idx} carries advisory text in a "
+            f"prompt (prompt labeling is C2 scope, not prompt injection)."
+        )
 
-    # === Emitted ProposalOutput — audit fields + success-path sanity ===
+    # === Emitted ProposalOutput — the over-budget draft with a labeled
+    # advisory + observability fields ===
     assert len(emitted_proposals) == 2, (
         f"expected 2 proposer emissions (iter 1 + iter 2), got {len(emitted_proposals)}."
     )
     iter2_proposal = emitted_proposals[1]
-    assert iter2_proposal.model_name == "arch_iter2_draft2", (
-        f"Success path should emit the feasible draft "
-        f"(arch_iter2_draft2); got '{iter2_proposal.model_name}'."
+    assert iter2_proposal.model_name == "arch_iter2_draft1", (
+        f"C1: the over-budget draft itself must be emitted "
+        f"(arch_iter2_draft1); got '{iter2_proposal.model_name}'."
     )
-    assert iter2_proposal.preflight_factor is not None, (
-        "Audit broken: preflight_factor not populated on emitted "
-        "ProposalOutput (pre-flight did not run?)."
-    )
-    assert iter2_proposal.preflight_factor <= 1.0, (
-        f"Emitted draft should be feasible (factor <= 1.0); got "
-        f"preflight_factor={iter2_proposal.preflight_factor}."
+    assert iter2_proposal.preflight_factor is not None and iter2_proposal.preflight_factor > 1.0, (
+        f"Observability broken: preflight_factor should record the "
+        f"over-budget value; got {iter2_proposal.preflight_factor}."
     )
     assert (
         iter2_proposal.preflight_estimated_minutes is not None
         and iter2_proposal.preflight_estimated_minutes > 0
     ), "Audit broken: preflight_estimated_minutes not populated."
+    advisories = [n for n in iter2_proposal.memo_consistency_notes if "PREFLIGHT_ADVISORY" in n]
+    assert len(advisories) == 1, (
+        f"C1: exactly one labeled advisory expected; got {iter2_proposal.memo_consistency_notes}"
+    )
+    advisory = advisories[0]
+    assert "static_uncalibrated" in advisory
+    assert "blocking_eligible=no" in advisory
+    assert f"{_OVERBUDGET_PARAM_COUNT:,}" in advisory
+    assert f"{iter2_proposal.preflight_factor:.2f}x" in advisory
+    assert f"{_PREFLIGHT_TRIAL_BUDGET_MIN:.1f} min budget" in advisory
+    assert "Do not infer a parameter-count ceiling" in advisory
     assert not any(
         "PREFLIGHT_OVERBUDGET_EMITTED" in note for note in iter2_proposal.memo_consistency_notes
     ), (
-        "Success path (not exhaustion) — memo_consistency_notes must NOT "
-        f"carry PREFLIGHT_OVERBUDGET_EMITTED. Got: "
+        "C1: the exhaustion path is retired — memo_consistency_notes must "
+        f"never carry PREFLIGHT_OVERBUDGET_EMITTED. Got: "
         f"{iter2_proposal.memo_consistency_notes}"
     )

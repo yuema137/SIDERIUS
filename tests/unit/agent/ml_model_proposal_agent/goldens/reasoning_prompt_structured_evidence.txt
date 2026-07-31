@@ -49,5 +49,9 @@ For this iteration: if the same architecture family or scale appears
 in multiple entries above, that is a strong signal the family is
 structurally infeasible under the active budgets — propose a
 different family, not a smaller variant of the same family. If only
-a single entry is shown, reduce parameter count and/or layer count
-enough that the resulting baseline estimates land below the budgets.
+a single entry is shown, treat it as one bounded report from the
+pre-attempt gates (whose time estimates may be uncalibrated): first
+adjust the workload plan (optimizer steps, batch size, segment
+sizing) to fit the budgets, reducing capacity only where the gate
+report shows a VRAM limit. Do not derive a permanent
+parameter-count ceiling from a single gate report.

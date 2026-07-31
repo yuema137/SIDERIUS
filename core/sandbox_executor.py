@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from core.inference_defaults import inference_batch_for
-from core.runtime_control.records import RuntimeObservation
+from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import DataScope, ScopeViolationError
@@ -435,10 +435,21 @@ def _watchdog_deadline_provider(
             candidates.append((policy.operator_budget_seconds, "operator_budget"))
         block = _read_runtime_observation_sidecar(rv_sidecar_path)
         if block:
+            components = (block.get("components") or {}).values()
+            # C8d: a deadline may only be derived from MEASUREMENT-BACKED
+            # component predictions (§7.4 watchdog column: static evidence
+            # is `never_used`, historical priors `never_used_alone`). Every
+            # prediction the RT2 session writes is measurement-backed by
+            # construction — setup measures itself, phases predict only
+            # after verifying — so this changes no production number; it
+            # closes the door on a prior ever setting a kill deadline.
+            # The arithmetic below is unchanged.
             predicted = [
-                c.get("prediction", {}).get("predicted_seconds")
-                for c in (block.get("components") or {}).values()
+                c["prediction"]["predicted_seconds"]
+                for c in components
                 if c.get("prediction") is not None
+                and c["prediction"].get("predicted_seconds") is not None
+                and c["prediction"].get("source") in MEASUREMENT_BACKED_SOURCES
             ]
             if predicted:
                 estimate = sum(predicted) * watchdog_factor
@@ -880,7 +891,21 @@ class TidmadSandbox:
                 runtime_verification is not None
                 and (runtime_verification.get("admission") or {}).get("decision") == "rejected"
             ):
-                reason = (runtime_verification.get("admission") or {}).get("reason", "")
+                admission_block = runtime_verification.get("admission") or {}
+                reason = admission_block.get("reason", "")
+                # C9c: an infrastructure-class refusal is NOT a verdict on
+                # this candidate — it says the evidence channel is broken.
+                # Surfacing it as a candidate rejection would send the chain
+                # to the next candidate and straight back into the same
+                # failure. Legacy records carry no failure_class and keep the
+                # historical (conservative) candidate-rejection path.
+                if admission_block.get("failure_class") == "infrastructure":
+                    print(f"--- Runtime Evidence-Channel Failure (ABORT) ---\n{reason}")
+                    return {
+                        "status": "aborted_infrastructure",
+                        "message": f"runtime evidence channel failed: {reason}",
+                        "runtime_verification": runtime_verification,
+                    }
                 print(f"--- Runtime Verification Rejected ---\n{reason}")
                 return {
                     "status": "rejected_time_risk",

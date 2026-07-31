@@ -1,7 +1,8 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
 # V19 Gate 0 pair runner — band 15-19, exactly two concurrent chains
-# (v19_gate_arch_15_19 + v19_gate_loss_15_19), 2 iterations each.
+# (${GATE_RUN_PREFIX}_arch_15_19 + ${GATE_RUN_PREFIX}_loss_15_19, default
+# prefix v19_c14), 2 iterations each.
 # Frozen Gate plan: reports/v19_gate0_20260729_2209.md; protocol:
 # docs/design/v19_priorities/v19_launch_protocol.md.
 #
@@ -47,9 +48,18 @@ POLL_SECONDS="${POLL_SECONDS:-60}"
 WALL_CAP_SECONDS="${WALL_CAP_SECONDS:-21600}"
 LAUNCH_SETTLE_SECONDS="${LAUNCH_SETTLE_SECONDS:-3}"
 
-ARCH_RUN="v19_gate_arch_15_19"
-LOSS_RUN="v19_gate_loss_15_19"
+# C14 (operator 2026-07-31): explicit C14 run names, so this Gate's
+# workspaces can never be confused with the 2026-07-30 Gate-0 attempt
+# (now archived) or with formal V19. Overridable for a re-run under a
+# different label; the launcher derives EVERY name from it, so the
+# summary, the markers and the chain argv cannot disagree.
+GATE_RUN_PREFIX="${GATE_RUN_PREFIX:-v19_c14}"
+ARCH_RUN="${GATE_RUN_PREFIX}_arch_15_19"
+LOSS_RUN="${GATE_RUN_PREFIX}_loss_15_19"
 SUMMARY="$GATE_ROOT/gate0_pair_summary.json"
+#: Per-chain admission cap, mirrored from gate_chain_args() so the
+#: aggregate check and the launched command can never disagree.
+PAIR_CAP_GIB="${PAIR_CAP_GIB:-12}"
 RUNNER_LOG="$GATE_ROOT/gate0_runner.log"
 
 log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$RUNNER_LOG"; }
@@ -59,7 +69,7 @@ log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$RUNNER_LOG"; }
 # advice path. Everything else is byte-identical by construction.
 gate_chain_args() {  # flavor (arch|loss)
   local FLAVOR="$1"
-  local RUN="v19_gate_${FLAVOR}_15_19"
+  local RUN="${GATE_RUN_PREFIX}_${FLAVOR}_15_19"
   cat <<EOF
 --mode
 lilab
@@ -111,16 +121,16 @@ sequential
 --formal_time_budget_minutes
 30
 --trial_vram_budget_gb
-24
+12
 --formal_vram_budget_gb
-24
+12
 --runtime_watchdog
 --runtime_safety_factor
 1.5
 --runtime_trial_safety_factor
 3.0
 --runtime_formal_safety_factor
-2.0
+2.25
 --runtime_watchdog_safety_factor
 3.5
 --runtime_watchdog_floor_seconds
@@ -164,7 +174,7 @@ wrapper_pid() {  # run -> self-reported wrapper-shell PID or "unknown"
 
 launch_gate_chain() {  # flavor (arch|loss)
   local FLAVOR="$1"
-  local RUN="v19_gate_${FLAVOR}_15_19"
+  local RUN="${GATE_RUN_PREFIX}_${FLAVOR}_15_19"
   local WS="$GATE_ROOT/$RUN"
   local LOG="$GATE_ROOT/${RUN}_$(date +%Y%m%d_%H%M).log"
   local SESSION="siderius-$RUN"
@@ -285,13 +295,31 @@ write_summary() {
   log "SUMMARY written: arch_exit=$AE loss_exit=$LE disposition=$DISPOSITION"
 }
 
-# Test hook: load definitions only.
-if [ "${V19_GATE0_NO_MAIN:-0}" = "1" ]; then
-  return 0 2>/dev/null || exit 0
-fi
-
+# --- entry point ------------------------------------------------------------
+# Everything above is definitions. main() below is the ONLY thing that
+# touches the filesystem or launches a chain, and it runs only on direct
+# execution (see the source-safe guard at the bottom of this file).
+main() {
 mkdir -p "$GATE_ROOT"
 trap write_summary EXIT
+
+# Host-aware aggregate admission (operator decision 2026-07-31). The
+# per-chain cap answers "does one attempt fit the device"; on a shared
+# host the binding limit is the per-user TOTAL. Asked here, before
+# anything launches, so the host watchdog is never the first component
+# to notice — during C12 it was, and what it produced was a kill.
+if ! PAIR_CHECK="$(.venv/bin/python -m core.runtime_control.pair_admission \
+      --caps "$ARCH_RUN=$PAIR_CAP_GIB,$LOSS_RUN=$PAIR_CAP_GIB" 2>&1)"; then
+  log "PAIR ADMISSION: configured caps can exceed the aggregate ceiling"
+  while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
+  if [ "${ALLOW_PAIR_CAP_OVERSUBSCRIPTION:-1}" != "1" ]; then
+    DISPOSITION="pair_infeasible_under_host_quota"; exit 1
+  fi
+  log "  proceeding: the BINDING guard is the per-attempt predicted-peak"
+  log "  check inside each chain; these are caps, not predictions."
+else
+  while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
+fi
 START_TS="$(date -u '+%Y-%m-%dT%H:%M:%S')"
 
 if ! launch_gate_chain arch; then
@@ -325,3 +353,16 @@ fi
 DISPOSITION="chain_failure"
 log "GATE PAIR DONE: arch=$AE loss=$LE disposition=chain_failure"
 exit 1
+}
+
+# Source-safe entry guard. Sourcing this file — for tests, or to inspect
+# the frozen command with gate_chain_args — must NEVER launch anything.
+# This replaced an environment-only opt-out that was easy to forget:
+# on 2026-07-31 the runner was sourced without it while diffing the argv
+# and executed its whole launch path. Nothing launched (the
+# workspace-exists guard refused) but the pair summary was overwritten.
+# `V19_GATE0_NO_MAIN` is still honoured so existing callers keep working,
+# but it is no longer what protects us.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${V19_GATE0_NO_MAIN:-0}" != "1" ]; then
+  main "$@"
+fi

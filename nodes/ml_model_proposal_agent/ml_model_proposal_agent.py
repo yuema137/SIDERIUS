@@ -22,7 +22,8 @@ Node contract:
 import argparse
 import json
 import os
-from typing import Any, cast
+from functools import lru_cache
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -57,12 +58,6 @@ _MAX_REASONING_RETRIES = 1
 # every proposing structural attempt, so they can only be corrected at the
 # causal stage itself. Total causal validation attempts = retries + 1.
 _MAX_CAUSAL_CORRECTION_RETRIES = 2
-
-# Fix 2 Commit 6 — total number of proposing-stage calls the pre-flight
-# revision loop is allowed. 1 initial draft + 2 revisions. The structural-
-# retry loop (_MAX_PROPOSING_RETRIES) is nested inside each pre-flight
-# attempt; schema errors do not burn a pre-flight budget slot.
-_MAX_PREFLIGHT_ATTEMPTS = 3
 
 
 def _active_time_budget_minutes(inp: ProposalInput) -> float | None:
@@ -113,29 +108,43 @@ def _live_model_registry_names(registry: CapabilityRegistry) -> list[str]:
     return sorted(indexed & live)
 
 
-def _build_preflight_rejection_block(
+@lru_cache(maxsize=1)
+def _runtime_policy():
+    """The one shared decision policy (C8g): resolved from the process-wide
+    `shared_runtime_components()` factory, so the proposer and the tuner's
+    pre-flight demonstrably decide with the same policy identity rather
+    than with two independently constructed equals."""
+    from core.runtime_control.estimator import shared_runtime_components
+
+    return shared_runtime_components()[1]
+
+
+def _build_preflight_advisory_note(
     num_params: int,
     estimated_minutes: float,
     factor: float,
     budget_minutes: float,
+    policy_identity: str = "",
 ) -> str:
-    """Render the prescriptive ``[PRE-FLIGHT REJECTION]`` block.
+    """Render the labeled ADVISORY note for an over-budget static estimate.
 
-    Decision 7 (§9 Commit 6): all four numeric substitutions must appear so
-    the LLM's next revision is grounded in concrete numbers, not a vague
-    "too slow" signal. Vague feedback produces vague revisions.
+    C1 (docs/design/runtime_estimation_and_calibration.md §8.1/§11.1):
+    the static pre-flight estimate is ``static_uncalibrated`` provenance
+    and carries NO blocking authority — it is recorded for observability
+    only, never injected into a revision prompt, and never a reason to
+    reject the proposal. The wave-1 incident showed this formula
+    rejecting an 18.4M-parameter draft at a fabricated 84.64× factor.
     """
+    suffix = f" [decided by {policy_identity}]" if policy_identity else ""
     return (
-        f"[PRE-FLIGHT REJECTION]\n"
-        f"Based on your estimated {num_params:,} parameters, the static cost "
-        f"model predicts a {estimated_minutes:.1f} min runtime, which is "
-        f"{factor:.1f}x over the {budget_minutes:.1f} min budget.\n"
-        f"Please simplify the architecture or use a more efficient model "
-        f"family. To fit within the budget you must reduce compute by roughly "
-        f"{factor:.1f}x — reduce parameter_count_estimate, reduce depth/width, "
-        f"or switch to a lighter architectural class (e.g. TCN, FFT-based, or "
-        f"windowed-attention) if the current family is structurally too "
-        f"expensive at the active segmentation_size."
+        f"PREFLIGHT_ADVISORY (provenance=static_uncalibrated, "
+        f"confidence=low, blocking_eligible=no): the static cost model "
+        f"projects {estimated_minutes:.1f} min against the "
+        f"{budget_minutes:.1f} min budget (factor {factor:.2f}x) for the "
+        f"estimated {num_params:,} parameters. This estimate has not been "
+        f"validated on the implemented model; runtime decisions are made "
+        f"from measured evidence after implementation. Do not infer a "
+        f"parameter-count ceiling from this advisory." + suffix
     )
 
 
@@ -143,17 +152,21 @@ def _run_preflight_check(
     inp: ProposalInput,
     output: ProposalOutput,
 ) -> float | None:
-    """Evaluate the static-formula pre-flight gate on a candidate ``output``.
+    """Evaluate the static-formula pre-flight ADVISORY on a candidate
+    ``output``.
 
     Mutates ``output`` in place: sets ``preflight_estimated_minutes`` and
-    ``preflight_factor`` when the gate runs; appends a ``PREFLIGHT_SKIPPED``
-    note to ``memo_consistency_notes`` when the LLM failed to supply a
+    ``preflight_factor`` when the estimate runs; appends a
+    ``PREFLIGHT_ADVISORY`` note when the estimate exceeds the budget;
+    appends a ``PREFLIGHT_SKIPPED`` note when the LLM failed to supply a
     usable ``parameter_count_estimate``.
 
-    Returns the numeric ``factor`` when the gate ran, or ``None`` when it
-    was skipped (budget disabled, or params missing / non-positive). The
-    caller uses ``None`` as the "pre-flight inconclusive — do not revise"
-    signal.
+    C1 contract: the result is ADVISORY ONLY (static_uncalibrated
+    provenance). Callers must not request proposal revision, inject
+    rejection text into prompts, or otherwise derive blocking behavior
+    from it. Returns the numeric ``factor`` for logging when the
+    estimate ran, or ``None`` when it was skipped (budget disabled, or
+    params missing / non-positive).
     """
     budget = _active_time_budget_minutes(inp)
     if budget is None:
@@ -163,7 +176,8 @@ def _run_preflight_check(
     if num_params is None or num_params <= 0:
         output.memo_consistency_notes.append(
             "PREFLIGHT_SKIPPED: parameter_count_estimate was None or "
-            "non-positive; pre-flight gate could not run for this draft."
+            "non-positive; the pre-flight advisory could not run for this "
+            "draft."
         )
         return None
 
@@ -181,7 +195,41 @@ def _run_preflight_check(
     )
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
-    return verdict["factor"]
+    factor = float(verdict["factor"])
+
+    # C8b: the note is emitted on the SHARED policy's decision, not on a
+    # private `factor > 1.0` comparison. The static producer's numbers are
+    # unchanged; what changed is that the authority to act on them now
+    # lives in exactly one place. A static estimate is structurally
+    # incapable of REJECT/ABORT here (type-derived eligibility + §7.4
+    # matrix row `static_prior/proposal = advisory_only`) — the assertion
+    # below turns any future regression of that invariant into a crash
+    # rather than a silently rejected proposal.
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+    from core.runtime_control.estimate_types import from_proposer_preflight
+
+    policy = _runtime_policy()
+    decision = policy.decide(
+        from_proposer_preflight(verdict),
+        RuntimeBudget(time_seconds=budget * 60.0),
+        RuntimeMode(phase="proposal", candidate_stage="proposal"),
+    )
+    if decision.kind in ("REJECT", "ABORT"):
+        raise AssertionError(
+            f"proposal-stage static evidence produced {decision.kind}: "
+            f"{decision.reasons} — the C1/C8 advisory-only invariant is broken"
+        )
+    if decision.kind != "ALLOW":
+        output.memo_consistency_notes.append(
+            _build_preflight_advisory_note(
+                num_params=num_params,
+                estimated_minutes=float(verdict["estimated_minutes"]),
+                factor=factor,
+                budget_minutes=budget,
+                policy_identity=policy.identity,
+            )
+        )
+    return factor
 
 
 def _check_citation_discipline(
@@ -282,7 +330,7 @@ Output a JSON object with exactly these fields:
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
-    "constraints": ["Hard limits — must include at least one VRAM limit and one parameter count limit"],
+    "constraints": ["Hard limits — must include at least one VRAM limit (relative to the effective cap in [HARDWARE CONTEXT])"],
     "known_failures": ["Configs or approaches to avoid, based on patterns in the interpretation"],
     "suggested_directions": [
       "Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'",
@@ -313,7 +361,10 @@ Hard constraints — violating any of these makes the proposal invalid:
 - model_name must be snake_case: lowercase letters, digits, and underscores only
 - The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
 - baseline_config must be conservative: fits comfortably within the effective cap shown in the [HARDWARE CONTEXT] (the VRAM gate rejects anything above it)
-- expert_advice.constraints must include at least one VRAM limit and one parameter count limit
+- expert_advice.constraints must include at least one VRAM limit (relative to
+  the effective cap shown in the [HARDWARE CONTEXT]). Capacity constraints such
+  as parameter-count ceilings may be included ONLY when justified by measured
+  evidence or explicit capacity arithmetic — never as unexamined defaults
 - parameter_count_estimate must be a positive integer — your best estimate of the total
   trainable parameter count at the baseline_config. An order-of-magnitude estimate is
   sufficient; be realistic about multi-head attention, state dims, dilated stacks, etc.
@@ -603,8 +654,12 @@ def _format_recent_gate_exhaustions_block(
         "in multiple entries above, that is a strong signal the family is",
         "structurally infeasible under the active budgets — propose a",
         "different family, not a smaller variant of the same family. If only",
-        "a single entry is shown, reduce parameter count and/or layer count",
-        "enough that the resulting baseline estimates land below the budgets.",
+        "a single entry is shown, treat it as one bounded report from the",
+        "pre-attempt gates (whose time estimates may be uncalibrated): first",
+        "adjust the workload plan (optimizer steps, batch size, segment",
+        "sizing) to fit the budgets, reducing capacity only where the gate",
+        "report shows a VRAM limit. Do not derive a permanent",
+        "parameter-count ceiling from a single gate report.",
     ]
     return "\n".join(lines)
 
@@ -1207,11 +1262,12 @@ class MLModelProposalAgent:
     def _run_legacy(self, inp: ProposalInput) -> ProposalOutput:
         """Original 2-call pattern: reasoning (text) + commit (JSON).
 
-        Wrapped with the Fix 2 Commit 6 pre-flight revision loop: up to
-        ``_MAX_PREFLIGHT_ATTEMPTS`` commit calls, with ``[PRE-FLIGHT
-        REJECTION]`` appended on each revision. Legacy mode has no
-        structural-retry inner loop — a schema-violating draft raises
-        immediately (unchanged behavior).
+        C1 (runtime_estimation_and_calibration.md §23-C1): the static
+        time pre-flight is ADVISORY ONLY — a single commit call, no
+        reject-revise loop, no rejection text in prompts. An over-budget
+        static estimate is recorded as a labeled advisory on the output.
+        Legacy mode has no structural-retry inner loop — a
+        schema-violating draft raises immediately (unchanged behavior).
         """
         reasoning_prompt = _build_reasoning_prompt(inp)
         print(f"    [PROMPT_SIZE] proposer_reasoning: {len(reasoning_prompt)} chars")
@@ -1226,100 +1282,46 @@ class MLModelProposalAgent:
         )
         print(f"   Legacy reasoning complete ({len(reasoning)} chars).")
 
-        base_commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
-        budget = _active_time_budget_minutes(inp)
-        preflight_errors: list[str] = []
-        candidates: list[ProposalOutput] = []
+        commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
+        raw = self.bridge.generate(
+            PROPOSAL_COMMIT_PROMPT,
+            commit_prompt,
+            label="proposer.legacy_commit",
+        )
 
-        for preflight_attempt in range(_MAX_PREFLIGHT_ATTEMPTS):
-            commit_prompt = base_commit_prompt
-            if preflight_errors:
-                commit_prompt = base_commit_prompt + "\n\n---\n\n" + "\n\n".join(preflight_errors)
-
-            raw = self.bridge.generate(
-                PROPOSAL_COMMIT_PROMPT,
-                commit_prompt,
-                label="proposer.legacy_commit",
+        proposed_name = raw.get("model_name", "")
+        if proposed_name in inp.existing_model_types:
+            raise ValueError(
+                f"LLM proposed model_name '{proposed_name}' which already exists in "
+                f"existing_model_types: {inp.existing_model_types}. "
+                f"Re-run or adjust the constraints."
             )
 
-            proposed_name = raw.get("model_name", "")
-            if proposed_name in inp.existing_model_types:
-                raise ValueError(
-                    f"LLM proposed model_name '{proposed_name}' which already exists in "
-                    f"existing_model_types: {inp.existing_model_types}. "
-                    f"Re-run or adjust the constraints."
-                )
+        output = ProposalOutput.model_validate(
+            {
+                "model_name": proposed_name,
+                "model_description": raw.get("model_description", ""),
+                "mathematical_definition": raw.get("mathematical_definition", ""),
+                "motivation": raw.get("motivation", ""),
+                "expert_advice": raw.get("expert_advice", {}),
+                "baseline_config": raw.get("baseline_config", {}),
+                "parameter_count_estimate": raw.get("parameter_count_estimate"),
+                "custom_loss_spec": raw.get("custom_loss_spec"),
+            },
+            context={
+                "loss_registry_names": live_loss_registry_names(self._registry),
+                "model_registry_names": _live_model_registry_names(self._registry),
+            },
+        )
 
-            output = ProposalOutput.model_validate(
-                {
-                    "model_name": proposed_name,
-                    "model_description": raw.get("model_description", ""),
-                    "mathematical_definition": raw.get("mathematical_definition", ""),
-                    "motivation": raw.get("motivation", ""),
-                    "expert_advice": raw.get("expert_advice", {}),
-                    "baseline_config": raw.get("baseline_config", {}),
-                    "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                    "custom_loss_spec": raw.get("custom_loss_spec"),
-                },
-                context={
-                    "loss_registry_names": live_loss_registry_names(self._registry),
-                    "model_registry_names": _live_model_registry_names(self._registry),
-                },
+        factor = _run_preflight_check(inp, output)
+        if factor is not None and factor > 1.0:
+            print(
+                f"   Pre-flight advisory (factor={factor:.2f}x, "
+                f"static_uncalibrated — no revision requested)."
             )
-
-            factor = _run_preflight_check(inp, output)
-            if factor is None or factor <= 1.0:
-                print(f"Proposed model (legacy): '{output.model_name}'")
-                return output
-
-            candidates.append(output)
-            if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
-                # Invariant: factor > 1.0 here means _run_preflight_check did not
-                # take its early-exit paths at L106-107 (budget None) or
-                # L110-115 (num_params None / non-positive), and reached L128
-                # where preflight_estimated_minutes is assigned. Narrow all three
-                # explicitly so any future regression in that invariant surfaces
-                # here with a clear message instead of crashing inside ``:,`` /
-                # ``:.1f`` format on None.
-                num_params = output.parameter_count_estimate
-                est_mins = output.preflight_estimated_minutes
-                if num_params is None or est_mins is None or budget is None:
-                    raise RuntimeError(
-                        "Preflight structural invariants violated: "
-                        f"factor={factor} > 1.0 but one of "
-                        f"(parameter_count_estimate={num_params}, "
-                        f"preflight_estimated_minutes={est_mins}, "
-                        f"budget={budget}) is None — _run_preflight_check "
-                        "should have returned None for skipped pre-flight."
-                    )
-                preflight_errors.append(
-                    _build_preflight_rejection_block(
-                        num_params=num_params,
-                        estimated_minutes=est_mins,
-                        factor=factor,
-                        budget_minutes=budget,
-                    )
-                )
-                print(
-                    f"   Pre-flight rejected (factor={factor:.2f}x); "
-                    f"requesting revision {preflight_attempt + 2}/"
-                    f"{_MAX_PREFLIGHT_ATTEMPTS}."
-                )
-
-        best = min(candidates, key=lambda o: cast(float, o.preflight_factor))
-        best.memo_consistency_notes.append(
-            f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
-            f"pre-flight attempts exceeded the {budget:.1f} min budget; "
-            f"emitting lowest-factor candidate "
-            f"(factor={best.preflight_factor:.2f}x, "
-            f"estimated {best.preflight_estimated_minutes:.1f} min). "
-            f"The tuner's real-data gate may still reject this at trial time."
-        )
-        print(
-            f"Proposed model (legacy, pre-flight exhausted): '{best.model_name}' "
-            f"factor={best.preflight_factor:.2f}x"
-        )
-        return best
+        print(f"Proposed model (legacy): '{output.model_name}'")
+        return output
 
     # ------------------------------------------------------------------
     # Pipeline mode (B.11 + B.12 — 3-stage reasoning pipeline)
@@ -1817,190 +1819,142 @@ class MLModelProposalAgent:
                 elif kind == "discovery":
                     discoveries.append(candidate)
 
-        # Fix 2 Commit 6 — two-layer loop: the outer pre-flight revision
-        # loop wraps the existing structural-retry inner loop. Schema errors
-        # are handled by the inner loop (burn structural-retry slots); pre-
-        # flight rejections are handled by the outer loop (burn pre-flight
-        # slots). Stages 1+2 are never re-run from either loop.
-        budget = _active_time_budget_minutes(inp)
-        preflight_candidates: list[ProposalOutput] = []
+        # C1 (runtime_estimation_and_calibration.md §23-C1): the static time
+        # pre-flight is ADVISORY ONLY — the former outer reject-revise loop
+        # is removed. Schema errors are still handled by the structural-retry
+        # loop below (unchanged behavior). Stages 1+2 are never re-run.
+        output: ProposalOutput | None = None
+        last_exc: Exception | None = None
 
-        for preflight_attempt in range(_MAX_PREFLIGHT_ATTEMPTS):
-            output: ProposalOutput | None = None
-            last_exc: Exception | None = None
+        for attempt in range(_MAX_PROPOSING_RETRIES + 1):
+            clamped_accumulated = clamp_and_backstop_accumulated(
+                accumulated,
+                top_k=policy.comparative_analysis_top_k,
+                max_chars=policy.prior_stage_max_chars,
+                input_keys=_PROPOSER_INPUT_KEYS,
+            )
+            # Proposing-stage user prompt — P-d order matches the reasoning
+            # stages above except the vocab block is intentionally omitted
+            # (proposing-stage prompts already cite vocab via system-prompt
+            # template_vars; rendering it again would bloat the prompt).
+            proposing_parts: list[str] = []
+            if hardware_block:
+                proposing_parts.append(hardware_block)
+            if constraints_block:
+                proposing_parts.append(constraints_block)
+            if agent_cards_block:
+                proposing_parts.append(agent_cards_block)
+            if expert_context_block:
+                proposing_parts.append(expert_context_block)
+            proposing_parts.append(_render_stage_user_prompt(clamped_accumulated))
+            proposing_user = "\n\n".join(proposing_parts)
 
-            for attempt in range(_MAX_PROPOSING_RETRIES + 1):
-                clamped_accumulated = clamp_and_backstop_accumulated(
-                    accumulated,
-                    top_k=policy.comparative_analysis_top_k,
-                    max_chars=policy.prior_stage_max_chars,
-                    input_keys=_PROPOSER_INPUT_KEYS,
-                )
-                # Proposing-stage user prompt — P-d order matches the reasoning
-                # stages above except the vocab block is intentionally omitted
-                # (proposing-stage prompts already cite vocab via system-prompt
-                # template_vars; rendering it again would bloat the prompt).
-                proposing_parts: list[str] = []
-                if hardware_block:
-                    proposing_parts.append(hardware_block)
-                if constraints_block:
-                    proposing_parts.append(constraints_block)
-                if agent_cards_block:
-                    proposing_parts.append(agent_cards_block)
-                if expert_context_block:
-                    proposing_parts.append(expert_context_block)
-                proposing_parts.append(_render_stage_user_prompt(clamped_accumulated))
-                proposing_user = "\n\n".join(proposing_parts)
+            print(
+                f"   Stage 'proposing': calling LLM "
+                f"(structural {attempt + 1}/{_MAX_PROPOSING_RETRIES + 1})..."
+            )
+            # Proposing-stage user prompt does not append vocab_block
+            # (only agent_cards + expert_context); the audit reflects
+            # this so component sums match the actual prompt sent.
+            proposing_audit = _audit_proposer_components(
+                inp=inp,
+                accumulated=clamped_accumulated,
+                agent_cards_block=agent_cards_block,
+                expert_context_block=expert_context_block,
+                vocab_block="",
+                system_prompt=proposing_prompt,
+                stage_name="proposing",
+            )
+            raw = self.bridge.generate(
+                proposing_prompt,
+                proposing_user,
+                label="proposer.proposing",
+                components=proposing_audit["components"],
+            )
 
-                print(
-                    f"   Stage 'proposing': calling LLM "
-                    f"(pre-flight {preflight_attempt + 1}/{_MAX_PREFLIGHT_ATTEMPTS}, "
-                    f"structural {attempt + 1}/{_MAX_PROPOSING_RETRIES + 1})..."
-                )
-                # Proposing-stage user prompt does not append vocab_block
-                # (only agent_cards + expert_context); the audit reflects
-                # this so component sums match the actual prompt sent.
-                proposing_audit = _audit_proposer_components(
-                    inp=inp,
-                    accumulated=clamped_accumulated,
-                    agent_cards_block=agent_cards_block,
-                    expert_context_block=expert_context_block,
-                    vocab_block="",
-                    system_prompt=proposing_prompt,
-                    stage_name="proposing",
-                )
-                raw = self.bridge.generate(
-                    proposing_prompt,
-                    proposing_user,
-                    label="proposer.proposing",
-                    components=proposing_audit["components"],
-                )
-
-                try:
-                    proposed_name = raw.get("model_name", "")
-                    if proposed_name in inp.existing_model_types:
-                        raise ValueError(
-                            f"model_name '{proposed_name}' already exists in "
-                            f"existing_model_types: {inp.existing_model_types}. "
-                            f"Choose a different name."
-                        )
-
-                    output = ProposalOutput.model_validate(
-                        {
-                            "model_name": proposed_name,
-                            "model_description": raw.get("model_description", ""),
-                            "mathematical_definition": raw.get("mathematical_definition", ""),
-                            "motivation": raw.get("motivation", ""),
-                            "expert_advice": raw.get("expert_advice", {}),
-                            "baseline_config": raw.get("baseline_config", {}),
-                            "inherited_components": inherited,
-                            "falsifiable_prediction": prediction,
-                            "proposed_vocab_links": vocab_links,
-                            "proposed_vocab_candidates": vocab_candidates,
-                            "proposed_discoveries": discoveries,
-                            "memo_consistency_notes": raw.get("memo_consistency_notes", []),
-                            "parameter_count_estimate": raw.get("parameter_count_estimate"),
-                            "custom_loss_spec": raw.get("custom_loss_spec"),
-                        },
-                        context={
-                            "loss_registry_names": live_loss_registry_names(self._registry),
-                            "model_registry_names": _live_model_registry_names(self._registry),
-                        },
+            try:
+                proposed_name = raw.get("model_name", "")
+                if proposed_name in inp.existing_model_types:
+                    raise ValueError(
+                        f"model_name '{proposed_name}' already exists in "
+                        f"existing_model_types: {inp.existing_model_types}. "
+                        f"Choose a different name."
                     )
-                    # Citation discipline — warnings, not hard failures.
-                    citation_violations = _check_citation_discipline(
-                        source_refs=reasoning_output.get("source_refs", []),
-                        causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
-                        proposed_change=reasoning_output.get("proposed_change", ""),
-                    )
-                    if citation_violations:
-                        output.memo_consistency_notes.extend(citation_violations)
-                        print(
-                            f"   Citation check: {len(citation_violations)} "
-                            f"violation(s) appended to memo_consistency_notes."
-                        )
-                    break  # structurally valid — proceed to pre-flight
 
-                except (ValidationError, ValueError) as exc:
-                    last_exc = exc
-                    if isinstance(exc, ValidationError):
-                        error_summary = "; ".join(
-                            f"{' → '.join(str(loc_part) for loc_part in e['loc'])}: {e['msg']}"
-                            for e in exc.errors()[:5]
-                        )
-                    else:
-                        error_summary = str(exc)
-
-                    if attempt < _MAX_PROPOSING_RETRIES:
-                        print(
-                            f"   Proposing attempt {attempt + 1} failed — "
-                            f"injecting error and retrying."
-                        )
-                        errors_so_far = accumulated.get("proposing_stage_errors", [])
-                        errors_so_far.append(
-                            f"Attempt {attempt + 1} error: {error_summary}. "
-                            f"Correct this in your next response."
-                        )
-                        accumulated["proposing_stage_errors"] = errors_so_far
-
-            if output is None:
-                raise RuntimeError(
-                    f"Proposing stage failed after {_MAX_PROPOSING_RETRIES + 1} "
-                    f"structural attempts. Last error: {last_exc}"
-                ) from last_exc
-
-            # ---- Outer: pre-flight cost gate on the structurally-valid draft ----
-            factor = _run_preflight_check(inp, output)
-            if factor is None or factor <= 1.0:
-                print(f"Proposed model (pipeline): '{output.model_name}'")
-                return output
-
-            preflight_candidates.append(output)
-            if preflight_attempt < _MAX_PREFLIGHT_ATTEMPTS - 1:
-                # Same invariant as in _run_legacy: factor > 1.0 implies
-                # _run_preflight_check ran to completion and assigned
-                # preflight_estimated_minutes. Explicit narrow surfaces any
-                # regression with a diagnostic message.
-                num_params = output.parameter_count_estimate
-                est_mins = output.preflight_estimated_minutes
-                if num_params is None or est_mins is None or budget is None:
-                    raise RuntimeError(
-                        "Preflight structural invariants violated: "
-                        f"factor={factor} > 1.0 but one of "
-                        f"(parameter_count_estimate={num_params}, "
-                        f"preflight_estimated_minutes={est_mins}, "
-                        f"budget={budget}) is None — _run_preflight_check "
-                        "should have returned None for skipped pre-flight."
-                    )
-                rejection = _build_preflight_rejection_block(
-                    num_params=num_params,
-                    estimated_minutes=est_mins,
-                    factor=factor,
-                    budget_minutes=budget,
+                output = ProposalOutput.model_validate(
+                    {
+                        "model_name": proposed_name,
+                        "model_description": raw.get("model_description", ""),
+                        "mathematical_definition": raw.get("mathematical_definition", ""),
+                        "motivation": raw.get("motivation", ""),
+                        "expert_advice": raw.get("expert_advice", {}),
+                        "baseline_config": raw.get("baseline_config", {}),
+                        "inherited_components": inherited,
+                        "falsifiable_prediction": prediction,
+                        "proposed_vocab_links": vocab_links,
+                        "proposed_vocab_candidates": vocab_candidates,
+                        "proposed_discoveries": discoveries,
+                        "memo_consistency_notes": raw.get("memo_consistency_notes", []),
+                        "parameter_count_estimate": raw.get("parameter_count_estimate"),
+                        "custom_loss_spec": raw.get("custom_loss_spec"),
+                    },
+                    context={
+                        "loss_registry_names": live_loss_registry_names(self._registry),
+                        "model_registry_names": _live_model_registry_names(self._registry),
+                    },
                 )
-                errors_so_far = accumulated.get("proposing_stage_errors", [])
-                errors_so_far.append(rejection)
-                accumulated["proposing_stage_errors"] = errors_so_far
-                print(
-                    f"   Pre-flight rejected (factor={factor:.2f}x); "
-                    f"requesting revision "
-                    f"{preflight_attempt + 2}/{_MAX_PREFLIGHT_ATTEMPTS}."
+                # Citation discipline — warnings, not hard failures.
+                citation_violations = _check_citation_discipline(
+                    source_refs=reasoning_output.get("source_refs", []),
+                    causal_hypothesis=reasoning_output.get("causal_hypothesis", ""),
+                    proposed_change=reasoning_output.get("proposed_change", ""),
                 )
+                if citation_violations:
+                    output.memo_consistency_notes.extend(citation_violations)
+                    print(
+                        f"   Citation check: {len(citation_violations)} "
+                        f"violation(s) appended to memo_consistency_notes."
+                    )
+                break  # structurally valid — proceed to pre-flight
 
-        best = min(preflight_candidates, key=lambda o: cast(float, o.preflight_factor))
-        best.memo_consistency_notes.append(
-            f"PREFLIGHT_OVERBUDGET_EMITTED: all {_MAX_PREFLIGHT_ATTEMPTS} "
-            f"pre-flight attempts exceeded the {budget:.1f} min budget; "
-            f"emitting lowest-factor candidate "
-            f"(factor={best.preflight_factor:.2f}x, "
-            f"estimated {best.preflight_estimated_minutes:.1f} min). "
-            f"The tuner's real-data gate may still reject this at trial time."
-        )
-        print(
-            f"Proposed model (pipeline, pre-flight exhausted): "
-            f"'{best.model_name}' factor={best.preflight_factor:.2f}x"
-        )
-        return best
+            except (ValidationError, ValueError) as exc:
+                last_exc = exc
+                if isinstance(exc, ValidationError):
+                    error_summary = "; ".join(
+                        f"{' → '.join(str(loc_part) for loc_part in e['loc'])}: {e['msg']}"
+                        for e in exc.errors()[:5]
+                    )
+                else:
+                    error_summary = str(exc)
+
+                if attempt < _MAX_PROPOSING_RETRIES:
+                    print(
+                        f"   Proposing attempt {attempt + 1} failed — injecting error and retrying."
+                    )
+                    errors_so_far = accumulated.get("proposing_stage_errors", [])
+                    errors_so_far.append(
+                        f"Attempt {attempt + 1} error: {error_summary}. "
+                        f"Correct this in your next response."
+                    )
+                    accumulated["proposing_stage_errors"] = errors_so_far
+
+        if output is None:
+            raise RuntimeError(
+                f"Proposing stage failed after {_MAX_PROPOSING_RETRIES + 1} "
+                f"structural attempts. Last error: {last_exc}"
+            ) from last_exc
+
+        # ---- Static pre-flight ADVISORY on the structurally-valid draft ----
+        # C1: advisory only (static_uncalibrated provenance) — recorded on
+        # the output by _run_preflight_check; never a revision trigger.
+        factor = _run_preflight_check(inp, output)
+        if factor is not None and factor > 1.0:
+            print(
+                f"   Pre-flight advisory (factor={factor:.2f}x, "
+                f"static_uncalibrated — no revision requested)."
+            )
+        print(f"Proposed model (pipeline): '{output.model_name}'")
+        return output
 
     @staticmethod
     def _render_vocabulary(vocab_seed: list) -> str:

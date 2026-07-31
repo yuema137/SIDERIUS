@@ -117,6 +117,16 @@ class RunInvariants(BaseModel):
     structured_health_feedback_enabled: bool = False
     health_feedback_history_window_iterations: int = 3
     health_feedback_history_max_entries_per_model: int = 8
+    # C9d — the runtime decision subsystem's behavioral identities. Unlike
+    # every field above, these have NO pre-feature state to default into:
+    # a lock without them was written before runtime authority was
+    # unified, so the workspace's history was produced under different
+    # decision rules. `None` therefore means "legacy", and legacy is
+    # REJECTED at validation (see _reject_legacy_runtime_lock) rather
+    # than silently accepted. The default exists only so an old lock file
+    # can be PARSED well enough to produce that explicit error.
+    runtime_estimator_identity: str | None = None
+    runtime_policy_identity: str | None = None
     created_at: str | None = None
 
     # Fields participating in lock equality. created_at (and any future
@@ -130,6 +140,15 @@ class RunInvariants(BaseModel):
         "structured_health_feedback_enabled",
         "health_feedback_history_window_iterations",
         "health_feedback_history_max_entries_per_model",
+        "runtime_estimator_identity",
+        "runtime_policy_identity",
+    )
+
+    #: C9d fields that a legacy lock cannot supply. Their absence is a
+    #: refusal, never a compatible default.
+    _RUNTIME_IDENTITY_FIELDS: ClassVar[tuple[str, ...]] = (
+        "runtime_estimator_identity",
+        "runtime_policy_identity",
     )
 
     def canonical(self) -> dict:
@@ -204,6 +223,44 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     return path
 
 
+def _reject_legacy_runtime_lock(
+    workspace: str, locked: RunInvariants, expected: RunInvariants
+) -> None:
+    """C9d: refuse to resume a workspace locked before runtime authority
+    was unified.
+
+    Pydantic defaults let an old lock file PARSE — that is all they are
+    for. They must never be read as "compatible": a workspace whose lock
+    predates these fields produced its history under different decision
+    rules (a static formula could gate rounds, priors could arm the
+    watchdog), so continuing it under the current rules would mix two
+    incompatible regimes in one trajectory.
+
+    Raised before any LLM call or training, and only when THIS run has the
+    identities (a legacy-vs-legacy comparison stays legal so old tooling
+    can still read old workspaces).
+    """
+    missing = [
+        name
+        for name in RunInvariants._RUNTIME_IDENTITY_FIELDS
+        if getattr(locked, name) is None and getattr(expected, name) is not None
+    ]
+    if not missing:
+        return
+    raise RunInvariantsViolation(
+        f"workspace {workspace!r} was created before the runtime-control "
+        f"invariants existed and cannot be resumed by this build.\n"
+        + "\n".join(f"  - {name}: absent from the lock" for name in missing)
+        + "\n  This run would decide runtime authority under rules the "
+        "workspace's existing iterations never ran under (unified "
+        "estimator/policy, measured-evidence-only blocking, "
+        "REQUEST_PROBE resolution). Defaults are used to PARSE the old "
+        "lock, never to declare it compatible.\n"
+        "  Start a FRESH workspace; the old one remains readable and is "
+        "not modified."
+    )
+
+
 def validate_run_invariants(workspace: str, expected: RunInvariants) -> None:
     """Compare ``expected`` against the workspace lock; raise on any drift.
 
@@ -223,6 +280,7 @@ def validate_run_invariants(workspace: str, expected: RunInvariants) -> None:
             f"workspace {workspace!r} has no {RUN_INVARIANTS_BASENAME} to "
             f"validate against. Initialize it via ensure_run_invariants()."
         )
+    _reject_legacy_runtime_lock(workspace, locked, expected)
     drifted = [
         name
         for name in RunInvariants._CANONICAL
@@ -275,6 +333,7 @@ def build_run_invariants(
     structured_health_feedback_enabled: bool = False,
     health_feedback_history_window_iterations: int = 3,
     health_feedback_history_max_entries_per_model: int = 8,
+    include_runtime_identities: bool = True,
 ) -> tuple[RunInvariants, str | None]:
     """Compute a run's invariants — the ONE shared path for every entry point.
 
@@ -342,9 +401,31 @@ def build_run_invariants(
             health_feedback_history_max_entries_per_model=(
                 health_feedback_history_max_entries_per_model
             ),
+            # C9d: stamped HERE so every entry point (workflow, chain
+            # runner, standalone tuner) locks the same identities — the
+            # builder is the one shared path by contract.
+            **_runtime_identity_fields(include_runtime_identities),
         ),
         effective_path,
     )
+
+
+def _runtime_identity_fields(include: bool) -> dict[str, str | None]:
+    """The runtime subsystem's behavioral identities for the lock.
+
+    ``include=False`` is for tooling that must build a LEGACY-shaped
+    invariant set (e.g. reading an old workspace); production callers
+    always stamp them.
+    """
+    if not include:
+        return {}
+    from core.runtime_control.estimator import shared_runtime_components
+
+    estimator, policy = shared_runtime_components()
+    return {
+        "runtime_estimator_identity": estimator.identity,
+        "runtime_policy_identity": policy.identity,
+    }
 
 
 def validate_stamped_invariants(

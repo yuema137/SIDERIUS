@@ -60,11 +60,13 @@ FROZEN_VALUES = {
     "--formal_eval_portion": "0.01",
     "--trial_time_budget_minutes": "5",
     "--formal_time_budget_minutes": "30",
-    "--trial_vram_budget_gb": "24",
-    "--formal_vram_budget_gb": "24",
+    # 24 -> 16 (operator 2026-07-31): this final Gate mirrors formal V19
+    # admission rather than the generic Gate-standard generous values.
+    "--trial_vram_budget_gb": "12",
+    "--formal_vram_budget_gb": "12",
     "--runtime_safety_factor": "1.5",
     "--runtime_trial_safety_factor": "3.0",
-    "--runtime_formal_safety_factor": "2.0",
+    "--runtime_formal_safety_factor": "2.25",
     "--runtime_watchdog_safety_factor": "3.5",
     "--runtime_watchdog_floor_seconds": "120",
     "--formal_strategy": "snapshot",
@@ -142,9 +144,9 @@ class TestFrozenCommand:
                     f"{flavor}: {flag} = {values.get(flag)!r}, frozen {expected!r}"
                 )
             assert switches == FROZEN_SWITCHES, f"{flavor}: switches {sorted(switches)}"
-            assert values["--run_name"] == f"v19_gate_{flavor}_15_19"
+            assert values["--run_name"] == f"v19_c14_{flavor}_15_19"
             assert values["--advice"] == f"advice/workflow/v19_gate0_{flavor}.json"
-            assert values["--workspace"].endswith(f"/v19_gate_{flavor}_15_19")
+            assert values["--workspace"].endswith(f"/v19_c14_{flavor}_15_19")
 
     def test_no_forbidden_flags(self):
         for flavor in ("arch", "loss"):
@@ -216,7 +218,7 @@ def _run_main(tmp_path: Path, exits: dict[str, str]) -> tuple[subprocess.Complet
 
 class TestMainFlow:
     def test_both_pass(self, tmp_path):
-        r, s = _run_main(tmp_path, {"v19_gate_arch_15_19": "0", "v19_gate_loss_15_19": "0"})
+        r, s = _run_main(tmp_path, {"v19_c14_arch_15_19": "0", "v19_c14_loss_15_19": "0"})
         assert r.returncode == 0, r.stderr
         assert s["arch_exit"] == 0 and s["loss_exit"] == 0
         assert s["loss_launched"] is True
@@ -224,17 +226,17 @@ class TestMainFlow:
         assert s["arch_wrapper_pid"] == "4242"  # self-reported, not parsed
 
     def test_arch_failure_during_stagger_blocks_loss(self, tmp_path):
-        r, s = _run_main(tmp_path, {"v19_gate_arch_15_19": "1"})
+        r, s = _run_main(tmp_path, {"v19_c14_arch_15_19": "1"})
         assert r.returncode != 0
         assert s["arch_exit"] == 1
         assert s["loss_launched"] is False
         assert s["loss_exit"] is None
         assert s["disposition"] == "arch_failed_before_stagger"
         # the loss chain must never have been "run" by the shim
-        assert not (tmp_path / "markers" / "v19_gate_loss_15_19.exit").exists()
+        assert not (tmp_path / "markers" / "v19_c14_loss_15_19.exit").exists()
 
     def test_one_chain_failure_not_masked(self, tmp_path):
-        r, s = _run_main(tmp_path, {"v19_gate_arch_15_19": "0", "v19_gate_loss_15_19": "7"})
+        r, s = _run_main(tmp_path, {"v19_c14_arch_15_19": "0", "v19_c14_loss_15_19": "7"})
         assert r.returncode != 0  # overall non-zero when either chain fails
         assert s["arch_exit"] == 0 and s["loss_exit"] == 7  # both preserved
         assert s["disposition"] == "chain_failure"
@@ -242,7 +244,7 @@ class TestMainFlow:
     def test_summary_written_even_on_launch_refusal(self, tmp_path):
         """A pre-existing workspace refuses the cold-start launch; the pair
         summary is still written (trap path)."""
-        (tmp_path / "gate0" / "v19_gate_arch_15_19").mkdir(parents=True)
+        (tmp_path / "gate0" / "v19_c14_arch_15_19").mkdir(parents=True)
         r, s = _run_main(tmp_path, {})
         assert r.returncode != 0
         assert s["disposition"] == "arch_launch_error"
@@ -253,7 +255,7 @@ class TestHelpers:
     def test_stagger_check_passes_on_arch_exit_zero(self, tmp_path):
         r = _sourced(
             'STAGGER_SECONDS=1; EXIT_DIR="$TD"; '
-            'echo "EXIT=0" > "$TD/v19_gate_arch_15_19.exit"; '
+            'echo "EXIT=0" > "$TD/v19_c14_arch_15_19.exit"; '
             "stagger_health_check; echo rc=$?",
             env={"TD": str(tmp_path)},
         )

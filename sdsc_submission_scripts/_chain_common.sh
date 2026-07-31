@@ -651,16 +651,97 @@ print_chain_header() {
     echo "############################################################"
 }
 
+# --- C13: operator-stop semantics ------------------------------------------
+# CONFIRMED defect (V19 wave-1 stop, §15): killing the iteration Python
+# only ended ONE CHILD. The loop below then walked straight on and
+# respawned iteration 2. An operator stop must end the CHAIN LOOP.
+#
+# Two independent stop channels, because the two real situations differ:
+#
+#   * a stop FILE   — "stop after the current iteration", the graceful
+#                     request an operator can make without touching a
+#                     running process;
+#   * a SIGNAL      — TERM/INT/HUP to this script, or a signal-terminated
+#                     iteration child (exit >= 128), i.e. the chain was
+#                     killed from outside.
+#
+# Either way the loop stops, a stopped-chain record is written, and no
+# further iteration is started. Ordinary in-chain failures are NOT
+# affected: a non-zero iteration that was not signalled keeps the frozen
+# continuation behaviour, because the no-respawn rule is scoped to an
+# OPERATOR-DIRECTED stop.
+
+#: Exit code for a chain that stopped on request rather than finishing.
+CHAIN_STOP_EXIT_CODE=99
+#: Set by the trap handler to the signal name that arrived.
+CHAIN_STOP_SIGNAL=""
+
+chain_stop_file() {
+    echo "${CHAIN_STOP_FILE:-${WORKSPACE}/STOP}"
+}
+
+# Record the signal and let the loop stop at its next checkpoint, rather
+# than dying mid-iteration and leaving no record of why.
+_chain_note_signal() {
+    CHAIN_STOP_SIGNAL="$1"
+    echo "" >&2
+    echo "[chain] $1 received — stopping the chain loop after the current iteration" >&2
+}
+
+install_chain_stop_traps() {
+    trap '_chain_note_signal SIGTERM' TERM
+    trap '_chain_note_signal SIGINT'  INT
+    trap '_chain_note_signal SIGHUP'  HUP
+}
+
+chain_stop_requested() {
+    [ -n "$CHAIN_STOP_SIGNAL" ] && return 0
+    [ -e "$(chain_stop_file)" ] && return 0
+    return 1
+}
+
+# The explicit stopped-wave state record. Written on EVERY stop path, so
+# "why did this chain end early" is never reconstructed from log text.
+record_chain_stop() {  # reason iteration detail
+    local reason="$1" iteration="$2" detail="${3:-}"
+    local path="${WORKSPACE}/chain_stopped.json"
+    [ "$DRY_RUN" -eq 1 ] && return 0
+    mkdir -p "$WORKSPACE" 2>/dev/null
+    printf '{"stopped": true, "reason": "%s", "signal": "%s", "stopped_before_iteration": %s, "iterations_planned": %s, "run_name": "%s", "workspace": "%s", "chain_pid": %s, "stopped_at": "%s", "detail": "%s", "respawn": false}\n' \
+        "$reason" "${CHAIN_STOP_SIGNAL:-none}" "$iteration" "$NUM_ITERATIONS" \
+        "${RUN_NAME:-unknown}" "$WORKSPACE" "$$" \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$detail" > "$path"
+    echo ""
+    echo "############################################################"
+    echo "  CHAIN STOPPED — $reason"
+    echo "  stopped before iteration $iteration of $NUM_ITERATIONS"
+    echo "  no further iteration will be started (no respawn)"
+    echo "  state record: $path"
+    echo "############################################################"
+}
+
 # Run all iterations. The caller must have defined a `submit_iteration`
 # function that takes the iteration number and uses the populated
 # SOURCE_PATHS and APP_ARGS arrays.
+#
+# Returns 0 normally, or CHAIN_STOP_EXIT_CODE when an operator stop ended
+# the loop early.
 run_chain() {
     if [ "$DRY_RUN" -ne 1 ]; then
         mkdir -p "$WORKSPACE"
     fi
+    install_chain_stop_traps
     local ITER
     local first="${START_ITER:-1}"
     for ITER in $(seq "$first" "$NUM_ITERATIONS"); do
+        # Checked BEFORE the iteration is built, so a stop requested while
+        # the previous iteration ran costs nothing further.
+        if chain_stop_requested; then
+            record_chain_stop "operator_stop_requested" "$ITER" \
+                "stop observed before iteration $ITER was started"
+            return "$CHAIN_STOP_EXIT_CODE"
+        fi
+
         build_source_paths "$ITER"
         build_app_args "$ITER"
 
@@ -674,6 +755,23 @@ run_chain() {
         done
         echo "############################################################"
 
-        submit_iteration "$ITER"
+        local status=0
+        submit_iteration "$ITER" || status=$?
+
+        if chain_stop_requested; then
+            record_chain_stop "operator_stop_requested" "$((ITER + 1))" \
+                "stop observed after iteration $ITER (iteration exit $status)"
+            return "$CHAIN_STOP_EXIT_CODE"
+        fi
+        # A child terminated by a signal is an EXTERNAL stop, whatever
+        # sent it — this is the exact wave-1 case, where killing the
+        # iteration Python used to let the loop respawn iteration 2.
+        if [ "$status" -ge 128 ]; then
+            CHAIN_STOP_SIGNAL="child_signal_$((status - 128))"
+            record_chain_stop "iteration_terminated_by_signal" "$((ITER + 1))" \
+                "iteration $ITER exited $status (128 + signal $((status - 128)))"
+            return "$status"
+        fi
     done
+    return 0
 }

@@ -219,19 +219,26 @@ class TestLaunchCommandContent:
 
     def test_v18_settings_unchanged(self):
         for flag in (
-            "--num_iterations 20",
+            # 20 -> 10 (operator 2026-07-31): the fresh campaign runs a
+            # 10-iteration treatment to bound cost, wall time and GPU use.
+            # Rendered from CAMPAIGN_ITERATIONS, deliberately NOT
+            # NUM_ITERATIONS — _chain_common.sh sets that to 2, and a
+            # `${NUM_ITERATIONS:-10}` here silently resolved to 2.
+            "--num_iterations $CAMPAIGN_ITERATIONS",
             "--max_rounds 3",
             "--max_epochs 1",
             "--skip_formal_min_delta 0.0",
             "--bypass_formal_time_budget_min_delta 0.5",
             "--trial_time_budget_minutes 20",
             "--formal_time_budget_minutes 120",
-            "--trial_vram_budget_gb 16",
-            "--formal_vram_budget_gb 16",
+            "--trial_vram_budget_gb 12",
+            "--formal_vram_budget_gb 12",
             "--runtime_watchdog \\",
             "--runtime_safety_factor 1.5",
             "--runtime_trial_safety_factor 3.0",
-            "--runtime_formal_safety_factor 2.0",
+            # 2.0 -> 2.25 (operator 2026-07-31): C12 measured pairwise
+            # slowdowns to 2.13x, which 2.0 does not cover.
+            "--runtime_formal_safety_factor 2.25",
             "--runtime_watchdog_floor_seconds 120",
             "--formal_strategy snapshot",
             "--formal_round_strategy inherit_best_trial",

@@ -56,6 +56,14 @@ PredictionSource = Literal[
     "bounded_negligible",
     # Component-derived total (§1.1).
     "derived_total",
+    # C3 vocabulary extension (runtime_estimation_and_calibration.md §7.3
+    # mapping table): the post-implementation bounded live probe (C6
+    # producer) and its historically-corrected form, plus the
+    # complete-execution observation tier (§8.4). Additive — no existing
+    # value changes meaning; nothing produces these until C6/C7.
+    "bounded_live_probe",
+    "bounded_live_probe_calibrated",
+    "complete_observation",
 ]
 
 #: Sources backed by a live measurement of the actual configuration —
@@ -67,6 +75,15 @@ MEASUREMENT_BACKED_SOURCES: frozenset[str] = frozenset(
         "real_inference_verification",
         "measured_representative_scoring",
         "real_dataset_warmup",
+        # C3 extension: live measurements of the ACTUAL implemented
+        # candidate (design contract §8.2/§8.4). The RuntimePrediction
+        # admission invariant applies unchanged: formal eligibility still
+        # requires verification="passed" + steady_state + measurement
+        # provenance — a contended or non-steady probe can never be
+        # formal-eligible.
+        "bounded_live_probe",
+        "bounded_live_probe_calibrated",
+        "complete_observation",
     }
 )
 
@@ -295,6 +312,23 @@ class AdmissionRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     decision: Literal["admitted", "rejected"]
+    failure_class: Literal["candidate", "infrastructure"] | None = Field(
+        default=None,
+        description=(
+            "C9c: WHY a non-admitted attempt was refused. 'candidate' = the "
+            "model itself (over budget, measured OOM, no steady state, "
+            "initialization failure under a working verifier) — attempt-local, "
+            "the chain may try another candidate. 'infrastructure' = the "
+            "evidence channel (registry corruption, persistence failure, "
+            "schema/protocol mismatch, probe executor failure, telemetry or "
+            "communication failure, policy invariant failure, uninterpretable "
+            "provenance) — the chain must stop rather than retry into the same "
+            "broken environment. None on admitted records AND on legacy "
+            "records written before this field existed: readers must treat "
+            "None conservatively (it is an absence of classification, never a "
+            "claim that the failure was benign)."
+        ),
+    )
     stage: str = Field(
         min_length=1,
         description='e.g. "pre_launch_screen", "post_setup_runtime_verification"',

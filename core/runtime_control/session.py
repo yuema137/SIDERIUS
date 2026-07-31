@@ -219,6 +219,7 @@ class RuntimeVerificationSession:
         self._storage: dict[str, Any] = {}
         self._verification_seconds: float = 0.0
         self._verification_failures: dict[str, str] = {}
+        self._evidence_channel_failure: str | None = None
         self._calibration_context: dict[str, Any] = {}
         self._total: TotalRecord | None = None
 
@@ -362,6 +363,20 @@ class RuntimeVerificationSession:
         session._final_status = resumed_status
         session._write_sidecar()
         return session
+
+    def record_evidence_channel_failure(self, reason: str) -> None:
+        """Report that the EVIDENCE CHANNEL failed (C9c).
+
+        Not a statement about the candidate: registry corruption, a
+        persistence failure, a schema/protocol mismatch, a probe executor
+        failure, telemetry or communication loss, a policy invariant
+        breach, uninterpretable provenance. The next ``decide_admission``
+        refuses with ``failure_class="infrastructure"``, which propagates
+        to a chain halt rather than to the next candidate — retrying into
+        the same broken environment produces nothing but more failures.
+        """
+        self._evidence_channel_failure = reason
+        self._write_sidecar()
 
     def set_calibration_context(self, context: dict[str, Any]) -> None:
         """Record the §6a calibration-key inputs for this attempt.
@@ -527,9 +542,32 @@ class RuntimeVerificationSession:
             "verification_cost_seconds": self._verification_seconds,
         }
 
+        if self._evidence_channel_failure is not None:
+            # C9c: highest precedence. A broken evidence channel invalidates
+            # every other judgement we could make here — including
+            # "record-only, no budget in force", because a record-only run
+            # still relies on the channel to record anything at all.
+            self._admission = AdmissionRecord(
+                decision="rejected",
+                failure_class="infrastructure",
+                stage=stage,
+                avoided_predicted_runtime_seconds=adjusted or None,
+                reason=(
+                    f"evidence-channel failure (infrastructure): {self._evidence_channel_failure}"
+                ),
+                **cost_fields,
+            )
+            self._final_status = "rejected"
+            self._write_sidecar()
+            return self._admission
+
         if budget is None:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                # Explicit: an admitted record carries no failure class. Also
+                # keeps `**cost_fields` (float values) from being checked
+                # against this Literal parameter under strict pyright.
+                failure_class=None,
                 stage=stage,
                 reason=(
                     "record-only: no operator budget in force"
@@ -549,6 +587,11 @@ class RuntimeVerificationSession:
             )
             self._admission = AdmissionRecord(
                 decision="rejected",
+                # The verifier WORKED and reported that the candidate did
+                # not stabilize — candidate-class (C9c). A verifier that
+                # itself fails reports through
+                # record_evidence_channel_failure instead.
+                failure_class="candidate",
                 stage=stage,
                 avoided_predicted_runtime_seconds=adjusted,
                 reason=f"verification failed — fail closed for formal (§2.11): {failures}",
@@ -558,6 +601,7 @@ class RuntimeVerificationSession:
         elif adjusted > budget:
             self._admission = AdmissionRecord(
                 decision="rejected",
+                failure_class="candidate",  # measured over budget (C9c)
                 stage=stage,
                 avoided_predicted_runtime_seconds=adjusted,
                 reason=(
@@ -571,6 +615,7 @@ class RuntimeVerificationSession:
         else:
             self._admission = AdmissionRecord(
                 decision="admitted",
+                failure_class=None,
                 stage=stage,
                 reason=(
                     f"known-cost lower bound {known_cost:.1f}s (safety x{safety:g} -> "

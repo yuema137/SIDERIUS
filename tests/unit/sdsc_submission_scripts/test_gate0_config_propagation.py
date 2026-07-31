@@ -73,10 +73,10 @@ class TestResolvedGateValues:
     """The frozen operator values, asserted on the RESOLVED namespace."""
 
     def test_identity_per_flavor(self, arch_args, loss_args):
-        assert arch_args.run_name == "v19_gate_arch_15_19"
-        assert loss_args.run_name == "v19_gate_loss_15_19"
-        assert arch_args.workspace.endswith("/v19_gate_arch_15_19")
-        assert loss_args.workspace.endswith("/v19_gate_loss_15_19")
+        assert arch_args.run_name == "v19_c14_arch_15_19"
+        assert loss_args.run_name == "v19_c14_loss_15_19"
+        assert arch_args.workspace.endswith("/v19_c14_arch_15_19")
+        assert loss_args.workspace.endswith("/v19_c14_loss_15_19")
         assert arch_args.workspace != loss_args.workspace
         assert arch_args.start_iteration == 1
 
@@ -101,15 +101,15 @@ class TestResolvedGateValues:
         for a in (arch_args, loss_args):
             assert a.trial_time_budget_minutes == 5
             assert a.formal_time_budget_minutes == 30
-            assert a.trial_vram_budget_gb == 24
-            assert a.formal_vram_budget_gb == 24
+            assert a.trial_vram_budget_gb == 12
+            assert a.formal_vram_budget_gb == 12
 
     def test_runtime_control(self, arch_args, loss_args):
         for a in (arch_args, loss_args):
             assert a.runtime_watchdog is True
             assert a.runtime_safety_factor == 1.5
             assert a.runtime_trial_safety_factor == 3.0
-            assert a.runtime_formal_safety_factor == 2.0
+            assert a.runtime_formal_safety_factor == 2.25
             assert a.runtime_watchdog_safety_factor == 3.5
             assert a.runtime_watchdog_floor_seconds == 120
 

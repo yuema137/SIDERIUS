@@ -67,7 +67,7 @@ def _iter4_tcn_model_cfg() -> dict:
 
 
 class TestReturnShape:
-    def test_returns_four_documented_keys(self):
+    def test_returns_six_documented_keys(self):
         out = estimate_proposal_time(
             model_type="gated_fourier_tcn",
             model_config=_iter4_tcn_model_cfg(),
@@ -81,7 +81,32 @@ class TestReturnShape:
             "factor",
             "verdict",
             "feasible",
+            "provenance",
+            "advisory_only",
         }
+
+    def test_provenance_constants_are_producer_derived(self):
+        """C1: the static path ALWAYS stamps static_uncalibrated +
+        advisory_only=True — there is no caller input that can change
+        them (no kwarg exists), so static evidence can never present
+        itself as blocking-eligible."""
+        out = estimate_proposal_time(
+            model_type="gated_fourier_tcn",
+            model_config=_iter4_tcn_model_cfg(),
+            train_config=_train_cfg(epochs=2),
+            loss_config=_loss_cfg(),
+            num_params=1_000_000,
+            time_budget_minutes=20.0,
+        )
+        assert out["provenance"] == "static_uncalibrated"
+        assert out["advisory_only"] is True
+        import inspect
+
+        from agent.utils.proposer_preflight import estimate_proposal_time as f
+
+        params = inspect.signature(f).parameters
+        assert "provenance" not in params
+        assert "advisory_only" not in params
 
     def test_factor_matches_estimated_over_budget(self):
         """``factor == round(estimated / budget, 3)`` — guards against a

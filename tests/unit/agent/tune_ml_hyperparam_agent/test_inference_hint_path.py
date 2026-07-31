@@ -58,7 +58,12 @@ def _stub_phase(phase_name: str, seconds: float) -> dict:
             "ms_per_step": 1.0,
             "k_correction": 1.0,
             "safety_multiplier": 2.0,
-            "ms_source": "fake_stub",
+            # C8c: the source must be a value the production training
+            # estimator can actually emit — the runtime adapter treats an
+            # uninterpretable provenance as an evidence-channel failure
+            # rather than pricing it. `static_uncalibrated` matches this
+            # stub's `formal_execution_eligible: False`.
+            "ms_source": "static_uncalibrated",
             "formal_execution_eligible": False,
             "gpu_name": "test_gpu",
             "total_inference_steps": 100,
@@ -249,7 +254,11 @@ class TestSlackRule:
             **_base_kwargs(time_budget_minutes=60.0),
             inference_per_psd_seg_ms_hint=50.0,
         )
-        assert result["feasible"] is False
+        # C8c: `over_effective_budget` is the quantity the slack rule moves;
+        # `feasible` is now the POLICY's verdict, and this stub's evidence is
+        # static_uncalibrated, which may not gate a round.
+        assert result["breakdown"]["over_effective_budget"] is True
+        assert result["breakdown"]["runtime_decision"] == "ADVISORY"
         assert result["breakdown"]["slack_applied"] is True
         assert result["breakdown"]["effective_budget_minutes"] == pytest.approx(66.0)
 
@@ -280,7 +289,7 @@ class TestSlackRule:
             **_base_kwargs(time_budget_minutes=60.0),
         )
         assert result["breakdown"]["inference_ms_source"] == "static_formula"
-        assert result["feasible"] is False
+        assert result["breakdown"]["over_effective_budget"] is True  # strict: 63 > 60
         assert result["breakdown"]["slack_applied"] is False
         assert result["breakdown"]["effective_budget_minutes"] == pytest.approx(60.0)
 
@@ -308,7 +317,7 @@ class TestSlackRule:
             data_dir="/some/fake/dir",
         )
         assert result["breakdown"]["inference_ms_source"] == "training_warmup_x2.7_fallback"
-        assert result["feasible"] is False
+        assert result["breakdown"]["over_effective_budget"] is True
         assert result["breakdown"]["slack_applied"] is False
 
 
