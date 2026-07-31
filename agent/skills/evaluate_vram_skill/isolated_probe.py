@@ -48,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
@@ -58,6 +58,7 @@ PreflightOutcome = Literal[
     "MEASURED_CUDA_OOM",
     "MEASURED_PEAK_ABOVE_VRAM_CAP",
     "MEASURED_HARD_TIMEOUT",
+    "INCONCLUSIVE_MEASUREMENT",
     "MEASURED_HOST_MEMORY_EXCEEDED",
     "HOST_MEMORY_ALLOCATION_FAILURE",
     "SCHEMA_REJECTED",
@@ -79,6 +80,7 @@ HOST_MEMORY_OUTCOMES = frozenset(
 NO_DOWNSIZING_AUTHORITY = frozenset(
     {
         "MEASURED_HARD_TIMEOUT",
+        "INCONCLUSIVE_MEASUREMENT",
         "SCHEMA_REJECTED",
         "PROBE_INFRASTRUCTURE_FAILURE",
     }
@@ -173,6 +175,31 @@ class IsolatedProbeResult(BaseModel):
     orphans_remaining: bool = False
     schema_field: str | None = None
     schema_message: str | None = None
+    #: Provenance for a timeout claim: which operation, which budget, and
+    #: how long it actually ran. Present so "this timed out" is checkable
+    #: rather than asserted.
+    timeout_operation: str | None = None
+    timeout_budget_seconds: float | None = Field(default=None, gt=0.0)
+    timeout_elapsed_seconds: float | None = Field(default=None, ge=0.0)
+
+    @model_validator(mode="after")
+    def _a_timeout_must_have_reached_its_deadline(self) -> IsolatedProbeResult:
+        """A result faster than its own budget is not a timeout.
+
+        On 2026-07-31 a 65.6 s inspection was filed as MEASURED_HARD_TIMEOUT
+        against a 600 s deadline, because every "inconclusive" status was
+        mapped to the timeout outcome. The schema now refuses that claim.
+        """
+        if self.outcome != "MEASURED_HARD_TIMEOUT":
+            return self
+        budget = self.timeout_budget_seconds
+        elapsed = self.timeout_elapsed_seconds
+        if budget is not None and elapsed is not None and elapsed < budget:
+            raise ValueError(
+                f"MEASURED_HARD_TIMEOUT claims a deadline was reached, but the "
+                f"operation ran {elapsed}s against a {budget}s budget"
+            )
+        return self
 
     @property
     def may_recommend_vram_downsizing(self) -> bool:
@@ -227,6 +254,14 @@ class IsolatedProbeResult(BaseModel):
                 "Reduce host-memory-heavy preflight behaviour (sequence handling, "
                 "tracing cost, construction footprint). Do not reduce GPU parameter "
                 "count on this basis alone."
+            )
+        if self.outcome == "INCONCLUSIVE_MEASUREMENT":
+            return (
+                "The preflight inspection was inconclusive and produced no measured "
+                "capacity result. Do not infer that the candidate is too large, too "
+                "slow, or infeasible from this event. No configured deadline elapsed "
+                "and no resource limit was reached; the inspection simply did not "
+                "establish an authoritative measurement."
             )
         if self.outcome == "MEASURED_HARD_TIMEOUT":
             return (
@@ -385,6 +420,9 @@ def run_isolated_preflight(
         inference_batch: int | None = None,
         schema_field: str | None = None,
         schema_message: str | None = None,
+        timeout_operation: str | None = None,
+        timeout_budget_seconds: float | None = None,
+        timeout_elapsed_seconds: float | None = None,
     ) -> IsolatedProbeResult:
         """Explicit keywords rather than `**dict` expansion: strict pyright
         cannot match a heterogeneous dict against these parameter types,
@@ -407,6 +445,9 @@ def run_isolated_preflight(
             inference_batch=inference_batch,
             schema_field=schema_field,
             schema_message=schema_message,
+            timeout_operation=timeout_operation,
+            timeout_budget_seconds=timeout_budget_seconds,
+            timeout_elapsed_seconds=timeout_elapsed_seconds,
         )
 
     if host_exceeded:
@@ -427,6 +468,9 @@ def run_isolated_preflight(
                 f"(TERM sent={term_sent}, KILL sent={kill_sent})"
             ),
             "worker_deadline",
+            timeout_operation="worker_deadline",
+            timeout_budget_seconds=deadline_seconds,
+            timeout_elapsed_seconds=elapsed,
         )
 
     payload = _load_worker_result(result_path)
@@ -475,6 +519,9 @@ def run_isolated_preflight(
         inference_batch=_int_or_none(payload.get("inference_batch")),
         schema_field=_str_or_none(payload.get("schema_field")),
         schema_message=_str_or_none(payload.get("schema_message")),
+        timeout_operation=_str_or_none(payload.get("timeout_operation")),
+        timeout_budget_seconds=_float_or_none(payload.get("timeout_budget_seconds")),
+        timeout_elapsed_seconds=_float_or_none(payload.get("timeout_elapsed_seconds")),
     )
 
 

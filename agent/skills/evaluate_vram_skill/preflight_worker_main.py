@@ -146,11 +146,28 @@ def _classify(outcome: dict) -> dict:
             "detail": str(outcome.get("message") or "")[:400],
             "phase": "cuda_probe",
         }
-    if status == "inconclusive":
+    if status == "timeout":
+        # A named deadline actually elapsed. The record carries which
+        # operation and which budget, so the claim is checkable.
+        record = outcome.get("timeout_record") or {}
         return {
             "outcome": "MEASURED_HARD_TIMEOUT",
             "detail": str(outcome.get("message") or "")[:400],
-            "phase": (outcome.get("timeout_record") or {}).get("operation") or "inspection",
+            "phase": record.get("operation") or "inspection",
+            "timeout_operation": record.get("operation"),
+            "timeout_budget_seconds": record.get("budget_seconds"),
+            "timeout_elapsed_seconds": record.get("elapsed_seconds"),
+        }
+    if status == "inconclusive":
+        # The inspection ended before any deadline without producing an
+        # authoritative measurement. That is not a timeout, and it is not
+        # a defect in the measurement system either — it establishes
+        # nothing about the candidate, which is precisely what makes it
+        # its own outcome rather than a borrowed one.
+        return {
+            "outcome": "INCONCLUSIVE_MEASUREMENT",
+            "detail": str(outcome.get("message") or "")[:400],
+            "phase": (outcome.get("timeout_record") or {}).get("phase") or "model_inspection",
         }
     if status == "error":
         from agent.skills.evaluate_vram_skill.probe_budgets import (

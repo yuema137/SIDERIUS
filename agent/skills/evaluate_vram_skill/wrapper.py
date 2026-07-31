@@ -707,9 +707,13 @@ def run_skill(sandbox, **kwargs):
     except BatchSearchTimeout as e:
         # A bounded search step ran out of time. The candidate measured
         # nothing, so this must not reach the tuner as a capacity verdict.
-        print(f"!!! [VRAMEval] INCONCLUSIVE: {e.record.agent_facing_summary()}")
+        # `timeout` rather than `inconclusive`: a deadline ACTUALLY
+        # elapsed here, and the caller must be able to tell that from an
+        # inspection that simply failed. Conflating the two produced a
+        # 65.6 s "timeout" against a 600 s deadline on 2026-07-31.
+        print(f"!!! [VRAMEval] TIMEOUT: {e.record.agent_facing_summary()}")
         return {
-            "status": "inconclusive",
+            "status": "timeout",
             "message": e.record.agent_facing_summary(),
             "timeout_record": e.record.model_dump(mode="json"),
         }
@@ -721,9 +725,9 @@ def run_skill(sandbox, **kwargs):
             model_identity=model_type,
             disposition="inconclusive",
         )
-        print(f"!!! [VRAMEval] INCONCLUSIVE: {e}")
+        print(f"!!! [VRAMEval] TIMEOUT: {e}")
         return {
-            "status": "inconclusive",
+            "status": "timeout",
             "message": str(e),
             "timeout_record": record.model_dump(mode="json"),
         }
@@ -756,6 +760,8 @@ def run_skill(sandbox, **kwargs):
             phase="torchinfo_trace",
             disposition="inconclusive",
         )
+        # NO deadline elapsed here — tracing simply failed. Reported as
+        # inconclusive, never as a timeout.
         print(f"!!! [VRAMEval] INCONCLUSIVE (torchinfo trace failed): {str(e)[:160]}")
         return {
             "status": "inconclusive",

@@ -4393,3 +4393,43 @@ Schema impact: none. `PreflightOutcome` is consumed only by the
 validation harness and its tests, is absent from `agent/schemas/`, and
 the production tuner is not yet wired to it — so no persisted version
 changes, no consumer breaks, no migration.
+
+
+### Third GPU validation and defect 4 — inconclusive is not timeout
+
+Third validation (SHA `3d3866e`) proved the safety mechanisms on real
+execution:
+
+| candidate | outcome | evidence |
+|---|---|---|
+| 323 M baseline | `COMPLETED_MEASUREMENT` | 323,281,352 params, 5.732 GB vs 12 GB cap, 7.79 s, peak RSS 7.05 GiB |
+| 17 M dilated-conv | `MEASURED_HOST_MEMORY_EXCEEDED` | peak RSS 26.176 GiB vs the 24 GiB ceiling; TERM sufficed, no KILL, no orphan |
+| quadratic-attention | mislabelled (see below) | peak RSS 12.295 GiB, 65.556 s |
+
+The parent survived all three, no global host OOM occurred, no orphan
+remained, and high virtual-address reservation no longer triggered false
+enforcement. RSS enforcement fired exactly once, on a real crossing.
+
+One defect remained. The worker mapped EVERY `inconclusive` status to
+`MEASURED_HARD_TIMEOUT`, so a structural-tracing failure that finished in
+65.556 s was reported as a timeout against a 600 s deadline — with no
+deadline elapsed, no allocator error, no RSS crossing and no CUDA OOM.
+
+`INCONCLUSIVE_MEASUREMENT` now exists for what that actually is: a
+bounded inspection that ended before any deadline without producing an
+authoritative measurement. It carries NO authority — not capacity
+rejection, not GPU downsizing, not host-memory reduction — and its
+agent-facing text says so explicitly.
+
+A real deadline now travels as its own status with provenance (operation,
+budget, elapsed), and the result schema REFUSES a `MEASURED_HARD_TIMEOUT`
+whose elapsed time is below its own budget. The claim is checkable rather
+than asserted.
+
+Schema impact: none. `PreflightOutcome` remains consumed only by the
+validation harness and its tests, absent from `agent/schemas/`, with the
+production tuner not yet wired to it.
+
+Verdict: `GPU VALIDATION FAIL — CAPACITY CLASSIFICATION`. The execution
+control was correct; the terminal semantic label was not. The repair is
+not validated until a fourth GPU validation passes on one exact SHA.

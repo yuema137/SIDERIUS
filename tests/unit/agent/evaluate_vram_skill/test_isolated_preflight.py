@@ -681,3 +681,138 @@ class TestOneClassifierEverywhere:
         ):
             source = (REPO_ROOT / path).read_text()
             assert "def _is_memory_error" not in source, path
+
+
+class TestInconclusiveIsNotTimeout:
+    """A 65.6 s inspection was filed as a timeout against a 600 s deadline.
+
+    The cause was a single mapping: every "inconclusive" status became
+    MEASURED_HARD_TIMEOUT. "We did not measure it" and "a deadline
+    elapsed" are different facts, and only the second is a timeout.
+    """
+
+    def test_a_non_timeout_inspection_failure_is_inconclusive(self, tmp_path):
+        body = (
+            "import json\n"
+            f"json.dump({{'outcome': 'INCONCLUSIVE_MEASUREMENT',\n"
+            f"  'detail': 'structural tracing failed', 'phase': 'model_inspection'}},\n"
+            f"  open(r'{tmp_path / 'result.json'}', 'w'))\n"
+        )
+        result = run_isolated_preflight(
+            _spec(tmp_path), deadline_seconds=600.0, command=_worker(tmp_path, body)
+        )
+        assert result.outcome == "INCONCLUSIVE_MEASUREMENT"
+        assert result.outcome != "MEASURED_HARD_TIMEOUT"
+        assert result.outcome != "PROBE_INFRASTRUCTURE_FAILURE"
+
+    def test_inconclusive_carries_no_authority_of_any_kind(self):
+        r = IsolatedProbeResult(label="x", outcome="INCONCLUSIVE_MEASUREMENT", vram_cap_gb=12.0)
+        assert r.may_recommend_vram_downsizing is False
+        assert r.may_recommend_host_memory_reduction is False
+        assert r.has_capacity_authority is False
+
+    def test_its_message_forbids_inferring_infeasibility(self):
+        r = IsolatedProbeResult(label="x", outcome="INCONCLUSIVE_MEASUREMENT", vram_cap_gb=12.0)
+        message = r.agent_facing_message()
+        assert "inconclusive" in message.lower()
+        assert "Do not infer" in message
+        assert "too large" in message
+        assert "reduce" not in message.lower().replace("produced no measured", "")
+
+    def test_the_schema_refuses_a_timeout_faster_than_its_budget(self):
+        """The exact 2026-07-31 shape: 65.6 s against a 600 s deadline."""
+        with pytest.raises(ValidationError, match="deadline was reached"):
+            IsolatedProbeResult(
+                label="x",
+                outcome="MEASURED_HARD_TIMEOUT",
+                timeout_budget_seconds=600.0,
+                timeout_elapsed_seconds=65.556,
+            )
+
+    def test_a_genuine_timeout_with_provenance_is_accepted(self):
+        r = IsolatedProbeResult(
+            label="x",
+            outcome="MEASURED_HARD_TIMEOUT",
+            timeout_operation="worker_deadline",
+            timeout_budget_seconds=600.0,
+            timeout_elapsed_seconds=601.2,
+        )
+        assert r.outcome == "MEASURED_HARD_TIMEOUT"
+        assert r.timeout_operation == "worker_deadline"
+
+    def test_a_real_worker_deadline_records_its_provenance(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path),
+            deadline_seconds=1.0,
+            grace_seconds=0.5,
+            command=_worker(tmp_path, STALLS),
+        )
+        assert result.outcome == "MEASURED_HARD_TIMEOUT"
+        assert result.timeout_operation == "worker_deadline"
+        assert result.timeout_budget_seconds == 1.0
+        assert result.timeout_elapsed_seconds is not None
+        assert result.timeout_elapsed_seconds >= 1.0
+
+    def test_the_wrapper_separates_timeout_from_inconclusive_status(self):
+        source = (REPO_ROOT / "agent/skills/evaluate_vram_skill/wrapper.py").read_text()
+        assert '"status": "timeout"' in source, "a real deadline needs its own status"
+        assert '"status": "inconclusive"' in source, "tracing failure keeps inconclusive"
+
+    def test_the_worker_no_longer_maps_inconclusive_to_timeout(self):
+        source = (
+            REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_worker_main.py"
+        ).read_text()
+        start = source.index('if status == "inconclusive":')
+        block = source[start : source.index("if status ==", start + 10)]
+        assert "INCONCLUSIVE_MEASUREMENT" in block
+        assert "MEASURED_HARD_TIMEOUT" not in block
+
+
+class TestThirdValidationOutcomesUnchanged:
+    """The paths that already worked must keep working."""
+
+    def test_completed_measurement_is_unaffected(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path),
+            deadline_seconds=600.0,
+            command=_worker(tmp_path, COMPLETES.format(result=tmp_path / "result.json")),
+        )
+        assert result.outcome == "COMPLETED_MEASUREMENT"
+        assert result.realized_parameter_count == 323281352
+
+    def test_rss_enforcement_is_unaffected(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path, limit_mib=512),
+            deadline_seconds=60.0,
+            command=_worker(tmp_path, GROWS_FOREVER),
+        )
+        assert result.outcome == "MEASURED_HOST_MEMORY_EXCEEDED"
+        assert result.host_memory is not None
+        assert result.host_memory.enforcement == "parent_rss_monitor"
+
+    def test_corrupt_ipc_remains_infrastructure(self, tmp_path):
+        result = run_isolated_preflight(
+            _spec(tmp_path),
+            deadline_seconds=30.0,
+            command=_worker(tmp_path, CORRUPT_RESULT.format(result=tmp_path / "result.json")),
+        )
+        assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+
+    def test_candidate_configs_and_hashes_are_unchanged(self):
+        import hashlib
+        import json as _json
+
+        from scripts.vram_preflight_validation import CANDIDATES, validate_config
+
+        expected = {
+            "fcnet@323M-official": "ad0e07aa864a6492",
+            "wavenet@17M": "958440417b837b89",
+            "transformer@medium": "80581a7d24d2f100",
+        }
+        for entry in CANDIDATES:
+            normalized, error = validate_config(entry)
+            assert error is None
+            digest = hashlib.sha256(
+                _json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            assert digest.startswith(expected[entry["label"]]), entry["label"]
