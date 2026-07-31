@@ -3459,6 +3459,68 @@ instead of implying vindication.
 
 ### C12 — `validation(runtime): multi-family, multi-scale, idle + pairwise-concurrent GPU campaign`
 
+**Implementation record (C12 infrastructure — pre-GPU).**
+
+*Files.* `core/runtime_control/campaign.py` (matrix, typed cells,
+thresholds, verdict, pairwise schemas), `scripts/runtime_campaign.py`
+(tracks A/C driver: `plan` / `run` / `verdict`),
+`scripts/legacy_fcnet_timing.py` (track B).
+
+*Matrix — three structurally different families, four scales, all from
+EXISTING registered implementations.* Every config was found by searching
+each family's OWN validated config bounds; no bound was raised to make a
+cell fit, and no novel model was created.
+
+| family | 50K | 500K | 5M | 20M |
+|---|---|---|---|---|
+| punet (conv/U-Net) | 69,328 | 422,248 | 4,297,024 | 17,277,760 |
+| wavenet (dilated temporal conv) | 49,680 | 500,448 | 5,000,704 | 20,033,952 |
+| transformer (token mixer) | 50,816 | 531,072 | 4,869,888 | **8,028,928** |
+
+The transformer's validated bounds (`embedding_dim<=256`,
+`num_layers<=10`, `dim_feedforward<=1024`) cap the family at ~8.03M.
+Raising a scientific config bound to manufacture a 20M cell is not a
+validation decision, so that cell records the real ceiling and is flagged
+`at_family_ceiling` rather than quietly appearing complete. fcnet is
+covered separately and at far larger scale by track B (323,280,840
+parameters).
+
+*Two production defects found by the tests, both fixed before any GPU
+time was spent.*
+
+1. The family-bias rule fired on ANY underprediction, so a uniform 5 %
+   error — comfortably inside the 30 % median threshold — was reported as
+   a family defect. "Systematically underestimated" now means MATERIALLY
+   (>= 1.10x at every size), and that ratio is part of the threshold set
+   put forward for freezing.
+2. The verdict was last-write-wins, so which failure category got
+   reported depended on the order the rules happened to run. All rules
+   now record their reasons and the verdict is selected by a fixed
+   precedence — wiring > concurrency > VRAM > size > family > accuracy —
+   which is also the order of actionability.
+
+*Evidence discipline.* `CellMeasurement` rejects a non-measurement
+provenance, so the legacy static/fallback path can never become campaign
+evidence. Training and inference stay separate and the inference work
+unit is named on the record. A cell that did not complete cannot
+contribute to a verdict, and `PairwiseResult` refuses a contended
+baseline, an idle observation recorded as concurrent, or a peer that was
+not identified by REGISTERED PID.
+
+*Durability.* Cells are written the instant they complete, so a failure
+at cell 9 never erases cells 1-8 and `verdict` works on a partial
+campaign. Failed cells are classified (measured vs infrastructure) and
+never silently re-run with different settings.
+
+*Thresholds are NOT frozen.* `CampaignThresholds` carries an identity
+hash so a post-hoc edit is visible in the report rather than invisible in
+a diff. The freeze proposal goes to the operator with the combined
+review package; no GPU execution has occurred.
+
+- [ ] Thresholds frozen (operator).
+- [ ] Campaign executed.
+
+
 **Goal.** §24 campaign under §24 PRE-REGISTERED thresholds; resolves
 the empirical halves of D3/D8; produces the restart evidence for
 criteria 23-25.

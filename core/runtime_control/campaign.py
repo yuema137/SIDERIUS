@@ -501,3 +501,88 @@ def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds)
         cells_evaluated=len(scored),
         cells_excluded=excluded,
     )
+
+
+# ── C12-C: pairwise concurrency ─────────────────────────────────────────────
+
+
+class PairwisePlan(BaseModel):
+    """One concurrency cell: the same two models alone, then together."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    members: tuple[str, ...]
+    member_parameter_counts: tuple[int, ...] = ()
+    execution_order: tuple[str, ...] = ()
+    stagger_seconds: float = 0.0
+
+    @property
+    def stages(self) -> tuple[str, ...]:
+        """Alone first, then together — an idle baseline must exist before
+        a contention multiplier can mean anything."""
+        return (
+            f"{self.members[0]}_alone",
+            f"{self.members[1]}_alone",
+            f"{self.label}_pairwise",
+        )
+
+
+class PairwiseResult(BaseModel):
+    """Measured concurrency evidence for one pair."""
+
+    model_config = ConfigDict(frozen=True)
+
+    label: str
+    member: str
+    alone_ms_per_step: float = Field(gt=0.0)
+    paired_ms_per_step: float = Field(gt=0.0)
+    alone_concurrency_identity: str
+    paired_concurrency_identity: str
+    peer_pid_registered: bool
+    aggregate_peak_vram_gb: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def _regimes_must_differ(self) -> PairwiseResult:
+        if self.alone_concurrency_identity != "single_candidate_idle":
+            raise ValueError(
+                "the ALONE measurement must be single_candidate_idle; a contended "
+                "baseline cannot define a contention multiplier"
+            )
+        if self.paired_concurrency_identity != "pairwise_expected_peer":
+            raise ValueError(
+                f"the PAIRED measurement is {self.paired_concurrency_identity!r}, not "
+                "pairwise_expected_peer — an idle observation must never be recorded "
+                "as a concurrent one, and a foreign process must never be accepted as "
+                "the expected peer"
+            )
+        if not self.peer_pid_registered:
+            raise ValueError(
+                "the peer must be identified by REGISTERED PID; a peer is never "
+                "inferred from a process name"
+            )
+        return self
+
+    @property
+    def contention_multiplier(self) -> float:
+        """How much slower this member runs beside its peer."""
+        return self.paired_ms_per_step / self.alone_ms_per_step
+
+
+def build_pairwise_plans(
+    realized_by_cell: dict[str, int] | None = None, *, stagger_seconds: float = 0.0
+) -> list[PairwisePlan]:
+    counts = realized_by_cell or {}
+    plans = []
+    for pair in PAIRWISE_PAIRS:
+        members = tuple(pair["members"])
+        plans.append(
+            PairwisePlan(
+                label=str(pair["label"]),
+                members=members,
+                member_parameter_counts=tuple(counts.get(m, 0) for m in members),
+                execution_order=members,
+                stagger_seconds=stagger_seconds,
+            )
+        )
+    return plans

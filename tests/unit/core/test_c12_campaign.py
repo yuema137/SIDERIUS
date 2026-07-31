@@ -299,3 +299,57 @@ class TestPersistence:
         report = evaluate_campaign(cells, CampaignThresholds())
         assert report.cells_evaluated == 2
         assert report.cells_excluded == 1
+
+
+class TestPairwiseConcurrency:
+    def _result(self, **over):
+        from core.runtime_control.campaign import PairwiseResult
+
+        base = dict(
+            label="small_homogeneous",
+            member="punet@50K",
+            alone_ms_per_step=20.0,
+            paired_ms_per_step=34.0,
+            alone_concurrency_identity="single_candidate_idle",
+            paired_concurrency_identity="pairwise_expected_peer",
+            peer_pid_registered=True,
+        )
+        base.update(over)
+        return PairwiseResult(**base)
+
+    def test_plans_cover_the_three_required_shapes(self):
+        from core.runtime_control.campaign import build_pairwise_plans
+
+        plans = build_pairwise_plans({"punet@50K": 69_328, "wavenet@50K": 49_680})
+        assert {p.label for p in plans} == {
+            "small_homogeneous",
+            "large_homogeneous",
+            "heterogeneous",
+        }
+        small = next(p for p in plans if p.label == "small_homogeneous")
+        assert small.member_parameter_counts == (69_328, 49_680)
+
+    def test_each_pair_measures_alone_before_together(self):
+        from core.runtime_control.campaign import build_pairwise_plans
+
+        plan = build_pairwise_plans()[0]
+        assert plan.stages[0].endswith("_alone")
+        assert plan.stages[1].endswith("_alone")
+        assert plan.stages[2].endswith("_pairwise")
+
+    def test_the_contention_multiplier_is_per_member(self):
+        assert self._result().contention_multiplier == pytest.approx(1.7)
+
+    def test_an_idle_observation_cannot_be_recorded_as_concurrent(self):
+        with pytest.raises(ValidationError, match="never be recorded"):
+            self._result(paired_concurrency_identity="single_candidate_idle")
+
+    def test_a_contended_baseline_cannot_define_a_multiplier(self):
+        with pytest.raises(ValidationError, match="cannot define a contention multiplier"):
+            self._result(alone_concurrency_identity="foreign_contended")
+
+    def test_a_foreign_process_is_never_accepted_as_the_peer(self):
+        with pytest.raises(ValidationError, match=r"never be recorded|REGISTERED PID"):
+            self._result(paired_concurrency_identity="foreign_contended")
+        with pytest.raises(ValidationError, match="REGISTERED PID"):
+            self._result(peer_pid_registered=False)
