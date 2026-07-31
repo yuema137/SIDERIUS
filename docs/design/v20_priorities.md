@@ -115,7 +115,7 @@ must be shown attributable to it.
 | **P2-1** | Campaign-scoped stop and queue state | A previous campaign's queue-level `STOP` blocked a new campaign's launch | One campaign's terminal state has authority over another | All control state under `<campaign_root>/<campaign_id>/control/` | No |
 | **P2-2** | Portable host-memory configuration | The 24 GiB worker threshold is derived for one machine | Not portable; environment-only control is weak for reproducibility | Backward-compatible layered config with recorded provenance | No |
 | **P2-3** | Model-scale and downsizing-bias monitoring | Iteration 1 proposed 2.39M / 4.12M against advice suggesting 10M-100M | The original V19 failure expressed itself as systematic shrinking | Campaign-level scale-trend reporting | No — non-blocking, improve during V20 (§13.1) |
-| **P0-5** | HealthGate detects collapse but does not enforce | All four rounds failed blocking checks (`unique_int8` 1–4 of 256) while `resolved_action` was `continue` | A round that collapsed still counted as a result; formal ran on a plan no valid trial supported | A failed blocking check invalidates the round; zero valid trials means the formal output is not a result or an incumbent | **Blocks V20 launch** (§13.1 #5) |
+| **P0-5** | Formal campaign ran under an observe-only HealthGate policy, and zero-valid-trial handling is undefined | V19 launched with `health_checks_baseline_observe_mode.yaml`; all four rounds collapsed (`unique_int8` 1–4 of 256) and correctly resolved `continue` per that config | Degenerate rounds consumed formal budget and entered the record; formal ran on a plan no valid trial supported | Formal campaigns use the blocking config; a zero-valid-trial iteration yields no authoritative result or incumbent | **Blocks V20 launch** (§13.1 #5) |
 
 ---
 
@@ -1232,25 +1232,54 @@ and which component held final authority.
 
 ---
 
-## 12A. P0-5 — HealthGate enforcement and the zero-valid-trial policy
+## 12A. P0-5 — Formal-campaign HealthGate policy and zero-valid-trial handling
 
 *Numbered 12A rather than 13 so the existing section numbers and the
 cross-references to §14 and §18 stay valid.*
 
-### 12A.1 Observed problem
+### 12A.0 Correction — this is a launch choice, not an enforcement defect
 
-**CONFIRMED DEFECT.** Every blocking HealthGate in wave 1 detected severe
-collapse, recorded that production policy would invalidate the round, and
-then resolved to `continue`. All four successful rounds carry the same
-shape:
+An earlier revision of this section called the `continue` resolution a
+**CONFIRMED DEFECT**. That was wrong, and the correction is recorded
+rather than silently replaced, per §17.
+
+The confirmed facts:
+
+- the repository default `configs/health_checks.yaml` maps all three
+  blocking checks to **`invalidate_round`**;
+- V19 explicitly launched with a different file —
+  `v19_queue_runner.sh:272` passes
+  `--health_checks_config configs/health_checks_baseline_observe_mode.yaml`;
+- that file deliberately maps the three blocking-named checks to
+  `continue`, with the reason recorded verbatim in the materialised
+  effective config: *"Observe only; production policy would invalidate a
+  failed result."*;
+- `resolved_action: continue` was therefore **correct execution of the
+  selected configuration**. No action was ignored, dropped, or
+  mis-resolved.
+
+So detection, collapse classification, and action resolution all worked.
+What went wrong is upstream of the code: **a formal campaign was launched
+with an observe-only gate policy**, and there is no policy for what
+happens when an iteration yields zero valid trials.
+
+The priority is therefore restated:
 
 ```
-check_passed                              false
-would_invalidate_under_production_policy  true
-resolved_action                           continue      ← nothing blocked
+was:  fix broken HealthGate enforcement
+is:   define formal-campaign HealthGate policy and
+      zero-valid-trial handling
 ```
 
-The measurements themselves are unambiguous. `unique_int8` counts how
+One presentation defect does follow from the evidence and is real: the
+gate IDs say `*_blocking` while the effective action is `continue`. That
+naming misled this analysis directly — the `_blocking` suffix was the
+reason the behaviour was first read as a defect.
+
+### 12A.1 What the gates measured
+
+The measurements are unambiguous, and they are why the policy question
+matters rather than being academic. `unique_int8` counts how
 many distinct values the model actually emits out of 256:
 
 | chain | exp | score | output_diversity | output_std | amplitude_collapse |
@@ -1287,8 +1316,11 @@ health and must not be read as such.
 
 ### 12A.3 Consequences observed
 
+The chain below is independent of which gate config was selected — it is
+what happens whenever an iteration ends with no valid trial:
+
 ```
-gates detect collapse → would_invalidate=true → resolved_action=continue
+gates detect collapse → observe-only config → continue
   → the round still yields a score, recorded as a normal result
   → "no successful trial round is HealthGate-valid in this iteration"
   → Best score: None (no incumbent)
@@ -1296,28 +1328,60 @@ gates detect collapse → would_invalidate=true → resolved_action=continue
      warning that the score "may be unreliable"
 ```
 
-The system is honest about the last step, but an unreliable score that
-reaches records can still become an incumbent or a reported result.
+The system is honest in that warning, but an unreliable score that
+reaches the records can still become an incumbent or a reported result.
+**That gap remains even under a blocking config**, which is why it is a
+separate requirement rather than a consequence of the config choice.
 
-### 12A.4 V20 target behaviour
+### 12A.4 Intended policy split
 
-- A blocking check that fails must not leave the round counted as a
-  valid result. Gates named `*_blocking` must either block or be renamed.
-- When an iteration produces **zero** HealthGate-valid trials, the formal
-  round's output must not become a scientific result or an incumbent. A
-  diagnostic fallback run is acceptable; silently promoting its number is
-  not.
-- The distinction between "policy says continue" and "policy says
-  invalidate but the resolver returned continue" must be visible in the
-  record, not inferable only by reading both fields.
+```
+formal scientific campaign
+    → configs/health_checks.yaml
+    → a failed blocking check invalidates the round
 
-### 12A.5 Open questions
+baseline characterization / gate calibration / threshold study /
+explicitly-labelled diagnostic campaign
+    → observe-only config may be selected deliberately
+    → its outputs remain non-authoritative
+```
 
-1. Is `resolved_action: continue` the configured intent in
-   `health_checks_effective.yaml` for these rounds, or a severity-
-   resolution defect? Read the materialised effective config first — this
-   is free and decides whether the fix is config or code.
-2. Should a zero-valid-trial iteration abort, run formal as labelled
+**Do not delete the observe-only config and do not change its
+semantics.** Observe mode is legitimate and needed; the defect is that a
+formal campaign used it, apparently unintentionally. The file name
+`health_checks_baseline_observe_mode.yaml` suggests it was written for
+baseline runs, not for a scientific campaign.
+
+**Recommendation for V20 (operator decision).** Use the blocking config.
+The observed collapse is not marginal: 1–4 distinct values out of 256,
+standard deviation of exactly 0.0 on four files, amplitude collapse at
+0.9999–1.000. Under observe mode, rounds this degenerate keep consuming
+formal budget and keep entering the record.
+
+### 12A.5 Unresolved policy requirements
+
+These hold regardless of the config choice and are the actual PR D work:
+
+- **no HealthGate-valid trial ⇒ no scientifically valid candidate** for
+  that iteration;
+- a formal run under a zero-valid-trial override must be explicitly
+  **diagnostic / non-authoritative**;
+- such a result must not enter incumbent selection;
+- it must not enter scientific aggregation or the formal grand mean;
+- the planner must receive **structured all-trials-invalid feedback**, so
+  the next iteration changes the plan rather than resubmitting it
+  unchanged;
+- campaign manifests must record the **selected HealthGate mode** plainly,
+  not only as a config path and hash;
+- IDs and operator-facing labels must not say `blocking` when the
+  effective action is `continue`.
+
+### 12A.6 Remaining open questions
+
+1. Was the observe-only config chosen deliberately for V19, or inherited
+   from the V17/V18 baseline work and never switched? This determines
+   whether the launcher needs a guard or only a changed argument.
+2. Should a zero-valid-trial iteration abort, run formal as a labelled
    diagnostic, or skip formal entirely?
 3. Does the interpreter already receive enough per-round gate evidence to
    explain the collapse to the proposer, or is that the PR 3 remainder?
@@ -1383,7 +1447,7 @@ money on known defects.
 | 2 | Chain/pair GPU aggregation and attribution: memory accounted over the process tree, contention-caused OOM never recorded as candidate failure, two-chain runs pass a real aggregate check | Pair reached 28,732 MiB and produced a mis-attributed OOM | §6.2, §6.5 |
 | 3 | Measured-evidence admission: a formal candidate cannot proceed on `ADVISORY` alone; it needs calibration shown applicable to it, or a live probe of it | `ADVISORY` is currently a terminal state for admitted candidates | §3.0, §3.5 |
 | 4 | Calibration promotion wired into production, `model_family` propagated, and validated/rejected/unusable counts reported | 20 observations, 0 promotions, family `unknown` throughout | §3.2, §3.3, §12 |
-| 5 | HealthGate enforcement: a failed blocking check cannot leave a round counted valid; with zero valid trials the formal output is not a scientific result or an incumbent | All four rounds collapsed, all resolved `continue` | §12A |
+| 5 | Formal-campaign HealthGate policy: the campaign selects the blocking config and the choice is recorded plainly; with zero valid trials the formal output is not a scientific result or an incumbent | All four rounds collapsed under an observe-only config selected at launch | §12A |
 | 6 | Campaign-scoped control state: STOP, queue state and pair summaries belong to a campaign; a stopped campaign cannot block a new one | The previous campaign's STOP blocked this one's launch | §9 |
 
 **Non-blocking — improve during V20**
@@ -1647,6 +1711,7 @@ about whether production calls it.
 
 | Rev | Date | Change |
 |---|---|---|
+| 1e | 2026-07-31 | **Correction to P0-5, before any code was written against it.** Revision 1d called the `continue` resolution a CONFIRMED DEFECT. It is not. The repository default `configs/health_checks.yaml` maps all three blocking checks to `invalidate_round`, but `v19_queue_runner.sh:272` launched V19 with `configs/health_checks_baseline_observe_mode.yaml`, which deliberately maps them to `continue` — the materialised effective config carries the reason verbatim: *"Observe only; production policy would invalidate a failed result."* Detection, collapse classification and action resolution all worked; `resolved_action: continue` was correct execution of the selected configuration. The priority is restated from *fix broken HealthGate enforcement* to **formal-campaign HealthGate policy and zero-valid-trial handling** (§12A). One real presentation defect survives: gate IDs read `*_blocking` while the effective action is `continue`, and that naming is what caused the original misreading. §12A.4 records the intended split — formal campaigns use the blocking config, while observe mode stays available and unchanged for baseline, calibration and explicitly-labelled diagnostic runs — with a recommendation to use blocking for V20 given collapse at 1–4 distinct values of 256 and std exactly 0.0 on four files. §12A.5 keeps the zero-valid-trial requirements, which hold under either config and are the actual PR D work: no valid trial means no valid candidate, any override run is non-authoritative and excluded from incumbent selection and scientific aggregation, the planner receives structured all-trials-invalid feedback, and the manifest records the selected mode plainly. No configuration file was modified in this documentation step. |
 | 1d | 2026-07-31 | **V19 formally closed** (§14): classified as an *infrastructure validation campaign stopped after confirming pair-level GPU contention and HealthGate enforcement gaps*, final state `STOPPED — PAIR-LEVEL GPU CONTENTION`. Explicitly not "completed successfully" — it produced no citable formal scientific result; it concluded as a production diagnostic campaign, which is where its value lies. It will not be restarted, and V20 must be a genuinely new campaign (new ID, run names, workspaces, report, queue state, cold start) reusing no proposal history, incumbent, HealthGate history, resource-failure feedback, old STOP or contention-polluted OOM evidence; V19 artifacts are forensic evidence only. §14.0 separates what V19 validated (static estimates hold no rejection authority, pre-flight classification correct, candidate/infrastructure failures distinguishable, C13 stop semantics) from what it exposed (seven defects). New priority **P0-5** added as §12A: HealthGate detected severe collapse on all four rounds — `unique_int8` of 1–4 out of 256, one round emitting a constant signal — recorded `would_invalidate_under_production_policy: true`, and still resolved to `continue`, so collapsed rounds counted as results and formal ran on a plan no valid trial supported. Gate-path defect, mis-calibrated thresholds and novel-architecture false positives are each ruled out by the artifacts. §13.1 adds a launch gate splitting the work into six blocking requirements and five non-blocking improvements, and §13.2 records the PR A–E ladder with the rule that each problem needs its own acceptance criteria. |
 | 1c | 2026-07-31 | Remediation plan added as §6.6 (operator decision): **PR A** routes the production pre-flight through the existing `run_isolated_preflight` and keeps the chain parent CPU-only — a call-site replacement, not a rewrite, with identical inputs, outputs and dispositions — plus production-wiring guardrails so "built but never called" cannot recur. Training and inference keep their subprocess architecture, which already returns memory correctly. Explicit non-goals recorded: no dynamic chain kill, no NVML scheduler, no memory broker, `empty_cache()` never as the primary fix, and no raising of the 12 / 28 GiB or host-quota ceilings, since the defect is double-held resources rather than a low ceiling. **PR B** (chain/pair NVML aggregation and contention-aware OOM attribution) is conditional on the phase-3 two-chain validation still showing risk, and must never be merged into PR A. Validation sequenced as wiring → bounded single-chain → bounded two-chain, with the chain peak measured rather than assumed. §11.2 restructured into four numbered entry points for resource-driven shrinking, adding door 4: the time estimate is rendered into the planning prompt (`prompts.py:645-650`) with an explicit "over" verdict — the arch formal round was shown "factor 1.98 (over)" for a round that took 96.3 min against a 120 min budget, a 2.47× over-prediction reaching the decision-maker as fact. Recorded as OPEN with no harm demonstrated: that line appeared on the formal round so no later proposal was observed, and the only observable size change went up 87 %. Door 4 is explicitly ranked far below the confirmed door 3. |
 | 1b | 2026-07-31 | Campaign stopped and closed out. §6.1 upgraded from OPEN INVESTIGATION to **CONFIRMED DEFECT**: the chain parent's 6.9 GiB is the in-process VRAM pre-flight, traced call-path by call-path and confirmed by a pre-registered falsifiable prediction — the parent held 6,962 MiB unchanged across 13 samples over 3 minutes *after* its child exited, alone on the GPU. The fix (`run_isolated_preflight`, PR #151) exists and is GPU-validated with zero production call sites, making this the second instance of the P0-1 pattern; a reachability check is now a V20 requirement. §14 records the operator's 20:15 reversal on the §6.5 evidence and the full closeout: C13's three stop layers all correct, waves 2-4 never started, GPU returned to baseline, 645,054 tokens / $1.94 spent, and 20 observations that advanced calibration by nothing. |
