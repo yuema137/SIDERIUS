@@ -223,9 +223,9 @@ MATRIX: tuple[dict[str, Any], ...] = (
 #: C12-C pairs: small, large, and heterogeneous — drawn from the matrix.
 PAIRWISE_PAIRS: tuple[dict[str, Any], ...] = (
     {"label": "small_cross_family", "members": ("punet@50K", "wavenet@50K")},
-    # wavenet@20M OOMs on this device (measured), so the large pair uses
-    # its operator-approved replacement.
-    {"label": "large_cross_family", "members": ("punet@20M", "wavenet@~9M")},
+    # wavenet@20M, ~9M and ~6M all OOM on this device (all measured), so
+    # wavenet@5M is the largest FEASIBLE member of that family here.
+    {"label": "largest_feasible_cross_family", "members": ("punet@20M", "wavenet@5M")},
     {"label": "heterogeneous_compute", "members": ("punet@5M", "transformer@5M")},
 )
 

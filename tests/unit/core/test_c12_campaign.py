@@ -84,7 +84,11 @@ class TestMatrix:
 
     def test_pairs_cover_small_large_and_heterogeneous(self):
         labels = {p["label"] for p in PAIRWISE_PAIRS}
-        assert labels == {"small_cross_family", "large_cross_family", "heterogeneous_compute"}
+        assert labels == {
+            "small_cross_family",
+            "largest_feasible_cross_family",
+            "heterogeneous_compute",
+        }
         for pair in PAIRWISE_PAIRS:
             assert len(pair["members"]) == 2
 
@@ -332,7 +336,7 @@ class TestPairwiseConcurrency:
         plans = build_pairwise_plans({"punet@50K": 69_328, "wavenet@50K": 49_680})
         assert {p.label for p in plans} == {
             "small_cross_family",
-            "large_cross_family",
+            "largest_feasible_cross_family",
             "heterogeneous_compute",
         }
         small = next(p for p in plans if p.label == "small_cross_family")

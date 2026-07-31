@@ -110,7 +110,11 @@ def run_cell(entry_id: str, args) -> CampaignCell:
         probe_device_vram_gb,
         production_probe_executors,
     )
-    from core.runtime_control.probe_subprocess import ProbeWorkerSpec, run_worker
+    from core.runtime_control.probe_subprocess import (
+        ProbeInfrastructureFailure,
+        ProbeWorkerSpec,
+        run_worker,
+    )
 
     entry = _resolve(entry_id)
     train_config = {
@@ -151,25 +155,30 @@ def run_cell(entry_id: str, args) -> CampaignCell:
     # C12 fix: the probe runs behind a PROCESS boundary so the wall cap is
     # a hard bound. A single stalled CUDA operation can no longer hang the
     # campaign (transformer@8M-ceiling did exactly that, twice).
-    outcome = run_worker(
-        ProbeWorkerSpec(
-            model_type=entry["family"],
-            model_config_payload=entry["config"],
-            train_config=train_config,
-            loss_config={"loss_type": "ce"},
-            data_dir=args.data_dir,
-            device="cuda",
-            caps={
-                "max_wall_seconds": args.probe_wall_seconds,
-                "n_warmup_steps": args.warmup_steps,
-                "n_timed_train_steps": args.timed_steps,
-                "n_timed_inference_batches": args.inference_batches,
-            },
-            device_vram_gb=probe_device_vram_gb(),
-            result_path=str(args.output_root / "workers" / f"{entry_id}.json"),
-        ),
-        hard_cap_seconds=args.probe_hard_cap_seconds,
-    )
+    try:
+        outcome = run_worker(
+            ProbeWorkerSpec(
+                model_type=entry["family"],
+                model_config_payload=entry["config"],
+                train_config=train_config,
+                loss_config={"loss_type": "ce"},
+                data_dir=args.data_dir,
+                device="cuda",
+                caps={
+                    "max_wall_seconds": args.probe_wall_seconds,
+                    "n_warmup_steps": args.warmup_steps,
+                    "n_timed_train_steps": args.timed_steps,
+                    "n_timed_inference_batches": args.inference_batches,
+                },
+                device_vram_gb=probe_device_vram_gb(),
+                result_path=str(args.output_root / "workers" / f"{entry_id}.json"),
+            ),
+            hard_cap_seconds=args.probe_hard_cap_seconds,
+        )
+    except ProbeInfrastructureFailure as exc:
+        # Our channel failed, not the candidate — record it, do not crash
+        # the campaign and lose the cell.
+        return _cell(status="infrastructure_failure", failure_detail=str(exc)[:2000])
     if outcome.classification == "measured_failure":
         return _cell(
             status="measured_failure",

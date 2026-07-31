@@ -224,6 +224,7 @@ class TestWorkerContract:
             "probe_result.json",
             "probe_result.spec.json",
             "probe_result.phase",
+            "probe_result.worker.log",  # diagnostics, beside the result
         }
 
 
@@ -245,3 +246,59 @@ class TestProductionWorkerWiring:
     def test_signal_constants_are_the_expected_ones(self):
         assert signal.SIGTERM == 15
         assert signal.SIGKILL == 9
+
+
+class TestWorkerDiagnostics:
+    """A worker that dies without writing a result must not be silent.
+
+    Found during the C12 closeout: `transformer@8M-ceiling` exited in
+    setup with no result, and the parent had captured stdout/stderr to a
+    PIPE it never drained — so the reason was lost, and an undrained PIPE
+    can deadlock a chatty child besides.
+    """
+
+    def test_worker_output_is_captured_to_a_file(self, tmp_path):
+        body = """
+import sys
+from pathlib import Path
+print("worker said something useful")
+print("and something on stderr", file=sys.stderr)
+sys.exit(7)
+"""
+        spec = _spec(tmp_path)
+        command = _fake_worker(tmp_path, body)
+        with pytest.raises(ProbeInfrastructureFailure) as exc:
+            run_worker(spec, hard_cap_seconds=30.0, command=command)
+        message = str(exc.value)
+        assert "worker said something useful" in message
+        assert "and something on stderr" in message  # stderr is merged in
+
+    def test_the_log_survives_a_hard_kill(self, tmp_path):
+        body = """
+import signal, sys, time
+from pathlib import Path
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+print("about to stall", flush=True)
+Path(r"{progress}").write_text("training")
+time.sleep(600)
+"""
+        outcome = _run(tmp_path, body, cap=1.0, grace=0.5)
+        assert outcome.termination.kill_sent is True
+        assert "about to stall" in outcome.detail
+
+    def test_a_chatty_worker_does_not_deadlock(self, tmp_path):
+        """An undrained PIPE would hang here; a file does not."""
+        body = """
+import json
+from pathlib import Path
+for i in range(20000):
+    print("noise line %d" % i)
+Path(r"{result}").write_text(json.dumps({{
+    "status": "ok", "phase": "complete", "model_identity": "fake_candidate",
+    "train_ms_per_step": 5.0
+}}))
+"""
+        outcome = _run(tmp_path, body, cap=60.0)
+        assert outcome.classification == "ok"
+        assert outcome.result is not None
+        assert outcome.result.train_ms_per_step == 5.0

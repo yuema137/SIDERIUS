@@ -184,16 +184,25 @@ def run_worker(
         "core.runtime_control.probe_worker_main",
         str(spec_path),
     ]
+    # File-backed stdio rather than PIPE: a PIPE nobody drains can deadlock
+    # a chatty child, and its contents are lost when the child is killed.
+    # On disk, the worker's diagnostics survive even a SIGKILL.
+    log_path = result_path.with_suffix(".worker.log")
+    try:
+        log_handle = log_path.open("w", encoding="utf-8")
+    except OSError as exc:
+        raise ProbeInfrastructureFailure(f"could not open the worker log: {exc}") from exc
     try:
         # start_new_session -> the child leads its own process group, so a
         # kill reaches every dataloader worker it spawned, not just itself.
         process = subprocess.Popen(
             argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
     except Exception as exc:
+        log_handle.close()
         raise ProbeInfrastructureFailure(f"could not launch the probe worker: {exc!r}") from exc
 
     pgid = process.pid  # session leader: pgid == pid
@@ -223,6 +232,8 @@ def run_worker(
         time.sleep(poll_seconds)
 
     elapsed = clock() - started
+    log_handle.close()
+    worker_log_tail = _log_tail(log_path)
     termination = ProbeTerminationRecord(
         timed_out=timed_out,
         phase_at_timeout=_read_phase(progress_path) if timed_out else None,
@@ -250,11 +261,11 @@ def run_worker(
             detail=(
                 f"probe exceeded the hard cap of {hard_cap_seconds:.0f}s during "
                 f"{termination.phase_at_timeout or 'an unreported phase'} "
-                f"(elapsed {elapsed:.1f}s)"
+                f"(elapsed {elapsed:.1f}s). Worker output: {worker_log_tail or '<empty>'}"
             ),
         )
 
-    result = _load_result(result_path, required=True)
+    result = _load_result(result_path, required=True, log_tail=worker_log_tail)
     assert result is not None
     if result.status in ("oom", "wall_cap"):
         return ProbeExecutionOutcome(
@@ -273,7 +284,16 @@ def run_worker(
     return ProbeExecutionOutcome(classification="ok", result=result, termination=termination)
 
 
-def _load_result(path: Path, *, required: bool) -> ProbeWorkerResult | None:
+def _log_tail(path: Path, *, limit: int = 1500) -> str:
+    """The worker's last words. Without this a hard failure is silent."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return text[-limit:]
+
+
+def _load_result(path: Path, *, required: bool, log_tail: str = "") -> ProbeWorkerResult | None:
     """Read the worker's typed result. A malformed or missing result when
     one was expected is an INFRASTRUCTURE failure — the candidate said
     nothing, our channel did."""
@@ -283,7 +303,8 @@ def _load_result(path: Path, *, required: bool) -> ProbeWorkerResult | None:
         if not required:
             return None
         raise ProbeInfrastructureFailure(
-            f"probe worker exited without writing a result to {path}: {exc}"
+            f"probe worker exited without writing a result to {path}: {exc}. "
+            f"Worker output: {log_tail or '<empty>'}"
         ) from exc
     try:
         return ProbeWorkerResult.model_validate_json(raw)
@@ -291,7 +312,8 @@ def _load_result(path: Path, *, required: bool) -> ProbeWorkerResult | None:
         if not required:
             return None
         raise ProbeInfrastructureFailure(
-            f"probe worker wrote a result that does not validate: {exc}"
+            f"probe worker wrote a result that does not validate: {exc}. "
+            f"Worker output: {log_tail or '<empty>'}"
         ) from exc
 
 
