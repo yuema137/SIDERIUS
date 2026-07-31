@@ -69,6 +69,33 @@ using validated measurements as the final production gate
 V20's central goal is to close that second gap, plus the resource
 observability and campaign isolation work that supports it.
 
+### 1.3 A measured event requires both classification and attribution
+
+V19's repairs established that a signal must not stand in for something
+it did not measure. The wave-1 CUDA OOM pair (§6.5) establishes the next
+requirement, which is not the same one:
+
+> **A measurement earns authority only when it is both correctly
+> classified and correctly attributed.**
+>
+> Classification asks *what kind of event was this* — CUDA OOM, host
+> memory, timeout, inconclusive. V19 solved this.
+>
+> Attribution asks *what caused it* — the candidate, or conditions the
+> candidate did not create. V19 did not address this, and a correctly
+> classified measurement with wrong attribution carries full rejection
+> authority today.
+
+The arch chain's OOM in §6.5 is the worked example: a real
+`torch.OutOfMemoryError`, correctly typed and accurately measured,
+produced while the peer chain held two-thirds of the GPU. Every
+V19-repaired check passes on it, and it is still not evidence about the
+candidate.
+
+This applies symmetrically to the applicability rule in §3: historical
+evidence must be shown applicable to the candidate, and live evidence
+must be shown attributable to it.
+
 ---
 
 ## 2. Priority summary
@@ -89,7 +116,38 @@ observability and campaign isolation work that supports it.
 
 ---
 
-## 3. P0-1/P0-3 — Dynamic calibration must become the final gate
+## 3. P0-1/P0-3 — Admission must rest on measured evidence for the concrete candidate
+
+> **The governing rule (operator formulation, 2026-07-31).**
+>
+> The final admission decision must be based on **measured evidence for
+> the concrete candidate**. Validated calibration may serve as that
+> evidence **only when its applicability to this candidate is
+> established**; otherwise a bounded live probe of this candidate is
+> required.
+>
+> This is deliberately *not* "dynamic calibration is always the final
+> gate". Predicting whether an unseen architecture will fit from history
+> alone is neither reliable nor a goal. Calibration's job is to scope
+> the probe, avoid redundant measurement, and inform similar workloads —
+> not to substitute for measuring a candidate that differs materially
+> from anything in the bucket.
+
+### 3.0 What is already achieved, and what is not
+
+| Property | Status |
+|---|---|
+| A static estimate cannot reject a candidate | **achieved** |
+| A probe can be requested when evidence is too weak | **achieved** |
+| When a probe runs, its measurement decides | **achieved** |
+| Every formally admitted candidate has applicable measured evidence | **not achieved** |
+
+The remaining gap is precisely the `ADVISORY` path. `ADVISORY` means
+"informational only; execution proceeds unaffected", so a candidate can
+reach formal execution having never been measured, with the trial wall
+clock or the watchdog as the only backstop. That is a safe *failure*
+mode, not a correct admission.
+
 
 ### 3.1 Observed problem
 
@@ -197,12 +255,17 @@ trustworthy evidence, proceed anyway".
 
 ```
 static / historical prior
-  → ADVISORY or REQUEST_PROBE            (never a final gate)
-  → bounded live measurement
-  → persist observation with complete identity
-  → attempt promotion
-  → validated calibration OR current measured evidence
-  → final ALLOW / REJECT
+  → decides only WHETHER TO MEASURE      (never a final gate)
+
+validated calibration
+  → applicability to THIS candidate must be established first
+  → if established : may serve as the measured evidence
+  → if not         : a bounded live probe is required
+
+bounded live probe of this candidate
+  → succeeded    : its measurement is the final gate — ALLOW / REJECT
+  → inconclusive : no ALLOW and no REJECT from runtime evidence;
+                   follow an explicit retry / fallback / stop policy
 ```
 
 Authority rules:
@@ -211,9 +274,20 @@ Authority rules:
 |---|---|---|---|---|
 | static prior (tier 0) | yes | yes | **no** | **no** |
 | historical prior alone (tier 1) | yes | yes | **no** | **no** |
+| validated calibration, applicability **not** established | yes | yes | **no** | **no** |
+| validated calibration, applicability established | yes | — | yes | yes, subject to §3.6 |
 | successful bounded live probe | yes | — | yes (this candidate) | yes (measured OOM / measured peak over cap / optimistic bound over budget) |
-| validated calibration | yes | — | yes (normal path) | yes, subject to §3.6 |
 | inconclusive probe | yes | yes | **no** | **no** |
+
+Two requirements follow that the current system does not meet:
+
+1. **`ADVISORY` must not be a terminal state for a formally admitted
+   candidate.** It may route to measurement; it may not stand in for it.
+2. **Applicability must be an explicit, checkable predicate**, not an
+   assumption that a matching bucket key implies a matching workload.
+   Deciding what establishes applicability — architecture family,
+   parameter scale, sequence length, batch, distance from the bucket's
+   observed range — is open question 7 in §3.6.
 
 An inconclusive probe must not silently become either allow or reject.
 The fallback policy for inconclusive evidence must be explicit and
@@ -506,6 +580,55 @@ the resource door this document exists to close. V20 must ensure a
 host-quota kill is classified as an **infrastructure** event and never
 as candidate evidence.
 
+### 6.5 Contention manufactures candidate-level evidence — CONFIRMED
+
+Both wave-1 chains hit a real `torch.OutOfMemoryError` during iteration
+1. The two are **not the same kind of event**, and the difference is the
+most important thing in this section.
+
+| | loss chain, R1a1 | arch chain, R2a1 |
+|---|---|---|
+| free VRAM at failure | **9.20 GiB** | **125.94 MiB** |
+| this process held | 20.13 GiB | 17.58 GiB |
+| the rest of the GPU | mostly free | held by the **peer chain** |
+| attributable to the candidate? | **yes** | **no** |
+| agent's response | batch 16 → 8, **params unchanged** (7,280,256) | params 2,924,160 → 1,278,944 |
+
+The loss event is exactly what the repaired system is for: a genuine
+per-candidate capacity limit, measured, with a correctly targeted
+response that reduced batch size rather than model size.
+
+The arch event is the problem. The GPU had **125.94 MiB free out of
+31.34 GiB** — the candidate did not exhaust the GPU, the *pair* did. Yet
+a measured `torch.OutOfMemoryError` carries rejection authority by
+design, so contention was converted into candidate-level evidence that
+the system is built to trust.
+
+**This generalizes the applicability rule in §3.** Applicability has two
+directions, and only one of them was previously stated:
+
+1. is historical calibration applicable **to this candidate**? (§3)
+2. is this measurement attributable **to this candidate**, or to
+   conditions it did not create?
+
+A measurement taken while a peer chain held two-thirds of the GPU is not
+evidence about the candidate. V20 must record the concurrency conditions
+under which every measurement was taken and refuse rejection authority
+to a measurement whose failure is not attributable to the candidate —
+the same discipline already applied to inconclusive probes.
+
+Note that this is the **third** entry point for resource-driven
+downsizing (§11.2), and unlike the first two it is not a
+misclassification: the OOM is real, correctly typed, and correctly
+measured. Only its *attribution* is wrong.
+
+**Scope note — no systematic shrinking yet.** arch recovered to
+2,388,992 in R3 after the post-OOM 1,278,944, and its shrink was
+justified in the log by HealthGate collapse evidence
+(`output_diversity`, `amplitude_collapse`), not by the OOM. loss moved
+7,280,256 → 4,117,792 → 3,774,544 without a resource trigger. This is
+**OPEN INVESTIGATION**, not a confirmed downsizing trend.
+
 **Do not change the per-chain policy mid-campaign.**
 
 ---
@@ -688,22 +811,33 @@ manifest.
 
 **OPEN INVESTIGATION.** Fresh V19 iteration 1 proposed:
 
-| chain | model | params |
-|---|---|---|
-| arch | `wavenet_full_spectrum_baseline_v1` | 2,388,992 |
-| loss | `wavenet_full_spectrum_ce_control_24b` | 4,117,792 |
+| chain | round | params | event |
+|---|---|---:|---|
+| arch | R1 a1 | 2,924,160 | completed, score −0.7587 |
+| arch | R2 a1 | 2,924,160 | **CUDA OOM** (125.94 MiB free — contention, §6.5) |
+| arch | R2 a2 | 1,278,944 | shrink attributed in-log to HealthGate collapse |
+| arch | R3 a1 | 2,388,992 | recovered upward |
+| loss | R1 a1 | 7,280,256 | **CUDA OOM** (9.20 GiB free — genuine, §6.5) |
+| loss | R1 a2 | 7,280,256 | batch 16 → 8, **params unchanged** |
+| loss | R2 a1 | 4,117,792 | |
+| loss | R3 a1 | 3,774,544 | |
 
-This is a large improvement over the contaminated campaign (2.92M /
-0.18M — the loss chain grew ~22×), but remains below the 10M-100M range
-the updated advice encourages. At the time of observation **no resource
-failure and no downsizing feedback had occurred**: every preflight
-returned `Feasible: YES`, with zero host-memory triggers, zero timeouts,
-and zero ambiguous classifications — against 15 timeouts in the
-contaminated campaign.
+The chains **opened higher than a single-round snapshot suggests** —
+2.92M and 7.28M, not the 2.39M / 4.12M visible mid-iteration. The loss
+chain's opening proposal approaches the advice's 10M-100M range. A first
+report of this campaign quoted the mid-iteration values and understated
+the opening scale; the full sequence above supersedes it.
 
-So there is currently **no evidence** that the proposals are small
-because of resource pressure. They may be small for scientific reasons,
-or because of a channel not yet identified.
+Against the contaminated campaign (2.92M / 0.18M opening), the loss
+chain grew ~40×. Two resource failures occurred, both real CUDA OOMs —
+zero host-memory triggers, zero timeouts, zero ambiguous
+classifications, against 15 timeouts in the contaminated campaign.
+
+There is currently **no confirmed evidence** of resource-driven
+systematic shrinking: arch recovered after its post-OOM dip, and loss
+reduced params with no resource trigger in the intervening rounds.
+Whether the drift from 7.28M to 3.77M is scientific or inherited
+pressure is **OPEN**.
 
 ### 11.2 The third possible entry point
 
