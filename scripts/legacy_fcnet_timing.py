@@ -30,15 +30,22 @@ WORKLOAD FIDELITY
 -----------------
 Every constant below is read from the legacy source, not remembered:
 
-    input_size = 40000                      train.py:40
+    input_size  = 40000                     train.py:41
     sample_size = 10                        train.py:44
     batchsize   = 1                         train.py:45
-    optimizer   = Adam(lr=0.0005)           train.py:112
-    loss        = nn.SmoothL1Loss()         train.py:101 (fcnet branch)
-    model       = AE(input_size)            train.py:100
-    bands       = [0,4,10,15,20]            train.py:73  -> 0-3/4-9/10-14/15-19
-    steps/file  = 2e9 // (10*1*40000) = 5000  (train.py:57-58 reshape)
-    inference   : batchsize 25, input 40000 inference.py:70-71
+    max_index   = 2000000000                train.py:57
+    reshape     = (-1, sample_size, batchsize, input_size)   train.py:58-59
+    bands       = [0,4,10,15,20]            train.py:74  -> 0-3/4-9/10-14/15-19
+    model       = AE(input_size)            train.py:102
+    loss        = nn.SmoothL1Loss()         train.py:103  (fcnet branch)
+    optimizer   = Adam(lr=0.0005)           train.py:113
+    steps/file  = 2e9 // (10*1*40000) = 5000        (from train.py:57-58)
+    inference   : input_size 40000          inference.py:69
+                  batchsize   25            inference.py:70
+                  reshape (-1, batchsize, input_size)       inference.py:94
+    AE dims     : 40000 -> 4000 -> 400 -> 40 -> 400 -> 4000 -> 40000
+                  scale_factor [0.1,0.01,0.001]  network.py:291
+                  realized parameter count 323,280,840
 
 Phases
 ------
