@@ -3367,7 +3367,95 @@ budget.
 per-tier labels; explicit "no runnable implementation" marking.
 **Failure/edge.** forensic snapshot moved → clear path error.
 **Boundary.** Tools + tests.
-- [ ] Evidence recorded.
+
+**Implementation record (C11).**
+
+*Files.* `scripts/runtime_replay/` — `schemas.py` (typed reports with
+schema-enforced evidence labels), `metadata_replay.py`,
+`executable_replay.py`, `legacy_migration.py`, `__main__.py` (CLI).
+
+```bash
+python -m scripts.runtime_replay metadata   --snapshot <forensics>
+python -m scripts.runtime_replay executable --snapshot <forensics> [--plan|--run]
+python -m scripts.runtime_replay legacy     [--path <k-table>] [--dry-run]
+```
+
+*Mode separation is a schema invariant, not a convention.* A
+`ReplayReport` in `metadata` mode REJECTS any candidate carrying a
+measurement; a `ReplayCandidate` rejects a measurement without a loadable
+implementation; and a `rejected_draft` can never carry runtime at all.
+The static numbers are labeled `static_estimate` and the measured ones
+`empirical_measurement` — in the same record, so the difference is
+visible rather than inferred.
+
+*Legacy migration is finalized as REFERENCE-ONLY.* The k-table is
+verified, hash-identified and recorded as a `LegacySourceReference`; its
+rows are exposed as `legacy_calibration_prior` (tier 1) through the
+existing read-only adapter. Nothing is imported as an observation —
+`CalibrationObservation` rejects non-measurement provenance by schema,
+and importing a row would launder an unlabeled number into the tier that
+may block a formal decision. Dry-run against the real table: 720
+entries, `imported_as_observations: 0`, `source_unmodified: True`, file
+sha256 `6933829e…` unchanged.
+
+**Metadata replay of the real V19 wave-1 snapshot (read-only).**
+
+Snapshot integrity: **verified — 228 files hash-match the SHA256SUMS
+manifest**, so the forensic evidence is provably unchanged since capture.
+
+| Candidate | Stage | Static estimate | Params (LLM) | Implementation |
+|---|---|---|---|---|
+| `tiny_spectral_gated_token_mixer_baseline` | surviving | 29.16 min, 1.46× | 312,000 | available |
+| `cross_scale_fno_pyramid_classifier` | surviving | 72.22 min, 3.61× | 780,000 | available |
+| `tiny_wavenet_hf_uncertainty_coldstart` | surviving | 4.62 min, 0.23× | 104,000 | available |
+| `wavenet_progressive_hardness_loss_probe` | surviving | 16.62 min, 0.83× | 244,864 | available |
+| 7 rejected drafts | rejected | factors 84.64, 26.80, 8.49, 8.30, 8.12, 6.29, 1.13× | none recorded | **NONE** |
+
+Two corrections to §15.6, both found by running the replay:
+
+1. **The wave-1 rejection count was 7, not 2.** §15.6 sampled the arch
+   chain's first two rejections; the snapshot contains 4 in `arch`
+   (84.64, 8.12, 26.80, 8.49) and 3 in `loss` (8.30, 1.13, 6.29). One
+   draft was rejected at **1.13×** — 13 % over budget, killed by an
+   uncalibrated formula.
+2. **The "18.4M / 1.76M" parameter counts are NOT recoverable from the
+   snapshot.** Those figures came from the live audit of the running
+   chain, which could see the in-flight proposal objects; rejection
+   discarded them before persistence, and the chain log records only the
+   factor. Grepping the log for those values returns progress-bar
+   artifacts (`118.44it/s`, `111.76it/s`), not parameter counts. The
+   replay therefore reports rejected drafts with `model_name=None` and
+   every static field genuinely absent left as `None` rather than
+   reconstructed — inventing a count would manufacture the evidence the
+   replay exists to look for.
+
+**The 18.4M and 1.76M drafts remain metadata-only, permanently.** They
+were rejected before implementation, so no code, no realized parameter
+count and no runtime truth exist for them. Neither replay mode can say
+whether those verdicts were right; the report states this explicitly
+instead of implying vindication.
+
+- [x] Evidence recorded: `tests/unit/scripts/test_c11_runtime_replay.py`
+      — **26 tests** (schema-enforced mode separation in both directions;
+      no measurement without an implementation; a rejected draft can
+      never carry runtime; metadata replay reads survivors and drafts,
+      reconstructs nothing, marks unregistered models unavailable, never
+      claims ground truth, is deterministic, and does not modify the
+      snapshot — verified by hashing every file before and after;
+      integrity verified / tampering detected / absent manifest is
+      `unverified` not `verified`; executable eligibility, plan with
+      reasons, promotion to executable mode, unmeasurable candidates
+      carried through rather than dropped; legacy migration registers by
+      hash and imports nothing, dry-run writes nothing, entries are
+      tier-1 priors, discovery is safe when absent; CLI surface and the
+      plan-not-run default). All against a SYNTHETIC snapshot in
+      `tmp_path` — the suite never depends on, or writes near, the real
+      forensic evidence.
+      `tests/integration/workflows/test_replay_pseudo.py` — **2 tests**
+      over the REAL probe engine and D3 classifier (a survivor gets a
+      comparable measurement showing the LLM's 312K beside a realized
+      45,408; the never-implemented drafts stay unknowable in the same
+      report).
 
 ### C12 — `validation(runtime): multi-family, multi-scale, idle + pairwise-concurrent GPU campaign`
 
