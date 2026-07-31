@@ -88,6 +88,22 @@ def _build_probe_input(batch_size: int, segmentation_size: int) -> torch.Tensor:
 # ── Public entry point ──────────────────────────────────────────────────────
 
 
+def _is_memory_error(exc: BaseException) -> bool:
+    """Host OOM, CUDA OOM, or an allocator refusal — all "not at this batch".
+
+    `torch.cuda.OutOfMemoryError` subclasses RuntimeError rather than
+    MemoryError, so the type alone is not enough.
+    """
+    if isinstance(exc, MemoryError):
+        return True
+    if type(exc).__name__ in ("OutOfMemoryError", "CudaOutOfMemoryError"):
+        return True
+    text = str(exc).lower()
+    return isinstance(exc, RuntimeError) and (
+        "out of memory" in text or "cannot allocate" in text or "bad_alloc" in text
+    )
+
+
 class BatchSearchTimeout(Exception):
     """A bounded step of the batch search ran out of time.
 
@@ -169,13 +185,30 @@ def resolve_inference_batch(
             )
 
         candidate_started = time.monotonic()
-        probe = probe_activation_footprint(
-            model=model,
-            loss_module=None,
-            input_sample=_build_probe_input(B, segmentation_size),
-            target_sample=None,
-            mode="inference",
-        )
+        try:
+            probe = probe_activation_footprint(
+                model=model,
+                loss_module=None,
+                input_sample=_build_probe_input(B, segmentation_size),
+                target_sample=None,
+                mode="inference",
+            )
+        except (MemoryError, RuntimeError) as exc:
+            # A candidate that cannot even be PROBED at this batch is not a
+            # verdict on the model — it is a verdict on this batch. The
+            # search exists to find the largest batch that works, so it
+            # continues to the next smaller one.
+            #
+            # This matters more than it looks. The list is DESCENDING, so
+            # B=64 is tried first, and for a quadratic-attention model at
+            # T=8000 that single attention matrix is 61 GiB
+            # (64 x 4 heads x 8000 x 8000 x 4 bytes). On 2026-07-31 that
+            # allocation took the whole host down at 57.7 GiB anon-rss —
+            # a model that would have probed fine at B=8 was never reached.
+            if not _is_memory_error(exc):
+                raise
+            last_peak, last_vram_ok, last_intensity_ok, last_B = 0, False, True, B
+            continue
         candidate_elapsed = time.monotonic() - candidate_started
         if candidate_elapsed >= budgets.single_candidate_seconds:
             raise BatchSearchTimeout(

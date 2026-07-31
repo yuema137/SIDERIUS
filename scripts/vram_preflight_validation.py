@@ -22,6 +22,7 @@ would have passed before the repair too.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -38,6 +39,12 @@ DEFAULT_OUTPUT = Path("/home/klz/Data/SIDEREIS_DATA/runtime_validation/vram_pref
 #: Candidates chosen for INSPECTION COST, not for science. Each names why
 #: it is in the set, so a later reader can tell whether the set still
 #: covers the failure mode.
+#:
+#: Every config here was checked against the model's actual schema bounds
+#: before being written down. The first version of this file guessed
+#: `residual_channels=256` for WaveNet, whose schema caps it at 128; the
+#: harness then reported the rejection as "completed", which is why
+#: schema validation now happens before any worker is launched.
 CANDIDATES: tuple[dict, ...] = (
     {
         "label": "fcnet@323M-official",
@@ -48,25 +55,48 @@ CANDIDATES: tuple[dict, ...] = (
             "at 6.04 GiB peak, so it MUST fit the 12 GiB cap and must not be "
             "rejected by an inspection timeout"
         ),
-        "expected": "completed",
+        "expected_parameters": 323_281_352,
+        "expected": "COMPLETED_MEASUREMENT",
     },
     {
-        "label": "wavenet@~15M",
+        "label": "wavenet@17M",
         "model_type": "wavenet",
-        "config": {"segmentation_size": 16000, "batch_size": 4, "residual_channels": 256},
+        # 17,110,528 params — verified against the schema bounds
+        # (residual<=128, gate<=256, skip<=128, kernel<=32, blocks<=20).
+        "config": {
+            "segmentation_size": 16000,
+            "batch_size": 4,
+            "residual_channels": 128,
+            "gate_channels": 256,
+            "skip_channels": 128,
+            "kernel_size": 24,
+            "num_blocks": 20,
+        },
         "why": "the 10M-20M convolutional range the advice now encourages",
-        "expected": "completed",
+        "expected_parameters": 17_110_528,
+        "expected": "COMPLETED_MEASUREMENT",
     },
     {
         "label": "transformer@medium",
         "model_type": "transformer",
-        "config": {"segmentation_size": 8000, "batch_size": 2},
+        # This is the candidate that OOM-killed the host on 2026-07-31 at
+        # T=8000. It is kept deliberately: the repair's central claim is
+        # that it now yields a BOUNDED, typed outcome instead of taking
+        # the machine down with it.
+        "config": {
+            "segmentation_size": 8000,
+            "batch_size": 2,
+            "embedding_dim": 128,
+            "nhead": 8,
+            "num_layers": 4,
+            "dim_feedforward": 512,
+        },
         "why": (
-            "attention cost grows with sequence length, so this is the most "
-            "likely candidate to produce a MEASURED capacity result rather "
-            "than an inspection timeout"
+            "attention cost grows with sequence length; this exact shape "
+            "previously grew to 60.5 GB host RSS and killed the parent, so "
+            "it is the direct regression case for host-memory isolation"
         ),
-        "expected": "completed_or_measured_capacity_failure",
+        "expected": "any bounded typed outcome (must NOT kill the parent)",
     },
 )
 
@@ -89,46 +119,83 @@ def plan() -> dict:
     }
 
 
+def validate_config(entry: dict) -> tuple[dict | None, str | None]:
+    """Schema-validate WITHOUT constructing the model.
+
+    Returns (normalized_config, error). The parent must never instantiate
+    a candidate: once the model is resident here, a worker memory limit is
+    already too late.
+    """
+    from ml_models.models_format_sandbox import get_config_class
+
+    config_class = get_config_class(entry["model_type"])
+    if config_class is None:
+        return None, f"no config class registered for {entry['model_type']!r}"
+    try:
+        validated = config_class(**dict(entry["config"]))
+    except Exception as exc:
+        return None, str(exc)[:400]
+    return validated.model_dump(mode="json"), None
+
+
+def config_identity(config: dict) -> str:
+    payload = json.dumps(config, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def run_candidate(entry: dict, output_root: Path) -> dict:
-    """Run one pre-flight and reduce it to a single typed disposition."""
-    from agent.skills.evaluate_vram_skill.wrapper import run_skill
-
-    started = time.perf_counter()
-    result = run_skill(
-        None,  # no sandbox: this harness probes in-process, like the tuner's pre-flight
-        model_type=entry["model_type"],
-        model_config=dict(entry["config"]),
-        train_config={"batch_size": entry["config"].get("batch_size", 1), "device": "cuda"},
-        loss_config={"loss_type": "ce"},
-        vram_budget_gb=VRAM_BUDGET_GB,
+    """Schema-validate, then probe in ONE isolated, memory-bounded worker."""
+    from agent.skills.evaluate_vram_skill.isolated_probe import (
+        IsolatedProbeSpec,
+        default_worker_memory_limit_bytes,
+        run_isolated_preflight,
     )
-    elapsed = round(time.perf_counter() - started, 2)
 
-    status = result.get("status")
-    if status == "inconclusive":
-        disposition = "inconclusive"
-    elif status == "error":
-        disposition = "AMBIGUOUS_RUNTIME_ERROR"  # a validation failure in itself
-    elif result.get("feasible") is False:
-        disposition = "measured_peak_over_cap"
-    else:
-        disposition = "completed"
+    output_root.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+
+    normalized, schema_error = validate_config(entry)
+    if schema_error is not None:
+        record = {
+            "label": entry["label"],
+            "model_type": entry["model_type"],
+            "config": entry["config"],
+            "expected": entry["expected"],
+            "outcome": "SCHEMA_REJECTED",
+            "schema_message": schema_error,
+            "elapsed_seconds": round(time.perf_counter() - started, 2),
+            "note": "rejected before any worker was launched",
+        }
+        (output_root / f"{entry['label']}.json").write_text(json.dumps(record, indent=2))
+        return record
+
+    limit = default_worker_memory_limit_bytes()
+    result = run_isolated_preflight(
+        IsolatedProbeSpec(
+            label=entry["label"],
+            model_type=entry["model_type"],
+            model_config_payload=normalized,
+            train_config={"batch_size": normalized.get("batch_size", 1), "device": "cuda"},
+            loss_config={"loss_type": "ce"},
+            vram_budget_gb=VRAM_BUDGET_GB,
+            result_path=str(output_root / "workers" / f"{entry['label']}.json"),
+            worker_memory_limit_bytes=limit,
+        ),
+        deadline_seconds=600.0,
+    )
 
     record = {
-        "label": entry["label"],
+        **result.model_dump(mode="json"),
         "model_type": entry["model_type"],
-        "config": entry["config"],
+        "normalized_config": normalized,
+        "config_identity": config_identity(normalized),
         "expected": entry["expected"],
-        "disposition": disposition,
-        "elapsed_seconds": elapsed,
-        "realized_parameter_count": result.get("num_params"),
-        "estimated_gb": result.get("estimated_gb"),
-        "limit_gb": result.get("limit_gb"),
-        "inference_batch": result.get("inference_batch"),
-        "timeout_record": result.get("timeout_record"),
-        "agent_facing_message": (result.get("message") or "")[:400],
+        "expected_parameters": entry.get("expected_parameters"),
+        "agent_facing_message": result.agent_facing_message(),
+        "may_recommend_vram_downsizing": result.may_recommend_vram_downsizing,
+        "may_recommend_host_memory_reduction": result.may_recommend_host_memory_reduction,
+        "has_capacity_authority": result.has_capacity_authority,
     }
-    output_root.mkdir(parents=True, exist_ok=True)
     (output_root / f"{entry['label']}.json").write_text(json.dumps(record, indent=2))
     return record
 
@@ -152,19 +219,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n=== {entry['label']} ===")
         record = run_candidate(entry, args.output_root)
         records.append(record)
+        host = record.get("host_memory") or {}
         print(
-            f"  disposition={record['disposition']} "
-            f"params={record['realized_parameter_count']} "
-            f"est={record['estimated_gb']} GB elapsed={record['elapsed_seconds']}s"
+            f"  outcome={record['outcome']} "
+            f"params={record.get('realized_parameter_count')} "
+            f"est={record.get('estimated_gb')} GB "
+            f"peak_host_rss={host.get('peak_worker_rss_gib')} GiB "
+            f"elapsed={record.get('elapsed_seconds')}s"
         )
 
-    ambiguous = [r for r in records if r["disposition"] == "AMBIGUOUS_RUNTIME_ERROR"]
-    print(f"\n{len(records)} candidate(s); {len(ambiguous)} ambiguous")
-    if ambiguous:
-        print("VALIDATION FAILED: a candidate produced a generic runtime error.")
-        for r in ambiguous:
-            print(f"  {r['label']}: {r['agent_facing_message'][:160]}")
-    return 1 if ambiguous else 0
+    # A schema rejection of a REQUIRED candidate fails the validation: the
+    # set is chosen deliberately, so skipping one silently would leave the
+    # failure mode untested.
+    bad = [
+        r for r in records if r["outcome"] in ("PROBE_INFRASTRUCTURE_FAILURE", "SCHEMA_REJECTED")
+    ]
+    orphaned = [r for r in records if r.get("orphans_remaining")]
+    print(f"\n{len(records)} candidate(s); {len(bad)} unusable; {len(orphaned)} left orphans")
+    for r in records:
+        print(f"  {r['label']:24} {r['outcome']}")
+    if bad or orphaned:
+        print("VALIDATION FAILED.")
+        for r in bad:
+            print(f"  {r['label']}: {r.get('schema_message') or r.get('detail', '')[:160]}")
+    return 1 if (bad or orphaned) else 0
 
 
 if __name__ == "__main__":
