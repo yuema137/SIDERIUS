@@ -1,7 +1,8 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
 # V19 Gate 0 pair runner — band 15-19, exactly two concurrent chains
-# (v19_gate_arch_15_19 + v19_gate_loss_15_19), 2 iterations each.
+# (${GATE_RUN_PREFIX}_arch_15_19 + ${GATE_RUN_PREFIX}_loss_15_19, default
+# prefix v19_c14), 2 iterations each.
 # Frozen Gate plan: reports/v19_gate0_20260729_2209.md; protocol:
 # docs/design/v19_priorities/v19_launch_protocol.md.
 #
@@ -47,8 +48,14 @@ POLL_SECONDS="${POLL_SECONDS:-60}"
 WALL_CAP_SECONDS="${WALL_CAP_SECONDS:-21600}"
 LAUNCH_SETTLE_SECONDS="${LAUNCH_SETTLE_SECONDS:-3}"
 
-ARCH_RUN="v19_gate_arch_15_19"
-LOSS_RUN="v19_gate_loss_15_19"
+# C14 (operator 2026-07-31): explicit C14 run names, so this Gate's
+# workspaces can never be confused with the 2026-07-30 Gate-0 attempt
+# (now archived) or with formal V19. Overridable for a re-run under a
+# different label; the launcher derives EVERY name from it, so the
+# summary, the markers and the chain argv cannot disagree.
+GATE_RUN_PREFIX="${GATE_RUN_PREFIX:-v19_c14}"
+ARCH_RUN="${GATE_RUN_PREFIX}_arch_15_19"
+LOSS_RUN="${GATE_RUN_PREFIX}_loss_15_19"
 SUMMARY="$GATE_ROOT/gate0_pair_summary.json"
 #: Per-chain admission cap, mirrored from gate_chain_args() so the
 #: aggregate check and the launched command can never disagree.
@@ -62,7 +69,7 @@ log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$RUNNER_LOG"; }
 # advice path. Everything else is byte-identical by construction.
 gate_chain_args() {  # flavor (arch|loss)
   local FLAVOR="$1"
-  local RUN="v19_gate_${FLAVOR}_15_19"
+  local RUN="${GATE_RUN_PREFIX}_${FLAVOR}_15_19"
   cat <<EOF
 --mode
 lilab
@@ -167,7 +174,7 @@ wrapper_pid() {  # run -> self-reported wrapper-shell PID or "unknown"
 
 launch_gate_chain() {  # flavor (arch|loss)
   local FLAVOR="$1"
-  local RUN="v19_gate_${FLAVOR}_15_19"
+  local RUN="${GATE_RUN_PREFIX}_${FLAVOR}_15_19"
   local WS="$GATE_ROOT/$RUN"
   local LOG="$GATE_ROOT/${RUN}_$(date +%Y%m%d_%H%M).log"
   local SESSION="siderius-$RUN"

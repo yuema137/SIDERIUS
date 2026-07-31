@@ -73,10 +73,10 @@ class TestResolvedGateValues:
     """The frozen operator values, asserted on the RESOLVED namespace."""
 
     def test_identity_per_flavor(self, arch_args, loss_args):
-        assert arch_args.run_name == "v19_gate_arch_15_19"
-        assert loss_args.run_name == "v19_gate_loss_15_19"
-        assert arch_args.workspace.endswith("/v19_gate_arch_15_19")
-        assert loss_args.workspace.endswith("/v19_gate_loss_15_19")
+        assert arch_args.run_name == "v19_c14_arch_15_19"
+        assert loss_args.run_name == "v19_c14_loss_15_19"
+        assert arch_args.workspace.endswith("/v19_c14_arch_15_19")
+        assert loss_args.workspace.endswith("/v19_c14_loss_15_19")
         assert arch_args.workspace != loss_args.workspace
         assert arch_args.start_iteration == 1
 
