@@ -1,7 +1,8 @@
 """Run a candidate VRAM pre-flight inside an isolated, memory-bounded worker.
 
-Why this exists, precisely. On 2026-07-31 a Transformer candidate's
-pre-flight grew to **60.5 GB of anonymous RSS** on a 61 GB host and the
+Why this exists, precisely. On 2026-07-31 a quadratic-attention
+candidate's pre-flight grew to **60.5 GB of anonymous RSS** on a 61 GB
+host and the
 kernel OOM-killer reaped the whole validation process. The GPU sat at
 273 MiB throughout — VRAM was never the constraint. Nothing was measured
 about that candidate; the process that was supposed to measure it died.
@@ -97,9 +98,9 @@ def default_worker_memory_limit_bytes() -> int:
         + ~1 GiB              the two parent processes
         = ~53 GiB of 61.8     leaving ~8.8 GiB headroom
 
-    24 GiB also sits far above any legitimate candidate: the 323M FCNet
-    pre-flight completed in 6.79 s well inside it. A worker that reaches
-    24 GiB is pathological, which is exactly what this is for.
+    24 GiB also sits far above any legitimate candidate: the 323 M-parameter
+    baseline pre-flight completed in 6.79 s well inside it. A worker that
+    reaches 24 GiB is pathological, which is exactly what this is for.
 
     Overridable per deployment; never inferred silently from free memory,
     because a transient reading would make the bound irreproducible.

@@ -5,16 +5,16 @@ The defect this replaces (V19 campaign `v19r2_10iter_20260731_0750`,
 stopped 2026-07-31): ONE 60-second alarm wrapped the ENTIRE
 inference-batch search, while that search internally probes seven
 candidate batches `(64, 32, 16, 8, 4, 2, 1)`, each with a full
-`torchinfo.summary(depth=10)` trace, on CPU. For a 24-block WaveNet at
-T=16000 the cumulative cost exceeds 60 s by construction — a property of
-OUR search, not of the candidate.
+`torchinfo.summary(depth=10)` trace, on CPU. For a deep dilated-conv
+candidate at T=16000 the cumulative cost exceeds 60 s by construction —
+a property of OUR search, not of the candidate.
 
 Worse than being wrong, it was wrong in a direction that compounds. The
 timeout surfaced as a hard `Resource check error`, the message blamed a
 loop "inside `nn.Module.forward`", and the agent — reasonably — concluded
 that large models are unsafe and downsized. Nine timeouts later both
 chains were proposing models at 2-3 % of their VRAM budget, against
-advice that asks for 4-12 GB and cites FCNet's 323 M parameters. The same
+advice that asks for 4-12 GB and cites a 323 M-parameter baseline. The same
 configuration both failed and passed depending on CPU load, which is what
 proves it was never a capacity signal.
 
@@ -74,8 +74,8 @@ class ProbeBudgets(BaseModel):
     in particular — it was one number doing four jobs. Each budget here
     bounds exactly one operation, so each can be set on its own merits.
 
-    Sizing note: C12 measured the official 323 M-parameter FCNet on this
-    environment at 17.68 ms/step and 6.04 GiB peak. A baseline-scale
+    Sizing note: C12 measured the official 323 M-parameter baseline on
+    this environment at 17.68 ms/step and 6.04 GiB peak. A baseline-scale
     model is expected to pass; these budgets exist to stop a pathological
     candidate, not a large one.
     """

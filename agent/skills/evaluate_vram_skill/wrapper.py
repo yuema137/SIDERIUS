@@ -729,10 +729,10 @@ def run_skill(sandbox, **kwargs):
         }
     except RuntimeError as e:
         # An allocation failure is a CANDIDATE-level fact and must be
-        # reported as one. On 2026-07-31 FCNet's torchinfo trace failed
-        # because the allocator refused it, and this handler filed it as
-        # "inconclusive" — which downstream became a TIMEOUT, after
-        # 3.771 s against a 600 s deadline.
+        # reported as one. On 2026-07-31 a baseline-scale candidate's
+        # torchinfo trace failed because the allocator refused it, and
+        # this handler filed it as "inconclusive" — which downstream
+        # became a TIMEOUT, after 3.771 s against a 600 s deadline.
         memory_kind = classify_host_memory_exception(e)
         if memory_kind is not None:
             print(f"!!! [VRAMEval] {memory_kind.upper()} ALLOCATION FAILURE: {str(e)[:160]}")
