@@ -1014,6 +1014,28 @@ def get_planner_user_prompt(
             f"You MUST propose a smaller config this round.\n"
         )
 
+    # An INCONCLUSIVE pre-flight measured nothing, so it must not act as a
+    # silent model-size ceiling. Saying so explicitly matters: the agent can
+    # still SEE the failed attempts in memory, and without this it reasonably
+    # infers that large models are unsafe — which is exactly how the V19
+    # campaign of 2026-07-31 collapsed to toy models.
+    inconclusive_note = ""
+    inconclusive_records = [
+        r for r in memory_history if r.get("failure_type") == "inconclusive_preflight"
+    ]
+    if inconclusive_records:
+        inconclusive_note = (
+            f"\n### NOTE - INCONCLUSIVE RESOURCE INSPECTION ({len(inconclusive_records)} attempt(s)):\n"
+            f"A VRAM pre-flight step did not finish within its own time budget, so "
+            f"those attempts have NO resource measurement. This is a limitation of "
+            f"the inspection, NOT a measurement of your model.\n"
+            f"It does NOT mean the model was too large, too slow, or infeasible. "
+            f"Do NOT reduce model capacity, batch size, or segmentation size in "
+            f"response to it, and do not treat larger models as unsafe. Only a "
+            f"MEASURED out-of-memory result or a MEASURED peak above the VRAM "
+            f"budget is evidence about capacity.\n"
+        )
+
     # Build a timing summary for the last successful experiment so the planner
     # can judge speed against whatever budget is set in the expert advice.
     slow_warning = ""
@@ -1111,7 +1133,7 @@ def get_planner_user_prompt(
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
+{oom_warning}{inconclusive_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.

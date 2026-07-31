@@ -35,6 +35,7 @@ the invariant across the whole VRAM stack.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 
 import torch
@@ -42,6 +43,7 @@ import torch.nn as nn
 
 from agent.skills.evaluate_vram_skill import compute_intensity
 from agent.skills.evaluate_vram_skill.overhead import cuda_context_bytes
+from agent.skills.evaluate_vram_skill.probe_budgets import ProbeBudgets, ProbeTimeoutRecord
 from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
@@ -86,12 +88,27 @@ def _build_probe_input(batch_size: int, segmentation_size: int) -> torch.Tensor:
 # ── Public entry point ──────────────────────────────────────────────────────
 
 
+class BatchSearchTimeout(Exception):
+    """A bounded step of the batch search ran out of time.
+
+    Carries the typed record rather than a message, because the caller
+    must be able to tell "this did not finish" from "this model does not
+    fit" WITHOUT parsing prose.
+    """
+
+    def __init__(self, record: ProbeTimeoutRecord):
+        self.record = record
+        super().__init__(record.agent_facing_summary())
+
+
 def resolve_inference_batch(
     model: nn.Module,
     segmentation_size: int,
     cap_bytes: int,
     *,
     candidate_batches: Sequence[int] = _DEFAULT_CANDIDATE_BATCHES,
+    budgets: ProbeBudgets | None = None,
+    model_identity: str | None = None,
 ) -> int:
     """Return the largest candidate batch that clears both caps.
 
@@ -123,7 +140,35 @@ def resolve_inference_batch(
     last_intensity_ok: bool = False
     last_B: int = candidate_batches[-1]
 
+    # Each candidate is timed on its own, and the search has its own
+    # separate budget. Sharing one budget across every candidate is what
+    # made a seven-step search indistinguishable from one pathological
+    # forward, and turned an unfinished inspection into a "model too
+    # large" verdict (V19 campaign stopped 2026-07-31).
+    budgets = budgets or ProbeBudgets()
+    search_started = time.monotonic()
+
     for B in candidate_batches:
+        search_elapsed = time.monotonic() - search_started
+        if search_elapsed >= budgets.batch_search_seconds:
+            raise BatchSearchTimeout(
+                ProbeTimeoutRecord(
+                    operation="batch_search",
+                    budget_seconds=budgets.batch_search_seconds,
+                    elapsed_seconds=round(search_elapsed, 3),
+                    search_elapsed_seconds=round(search_elapsed, 3),
+                    candidate_batch=B,
+                    phase="inference_batch_resolution",
+                    model_identity=model_identity or type(model).__name__,
+                    realized_parameter_count=sum(q.numel() for q in model.parameters()),
+                    device=str(next(model.parameters()).device)
+                    if any(True for _ in model.parameters())
+                    else "cpu",
+                    disposition="inconclusive",
+                )
+            )
+
+        candidate_started = time.monotonic()
         probe = probe_activation_footprint(
             model=model,
             loss_module=None,
@@ -131,6 +176,24 @@ def resolve_inference_batch(
             target_sample=None,
             mode="inference",
         )
+        candidate_elapsed = time.monotonic() - candidate_started
+        if candidate_elapsed >= budgets.single_candidate_seconds:
+            raise BatchSearchTimeout(
+                ProbeTimeoutRecord(
+                    operation="batch_candidate",
+                    budget_seconds=budgets.single_candidate_seconds,
+                    elapsed_seconds=round(candidate_elapsed, 3),
+                    search_elapsed_seconds=round(time.monotonic() - search_started, 3),
+                    candidate_batch=B,
+                    phase="inference_batch_resolution",
+                    model_identity=model_identity or type(model).__name__,
+                    realized_parameter_count=sum(q.numel() for q in model.parameters()),
+                    device=str(next(model.parameters()).device)
+                    if any(True for _ in model.parameters())
+                    else "cpu",
+                    disposition="inconclusive",
+                )
+            )
         peak = _predict_inference_peak_bytes(probe)
         vram_ok = peak <= cap_bytes
         intensity_ok = compute_intensity.passes(B, segmentation_size)
