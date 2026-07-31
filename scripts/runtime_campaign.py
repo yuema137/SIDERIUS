@@ -47,6 +47,7 @@ from core.runtime_control.campaign import (  # noqa: E402
     CellMeasurement,
     evaluate_campaign,
     load_cells,
+    matrix_cell_id,
     write_cell,
 )
 
@@ -55,9 +56,8 @@ DEFAULT_CELL_WALL_SECONDS = 120.0
 
 
 def cell_id(entry: dict) -> str:
-    target = entry["target"]
-    label = f"{target // 1_000_000}M" if target >= 1_000_000 else f"{target // 1_000}K"
-    return f"{entry['family']}@{label}"
+    """One source of truth for cell ids — the matrix helper."""
+    return matrix_cell_id(entry)
 
 
 def build_plan(args) -> dict:

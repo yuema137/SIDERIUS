@@ -165,6 +165,9 @@ MATRIX: tuple[dict[str, Any], ...] = (
     # labeled as such.
     {
         "family": "transformer",
+        # Operator decision (2026-07-31): this is NOT a 20M cell and must
+        # never be analyzed as one. Its REALIZED count is used everywhere.
+        "cell_label": "8M-ceiling",
         "target": 20_000_000,
         "realized": 8_028_928,
         "at_family_ceiling": True,
@@ -180,9 +183,9 @@ MATRIX: tuple[dict[str, Any], ...] = (
 
 #: C12-C pairs: small, large, and heterogeneous — drawn from the matrix.
 PAIRWISE_PAIRS: tuple[dict[str, Any], ...] = (
-    {"label": "small_homogeneous", "members": ("punet@50K", "wavenet@50K")},
-    {"label": "large_homogeneous", "members": ("punet@20M", "wavenet@20M")},
-    {"label": "heterogeneous", "members": ("punet@5M", "transformer@5M")},
+    {"label": "small_cross_family", "members": ("punet@50K", "wavenet@50K")},
+    {"label": "large_cross_family", "members": ("punet@20M", "wavenet@20M")},
+    {"label": "heterogeneous_compute", "members": ("punet@5M", "transformer@5M")},
 )
 
 
@@ -284,6 +287,22 @@ class CampaignCell(BaseModel):
         return self.status == "ok" and self.absolute_percentage_error is not None
 
 
+def matrix_cell_id(entry: dict[str, Any]) -> str:
+    """Stable id for a matrix entry. A cell that cannot reach its target
+    carries an explicit label (e.g. `transformer@8M-ceiling`) so it is
+    never analyzed as though it were the target size."""
+    label = entry.get("cell_label")
+    if not label:
+        target = entry["target"]
+        label = f"{target // 1_000_000}M" if target >= 1_000_000 else f"{target // 1_000}K"
+    return f"{entry['family']}@{label}"
+
+
+def required_cell_ids() -> tuple[str, ...]:
+    """Every cell the campaign MUST complete to be eligible to pass."""
+    return tuple(matrix_cell_id(entry) for entry in MATRIX)
+
+
 def write_cell(output_root: Path, cell: CampaignCell) -> Path:
     """Persist one cell IMMEDIATELY. A later failure never erases it."""
     directory = output_root / cell.track
@@ -316,20 +335,27 @@ class CampaignThresholds(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
+    frozen_by: str = "operator 2026-07-31"
     median_absolute_percentage_error_max: float = 30.0
     p90_underprediction_ratio_max: float = 1.5
     large_model_underprediction_ratio_max: float = 2.0
     large_model_parameter_threshold: int = 5_000_000
     vram_underprediction_fraction_max: float = 0.20
     vram_underprediction_absolute_gb_max: float = 1.0
-    forbid_monotonic_size_underprediction: bool = True
-    forbid_family_wide_underprediction: bool = True
-    #: "Systematically underestimated" must mean MATERIALLY, not by any
-    #: epsilon: a uniform 5% underprediction sits well inside the median
-    #: threshold and is not a family defect. A family trips the rule only
-    #: when every one of its sizes is underestimated by at least this
-    #: ratio.
-    family_underprediction_materiality_ratio: float = 1.10
+    #: Size bias: within a family with >= this many completed sizes, the
+    #: largest-size underprediction ratio must not exceed the smallest by
+    #: more than `size_bias_ratio_spread_max` WHILE a majority of adjacent
+    #: sizes also trend upward. Both conditions are required: a spread
+    #: alone can be noise, a trend alone can be immaterial.
+    size_bias_min_completed_sizes: int = 3
+    size_bias_ratio_spread_max: float = 0.25
+    #: Family bias: within a family with >= this many completed cells, at
+    #: least `family_bias_min_underestimated` are underestimated AND the
+    #: family's MEDIAN underprediction ratio exceeds
+    #: `family_bias_median_ratio_max`.
+    family_bias_min_completed_cells: int = 3
+    family_bias_min_underestimated: int = 3
+    family_bias_median_ratio_max: float = 1.10
 
     @property
     def identity(self) -> str:
@@ -373,8 +399,18 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[rank - 1]
 
 
-def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds) -> CampaignReport:
-    """Apply the frozen thresholds. Deterministic and order-independent."""
+def evaluate_campaign(
+    cells: list[CampaignCell],
+    thresholds: CampaignThresholds,
+    *,
+    approved_replacements: frozenset[str] = frozenset(),
+) -> CampaignReport:
+    """Apply the frozen thresholds. Deterministic and order-independent.
+
+    ``approved_replacements`` names required cells the operator has
+    explicitly excused (same family, comparable scale). Nothing is excused
+    by default: a missing cell blocks PASS until it is diagnosed.
+    """
     scored = [c for c in cells if c.contributes_to_verdict]
     excluded = len(cells) - len(scored)
     if not scored:
@@ -392,6 +428,7 @@ def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds)
 
     reasons: list[str] = []
     metrics: dict[str, Any] = {
+        "required_cells": len(required_cell_ids()),
         "median_absolute_percentage_error": round(median_error, 2),
         "p90_underprediction_ratio": round(p90_under, 3),
         "max_underprediction_ratio": round(max(under), 3),
@@ -426,42 +463,52 @@ def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds)
             and ratio > thresholds.large_model_underprediction_ratio_max
         ):
             reasons.append(f"{cell.cell_id}: {params:,} parameters underestimated by {ratio:.2f}x")
-            verdict = "C12 FAIL — SIZE BIAS"
+            failures.add("C12 FAIL — SIZE BIAS")
 
-    # Monotonic size-dependent underprediction, per family.
-    if thresholds.forbid_monotonic_size_underprediction:
-        for family in sorted({c.family for c in scored}):
-            ordered = sorted(
-                (c for c in scored if c.family == family),
-                key=lambda c: (c.probe.realized_parameter_count if c.probe else 0) or 0,
+    # FROZEN size-bias rule (operator 2026-07-31): a family trips it only
+    # when the spread between its largest and smallest size is material
+    # AND a majority of adjacent steps trend upward. Either alone is
+    # insufficient — a spread can be noise, a trend can be immaterial.
+    for family in sorted({c.family for c in scored}):
+        ordered = sorted(
+            (c for c in scored if c.family == family),
+            key=lambda c: (c.probe.realized_parameter_count if c.probe else 0) or 0,
+        )
+        if len(ordered) < thresholds.size_bias_min_completed_sizes:
+            continue
+        ratios = [c.underprediction_ratio or 1.0 for c in ordered]
+        spread = ratios[-1] - ratios[0]
+        upward = sum(1 for a, b in itertools.pairwise(ratios) if b > a)
+        adjacent = len(ratios) - 1
+        if spread > thresholds.size_bias_ratio_spread_max and upward * 2 > adjacent:
+            reasons.append(
+                f"{family}: underprediction grows with size — largest-size ratio "
+                f"exceeds smallest by {spread:.2f} (limit "
+                f"{thresholds.size_bias_ratio_spread_max}), with {upward}/{adjacent} "
+                f"adjacent sizes trending upward ({' -> '.join(f'{r:.2f}x' for r in ratios)})"
             )
-            ratios = [c.underprediction_ratio or 1.0 for c in ordered]
-            if (
-                len(ratios) >= 3
-                and all(b > a for a, b in itertools.pairwise(ratios))
-                and ratios[-1] > 1.0
-            ):
-                reasons.append(
-                    f"{family}: underprediction grows monotonically with size "
-                    f"({' -> '.join(f'{r:.2f}x' for r in ratios)})"
-                )
-                failures.add("C12 FAIL — SIZE BIAS")
+            failures.add("C12 FAIL — SIZE BIAS")
 
-    # A family underestimated at EVERY tested size.
-    if thresholds.forbid_family_wide_underprediction:
-        for family in sorted({c.family for c in scored}):
-            family_cells = [c for c in scored if c.family == family]
-            if len(family_cells) >= 3 and all(
-                (c.underprediction_ratio or 1.0)
-                >= thresholds.family_underprediction_materiality_ratio
-                for c in family_cells
-            ):
-                reasons.append(
-                    f"{family}: underestimated by at least "
-                    f"{thresholds.family_underprediction_materiality_ratio:.2f}x at every "
-                    "tested size"
-                )
-                failures.add("C12 FAIL — FAMILY BIAS")
+    # FROZEN family-bias rule (operator 2026-07-31): enough completed
+    # cells, at least N of them underestimated, and the family's MEDIAN
+    # underprediction materially above 1.0.
+    for family in sorted({c.family for c in scored}):
+        family_cells = [c for c in scored if c.family == family]
+        if len(family_cells) < thresholds.family_bias_min_completed_cells:
+            continue
+        ratios = [c.underprediction_ratio or 1.0 for c in family_cells]
+        underestimated = sum(1 for r in ratios if r > 1.0)
+        median_ratio = _percentile(ratios, 0.5)
+        if (
+            underestimated >= thresholds.family_bias_min_underestimated
+            and median_ratio > thresholds.family_bias_median_ratio_max
+        ):
+            reasons.append(
+                f"{family}: {underestimated}/{len(ratios)} cells underestimated with a "
+                f"median ratio of {median_ratio:.2f}x (limit "
+                f"{thresholds.family_bias_median_ratio_max})"
+            )
+            failures.add("C12 FAIL — FAMILY BIAS")
 
     # VRAM.
     for cell in scored:
@@ -478,6 +525,22 @@ def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds)
             )
             failures.add("C12 FAIL — VRAM ACCURACY")
 
+    # REQUIRED-CELL COVERAGE (operator 2026-07-31). A measured failure is
+    # preserved as evidence but still leaves a hole in the matrix: C12
+    # cannot PASS while a required cell has no completed measurement.
+    completed = {c.cell_id for c in scored}
+    missing = [
+        cell_id
+        for cell_id in required_cell_ids()
+        if cell_id not in completed and cell_id not in approved_replacements
+    ]
+    if missing:
+        detail = {c.cell_id: (c.status, c.failure_detail) for c in cells if c.cell_id in missing}
+        reasons.append(
+            f"required cells without a completed measurement: {missing}. "
+            f"Diagnosis needed before a verdict: {detail}"
+        )
+
     # Precedence: the most specific, most actionable diagnosis wins.
     for candidate in (
         "C12 FAIL — PRODUCTION WIRING",
@@ -491,7 +554,8 @@ def evaluate_campaign(cells: list[CampaignCell], thresholds: CampaignThresholds)
             verdict = candidate
             break
     else:
-        verdict = "C12 PASS"
+        # Coverage cannot be traded away by everything else looking fine.
+        verdict = "STOPPED — RESOURCE / ENVIRONMENT" if missing else "C12 PASS"
 
     return CampaignReport(
         verdict=verdict,

@@ -3517,7 +3517,40 @@ hash so a post-hoc edit is visible in the report rather than invisible in
 a diff. The freeze proposal goes to the operator with the combined
 review package; no GPU execution has occurred.
 
-- [ ] Thresholds frozen (operator).
+**FROZEN acceptance thresholds (operator, 2026-07-31 — never revised
+after results).** Identity: `campaign_thresholds@1.0.0+4e06a54f5c2c`.
+
+```text
+median absolute percentage error            <= 30%      (denominator: actual)
+90th-percentile underprediction ratio       <= 1.5      (nearest-rank)
+completed cell with realized >= 5M params   <= 2.0x underprediction
+size bias    : family with >=3 completed sizes, largest-size ratio exceeds
+               smallest by > 0.25, AND a majority of adjacent sizes trend up
+family bias  : family with >=3 completed cells, >=3 underestimated,
+               AND median underprediction ratio > 1.10
+VRAM underprediction <= max(20% of actual peak, 1 GiB)
+```
+
+Both bias rules require TWO conditions, deliberately: a spread alone can
+be noise and a trend alone can be immaterial, and a single underestimated
+cell is not a family defect.
+
+**Required-cell coverage (operator, 2026-07-31).** A measured failure
+(OOM, wall-cap) is preserved as evidence and excluded from percentage-
+error statistics — but it still leaves a hole. C12 cannot PASS while any
+required cell lacks a completed measurement; the verdict becomes
+`STOPPED — RESOURCE / ENVIRONMENT` with the missing cells and their
+diagnoses named. Only an explicit `approved_replacements` entry (same
+family, comparable scale) excuses a cell.
+
+**Naming corrections (operator, 2026-07-31).** The transformer ceiling
+cell is `transformer@8M-ceiling`, analyzed at its REALIZED 8,028,928
+parameters and never as a 20M cell. The concurrency pairs are
+`small_cross_family`, `large_cross_family`, `heterogeneous_compute` —
+the members were always cross-family and the old labels implied
+otherwise.
+
+- [x] Thresholds frozen (operator 2026-07-31), identity recorded above.
 - [ ] Campaign executed.
 
 

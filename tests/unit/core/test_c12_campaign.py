@@ -82,7 +82,7 @@ class TestMatrix:
 
     def test_pairs_cover_small_large_and_heterogeneous(self):
         labels = {p["label"] for p in PAIRWISE_PAIRS}
-        assert labels == {"small_homogeneous", "large_homogeneous", "heterogeneous"}
+        assert labels == {"small_cross_family", "large_cross_family", "heterogeneous_compute"}
         for pair in PAIRWISE_PAIRS:
             assert len(pair["members"]) == 2
 
@@ -118,12 +118,23 @@ class TestCellEvidenceRules:
 
 
 class TestThresholdEvaluation:
+    """Threshold behaviour only. Required-cell COVERAGE is a separate gate
+    with its own tests, so these cases excuse it explicitly rather than
+    accidentally passing or failing on it."""
+
     def _thresholds(self, **over) -> CampaignThresholds:
         return CampaignThresholds(**over)
 
+    def _evaluate(self, cells, thresholds):
+        from core.runtime_control.campaign import required_cell_ids
+
+        return evaluate_campaign(
+            cells, thresholds, approved_replacements=frozenset(required_cell_ids())
+        )
+
     def test_an_accurate_campaign_passes(self):
         cells = [_cell(f"punet@{i}", projected=100.0, actual=105.0) for i in ("50K", "500K", "5M")]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 PASS"
         assert report.cells_evaluated == 3
 
@@ -136,7 +147,7 @@ class TestThresholdEvaluation:
             _cell("wavenet@5M", family="wavenet", projected=100.0, actual=180.0),  # under
             _cell("transformer@5M", family="transformer", projected=220.0, actual=100.0),
         ]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 FAIL — RUNTIME ACCURACY"
         assert any("median absolute percentage error" in r for r in report.reasons)
 
@@ -145,7 +156,7 @@ class TestThresholdEvaluation:
         actionable diagnosis is the family, not generic inaccuracy — the
         verdict precedence says so deterministically."""
         cells = [_cell(f"punet@{i}", projected=100.0, actual=200.0) for i in ("a", "b", "c")]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 FAIL — FAMILY BIAS"
         # the accuracy breach is still REPORTED, just not the headline
         assert any("median absolute percentage error" in r for r in report.reasons)
@@ -161,12 +172,14 @@ class TestThresholdEvaluation:
                 probe=_measurement(realized_parameter_count=20_000_000),
             ),
         ]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict in ("C12 FAIL — SIZE BIAS", "C12 FAIL — RUNTIME ACCURACY")
         assert any("underestimated by" in r for r in report.reasons)
 
-    def test_monotonic_size_bias_is_caught_even_when_each_cell_is_small(self):
-        """Each error is individually tolerable; the TREND is not."""
+    def test_size_bias_needs_both_a_material_spread_and_an_upward_trend(self):
+        """FROZEN rule: spread(largest - smallest) > 0.25 AND a majority of
+        adjacent sizes trending upward. Each individual error here is
+        tolerable; the TREND across sizes is not."""
         cells = [
             _cell(
                 "punet@50K",
@@ -177,42 +190,36 @@ class TestThresholdEvaluation:
             _cell(
                 "punet@500K",
                 projected=100.0,
-                actual=115.0,
+                actual=120.0,
                 probe=_measurement(realized_parameter_count=500_000),
             ),
             _cell(
                 "punet@5M",
                 projected=100.0,
-                actual=125.0,
+                actual=140.0,
                 probe=_measurement(realized_parameter_count=5_000_000),
             ),
         ]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 FAIL — SIZE BIAS"
-        assert any("monotonically" in r for r in report.reasons)
+        assert any("underprediction grows with size" in r for r in report.reasons)
+        assert any("adjacent sizes trending upward" in r for r in report.reasons)
 
-    def test_family_wide_underprediction_is_caught(self):
+    def test_family_bias_needs_enough_cells_and_a_median_above_the_bar(self):
         cells = [
             _cell(
                 f"wavenet@{label}",
                 family="wavenet",
                 projected=100.0,
-                actual=110.0,
+                actual=115.0,
                 probe=_measurement(realized_parameter_count=size),
             )
-            # non-monotonic so the size rule cannot claim it first
+            # flat, not trending: the size rule must not claim this first
             for label, size in (("50K", 50_000), ("500K", 500_000), ("5M", 5_000_000))
         ]
-        cells[1] = _cell(
-            "wavenet@500K",
-            family="wavenet",
-            projected=100.0,
-            actual=120.0,
-            probe=_measurement(realized_parameter_count=500_000),
-        )
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 FAIL — FAMILY BIAS"
-        assert any("every tested size" in r for r in report.reasons)
+        assert any("cells underestimated with a median ratio" in r for r in report.reasons)
 
     def test_vram_underprediction_fails(self):
         cells = [
@@ -225,7 +232,7 @@ class TestThresholdEvaluation:
             )
             for i in ("a", "b", "c")
         ]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "C12 FAIL — VRAM ACCURACY"
 
     def test_small_vram_gaps_are_tolerated_by_the_absolute_floor(self):
@@ -239,7 +246,7 @@ class TestThresholdEvaluation:
             )
             for i in ("a", "b", "c")
         ]
-        assert evaluate_campaign(cells, self._thresholds()).verdict == "C12 PASS"
+        assert self._evaluate(cells, self._thresholds()).verdict == "C12 PASS"
 
     def test_a_campaign_with_no_scorable_cell_is_stopped_not_passed(self):
         cells = [
@@ -251,7 +258,7 @@ class TestThresholdEvaluation:
                 actual_seconds=None,
             )
         ]
-        report = evaluate_campaign(cells, self._thresholds())
+        report = self._evaluate(cells, self._thresholds())
         assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
         assert report.cells_excluded == 1
 
@@ -261,8 +268,8 @@ class TestThresholdEvaluation:
             _cell("b", projected=100.0, actual=140.0),
             _cell("c", projected=100.0, actual=90.0),
         ]
-        first = evaluate_campaign(cells, self._thresholds())
-        second = evaluate_campaign(list(reversed(cells)), self._thresholds())
+        first = self._evaluate(cells, self._thresholds())
+        second = self._evaluate(list(reversed(cells)), self._thresholds())
         assert first.model_dump() == second.model_dump()
 
     def test_thresholds_carry_an_identity(self):
@@ -306,7 +313,7 @@ class TestPairwiseConcurrency:
         from core.runtime_control.campaign import PairwiseResult
 
         base = dict(
-            label="small_homogeneous",
+            label="small_cross_family",
             member="punet@50K",
             alone_ms_per_step=20.0,
             paired_ms_per_step=34.0,
@@ -322,11 +329,11 @@ class TestPairwiseConcurrency:
 
         plans = build_pairwise_plans({"punet@50K": 69_328, "wavenet@50K": 49_680})
         assert {p.label for p in plans} == {
-            "small_homogeneous",
-            "large_homogeneous",
-            "heterogeneous",
+            "small_cross_family",
+            "large_cross_family",
+            "heterogeneous_compute",
         }
-        small = next(p for p in plans if p.label == "small_homogeneous")
+        small = next(p for p in plans if p.label == "small_cross_family")
         assert small.member_parameter_counts == (69_328, 49_680)
 
     def test_each_pair_measures_alone_before_together(self):
@@ -353,3 +360,84 @@ class TestPairwiseConcurrency:
             self._result(paired_concurrency_identity="foreign_contended")
         with pytest.raises(ValidationError, match="REGISTERED PID"):
             self._result(peer_pid_registered=False)
+
+
+class TestRequiredCellCoverage:
+    """Operator rule (2026-07-31): a measured failure is preserved as
+    evidence, but it still leaves a hole in the matrix. C12 cannot PASS
+    while any required cell lacks a completed measurement."""
+
+    def _complete_matrix(self):
+        from core.runtime_control.campaign import required_cell_ids
+
+        return [
+            _cell(cell_id, family=cell_id.split("@")[0], projected=100.0, actual=102.0)
+            for cell_id in required_cell_ids()
+        ]
+
+    def test_a_complete_accurate_matrix_passes(self):
+        report = evaluate_campaign(self._complete_matrix(), CampaignThresholds())
+        assert report.verdict == "C12 PASS"
+        assert report.metrics["required_cells"] == 12
+
+    def test_a_missing_cell_blocks_pass_even_when_everything_else_is_fine(self):
+        cells = self._complete_matrix()[:-1]
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
+        assert any("required cells without a completed measurement" in r for r in report.reasons)
+        assert "transformer@8M-ceiling" in report.reasons[-1]
+
+    def test_a_measured_failure_is_preserved_but_still_leaves_a_hole(self):
+        cells = self._complete_matrix()[:-1]
+        cells.append(
+            _cell(
+                "transformer@8M-ceiling",
+                family="transformer",
+                probe=None,
+                status="measured_failure",
+                failure_detail="probe status=oom: CUDA out of memory",
+                projected_seconds=None,
+                actual_seconds=None,
+            )
+        )
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
+        assert "oom" in report.reasons[-1]  # the evidence is reported, not dropped
+
+    def test_an_operator_approved_replacement_restores_coverage(self):
+        cells = self._complete_matrix()[:-1]
+        report = evaluate_campaign(
+            cells,
+            CampaignThresholds(),
+            approved_replacements=frozenset({"transformer@8M-ceiling"}),
+        )
+        assert report.verdict == "C12 PASS"
+
+    def test_the_ceiling_cell_is_named_by_its_realized_scale(self):
+        from core.runtime_control.campaign import required_cell_ids
+
+        ids = required_cell_ids()
+        assert "transformer@8M-ceiling" in ids
+        assert "transformer@20M" not in ids  # never analyzed as a 20M cell
+
+
+class TestFrozenThresholdIdentity:
+    def test_the_frozen_values_are_the_approved_ones(self):
+        t = CampaignThresholds()
+        assert t.median_absolute_percentage_error_max == 30.0
+        assert t.p90_underprediction_ratio_max == 1.5
+        assert t.large_model_underprediction_ratio_max == 2.0
+        assert t.large_model_parameter_threshold == 5_000_000
+        assert t.size_bias_ratio_spread_max == 0.25
+        assert t.size_bias_min_completed_sizes == 3
+        assert t.family_bias_min_completed_cells == 3
+        assert t.family_bias_min_underestimated == 3
+        assert t.family_bias_median_ratio_max == 1.10
+        assert t.vram_underprediction_fraction_max == 0.20
+        assert t.vram_underprediction_absolute_gb_max == 1.0
+        assert t.frozen_by == "operator 2026-07-31"
+
+    def test_the_identity_pins_the_frozen_set(self):
+        """Any post-hoc edit changes this hash, so a silent relaxation is
+        visible in every report rather than invisible in a diff."""
+        assert CampaignThresholds().identity == "campaign_thresholds@1.0.0+4e06a54f5c2c"
