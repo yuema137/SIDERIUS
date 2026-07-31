@@ -107,7 +107,7 @@ must be shown attributable to it.
 | **P0-3** | Validated calibration is not an admission authority | No consumer treats a validated bucket as the final gate | Operator requirement: dynamic calibration should be the final gate | Validated calibration or a successful live probe is the final gate | No |
 | **P0-4** | Calibration-quality reporting | A campaign can collect observations while zero are promotable, silently | "Dynamic calibration is running" was believed true when it was not | Every campaign reports bucketed/eligible/validated/rejected counts | No |
 | **P1-1** | GPU-memory telemetry incomplete | Estimate (2.00 GB) and `nvidia-smi` (6,962 MiB) are different quantities; neither `max_memory_allocated` nor `max_memory_reserved` is persisted | The estimate-vs-actual gap cannot be attributed | Persist allocated / reserved / driver-visible per process and phase | No |
-| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | Define and enforce the cap over the chain's GPU process tree, measured driver-visible; route pre-flight through the existing isolated worker (§6.1) | **Campaign stopped §14.1.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
+| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | **PR A** (§6.6): route production pre-flight through the existing isolated worker, keep the parent CPU-only. **PR B** (conditional): chain/pair aggregation + OOM attribution, only if validation still shows it is needed | **Campaign stopped §14.1.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
 | **P1-3** | Production host-memory telemetry absent | Peak RSS, RSS timeline, and phase attribution are not persisted on the production path | The 17M dilated-conv question cannot be settled from artifacts | Bounded RSS telemetry with phase attribution | No |
 | **P1-4** | Long-sequence preflight memory amplification | A 17M candidate reached ≈26 GiB process-tree RSS in preflight | Unresolved between genuine requirement and inspection amplification | Phase-level bounded measurement to distinguish A from B | No |
 | **P2-1** | Campaign-scoped stop and queue state | A previous campaign's queue-level `STOP` blocked a new campaign's launch | One campaign's terminal state has authority over another | All control state under `<campaign_root>/<campaign_id>/control/` | No |
@@ -699,6 +699,213 @@ justified in the log by HealthGate collapse evidence
 
 **Do not change the per-chain policy mid-campaign.**
 
+### 6.6 Remediation — the narrow fix first (operator decision, 2026-07-31)
+
+**Root cause, restated in one sentence.** The pre-flight VRAM check runs
+inside the chain's main process, so that process creates a CUDA context
+and keeps the allocator cache from the check for the whole iteration;
+training and inference then hold their own copies in subprocesses, so
+resources for the same model are held twice.
+
+The evidence is sufficient for a narrow fix and does not justify a
+rewrite: two orchestration-only parents held 15,906 MiB, ~55 % of all GPU
+memory in use, and the arch parent held 6,962 MiB unchanged for three
+minutes after its child exited, releasing only when the parent itself
+exited. That rules out both transient overlap and a stale-process leak.
+
+#### PR A — route production pre-flight through the existing isolated worker
+
+The one change that must happen, and the smallest one available.
+
+```
+today                        target
+─────────────────────────    ─────────────────────────────────
+chain parent                 chain parent stays CPU-only
+ → in-process VRAM preflight  → isolated pre-flight subprocess
+ → parent creates CUDA ctx    → subprocess exits
+ → cache held all iteration   → CUDA context and cache fully returned
+ → training/inference child   → training/inference subprocess unchanged
+```
+
+`run_isolated_preflight` already exists and survived four rounds of GPU
+validation; the production tuner simply still calls the old in-process
+`run_skill`. So this is a **call-site replacement**, not a rewrite of
+pre-flight: inputs, outputs and the disposition schema stay identical.
+
+It removes, in one change: the parent's redundant GPU context; the
+duplicate model instantiation in the parent; the reserved memory retained
+after pre-flight; and the parent+child overlap at any instant.
+
+**Scope.** One production call site, a result adapter, a little
+manifest provenance, the guardrail tests below, and the doc updates.
+
+**Explicitly not touched**: queue, training, inference, admission policy,
+the 12 / 28 GiB thresholds, calibration, HealthGate, agent prompts.
+
+#### Keep the existing subprocess architecture for training and inference
+
+That part already behaves correctly — memory returns in full on child
+exit, failures are isolated, and no single candidate can take down the
+chain parent. Do not "unify" it.
+
+The principle to hold:
+
+```
+anything that loads a model or touches CUDA  →  short-lived child
+the long-lived orchestrator                  →  CPU-only
+```
+
+This is more reliable than sprinkling `torch.cuda.empty_cache()` in the
+parent. `empty_cache()` frees only unused cached blocks; it cannot
+guarantee the context, live references, or third-party allocations are
+released. **Process exit is an unambiguous resource boundary; a cache
+call is not.**
+
+#### Production-wiring guardrails
+
+Small tests that lock the call path, so "built but never called" cannot
+recur (this is the §18 gap, and P0-1 is the same failure in another
+subsystem):
+
+- production pre-flight must go through `run_isolated_preflight`;
+- the chain parent must not appear as a GPU process before or after
+  pre-flight;
+- production code must not call the old in-process GPU pre-flight;
+- the manifest records the pre-flight execution mode, e.g.
+  `isolated_subprocess`;
+- a test asserts the parent never imports or instantiates the candidate
+  model.
+
+None of these change the workflow. They only pin the path.
+
+#### What phase 1 must NOT do
+
+**No dynamic chain-level kill yet.** Aggregate driver-visible protection
+across a chain and a pair is the right eventual answer, but if the
+parent's 6.9-8.9 GiB disappears once pre-flight is isolated, the largest
+redundancy may already be gone. Measure first:
+
+```
+wire the isolated pre-flight
+  → single-chain real validation
+  → two-chain real validation
+  → only then decide whether a live aggregate gate is needed
+```
+
+Do not introduce, at this stage: a continuous NVML scheduler; automatic
+pausing of a chain; dynamic concurrency adjustment; a cross-process GPU
+memory broker; or a resource-reservation protocol. Each has a wide blast
+radius across the queue, watchdog and sandbox lifecycle, all of which
+currently work.
+
+**Do not make `empty_cache()` the primary fix** — see above; it may serve
+as cleanup inside a worker, never as a substitute for isolation.
+
+**Do not raise the 12 GiB, 28 GiB, or host quota.** The problem is
+double-held resources and an under-scoped accounting boundary, not a
+ceiling that is too low. Raising it would hide the defect.
+
+#### Validation sequence
+
+**Phase 1 — wiring and compatibility.** Change only the production call
+site. Required: identical input config, identical structured result,
+identical dispositions, identical error classification. Keep the old
+in-process function so tests and other tools do not break; production
+defaults to the isolated path. An explicit test-only fallback may remain,
+but the formal workflow must never use it.
+
+**Phase 2 — bounded single-chain GPU validation.** One light iteration,
+one chain. Measure: whether the parent appears in `nvidia-smi` at all;
+pre-flight worker peak; GPU state after the worker exits; training child
+peak; inference child peak; the chain's driver-visible peak; and
+allocated / reserved / driver-visible together.
+
+```
+pass criteria
+  chain parent ≈ 0 GPU memory
+  pre-flight worker exits cleanly
+  no overlap between pre-flight and training
+  no orphan processes
+  scientific result path unchanged
+```
+
+Do not assume the chain peak will fall under 12 GiB. Measure it.
+
+**Phase 3 — bounded two-chain validation.** Only after phase 2 passes:
+a small concurrent arch + loss run. Required: pair aggregate stays below
+28 GiB and away from the 30,000 MiB host quota; any OOM records peer
+occupancy; peer contention is never recorded as candidate evidence; both
+parents stay CPU-only.
+
+Only if the pair still approaches the quota does PR B begin.
+
+#### PR B — chain/pair aggregation and OOM attribution (conditional)
+
+A separate PR, never merged into PR A, and only if phase 3 shows it is
+still needed. Scope it to **measurement and attribution**, not automatic
+workflow rearrangement:
+
+1. register each chain's parent PID, process group and child PIDs;
+2. read driver-visible memory per PID via NVML;
+3. aggregate into chain total, peer chain total, pair total;
+4. check pair headroom before launching a new GPU child;
+5. on OOM, record candidate process memory, peer memory, free VRAM and
+   pair total *as they were before the failure*.
+
+Attribution can start simple, and answers §1.3 directly:
+
+```
+candidate process/tree independently exceeds its allowed measured scope
+    → candidate-attributable
+
+pair total near the device/quota ceiling while the peer holds
+substantial memory
+    → contention-attributable
+    → no candidate-downsizing authority
+```
+
+Do not automatically kill a running peer. Refusing to start the next
+stage, or marking the result as contention/infrastructure evidence, is
+sufficient and far less invasive.
+
+#### Host memory benefits, and what stays separate
+
+Isolating pre-flight also returns CPU memory: the model and probe tensors
+go away with the worker, the parent stops holding Python objects, model
+structure and tracing data for the iteration, and every candidate's
+temporaries get a clear lifetime.
+
+The 26 GiB long-sequence host-memory question (§8) is **not** folded into
+this PR. It remains its own investigation.
+
+The isolated worker may cheaply persist phase peaks while it is there:
+
+```
+model construction peak RSS
+training probe peak RSS
+inspection peak RSS
+batch search peak RSS
+final worker peak RSS
+```
+
+Peaks only — no unbounded time series, so CPU and disk cost stay
+negligible.
+
+#### The recommended route, end to end
+
+```
+1. route production pre-flight through the existing isolated worker
+2. guarantee the long-lived parent never touches CUDA
+3. bounded single-chain measurement
+4. bounded two-chain measurement
+5. add a chain/pair aggregate gate only if the quota is still approached
+```
+
+This removes the confirmed redundancy and the CPU lifetime problem while
+leaving the workflow, queue, training, inference and failure
+classification logic intact. The §6.1-§6.5 evidence supports exactly this
+narrow fix; it does not support a large refactor.
+
 ---
 
 ## 7. P1-3 — Production host-memory telemetry
@@ -907,18 +1114,71 @@ reduced params with no resource trigger in the intervening rounds.
 Whether the drift from 7.28M to 3.77M is scientific or inherited
 pressure is **OPEN**.
 
-### 11.2 The third possible entry point
+### 11.2 Entry points for resource-driven shrinking
 
 The original V19 failure was resource pressure expressing itself as
-systematic shrinking. Two entry points are now closed (timeout
-misclassification, host-memory misattribution). A third is theoretically
-open: **time budget**. Observed estimates exceeded budgets substantially
-(§3.1) while remaining advisory. If the agent sees those advisories and
-shrinks models to fit the wall clock, the same effect returns through a
-new door.
+systematic shrinking. Four doors have been identified; their status
+differs sharply and should not be flattened:
 
-**HYPOTHESIS only.** Iteration 1 arch held 2.39M across rounds 1 and 2
-with no shrinking observed.
+| # | entry point | status |
+|---|---|---|
+| 1 | batch-search timeout read as capacity | **closed** (PR #151) |
+| 2 | host memory misattributed | **closed** (PR #151) |
+| 3 | peer-contention OOM read as candidate evidence | **CONFIRMED, open** (§6.5) |
+| 4 | time-budget advisory rendered into the prompt | **OPEN, unmeasured** (below) |
+
+#### Door 4 — the time estimate reaches the agent as prose
+
+The runtime gate layer is healthy: no static estimate ever rejected a
+candidate, `ADVISORY` / `REQUEST_PROBE` / `ALLOW` resolved correctly, and
+every round finished inside its budget. That part needs no repair.
+
+But the estimate is **also rendered into the planning prompt**
+(`agent/prompts.py:645-650`):
+
+```python
+factor = last_time_estimate_minutes / active_time_budget
+verdict = "over" if factor > 1.0 else "under"
+time_line = (f"  Time:  estimate {…:.2f} min   budget {…:.1f} min   "
+             f"factor {factor:.2f}  ({verdict})")
+```
+
+So for the arch formal round the agent was shown:
+
+```
+  Time:  estimate 237.80 min   budget 120.0 min   factor 1.98  (over)
+```
+
+while the round actually took **96.3 min** — factor **0.80**, *under*
+budget with 20 % to spare. The estimator over-predicted by **2.47×**, and
+that error reached the decision-maker as a stated fact carrying an
+explicit "over" verdict.
+
+The over-prediction is systematic rather than random:
+
+| chain | round | estimate | budget | actual |
+|---|---|---:|---:|---:|
+| arch | formal | 237.8 min | 120 | **96.3 min** |
+| arch | trial | 14.4 min | 20 | 7.8 / 11.2 min |
+| loss | trial | 42.9 min | 20 | 16.5 / 17.3 min |
+
+**This is not a defect in the gate; it is an influence path that bypasses
+the authority layering.** The repaired architecture governs `REJECT`. It
+does not govern what the prompt asserts.
+
+**Status: OPEN, and no harm is demonstrated.** The evidence is thin and
+points the other way. The 237.8 min / factor 1.98 line appeared on the
+**formal** round — the last step of the iteration — so no subsequent
+proposal was ever observed responding to it, and iteration 2 never ran.
+The only observable size change went **up**: arch moved from 1,278,944 to
+2,388,992 (+87 %). Nothing here shows the agent shrinking in response to
+a time advisory.
+
+Two things follow for V20. Whether door 4 is real is answerable only by
+recording the estimate shown, the verdict word, and the next proposal's
+size together (§11.3) — it is a behavioural question, not a code
+question. And it is a far weaker concern than door 3, which is confirmed
+and has already fired once; the two must not be given equal weight.
 
 ### 11.3 Required V20 analysis
 
@@ -984,10 +1244,18 @@ loop, and because every other runtime decision inherits from it.
 
 **P1 — GPU resource truth**
 
-6. Persist allocated / reserved / driver-visible VRAM
-7. Attribute GPU processes to chain and phase
-8. Explain the chain parent's ~6.9 GiB CUDA context
-9. Enforce or report chain-tree and pair aggregates correctly
+Item 8 is now answered (§6.1) and the remaining work is sequenced as PR A
+then a conditional PR B (§6.6). PR A is the only one authorized to start.
+
+6. **PR A** — route production pre-flight through `run_isolated_preflight`;
+   keep the chain parent CPU-only; add the production-wiring guardrails
+7. Bounded single-chain, then two-chain GPU validation (§6.6 phases 2-3)
+8. ~~Explain the chain parent's ~6.9 GiB CUDA context~~ — **answered**:
+   in-process pre-flight, confirmed by measurement (§6.1)
+9. Persist allocated / reserved / driver-visible VRAM
+10. **PR B, only if phase 3 requires it** — chain/pair aggregation via
+    NVML, pre-launch pair headroom check, contention-aware OOM
+    attribution (§1.3)
 
 **P1 — Host-memory observability**
 
@@ -1161,6 +1429,7 @@ about whether production calls it.
 
 | Rev | Date | Change |
 |---|---|---|
+| 1c | 2026-07-31 | Remediation plan added as §6.6 (operator decision): **PR A** routes the production pre-flight through the existing `run_isolated_preflight` and keeps the chain parent CPU-only — a call-site replacement, not a rewrite, with identical inputs, outputs and dispositions — plus production-wiring guardrails so "built but never called" cannot recur. Training and inference keep their subprocess architecture, which already returns memory correctly. Explicit non-goals recorded: no dynamic chain kill, no NVML scheduler, no memory broker, `empty_cache()` never as the primary fix, and no raising of the 12 / 28 GiB or host-quota ceilings, since the defect is double-held resources rather than a low ceiling. **PR B** (chain/pair NVML aggregation and contention-aware OOM attribution) is conditional on the phase-3 two-chain validation still showing risk, and must never be merged into PR A. Validation sequenced as wiring → bounded single-chain → bounded two-chain, with the chain peak measured rather than assumed. §11.2 restructured into four numbered entry points for resource-driven shrinking, adding door 4: the time estimate is rendered into the planning prompt (`prompts.py:645-650`) with an explicit "over" verdict — the arch formal round was shown "factor 1.98 (over)" for a round that took 96.3 min against a 120 min budget, a 2.47× over-prediction reaching the decision-maker as fact. Recorded as OPEN with no harm demonstrated: that line appeared on the formal round so no later proposal was observed, and the only observable size change went up 87 %. Door 4 is explicitly ranked far below the confirmed door 3. |
 | 1b | 2026-07-31 | Campaign stopped and closed out. §6.1 upgraded from OPEN INVESTIGATION to **CONFIRMED DEFECT**: the chain parent's 6.9 GiB is the in-process VRAM pre-flight, traced call-path by call-path and confirmed by a pre-registered falsifiable prediction — the parent held 6,962 MiB unchanged across 13 samples over 3 minutes *after* its child exited, alone on the GPU. The fix (`run_isolated_preflight`, PR #151) exists and is GPU-validated with zero production call sites, making this the second instance of the P0-1 pattern; a reachability check is now a V20 requirement. §14 records the operator's 20:15 reversal on the §6.5 evidence and the full closeout: C13's three stop layers all correct, waves 2-4 never started, GPU returned to baseline, 645,054 tokens / $1.94 spent, and 20 observations that advanced calibration by nothing. |
 | 1a | 2026-07-31 | Same day, before commit: §6.3 upgraded from HYPOTHESIS to CONFIRMED by direct measurement — pair total 28,732 MiB past the 28 GiB ceiling, loss chain tree 17.74 GiB against a 12 GiB cap, chain parents holding 55 % of all GPU memory. §14 escalation fired and is recorded with the operator's continue-with-monitoring decision; §6.4 records the accepted risk (a host-quota SIGTERM carries no memory error and resembles the misattributed C12 signature). |
 | 1 | 2026-07-31 | Created from findings during the fresh V19 restart (`v19r3_10iter_20260731_1842`) after the runtime-estimation C1-C14 ladder and the PR #151 VRAM-preflight repair. Records: zero production promotion call sites; `model_family="unknown"` on all observations; the corrected `bucket_key` diagnosis; chain parent + sandbox child GPU aggregation; absent production RSS telemetry; the unresolved long-sequence amplification question; cross-campaign STOP scope; host-memory config portability; and model-scale monitoring. |
