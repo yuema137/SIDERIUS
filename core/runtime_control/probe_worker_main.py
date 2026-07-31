@@ -24,6 +24,44 @@ import sys
 from pathlib import Path
 
 
+def _run_sustained_load(spec, executors, paths) -> int:
+    """Train continuously until the deadline, then report (C12-C).
+
+    The load worker's own step rate is recorded, but it is NOT the
+    pairwise measurement: the measured member is the one that ran a full
+    probe with this process registered as its peer.
+    """
+    import time
+
+    from core.runtime_control.probe_subprocess import (
+        ProbeWorkerResult,
+        dump_result,
+        write_progress,
+    )
+
+    write_progress(paths["progress"], "training")
+    executors.setup()
+    deadline = time.monotonic() + spec.sustained_seconds
+    steps = 0
+    started = time.monotonic()
+    while time.monotonic() < deadline:
+        executors.train_step()
+        steps += 1
+    elapsed = time.monotonic() - started
+    write_progress(paths["progress"], "complete")
+    dump_result(
+        ProbeWorkerResult(
+            status="ok",
+            phase="complete",
+            model_identity=spec.model_type,
+            train_ms_per_step=(elapsed * 1000.0 / steps) if steps else None,
+            concurrency_identity=None,  # a load worker classifies nothing
+        ),
+        paths["result"],
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 1:
@@ -61,6 +99,12 @@ def main(argv: list[str] | None = None) -> int:
             write_progress(paths["progress"], "setup")
             return sample_contention_window(**kwargs)
 
+        if spec.sustained_seconds > 0.0:
+            # Background-load mode (C12-C): no probe, no measurement of
+            # record — this worker exists so that the OTHER member of the
+            # pair has a peer that is actually computing.
+            return _run_sustained_load(spec, executors, paths)
+
         # Phase announcements bracket the real work so a stall is
         # attributable. run_bounded_probe owns the between-operation caps;
         # the parent owns the hard one.
@@ -70,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             executors=executors,
             caps=ProbeCaps(**spec.caps) if spec.caps else ProbeCaps(),
             device_vram_gb=spec.device_vram_gb,
+            expected_peer_pids=spec.expected_peer_pids,
             contention_window=_window,
         )
         write_progress(paths["progress"], "complete")

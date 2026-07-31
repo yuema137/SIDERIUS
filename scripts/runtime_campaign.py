@@ -265,10 +265,162 @@ def run_cell(entry_id: str, args) -> CampaignCell:
     )
 
 
+def _pair_entry(label: str) -> dict:
+    for pair in PAIRWISE_PAIRS:
+        if pair["label"] == label:
+            return dict(pair)
+    raise SystemExit(f"unknown pair {label!r}; see `plan` for track C")
+
+
+def _probe_member(member: str, args, *, tag: str, peer_pids: tuple[int, ...] = ()):
+    """One member's bounded probe, alone or with a registered peer."""
+    from core.runtime_control.probe_production import probe_device_vram_gb
+    from core.runtime_control.probe_subprocess import ProbeWorkerSpec, run_worker
+
+    entry = _resolve(member)
+    return run_worker(
+        ProbeWorkerSpec(
+            model_type=entry["family"],
+            model_config_payload=entry["config"],
+            train_config={
+                "lr": 1e-4,
+                "batch_size": args.batch_size,
+                "epochs": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 1e-5,
+                "device": "cuda",
+            },
+            loss_config={"loss_type": "ce"},
+            data_dir=args.data_dir,
+            device="cuda",
+            caps={
+                "max_wall_seconds": args.probe_wall_seconds,
+                "n_warmup_steps": args.warmup_steps,
+                "n_timed_train_steps": args.timed_steps,
+                "n_timed_inference_batches": args.inference_batches,
+            },
+            device_vram_gb=probe_device_vram_gb(),
+            expected_peer_pids=peer_pids,
+            result_path=str(args.output_root / "workers" / f"pair_{tag}.json"),
+        ),
+        hard_cap_seconds=args.probe_hard_cap_seconds,
+    )
+
+
+def _spawn_load(member: str, args, *, tag: str, seconds: float):
+    """A partner that genuinely computes for the whole measured window."""
+    from core.runtime_control.probe_production import probe_device_vram_gb
+    from core.runtime_control.probe_subprocess import ProbeWorkerSpec, spawn_worker
+
+    entry = _resolve(member)
+    return spawn_worker(
+        ProbeWorkerSpec(
+            model_type=entry["family"],
+            model_config_payload=entry["config"],
+            train_config={
+                "lr": 1e-4,
+                "batch_size": args.batch_size,
+                "epochs": 1,
+                "optimizer_type": "adamw",
+                "weight_decay": 1e-5,
+                "device": "cuda",
+            },
+            loss_config={"loss_type": "ce"},
+            data_dir=args.data_dir,
+            device="cuda",
+            device_vram_gb=probe_device_vram_gb(),
+            sustained_seconds=seconds,
+            result_path=str(args.output_root / "workers" / f"load_{tag}.json"),
+        )
+    )
+
+
+def run_pair(label: str, args) -> dict:
+    """C12-C: each member ALONE, then the same member with the other
+    registered as an explicit peer and genuinely computing.
+
+    An idle baseline must exist before a contention multiplier can mean
+    anything, so the alone stages run first and a non-idle alone stage
+    invalidates the cell rather than being quietly accepted.
+    """
+    from core.runtime_control.probe_subprocess import ProbeInfrastructureFailure, stop_worker
+
+    pair = _pair_entry(label)
+    members: tuple[str, str] = tuple(pair["members"])  # type: ignore[assignment]
+    record: dict = {
+        "track": "C_pairwise",
+        "label": label,
+        "members": list(members),
+        "stagger_seconds": args.stagger_seconds,
+        "load_seconds": args.load_seconds,
+        "stages": {},
+    }
+
+    alone: dict[str, dict] = {}
+    for member in members:
+        try:
+            outcome = _probe_member(member, args, tag=f"{label}_{member}_alone")
+        except ProbeInfrastructureFailure as exc:
+            record["status"] = "infrastructure_failure"
+            record["failure_detail"] = f"{member} alone: {str(exc)[:1500]}"
+            return record
+        if outcome.classification != "ok" or outcome.result is None:
+            record["status"] = outcome.classification
+            record["failure_detail"] = f"{member} alone: {outcome.detail[:1500]}"
+            return record
+        alone[member] = {
+            "ms_per_step": outcome.result.train_ms_per_step,
+            "concurrency_identity": outcome.result.concurrency_identity,
+            "peak_vram_gb": outcome.result.peak_vram_gb,
+        }
+        record["stages"][f"{member}_alone"] = alone[member]
+
+    # Each member measured while the OTHER trains continuously.
+    for measured, partner in (members, tuple(reversed(members))):
+        tag = f"{label}_{measured}_paired"
+        process, handle, log_path = _spawn_load(partner, args, tag=tag, seconds=args.load_seconds)
+        try:
+            time.sleep(args.stagger_seconds)  # let the partner reach steady state
+            if process.poll() is not None:
+                record["status"] = "infrastructure_failure"
+                record["failure_detail"] = (
+                    f"background load {partner} exited early "
+                    f"(rc={process.returncode}); log={log_path}"
+                )
+                return record
+            outcome = _probe_member(measured, args, tag=tag, peer_pids=(process.pid,))
+        except ProbeInfrastructureFailure as exc:
+            record["status"] = "infrastructure_failure"
+            record["failure_detail"] = f"{measured} paired: {str(exc)[:1500]}"
+            return record
+        finally:
+            stop_worker(process)
+            handle.close()
+
+        if outcome.classification != "ok" or outcome.result is None:
+            record["status"] = outcome.classification
+            record["failure_detail"] = f"{measured} paired: {outcome.detail[:1500]}"
+            return record
+        paired_ms = outcome.result.train_ms_per_step
+        alone_ms = alone[measured]["ms_per_step"]
+        record["stages"][f"{measured}_paired_with_{partner}"] = {
+            "ms_per_step": paired_ms,
+            "concurrency_identity": outcome.result.concurrency_identity,
+            "registered_peer_pid": process.pid,
+            "peak_vram_gb": outcome.result.peak_vram_gb,
+            "contention_multiplier": (
+                round(paired_ms / alone_ms, 4) if paired_ms and alone_ms else None
+            ),
+        }
+
+    record["status"] = "ok"
+    return record
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="C12 validation campaign (tracks A and C).")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "run", "verdict"):
+    for name in ("plan", "run", "pair", "verdict"):
         p = sub.add_parser(name)
         p.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
         p.add_argument("--data-dir", default=None)
@@ -286,6 +438,21 @@ def build_parser() -> argparse.ArgumentParser:
         )
         if name == "run":
             p.add_argument("--cell", required=True)
+        if name == "pair":
+            p.add_argument("--pair", required=True)
+            p.add_argument(
+                "--stagger-seconds",
+                type=float,
+                default=25.0,
+                help="How long the background partner trains before the measured probe starts.",
+            )
+            p.add_argument(
+                "--load-seconds",
+                type=float,
+                default=240.0,
+                help="How long the background partner keeps training.",
+            )
+        if name in ("run", "pair"):
             p.add_argument("--run", action="store_true", help="Execute on the GPU.")
     return parser
 
@@ -302,6 +469,20 @@ def main(argv: list[str] | None = None) -> int:
         report = evaluate_campaign(cells, CampaignThresholds())
         print(json.dumps(report.model_dump(mode="json"), indent=2))
         return 0 if report.verdict == "C12 PASS" else 1
+
+    if args.command == "pair":
+        if not args.run:
+            print(
+                json.dumps({"would_run_pair": args.pair, "pair": _pair_entry(args.pair)}, indent=2)
+            )
+            return 0
+        record = run_pair(args.pair, args)
+        path = args.output_root / "pairs" / f"{args.pair}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        print(json.dumps(record, indent=2))
+        print(f"\n  pair -> {path}")
+        return 0 if record.get("status") == "ok" else 1
 
     if not args.run:
         print(json.dumps({"would_run": args.cell, **build_plan(args)}, indent=2))

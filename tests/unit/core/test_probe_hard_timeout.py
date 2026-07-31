@@ -248,6 +248,117 @@ class TestProductionWorkerWiring:
         assert signal.SIGKILL == 9
 
 
+SELF_SIGNAL = """
+import os, signal, sys
+from pathlib import Path
+{announce}
+print("reached {phase}", flush=True)
+if signal.{sig} != signal.SIGKILL:   # SIGKILL is uncatchable: no handler to reset
+    signal.signal(signal.{sig}, signal.SIG_DFL)
+os.kill(os.getpid(), signal.{sig})
+"""
+
+SIGNAL_AFTER_RESULT = """
+import json, os, signal
+from pathlib import Path
+Path(r"{{progress}}").write_text("training")
+Path(r"{{result}}").write_text(json.dumps({{{{
+    "status": "oom", "phase": "training", "model_identity": "fake_candidate",
+    "peak_vram_gb": 30.5, "error": "CUDA out of memory."
+}}}}))
+if signal.{sig} != signal.SIGKILL:
+    signal.signal(signal.{sig}, signal.SIG_DFL)
+os.kill(os.getpid(), signal.{sig})
+"""
+
+
+class TestSignalTermination:
+    """A worker killed by a signal must not be silently called
+    infrastructure.
+
+    `transformer@8M-ceiling` died exactly this way — SIGKILL from the host
+    OOM killer right after dataset indexing, no traceback, no result. That
+    is a REJECT-worthy fact about the candidate; classifying it as
+    infrastructure would (via the C9b resolver) ABORT a whole chain
+    because one model does not fit.
+
+    The discriminator is evidence, not the bare presence of a signal: the
+    signal must be one a candidate can raise, AND the worker must have
+    reached candidate work.
+    """
+
+    def _signal_worker(self, tmp_path, sig, *, phase="training", announce=True):
+        paths = worker_result_paths(_spec(tmp_path).result_path)
+        announcement = f'Path(r"{paths["progress"]}").write_text("{phase}")' if announce else ""
+        body = SELF_SIGNAL.format(announce=announcement, phase=phase, sig=sig)
+        return run_worker(
+            _spec(tmp_path),
+            hard_cap_seconds=30.0,
+            command=_fake_worker(tmp_path, body),
+        )
+
+    @pytest.mark.parametrize("sig", ["SIGKILL", "SIGABRT", "SIGSEGV", "SIGBUS"])
+    def test_a_candidate_signal_during_candidate_work_is_a_measured_failure(self, tmp_path, sig):
+        outcome = self._signal_worker(tmp_path, sig)
+        assert outcome.classification == "measured_failure"
+        assert outcome.termination.signal_number == getattr(signal, sig)
+        assert outcome.termination.signal_name == sig
+        assert outcome.termination.phase_at_exit == "training"
+        assert outcome.termination.result_present is False
+        assert "resource/candidate failure" in outcome.detail
+
+    @pytest.mark.parametrize("phase", ["setup", "training", "inference"])
+    def test_every_candidate_work_phase_counts(self, tmp_path, phase):
+        """Setup counts: a model that cannot even be built inside the
+        machine is a fact about the model."""
+        outcome = self._signal_worker(tmp_path, "SIGKILL", phase=phase)
+        assert outcome.classification == "measured_failure"
+        assert outcome.termination.phase_at_exit == phase
+
+    def test_a_signal_before_any_candidate_work_is_infrastructure(self, tmp_path):
+        """Dying during interpreter start-up says nothing about the
+        candidate — it never ran."""
+        with pytest.raises(ProbeInfrastructureFailure, match="SIGKILL"):
+            self._signal_worker(tmp_path, "SIGKILL", announce=False)
+
+    def test_a_non_candidate_signal_is_infrastructure(self, tmp_path):
+        """SIGINT is the operator or the environment speaking, not the
+        candidate — even mid-training."""
+        with pytest.raises(ProbeInfrastructureFailure, match="SIGINT"):
+            self._signal_worker(tmp_path, "SIGINT")
+
+    def test_a_result_the_worker_did_write_still_wins(self, tmp_path):
+        """Signalled AFTER reporting: the report is the evidence."""
+        paths = worker_result_paths(_spec(tmp_path).result_path)
+        body = SIGNAL_AFTER_RESULT.format(sig="SIGKILL").format(
+            progress=paths["progress"], result=paths["result"]
+        )
+        outcome = run_worker(
+            _spec(tmp_path), hard_cap_seconds=30.0, command=_fake_worker(tmp_path, body)
+        )
+        assert outcome.classification == "measured_failure"
+        assert outcome.result is not None
+        assert outcome.result.status == "oom"
+        assert outcome.termination.result_present is True
+
+    def test_the_full_diagnostic_set_is_preserved(self, tmp_path):
+        outcome = self._signal_worker(tmp_path, "SIGKILL")
+        t = outcome.termination
+        assert t.exit_code == -signal.SIGKILL
+        assert t.signal_number == signal.SIGKILL
+        assert t.worker_pid and t.worker_pgid
+        assert t.elapsed_seconds > 0.0
+        assert t.phase_at_exit == "training"
+        assert t.result_present is False
+        assert "reached training" in t.worker_log_tail
+        assert t.term_sent is False and t.kill_sent is False  # it died on its own
+        assert t.orphans_remaining is False
+
+    def test_no_throughput_is_invented_for_a_worker_that_died(self, tmp_path):
+        outcome = self._signal_worker(tmp_path, "SIGSEGV")
+        assert outcome.result is None
+
+
 class TestWorkerDiagnostics:
     """A worker that dies without writing a result must not be silent.
 

@@ -56,6 +56,35 @@ DEFAULT_GRACE_SECONDS = 10.0
 #: Ceiling on the parent's own bookkeeping, so the hard cap stays honest.
 PROCESS_CONTROL_OVERHEAD_SECONDS = 5.0
 
+#: Signals that, when they land on a worker that had ALREADY entered
+#: candidate work, are evidence ABOUT THE CANDIDATE rather than about our
+#: infrastructure:
+#:
+#: * SIGKILL  — the host OOM killer, i.e. the candidate's host-memory
+#:              demand exceeded the machine (transformer@8M-ceiling);
+#: * SIGABRT  — a CUDA/library hard abort raised inside candidate code;
+#: * SIGSEGV / SIGBUS / SIGILL / SIGFPE — a fault inside candidate code.
+#:
+#: Signals NOT listed here (SIGINT, SIGHUP, SIGTERM from outside, …) are
+#: statements about the environment or the operator, never about the
+#: candidate, and stay infrastructure. "Terminated by a signal" alone is
+#: deliberately NOT sufficient — the phase evidence must show the worker
+#: had reached candidate work.
+CANDIDATE_FAILURE_SIGNALS = frozenset(
+    {
+        signal.SIGKILL,
+        signal.SIGABRT,
+        signal.SIGSEGV,
+        signal.SIGBUS,
+        signal.SIGILL,
+        signal.SIGFPE,
+    }
+)
+#: Phases in which the worker is executing the CANDIDATE (loading it
+#: counts: a model that cannot be constructed within the machine is a
+#: fact about the model).
+CANDIDATE_WORK_PHASES = frozenset({"setup", "training", "inference"})
+
 
 class ProbeWorkerSpec(BaseModel):
     """Parent -> worker. Bounded, typed, passed as a file (not argv)."""
@@ -71,6 +100,14 @@ class ProbeWorkerSpec(BaseModel):
     caps: dict[str, Any] = Field(default_factory=dict)
     device_vram_gb: float = Field(gt=0.0)
     result_path: str
+    #: EXPLICITLY registered partner PIDs (C12-C). A peer is never
+    #: inferred from a process name — the launcher declares it.
+    expected_peer_pids: tuple[int, ...] = ()
+    #: >0 turns this worker into a sustained BACKGROUND LOAD: it sets up,
+    #: then trains until the deadline. Used as the partner in a pairwise
+    #: concurrency cell, where the measured member needs a peer that is
+    #: genuinely computing (not merely resident) during its window.
+    sustained_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class ProbeWorkerResult(BaseModel):
@@ -100,6 +137,8 @@ class ProbeTerminationRecord(BaseModel):
 
     timed_out: bool = False
     phase_at_timeout: WorkerPhase | None = None
+    #: The worker's last announced phase at exit, however it exited.
+    phase_at_exit: WorkerPhase | None = None
     elapsed_seconds: float = Field(default=0.0, ge=0.0)
     hard_cap_seconds: float = Field(default=0.0, ge=0.0)
     worker_pid: int | None = None
@@ -108,6 +147,14 @@ class ProbeTerminationRecord(BaseModel):
     kill_sent: bool = False
     grace_seconds: float = DEFAULT_GRACE_SECONDS
     exit_code: int | None = None
+    #: Set when the worker was terminated by a signal (POSIX: rc < 0).
+    signal_number: int | None = None
+    signal_name: str | None = None
+    #: Did the worker leave a result record at all?
+    result_present: bool = False
+    #: Bounded tail of the worker's own output — the only evidence that
+    #: survives a SIGKILL.
+    worker_log_tail: str = ""
     orphans_remaining: bool = False
 
 
@@ -154,24 +201,18 @@ def _read_phase(progress_path: Path) -> WorkerPhase | None:
     return phase if phase in ("launch", "setup", "training", "inference", "complete") else None
 
 
-def run_worker(
-    spec: ProbeWorkerSpec,
-    *,
-    hard_cap_seconds: float,
-    grace_seconds: float = DEFAULT_GRACE_SECONDS,
-    command: list[str] | None = None,
-    poll_seconds: float = 0.1,
-    clock: Any = time.monotonic,
-) -> ProbeExecutionOutcome:
-    """Run one probe worker under a HARD wall deadline.
+def spawn_worker(
+    spec: ProbeWorkerSpec, *, command: list[str] | None = None
+) -> tuple[subprocess.Popen, Any, Path]:
+    """Launch one worker in its OWN process group and return immediately.
 
-    ``command`` is injectable so unit tests can drive deterministic fake
-    workers (stuck in setup, stuck in a step, malformed output, …)
-    without a GPU.
+    Returns ``(process, log_handle, log_path)``. The caller owns the
+    deadline, the log handle and the eventual termination — see
+    `run_worker` for the blocking, deadline-enforcing use, and the C12-C
+    pairwise driver for the concurrent one.
     """
     result_path = Path(spec.result_path)
     spec_path = result_path.with_suffix(".spec.json")
-    progress_path = result_path.with_suffix(".phase")
     try:
         result_path.parent.mkdir(parents=True, exist_ok=True)
         spec_path.write_text(spec.model_dump_json(indent=1), encoding="utf-8")
@@ -204,6 +245,42 @@ def run_worker(
     except Exception as exc:
         log_handle.close()
         raise ProbeInfrastructureFailure(f"could not launch the probe worker: {exc!r}") from exc
+    return process, log_handle, log_path
+
+
+def stop_worker(process: subprocess.Popen, *, grace_seconds: float = DEFAULT_GRACE_SECONDS) -> None:
+    """Terminate a worker's whole process group, escalating if needed."""
+    pgid = process.pid
+    if process.poll() is not None:
+        return
+    _signal_group(pgid, signal.SIGTERM)
+    deadline = time.monotonic() + grace_seconds
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if process.poll() is None:
+        _signal_group(pgid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=PROCESS_CONTROL_OVERHEAD_SECONDS)
+
+
+def run_worker(
+    spec: ProbeWorkerSpec,
+    *,
+    hard_cap_seconds: float,
+    grace_seconds: float = DEFAULT_GRACE_SECONDS,
+    command: list[str] | None = None,
+    poll_seconds: float = 0.1,
+    clock: Any = time.monotonic,
+) -> ProbeExecutionOutcome:
+    """Run one probe worker under a HARD wall deadline.
+
+    ``command`` is injectable so unit tests can drive deterministic fake
+    workers (stuck in setup, stuck in a step, malformed output, …)
+    without a GPU.
+    """
+    result_path = Path(spec.result_path)
+    progress_path = result_path.with_suffix(".phase")
+    process, log_handle, log_path = spawn_worker(spec, command=command)
 
     pgid = process.pid  # session leader: pgid == pid
     started = clock()
@@ -234,9 +311,14 @@ def run_worker(
     elapsed = clock() - started
     log_handle.close()
     worker_log_tail = _log_tail(log_path)
+    phase_at_exit = _read_phase(progress_path)
+    returncode = process.returncode
+    exit_signal = -returncode if returncode is not None and returncode < 0 else None
+    result_present = result_path.is_file()
     termination = ProbeTerminationRecord(
         timed_out=timed_out,
-        phase_at_timeout=_read_phase(progress_path) if timed_out else None,
+        phase_at_timeout=phase_at_exit if timed_out else None,
+        phase_at_exit=phase_at_exit,
         elapsed_seconds=round(elapsed, 3),
         hard_cap_seconds=hard_cap_seconds,
         worker_pid=process.pid,
@@ -244,7 +326,11 @@ def run_worker(
         term_sent=term_sent,
         kill_sent=kill_sent,
         grace_seconds=grace_seconds,
-        exit_code=process.returncode,
+        exit_code=returncode,
+        signal_number=exit_signal,
+        signal_name=signal.Signals(exit_signal).name if exit_signal else None,
+        result_present=result_present,
+        worker_log_tail=worker_log_tail,
         orphans_remaining=_process_group_alive(pgid),
     )
 
@@ -264,6 +350,34 @@ def run_worker(
                 f"(elapsed {elapsed:.1f}s). Worker output: {worker_log_tail or '<empty>'}"
             ),
         )
+
+    if exit_signal is not None and not result_present:
+        # The worker died before it could say anything. Whether that is a
+        # statement about the CANDIDATE or about our infrastructure is
+        # decided from evidence — the signal AND the phase it had reached
+        # — never from the bare fact that a signal arrived.
+        attributable = exit_signal in CANDIDATE_FAILURE_SIGNALS and (
+            phase_at_exit in CANDIDATE_WORK_PHASES
+        )
+        detail = (
+            f"probe worker was terminated by {termination.signal_name} "
+            f"({exit_signal}) during {phase_at_exit or 'an unreported phase'} "
+            f"after {elapsed:.1f}s, leaving no result. "
+            f"Worker output: {worker_log_tail or '<empty>'}"
+        )
+        if attributable:
+            # e.g. the host OOM killer reaping a candidate whose host-memory
+            # demand exceeded the machine: a REJECT-worthy measured fact
+            # about that candidate, not a broken evidence channel.
+            return ProbeExecutionOutcome(
+                classification="measured_failure",
+                result=None,
+                termination=termination,
+                detail=detail + " Attributed to the candidate: this signal, "
+                "raised while the candidate itself was executing, is a "
+                "resource/candidate failure.",
+            )
+        raise ProbeInfrastructureFailure(detail)
 
     result = _load_result(result_path, required=True, log_tail=worker_log_tail)
     assert result is not None
