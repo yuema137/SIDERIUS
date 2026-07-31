@@ -3247,7 +3247,58 @@ source/JSON by hand.
 bootstrap time (recorded, flagged).
 **Migration/rollback.** additive tool.
 **Boundary.** CLI + self-tests.
-- [ ] Evidence recorded.
+
+**Implementation record (C10).**
+
+*Files.* `core/runtime_control/bootstrap.py` (the eleven-step sequence
+over injected seams), `scripts/runtime_bootstrap.py` (the CLI),
+`docs/runtime_bootstrap.md` (operator guide).
+
+*The eleven steps* run in the §12-directive order and each produces a
+`BootstrapStep` with `ok`, a detail, and — when it fails — a REMEDY. An
+unusable environment is a RESULT (NOT READY), never an exception: a
+bootstrap tool that crashes teaches the operator nothing.
+
+*Constraints kept.* Writes go through `CalibrationRegistry` only —
+asserted by a test that the run creates exactly one directory and nothing
+else, so there is no file for an operator to hand-edit. `--registry-dir`
+isolates the registry by setting `SIDERIUS_CALIBRATION_DIR` for the
+process, which is why no config file needs touching. Step 11 calls the
+SAME `run_launch_self_test` the launch guard calls.
+
+*Contention is refused, not averaged in.* A `foreign_contended` window
+stops the run BEFORE the probe, and the registry stays empty — a dirty
+baseline is worse than none. The classification and its reasons are
+recorded on the step either way.
+
+*Two honest limits, documented in the operator guide.* One clean
+bootstrap yields a CANDIDATE observation per operation, not calibration —
+under D4 a bucket needs 2 consistent observations for provisional and 3
+for validated, so repeated bootstraps on an idle machine are the path to
+calibration (proved by a pseudo-integration test that runs bootstrap
+three times and watches the buckets promote). And C10 says nothing about
+estimator ACCURACY across families and scales; that is C12.
+
+- [x] Evidence recorded: `tests/unit/core/test_c10_bootstrap.py` — **19
+      tests** (fresh environment reaches READY with an empty temp
+      registry and no hand edits — the design-doc acceptance criterion;
+      the eleven steps run in order; the four measured quantities are
+      recorded; writes go only through the registry; hash-verified
+      read-back; the verdict renders; and eight refusal paths — no
+      accelerator, no dataset, contended GPU, telemetry failure,
+      unbuildable model, oom/wall_cap/load_failure probes, unwritable
+      registry, failing launch self-test — each asserting the remedy is
+      actionable and that an environment problem is a verdict rather than
+      an exception; plus the CLI surface and bounded defaults).
+      `tests/integration/workflows/test_bootstrap_pseudo.py` — **5 tests**
+      over the REAL probe engine, REAL D3 classifier, REAL registry and
+      REAL launch guard with only the device seams faked (fresh
+      environment → READY; the recorded evidence is usable by a later run
+      and is correctly a PRIOR until promoted; three consistent
+      bootstraps promote the buckets to validated; a contended GPU
+      refuses before measuring and leaves the registry empty; bootstrap
+      is idempotent — identical content is content-addressed to the same
+      record).
 
 ### C11 — `feat(runtime): legacy migration and metadata/executable replay tools`
 
