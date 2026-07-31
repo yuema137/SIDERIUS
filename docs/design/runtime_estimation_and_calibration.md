@@ -3865,6 +3865,57 @@ record fields and the exit code.
 
 ### C14 — `docs(runtime): acceptance evidence, cold-start smoke, and V19 restart stop-and-show`
 
+**Preparation record (C14, 2026-07-31) — PREPARED, NOT RUN.**
+
+*Runner.* `sdsc_submission_scripts/v19_gate0_pair_runner.sh` already
+implements the Gate exactly as specified: band 15-19, two concurrent
+chains, `gate_chain_args()` as the single source of truth for the frozen
+command, stagger health check, wrapper-PID self-report, marker-based
+completion, pair summary on every exit path (trap on runner exit), and a
+6 h wall cap that records rather than kills.
+
+*Alignment audit.* The Gate's argv was compared FLAG BY FLAG against the
+formal V19 argv in `v19_queue_runner.sh`. Every operator-specified
+bounded Gate setting matches (2 iterations, 2 rounds, 3 proposal
+attempts, 1 epoch, scope 15-19, monitored files 15-19, portions
+0.02/1.0/0.01 both phases, 5 min trial, 30 min formal), `--seed_paths` is
+ABSENT (cold start), and everything the Gate must preserve is
+byte-identical: LLM config, HealthGate config, runtime watchdog and all
+five safety factors, incumbent coupling, structured feedback, sequential
+ordering with the explicit file order, formal strategy, exploration mode,
+lit review, and forced formal (default `FORCE_FORMAL_ROUND=1`, forwarded
+only when disabled — so ON in both).
+
+`tests/unit/sdsc_submission_scripts/test_c14_gate_v19_parity.py` (40
+tests) pins this permanently: drift in either script now fails there
+instead of surfacing as a Gate that quietly validated something else.
+
+*One recorded conflict (operator decision required).* The Gate carries
+`--{trial,formal}_vram_budget_gb 24`; formal V19 uses 16. Both sources
+are authoritative and disagree: `docs/gates/gate_testing_standard.md`
+§"24 / 24 (GENEROUS — never let the VRAM gate eat a Gate attempt)" versus
+the C14 requirement to preserve formal V19 admission. This was NOT
+resolved unilaterally — the Gate keeps its documented 24/24 and the
+divergence is recorded in `PENDING_OPERATOR_DECISION`, asserted to be the
+only one.
+
+*Cold start is BLOCKED pending approval.* The Gate runner refuses to
+launch onto an existing workspace, and both Gate workspaces from the
+2026-07-30 attempt are present. C14 therefore cannot start until the
+deletion inventory below is approved. Nothing has been deleted.
+
+*Incident disclosed.* While diffing the Gate argv, the runner was sourced
+WITHOUT `V19_GATE0_NO_MAIN=1`, executing its main path. It launched
+nothing (the workspace-exists guard refused) and touched no workspace,
+chain log or forensic artifact, but it overwrote
+`gate0/gate0_pair_summary.json` and appended two log lines. Every field
+of the previous summary was recoverable from `gate0_runner.log` and has
+been restored with an explicit `reconstructed_from` note.
+
+- [ ] Operator approval for the deletion inventory (cold start).
+- [ ] Operator decision on the VRAM-budget conflict.
+- [ ] C14 executed.
+
 **Goal.** §26 Layers 4-5: bounded cold-start production smoke (real
 candidate, real probe, real estimator, real artifacts, no trajectory
 reuse — STILL NOT V19), then the complete restart report against all 33
