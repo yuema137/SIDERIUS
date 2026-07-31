@@ -25,8 +25,18 @@ the whole point:
 
 * candidate exceeded the hard cap        -> measured failure -> REJECT
 * candidate OOM                          -> measured failure -> REJECT
+* candidate signalled while at the device/quota capacity bound
+                                         -> measured failure -> REJECT
 * launch / IPC / schema / process-control failure
                                          -> infrastructure   -> ABORT
+
+The capacity case exists because a candidate can be reaped from OUTSIDE
+this process — by a shared-host VRAM-quota watchdog, a scheduler, or a
+container limit — before it can report anything. The parent therefore
+samples the worker's OWN device footprint while it runs, so that
+"killed while sitting at the ceiling" remains attributable evidence
+about the model rather than an unexplained infrastructure abort that
+would halt an entire chain.
 
 Nothing is fabricated: an operation that did not complete contributes no
 throughput number. A timeout record carries the phase that was active,
@@ -48,6 +58,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.runtime_control.probe import descendant_pids
+
 WorkerPhase = Literal["launch", "setup", "training", "inference", "complete"]
 WorkerStatus = Literal["ok", "oom", "load_failure", "wall_cap"]
 
@@ -61,7 +73,7 @@ PROCESS_CONTROL_OVERHEAD_SECONDS = 5.0
 #: infrastructure:
 #:
 #: * SIGKILL  — the host OOM killer, i.e. the candidate's host-memory
-#:              demand exceeded the machine (transformer@8M-ceiling);
+#:              demand exceeded the machine;
 #: * SIGABRT  — a CUDA/library hard abort raised inside candidate code;
 #: * SIGSEGV / SIGBUS / SIGILL / SIGFPE — a fault inside candidate code.
 #:
@@ -84,6 +96,64 @@ CANDIDATE_FAILURE_SIGNALS = frozenset(
 #: counts: a model that cannot be constructed within the machine is a
 #: fact about the model).
 CANDIDATE_WORK_PHASES = frozenset({"setup", "training", "inference"})
+
+#: Optional per-user VRAM quota, in GiB, enforced by something OUTSIDE
+#: this process (a shared-host watchdog, a scheduler, a container limit).
+#: Read from the environment because it is a property of the DEPLOYMENT,
+#: never of the checkout.
+VRAM_QUOTA_ENV = "SIDERIUS_GPU_VRAM_QUOTA_GB"
+#: Absent an explicit quota, a worker holding this fraction of the device
+#: is at the capacity boundary by any reasonable reading.
+DEFAULT_VRAM_ATTRIBUTION_FRACTION = 0.90
+
+
+def vram_attribution_threshold_gb(device_vram_gb: float) -> float:
+    """Above this, a worker's own VRAM footprint is capacity evidence.
+
+    An explicitly configured quota wins when it is the tighter bound —
+    on a shared host the enforced quota, not the card, is the real
+    ceiling.
+    """
+    fraction_bound = DEFAULT_VRAM_ATTRIBUTION_FRACTION * device_vram_gb
+    raw = os.environ.get(VRAM_QUOTA_ENV)
+    if not raw:
+        return fraction_bound
+    try:
+        quota = float(raw)
+    except ValueError:
+        return fraction_bound
+    return min(quota, fraction_bound) if quota > 0 else fraction_bound
+
+
+def sample_worker_vram_gb(pgid: int) -> float | None:
+    """GiB of device memory held by the worker's process group, or None
+    when telemetry is unavailable. A gap is a gap, never a zero."""
+    import subprocess as _sp
+
+    try:
+        out = _sp.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_gpu_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout
+    except Exception:
+        return None
+    own = {pgid, *descendant_pids(pgid)}
+    total_mib = 0.0
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue
+        if int(parts[0]) in own:
+            with contextlib.suppress(ValueError):
+                total_mib += float(parts[1])
+    return total_mib / 1024.0 if total_mib else None
 
 
 class ProbeWorkerSpec(BaseModel):
@@ -155,6 +225,12 @@ class ProbeTerminationRecord(BaseModel):
     #: Bounded tail of the worker's own output — the only evidence that
     #: survives a SIGKILL.
     worker_log_tail: str = ""
+    #: Peak device memory the worker itself held, sampled by the PARENT
+    #: while it ran. This is the only VRAM evidence that survives a worker
+    #: killed before it could report (C12: an external quota watchdog).
+    observed_peak_vram_gb: float | None = Field(default=None, ge=0.0)
+    #: The bound that peak was judged against, when one applied.
+    vram_attribution_threshold_gb: float | None = Field(default=None, gt=0.0)
     orphans_remaining: bool = False
 
 
@@ -271,6 +347,8 @@ def run_worker(
     command: list[str] | None = None,
     poll_seconds: float = 0.1,
     clock: Any = time.monotonic,
+    usage_sampler: Any = sample_worker_vram_gb,
+    usage_sample_seconds: float = 2.0,
 ) -> ProbeExecutionOutcome:
     """Run one probe worker under a HARD wall deadline.
 
@@ -286,11 +364,20 @@ def run_worker(
     started = clock()
     term_sent = kill_sent = False
     timed_out = False
+    observed_peak_vram_gb: float | None = None
+    next_usage_sample = started
 
     while True:
         if process.poll() is not None:
             break
         elapsed = clock() - started
+        # The parent watches the worker's OWN footprint, because a worker
+        # killed from outside never gets to report its peak.
+        if usage_sampler is not None and clock() >= next_usage_sample:
+            next_usage_sample = clock() + usage_sample_seconds
+            sampled = usage_sampler(pgid)
+            if sampled is not None:
+                observed_peak_vram_gb = max(observed_peak_vram_gb or 0.0, sampled)
         if elapsed >= hard_cap_seconds and not term_sent:
             timed_out = True
             term_sent = _signal_group(pgid, signal.SIGTERM)
@@ -315,6 +402,7 @@ def run_worker(
     returncode = process.returncode
     exit_signal = -returncode if returncode is not None and returncode < 0 else None
     result_present = result_path.is_file()
+    vram_threshold = vram_attribution_threshold_gb(spec.device_vram_gb)
     termination = ProbeTerminationRecord(
         timed_out=timed_out,
         phase_at_timeout=phase_at_exit if timed_out else None,
@@ -331,6 +419,8 @@ def run_worker(
         signal_name=signal.Signals(exit_signal).name if exit_signal else None,
         result_present=result_present,
         worker_log_tail=worker_log_tail,
+        observed_peak_vram_gb=observed_peak_vram_gb,
+        vram_attribution_threshold_gb=vram_threshold,
         orphans_remaining=_process_group_alive(pgid),
     )
 
@@ -356,13 +446,22 @@ def run_worker(
         # statement about the CANDIDATE or about our infrastructure is
         # decided from evidence — the signal AND the phase it had reached
         # — never from the bare fact that a signal arrived.
-        attributable = exit_signal in CANDIDATE_FAILURE_SIGNALS and (
-            phase_at_exit in CANDIDATE_WORK_PHASES
+        at_capacity = observed_peak_vram_gb is not None and observed_peak_vram_gb >= vram_threshold
+        # Either the signal itself implicates the candidate, or the
+        # candidate was measured sitting at the device/quota ceiling when
+        # it was reaped — an external quota watchdog SIGTERMs, and SIGTERM
+        # alone must never be read as a candidate verdict (an operator
+        # stop looks identical).
+        attributable = phase_at_exit in CANDIDATE_WORK_PHASES and (
+            exit_signal in CANDIDATE_FAILURE_SIGNALS or at_capacity
         )
         detail = (
             f"probe worker was terminated by {termination.signal_name} "
             f"({exit_signal}) during {phase_at_exit or 'an unreported phase'} "
             f"after {elapsed:.1f}s, leaving no result. "
+            f"Peak VRAM held by the worker: "
+            f"{observed_peak_vram_gb if observed_peak_vram_gb is not None else 'unknown'} GiB "
+            f"(attribution threshold {vram_threshold:.2f} GiB). "
             f"Worker output: {worker_log_tail or '<empty>'}"
         )
         if attributable:
@@ -373,9 +472,16 @@ def run_worker(
                 classification="measured_failure",
                 result=None,
                 termination=termination,
-                detail=detail + " Attributed to the candidate: this signal, "
-                "raised while the candidate itself was executing, is a "
-                "resource/candidate failure.",
+                detail=detail
+                + (
+                    "Attributed to the candidate: it was holding "
+                    f"{observed_peak_vram_gb:.2f} GiB, at or above the "
+                    f"{vram_threshold:.2f} GiB capacity bound, when it was reaped."
+                    if at_capacity
+                    else "Attributed to the candidate: this signal, raised while "
+                    "the candidate itself was executing, is a resource/candidate "
+                    "failure."
+                ),
             )
         raise ProbeInfrastructureFailure(detail)
 

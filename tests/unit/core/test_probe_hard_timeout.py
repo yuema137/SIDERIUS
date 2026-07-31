@@ -359,6 +359,100 @@ class TestSignalTermination:
         assert outcome.result is None
 
 
+class TestCapacityAttribution:
+    """A candidate reaped by an EXTERNAL quota watchdog is still a
+    candidate failure.
+
+    C12, measured: `transformer@8M-ceiling` reached 31.27 GiB on a
+    31.34 GiB card, tripped this host's 30 GiB per-user VRAM quota, and
+    was SIGTERM'd by a root watchdog. The worker never got to report, and
+    SIGTERM cannot be read as a candidate verdict on its own — an
+    operator stop looks exactly the same. The discriminator is the VRAM
+    the PARENT watched the worker holding.
+
+    Without this, every quota trip would ABORT the whole chain (C9b)
+    instead of rejecting one oversized model.
+    """
+
+    def _run_with_usage(self, tmp_path, peak_gb, *, sig="SIGTERM", phase="setup", device=31.34):
+        paths = worker_result_paths(_spec(tmp_path).result_path)
+        body = SELF_SIGNAL.format(
+            announce=f'Path(r"{paths["progress"]}").write_text("{phase}")',
+            phase=phase,
+            sig=sig,
+        )
+        spec = ProbeWorkerSpec(
+            model_type="fake_candidate",
+            device_vram_gb=device,
+            result_path=str(tmp_path / "probe_result.json"),
+        )
+        return run_worker(
+            spec,
+            hard_cap_seconds=30.0,
+            command=_fake_worker(tmp_path, body),
+            usage_sampler=lambda _pgid: peak_gb,
+            usage_sample_seconds=0.0,
+        )
+
+    def test_a_worker_at_the_capacity_bound_is_a_candidate_failure(self, tmp_path):
+        outcome = self._run_with_usage(tmp_path, 31.27)
+        assert outcome.classification == "measured_failure"
+        assert outcome.termination.observed_peak_vram_gb == 31.27
+        assert "at or above" in outcome.detail
+
+    def test_a_small_worker_killed_by_the_same_signal_is_infrastructure(self, tmp_path):
+        """The same SIGTERM, a candidate using 2 GiB: this is an operator
+        stop or an environment event, and must NOT be blamed on the model."""
+        with pytest.raises(ProbeInfrastructureFailure, match="SIGTERM"):
+            self._run_with_usage(tmp_path, 2.0)
+
+    def test_unavailable_telemetry_does_not_invent_attribution(self, tmp_path):
+        with pytest.raises(ProbeInfrastructureFailure):
+            self._run_with_usage(tmp_path, None)
+
+    def test_the_peak_is_recorded_even_on_a_clean_run(self, tmp_path):
+        outcome = _run(tmp_path, COMPLETES, cap=30.0)
+        assert outcome.classification == "ok"
+        assert outcome.termination.vram_attribution_threshold_gb is not None
+
+    def test_an_explicit_quota_tightens_the_bound(self, tmp_path, monkeypatch):
+        from core.runtime_control.probe_subprocess import (
+            VRAM_QUOTA_ENV,
+            vram_attribution_threshold_gb,
+        )
+
+        monkeypatch.delenv(VRAM_QUOTA_ENV, raising=False)
+        assert vram_attribution_threshold_gb(31.34) == pytest.approx(28.206)
+        # this host's actual watchdog quota
+        monkeypatch.setenv(VRAM_QUOTA_ENV, "29.30")
+        assert vram_attribution_threshold_gb(31.34) == pytest.approx(28.206)
+        monkeypatch.setenv(VRAM_QUOTA_ENV, "20")
+        assert vram_attribution_threshold_gb(31.34) == 20.0
+
+    def test_a_malformed_quota_falls_back_rather_than_crashing(self, tmp_path, monkeypatch):
+        from core.runtime_control.probe_subprocess import (
+            VRAM_QUOTA_ENV,
+            vram_attribution_threshold_gb,
+        )
+
+        monkeypatch.setenv(VRAM_QUOTA_ENV, "not-a-number")
+        assert vram_attribution_threshold_gb(10.0) == pytest.approx(9.0)
+
+    def test_capacity_evidence_still_requires_candidate_work(self, tmp_path):
+        """Holding VRAM at start-up, before any phase, proves nothing."""
+        paths = worker_result_paths(_spec(tmp_path).result_path)
+        assert paths  # the worker below announces nothing
+        body = SELF_SIGNAL.format(announce="", phase="setup", sig="SIGTERM")
+        with pytest.raises(ProbeInfrastructureFailure):
+            run_worker(
+                _spec(tmp_path),
+                hard_cap_seconds=30.0,
+                command=_fake_worker(tmp_path, body),
+                usage_sampler=lambda _pgid: 31.0,
+                usage_sample_seconds=0.0,
+            )
+
+
 class TestWorkerDiagnostics:
     """A worker that dies without writing a result must not be silent.
 
