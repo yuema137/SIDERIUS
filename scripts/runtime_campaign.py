@@ -182,6 +182,8 @@ def run_cell(entry_id: str, args) -> CampaignCell:
     if outcome.classification == "measured_failure":
         return _cell(
             status="measured_failure",
+            failure_class=outcome.failure_kind,
+            failure_class_source="recorded live by the probe parent",
             failure_detail=(
                 f"{outcome.detail} | termination={outcome.termination.model_dump(mode='json')}"
             ),
@@ -214,6 +216,8 @@ def run_cell(entry_id: str, args) -> CampaignCell:
         if is_out_of_memory(exc):
             return _cell(
                 status="measured_failure",
+                failure_class="capacity",
+                failure_class_source="recorded live by the probe parent",
                 failure_detail=f"probe OOM: {exc}",
             )
         return _cell(

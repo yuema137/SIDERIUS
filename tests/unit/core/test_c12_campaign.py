@@ -412,6 +412,63 @@ class TestRequiredCellCoverage:
         assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
         assert "oom" in report.reasons[-1]  # the evidence is reported, not dropped
 
+    def _matrix_minus_ceiling(self, **overrides):
+        """The full matrix, with the transformer ceiling cell failed."""
+        cells = self._complete_matrix()[:-1]
+        cells.append(
+            _cell(
+                "transformer@8M-ceiling",
+                family="transformer",
+                probe=None,
+                status="measured_failure",
+                projected_seconds=None,
+                actual_seconds=None,
+                **overrides,
+            )
+        )
+        return cells
+
+    def test_measured_capacity_evidence_covers_a_required_cell(self):
+        """Operator direction 2026-07-30: coverage is satisfied by the
+        largest FEASIBLE completed cell, not by an exact capacity ceiling.
+        C12 validates the estimator, not each family's exact limit."""
+        report = evaluate_campaign(
+            self._matrix_minus_ceiling(
+                failure_class="capacity",
+                failure_detail="reaped at 31.27 GiB on a 31.34 GiB device",
+            ),
+            CampaignThresholds(),
+        )
+        assert report.verdict == "C12 PASS"
+        assert any("measured capacity evidence" in r for r in report.reasons)
+
+    def test_the_capacity_stand_in_needs_a_completed_cell_in_that_family(self):
+        """A family with NO completed cell has no accuracy datum, so its
+        capacity failure cannot stand in for one."""
+        cells = [
+            c
+            for c in self._matrix_minus_ceiling(failure_class="capacity")
+            if not (c.family == "transformer" and c.status == "ok")
+        ]
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
+
+    @pytest.mark.parametrize("failure_class", ["wall_cap", "infrastructure", "other", None])
+    def test_only_capacity_covers_anything(self, failure_class):
+        """A worker that timed out, or that our own channel lost, says
+        nothing about whether the model fits."""
+        report = evaluate_campaign(
+            self._matrix_minus_ceiling(failure_class=failure_class), CampaignThresholds()
+        )
+        assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
+
+    def test_the_covered_cell_keeps_its_own_record(self):
+        """Covered is not erased: the capacity failure stays visible."""
+        cells = self._matrix_minus_ceiling(failure_class="capacity")
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert "transformer@8M-ceiling" in " ".join(report.reasons)
+        assert report.cells_excluded >= 1  # it contributes no accuracy datum
+
     def test_an_operator_approved_replacement_restores_coverage(self):
         cells = self._complete_matrix()[:-1]
         report = evaluate_campaign(

@@ -264,6 +264,10 @@ class CellMeasurement(BaseModel):
         return self
 
 
+#: Typed cause for a cell that did not complete.
+FailureClass = Literal["capacity", "wall_cap", "infrastructure", "other"]
+
+
 class CampaignCell(BaseModel):
     """One matrix cell: what was projected, what actually happened."""
 
@@ -283,6 +287,13 @@ class CampaignCell(BaseModel):
     replacement_reason: str | None = None
     status: CellStatus = "ok"
     failure_detail: str = ""
+    #: WHY a failed cell failed, as a typed fact rather than prose. Only
+    #: `capacity` — the candidate provably hit the device or enforced-quota
+    #: ceiling (CUDA OOM, or reaped while sitting at the bound) — can stand
+    #: in for a completed measurement in the coverage rule below.
+    failure_class: FailureClass | None = None
+    #: Where `failure_class` came from, when it was not recorded live.
+    failure_class_source: str | None = None
 
     probe: CellMeasurement | None = None
     projected_seconds: float | None = Field(default=None, gt=0.0)
@@ -590,13 +601,38 @@ def evaluate_campaign(
         for entry in MATRIX
         if entry.get("replacement_for") and matrix_cell_id(entry) in completed
     }
+    # A required cell that MEASURABLY hit the device/quota ceiling is
+    # covered by the largest cell of its family that did complete
+    # (operator direction, 2026-07-30: "required coverage is satisfied by
+    # the largest feasible completed cells rather than exact capacity
+    # ceilings"). C12 validates the ESTIMATOR, not the exact capacity
+    # boundary of every family — and a capacity failure is itself a
+    # measured fact, recorded and kept, not a gap in the evidence.
+    #
+    # The stand-in is deliberately narrow: only `capacity`, and only when
+    # that family actually has a completed cell to carry the accuracy
+    # datum. A wall-cap or infrastructure failure covers nothing.
+    families_with_completed = {c.family for c in scored}
+    capacity_bounded = {
+        c.cell_id: c
+        for c in cells
+        if c.status == "measured_failure"
+        and c.failure_class == "capacity"
+        and c.family in families_with_completed
+    }
     missing = [
         cell_id
         for cell_id in required_cell_ids()
         if cell_id not in completed
         and cell_id not in approved_replacements
         and cell_id not in satisfied_by_replacement
+        and cell_id not in capacity_bounded
     ]
+    if capacity_bounded:
+        reasons.append(
+            "required cells covered by measured capacity evidence plus the "
+            f"largest completed cell of the same family: {sorted(capacity_bounded)}"
+        )
     if missing:
         detail = {c.cell_id: (c.status, c.failure_detail) for c in cells if c.cell_id in missing}
         reasons.append(

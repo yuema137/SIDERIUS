@@ -244,6 +244,27 @@ class ProbeExecutionOutcome(BaseModel):
     termination: ProbeTerminationRecord
     detail: str = ""
 
+    @property
+    def failure_kind(self) -> Literal["capacity", "wall_cap", "infrastructure", "other"] | None:
+        """WHY it failed, as a typed fact — consumers must not re-derive
+        this by matching strings against `detail`."""
+        if self.classification == "ok":
+            return None
+        if self.classification == "infrastructure_failure":
+            return "infrastructure"
+        if self.result is not None:
+            if self.result.status == "oom":
+                return "capacity"
+            if self.result.status == "wall_cap":
+                return "wall_cap"
+        if self.termination.timed_out:
+            return "wall_cap"
+        peak = self.termination.observed_peak_vram_gb
+        bound = self.termination.vram_attribution_threshold_gb
+        if peak is not None and bound is not None and peak >= bound:
+            return "capacity"
+        return "other"
+
 
 class ProbeInfrastructureFailure(Exception):
     """Launch, IPC, schema or process-control failure — never a verdict
