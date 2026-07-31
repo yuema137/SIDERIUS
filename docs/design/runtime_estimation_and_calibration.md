@@ -3550,8 +3550,50 @@ parameters and never as a 20M cell. The concurrency pairs are
 the members were always cross-family and the old labels implied
 otherwise.
 
+**C12-B Stage 1 — FCNet Phase A, all four bands (executed 2026-07-31).**
+
+| Band | Setup | Data load | Train ms/step | Inference ms/batch | Peak VRAM | Steps | Projected train |
+|---|---|---|---|---|---|---|---|
+| 0-3 | 1.49 s | 16.2 s | 17.67 | 1.62 | 6.04 GB | 20,000 | 5.9 min |
+| 4-9 | 1.59 s | 17.2 s | 17.68 | 1.61 | 6.04 GB | 30,000 | 8.8 min |
+| 10-14 | 1.60 s | 18.7 s | 17.68 | 1.59 | 6.04 GB | 25,000 | 7.4 min |
+| 15-19 | 1.59 s | 19.9 s | 17.68 | 1.62 | 6.04 GB | 25,000 | 7.4 min |
+
+All four: 323,280,840 realized parameters, `single_candidate_idle`,
+`legacy_repo_unmodified=True`, `legacy_repo_new_paths=[]`, legacy file
+count 33,937 unchanged. ms/step is stable to 0.06 % across bands, as
+expected — the model and batch shape are identical and only the file
+count differs. "Probe runtime" and "projected full official training
+runtime" are kept distinct: the projections above are NOT a full training
+run, which remains unauthorized.
+
+**NumPy compatibility decision (harness-only, operator-accepted
+2026-07-31).** The legacy `read_loader` (train.py:53-54) computes
+`np.array(...) + 128` on int8 data. That relied on NumPy 1.x VALUE-BASED
+promotion: the scalar does not fit in int8, so the array widened to
+int16 and the result was the ADC range [0,255] the 256-class target
+expects. NumPy 2.4 removed value-based promotion and raises
+`OverflowError`, so the legacy expression cannot execute in this
+environment at all.
+
+The harness reproduces the legacy RESULT with an explicit
+`.astype(np.int16) + 128`, verified equal to the NumPy 1.x output across
+the ENTIRE int8 domain ([-128..127] -> [0..255], dtype int16). This is a
+measurement-fidelity decision confined to
+`scripts/legacy_fcnet_timing.py`; a regression test asserts the
+equivalence, asserts the harness uses it, and scans SIDERIUS production
+code (executable source only, so required provenance citations in
+docstrings are unaffected) to prove no legacy-derived code entered
+`core/`, `agent/`, `nodes/`, `execute_tools/` or `workflows/`.
+
+Audit-only rule (operator, 2026-07-31): the legacy repository is an
+isolated measurement target. No legacy architecture, data handling or
+implementation pattern is adopted into SIDERIUS, and the tree is never
+modified.
+
 - [x] Thresholds frozen (operator 2026-07-31), identity recorded above.
-- [ ] Campaign executed.
+- [x] Stage 1 (FCNet Phase A) executed.
+- [ ] Stages 2-4 executed.
 
 
 **Goal.** §24 campaign under §24 PRE-REGISTERED thresholds; resolves

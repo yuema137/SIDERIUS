@@ -175,8 +175,17 @@ def _load_band_file(path: Path) -> tuple[np.ndarray, float]:
         # runtime object is a dataset group. Narrow explicitly rather than
         # scattering ignores.
         series: Any = handle["timeseries"]
-        alltrain = np.array(series["channel0001"]["timeseries"]) + 128
-        alltarget = np.array(series["channel0002"]["timeseries"]) + 128
+        # Legacy fidelity note (train.py:53-54 does `np.array(...) + 128`
+        # on int8 data). That relied on NumPy 1.x VALUE-BASED promotion:
+        # the scalar 128 does not fit in int8, so the array was promoted
+        # to int16 and the result was the ADC range [0, 255] the 256-class
+        # target expects. NumPy 2.x removed value-based promotion and
+        # raises OverflowError instead, so the legacy expression cannot
+        # run here at all. The cast below reproduces the legacy RESULT
+        # exactly ([-128,127] -> [0,255]); it does not change the
+        # workload. Verified: int8[-128,-1,0,127] -> [0,127,128,255].
+        alltrain = np.array(series["channel0001"]["timeseries"]).astype(np.int16) + 128
+        alltarget = np.array(series["channel0002"]["timeseries"]).astype(np.int16) + 128
     alltrain = alltrain[:MAX_INDEX].reshape(-1, SAMPLE_SIZE, BATCH_SIZE, INPUT_SIZE)
     alltarget = alltarget[:MAX_INDEX].reshape(-1, SAMPLE_SIZE, BATCH_SIZE, INPUT_SIZE)
     random_index = np.random.randint(SAMPLE_SIZE)

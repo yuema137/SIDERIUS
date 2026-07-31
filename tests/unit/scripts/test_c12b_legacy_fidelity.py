@@ -159,3 +159,80 @@ class TestReadOnlyGuards:
 
         assert not str(DEFAULT_OUTPUT_ROOT).startswith(str(root))
         assert "SIDEREIS_DATA" in str(DEFAULT_OUTPUT_ROOT)
+
+
+@legacy_required
+class TestNumpyCompatibilityHandling:
+    """The legacy `read_loader` does `int8_array + 128`, which relied on
+    NumPy 1.x VALUE-BASED promotion (widen to int16, giving the ADC range
+    [0,255] the 256-class target expects). NumPy 2.x removed that and
+    raises OverflowError, so the legacy expression cannot run here at all.
+
+    The harness reproduces the legacy RESULT. These tests pin that
+    equivalence over the ENTIRE int8 domain, and pin that the workaround
+    stays inside the harness.
+    """
+
+    def test_the_legacy_expression_no_longer_runs_under_this_numpy(self):
+        import numpy as np
+
+        assert int(np.__version__.split(".")[0]) >= 2
+        with pytest.raises(OverflowError):
+            np.array([-128, 0, 127], dtype=np.int8) + 128
+
+    def test_the_cast_reproduces_the_legacy_result_over_the_whole_domain(self):
+        import numpy as np
+
+        domain = np.arange(-128, 128, dtype=np.int8)
+        reproduced = domain.astype(np.int16) + 128
+        # NumPy 1.x promoted to int16 and produced exactly this:
+        expected = np.arange(0, 256, dtype=np.int16)
+        assert np.array_equal(reproduced, expected)
+        assert reproduced.min() == 0 and reproduced.max() == 255
+        assert reproduced.dtype == np.int16
+
+    def test_the_harness_uses_the_cast(self):
+        from pathlib import Path as _Path
+
+        source = (
+            _Path(__file__).resolve().parents[3] / "scripts" / "legacy_fcnet_timing.py"
+        ).read_text(encoding="utf-8")
+        assert 'series["channel0001"]["timeseries"]).astype(np.int16) + 128' in source
+        assert 'series["channel0002"]["timeseries"]).astype(np.int16) + 128' in source
+
+    def test_the_workaround_does_not_reach_siderius_production_code(self):
+        """Audit-only rule: no legacy-derived CODE may enter production.
+
+        Provenance citations in docstrings are explicitly allowed and in
+        one case required — the frozen TIDMAD score formula must cite the
+        reference implementation it was verified against. So this scans
+        EXECUTABLE code, not prose.
+        """
+        import io
+        import tokenize
+        from pathlib import Path as _Path
+
+        def executable_source(path: _Path) -> str:
+            kept, previous = [], tokenize.INDENT
+            with path.open(encoding="utf-8") as handle:
+                for token in tokenize.generate_tokens(handle.readline):
+                    if token.type == tokenize.COMMENT:
+                        continue
+                    if token.type == tokenize.STRING and previous in (
+                        tokenize.INDENT,
+                        tokenize.DEDENT,
+                        tokenize.NEWLINE,
+                        tokenize.NL,
+                    ):
+                        continue  # docstring
+                    previous = token.type
+                    kept.append(token.string)
+            return "\n".join(kept)
+
+        repo = _Path(__file__).resolve().parents[3]
+        for directory in ("core", "agent", "nodes", "execute_tools", "workflows"):
+            for path in (repo / directory).rglob("*.py"):
+                code = executable_source(path)
+                assert "astype(np.int16) + 128" not in code, path
+                assert "/home/tidmad/TIDMAD" not in code, path
+                assert "from network import" not in code, path
