@@ -3134,9 +3134,74 @@ precedence, abort detection, the four non-halting reasons, sentinel
 reason/typing, exit-3-after-manifest ordering, gate exhaustion still
 exiting 0). Full `tests/unit` — **5032 passed, 4 xfailed**.
 
-**C9d — launch guard.** [ ] Implemented against the FINAL lifecycle
-(operator sequencing decision: no partial guard in parallel with C9c,
-so the guard never validates an intermediate architecture).
+**C9d — production wiring, launch guard, run-invariant lock.** [x]
+
+*Production wiring (the point of the stage).* `probe_wiring.py` holds
+the connections: `build_production_probe_runner` (real plugin, real
+dataset, real device — every assembly failure raised as
+`ProbeInfrastructureError`), `build_registry_persist` (real C5/C7
+registry with hardware + environment profiles), and
+`resolve_request_probe`, the single production entry point. The tuner's
+`_resolve_time_check_probe_request` calls it when the pre-flight returns
+REQUEST_PROBE and maps the outcome: ALLOW → proceed, REJECT →
+attempt-local skip, ABORT → `RuntimeEvidenceChannelError` → chain halt.
+The resolution is recorded on the round's breakdown
+(`probe_resolution`, `probe_observation_ids`, `probe_status`,
+`probe_expected_seconds`).
+
+An environment that cannot build a real runner (CPU box, no dataset,
+pseudo run) records a VISIBLY TYPED `probe_resolution="unavailable"`
+with the reason instead of resolving. A real formal launch never reaches
+that branch — the guard refuses to start (below).
+
+*Launch guard.* `launch_guard.run_launch_self_test()` runs in
+`run_workflow` before any LLM call or trajectory mutation. It does not
+check that classes exist — existence was true throughout the wave-1
+incident. It EXERCISES the lifecycle through the same entry point
+production calls, with an injected fake runner:
+
+```text
+shared estimator + policy resolved once per process
+static evidence cannot block
+measured evidence retains blocking authority
+a formal decision on a prior returns REQUEST_PROBE
+REQUEST_PROBE resolves through the production entry point
+the probe runs exactly once; a repeat request ABORTs
+probe infrastructure failure ABORTs (no static fallback)
+probe-runner availability (REQUIRED for a real launch)
+```
+
+Measured cost on the dev box: **0.67 s**, no GPU work, no network, no
+LLM. `require_probe_runner` is True exactly when the launch uses real
+factories.
+
+*Run-invariant lock — legacy workspaces are REFUSED, not defaulted.*
+`runtime_estimator_identity` and `runtime_policy_identity` join
+`_CANONICAL`, stamped by `build_run_invariants` (the one shared path, so
+workflow / chain runner / standalone tuner cannot diverge). Unlike every
+earlier lock field, these have NO pre-feature state to default into: a
+lock without them was written when a static formula could gate rounds
+and a prior could arm the watchdog. `_reject_legacy_runtime_lock` raises
+before any LLM call, names the missing fields, and requires a fresh
+workspace. The Pydantic default exists ONLY so an old lock can be parsed
+well enough to produce that error — parsing is not compatibility. A
+legacy-vs-legacy comparison stays legal so old tooling can still read
+old workspaces.
+
+Evidence: `tests/unit/core/test_c9d_launch_guard.py` — **20 tests**
+(guard passes and reports; guard is offline — asserted by making
+`subprocess` raise; refuses a production launch that cannot probe;
+catches a policy that lets static evidence block; catches an unwired
+REQUEST_PROBE; guard and production share one entry point; the tuner
+edge resolves + persists; probe REJECT stays attempt-local;
+infrastructure failure asks for a chain abort; unprobeable environment
+is typed not silent; other decisions untouched; assembly failure is
+infrastructure; a load-failure probe ABORTs; availability never raises;
+legacy lock parses; legacy resume refused BY NAME; refusal through
+`ensure_run_invariants`; fresh workspace records identities; changed
+policy identity is a violation; legacy tooling still reads legacy
+workspaces). Full `tests/unit` — **5052 passed, 4 xfailed**; full
+`tests/integration` — **142 passed, 130 skipped**.
 
 ### C9 — `feat(runtime): formal launch invariant, behavioral self-test, and run-invariant locking`
 

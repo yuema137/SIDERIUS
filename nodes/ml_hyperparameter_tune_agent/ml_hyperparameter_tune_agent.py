@@ -225,6 +225,113 @@ def _run_time_preflight(
     )
 
 
+def _resolve_time_check_probe_request(
+    time_check: dict,
+    *,
+    model_type: str,
+    active_params: dict,
+    time_budget_minutes: float,
+    is_trial: bool,
+    data_dir: str | None,
+    run_name: str,
+    exp_id: str,
+) -> str:
+    """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
+
+    This is the production edge the C8 closure audit found missing. When
+    the shared policy asks for a measurement, we take one:
+
+        REQUEST_PROBE -> bounded probe -> persisted observation
+                      -> rebuilt estimate -> re-run policy
+                      -> ALLOW / REJECT / ABORT
+
+    Mutates ``time_check`` in place (mirroring the bypass gate) and
+    returns the action for the caller: ``"proceed"``, ``"skip"`` (the
+    existing attempt-local skipped_time_risk path) or ``"abort"`` (chain
+    halt). Any other pre-flight decision returns ``"proceed"`` untouched.
+
+    When the environment cannot build a real probe runner — CPU box, no
+    dataset, pseudo run — the request is recorded as a VISIBLY TYPED
+    advisory rather than resolved. A real formal launch never reaches
+    that branch: the launch guard refuses to start when a production run
+    cannot probe (`require_probe_runner=True`).
+    """
+    breakdown = time_check.get("breakdown") or {}
+    if breakdown.get("runtime_decision") != "REQUEST_PROBE":
+        return "proceed"
+
+    from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+    from core.runtime_control.probe_lifecycle import ProbeRequest
+    from core.runtime_control.probe_wiring import (
+        build_production_probe_runner,
+        build_registry_persist,
+        probe_runner_availability,
+    )
+
+    available, detail = probe_runner_availability()
+    if not available:
+        breakdown["probe_resolution"] = "unavailable"
+        breakdown["probe_resolution_detail"] = detail
+        print(
+            f"  [PROBE] REQUEST_PROBE could not be resolved by measurement in this "
+            f"environment ({detail}). Recorded as advisory — this is NOT a measured "
+            f"production decision."
+        )
+        return "proceed"
+
+    request = ProbeRequest(
+        model_identity=model_type,
+        train_steps=int(breakdown.get("total_train_steps") or 0),
+        inference_batches=0,
+        workload={
+            "batch_size": int((active_params.get("train_config") or {}).get("batch_size", 1)),
+            "segment_length": int(
+                (active_params.get("model_config") or {}).get("segmentation_size", 0)
+            ),
+        },
+    )
+    print(f"  [PROBE] Resolving REQUEST_PROBE with a bounded live probe of {model_type}...")
+    from core.runtime_control.probe_wiring import resolve_request_probe
+
+    resolution = resolve_request_probe(
+        request=request,
+        budget=RuntimeBudget(time_seconds=max(time_budget_minutes, 1e-9) * 60.0),
+        mode=RuntimeMode(
+            phase="trial" if is_trial else "formal",
+            candidate_stage="post_implementation",
+            probe_available=True,
+        ),
+        run_probe=build_production_probe_runner(
+            model_type=model_type,
+            model_config=active_params.get("model_config") or {},
+            train_config=active_params.get("train_config") or {},
+            loss_config=active_params.get("loss_config") or {},
+            data_dir=data_dir,
+        ),
+        persist=build_registry_persist(
+            workload=request.workload,
+            software_stack={},
+            source_run={"run_name": run_name, "exp_id": exp_id},
+        ),
+    )
+    breakdown["probe_resolution"] = resolution.decision.kind
+    breakdown["probe_resolution_reasons"] = list(resolution.decision.reasons)
+    breakdown["probe_observation_ids"] = list(resolution.observation_ids)
+    breakdown["probe_status"] = resolution.probe_status
+    if resolution.estimate is not None:
+        breakdown["probe_expected_seconds"] = resolution.estimate.expected_seconds
+
+    if resolution.decision.kind == "ABORT":
+        return "abort"
+    if resolution.decision.kind == "REJECT":
+        time_check["feasible"] = False
+        time_check["verdict"] = (
+            f"❌ REJECTED by bounded live probe — {'; '.join(resolution.decision.reasons)}"
+        )
+        return "skip"
+    return "proceed"
+
+
 def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
@@ -2902,6 +3009,30 @@ class HyperparamTuningAgent:
                             # evidence-channel failure is an execution-system
                             # failure, never a candidate verdict.
                             raise RuntimeError(f"Time check error: {time_check.get('message')}")
+
+                        # C9d — resolve a REQUEST_PROBE by taking the
+                        # measurement (see _resolve_time_check_probe_request).
+                        if (
+                            _resolve_time_check_probe_request(
+                                time_check,
+                                model_type=model_type,
+                                active_params=active_params,
+                                time_budget_minutes=chosen_time_budget,
+                                is_trial=plan.is_trial,
+                                data_dir=time_data_dir,
+                                run_name=run_name,
+                                exp_id=exp_id,
+                            )
+                            == "abort"
+                        ):
+                            raise RuntimeEvidenceChannelError(
+                                "bounded live probe could not produce evidence: "
+                                + "; ".join(
+                                    (time_check.get("breakdown") or {}).get(
+                                        "probe_resolution_reasons", []
+                                    )
+                                )
+                            )
 
                         # Post-v15 bypass-time-budget gate: when the formal
                         # round is gated by the time estimator, but the
