@@ -32,12 +32,26 @@ All scores are on the same log_5.27 scale, using the global s_max (295715680.14)
 
 ## Summary
 
-| Model | denoising_score | vs raw floor | vs GT ceiling | Details |
-|:------|----------------:|-------------:|--------------:|:--------|
-| fcnet | **6.4348** | 5.4341 | -3.6786 | [`fcnet.md`](fcnet.md) |
-| punet | **3.6918** | 2.6911 | -6.4216 | [`punet.md`](punet.md) |
-| rnn | **1.5056** | 0.5049 | -8.6078 | [`rnn.md`](rnn.md) |
-| transformer | *pending* | — | — | *pending* |
+| Model | denoising_score | vs raw floor | vs GT ceiling | HealthGate | Details |
+|:------|----------------:|-------------:|--------------:|:-----------|:--------|
+| fcnet | **6.4348** | 5.4341 | -3.6786 | 20/20 healthy | [`fcnet.md`](fcnet.md) |
+| punet | **3.6918** | 2.6911 | -6.4216 | 10/20 healthy | [`punet.md`](punet.md) |
+| rnn | **1.5056** | 0.5049 | -8.6078 | *not scanned* | [`rnn.md`](rnn.md) |
+| transformer | *pending* | — | — | 0/18 healthy, 2 missing | [`transformer.md`](transformer.md) |
+
+The HealthGate column counts files passing all three blocking checks
+(diversity, std, amplitude). It is reported beside the score because the two
+can disagree: a collapsed model can score well through a PSD artifact. A high
+score with a low health count is a warning, not a result.
+
+**The score ordering and the health ordering are not the same ordering.**
+`fcnet > punet > rnn` by score; by health, fcnet is clean everywhere, punet is
+clean only on the two high bands, and rnn has not been scanned because its
+denoised outputs were deleted. Collapse is band-dependent, so a single scalar
+per model hides where a model actually works.
+
+`rnn` requires a fresh inference run before it can be scanned — see
+[`rnn.md`](rnn.md).
 
 ## Reproducibility
 

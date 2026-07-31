@@ -69,7 +69,121 @@ def load_summary(summary_dir: Path, model_key: str) -> dict | None:
         return json.load(f)
 
 
-def render_per_model(summary: dict, out_path: Path) -> None:
+def load_health(out_dir: Path, model_key: str) -> dict | None:
+    """Per-file HealthGate metrics from ``scripts/official_paper_health_scan.py``.
+
+    Optional by design: a model may have a score before anyone has asked
+    whether it collapsed, and the score page must still render.
+    """
+    p = out_dir / f"{model_key}_health.json"
+    if not p.is_file():
+        return None
+    with p.open("r") as f:
+        return json.load(f)
+
+
+def health_headline(health: dict | None) -> str:
+    """One cell for the README table — collapse is not visible in the score."""
+    if health is None:
+        return "*not scanned*"
+    s = health["summary"]
+    n = s["files_scanned"]
+    partial = f", {len(s['files_missing'])} missing" if s["files_missing"] else ""
+    return f"{s['all_three_pass']}/{n} healthy{partial}"
+
+
+def render_health_section(health: dict) -> list[str]:
+    """Per-file collapse metrics.
+
+    Reported beside the score because the two can disagree: a collapsed
+    model can score well through a PSD artifact, which is the whole reason
+    the HealthGate framework exists.
+    """
+    s = health["summary"]
+    t = health["thresholds"]
+    n = s["files_scanned"]
+    lines = [
+        "",
+        "## HealthGate per-file metrics",
+        "",
+        f"Peek window {health['peek_samples']:,} samples (the reference-table "
+        "window; production blocking gates peek 100,000). Metric formulas are "
+        "the production `HealthCheck` classes, imported rather than "
+        "reimplemented, so a number here means what it means inside a chain.",
+        "",
+        f"Thresholds: `unique_int8 > {t['min_unique_int8_values']}`, "
+        f"`std_mv >= {t['min_std_mv']}`, "
+        f"`mode_fraction < {t['collapse_threshold']}`.",
+        "",
+        f"**Healthy on {s['all_three_pass']} of {n} files** "
+        f"(diversity {s['diversity_pass']}/{n}, std {s['std_pass']}/{n}, "
+        f"amplitude {s['amplitude_pass']}/{n}).",
+        "",
+    ]
+    if s["files_missing"]:
+        lines += [
+            f"> **Partial scan — {n} of 20 files.** Missing denoised outputs: "
+            + ", ".join(f"`{i:04d}`" for i in s["files_missing"])
+            + ". Absent files are neither scored nor inferred.",
+            "",
+        ]
+    lines += [
+        "| file | ckpt | target std (mV) | unique_int8 | std (mV) | mode % | pearson | spectral | verdict |",
+        "|---:|:---|---:|---:|---:|---:|---:|---:|:---|",
+    ]
+    for r in health["per_file"]:
+        ok = r["passes_diversity"] and r["passes_std"] and r["passes_amplitude"]
+        marks = "".join(
+            [
+                "D" if r["passes_diversity"] else "d",
+                "S" if r["passes_std"] else "s",
+                "A" if r["passes_amplitude"] else "a",
+            ]
+        )
+        spectral = (
+            f"{r['spectral_peak_ratio']:.4f}" if math.isfinite(r["spectral_peak_ratio"]) else "—"
+        )
+        pearson = f"{r['pearson']:+.4f}" if math.isfinite(r["pearson"]) else "—"
+        lines.append(
+            f"| {r['file_index']:04d} | `{r['band_checkpoint']}` | "
+            f"{r['target_std_mv']:.4f} | {r['unique_int8']} | {r['std_mv']:.4f} | "
+            f"{100 * r['mode_fraction']:.2f} | {pearson} | {spectral} | "
+            f"{'PASS' if ok else 'FAIL'} ({marks}) |"
+        )
+    lines += [
+        "",
+        "Verdict letters: upper case passed that check (D diversity, S std, "
+        "A amplitude), lower case failed.",
+        "",
+        "Regenerate:",
+        "",
+        "```bash",
+        f"python scripts/official_paper_health_scan.py --model {health['model']} \\",
+        f"  --denoised-dir {health['denoised_dir']} \\",
+        f"  --json-out reference_data/official_paper_result/{health['model']}_health.json",
+        "```",
+    ]
+    return lines
+
+
+def render_health_only(health: dict, out_path: Path) -> None:
+    """A model whose collapse metrics exist before its score does."""
+    key = health["model"]
+    lines = [
+        f"# TIDMAD official band-split {key}",
+        "",
+        "## Headline",
+        "",
+        "**Canonical `denoising_score` = _pending_** — the banded scoring run "
+        "has not produced a summary JSON for this model yet. The HealthGate "
+        "metrics below stand on their own: they describe the denoised outputs "
+        "that do exist, and they do not depend on the score.",
+    ]
+    lines += render_health_section(health)
+    out_path.write_text("\n".join(lines))
+
+
+def render_per_model(summary: dict, out_path: Path, health: dict | None = None) -> None:
     key = summary["model_key"]
     fv = summary["file_vector_linear"]
     fv_log = summary["file_vector_log"]
@@ -148,10 +262,18 @@ def render_per_model(summary: dict, out_path: Path) -> None:
         f"`tidmad_official_{key}_banded_score.json` (this run's outputs)."
     )
     lines.append("")
+    if health is not None:
+        lines.extend(render_health_section(health))
+        lines.append("")
     out_path.write_text("\n".join(lines))
 
 
-def render_readme(summaries: dict[str, dict | None], out_path: Path) -> None:
+def render_readme(
+    summaries: dict[str, dict | None],
+    out_path: Path,
+    healths: dict[str, dict | None] | None = None,
+) -> None:
+    healths = healths or {}
     lines: list[str] = []
     lines.append("# TIDMAD Official Paper-Model Denoising Scores")
     lines.append("")
@@ -203,21 +325,34 @@ def render_readme(summaries: dict[str, dict | None], out_path: Path) -> None:
     lines.append("")
     lines.append("## Summary")
     lines.append("")
-    lines.append("| Model | denoising_score | vs raw floor | vs GT ceiling | Details |")
-    lines.append("|:------|----------------:|-------------:|--------------:|:--------|")
+    lines.append(
+        "| Model | denoising_score | vs raw floor | vs GT ceiling | HealthGate | Details |"
+    )
+    lines.append(
+        "|:------|----------------:|-------------:|--------------:|:-----------|:--------|"
+    )
     for key in MODEL_ORDER:
         s = summaries.get(key)
+        h = healths.get(key)
+        health_cell = health_headline(h)
+        details = f"[`{key}.md`]({key}.md)" if (s is not None or h is not None) else "*pending*"
         if s is None:
-            lines.append(f"| {key} | *pending* | — | — | *pending* |")
+            lines.append(f"| {key} | *pending* | — | — | {health_cell} | {details} |")
             continue
         sc = s.get("denoising_score")
         vs_raw = sc - RAW_FLOOR if sc is not None else None
         vs_gt = sc - GT_CEILING if sc is not None else None
         lines.append(
             f"| {key} | **{fmt(sc, 4)}** | "
-            f"{fmt(vs_raw, 4)} | {fmt(vs_gt, 4)} | "
-            f"[`{key}.md`]({key}.md) |"
+            f"{fmt(vs_raw, 4)} | {fmt(vs_gt, 4)} | {health_cell} | {details} |"
         )
+    lines.append("")
+    lines.append(
+        "The HealthGate column counts files passing all three blocking checks "
+        "(diversity, std, amplitude). It is reported beside the score because "
+        "the two can disagree: a collapsed model can score well through a PSD "
+        "artifact. A high score with a low health count is a warning, not a result."
+    )
     lines.append("")
     lines.append("## Reproducibility")
     lines.append("")
@@ -235,17 +370,46 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     summaries = {key: load_summary(args.summary_dir, key) for key in MODEL_ORDER}
+    healths = {key: load_health(args.out_dir, key) for key in MODEL_ORDER}
 
     for key, s in summaries.items():
-        if s is None:
-            print(f"skip {key}: no summary JSON yet")
-            continue
+        h = healths.get(key)
         out = args.out_dir / f"{key}.md"
-        render_per_model(s, out)
-        print(f"wrote {out}  (denoising_score={s.get('denoising_score')})")
+        if s is None and h is None:
+            print(f"skip {key}: no summary JSON and no health JSON yet")
+            continue
+        if s is None:
+            # Collapse metrics can precede the score; a model that has been
+            # scanned but not scored still deserves a page, because "did it
+            # collapse" is answerable without knowing how well it scored.
+            #
+            # But never downgrade: the summary JSONs are server-specific, so
+            # running this on a machine that lacks them must not overwrite a
+            # page that already carries a real score with a health-only stub.
+            if out.is_file() and "denoising_score` = _pending_" not in out.read_text():
+                print(
+                    f"skip {key}: {out.name} already holds a scored page and no "
+                    "summary JSON is present here — refusing to overwrite it "
+                    "with a health-only page. Run where the summary JSONs live."
+                )
+                continue
+            render_health_only(h, out)
+            print(f"wrote {out}  (health-only, {h['summary']['all_three_pass']} healthy files)")
+            continue
+        render_per_model(s, out, h)
+        health_note = "" if h is None else f", health {h['summary']['all_three_pass']} healthy"
+        print(f"wrote {out}  (denoising_score={s.get('denoising_score')}{health_note})")
 
     readme = args.out_dir / "README.md"
-    render_readme(summaries, readme)
+    if all(s is None for s in summaries.values()) and readme.is_file():
+        # Same non-downgrade rule as the per-model pages: an environment with
+        # no summary JSONs would rewrite every score as "pending".
+        print(
+            f"skip {readme.name}: no summary JSON for any model here — "
+            "refusing to rewrite a populated summary table as all-pending."
+        )
+        return
+    render_readme(summaries, readme, healths)
     print(f"wrote {readme}")
 
 

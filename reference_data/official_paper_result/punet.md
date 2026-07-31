@@ -59,3 +59,44 @@ scripts/score_tidmad_official_banded.py --models punet \
 ```
 
 Source summary JSON: `/workspace/DATA/TIDMAD_DATA` (raw inputs), `tidmad_official_punet_banded_score.json` (this run's outputs).
+
+## HealthGate per-file metrics
+
+Peek window 1,000,000 samples (the reference-table window; production blocking gates peek 100,000). Metric formulas are the production `HealthCheck` classes, imported rather than reimplemented, so a number here means what it means inside a chain.
+
+Thresholds: `unique_int8 > 25`, `std_mv >= 1.0`, `mode_fraction < 0.95`.
+
+**Healthy on 10 of 20 files** (diversity 10/20, std 10/20, amplitude 16/20).
+
+| file | ckpt | target std (mV) | unique_int8 | std (mV) | mode % | pearson | spectral | verdict |
+|---:|:---|---:|---:|---:|---:|---:|---:|:---|
+| 0000 | `0_4` | 0.2797 | 12 | 0.0756 | 98.01 | +0.2570 | 0.8602 | FAIL (dsa) |
+| 0001 | `0_4` | 0.2519 | 12 | 0.0659 | 98.60 | +0.2477 | 0.3977 | FAIL (dsa) |
+| 0002 | `0_4` | 0.2483 | 12 | 0.0646 | 98.61 | +0.2428 | 0.2922 | FAIL (dsa) |
+| 0003 | `0_4` | 0.2465 | 12 | 0.0559 | 98.94 | +0.0003 | 0.3237 | FAIL (dsa) |
+| 0004 | `4_10` | 0.4067 | 9 | 0.9223 | 31.06 | +0.0007 | 2782.4355 | FAIL (dsA) |
+| 0005 | `4_10` | 1.4920 | 9 | 0.9221 | 31.02 | +0.0004 | 3144.5751 | FAIL (dsA) |
+| 0006 | `4_10` | 2.8800 | 9 | 0.9221 | 31.07 | -0.0031 | 2817.8379 | FAIL (dsA) |
+| 0007 | `4_10` | 2.1819 | 9 | 0.9220 | 31.02 | -0.0129 | 3079.9014 | FAIL (dsA) |
+| 0008 | `4_10` | 3.0597 | 9 | 0.9222 | 31.05 | -0.0057 | 2859.7434 | FAIL (dsA) |
+| 0009 | `4_10` | 3.9596 | 9 | 0.9223 | 31.05 | +0.0357 | 2621.6638 | FAIL (dsA) |
+| 0010 | `10_15` | 4.9220 | 53 | 20.5004 | 52.97 | +0.0045 | 44.6810 | PASS (DSA) |
+| 0011 | `10_15` | 5.7752 | 51 | 20.4308 | 53.26 | +0.0061 | 40.0377 | PASS (DSA) |
+| 0012 | `10_15` | 8.8355 | 50 | 20.4507 | 53.19 | -0.0016 | 36.2570 | PASS (DSA) |
+| 0013 | `10_15` | 13.4092 | 51 | 20.4683 | 53.13 | +0.0122 | 42.3077 | PASS (DSA) |
+| 0014 | `10_15` | 15.1689 | 51 | 20.4969 | 52.90 | +0.0221 | 38.9549 | PASS (DSA) |
+| 0015 | `15_20` | 15.9695 | 93 | 16.1461 | 10.54 | +0.0017 | 77.9629 | PASS (DSA) |
+| 0016 | `15_20` | 16.2986 | 95 | 16.1488 | 10.55 | +0.0008 | 76.3168 | PASS (DSA) |
+| 0017 | `15_20` | 16.4619 | 99 | 16.1480 | 10.57 | -0.0012 | 80.2790 | PASS (DSA) |
+| 0018 | `15_20` | 16.4866 | 95 | 16.1496 | 10.55 | +0.1004 | 79.1367 | PASS (DSA) |
+| 0019 | `15_20` | 16.4285 | 95 | 16.1492 | 10.57 | -0.0544 | 80.6220 | PASS (DSA) |
+
+Verdict letters: upper case passed that check (D diversity, S std, A amplitude), lower case failed.
+
+Regenerate:
+
+```bash
+python scripts/official_paper_health_scan.py --model punet \
+  --denoised-dir /home/klz/Data/SIDEREIS_DATA/tidmad_reproduction/punet/full_20_files \
+  --json-out reference_data/official_paper_result/punet_health.json
+```
