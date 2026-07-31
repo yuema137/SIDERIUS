@@ -121,6 +121,26 @@ MATRIX: tuple[dict[str, Any], ...] = (
             "kernel_size": 32,
         },
     },
+    # Operator-approved replacement (2026-07-31) for the cell above, which
+    # OOM'd on this device at the unchanged workload. Same family, same
+    # workload shape, comparable large scale. It is NOT a 20M model and is
+    # never relabelled as one; the original OOM stays in the report as
+    # device-capacity evidence.
+    {
+        "family": "wavenet",
+        "cell_label": "~9M",
+        "target": 9_246_208,
+        "realized": 9_246_208,
+        "replacement_for": "wavenet@20M",
+        "replacement_reason": "measured_device_capacity_boundary",
+        "config": {
+            "segmentation_size": 40000,
+            "residual_channels": 128,
+            "gate_channels": 256,
+            "skip_channels": 128,
+            "num_blocks": 20,
+        },
+    },
     # --- transformer: token-mixer / sequence model ---
     {
         "family": "transformer",
@@ -184,7 +204,9 @@ MATRIX: tuple[dict[str, Any], ...] = (
 #: C12-C pairs: small, large, and heterogeneous — drawn from the matrix.
 PAIRWISE_PAIRS: tuple[dict[str, Any], ...] = (
     {"label": "small_cross_family", "members": ("punet@50K", "wavenet@50K")},
-    {"label": "large_cross_family", "members": ("punet@20M", "wavenet@20M")},
+    # wavenet@20M OOMs on this device (measured), so the large pair uses
+    # its operator-approved replacement.
+    {"label": "large_cross_family", "members": ("punet@20M", "wavenet@~9M")},
     {"label": "heterogeneous_compute", "members": ("punet@5M", "transformer@5M")},
 )
 
@@ -233,6 +255,13 @@ class CampaignCell(BaseModel):
     family: str
     target_parameter_count: int | None = None
     at_family_ceiling: bool = False
+    replacement_for: str | None = Field(
+        default=None,
+        description="The cell this one replaces, when the original could not "
+        "complete on this device. Never a relabelling: the original keeps its "
+        "own record and its own realized scale.",
+    )
+    replacement_reason: str | None = None
     status: CellStatus = "ok"
     failure_detail: str = ""
 
@@ -529,10 +558,20 @@ def evaluate_campaign(
     # preserved as evidence but still leaves a hole in the matrix: C12
     # cannot PASS while a required cell has no completed measurement.
     completed = {c.cell_id for c in scored}
+    # A cell whose operator-approved REPLACEMENT completed is covered: the
+    # original stays in the report as evidence, the replacement supplies
+    # the accuracy datum.
+    satisfied_by_replacement = {
+        str(entry["replacement_for"])
+        for entry in MATRIX
+        if entry.get("replacement_for") and matrix_cell_id(entry) in completed
+    }
     missing = [
         cell_id
         for cell_id in required_cell_ids()
-        if cell_id not in completed and cell_id not in approved_replacements
+        if cell_id not in completed
+        and cell_id not in approved_replacements
+        and cell_id not in satisfied_by_replacement
     ]
     if missing:
         detail = {c.cell_id: (c.status, c.failure_detail) for c in cells if c.cell_id in missing}

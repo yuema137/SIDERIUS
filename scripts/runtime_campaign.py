@@ -70,6 +70,8 @@ def build_plan(args) -> dict:
                 "target_parameter_count": entry["target"],
                 "expected_realized_parameter_count": entry["realized"],
                 "at_family_ceiling": entry.get("at_family_ceiling", False),
+                "replacement_for": entry.get("replacement_for"),
+                "replacement_reason": entry.get("replacement_reason"),
                 "config": entry["config"],
                 "registered_implementation": True,
                 "source": "built-in MODEL_REGISTRY family (no novel model created)",
@@ -133,6 +135,8 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             family=str(entry["family"]),
             target_parameter_count=int(entry["target"]),
             at_family_ceiling=bool(entry.get("at_family_ceiling", False)),
+            replacement_for=entry.get("replacement_for"),
+            replacement_reason=entry.get("replacement_reason"),
             wall_cap_seconds=args.cell_wall_seconds,
             **fields,
         )

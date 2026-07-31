@@ -61,7 +61,9 @@ class TestMatrix:
         assert len(families) >= 3
         for family in families:
             scales = {e["target"] for e in MATRIX if e["family"] == family}
-            assert scales == {50_000, 500_000, 5_000_000, 20_000_000}, family
+            # >= the four required scales: an operator-approved replacement
+            # cell adds coverage without removing any required scale.
+            assert scales >= {50_000, 500_000, 5_000_000, 20_000_000}, family
 
     def test_the_families_are_structurally_different(self):
         assert {"punet", "wavenet", "transformer"} <= {e["family"] for e in MATRIX}
@@ -376,9 +378,11 @@ class TestRequiredCellCoverage:
         ]
 
     def test_a_complete_accurate_matrix_passes(self):
+        from core.runtime_control.campaign import required_cell_ids
+
         report = evaluate_campaign(self._complete_matrix(), CampaignThresholds())
         assert report.verdict == "C12 PASS"
-        assert report.metrics["required_cells"] == 12
+        assert report.metrics["required_cells"] == len(required_cell_ids())
 
     def test_a_missing_cell_blocks_pass_even_when_everything_else_is_fine(self):
         cells = self._complete_matrix()[:-1]
@@ -441,3 +445,123 @@ class TestFrozenThresholdIdentity:
         """Any post-hoc edit changes this hash, so a silent relaxation is
         visible in every report rather than invisible in a diff."""
         assert CampaignThresholds().identity == "campaign_thresholds@1.0.0+4e06a54f5c2c"
+
+
+class TestApprovedReplacementCell:
+    """Operator decision (2026-07-31): wavenet@20M OOM'd at the unchanged
+    workload, so a same-family, comparable-scale replacement supplies the
+    accuracy datum. The original stays in the report as capacity evidence
+    and is never relabelled."""
+
+    def _entry(self, cell_id: str) -> dict:
+        from core.runtime_control.campaign import matrix_cell_id
+
+        return next(e for e in MATRIX if matrix_cell_id(e) == cell_id)
+
+    def test_the_replacement_is_labelled_not_relabelled(self):
+        entry = self._entry("wavenet@~9M")
+        assert entry["replacement_for"] == "wavenet@20M"
+        assert entry["replacement_reason"] == "measured_device_capacity_boundary"
+        assert entry["realized"] == 9_246_208
+        # the original keeps its own identity and its own realized scale
+        assert self._entry("wavenet@20M")["realized"] == 20_033_952
+
+    def test_the_replacement_keeps_the_same_workload_shape(self):
+        assert self._entry("wavenet@~9M")["config"]["segmentation_size"] == 40000
+
+    def test_a_completed_replacement_covers_the_original(self):
+        from core.runtime_control.campaign import required_cell_ids
+
+        cells = [
+            _cell(cid, family=cid.split("@")[0], projected=100.0, actual=102.0)
+            for cid in required_cell_ids()
+            if cid != "wavenet@20M"
+        ]
+        cells.append(
+            _cell(
+                "wavenet@20M",
+                family="wavenet",
+                probe=None,
+                status="measured_failure",
+                failure_detail="probe OOM: CUDA out of memory",
+                projected_seconds=None,
+                actual_seconds=None,
+            )
+        )
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert report.verdict == "C12 PASS"
+
+    def test_without_the_replacement_the_hole_still_blocks(self):
+        from core.runtime_control.campaign import required_cell_ids
+
+        cells = [
+            _cell(cid, family=cid.split("@")[0], projected=100.0, actual=102.0)
+            for cid in required_cell_ids()
+            if cid not in ("wavenet@20M", "wavenet@~9M")
+        ]
+        report = evaluate_campaign(cells, CampaignThresholds())
+        assert report.verdict == "STOPPED — RESOURCE / ENVIRONMENT"
+        assert "wavenet@20M" in report.reasons[-1]
+
+
+class TestMeasuredOomReachesRejectNotAbort:
+    """End-to-end: a CUDA-shaped OOM from a real probe must become a
+    candidate REJECT, never a chain-halting ABORT."""
+
+    def test_probe_oom_resolves_to_reject(self):
+        from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
+        from core.runtime_control.probe import (
+            ContentionSnapshot,
+            ProbeCaps,
+            ProbeExecutors,
+            RealizedModelProperties,
+            run_bounded_probe,
+        )
+        from core.runtime_control.probe_lifecycle import ProbeRequest
+        from core.runtime_control.probe_wiring import resolve_request_probe
+
+        cuda_oom = type("OutOfMemoryError", (RuntimeError,), {})(
+            "CUDA out of memory. Tried to allocate 158.00 MiB."
+        )
+
+        def _train():
+            raise cuda_oom
+
+        def _run(_request):
+            return run_bounded_probe(
+                model_identity="oversized",
+                executors=ProbeExecutors(
+                    setup=lambda: RealizedModelProperties(
+                        parameter_count=20_033_952,
+                        trainable_parameter_count=20_033_952,
+                        parameter_memory_gb=0.08,
+                        dtype="float32",
+                    ),
+                    train_step=_train,
+                    inference_batch=lambda: 1.0,
+                    peak_vram_gb=lambda: 30.9,
+                ),
+                caps=ProbeCaps(n_warmup_steps=0, n_timed_train_steps=1),
+                device_vram_gb=31.34,
+                contention_window=lambda **kw: type(
+                    "W",
+                    (),
+                    {
+                        "classification": "single_candidate_idle",
+                        "samples": (ContentionSnapshot(telemetry_available=True),),
+                        "reasons": ("idle",),
+                        "raw_telemetry": lambda self: {},
+                    },
+                )(),
+            )
+
+        resolution = resolve_request_probe(
+            request=ProbeRequest(model_identity="oversized", train_steps=1000, inference_batches=1),
+            budget=RuntimeBudget(time_seconds=600.0),
+            mode=RuntimeMode(phase="formal", candidate_stage="post_implementation"),
+            run_probe=_run,
+            persist=None,
+        )
+        assert resolution.probe_status == "oom"
+        assert resolution.decision.kind == "REJECT"  # candidate-local
+        assert resolution.decision.kind != "ABORT"  # never halts the chain
