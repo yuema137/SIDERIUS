@@ -380,3 +380,42 @@ class TestLegacyWorkspaceRejection:
         """The refusal fires only when THIS run carries the identities."""
         write_run_invariants(str(tmp_path), self._legacy())
         validate_run_invariants(str(tmp_path), self._legacy())  # no raise
+
+
+class TestProbeRequirementIsExplicit:
+    """C9d follow-up: the probe requirement is an explicit launch decision,
+    never inferred from incidental arguments.
+
+    The first version derived it from `sandbox_factory is None`, which made
+    workflow startup silently GPU-dependent: it passed on a GPU dev box and
+    failed in CI, where no CUDA device exists. Factory identity says
+    nothing about whether a launch will do formal training.
+    """
+
+    def test_run_workflow_defaults_to_not_requiring_a_device(self):
+        import inspect
+
+        from workflows.model_exploration import run_workflow
+
+        parameter = inspect.signature(run_workflow).parameters["require_probe_runner"]
+        assert parameter.default is False
+
+    def test_the_real_launch_path_opts_in_explicitly(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+        ).read_text(encoding="utf-8")
+        assert "require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm)" in source
+
+    def test_the_guard_still_runs_every_behavioral_check_without_a_device(self, monkeypatch):
+        """Not requiring a device must not mean skipping the checks."""
+        import core.runtime_control.launch_guard as guard
+
+        monkeypatch.setattr(
+            guard, "_probe_runner_availability", lambda: (False, "no CUDA device is visible")
+        )
+        report = run_launch_self_test(require_probe_runner=False)
+        assert report.probe_runner_available is False
+        assert len(report.checks) >= 7
+        assert any("REQUEST_PROBE resolves" in c for c in report.checks)

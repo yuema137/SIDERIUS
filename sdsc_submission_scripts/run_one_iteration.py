@@ -1529,6 +1529,9 @@ def main():
             source_paths=resolved_paths,
             workspace=args.workspace,
             run_name=run_name,
+            # C9d: a real training launch must be able to take a bounded
+            # live measurement; a pseudo run must not require a device.
+            require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
             chain_run_name=chain_run_name,
             run_id=run_id,
             llm_config=llm_config,

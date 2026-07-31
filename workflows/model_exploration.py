@@ -1533,6 +1533,16 @@ def run_workflow(
     # See ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
     bridge_factory: Callable | None = None,
     sandbox_factory: Callable | None = None,
+    # C9d — does this launch REQUIRE a buildable bounded-probe runner?
+    # True only for a real training launch: a formal runtime decision
+    # there must resolve to measured evidence, so a machine that cannot
+    # probe must not start one. Default False keeps CPU boxes, dry runs
+    # and unit tests working — the guard still runs every behavioral
+    # check, it just does not demand a device. Deriving this from the
+    # factory arguments was wrong: factory identity says nothing about
+    # whether GPU training will happen, and it made workflow startup
+    # silently GPU-dependent.
+    require_probe_runner: bool = False,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -1809,9 +1819,7 @@ def run_workflow(
     # infrastructure failure aborting). A real launch additionally
     # requires a buildable bounded-probe runner: without one, a formal
     # decision would have no measured evidence to resolve to.
-    _launch_report = run_launch_self_test(
-        require_probe_runner=(sandbox_factory is None and bridge_factory is None)
-    )
+    _launch_report = run_launch_self_test(require_probe_runner=require_probe_runner)
     print(
         f"[RUNTIME] Launch self-test passed in {_launch_report.elapsed_seconds:.2f}s "
         f"({len(_launch_report.checks)} checks) | estimator="
