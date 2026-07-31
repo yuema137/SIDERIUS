@@ -1,10 +1,12 @@
 # V20 Priority Decisions
 
-- **Status**: Draft — evidence collection during V19
-- **Current campaign**: `v19r3_10iter_20260731_1842`
-- **Implementation target**: V20
-- **Current V19 policy**: continue unless an explicit stop condition in
-  §14 is met
+- **Status**: Active — V19 closed, V20 implementation plan
+- **V19**: `v19r3_10iter_20260731_1842` — **CLOSED**, not to be
+  restarted. Classified as an infrastructure validation campaign stopped
+  after confirming pair-level GPU contention and HealthGate enforcement
+  gaps (§14). Its artifacts are forensic evidence only.
+- **Implementation target**: V20, launched as a genuinely new campaign
+  after the §13.1 launch gate is complete and validated
 - **Created**: 2026-07-31, from findings during the fresh V19 restart
   after the runtime-estimation (C1-C14) and VRAM-preflight (PR #151)
   repairs
@@ -107,12 +109,13 @@ must be shown attributable to it.
 | **P0-3** | Validated calibration is not an admission authority | No consumer treats a validated bucket as the final gate | Operator requirement: dynamic calibration should be the final gate | Validated calibration or a successful live probe is the final gate | No |
 | **P0-4** | Calibration-quality reporting | A campaign can collect observations while zero are promotable, silently | "Dynamic calibration is running" was believed true when it was not | Every campaign reports bucketed/eligible/validated/rejected counts | No |
 | **P1-1** | GPU-memory telemetry incomplete | Estimate (2.00 GB) and `nvidia-smi` (6,962 MiB) are different quantities; neither `max_memory_allocated` nor `max_memory_reserved` is persisted | The estimate-vs-actual gap cannot be attributed | Persist allocated / reserved / driver-visible per process and phase | No |
-| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | **PR A** (§6.6): route production pre-flight through the existing isolated worker, keep the parent CPU-only. **PR B** (conditional): chain/pair aggregation + OOM attribution, only if validation still shows it is needed | **Campaign stopped §14.1.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
+| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | **PR A** (§6.6): route production pre-flight through the existing isolated worker, keep the parent CPU-only. **PR B** (conditional): chain/pair aggregation + OOM attribution, only if validation still shows it is needed | **Campaign stopped §14.2.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
 | **P1-3** | Production host-memory telemetry absent | Peak RSS, RSS timeline, and phase attribution are not persisted on the production path | The 17M dilated-conv question cannot be settled from artifacts | Bounded RSS telemetry with phase attribution | No |
 | **P1-4** | Long-sequence preflight memory amplification | A 17M candidate reached ≈26 GiB process-tree RSS in preflight | Unresolved between genuine requirement and inspection amplification | Phase-level bounded measurement to distinguish A from B | No |
 | **P2-1** | Campaign-scoped stop and queue state | A previous campaign's queue-level `STOP` blocked a new campaign's launch | One campaign's terminal state has authority over another | All control state under `<campaign_root>/<campaign_id>/control/` | No |
 | **P2-2** | Portable host-memory configuration | The 24 GiB worker threshold is derived for one machine | Not portable; environment-only control is weak for reproducibility | Backward-compatible layered config with recorded provenance | No |
-| **P2-3** | Model-scale and downsizing-bias monitoring | Iteration 1 proposed 2.39M / 4.12M against advice suggesting 10M-100M | The original V19 failure expressed itself as systematic shrinking | Campaign-level scale-trend reporting | No — monitor per §14 |
+| **P2-3** | Model-scale and downsizing-bias monitoring | Iteration 1 proposed 2.39M / 4.12M against advice suggesting 10M-100M | The original V19 failure expressed itself as systematic shrinking | Campaign-level scale-trend reporting | No — non-blocking, improve during V20 (§13.1) |
+| **P0-5** | HealthGate detects collapse but does not enforce | All four rounds failed blocking checks (`unique_int8` 1–4 of 256) while `resolved_action` was `continue` | A round that collapsed still counted as a result; formal ran on a plan no valid trial supported | A failed blocking check invalidates the round; zero valid trials means the formal output is not a result or an incumbent | **Blocks V20 launch** (§13.1 #5) |
 
 ---
 
@@ -1229,6 +1232,96 @@ and which component held final authority.
 
 ---
 
+## 12A. P0-5 — HealthGate enforcement and the zero-valid-trial policy
+
+*Numbered 12A rather than 13 so the existing section numbers and the
+cross-references to §14 and §18 stay valid.*
+
+### 12A.1 Observed problem
+
+**CONFIRMED DEFECT.** Every blocking HealthGate in wave 1 detected severe
+collapse, recorded that production policy would invalidate the round, and
+then resolved to `continue`. All four successful rounds carry the same
+shape:
+
+```
+check_passed                              false
+would_invalidate_under_production_policy  true
+resolved_action                           continue      ← nothing blocked
+```
+
+The measurements themselves are unambiguous. `unique_int8` counts how
+many distinct values the model actually emits out of 256:
+
+| chain | exp | score | output_diversity | output_std | amplitude_collapse |
+|---|---|---:|---|---|---|
+| arch | 001 | −0.7587 | **FAIL** 4,4,4,3,4 | pass | **FAIL** 0.996–0.997 |
+| arch | 003 | −2.5390 | **FAIL** 1,2,1,1,1 | **FAIL** 0.0 on 4 of 5 files | **FAIL** 1.000 |
+| loss | 002 | −0.3453 | **FAIL** 2,2,2,2,2 | pass | **FAIL** 0.993–0.995 |
+| loss | 003 | −0.7831 | **FAIL** 2,2,2,2,2 | **FAIL** 0.20–0.40 | **FAIL** 0.9999 |
+
+arch 003 emitted a **constant** signal on four of five files — standard
+deviation exactly 0.0. The log names the mechanism: `Class-127 collapse
+artifact — score would be 5.5762667 via 2^17 FP ratio`.
+
+### 12A.2 What this is not
+
+Three alternative explanations are ruled out by the artifacts, so the
+investigation does not need to revisit them:
+
+- **Not a gate-path defect.** Every check reported `n_files_io_failed: 0`
+  with `files_completed = 5/5` and full per-file metrics.
+- **Not mis-calibrated thresholds.** The `unique_int8 > 25` threshold was
+  derived from FCNet's own worst file (52 on file 3, a 2.08× margin) and
+  sits above the collapsed-baseline maximum of 15. On band 15-19
+  specifically, FCNet measures **143–159**. Observed values of 1–4 fail by
+  an order of magnitude against any defensible threshold.
+- **Not a novel-architecture false positive.** The design doc anticipated
+  legitimate models landing in `[15, 25)`; these are at 1–4, far outside
+  that grey zone.
+
+The three recording-only checks (`pearson_dispersion`,
+`spectral_peak_ratio`, `per_file_output_std`) all passed, but they carry
+no rejection threshold by design — their passing is not evidence of
+health and must not be read as such.
+
+### 12A.3 Consequences observed
+
+```
+gates detect collapse → would_invalidate=true → resolved_action=continue
+  → the round still yields a score, recorded as a normal result
+  → "no successful trial round is HealthGate-valid in this iteration"
+  → Best score: None (no incumbent)
+  → [FORMAL OVERRIDE] runs formal on an unvalidated plan,
+     warning that the score "may be unreliable"
+```
+
+The system is honest about the last step, but an unreliable score that
+reaches records can still become an incumbent or a reported result.
+
+### 12A.4 V20 target behaviour
+
+- A blocking check that fails must not leave the round counted as a
+  valid result. Gates named `*_blocking` must either block or be renamed.
+- When an iteration produces **zero** HealthGate-valid trials, the formal
+  round's output must not become a scientific result or an incumbent. A
+  diagnostic fallback run is acceptable; silently promoting its number is
+  not.
+- The distinction between "policy says continue" and "policy says
+  invalidate but the resolver returned continue" must be visible in the
+  record, not inferable only by reading both fields.
+
+### 12A.5 Open questions
+
+1. Is `resolved_action: continue` the configured intent in
+   `health_checks_effective.yaml` for these rounds, or a severity-
+   resolution defect? Read the materialised effective config first — this
+   is free and decides whether the fix is config or code.
+2. Should a zero-valid-trial iteration abort, run formal as labelled
+   diagnostic, or skip formal entirely?
+3. Does the interpreter already receive enough per-round gate evidence to
+   explain the collapse to the proposer, or is that the PR 3 remainder?
+
 ## 13. Priority ordering
 
 **P0 — Calibration authority and identity**
@@ -1274,12 +1367,126 @@ then a conditional PR B (§6.6). PR A is the only one authorized to start.
 16. Track model-scale trends and feedback effects
 17. Detect systematic downsizing bias
 
+### 13.1 Launch gate — what must be done before V20 runs
+
+The list above orders work by importance. This section splits it by a
+different question: **what would make a V20 campaign's results
+uninterpretable if it were still missing?** Everything in the first tier
+failed visibly in V19; running again without it would spend time and
+money on known defects.
+
+**Blocking — V20 does not launch until all six are complete and validated**
+
+| # | Requirement | Why it blocks | Evidence |
+|---|---|---|---|
+| 1 | Production pre-flight runs in the isolated worker; parent stays CPU-only, holding no CUDA context or cache | The parent held 6,962 MiB for a whole iteration | §6.1, §6.6 |
+| 2 | Chain/pair GPU aggregation and attribution: memory accounted over the process tree, contention-caused OOM never recorded as candidate failure, two-chain runs pass a real aggregate check | Pair reached 28,732 MiB and produced a mis-attributed OOM | §6.2, §6.5 |
+| 3 | Measured-evidence admission: a formal candidate cannot proceed on `ADVISORY` alone; it needs calibration shown applicable to it, or a live probe of it | `ADVISORY` is currently a terminal state for admitted candidates | §3.0, §3.5 |
+| 4 | Calibration promotion wired into production, `model_family` propagated, and validated/rejected/unusable counts reported | 20 observations, 0 promotions, family `unknown` throughout | §3.2, §3.3, §12 |
+| 5 | HealthGate enforcement: a failed blocking check cannot leave a round counted valid; with zero valid trials the formal output is not a scientific result or an incumbent | All four rounds collapsed, all resolved `continue` | §12A |
+| 6 | Campaign-scoped control state: STOP, queue state and pair summaries belong to a campaign; a stopped campaign cannot block a new one | The previous campaign's STOP blocked this one's launch | §9 |
+
+**Non-blocking — improve during V20**
+
+These sharpen analysis but do not decide whether a result is
+interpretable, provided the six above hold:
+
+- fuller RSS time series beyond phase peaks (§7);
+- portable/auto host-memory configuration (§10);
+- richer model-scale trend reporting (§11.3);
+- time-estimate accuracy, including door 4 (§11.2);
+- deeper allocated/reserved telemetry (§5) — *given* that basic aggregate
+  safety from requirement 2 is already in place.
+
+### 13.2 Suggested PR ladder
+
+Not necessarily five mechanical PRs, but **each problem needs its own
+acceptance criteria**, so a regression can be located instead of hunted
+across a large change.
+
+```
+V19 closeout (§14)
+  → PR A   isolated production pre-flight
+           → bounded single-chain validation
+           → bounded two-chain validation
+  → PR B   chain/pair GPU aggregation and attribution
+           → real contention validation
+  → PR C   measured-evidence admission + calibration promotion
+           → production reachability validation
+  → PR D   HealthGate enforcement and zero-valid-trial policy
+  → PR E   campaign-scoped controls
+  → final V20 gate
+  → launch V20
+```
+
+PR B remains conditional in the sense of §6.6 — its *scope* depends on
+what the two-chain validation after PR A actually shows — but requirement
+2 above is not optional. If PR A alone makes the pair demonstrably safe
+and attribution correct, PR B can be small; it cannot be skipped without
+evidence.
+
 ---
 
-## 14. V19 continuation policy
+## 14. V19 closure
 
-None of the findings in this document is an automatic stop condition for
-the running campaign.
+**V19 is closed. It will not be restarted.**
+
+Formal classification:
+
+```
+V19 infrastructure validation campaign — stopped after confirming
+pair-level GPU contention and HealthGate enforcement gaps.
+
+Final state: STOPPED — PAIR-LEVEL GPU CONTENTION
+```
+
+**Do not describe V19 as "completed successfully".** It produced no
+citable formal scientific result. The accurate description is that it
+**concluded as a production diagnostic campaign** — and that is where its
+value lies: it forced several hidden production defects into the open,
+with measurements, in two hours of real running. Restarting it would
+spend further time and money on defects that are now known.
+
+### 14.0 What V19 established
+
+**Validated — these work and V20 must not redesign them**
+
+- static runtime estimates no longer hold rejection authority;
+- VRAM pre-flight classification is correct across its typed dispositions;
+- candidate-level and infrastructure failures are distinguishable;
+- C13 stop semantics work at all three layers (§14.2).
+
+**Exposed — these are the V20 work**
+
+- production pre-flight is not wired to the isolated worker (§6.1);
+- chain/pair GPU aggregate is not actually constrained (§6.2);
+- a contention-caused OOM was attributed to a candidate (§6.5);
+- calibration promotion is not wired into production (§3.2);
+- `model_family` identity is missing from every observation (§3.3);
+- HealthGate detected severe collapse while enforcement resolved to
+  `continue` (§12A);
+- no citable formal scientific result was produced.
+
+The next step is not a V19 restart but the §13.1 launch gate, then a
+fresh campaign.
+
+### 14.0.1 V20 must be a genuinely new campaign
+
+Required: new campaign ID, new run names, new workspaces, new report, new
+queue state, cold start.
+
+**Must not be reused**, because each would import a defect or a
+contaminated judgement into a clean run:
+
+```
+proposal history          incumbent
+HealthGate history        resource-failure feedback
+the old STOP file         contention-polluted OOM evidence
+```
+
+V19's artifacts are retained as **forensic evidence only**.
+
+### 14.1 Historical record — the stop decision
 
 > **Escalation record — 2026-07-31 19:56 UTC.** The first condition
 > below fired: driver-visible aggregate reached 28,732 MiB, past the
@@ -1298,7 +1505,7 @@ the running campaign.
 > preserves comparability; the two chains would otherwise have run the
 > rest of the campaign under materially different resource conditions.
 
-### 14.1 Campaign closeout — verified 2026-07-31 21:00 UTC
+### 14.2 Campaign closeout — verified 2026-07-31 21:00 UTC
 
 **Final verdict: `STOPPED — PAIR-LEVEL GPU CONTENTION`.** Not a candidate
 failure and not a runtime-estimation failure — every disposition was
@@ -1357,9 +1564,14 @@ the calibration state by nothing.
 
 ---
 
-## 15. Evidence to collect from the remainder of V19
+## 15. Evidence to collect — from V19's artifacts, and from V20
 
-Update this document after the campaign with, per iteration: proposal
+V19 is closed, so there is no "remainder" to observe. This list now has
+two uses: what to mine from V19's retained artifacts, and what the V20
+campaign must record from its first iteration onward so the same
+questions are answerable without a second forensic exercise.
+
+Per iteration: proposal
 scale; realized parameter count; model family; runtime evidence tier;
 live probe result; calibration bucket identity; promotion result;
 training wall time; allocated / reserved / driver-visible VRAM where
@@ -1367,10 +1579,16 @@ available; process count per chain; HealthGate result; score;
 next-iteration scale change; and every resource-related candidate
 failure.
 
-**Constraint**: do not modify the running V19 to obtain telemetry it
-does not currently produce. Use existing artifacts and read-only
-monitoring only. Telemetry that does not exist is itself a V20 finding
-(§7), not a reason to touch a running campaign.
+**Constraint on V19 artifacts**: read-only. They are forensic evidence
+(§14.0.1) and nothing may be re-run against them to manufacture
+telemetry that the campaign did not produce. Telemetry that does not
+exist is itself a V20 finding (§7).
+
+**Requirement on V20**: the fields above must be recorded as the
+campaign runs, not reconstructed afterwards. Every gap in this list cost
+a separate investigation during the V19 closeout — peak RSS, per-process
+GPU attribution, and the feedback text actually shown to the agent were
+each unavailable when the question arose.
 
 ---
 
@@ -1429,6 +1647,7 @@ about whether production calls it.
 
 | Rev | Date | Change |
 |---|---|---|
+| 1d | 2026-07-31 | **V19 formally closed** (§14): classified as an *infrastructure validation campaign stopped after confirming pair-level GPU contention and HealthGate enforcement gaps*, final state `STOPPED — PAIR-LEVEL GPU CONTENTION`. Explicitly not "completed successfully" — it produced no citable formal scientific result; it concluded as a production diagnostic campaign, which is where its value lies. It will not be restarted, and V20 must be a genuinely new campaign (new ID, run names, workspaces, report, queue state, cold start) reusing no proposal history, incumbent, HealthGate history, resource-failure feedback, old STOP or contention-polluted OOM evidence; V19 artifacts are forensic evidence only. §14.0 separates what V19 validated (static estimates hold no rejection authority, pre-flight classification correct, candidate/infrastructure failures distinguishable, C13 stop semantics) from what it exposed (seven defects). New priority **P0-5** added as §12A: HealthGate detected severe collapse on all four rounds — `unique_int8` of 1–4 out of 256, one round emitting a constant signal — recorded `would_invalidate_under_production_policy: true`, and still resolved to `continue`, so collapsed rounds counted as results and formal ran on a plan no valid trial supported. Gate-path defect, mis-calibrated thresholds and novel-architecture false positives are each ruled out by the artifacts. §13.1 adds a launch gate splitting the work into six blocking requirements and five non-blocking improvements, and §13.2 records the PR A–E ladder with the rule that each problem needs its own acceptance criteria. |
 | 1c | 2026-07-31 | Remediation plan added as §6.6 (operator decision): **PR A** routes the production pre-flight through the existing `run_isolated_preflight` and keeps the chain parent CPU-only — a call-site replacement, not a rewrite, with identical inputs, outputs and dispositions — plus production-wiring guardrails so "built but never called" cannot recur. Training and inference keep their subprocess architecture, which already returns memory correctly. Explicit non-goals recorded: no dynamic chain kill, no NVML scheduler, no memory broker, `empty_cache()` never as the primary fix, and no raising of the 12 / 28 GiB or host-quota ceilings, since the defect is double-held resources rather than a low ceiling. **PR B** (chain/pair NVML aggregation and contention-aware OOM attribution) is conditional on the phase-3 two-chain validation still showing risk, and must never be merged into PR A. Validation sequenced as wiring → bounded single-chain → bounded two-chain, with the chain peak measured rather than assumed. §11.2 restructured into four numbered entry points for resource-driven shrinking, adding door 4: the time estimate is rendered into the planning prompt (`prompts.py:645-650`) with an explicit "over" verdict — the arch formal round was shown "factor 1.98 (over)" for a round that took 96.3 min against a 120 min budget, a 2.47× over-prediction reaching the decision-maker as fact. Recorded as OPEN with no harm demonstrated: that line appeared on the formal round so no later proposal was observed, and the only observable size change went up 87 %. Door 4 is explicitly ranked far below the confirmed door 3. |
 | 1b | 2026-07-31 | Campaign stopped and closed out. §6.1 upgraded from OPEN INVESTIGATION to **CONFIRMED DEFECT**: the chain parent's 6.9 GiB is the in-process VRAM pre-flight, traced call-path by call-path and confirmed by a pre-registered falsifiable prediction — the parent held 6,962 MiB unchanged across 13 samples over 3 minutes *after* its child exited, alone on the GPU. The fix (`run_isolated_preflight`, PR #151) exists and is GPU-validated with zero production call sites, making this the second instance of the P0-1 pattern; a reachability check is now a V20 requirement. §14 records the operator's 20:15 reversal on the §6.5 evidence and the full closeout: C13's three stop layers all correct, waves 2-4 never started, GPU returned to baseline, 645,054 tokens / $1.94 spent, and 20 observations that advanced calibration by nothing. |
 | 1a | 2026-07-31 | Same day, before commit: §6.3 upgraded from HYPOTHESIS to CONFIRMED by direct measurement — pair total 28,732 MiB past the 28 GiB ceiling, loss chain tree 17.74 GiB against a 12 GiB cap, chain parents holding 55 % of all GPU memory. §14 escalation fired and is recorded with the operator's continue-with-monitoring decision; §6.4 records the accepted risk (a host-quota SIGTERM carries no memory error and resembles the misattributed C12 signature). |
