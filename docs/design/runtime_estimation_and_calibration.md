@@ -4433,3 +4433,47 @@ production tuner not yet wired to it.
 Verdict: `GPU VALIDATION FAIL — CAPACITY CLASSIFICATION`. The execution
 control was correct; the terminal semantic label was not. The repair is
 not validated until a fourth GPU validation passes on one exact SHA.
+
+
+### Fourth GPU validation — PASS (SHA `8f853c5`)
+
+All three candidates produced their expected typed result on one exact
+SHA, with candidate hashes byte-identical to the reviewed package.
+
+| candidate | outcome | evidence |
+|---|---|---|
+| 323 M baseline | `COMPLETED_MEASUREMENT` | 323,281,352 params, 5.732 GB vs 12 GB cap, 7.80 s, peak RSS 7.94 GiB |
+| 17 M dilated-conv | `MEASURED_HOST_MEMORY_EXCEEDED` | peak RSS 25.99 GiB vs 24 GiB ceiling, `parent_rss_monitor`, exit -15, TERM sufficed, no orphan |
+| quadratic-attention | `INCONCLUSIVE_MEASUREMENT` | `torchinfo_trace` phase, 64.6 s, no timeout provenance, peak RSS 12.28 GiB |
+
+Authority resolved correctly in every case: the host-memory result
+carried host authority only and was phrased as a host limit, never a VRAM
+verdict; the inconclusive result carried no authority at all.
+
+All 16 acceptance criteria met: parent survived, no global host OOM, no
+orphans, no timeout below its deadline, no host result mislabelled as
+VRAM, no training, no LLM calls, GPU and host memory returned to
+baseline.
+
+Four repairs were needed, and they share one shape — each time a signal
+was standing in for something it did not measure:
+
+```text
+1  a search timeout        standing in for  capacity
+2  wall time               standing in for  memory
+3  address-space reservation standing in for  resident memory
+4  "inconclusive"          standing in for  "a deadline elapsed"
+```
+
+Every conclusion is now supported by a measurement of its own kind, and
+the result schema refuses a timeout claim that cannot evidence its own
+deadline.
+
+**Open, separate from this repair:** the 17 M candidate used ~26 GiB of
+host RSS during PRE-FLIGHT. The protection classified it correctly, but a
+legitimate medium-scale candidate being stopped by inspection overhead
+would keep the original problem alive in a new form — the agent would
+still be pushed toward smaller models. Whether that 26 GiB is the
+candidate's real requirement or an artifact of the inspection method
+(CPU tracing at long sequence length, descending batch search, retained
+intermediates) is a preflight-efficiency question, tracked separately.
