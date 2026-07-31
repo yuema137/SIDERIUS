@@ -107,7 +107,7 @@ must be shown attributable to it.
 | **P0-3** | Validated calibration is not an admission authority | No consumer treats a validated bucket as the final gate | Operator requirement: dynamic calibration should be the final gate | Validated calibration or a successful live probe is the final gate | No |
 | **P0-4** | Calibration-quality reporting | A campaign can collect observations while zero are promotable, silently | "Dynamic calibration is running" was believed true when it was not | Every campaign reports bucketed/eligible/validated/rejected counts | No |
 | **P1-1** | GPU-memory telemetry incomplete | Estimate (2.00 GB) and `nvidia-smi` (6,962 MiB) are different quantities; neither `max_memory_allocated` nor `max_memory_reserved` is persisted | The estimate-vs-actual gap cannot be attributed | Persist allocated / reserved / driver-visible per process and phase | No |
-| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | Define and enforce the cap over the chain's GPU process tree, measured driver-visible | **Escalated §6.3** — operator elected to continue with monitoring |
+| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | Define and enforce the cap over the chain's GPU process tree, measured driver-visible; route pre-flight through the existing isolated worker (§6.1) | **Campaign stopped §14.1.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
 | **P1-3** | Production host-memory telemetry absent | Peak RSS, RSS timeline, and phase attribution are not persisted on the production path | The 17M dilated-conv question cannot be settled from artifacts | Bounded RSS telemetry with phase attribution | No |
 | **P1-4** | Long-sequence preflight memory amplification | A 17M candidate reached ≈26 GiB process-tree RSS in preflight | Unresolved between genuine requirement and inspection amplification | Phase-level bounded measurement to distinguish A from B | No |
 | **P2-1** | Campaign-scoped stop and queue state | A previous campaign's queue-level `STOP` blocked a new campaign's launch | One campaign's terminal state has authority over another | All control state under `<campaign_root>/<campaign_id>/control/` | No |
@@ -491,12 +491,80 @@ What is **not** covered by design: the chain parent
 6,962 MiB. Combined with its child, one chain held ≈13.6 GiB against a
 **12 GiB per-chain cap**.
 
-**OPEN INVESTIGATION**: why the parent holds ~6.9 GiB. A driver process
-that orchestrates subprocesses should not need a large CUDA allocation.
-Candidate explanations, none confirmed: the parent runs the VRAM
-preflight in-process and does not release it; the parent performs
-scoring or evaluation itself; a caching-allocator pool is retained
-across iterations. This must be measured, not assumed.
+**CONFIRMED DEFECT — traced and measured 2026-07-31.** The parent's
+6.9 GiB is the in-process VRAM pre-flight, never released.
+
+The call path (all non-test, traced on `195a9a1`):
+
+```
+run_one_iteration.py                      ← no torch import of its own
+ └ workflows/model_exploration.py:56       from … import run_workflow   (in-process)
+    └ HyperparamTuningAgent.run()                                        (in-process)
+       ├ _run_skill("evaluate_vram_skill")   tune_agent:1041-1048
+       │    importlib.import_module(...).run_skill(sandbox, ...)   ← IN-PROCESS call
+       │    evaluate_vram_skill/wrapper.py:49   import torch
+       │    evaluate_vram_skill/wrapper.py:225  cuda_context_bytes()  → CUDA context
+       │    batch_resolver searches batch sizes upward → allocates to a high-water mark
+       │    wrapper.py:558  del model_for_train, …   ← frees Python refs only
+       │    (no torch.cuda.empty_cache() anywhere in the skill)
+       │                          ⇒ caching-allocator reserved pool held for the
+       │                            entire life of the chain parent
+       ├ sandbox_executor → subprocess train_engine_sandbox.py   ← releases on exit
+       └ sandbox_executor → subprocess inference_single.py       ← releases on exit
+```
+
+Training and inference are `subprocess.Popen` and give everything back
+when they exit. **Only the pre-flight runs in the parent, and only its
+memory persists.**
+
+**Measured confirmation.** A falsifiable prediction was registered before
+the evidence existed: if this diagnosis is right, the parent must keep
+its memory after its child exits. The wind-down of the arch chain, alone
+on the GPU with no contention, sampled every 15 s:
+
+```
+20:56:12  total=7240  pid=1422046  mem=6962   ← child already exited
+   …      13 consecutive samples, 3 minutes
+20:59:15  total=7240  pid=1422046  mem=6962
+20:59:30  total=273   ALL_GPU_PROCS_EXITED    ← parent exits, GPU returns to baseline
+```
+
+| Prediction | Supports diagnosis if | Measured |
+|---|---|---|
+| parent holds ~6.9 GiB after child exits | yes | **6,962 MiB, unchanged** ✓ |
+| parent memory does not vary with child phase | yes | one value ever observed: 6,962 ✓ |
+| parent memory fixed from early on | yes | constant across all sampling ✓ |
+| GPU returns to baseline once parent exits | yes | 273 MiB ✓ |
+
+All four hold. The 6.9 / 8.9 GiB difference between the two chains is
+consistent with the batch search reaching different high-water marks.
+
+**The fix already exists and is already GPU-validated.** PR #151 built
+`run_isolated_preflight` (`isolated_probe.py` + `preflight_worker_main.py`)
+precisely to run pre-flight in its own process. Its only non-test call
+site is `scripts/vram_preflight_validation.py` — **zero production call
+sites**. Routing the production pre-flight through it should remove the
+parent's CUDA context entirely.
+
+> **This is the same structural defect as P0-1, in a second subsystem.**
+>
+> | | built | unit-tested | GPU-validated | wired to production |
+> |---|---|---|---|---|
+> | calibration promotion | ✓ | ✓ | — | **✗** |
+> | isolated pre-flight worker | ✓ | ✓ | ✓ | **✗** |
+>
+> Two components, both correct, both unreachable from the code that
+> needs them. §18 states the rule this violates: a unit test proves the
+> function works and cannot prove production calls it. V20 should add a
+> reachability check for both.
+
+**Not yet measured**: the predicted pair total after the fix. An earlier
+draft estimated ~12.5 GiB; that is arithmetic, not evidence, and must be
+confirmed by a bounded single-chain GPU validation after the wiring
+lands. Note also that the 17.74 GiB loss-chain tree was measured *under
+contention* — the caching allocator grows opportunistically, so a
+standalone peak could be higher, not lower. Serial-execution safety is
+therefore also unproven.
 
 ### 6.2 The cap does not mean what it appears to mean
 
@@ -950,10 +1018,49 @@ the running campaign.
 > 28 GiB campaign ceiling, 1,268 MiB (4.2 %) from the host quota, stable
 > over 40 s (§6.3). Reported to the operator with three options
 > (graceful stop of the loss chain; graceful stop of both; continue with
-> monitoring). **Operator decision: continue with automated
-> monitoring**, accepting the §6.4 risk. No campaign state was modified.
-> A read-only monitor is armed on the quota margin and on chain-parent
-> liveness.
+> monitoring). **Operator decision at 19:56: continue with automated
+> monitoring**, accepting the §6.4 risk.
+>
+> **Reversed at 20:15 UTC on new evidence.** The §6.5 contention-OOM
+> finding — a real `torch.OutOfMemoryError` produced with 125.94 MiB
+> free, attributable to the peer chain rather than the candidate —
+> changed the balance: the risk was no longer hypothetical wasted GPU
+> time but demonstrated mis-attributed feedback to the agent. **Operator
+> decision: stop both chains gracefully.** Stopping both rather than one
+> preserves comparability; the two chains would otherwise have run the
+> rest of the campaign under materially different resource conditions.
+
+### 14.1 Campaign closeout — verified 2026-07-31 21:00 UTC
+
+**Final verdict: `STOPPED — PAIR-LEVEL GPU CONTENTION`.** Not a candidate
+failure and not a runtime-estimation failure — every disposition was
+correctly classified and no static estimate rejected anything. The gap is
+attribution (§1.3) and aggregate control (§6.2).
+
+C13's three stop layers all behaved as designed:
+
+```
+chain   chain_stopped.json ×2, respawn: false
+        arch  "stop observed after iteration 1 (iteration exit 0)"    ← ran to completion
+        loss  "stop observed after iteration 1 (iteration exit 143)"  ← SIGTERM, 128+15
+runner  "chain … STOPPED on request (EXIT=99) — no restart suggested"
+queue   "QUEUE STOPPED (operator_stop_requested) at wave 1:
+         wave 1 ended under an operator stop — no further wave launched"
+        RUNNER_EXIT=99
+```
+
+| check | result |
+|---|---|
+| waves 2-4 | never started |
+| GPU after stop | 0 processes, 273 MiB baseline, no stragglers |
+| watchdog kills / signal terminations | none |
+| CUDA OOM events | exactly 2, both in iteration 1 (§6.5) |
+| spend | 645,054 tokens / $1.94 — 1.1 % of the 60M / $180 caps |
+| calibration delta | 20 observations, **0 promotions**, 6 buckets, `family=unknown` throughout |
+
+The calibration line is the P0 defect restated as an outcome: a full
+two-hour wave of real training produced twenty measurements and advanced
+the calibration state by nothing.
 
 **Continue V19 while all of these hold:**
 
@@ -1054,5 +1161,6 @@ about whether production calls it.
 
 | Rev | Date | Change |
 |---|---|---|
+| 1b | 2026-07-31 | Campaign stopped and closed out. §6.1 upgraded from OPEN INVESTIGATION to **CONFIRMED DEFECT**: the chain parent's 6.9 GiB is the in-process VRAM pre-flight, traced call-path by call-path and confirmed by a pre-registered falsifiable prediction — the parent held 6,962 MiB unchanged across 13 samples over 3 minutes *after* its child exited, alone on the GPU. The fix (`run_isolated_preflight`, PR #151) exists and is GPU-validated with zero production call sites, making this the second instance of the P0-1 pattern; a reachability check is now a V20 requirement. §14 records the operator's 20:15 reversal on the §6.5 evidence and the full closeout: C13's three stop layers all correct, waves 2-4 never started, GPU returned to baseline, 645,054 tokens / $1.94 spent, and 20 observations that advanced calibration by nothing. |
 | 1a | 2026-07-31 | Same day, before commit: §6.3 upgraded from HYPOTHESIS to CONFIRMED by direct measurement — pair total 28,732 MiB past the 28 GiB ceiling, loss chain tree 17.74 GiB against a 12 GiB cap, chain parents holding 55 % of all GPU memory. §14 escalation fired and is recorded with the operator's continue-with-monitoring decision; §6.4 records the accepted risk (a host-quota SIGTERM carries no memory error and resembles the misattributed C12 signature). |
 | 1 | 2026-07-31 | Created from findings during the fresh V19 restart (`v19r3_10iter_20260731_1842`) after the runtime-estimation C1-C14 ladder and the PR #151 VRAM-preflight repair. Records: zero production promotion call sites; `model_family="unknown"` on all observations; the corrected `bucket_key` diagnosis; chain parent + sandbox child GPU aggregation; absent production RSS telemetry; the unresolved long-sequence amplification question; cross-campaign STOP scope; host-memory config portability; and model-scale monitoring. |
