@@ -119,19 +119,27 @@ def run_cell(entry_id: str, args) -> CampaignCell:
         "weight_decay": 1e-5,
         "device": "cuda",
     }
-    base = dict(
-        track="A_matrix",
-        cell_id=entry_id,
-        family=entry["family"],
-        target_parameter_count=entry["target"],
-        at_family_ceiling=entry.get("at_family_ceiling", False),
-        wall_cap_seconds=args.cell_wall_seconds,
-    )
+
+    def _cell(**fields) -> CampaignCell:
+        """Build a cell with the shared identity fields.
+
+        Explicit keywords rather than `**base` expansion: strict pyright
+        cannot match a heterogeneous dict against the model's parameter
+        types, and silencing that would hide real mismatches.
+        """
+        return CampaignCell(
+            track="A_matrix",
+            cell_id=entry_id,
+            family=str(entry["family"]),
+            target_parameter_count=int(entry["target"]),
+            at_family_ceiling=bool(entry.get("at_family_ceiling", False)),
+            wall_cap_seconds=args.cell_wall_seconds,
+            **fields,
+        )
 
     window = sample_contention_window(device_vram_gb=probe_device_vram_gb())
     if window.classification != "single_candidate_idle":
-        return CampaignCell(
-            **base,
+        return _cell(
             status="infrastructure_failure",
             failure_detail=f"GPU not idle: {window.classification}",
         )
@@ -156,15 +164,13 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             device_vram_gb=probe_device_vram_gb(),
         )
     except Exception as exc:
-        return CampaignCell(
-            **base,
+        return _cell(
             status="infrastructure_failure",
             failure_detail=f"probe could not be built or run: {exc!r}",
         )
 
     if result.status != "ok":
-        return CampaignCell(
-            **base,
+        return _cell(
             status="measured_failure",
             failure_detail=f"probe status={result.status}: {result.error}",
         )
@@ -202,8 +208,7 @@ def run_cell(entry_id: str, args) -> CampaignCell:
     torch.cuda.synchronize()
     actual = time.perf_counter() - started
 
-    return CampaignCell(
-        **base,
+    return _cell(
         status="ok",
         probe=probe,
         projected_seconds=projected,

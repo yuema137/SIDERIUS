@@ -66,6 +66,10 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 sys.dont_write_bytecode = True
@@ -160,15 +164,19 @@ def plan(band: str, data_dir: Path, output_root: Path, args) -> dict:
     }
 
 
-def _load_band_file(path: Path) -> tuple[object, float]:
+def _load_band_file(path: Path) -> tuple[np.ndarray, float]:
     """Legacy ``read_loader`` semantics (train.py:52-62), timed."""
     import h5py
     import numpy as np
 
     started = time.perf_counter()
     with h5py.File(path, "r") as handle:
-        alltrain = np.array(handle["timeseries"]["channel0001"]["timeseries"]) + 128
-        alltarget = np.array(handle["timeseries"]["channel0002"]["timeseries"]) + 128
+        # h5py's static type is a union that pyright cannot index; the
+        # runtime object is a dataset group. Narrow explicitly rather than
+        # scattering ignores.
+        series: Any = handle["timeseries"]
+        alltrain = np.array(series["channel0001"]["timeseries"]) + 128
+        alltarget = np.array(series["channel0002"]["timeseries"]) + 128
     alltrain = alltrain[:MAX_INDEX].reshape(-1, SAMPLE_SIZE, BATCH_SIZE, INPUT_SIZE)
     alltarget = alltarget[:MAX_INDEX].reshape(-1, SAMPLE_SIZE, BATCH_SIZE, INPUT_SIZE)
     random_index = np.random.randint(SAMPLE_SIZE)
