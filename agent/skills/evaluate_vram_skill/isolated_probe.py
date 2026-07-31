@@ -45,7 +45,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -358,38 +358,58 @@ def run_isolated_preflight(
         exceeded=host_exceeded,
     )
 
-    common = dict(
-        label=spec.label,
-        elapsed_seconds=elapsed,
-        worker_pid=process.pid,
-        worker_pgid=pgid,
-        exit_code=returncode,
-        signal_number=exit_signal,
-        orphans_remaining=orphans,
-        host_memory=host_evidence,
-        vram_cap_gb=spec.vram_budget_gb,
-    )
+    def _result(
+        outcome: PreflightOutcome,
+        detail: str,
+        phase: str,
+        *,
+        realized_parameter_count: int | None = None,
+        estimated_gb: float | None = None,
+        inference_batch: int | None = None,
+        schema_field: str | None = None,
+        schema_message: str | None = None,
+    ) -> IsolatedProbeResult:
+        """Explicit keywords rather than `**dict` expansion: strict pyright
+        cannot match a heterogeneous dict against these parameter types,
+        and silencing that would hide real mismatches."""
+        return IsolatedProbeResult(
+            label=spec.label,
+            outcome=outcome,
+            detail=detail,
+            phase=phase,
+            elapsed_seconds=elapsed,
+            worker_pid=process.pid,
+            worker_pgid=pgid,
+            exit_code=returncode,
+            signal_number=exit_signal,
+            orphans_remaining=orphans,
+            host_memory=host_evidence,
+            vram_cap_gb=spec.vram_budget_gb,
+            realized_parameter_count=realized_parameter_count,
+            estimated_gb=estimated_gb,
+            inference_batch=inference_batch,
+            schema_field=schema_field,
+            schema_message=schema_message,
+        )
 
     if host_exceeded:
-        return IsolatedProbeResult(
-            outcome="MEASURED_HOST_MEMORY_EXCEEDED",
-            detail=(
+        return _result(
+            "MEASURED_HOST_MEMORY_EXCEEDED",
+            (
                 f"worker tree reached {host_evidence.peak_worker_rss_gib} GiB against "
                 f"a {host_evidence.limit_gib} GiB allowance; terminated by the parent "
                 f"(TERM sent={term_sent}, KILL sent={kill_sent})"
             ),
-            phase="host_memory_monitor",
-            **common,
+            "host_memory_monitor",
         )
     if timed_out:
-        return IsolatedProbeResult(
-            outcome="MEASURED_HARD_TIMEOUT",
-            detail=(
+        return _result(
+            "MEASURED_HARD_TIMEOUT",
+            (
                 f"worker exceeded the {deadline_seconds:.0f}s deadline "
                 f"(TERM sent={term_sent}, KILL sent={kill_sent})"
             ),
-            phase="worker_deadline",
-            **common,
+            "worker_deadline",
         )
 
     payload = _load_worker_result(result_path)
@@ -399,30 +419,46 @@ def run_isolated_preflight(
         # machinery failing, and must not be dressed up as a measurement.
         near_limit = peak_rss >= 0.9 * spec.worker_memory_limit_bytes
         if exit_signal == signal.SIGKILL and near_limit:
-            return IsolatedProbeResult(
-                outcome="MEASURED_HOST_MEMORY_EXCEEDED",
-                detail=(
+            return _result(
+                "MEASURED_HOST_MEMORY_EXCEEDED",
+                (
                     f"worker was SIGKILLed at {host_evidence.peak_worker_rss_gib} GiB, "
                     f"within 10% of the {host_evidence.limit_gib} GiB allowance"
                 ),
-                phase="worker_exit",
-                **common,
+                "worker_exit",
             )
-        return IsolatedProbeResult(
-            outcome="PROBE_INFRASTRUCTURE_FAILURE",
-            detail=(
+        return _result(
+            "PROBE_INFRASTRUCTURE_FAILURE",
+            (
                 f"worker exited without a structured result "
                 f"(exit={returncode}, signal={exit_signal}); "
                 f"log tail: {_log_tail(log_path)}"
             ),
-            phase="worker_exit",
-            **common,
+            "worker_exit",
         )
 
-    payload.pop("label", None)
-    for key in ("host_memory", "vram_cap_gb", "elapsed_seconds"):
-        payload.pop(key, None)
-    return IsolatedProbeResult(**{**common, **payload})
+    def _int_or_none(value: object) -> int | None:
+        return value if isinstance(value, int) else None
+
+    def _float_or_none(value: object) -> float | None:
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def _str_or_none(value: object) -> str | None:
+        return value if isinstance(value, str) else None
+
+    outcome = _str_or_none(payload.get("outcome")) or "PROBE_INFRASTRUCTURE_FAILURE"
+    if outcome not in get_args(PreflightOutcome):
+        outcome = "PROBE_INFRASTRUCTURE_FAILURE"
+    return _result(
+        outcome,  # type: ignore[arg-type]  - narrowed against the Literal above
+        _str_or_none(payload.get("detail")) or "",
+        _str_or_none(payload.get("phase")) or "complete",
+        realized_parameter_count=_int_or_none(payload.get("realized_parameter_count")),
+        estimated_gb=_float_or_none(payload.get("estimated_gb")),
+        inference_batch=_int_or_none(payload.get("inference_batch")),
+        schema_field=_str_or_none(payload.get("schema_field")),
+        schema_message=_str_or_none(payload.get("schema_message")),
+    )
 
 
 def _load_worker_result(path: Path) -> dict | None:
