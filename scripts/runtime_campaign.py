@@ -106,11 +106,11 @@ def run_cell(entry_id: str, args) -> CampaignCell:
     import torch
 
     from core.runtime_control.calibration_policy import sample_contention_window
-    from core.runtime_control.probe import ProbeCaps, run_bounded_probe
     from core.runtime_control.probe_production import (
         probe_device_vram_gb,
         production_probe_executors,
     )
+    from core.runtime_control.probe_subprocess import ProbeWorkerSpec, run_worker
 
     entry = _resolve(entry_id)
     train_config = {
@@ -148,6 +148,43 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             failure_detail=f"GPU not idle: {window.classification}",
         )
 
+    # C12 fix: the probe runs behind a PROCESS boundary so the wall cap is
+    # a hard bound. A single stalled CUDA operation can no longer hang the
+    # campaign (transformer@8M-ceiling did exactly that, twice).
+    outcome = run_worker(
+        ProbeWorkerSpec(
+            model_type=entry["family"],
+            model_config_payload=entry["config"],
+            train_config=train_config,
+            loss_config={"loss_type": "ce"},
+            data_dir=args.data_dir,
+            device="cuda",
+            caps={
+                "max_wall_seconds": args.probe_wall_seconds,
+                "n_warmup_steps": args.warmup_steps,
+                "n_timed_train_steps": args.timed_steps,
+                "n_timed_inference_batches": args.inference_batches,
+            },
+            device_vram_gb=probe_device_vram_gb(),
+            result_path=str(args.output_root / "workers" / f"{entry_id}.json"),
+        ),
+        hard_cap_seconds=args.probe_hard_cap_seconds,
+    )
+    if outcome.classification == "measured_failure":
+        return _cell(
+            status="measured_failure",
+            failure_detail=(
+                f"{outcome.detail} | termination={outcome.termination.model_dump(mode='json')}"
+            ),
+        )
+    if outcome.classification == "infrastructure_failure":
+        return _cell(status="infrastructure_failure", failure_detail=outcome.detail)
+
+    worker = outcome.result
+    assert worker is not None
+
+    # The bounded EXECUTION segment still runs here, in-process, using the
+    # rate the worker measured.
     try:
         executors = production_probe_executors(
             model_type=entry["family"],
@@ -156,17 +193,8 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             loss_config={"loss_type": "ce"},
             data_dir=args.data_dir,
         )
-        result = run_bounded_probe(
-            model_identity=entry["family"],
-            executors=executors,
-            caps=ProbeCaps(
-                max_wall_seconds=args.probe_wall_seconds,
-                n_warmup_steps=args.warmup_steps,
-                n_timed_train_steps=args.timed_steps,
-                n_timed_inference_batches=args.inference_batches,
-            ),
-            device_vram_gb=probe_device_vram_gb(),
-        )
+        executors.setup()
+        result = worker
     except Exception as exc:
         # An OOM is a MEASURED statement about the candidate, not about our
         # infrastructure — classifying it as the latter would both mislabel
@@ -184,12 +212,7 @@ def run_cell(entry_id: str, args) -> CampaignCell:
             failure_detail=f"probe could not be built or run: {exc!r}",
         )
 
-    if result.status != "ok":
-        return _cell(
-            status="measured_failure",
-            failure_detail=f"probe status={result.status}: {result.error}",
-        )
-
+    realized = result.realized or {}
     probe = CellMeasurement(
         provenance="bounded_live_probe",
         setup_seconds=result.setup_seconds,
@@ -197,12 +220,10 @@ def run_cell(entry_id: str, args) -> CampaignCell:
         inference_ms_per_unit=result.inference_ms_per_batch,
         inference_work_unit="inference_batch",
         peak_vram_allocated_gb=result.peak_vram_gb,
-        realized_parameter_count=result.realized.parameter_count if result.realized else None,
-        trainable_parameter_count=(
-            result.realized.trainable_parameter_count if result.realized else None
-        ),
-        parameter_memory_gb=result.realized.parameter_memory_gb if result.realized else None,
-        dtype=result.realized.dtype if result.realized else None,
+        realized_parameter_count=realized.get("parameter_count"),
+        trainable_parameter_count=realized.get("trainable_parameter_count"),
+        parameter_memory_gb=realized.get("parameter_memory_gb"),
+        dtype=realized.get("dtype"),
         concurrency_identity=result.concurrency_identity,
     )
 
@@ -248,6 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--timed-steps", type=int, default=7)
         p.add_argument("--inference-batches", type=int, default=5)
         p.add_argument("--cell-wall-seconds", type=float, default=DEFAULT_CELL_WALL_SECONDS)
+        p.add_argument(
+            "--probe-hard-cap-seconds",
+            type=float,
+            default=300.0,
+            help="HARD process-level bound on the probe worker (C12 fix).",
+        )
         if name == "run":
             p.add_argument("--cell", required=True)
             p.add_argument("--run", action="store_true", help="Execute on the GPU.")

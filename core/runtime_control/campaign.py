@@ -141,6 +141,25 @@ MATRIX: tuple[dict[str, Any], ...] = (
             "num_blocks": 20,
         },
     },
+    # Final same-family replacement attempt (operator, 2026-07-31). The 20M
+    # and ~9M cells both OOM'd on this device; if this one also fails,
+    # wavenet@5M stands as the measured feasible family ceiling here and no
+    # further sizes are searched.
+    {
+        "family": "wavenet",
+        "cell_label": "~6M",
+        "target": 6_009_408,
+        "realized": 6_009_408,
+        "replacement_for": "wavenet@20M",
+        "replacement_reason": "measured_device_capacity_boundary",
+        "config": {
+            "segmentation_size": 40000,
+            "residual_channels": 128,
+            "gate_channels": 192,
+            "skip_channels": 64,
+            "num_blocks": 18,
+        },
+    },
     # --- transformer: token-mixer / sequence model ---
     {
         "family": "transformer",
@@ -328,8 +347,13 @@ def matrix_cell_id(entry: dict[str, Any]) -> str:
 
 
 def required_cell_ids() -> tuple[str, ...]:
-    """Every cell the campaign MUST complete to be eligible to pass."""
-    return tuple(matrix_cell_id(entry) for entry in MATRIX)
+    """Every cell the campaign MUST cover to be eligible to pass.
+
+    A REPLACEMENT cell is not independently required — it exists to cover
+    its original, and a replacement that itself fails must not open a new
+    hole of its own.
+    """
+    return tuple(matrix_cell_id(entry) for entry in MATRIX if not entry.get("replacement_for"))
 
 
 def write_cell(output_root: Path, cell: CampaignCell) -> Path:

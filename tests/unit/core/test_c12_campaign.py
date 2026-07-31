@@ -488,6 +488,8 @@ class TestApprovedReplacementCell:
                 actual_seconds=None,
             )
         )
+        # the replacement supplies the accuracy datum the original cannot
+        cells.append(_cell("wavenet@~6M", family="wavenet", projected=100.0, actual=102.0))
         report = evaluate_campaign(cells, CampaignThresholds())
         assert report.verdict == "C12 PASS"
 
