@@ -60,11 +60,13 @@ FROZEN_VALUES = {
     "--formal_eval_portion": "0.01",
     "--trial_time_budget_minutes": "5",
     "--formal_time_budget_minutes": "30",
-    "--trial_vram_budget_gb": "24",
-    "--formal_vram_budget_gb": "24",
+    # 24 -> 16 (operator 2026-07-31): this final Gate mirrors formal V19
+    # admission rather than the generic Gate-standard generous values.
+    "--trial_vram_budget_gb": "12",
+    "--formal_vram_budget_gb": "12",
     "--runtime_safety_factor": "1.5",
     "--runtime_trial_safety_factor": "3.0",
-    "--runtime_formal_safety_factor": "2.0",
+    "--runtime_formal_safety_factor": "2.25",
     "--runtime_watchdog_safety_factor": "3.5",
     "--runtime_watchdog_floor_seconds": "120",
     "--formal_strategy": "snapshot",

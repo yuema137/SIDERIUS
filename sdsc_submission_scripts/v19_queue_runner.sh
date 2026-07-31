@@ -15,13 +15,15 @@
 # Concurrency: exactly the two chains of the active wave (one arch + one
 # loss, SAME band) — never chains from different bands, never more than 2.
 #
-# VRAM: each chain carries a 16 GB per-attempt admission cap
-# (min(0.8 x physical, budget) in evaluate_vram_skill). Aggregate
-# 2 x 16 GB equals the 5090's 32 GB — there is NO combined-VRAM admission
-# (operator decision; V18r-measured models ran far below cap). An
-# aggregate OOM is handled by the continuation policy: preserve both
-# workspaces/logs, identify the failed process, restart ONLY the failed
-# chain via --only, record the contention event.
+# VRAM: each chain carries a 12 GiB per-attempt admission cap
+# (min(0.8 x physical, budget) in evaluate_vram_skill), and the PAIR is
+# now admitted as a unit against an aggregate ceiling (operator decision
+# 2026-07-31, core/runtime_control/pair_admission.py). 2 x 12 = 24 GiB
+# sits below both the 28 GiB ceiling and this host's 29.30 GiB
+# (30,000 MiB) per-user quota, so a pair at cap cannot trip the host
+# watchdog. The earlier posture — 2 x 16 = 32 GiB with no combined-VRAM
+# admission — assumed the card was the only limit; C12 measured the
+# per-user quota being enforced by SIGTERM instead.
 #
 # Continuation policy (frozen):
 #   both EXIT=0            -> next wave
@@ -71,6 +73,9 @@ QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$WS_ROOT/STOP}"
 #: Exit code a chain uses when it stopped on request (run_chain.sh).
 CHAIN_STOP_EXIT_CODE=99
 QUEUE_STOP_SIGNAL=""
+#: Per-chain admission cap, mirrored from the frozen chain command so the
+#: aggregate check and the launched command can never disagree.
+PAIR_CAP_GIB="${PAIR_CAP_GIB:-12}"
 
 # Frozen waves (operator 2026-07-29): wave : scope : monitored files.
 # Chain names derive as v19_{arch,loss}_<band-tag>; both families of a
@@ -199,12 +204,12 @@ launch_chain() {
       --bypass_formal_time_budget_min_delta 0.5 \
       --trial_time_budget_minutes 20 \
       --formal_time_budget_minutes 120 \
-      --trial_vram_budget_gb 16 \
-      --formal_vram_budget_gb 16 \
+      --trial_vram_budget_gb 12 \
+      --formal_vram_budget_gb 12 \
       --runtime_watchdog \
       --runtime_safety_factor 1.5 \
       --runtime_trial_safety_factor 3.0 \
-      --runtime_formal_safety_factor 2.0 \
+      --runtime_formal_safety_factor 2.25 \
       --runtime_watchdog_safety_factor 3.5 \
       --runtime_watchdog_floor_seconds 120 \
       --formal_strategy snapshot \
@@ -276,11 +281,11 @@ wait_and_record() {  # wave start_ts run1 [run2]
   return $(( 1 - all_ok ))
 }
 
-# Test hook: V19_QUEUE_NO_MAIN=1 source ... loads definitions only.
-if [ "${V19_QUEUE_NO_MAIN:-0}" = "1" ]; then
-  return 0 2>/dev/null || exit 0
-fi
-
+# --- entry point ------------------------------------------------------------
+# Everything above is definitions. main() below is the ONLY thing that
+# touches the filesystem or launches a chain; the source-safe guard at
+# the bottom of this file runs it on direct execution only.
+main() {
 # --- argument parsing / O2 selection ---------------------------------------
 ONLY=""
 while [ $# -gt 0 ]; do
@@ -345,6 +350,22 @@ for wave_spec in "${WAVES[@]}"; do
     continue
   fi
 
+  # Host-aware aggregate admission — the same rule the Gate applies.
+  # Per-chain caps bound one attempt; the host quota bounds the SUM.
+  if ! PAIR_CHECK="$(.venv/bin/python -m core.runtime_control.pair_admission \
+        --caps "$ARCH_RUN=$PAIR_CAP_GIB,$LOSS_RUN=$PAIR_CAP_GIB" 2>&1)"; then
+    log "WAVE $WAVE PAIR ADMISSION: configured caps can exceed the ceiling"
+    while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
+    if [ "${ALLOW_PAIR_CAP_OVERSUBSCRIPTION:-1}" != "1" ]; then
+      record_queue_stop "pair_infeasible_under_host_quota" "$WAVE" \
+        "configured caps for $ARCH_RUN + $LOSS_RUN exceed the aggregate ceiling"
+      exit 1
+    fi
+    log "  proceeding: the BINDING guard is the per-attempt predicted-peak check"
+  else
+    while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
+  fi
+
   log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]}"
   START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   LAUNCHED=()
@@ -397,3 +418,13 @@ for wave_spec in "${WAVES[@]}"; do
 done
 log "ALL WAVES COMPLETE — v19 campaign queue finished"
 exit 0
+}
+
+# Source-safe entry guard. Sourcing this file for tests or to inspect the
+# frozen command must NEVER launch a wave. `V19_QUEUE_NO_MAIN` is still
+# honoured for existing callers, but it is no longer what protects us —
+# an environment-only opt-out is one forgotten variable away from
+# executing a launch path.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${V19_QUEUE_NO_MAIN:-0}" != "1" ]; then
+  main "$@"
+fi
