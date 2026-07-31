@@ -342,6 +342,17 @@ def run_bootstrap(
             result,
             hardware_compatibility_id=hardware_id,
             execution_environment_id=environment_id,
+            # The workload the probe ACTUALLY ran. Derived from the caller's
+            # configs, never from the caps: D4 buckets and C7 applicability
+            # ranges are keyed on these, so a wrong value here mislabels the
+            # evidence for every future comparison.
+            workload={
+                "batch_size": int(train_config.get("batch_size", 1)),
+                "segment_length": int(model_config.get("segmentation_size", 0)),
+                "n_timed_train_steps": result.caps.n_timed_train_steps,
+                "n_timed_inference_batches": result.caps.n_timed_inference_batches,
+                "probe": "bootstrap",
+            },
         )
         observation_ids = tuple(registry.record_observation(record) for record in records)
     except Exception as exc:
@@ -440,17 +451,16 @@ def production_dependencies() -> BootstrapDependencies:
             expected_peer_pids=expected_peer_pids,
         )
 
-    def _build_observations(result, *, hardware_compatibility_id, execution_environment_id):
+    def _build_observations(
+        result, *, hardware_compatibility_id, execution_environment_id, workload
+    ):
         import torch
 
         return probe_observations(
             result,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
-            workload={
-                "batch_size": result.caps.n_timed_train_steps,
-                "probe": "bootstrap",
-            },
+            workload=workload,
             software_stack={"torch": torch.__version__, "cuda": torch.version.cuda},
             source_run={"run_name": "bootstrap", "tool": "scripts/runtime_bootstrap.py"},
             timestamp_metadata=time.strftime("%Y-%m-%dT%H:%M:%S%z"),

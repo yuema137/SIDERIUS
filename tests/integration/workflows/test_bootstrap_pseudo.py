@@ -85,13 +85,13 @@ def _deps(tmp_path, *, snapshot=IDLE) -> BootstrapDependencies:
             contention_window=_sample,
         )
 
-    def _observations(result, *, hardware_compatibility_id, execution_environment_id):
+    def _observations(result, *, hardware_compatibility_id, execution_environment_id, workload):
         # REAL observation builder.
         return probe_observations(
             result,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
-            workload={"batch_size": 8, "segment_length": 40_000},
+            workload=workload,
             software_stack={"torch": "2.7.0"},
             source_run={"run_name": "bootstrap_pseudo"},
         )

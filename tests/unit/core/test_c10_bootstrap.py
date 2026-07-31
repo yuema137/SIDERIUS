@@ -82,12 +82,12 @@ def _probe_result(**over) -> ProbeResult:
 def _deps(tmp_path, **over) -> BootstrapDependencies:
     from core.runtime_control.probe import probe_observations
 
-    def _observations(result, *, hardware_compatibility_id, execution_environment_id):
+    def _observations(result, *, hardware_compatibility_id, execution_environment_id, workload):
         return probe_observations(
             result,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
-            workload={"batch_size": 8, "segment_length": 40_000},
+            workload=workload,
             software_stack={"torch": "2.7.0"},
             source_run={"run_name": "bootstrap_test"},
         )
@@ -312,3 +312,51 @@ class TestCliSurface:
         assert args.timed_train_steps == 7
         assert args.timed_inference_batches == 5
         assert args.dry_run is False
+
+
+class TestWorkloadMetadata:
+    """Regression: the first real GPU bootstrap recorded
+    `batch_size = n_timed_train_steps` (7 instead of 8) and no
+    segment_length at all. D4 buckets and C7 applicability ranges are
+    keyed on this metadata, so a wrong value mislabels the evidence for
+    every future comparison — the run still said READY, which is exactly
+    why this needs a test rather than an eye.
+    """
+
+    def test_the_recorded_workload_is_the_one_that_ran(self, tmp_path):
+        captured: dict = {}
+
+        def _capture(result, *, hardware_compatibility_id, execution_environment_id, workload):
+            captured.update(workload)
+            from core.runtime_control.probe import probe_observations
+
+            return probe_observations(
+                result,
+                hardware_compatibility_id=hardware_compatibility_id,
+                execution_environment_id=execution_environment_id,
+                workload=workload,
+                software_stack={"torch": "2.7.0"},
+                source_run={"run_name": "t"},
+            )
+
+        report = run_bootstrap(
+            model_type="bootstrap_model",
+            model_config={"segmentation_size": 40_000},
+            train_config={"batch_size": 8, "epochs": 1},
+            loss_config={"loss_type": "ce"},
+            deps=_deps(tmp_path, build_observations=_capture),
+        )
+        assert report.ready is True
+        assert captured["batch_size"] == 8  # NOT the timed-step count
+        assert captured["segment_length"] == 40_000
+        # the cap counts are still recorded, under their own names
+        assert captured["n_timed_train_steps"] == 7
+        assert captured["n_timed_inference_batches"] == 5
+
+    def test_the_persisted_observation_carries_it(self, tmp_path):
+        report = _run(tmp_path)
+        registry = CalibrationRegistry(tmp_path / "runtime_calibration")
+        for observation_id in report.observation_ids:
+            workload = registry.load_observation(observation_id).workload
+            assert workload["batch_size"] == 8
+            assert workload["segment_length"] == 40_000

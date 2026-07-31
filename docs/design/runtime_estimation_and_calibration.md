@@ -3279,7 +3279,57 @@ calibration (proved by a pseudo-integration test that runs bootstrap
 three times and watches the buckets promote). And C10 says nothing about
 estimator ACCURACY across families and scales; that is C12.
 
-- [x] Evidence recorded: `tests/unit/core/test_c10_bootstrap.py` — **19
+**First real GPU bootstrap (operator-approved, 2026-07-30) — and the
+defect it exposed.**
+
+The run itself passed every stop condition: exit 0 / READY in 41.79 s,
+`single_candidate_idle` over 5 samples, setup 22.40 s, training
+17.591 ms/step (spread [17.570, 17.628]), inference 3.171 ms/batch, peak
+VRAM 1.594 GB, realized 45,408 parameters, 2 hash-verified observations,
+launch self-test green, no fallback or downgrade, legacy k-table
+byte-identical (sha256 `6933829e…`, mtime unchanged). The training figure
+reproduced the C6 smoke's 17.62 ms/step to within 0.2 % through different
+wiring on a different day.
+
+The hash-verified read-back then exposed a defect in the C10 code:
+
+```text
+recorded : workload = {"batch_size": 7, "probe": "bootstrap"}
+actual   : batch_size 8; segment_length 40000 (absent entirely)
+cause    : workload["batch_size"] was set from caps.n_timed_train_steps
+```
+
+This mattered despite the correct verdict: D4 buckets and C7
+applicability ranges are keyed on workload metadata, so the two records
+were mislabeled evidence in what was meant to be the campaign baseline.
+The verdict being right is exactly why it needed a test rather than an
+eye — two regression tests now pin what is passed and what is persisted.
+
+*Reset diagnostic (recorded before deletion, operator decision (c)).*
+
+```text
+registry root  : /home/yuema137/.siderius/runtime_calibration
+generation     : 5 (4 after the run; +1 from the verification rebuild_index)
+observations   : sha256:8f3247e01f95…f7  (training,  workload batch_size=7)
+                 sha256:abc9925b8fa7…44  (inference, workload batch_size=7)
+promotions     : none          summaries : none      legacy_sources : none
+files          : registry.json, registry.lock, installation_id,
+                 hardware_profiles/b2e8a85024be….json,
+                 environment_profiles/b91437e18fe4….json,
+                 observations/{8f3247e01f95…,abc9925b8fa7…}.json
+reason         : mislabeled workload metadata in a baseline registry
+consumed by    : nothing — no V19 run (stopped), no C12 campaign (not
+                 started), no promotion, no summary cache, no downstream
+                 calibration; the records were 41 s old and had no
+                 authority (validation_status=unvalidated)
+not touched    : the legacy k-table beside it (read-only by C5 contract)
+```
+
+The registry root was removed and recreated by a single re-run of the
+same command after the fix; the incorrect observations were NOT carried
+into the new registry.
+
+- [x] Evidence recorded: `tests/unit/core/test_c10_bootstrap.py` — **21
       tests** (fresh environment reaches READY with an empty temp
       registry and no hand edits — the design-doc acceptance criterion;
       the eleven steps run in order; the four measured quantities are
