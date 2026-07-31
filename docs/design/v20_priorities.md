@@ -1717,3 +1717,735 @@ about whether production calls it.
 | 1b | 2026-07-31 | Campaign stopped and closed out. §6.1 upgraded from OPEN INVESTIGATION to **CONFIRMED DEFECT**: the chain parent's 6.9 GiB is the in-process VRAM pre-flight, traced call-path by call-path and confirmed by a pre-registered falsifiable prediction — the parent held 6,962 MiB unchanged across 13 samples over 3 minutes *after* its child exited, alone on the GPU. The fix (`run_isolated_preflight`, PR #151) exists and is GPU-validated with zero production call sites, making this the second instance of the P0-1 pattern; a reachability check is now a V20 requirement. §14 records the operator's 20:15 reversal on the §6.5 evidence and the full closeout: C13's three stop layers all correct, waves 2-4 never started, GPU returned to baseline, 645,054 tokens / $1.94 spent, and 20 observations that advanced calibration by nothing. |
 | 1a | 2026-07-31 | Same day, before commit: §6.3 upgraded from HYPOTHESIS to CONFIRMED by direct measurement — pair total 28,732 MiB past the 28 GiB ceiling, loss chain tree 17.74 GiB against a 12 GiB cap, chain parents holding 55 % of all GPU memory. §14 escalation fired and is recorded with the operator's continue-with-monitoring decision; §6.4 records the accepted risk (a host-quota SIGTERM carries no memory error and resembles the misattributed C12 signature). |
 | 1 | 2026-07-31 | Created from findings during the fresh V19 restart (`v19r3_10iter_20260731_1842`) after the runtime-estimation C1-C14 ladder and the PR #151 VRAM-preflight repair. Records: zero production promotion call sites; `model_family="unknown"` on all observations; the corrected `bucket_key` diagnosis; chain parent + sandbox child GPU aggregation; absent production RSS telemetry; the unresolved long-sequence amplification question; cross-campaign STOP scope; host-memory config portability; and model-scale monitoring. |
+
+---
+
+## 20. Proposed V20 PR Plan
+
+Sections 1-19 record what V19 found and what V20 must fix. This section
+translates those priorities into a small number of reviewable
+implementation PRs, so that execution does not have to re-derive scope
+and unrelated problems do not collect in one change.
+
+**This section authorizes no implementation.** It defines how each PR
+must be audited, built, validated and merged.
+
+### 20.1 Planning principles
+
+#### Minimal-change principle
+
+V20 preserves what already worked in V19: training and inference
+subprocess execution, queue sequencing, operator-stop semantics, the
+failure classification from PR #151, static-estimate non-authority, the
+existing typed result schemas unless a schema change is explicitly
+reviewed, and the current advice and scientific workflow unless a
+specific PR says otherwise.
+
+The preferred strategy, in order:
+
+```
+wire existing validated components into production
+    before
+building new infrastructure
+```
+
+Two of the five blocking problems (§13.1) are wiring, not construction.
+
+#### One causal problem per PR
+
+Each PR carries one dominant causal claim. Isolated pre-flight wiring,
+GPU aggregation, calibration promotion, HealthGate policy and
+campaign-control paths must not be combined — a regression in a combined
+change cannot be located.
+
+#### Evidence before expansion
+
+Appearing in this plan does not authorize a PR. A conditional PR begins
+only when the preceding validation shows it is necessary.
+
+#### Per-PR design doc, reviewed before implementation
+
+**Operator rule, 2026-07-31.** Every PR in this plan gets its own design
+document under `docs/design/v20_priorities/`, and **no implementation
+starts until the operator has reviewed and approved that document.**
+
+```
+docs/design/v20_priorities/
+    pr_a_isolated_preflight_wiring.md
+    pr_b_gpu_aggregation_attribution.md
+    pr_c_measured_evidence_admission.md
+    pr_d_healthgate_formal_policy.md
+    pr_e_campaign_scoped_control.md
+    README.md          — index and status of the five
+```
+
+Each document carries the §20.11 template filled in, the required
+pre-implementation audit **already performed and evidence-cited**, the
+commit plan, the checkpoints, and the validation plan. This mirrors the
+V19 workflow (`docs/design/v19_priorities/`), which caught scope and
+factual errors in review rather than in code.
+
+This section (§20) defines *what* each PR must contain. The per-PR
+document is where the actual audit findings, design decisions and commit
+plan live. **Do not implement from §20 alone** — it is deliberately
+scope-level, and the audits it requires will change the design.
+
+#### Reachability requirement
+
+Every production feature ships with a test proving the **actual
+production call path** reaches it. Unit tests exercising a component in
+isolation are insufficient.
+
+This is not a stylistic preference. Two components in V19 were built,
+tested, and in one case GPU-validated, and neither had a production call
+site: calibration promotion (§3.2) and the isolated pre-flight worker
+(§6.1). Both defects were invisible to a green test suite.
+
+### 20.2 PR overview
+
+| PR | Title | Main problem | Dependency | Blocking for V20 launch? |
+|---|---|---|---|---|
+| **A** | Wire isolated pre-flight into production | Long-lived parent retains a CUDA context and allocator cache | none | **Yes** |
+| **B** | Chain/pair GPU aggregation and contention attribution | The per-attempt cap does not constrain actual chain process-tree usage | PR A validation | **Conditional, likely yes** |
+| **C** | Measured-evidence admission + calibration production wiring | Observations are collected but never promoted or applied | independent after design review | **Yes** |
+| **D** | Formal HealthGate and zero-valid-trial policy | V19 deliberately used observe-only mode; formal proceeded with no valid trial | operator policy decision | **Yes** |
+| **E** | Campaign-scoped control state | An old campaign's STOP can block a new campaign | independent | **Yes** |
+
+Optional follow-ups, none of them launch blockers: GPU and host-memory
+telemetry; portable host-memory configuration; model-scale trend
+reporting; runtime-estimate quality reporting. Fold one into A-E **only**
+when the scope stays small and validation stays attributable to a single
+cause.
+
+### 20.3 PR A — Wire isolated pre-flight into production
+
+#### Objective
+
+Route the production VRAM pre-flight through the already-implemented,
+GPU-validated isolated worker. The long-lived chain parent must remain
+CPU-only.
+
+#### Confirmed root cause
+
+```
+production pre-flight runs in the chain parent
+  → parent initializes CUDA
+  → parent retains 6.9-8.9 GiB driver-visible memory
+  → training/inference children allocate additional GPU memory
+  → one chain exceeds its intended resource envelope
+```
+
+Wind-down evidence, arch chain alone on the GPU (§6.1):
+
+```
+child exited
+  → parent retained 6,962 MiB unchanged for ~3 minutes (13 samples)
+  → parent exited
+  → GPU returned to the 273 MiB baseline
+```
+
+#### Scope
+
+Only: the production pre-flight call boundary; the compatibility adapter
+between the production caller and `run_isolated_preflight`; minimal
+provenance recording; reachability tests; and the minimal phase-level
+resource telemetry that validation requires.
+
+#### Out of scope
+
+Pre-flight algorithms, candidate configuration, batch-search policy,
+typed dispositions, capacity authority, timeout values, the 12 GiB cap,
+the 28 GiB pair ceiling, training execution, inference execution, queue
+logic, HealthGate, calibration promotion, agent prompts.
+
+`torch.cuda.empty_cache()` is not the primary repair (§6.6).
+
+#### Required pre-implementation audit
+
+Audit and document, before editing: every production caller of the
+current in-process VRAM skill; the exact input schema; the exact output
+schema; exception mapping; artifact paths; logging and feedback text;
+timeout semantics; host-memory enforcement; model import and
+construction ownership; and whether any caller depends on in-process
+mutable state.
+
+Produce a compatibility table:
+
+| Behavior | Current in-process path | Isolated path | Required adapter |
+|---|---|---|---|
+
+**No implementation begins until this table is complete**, because the
+two paths are already known to differ: the worker returns a bounded
+typed disposition while the production caller consumes a richer result
+dict. The adapter is the substance of this PR, not an afterthought.
+
+#### Checkpoints
+
+**A1 — Call-path audit complete.** Before/after production call graph;
+full caller inventory; compatibility table; no unresolved input/output
+mismatch.
+
+**A2 — Production wiring implemented.**
+
+```
+parent
+  → launch isolated pre-flight worker
+  → receive bounded structured result
+  → worker exits
+  → parent remains CPU-only
+```
+
+**A3 — Deterministic compatibility.** Identical normalized input;
+identical disposition mapping; identical agent-facing feedback; identical
+artifacts where semantics require compatibility; no candidate model
+construction in the parent; no production reachability to the old
+in-process path.
+
+**A4 — CI green.** ruff, formatting, strict pyright, affected pytest
+suites, guardrails, production reachability tests.
+
+#### Deterministic validation
+
+1. formal production reaches `run_isolated_preflight`;
+2. formal production cannot reach in-process GPU pre-flight;
+3. the parent does not instantiate the candidate;
+4. the parent does not initialize CUDA;
+5. worker cleanup is complete;
+6. result mapping is equivalent;
+7. failure classification is unchanged;
+8. timeout behaviour is unchanged;
+9. training and inference subprocess paths are unchanged;
+10. a regression test **fails** if direct in-process execution is restored.
+
+#### Bounded real validation
+
+**Phase A5 — single-chain GPU validation.** One bounded chain. Measure:
+parent driver-visible GPU memory; pre-flight worker peak; worker memory
+after exit; training child peak; inference child peak; chain
+process-tree aggregate; allocated peak; reserved peak; driver-visible
+peak; host RSS peak; orphan state.
+
+```
+pass criteria
+  parent remains absent from nvidia-smi
+  pre-flight worker releases GPU memory on exit
+  training/inference paths unchanged
+  no orphan
+  no scientific-path regression
+```
+
+**Do not assume the chain fits under 12 GiB. Measure it.** The 17.74 GiB
+figure from V19 was taken under contention and may not bound a
+standalone run (§6.1).
+
+**Phase A6 — dual-chain lightweight validation.** A bounded arch/loss
+pair. Measure each chain aggregate, pair aggregate, host-quota margin,
+process count, and any OOM with its attribution context. Pass when both
+parents stay CPU-only, the pair aggregate stays safely below the campaign
+ceiling and host quota, no contention-attributable candidate evidence is
+produced, and no processes accumulate.
+
+#### Stop conditions
+
+Stop for operator review if production requires a persistent schema
+change; caller behaviour cannot be preserved; the isolated worker cannot
+represent an existing production outcome; the parent still initializes
+CUDA after wiring; training or inference must be redesigned; or
+validation reveals a new architecture-wide lifecycle problem.
+
+#### Merge criteria
+
+All checkpoints pass; single-chain validation passes; dual-chain
+validation passes **or clearly demonstrates the need for PR B**;
+production reachability is proven; no unrelated workflow change is
+included.
+
+#### Dependencies
+
+None. PR A is the entry point of the ladder.
+
+#### Expected artifacts
+
+The compatibility table; before/after production call graph; the
+single-chain and dual-chain measurement records (allocated, reserved,
+driver-visible, host RSS, per phase); the reachability test suite; a
+manifest field recording the pre-flight execution mode.
+
+
+### 20.4 PR B — Chain/pair GPU aggregation and contention attribution
+
+#### Conditional start rule
+
+Begin only if PR A validation shows at least one of: chain process-tree
+usage can still exceed the intended scope; pair usage can still approach
+the host quota; OOM attribution remains ambiguous; or driver-visible
+occupancy cannot be inferred safely from candidate measurement alone.
+
+If PR A removes the operational risk, PR B reduces to telemetry and
+attribution only. It is not skipped — §13.1 requirement 2 stands — but
+its size follows the evidence.
+
+#### Objective
+
+Measure and attribute actual driver-visible GPU usage at process,
+attempt, chain process tree, pair, and host-user levels, and prevent peer
+contention from becoming candidate-level evidence (§1.3, §6.5).
+
+#### Scope
+
+Process-to-chain registration; lightweight NVML or equivalent
+driver-visible measurement; chain and pair aggregate accounting; OOM
+context capture; attribution logic; pre-launch or pre-phase aggregate
+headroom checks; structured contention evidence.
+
+#### Out of scope
+
+A dynamic GPU scheduler; automatic peer killing; a memory broker;
+automatic concurrency reshaping; silent serial fallback; threshold
+increases; major queue redesign.
+
+#### Required audit
+
+Parent/child process lifecycle; process groups; CUDA-owning PIDs;
+existing queue peer identity; external host-watchdog behaviour; the
+current 12/28 GiB semantics; all OOM consumers; every place where an OOM
+becomes agent feedback; current pair-guard inputs; and whether
+driver-visible usage can be sampled reliably without privilege.
+
+#### Attribution model
+
+At minimum distinguish:
+
+```
+candidate-attributable
+peer-contention-attributable
+foreign-contention-attributable
+host-quota intervention
+unknown attribution
+```
+
+**A measurement carries rejection authority only when attribution is
+sufficient.**
+
+#### Checkpoints
+
+**B1 — process identity model.** Every GPU process maps to campaign,
+wave, chain, run, iteration, phase, candidate, and parent/child role.
+
+**B2 — telemetry correctness.** Persist allocated, reserved,
+driver-visible, chain aggregate, pair aggregate, free GPU memory, peer
+occupancy, timestamp and phase.
+
+**B3 — attribution rules.** A real CUDA OOM must not automatically imply
+candidate failure; the record shows whether the candidate, the peer, or
+the host environment caused the condition.
+
+**B4 — admission integration.** Check real aggregate headroom before
+launching a new GPU phase. **Do not interrupt an active peer
+automatically in this PR.**
+
+**B5 — validation and CI.**
+
+#### Deterministic validation
+
+PID-to-chain attribution; process-tree aggregation; pair aggregation;
+stale PID handling; PID reuse; missing telemetry; peer identity;
+candidate OOM; contention OOM; host-watchdog signature; and no
+candidate-downsizing authority for unattributable events.
+
+#### Controlled GPU validation
+
+Deliberately constructed scenarios: (1) a candidate genuinely exceeds
+capacity; (2) a candidate fits alone but fails under expected peer
+contention; (3) foreign GPU contention; (4) pair below ceiling; (5) pair
+near ceiling; (6) host-quota-like termination; (7) worker exits and
+memory returns.
+
+#### Merge criteria
+
+Contention OOM never becomes candidate evidence; genuine candidate OOM
+retains authority; the pair aggregate protects the actual host limit;
+missing attribution yields non-authoritative evidence; no scheduler or
+automatic-kill behaviour is introduced.
+
+#### Stop conditions
+
+Stop for operator review if driver-visible sampling proves unreliable
+without elevated privilege; if PID-to-chain attribution cannot be made
+deterministic under PID reuse; if a headroom check would have to
+interrupt a running peer to be effective; or if the attribution model
+cannot separate peer contention from candidate capacity on real data.
+
+#### Dependencies
+
+PR A merged and its dual-chain validation complete. The *size* of PR B
+follows those measurements (§20.4 conditional start rule).
+
+#### Expected artifacts
+
+The process identity model; per-phase aggregate telemetry records; the
+seven controlled-scenario results; OOM records carrying peer occupancy
+and free VRAM as they were before the failure.
+
+
+### 20.5 PR C — Measured-evidence admission and calibration production wiring
+
+#### Objective
+
+Every formally admitted candidate has measured evidence applicable to
+that concrete candidate (§3.5), and calibration promotion runs in
+production.
+
+#### Scope
+
+Production call to promotion evaluation; production call to promotion
+recording; correct `model_family` propagation; calibration-quality
+reporting; the applicability predicate; admission consumer integration;
+removal of terminal `ADVISORY` for formal admission.
+
+#### Out of scope
+
+Predicting arbitrary unseen architectures from history. Treating a
+matching bucket key alone as establishing applicability. Changing static
+prior semantics.
+
+#### Required audit
+
+Observation creation; the model-family source; bucket-key derivation;
+promotion policy; the registry write path; promotion consumers; the
+current admission decision graph; every terminal `ADVISORY` path; current
+live-probe result handling; calibration invalidation and versioning.
+
+#### Required design decision
+
+Define applicability to the concrete candidate. Candidate dimensions:
+architecture family; realized parameter range; batch; segment length;
+operation; dtype; hardware; software stack; concurrency condition;
+distance outside the observed range.
+
+**Do not implement this predicate without an explicit design record.**
+
+#### Checkpoints
+
+**C1 — production promotion reachability.** A production observation
+triggers promotion evaluation.
+
+**C2 — family identity.** Known candidates no longer produce
+`model_family="unknown"`.
+
+**C3 — calibration quality report.** Campaign reports include
+observations, bucketed/unbucketed, eligible, promoted, rejected,
+rejection reasons, and coverage.
+
+**C4 — admission authority.** Formal admission requires applicable
+validated calibration **or** a successful bounded live probe.
+
+**C5 — inconclusive fallback.** An inconclusive probe cannot silently
+allow or reject; the fallback policy is explicit.
+
+**C6 — real production confirmation.** A bounded real campaign proves
+`observation → promotion evaluation → validated or rejected bucket →
+admission consumer`.
+
+#### Validation layers
+
+**Layer 1** — deterministic reachability, schema, identity, authority.
+**Layer 2** — broad controlled scenarios across families, scales,
+hardware, concurrency, matching and mismatching buckets, repeated
+observations, and contradictory measurements.
+**Layer 3** — a small bounded real LLM + real training run proving
+end-to-end production reachability.
+
+#### Merge criteria
+
+Production promotion actually occurs; family identity is correct; formal
+admission never terminates at static `ADVISORY`; applicability is
+explicit; live measurement overrides stale or inapplicable history; and
+the campaign report cannot falsely imply calibration is active.
+
+#### Stop conditions
+
+Stop for operator review if the applicability predicate cannot be
+defined without inventing thresholds; if promotion would require
+observations whose identity is still incomplete; if removing terminal
+`ADVISORY` would block candidates that no probe can measure in bounded
+time; or if live measurement and validated calibration contradict each
+other with no rule for which wins.
+
+#### Dependencies
+
+Independent of PR A and B after its design record is approved. Its
+Layer-3 confirmation needs a working bounded real run, so in practice it
+follows PR A.
+
+#### Expected artifacts
+
+The applicability design record; promotion evaluation and recording call
+sites with reachability tests; the calibration-quality report format;
+Layer-2 scenario matrix results; a bounded real-campaign trace showing
+observation through admission.
+
+
+### 20.6 PR D — Formal HealthGate and zero-valid-trial policy
+
+#### Objective
+
+Define which HealthGate mode a formal scientific campaign uses, and what
+happens when no trial is valid.
+
+#### Confirmed facts (§12A)
+
+The repository default config invalidates failed blocking checks; V19
+explicitly selected the observe-only config; `resolved_action=continue`
+was correct for that config; this was a campaign-policy choice, not an
+enforcement defect; all four observed rounds showed severe collapse; zero
+valid trials existed; formal still ran under override.
+
+#### Required operator policy
+
+A formal V20 scientific campaign uses the true blocking config unless the
+operator explicitly selects a diagnostic mode. Observe-only remains valid
+for baseline characterization, threshold studies, diagnostics and gate
+calibration.
+
+#### Scope
+
+Explicit campaign HealthGate mode; unambiguous resolved mode in the
+manifest; zero-valid-trial handling; non-authoritative formal override;
+incumbent exclusion; scientific-aggregation exclusion; structured
+all-trials-invalid feedback; clearer operator-facing labels.
+
+#### Out of scope
+
+Retuning thresholds without new evidence; removing observe-only mode;
+forcing a successful trial.
+
+#### Required audit
+
+Config selection in launchers; effective-config materialization;
+gate-action resolution; valid-trial counting; `Best score: None`; the
+formal override; incumbent ingestion; report aggregation; grand-mean
+inclusion; planner feedback.
+
+#### Checkpoints
+
+**D1 — explicit mode.** The manifest states `blocking`, `observe_only`
+or `diagnostic` plainly.
+**D2 — valid-trial invariant.** Zero valid trials ⇒ no authoritative
+formal scientific result.
+**D3 — diagnostic formal.** May run, but is marked non-authoritative.
+**D4 — incumbent exclusion.** No zero-valid-trial formal result enters
+incumbent selection.
+**D5 — reporting exclusion.** No non-authoritative formal result enters
+scientific aggregation.
+**D6 — feedback.** The planner receives structured all-trials-invalid
+evidence.
+
+#### Validation
+
+Blocking mode; observe-only mode; zero-valid-trial; one-valid-trial;
+mixed valid/invalid; diagnostic formal; incumbent exclusion; reporting
+exclusion; manifest provenance. Layer 3 uses a small bounded real run
+that **deliberately produces collapse** and proves the formal result
+cannot become authoritative.
+
+#### Merge criteria
+
+Campaign mode is explicit; no authoritative result exists without a valid
+trial; observe-only remains available and honest; labels do not
+contradict effective behaviour; incumbent and reports enforce the policy.
+
+#### Stop conditions
+
+Stop for operator review if the blocking config would invalidate rounds
+that are scientifically legitimate on some band; if zero-valid-trial
+handling would deadlock an iteration with no path forward; or if
+excluding non-authoritative results empties the report entirely, which
+would indicate a deeper problem than gate policy.
+
+#### Dependencies
+
+An operator decision on the default mode for formal campaigns (§12A.4).
+Otherwise independent.
+
+#### Expected artifacts
+
+The manifest mode field; the zero-valid-trial policy implementation and
+its tests; the structured all-trials-invalid feedback block; a bounded
+real run that deliberately collapses and proves non-authority.
+
+
+### 20.7 PR E — Campaign-scoped control state
+
+#### Objective
+
+One campaign's STOP, queue state or pair summary cannot control another
+campaign.
+
+#### Scope
+
+```
+<root>/<campaign_id>/control/STOP
+<root>/<campaign_id>/queue_state/
+<root>/<campaign_id>/pair_summaries/
+```
+
+Historical evidence is preserved.
+
+#### Out of scope
+
+Redesigning stop semantics; removing no-respawn behaviour; deleting
+legacy STOP evidence.
+
+#### Required audit
+
+All STOP readers; all STOP writers; queue-level paths; chain-level paths;
+runner state; pair-summary paths; resume behaviour; historical layouts;
+cleanup scripts; tests and docs.
+
+#### Checkpoints
+
+**E1 — path model.** Every authority-bearing path contains campaign
+identity.
+**E2 — backward compatibility.** Historical evidence stays readable; a
+legacy global STOP cannot block a new campaign.
+**E3 — campaign mismatch protection.** The launcher rejects mismatched
+campaign state.
+**E4 — stop semantics preserved.** Operator stop still stops after the
+current iteration, writes stopped state, prevents respawn, and prevents
+later waves.
+**E5 — recovery validation.** Start and stop multiple synthetic
+campaigns and prove isolation.
+
+#### Validation
+
+Old campaign stopped and new campaign starts; two campaigns coexist;
+wrong-campaign STOP ignored; correct-campaign STOP honoured; historical
+global STOP archived and readable; resume reads only matching campaign
+state; no destructive cleanup required. A small shell-level real queue
+test may be used without GPU.
+
+#### Merge criteria
+
+No cross-campaign authority; stop semantics unchanged; historical
+evidence preserved; no manual root-level cleanup required before a new
+launch.
+
+#### Stop conditions
+
+Stop for operator review if historical layouts cannot be read without
+ambiguity; if any authority-bearing path cannot carry campaign identity
+without changing stop semantics; or if migration would require deleting
+existing evidence.
+
+#### Dependencies
+
+None. PR E touches launcher and path logic only.
+
+#### Expected artifacts
+
+The path model; the campaign-mismatch guard; the multi-campaign
+isolation test; a record of which historical layouts remain readable.
+
+
+### 20.8 Optional telemetry and portability PRs
+
+**Telemetry PR** — allocated/reserved/driver-visible GPU metrics; bounded
+RSS phase peaks; process identity; model-scale trend reporting; admission
+evidence summaries. Merge into A/B/C only if the scope stays narrow.
+
+**Portable host-memory policy PR** — implement only after the launch
+blockers are resolved. Requirements: backward-compatible legacy
+behaviour; a fixed config mode; an opt-in hardware-aware mode; the
+environment override preserved; resolved provenance persisted. Not a
+launch blocker unless V20 must run on a different host.
+
+### 20.9 Global checkpoints before V20 launch
+
+**Implementation**
+
+- PR A merged and GPU validated;
+- PR B completed **or** formally deemed unnecessary from PR A evidence;
+- PR C merged and production reachability demonstrated;
+- PR D merged and the zero-valid-trial policy proven;
+- PR E merged and campaign isolation proven.
+
+**Validation**
+
+- deterministic CI green;
+- broad controlled Layer-2 validation;
+- bounded real GPU validation;
+- small bounded real LLM + training validation;
+- no production feature exists only in tests;
+- parent orchestrators remain CPU-only;
+- pair GPU usage remains below the operational ceiling;
+- measured failures have both correct classification **and** attribution;
+- formal admission has applicable measured evidence;
+- no authoritative scientific result exists without a valid trial;
+- a new campaign cannot read authority-bearing state from old campaigns.
+
+**Final Gate.** One bounded Gate exercising: isolated pre-flight;
+single-chain GPU lifecycle; dual-chain GPU lifecycle; chain/pair
+aggregation if implemented; measured-evidence admission; promotion
+reachability; HealthGate blocking; zero-valid-trial behaviour;
+campaign-scoped stop; iteration restore.
+
+**The Gate must use real production entry points. Do not create test-only
+launch paths** — that would reproduce the very defect this plan exists to
+prevent.
+
+### 20.10 Recommended execution order
+
+```
+PR A
+  → single-chain GPU validation
+  → dual-chain GPU validation
+  → decide whether PR B is required
+
+PR B (if required)
+  → contention validation
+
+PR C
+  → Layer-2 calibration evaluation
+  → bounded production confirmation
+
+PR D
+  → bounded collapse / zero-valid-trial validation
+
+PR E
+  → queue isolation validation
+
+final V20 Gate
+  → fresh V20 campaign
+```
+
+PR C, D and E may be **developed** in parallel once their design
+checkpoints are recorded, but each merges only after satisfying its own
+acceptance criteria. PR B's size remains conditional on PR A's
+measurements.
+
+### 20.11 PR review template
+
+Every V20 PR fills this in its description or design record. A PR is not
+complete until it is filled.
+
+```
+Problem statement:
+Confirmed evidence:
+Scope:
+Out of scope:
+Production callers:
+Persistent schema impact:
+Backward compatibility:
+Implementation checkpoints:
+Deterministic tests:
+Layer-2 evaluation:
+Bounded real validation:
+Failure classification:
+Attribution:
+Artifacts:
+Stop conditions:
+Merge criteria:
+Dependencies:
+Operator decisions:
+```
