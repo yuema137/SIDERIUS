@@ -155,14 +155,17 @@ def run_candidate(entry: dict, output_root: Path) -> dict:
     started = time.perf_counter()
 
     normalized, schema_error = validate_config(entry)
-    if schema_error is not None:
+    # Checked on `normalized` rather than `schema_error` so the type
+    # narrows: the two are correlated by construction but not by the
+    # signature, and a strict checker cannot know that.
+    if normalized is None:
         record = {
             "label": entry["label"],
             "model_type": entry["model_type"],
             "config": entry["config"],
             "expected": entry["expected"],
             "outcome": "SCHEMA_REJECTED",
-            "schema_message": schema_error,
+            "schema_message": schema_error or "configuration could not be validated",
             "elapsed_seconds": round(time.perf_counter() - started, 2),
             "note": "rejected before any worker was launched",
         }
