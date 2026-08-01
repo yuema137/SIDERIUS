@@ -119,8 +119,42 @@ def default_worker_memory_limit_bytes() -> int:
     return int(gib * 1024**3)
 
 
+class HardwareSnapshot(BaseModel):
+    """The hardware facts the worker needs, frozen by the parent.
+
+    The parent resolves ``HardwareContext`` once and sends these values;
+    the worker never discovers hardware for itself. A parent and a worker
+    that discover independently can disagree about the budget, the device
+    or the fingerprint, and a disagreement there is invisible — it looks
+    like a measurement, not a configuration error (PR A, D-A3/D-A4).
+
+    ``device_index`` and ``cuda_visible_devices`` are carried because
+    device selection is otherwise implicit: neither the skill nor the
+    worker calls ``torch.cuda.set_device``, so both rely on whichever
+    device the inherited environment exposes. Inheriting is not
+    asserting, and on a multi-GPU host the difference is silent.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    usable_cap_bytes: int = Field(gt=0)
+    usable_cap_gb: float = Field(gt=0.0)
+    total_memory_bytes: int = Field(gt=0)
+    total_memory_gb: float = Field(gt=0.0)
+    device_name: str = Field(min_length=1)
+    device_available: bool
+    hardware_fingerprint: str = Field(min_length=1)
+    device_index: int = Field(default=0, ge=0)
+    cuda_visible_devices: str | None = None
+
+
 class IsolatedProbeSpec(BaseModel):
-    """Everything the worker needs. Deliberately small and JSON-only."""
+    """Everything the worker needs. Deliberately small and JSON-only.
+
+    Serialized to a transient ``<result>.spec.json`` for the worker it
+    launches. It is an IPC contract, not a persisted artifact: it appears
+    in no manifest and has no reader beyond that worker.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -129,9 +163,32 @@ class IsolatedProbeSpec(BaseModel):
     model_config_payload: dict[str, Any] = Field(default_factory=dict)
     train_config: dict[str, Any] = Field(default_factory=dict)
     loss_config: dict[str, Any] = Field(default_factory=dict)
-    vram_budget_gb: float = Field(gt=0.0)
+    #: ``None`` means "no operator ceiling" — the defensive-cap mode the
+    #: in-process path has always had. It does NOT mean "unset", and the
+    #: worker must not invent a number for it: with ``None`` the cap comes
+    #: from ``hardware.usable_cap_gb``, already resolved by the parent.
+    vram_budget_gb: float | None = Field(default=None, gt=0.0)
     result_path: str
     worker_memory_limit_bytes: int = Field(gt=0)
+    #: Absent only for standalone tooling that opts into discovery. In
+    #: production its absence is a configuration error, never a fallback.
+    hardware: HardwareSnapshot | None = None
+
+    def effective_cap_gb(self) -> float | None:
+        """The cap the worker must apply: operator ceiling, else the
+        parent's frozen defensive cap, else nothing to enforce."""
+        if self.vram_budget_gb is not None:
+            return self.vram_budget_gb
+        return self.hardware.usable_cap_gb if self.hardware is not None else None
+
+    def effective_limit_source(self) -> str:
+        return (
+            "operator_vram_budget"
+            if self.vram_budget_gb is not None
+            else "hardware_snapshot_defensive_cap"
+            if self.hardware is not None
+            else "unbounded_no_snapshot"
+        )
 
 
 class HostMemoryEvidence(BaseModel):
@@ -175,6 +232,45 @@ class IsolatedProbeResult(BaseModel):
     orphans_remaining: bool = False
     schema_field: str | None = None
     schema_message: str | None = None
+
+    # ── fields carried from the worker for the legacy contract ──────────
+    #
+    # A5 (2026-08-01) found these silently dropped. The worker emitted
+    # them, the adapter forwarded them, and this model in between did
+    # not declare them — so Pydantic discarded them before the adapter
+    # ever ran. ``memory.vram_budget_gb`` landed as null where every
+    # pre-PR-A record held 12.0.
+    #
+    # The near-neighbour ``vram_cap_gb`` above is the cap the PARENT
+    # resolved and sent; ``limit_gb`` is the limit the WORKER actually
+    # applied. They normally agree, and the similar name is the likely
+    # reason the omission went unnoticed. Keep both: a divergence is a
+    # real signal, and collapsing them would hide it.
+    limit_gb: float | None = Field(default=None, gt=0.0)
+    dominant_phase: str | None = None
+    #: Agent-facing text, FORWARDED from the skill, never regenerated
+    #: here — a second generator would drift where nobody reads it.
+    verdict: str = ""
+    suggestion: str = ""
+    #: D-A2 bounded diagnostics. Without these the whole bounded-rich-
+    #: field mechanism was inert: it was built and tested in the worker,
+    #: then discarded one layer later.
+    #:
+    #: ``str`` is a real member of each union, not sloppiness: when a
+    #: field will not fit the 8 KiB budget the worker replaces it with
+    #: ``"[dropped: exceeded the rich-field budget]"`` so its absence is
+    #: explicit rather than silent. Narrowing these to list/dict would
+    #: turn that deliberate marker back into a silent ``None``.
+    violations: list[Any] | str | None = None
+    offending_config: dict[str, Any] | str | None = None
+    memory_killer: dict[str, Any] | str | None = None
+    #: Set by the worker when the rich fields did not fit the byte
+    #: budget. ``truncated`` without the count tells a reader that
+    #: something was dropped but not how much, so both travel together:
+    #: the worker emits the count for every truncation mode.
+    truncated: bool = False
+    violations_omitted_count: int | None = Field(default=None, ge=0)
+
     #: Provenance for a timeout claim: which operation, which budget, and
     #: how long it actually ran. Present so "this timed out" is checkable
     #: rather than asserted.
@@ -423,6 +519,15 @@ def run_isolated_preflight(
         timeout_operation: str | None = None,
         timeout_budget_seconds: float | None = None,
         timeout_elapsed_seconds: float | None = None,
+        limit_gb: float | None = None,
+        dominant_phase: str | None = None,
+        verdict: str = "",
+        suggestion: str = "",
+        violations: list[Any] | str | None = None,
+        offending_config: dict[str, Any] | str | None = None,
+        memory_killer: dict[str, Any] | str | None = None,
+        truncated: bool = False,
+        violations_omitted_count: int | None = None,
     ) -> IsolatedProbeResult:
         """Explicit keywords rather than `**dict` expansion: strict pyright
         cannot match a heterogeneous dict against these parameter types,
@@ -439,7 +544,7 @@ def run_isolated_preflight(
             signal_number=exit_signal,
             orphans_remaining=orphans,
             host_memory=host_evidence,
-            vram_cap_gb=spec.vram_budget_gb,
+            vram_cap_gb=spec.effective_cap_gb(),
             realized_parameter_count=realized_parameter_count,
             estimated_gb=estimated_gb,
             inference_batch=inference_batch,
@@ -448,6 +553,15 @@ def run_isolated_preflight(
             timeout_operation=timeout_operation,
             timeout_budget_seconds=timeout_budget_seconds,
             timeout_elapsed_seconds=timeout_elapsed_seconds,
+            limit_gb=limit_gb,
+            dominant_phase=dominant_phase,
+            verdict=verdict,
+            suggestion=suggestion,
+            violations=violations,
+            offending_config=offending_config,
+            memory_killer=memory_killer,
+            truncated=truncated,
+            violations_omitted_count=violations_omitted_count,
         )
 
     if host_exceeded:
@@ -507,6 +621,13 @@ def run_isolated_preflight(
     def _str_or_none(value: object) -> str | None:
         return value if isinstance(value, str) else None
 
+    def _list_or_none(value: object) -> list[Any] | str | None:
+        """A dropped list arrives as the worker's marker string; keep it."""
+        return value if isinstance(value, (list, str)) else None
+
+    def _dict_or_none(value: object) -> dict[str, Any] | str | None:
+        return value if isinstance(value, (dict, str)) else None
+
     outcome = _str_or_none(payload.get("outcome")) or "PROBE_INFRASTRUCTURE_FAILURE"
     if outcome not in get_args(PreflightOutcome):
         outcome = "PROBE_INFRASTRUCTURE_FAILURE"
@@ -522,6 +643,18 @@ def run_isolated_preflight(
         timeout_operation=_str_or_none(payload.get("timeout_operation")),
         timeout_budget_seconds=_float_or_none(payload.get("timeout_budget_seconds")),
         timeout_elapsed_seconds=_float_or_none(payload.get("timeout_elapsed_seconds")),
+        # A5 repair — carried explicitly, in the same style as the fields
+        # above. The schema-diff guardrail fails if a worker field is
+        # added without appearing here.
+        limit_gb=_float_or_none(payload.get("limit_gb")),
+        dominant_phase=_str_or_none(payload.get("dominant_phase")),
+        verdict=_str_or_none(payload.get("verdict")) or "",
+        suggestion=_str_or_none(payload.get("suggestion")) or "",
+        violations=_list_or_none(payload.get("violations")),
+        offending_config=_dict_or_none(payload.get("offending_config")),
+        memory_killer=_dict_or_none(payload.get("memory_killer")),
+        truncated=payload.get("truncated") is True,
+        violations_omitted_count=_int_or_none(payload.get("violations_omitted_count")),
     )
 
 

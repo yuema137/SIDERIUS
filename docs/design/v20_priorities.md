@@ -109,7 +109,7 @@ must be shown attributable to it.
 | **P0-3** | Validated calibration is not an admission authority | No consumer treats a validated bucket as the final gate | Operator requirement: dynamic calibration should be the final gate | Validated calibration or a successful live probe is the final gate | No |
 | **P0-4** | Calibration-quality reporting | A campaign can collect observations while zero are promotable, silently | "Dynamic calibration is running" was believed true when it was not | Every campaign reports bucketed/eligible/validated/rejected counts | No |
 | **P1-1** | GPU-memory telemetry incomplete | Estimate (2.00 GB) and `nvidia-smi` (6,962 MiB) are different quantities; neither `max_memory_allocated` nor `max_memory_reserved` is persisted | The estimate-vs-actual gap cannot be attributed | Persist allocated / reserved / driver-visible per process and phase | No |
-| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | **PR A** (§6.6): route production pre-flight through the existing isolated worker, keep the parent CPU-only. **PR B** (conditional): chain/pair aggregation + OOM attribution, only if validation still shows it is needed | **Campaign stopped §14.2.** Root cause CONFIRMED (§6.1): the parent's share is the in-process pre-flight, never released |
+| **P1-2** | Chain-level GPU aggregation is unbounded | Measured 2026-07-31 19:55Z: loss chain tree **17.74 GiB** against a 12 GiB cap; pair total **28,732 MiB**, past the 28 GiB ceiling, 1,268 MiB from the host quota | The per-chain cap bounds a predicted per-attempt allocation, not what the chain's process tree holds | **PR A** (§6.6): route production pre-flight through the existing isolated worker, keep the parent CPU-only. **PR B** (conditional): chain/pair aggregation + OOM attribution, only if validation still shows it is needed | **PR A COMPLETE AND VALIDATED 2026-08-01** (§21). A5 + A6 measured: parents hold **0 MiB**, pair peak **15.52 GiB** vs V19's **28.05 GiB**. Root cause (§6.1) confirmed fixed. **PR B is now REQUIRED, not conditional** — A6 showed admission compares an estimate that under-reads driver-visible by ~1.8–2.0×, and the 28 GiB pair guard has no production caller |
 | **P1-3** | Production host-memory telemetry absent | Peak RSS, RSS timeline, and phase attribution are not persisted on the production path | The 17M dilated-conv question cannot be settled from artifacts | Bounded RSS telemetry with phase attribution | No |
 | **P1-4** | Long-sequence preflight memory amplification | A 17M candidate reached ≈26 GiB process-tree RSS in preflight | Unresolved between genuine requirement and inspection amplification | Phase-level bounded measurement to distinguish A from B | No |
 | **P2-1** | Campaign-scoped stop and queue state | A previous campaign's queue-level `STOP` blocked a new campaign's launch | One campaign's terminal state has authority over another | All control state under `<campaign_root>/<campaign_id>/control/` | No |
@@ -1711,6 +1711,7 @@ about whether production calls it.
 
 | Rev | Date | Change |
 |---|---|---|
+| 1f | 2026-08-01 | **PR A complete and validated; PR B promoted from conditional to REQUIRED.** A5 (single chain) and A6 (dual chain) both PASS on real GPU: chain parents hold **0 MiB** — they never appear in `nvidia-smi --query-compute-apps` at all — and the pair peak is **15.52 GiB against V19's 28.05 GiB**, with 125.9 s of genuine concurrent training, no OOM, no orphan and no watchdog intervention. The §6.1 root cause is fixed. Three things were learned that the plan did not anticipate. **(a)** A5's contract check failed before it passed: the intermediate `IsolatedProbeResult` silently dropped **eight** worker fields, so `memory.vram_budget_gb` landed null where 456 pre-PR-A records held 12.0, and the whole D-A2 bounded-diagnostics mechanism had never reached a record. Forty-seven adapter tests missed it because each serialization layer was tested alone and the composed worker-JSON → IPC-model → adapter path never was. Repaired narrowly, with a composition suite driving the real production path and a schema-diff guardrail; revalidated 10/10. **(b)** Finding F1 — that the parent *must* appear in `nvidia-smi` because `hardware_context.discover()` initializes CUDA — was **wrong, and had already been used to weaken a pass criterion** before it was measured. Direct measurement: `discover()` sets `is_initialized()` but registers no compute process; only a real allocation does. The original stronger criterion was achievable all along and both runs met it. **(c)** A6 exposed the decisive fact for PR B: chain A was admitted at a 6.43 GB estimate and then held **12.52 GiB** — past the 12 GiB per-attempt cap it was admitted under. Admission compares a predicted *allocated* peak while the host quota counts driver-visible *reserved*, so `estimated <= 12 GiB` does not imply `driver-visible <= 12 GiB`; and `pair_admission.py`, which defines the 28 GiB ceiling, has **zero production callers**, so nothing enforced it during the run except an external validation monitor that is not part of the product. A6's pair was safe because the candidates were small relative to the cap, not because any mechanism made it so. §20.4's conditional start rule is therefore **resolved as REQUIRED** with a three-item minimum scope (real aggregate accounting, pre-phase headroom check, correct OOM attribution), and §20.9's "or formally deemed unnecessary" branch is **closed**. Recorded against over-reading: the two observed estimate-to-measured ratios (1.95×, 1.82×) demonstrate the estimate cannot protect a driver-visible quota, but two samples do not establish a scaling constant — PR B must measure the real aggregate, never multiply the estimate by a factor. |
 | 1e | 2026-07-31 | **Correction to P0-5, before any code was written against it.** Revision 1d called the `continue` resolution a CONFIRMED DEFECT. It is not. The repository default `configs/health_checks.yaml` maps all three blocking checks to `invalidate_round`, but `v19_queue_runner.sh:272` launched V19 with `configs/health_checks_baseline_observe_mode.yaml`, which deliberately maps them to `continue` — the materialised effective config carries the reason verbatim: *"Observe only; production policy would invalidate a failed result."* Detection, collapse classification and action resolution all worked; `resolved_action: continue` was correct execution of the selected configuration. The priority is restated from *fix broken HealthGate enforcement* to **formal-campaign HealthGate policy and zero-valid-trial handling** (§12A). One real presentation defect survives: gate IDs read `*_blocking` while the effective action is `continue`, and that naming is what caused the original misreading. §12A.4 records the intended split — formal campaigns use the blocking config, while observe mode stays available and unchanged for baseline, calibration and explicitly-labelled diagnostic runs — with a recommendation to use blocking for V20 given collapse at 1–4 distinct values of 256 and std exactly 0.0 on four files. §12A.5 keeps the zero-valid-trial requirements, which hold under either config and are the actual PR D work: no valid trial means no valid candidate, any override run is non-authoritative and excluded from incumbent selection and scientific aggregation, the planner receives structured all-trials-invalid feedback, and the manifest records the selected mode plainly. No configuration file was modified in this documentation step. |
 | 1d | 2026-07-31 | **V19 formally closed** (§14): classified as an *infrastructure validation campaign stopped after confirming pair-level GPU contention and HealthGate enforcement gaps*, final state `STOPPED — PAIR-LEVEL GPU CONTENTION`. Explicitly not "completed successfully" — it produced no citable formal scientific result; it concluded as a production diagnostic campaign, which is where its value lies. It will not be restarted, and V20 must be a genuinely new campaign (new ID, run names, workspaces, report, queue state, cold start) reusing no proposal history, incumbent, HealthGate history, resource-failure feedback, old STOP or contention-polluted OOM evidence; V19 artifacts are forensic evidence only. §14.0 separates what V19 validated (static estimates hold no rejection authority, pre-flight classification correct, candidate/infrastructure failures distinguishable, C13 stop semantics) from what it exposed (seven defects). New priority **P0-5** added as §12A: HealthGate detected severe collapse on all four rounds — `unique_int8` of 1–4 out of 256, one round emitting a constant signal — recorded `would_invalidate_under_production_policy: true`, and still resolved to `continue`, so collapsed rounds counted as results and formal ran on a plan no valid trial supported. Gate-path defect, mis-calibrated thresholds and novel-architecture false positives are each ruled out by the artifacts. §13.1 adds a launch gate splitting the work into six blocking requirements and five non-blocking improvements, and §13.2 records the PR A–E ladder with the rule that each problem needs its own acceptance criteria. |
 | 1c | 2026-07-31 | Remediation plan added as §6.6 (operator decision): **PR A** routes the production pre-flight through the existing `run_isolated_preflight` and keeps the chain parent CPU-only — a call-site replacement, not a rewrite, with identical inputs, outputs and dispositions — plus production-wiring guardrails so "built but never called" cannot recur. Training and inference keep their subprocess architecture, which already returns memory correctly. Explicit non-goals recorded: no dynamic chain kill, no NVML scheduler, no memory broker, `empty_cache()` never as the primary fix, and no raising of the 12 / 28 GiB or host-quota ceilings, since the defect is double-held resources rather than a low ceiling. **PR B** (chain/pair NVML aggregation and contention-aware OOM attribution) is conditional on the phase-3 two-chain validation still showing risk, and must never be merged into PR A. Validation sequenced as wiring → bounded single-chain → bounded two-chain, with the chain peak measured rather than assumed. §11.2 restructured into four numbered entry points for resource-driven shrinking, adding door 4: the time estimate is rendered into the planning prompt (`prompts.py:645-650`) with an explicit "over" verdict — the arch formal round was shown "factor 1.98 (over)" for a round that took 96.3 min against a 120 min budget, a 2.47× over-prediction reaching the decision-maker as fact. Recorded as OPEN with no harm demonstrated: that line appeared on the formal round so no later proposal was observed, and the only observable size change went up 87 %. Door 4 is explicitly ranked far below the confirmed door 3. |
@@ -1818,6 +1819,25 @@ when the scope stays small and validation stays attributable to a single
 cause.
 
 ### 20.3 PR A — Wire isolated pre-flight into production
+
+> **STATUS 2026-08-01: COMPLETE AND VALIDATED. Ready to merge (PR #152).**
+> Full record in `v20_priorities/pr_a_isolated_preflight_wiring.md`.
+>
+> | Phase | Result |
+> |---|---|
+> | Implementation | isolated-worker wiring, parent-side adapter, production call-site switch, 13 reachability guardrails |
+> | **A5** single chain | **PASS.** Parent never appeared in `nvidia-smi` across 910 samples, peak **0 MiB** |
+> | A5 contract | **FAIL first**, then repaired: the IPC model silently dropped **eight** worker fields, including `limit_gb`, so `memory.vram_budget_gb` landed null where 456 pre-PR-A records held 12.0. Repaired and revalidated — 10/10 |
+> | **A6** dual chain | **PASS.** Both parents 0 MiB, 125.9 s of genuine concurrent training, pair peak **15.52 GiB** vs V19's **28.05 GiB**, no OOM, no orphan, no watchdog |
+>
+> **Verdict:** `A6 PASS — PR A READY TO MERGE; PR B REQUIRED BEFORE V20 LAUNCH`.
+>
+> Two lessons are recorded in the PR doc rather than here: a finding
+> asserted from source (F1, "the parent must appear in `nvidia-smi`")
+> was refuted by measurement and had already been used to weaken a pass
+> criterion; and 47 passing adapter tests missed a real regression
+> because each serialization layer was tested alone and the composed
+> path never was.
 
 #### Objective
 
@@ -1974,22 +1994,108 @@ manifest field recording the pre-flight execution mode.
 
 ### 20.4 PR B — Chain/pair GPU aggregation and contention attribution
 
-#### Conditional start rule
+#### Start rule — RESOLVED 2026-08-01: PR B is REQUIRED
 
-Begin only if PR A validation shows at least one of: chain process-tree
-usage can still exceed the intended scope; pair usage can still approach
-the host quota; OOM attribution remains ambiguous; or driver-visible
+The condition was: begin only if PR A validation shows chain process-tree
+usage can still exceed its intended scope, pair usage can still approach
+the host quota, OOM attribution remains ambiguous, or driver-visible
 occupancy cannot be inferred safely from candidate measurement alone.
 
-If PR A removes the operational risk, PR B reduces to telemetry and
-attribution only. It is not skipped — §13.1 requirement 2 stands — but
-its size follows the evidence.
+**A6 satisfied the fourth clause outright, and the first as a
+consequence.** Measured on 2026-08-01 with both parents CPU-only and
+125.9 s of genuine concurrent training:
+
+| Chain | Pre-flight estimate | Driver-visible peak | Ratio |
+|---|---|---|---|
+| A `wavenet` (302,784 params) | 6.429 GB | **12,820 MiB = 12.52 GiB** | 1.95× |
+| B `punet` (6,762,568 params) | 1.655 GB | 3,076 MiB = 3.00 GiB | 1.82× |
+
+Chain A was **admitted at an estimate of 6.43 GB and then held 12.52 GiB
+— past the 12 GiB per-attempt cap it was admitted under.** Admission
+compares a predicted *allocated* peak; the host quota counts
+driver-visible *reserved*. These are different quantities, so
+
+```text
+estimated <= 12 GiB   does NOT imply   driver-visible <= 12 GiB
+```
+
+**What this does not license.** Two samples do not establish a scaling
+constant. The observed 1.8–2.0× spread shows the estimate cannot
+currently protect a driver-visible quota; it does **not** mean the gap
+is 1.9× for every architecture, batch size and phase, and PR B must
+therefore **measure the real aggregate rather than multiply the estimate
+by any factor**. An earlier draft of the A6 report projected "2 × 12 ×
+1.88 ≈ 45 GiB" — admissible as a risk illustration, inadmissible as a
+conclusion, and recorded here so it is not quoted as one.
+
+The pair was safe in A6 (15.52 GiB against a 28 GiB ceiling), but the
+safety came from the candidates being small relative to the cap, not
+from any mechanism. The mechanism that is supposed to bound the pair is
+absent on both sides: the per-attempt cap does not bound actual usage,
+and `core/runtime_control/pair_admission.py` — which defines the 28 GiB
+ceiling — has **zero production callers**, so nothing enforces it at
+runtime. During A6 the only thing standing between the run and the host
+watchdog was an external validation monitor, which is not part of the
+product.
+
+So PR A's success and PR B's necessity are separate facts:
+
+```text
+PR A removed the redundant parent memory.          DONE, validated.
+PR B must make the remaining real total controlled  REQUIRED.
+at runtime.
+```
+
+PR B is no longer sized "by the evidence" as a possible
+telemetry-only change. It is a **V20 launch blocker** (§13.1
+requirement 2), with the minimum scope below.
 
 #### Objective
 
 Measure and attribute actual driver-visible GPU usage at process,
 attempt, chain process tree, pair, and host-user levels, and prevent peer
 contention from becoming candidate-level evidence (§1.3, §6.5).
+
+#### Minimum scope — operator decision 2026-08-01
+
+PR B does three things and no more. It is not a scheduler.
+
+**1. Account for real memory, not predicted memory.**
+Sum driver-visible usage over every GPU child of a chain, and over both
+chains. Driver-visible is the quantity the host quota counts, so it is
+the quantity the guard must use. The existing per-attempt estimate stays
+where it is and keeps its current job — it is a planning input, not a
+resource fact, and A6 showed it cannot serve as one.
+
+**2. Check headroom before a new GPU phase starts.**
+Before a chain launches a training or inference child, ask: what does
+the peer hold right now, what will this phase need, and is there
+headroom under the ceiling? This is the check `pair_admission.py`
+already models and that nothing calls; wiring it — with measured inputs
+rather than configured caps — is most of the work. **A guard that exists
+and is never invoked is the defect this whole document was opened
+about**, so PR B's acceptance must include a production-reachability
+guardrail of the kind PR A shipped (a test that fails if the call site
+is removed).
+
+**3. Attribute an OOM correctly.**
+Three outcomes must be distinguishable and separately recorded:
+
+```text
+candidate exceeded the limit while running alone   -> candidate failure
+candidate failed while the peer held the memory    -> contention evidence
+host quota killed the process                      -> infrastructure failure
+```
+
+Only the first may ever reach an agent as a reason to shrink a model.
+The second and third must never do so — that misattribution is what
+V19's §6.5 recorded, and it is why a wrong OOM label is more damaging
+than a missing one.
+
+**Explicitly still out of scope**: automatic peer killing, dynamic
+concurrency reshaping, a memory broker, a general GPU scheduler, silent
+serial fallback, and any raising of the 12 / 28 GiB or host-quota
+ceilings.
 
 #### Scope
 
@@ -2364,8 +2470,12 @@ launch blocker unless V20 must run on a different host.
 
 **Implementation**
 
-- PR A merged and GPU validated;
-- PR B completed **or** formally deemed unnecessary from PR A evidence;
+- PR A merged and GPU validated — **A5 + A6 PASS 2026-08-01**, merge pending;
+- PR B completed. **The "or formally deemed unnecessary" branch is
+  closed**: A6 measured the per-attempt cap being exceeded by an
+  admitted candidate (12.52 GiB against a 12 GiB cap) and confirmed the
+  28 GiB pair guard has no production caller, so PR B is required rather
+  than conditional (§20.4);
 - PR C merged and production reachability demonstrated;
 - PR D merged and the zero-valid-trial policy proven;
 - PR E merged and campaign isolation proven.
@@ -2397,12 +2507,17 @@ prevent.
 ### 20.10 Recommended execution order
 
 ```
-PR A
-  → single-chain GPU validation
-  → dual-chain GPU validation
+PR A                              DONE 2026-08-01
+  → single-chain GPU validation   A5 PASS (contract repaired, revalidated)
+  → dual-chain GPU validation     A6 PASS
   → decide whether PR B is required
+                                  DECIDED: REQUIRED (§20.4)
+  → merge PR #152                 <-- next
 
-PR B (if required)
+PR B (REQUIRED — no longer conditional)
+  → independent design audit first, per the §20.1 per-PR rule
+  → minimum scope only: real aggregate accounting,
+    pre-phase headroom check, OOM attribution
   → contention validation
 
 PR C

@@ -46,6 +46,7 @@ from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
     _aggregate_inference_file_timings,
 )
+from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
@@ -2836,15 +2837,39 @@ class HyperparamTuningAgent:
                         f"budget={vram_budget_desc})..."
                     )
                     failure_stage = "vram_structural_probe"
-                    # Phase 6.6 A.11 — pass the per-run hardware manifest (from
-                    # A.1.6's get_or_create) into the skill so the cap is
-                    # physically correct and consistent across the whole run.
-                    resource_check = _run_skill(
-                        "evaluate_vram_skill",
-                        sandbox,
-                        **active_params,
+                    # V20 PR A / A-C4. The pre-flight runs in a CHILD process.
+                    #
+                    # It used to run here, in the chain parent, which then held
+                    # a CUDA context and the allocator's reserved pool for the
+                    # whole iteration — 6,962 MiB measured, still held three
+                    # minutes after the training child had exited, while
+                    # training and inference held their own copies in
+                    # subprocesses. Two orchestration-only parents accounted
+                    # for 55 % of all GPU memory in use.
+                    #
+                    # `empty_cache()` in the parent would not fix it: it frees
+                    # unused cached blocks but cannot release the context or
+                    # live references. Process exit is an unambiguous resource
+                    # boundary; a cache call is not.
+                    #
+                    # Phase 6.6 A.11 still holds — the per-run hardware manifest
+                    # decides the cap — but it is now FROZEN into a snapshot by
+                    # this parent rather than rediscovered in the worker, so
+                    # both sides share one resolved cap, device and fingerprint.
+                    # A worker failure surfaces as a typed infrastructure
+                    # outcome and is NEVER retried in-process; that fallback is
+                    # exactly how the original defect would return, on the
+                    # exception paths nobody watches.
+                    # See docs/design/v20_priorities/pr_a_isolated_preflight_wiring.md
+                    resource_check = run_production_preflight(
+                        model_type=active_params["model_type"],
+                        model_config=active_params["model_config"],
+                        train_config=active_params["train_config"],
+                        loss_config=active_params["loss_config"],
                         vram_budget_gb=chosen_vram_budget,
                         hardware_context=hardware_context,
+                        workspace=workspace,
+                        label=exp_id,
                     )
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")

@@ -29,13 +29,102 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any, cast
+
+#: Combined ceiling for the three rich diagnostic fields (PR A, D-A2).
+#: They exist so an agent can act on a rejection; they must never become a
+#: channel for tensors, state dicts or whole tracebacks.
+RICH_FIELD_BUDGET_BYTES = 8 * 1024
+#: Free text is truncated before structure, because a violating field name
+#: with a clipped message is still actionable and the reverse is not.
+_MAX_TEXT_CHARS = 400
+
+
+def _clip_text(value: object, limit: int = _MAX_TEXT_CHARS) -> object:
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "…[clipped]"
+    return value
+
+
+def _shrink(payload: Any) -> Any:
+    """Clip free text in place, leaving structure intact."""
+    if isinstance(payload, dict):
+        return {k: _shrink(_clip_text(v)) for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [_shrink(_clip_text(v)) for v in payload]
+    return _clip_text(payload)
+
+
+def _bounded_rich_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Fit the rich diagnostic fields inside ``RICH_FIELD_BUDGET_BYTES``.
+
+    Truncation preserves JSON validity and the structured core: text is
+    clipped first, and only if that is still too large is the largest
+    field dropped — with ``truncated: true`` so a reader never mistakes a
+    clipped record for a complete one.
+    """
+    present = {k: v for k, v in fields.items() if v not in (None, {}, [])}
+    if not present:
+        return {}
+
+    def size(obj: dict[str, Any]) -> int:
+        return len(json.dumps(obj, default=str).encode("utf-8"))
+
+    if size(present) <= RICH_FIELD_BUDGET_BYTES:
+        return present
+
+    shrunk: dict[str, Any] = {k: _shrink(v) for k, v in present.items()}
+    shrunk["truncated"] = True
+    #: Original list lengths, so the omitted count below is against what
+    #: the worker actually measured rather than against an already-
+    #: shrunk intermediate.
+    original_lengths = {k: len(v) for k, v in present.items() if isinstance(v, list)}
+
+    # Shorten lists before discarding fields: ten violations with their
+    # field names beat zero violations, and a schema rejection the agent
+    # cannot act on is the same as no rejection detail at all.
+    while size(shrunk) > RICH_FIELD_BUDGET_BYTES:
+        lists = {k: v for k, v in shrunk.items() if isinstance(v, list) and len(v) > 1}
+        if not lists:
+            break
+        longest = max(lists, key=lambda k: len(lists[k]))
+        keep = max(1, len(shrunk[longest]) // 2)
+        omitted = len(shrunk[longest]) - keep
+        shrunk[longest] = shrunk[longest][:keep]
+        shrunk[f"{longest}_omitted_count"] = shrunk.get(f"{longest}_omitted_count", 0) + omitted
+
+    # Only if trimming lists was not enough does a whole field go, and it
+    # is replaced by a marker rather than removed, so its absence is
+    # explicit in the record.
+    while size(shrunk) > RICH_FIELD_BUDGET_BYTES:
+        droppable = [
+            k
+            for k, v in shrunk.items()
+            if k != "truncated" and not k.endswith("_omitted_count") and not isinstance(v, str)
+        ]
+        if not droppable:
+            break
+        largest = max(droppable, key=lambda k: size({k: shrunk[k]}))
+        shrunk[largest] = "[dropped: exceeded the rich-field budget]"
+
+    # A5 repair, operator decision 2: ``truncated: true`` must never
+    # appear without the omitted count. Three truncation modes reach
+    # here — text shrinking alone, list trimming, and whole-field
+    # dropping — and only the middle one used to record a count. A
+    # record that says "something was cut" but not how much cannot tell
+    # a reader whether one violation or forty were lost, which is the
+    # measured part.
+    for key, original in original_lengths.items():
+        kept = len(shrunk[key]) if isinstance(shrunk.get(key), list) else 0
+        shrunk[f"{key}_omitted_count"] = original - kept
+    return shrunk
 
 
 def _write(result_path: str, payload: dict) -> None:
     """Atomic, bounded result. Only metadata crosses the boundary."""
     target = Path(result_path)
     tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    tmp.write_text(json.dumps(payload, indent=1, default=str), encoding="utf-8")
     tmp.replace(target)
 
 
@@ -55,6 +144,45 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
+    # PR A / D-A3, D-A4. The parent resolves the hardware once and freezes
+    # it here; the worker never discovers for itself, because a parent and
+    # a worker that discover independently can disagree about the cap, the
+    # device or the fingerprint, and that disagreement is invisible.
+    #
+    # ``HardwareSnapshot`` carries exactly the six attributes ``run_skill``
+    # reads — usable_cap_bytes, usable_cap_gb, total_memory_bytes,
+    # total_memory_gb, device_name, device_available — so it is passed
+    # directly rather than reconstructed. See FU-A-3 for making that
+    # contract a Protocol instead of a structural coincidence.
+    snapshot = spec.get("hardware")
+    if snapshot is not None:
+        from agent.skills.evaluate_vram_skill.isolated_probe import HardwareSnapshot
+
+        hardware = HardwareSnapshot(**snapshot)
+        if snapshot.get("device_index") is not None:
+            print(
+                f"[worker] device {snapshot['device_index']} "
+                f"({snapshot.get('device_name')}), "
+                f"CUDA_VISIBLE_DEVICES={snapshot.get('cuda_visible_devices')!r}",
+                flush=True,
+            )
+    else:
+        hardware = None
+
+    # ``None`` is "no operator ceiling", not "unset". The effective cap was
+    # already resolved by the parent; the worker must not invent one.
+    budget = spec.get("vram_budget_gb")
+    if budget is None and hardware is not None:
+        budget = hardware.usable_cap_gb
+    limit_source = (
+        "operator_vram_budget"
+        if spec.get("vram_budget_gb") is not None
+        else "hardware_snapshot_defensive_cap"
+        if hardware is not None
+        else "unbounded_no_snapshot"
+    )
+    print(f"[worker] effective VRAM limit {budget} GB (source: {limit_source})", flush=True)
+
     try:
         from agent.skills.evaluate_vram_skill.wrapper import run_skill
 
@@ -65,7 +193,19 @@ def main(argv: list[str] | None = None) -> int:
             model_config=dict(spec.get("model_config_payload") or {}),
             train_config=dict(spec.get("train_config") or {}),
             loss_config=dict(spec.get("loss_config") or {}),
-            vram_budget_gb=spec["vram_budget_gb"],
+            vram_budget_gb=budget,
+            # HardwareSnapshot intentionally satisfies the audited
+            # read-only HardwareContext surface used by run_skill:
+            # usable_cap_bytes, usable_cap_gb, total_memory_bytes,
+            # total_memory_gb, device_name, and device_available.
+            # This is audited structural compatibility, not a blanket
+            # escape from type checking — the cast is deliberately local
+            # and must not spread to the adapter or the production caller.
+            # test_hardware_snapshot_satisfies_run_skill_surface locks the
+            # six attributes, so a seventh read by run_skill fails a test
+            # rather than running silently. Widening the shared wrapper
+            # type to a Protocol belongs to FU-A-3.
+            hardware_context=cast("Any", hardware),
         )
     except BaseException as exc:
         from agent.skills.evaluate_vram_skill.probe_budgets import (
@@ -133,6 +273,16 @@ def _classify(outcome: dict) -> dict:
             "schema_field": first.get("field") or first.get("loc"),
             "schema_message": str(first.get("message") or outcome.get("message") or "")[:300],
             "phase": "schema_validation",
+            # PR A / D-A2. The full violation list and the offending values
+            # are what let an agent repair its config; a first-field
+            # summary is not actionable. Bounded, never re-derived in the
+            # parent — that would mean building the candidate there.
+            **_bounded_rich_fields(
+                {
+                    "violations": violations,
+                    "offending_config": outcome.get("offending_config"),
+                }
+            ),
         }
     if status == "host_memory":
         return {
@@ -194,6 +344,17 @@ def _classify(outcome: dict) -> dict:
         "realized_parameter_count": outcome.get("num_params"),
         "estimated_gb": outcome.get("estimated_gb"),
         "inference_batch": outcome.get("inference_batch"),
+        # Carried so the parent can rebuild the legacy contract without
+        # recomputing anything (PR A §6).
+        "limit_gb": outcome.get("limit_gb"),
+        "dominant_phase": outcome.get("dominant_phase"),
+        # PR A / review point 16.1-A. The agent-facing text is FORWARDED,
+        # not regenerated in the parent. The skill already builds it once
+        # (KillerReport.verdict / .suggestion); a second generator on the
+        # parent side would drift from this one, and it would drift where
+        # nobody reads — in the feedback the agent acts on.
+        "verdict": str(outcome.get("verdict") or "")[:_MAX_TEXT_CHARS],
+        "suggestion": str(outcome.get("suggestion") or "")[:_MAX_TEXT_CHARS],
     }
     if outcome.get("feasible") is False:
         return {
@@ -201,6 +362,9 @@ def _classify(outcome: dict) -> dict:
             "detail": str(outcome.get("verdict") or "")[:400],
             "phase": "vram_gate",
             **common,
+            # PR A / D-A2 — the killer report is the actionable part of an
+            # infeasible verdict.
+            **_bounded_rich_fields({"memory_killer": outcome.get("memory_killer")}),
         }
     return {
         "outcome": "COMPLETED_MEASUREMENT",

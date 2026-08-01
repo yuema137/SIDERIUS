@@ -45,6 +45,7 @@ from dotenv import load_dotenv
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.telemetry import LLMBridgeContextError
+from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
     RunInvariants,
@@ -477,6 +478,16 @@ def write_manifest(
     # auditable. Policy only: per-round gate evidence lives in the
     # records and the interpretation digest — never duplicated here.
     manifest["health_feedback_policy"] = health_feedback_policy
+
+    # V20 PR A (§11) — pre-flight execution provenance, stamped on EVERY
+    # branch for the same reason as the policy above: a crashed iteration
+    # is exactly when you want to know how the pre-flight ran.
+    #
+    # Imported from the adapter rather than written as a literal, so the
+    # manifest and the mechanism cannot drift apart. This records which
+    # mechanism the build ships; that production reaches it is a separate
+    # claim, proven by the reachability guardrails.
+    manifest["preflight_execution_mode"] = PREFLIGHT_EXECUTION_MODE
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:

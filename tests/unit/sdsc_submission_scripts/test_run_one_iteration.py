@@ -858,6 +858,47 @@ class TestNoRecordsExit:
         assert manifest["status"] == "completed"
         assert manifest["best_score"] == 0.71
 
+    @pytest.mark.parametrize(
+        "kwargs,results",
+        [
+            ({}, []),
+            ({}, [_StubResult("c8_test_arch_a", score=None)]),
+            ({}, [_StubResult("c8_test_arch_a", score=0.71)]),
+            ({"crashed": True}, [_StubResult("c8_test_arch_a", score=0.71)]),
+        ],
+        ids=["no_records", "none_score", "completed", "crashed"],
+    )
+    def test_manifest_records_the_preflight_execution_mode(self, tmp_path, kwargs, results):
+        """V20 PR A §11 — pre-flight provenance, on every branch.
+
+        Stamped for the same reason as ``health_feedback_policy``: a
+        crashed iteration is exactly when an auditor needs to know how
+        the pre-flight ran, so the field must not be confined to the
+        happy path.
+        """
+        manifest = runner.write_manifest(str(tmp_path), "iter_001", results, **kwargs)
+        assert manifest["preflight_execution_mode"] == "isolated_subprocess"
+
+    def test_preflight_mode_is_imported_from_the_adapter_not_a_literal(self, tmp_path):
+        """The manifest must not be able to claim a mechanism the build
+        does not ship. Tying the value to the module that *is* the
+        isolated path means the two cannot drift apart independently."""
+        from agent.skills.evaluate_vram_skill import preflight_adapter
+
+        manifest = runner.write_manifest(
+            str(tmp_path), "iter_001", [_StubResult("c8_test_arch_a", score=0.71)]
+        )
+        assert manifest["preflight_execution_mode"] is preflight_adapter.PREFLIGHT_EXECUTION_MODE
+
+    def test_preflight_mode_survives_the_json_round_trip(self, tmp_path):
+        """The manifest is a handoff file, so the field has to be on disk,
+        not merely in the returned dict."""
+        runner.write_manifest(
+            str(tmp_path), "iter_001", [_StubResult("c8_test_arch_a", score=0.71)]
+        )
+        on_disk = json.loads((tmp_path / "manifest.json").read_text())
+        assert on_disk["preflight_execution_mode"] == "isolated_subprocess"
+
     def test_write_manifest_records_consumed_health_checks_config(self, tmp_path):
         path = "configs/health_checks_baseline_observe_mode.yaml"
         results = [
