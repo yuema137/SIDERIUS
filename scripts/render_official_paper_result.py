@@ -375,13 +375,18 @@ def main() -> None:
     for key, s in summaries.items():
         h = healths.get(key)
         out = args.out_dir / f"{key}.md"
-        if s is None and h is None:
-            print(f"skip {key}: no summary JSON and no health JSON yet")
-            continue
         if s is None:
             # Collapse metrics can precede the score; a model that has been
             # scanned but not scored still deserves a page, because "did it
             # collapse" is answerable without knowing how well it scored.
+            #
+            # Narrowed here rather than in a combined `s is None and h is
+            # None` guard above: the combined form left `h` typed as
+            # `dict | None` at the render call, which pyright rejects and a
+            # reader has to re-derive.
+            if h is None:
+                print(f"skip {key}: no summary JSON and no health JSON yet")
+                continue
             #
             # But never downgrade: the summary JSONs are server-specific, so
             # running this on a machine that lacks them must not overwrite a
