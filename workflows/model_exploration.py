@@ -96,6 +96,7 @@ from core.run_invariants import (
     ensure_run_invariants,
     validate_stamped_invariants,
 )
+from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.launch_guard import run_launch_self_test
 from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
 from execute_tools.dataset_config import DataScope
@@ -1385,7 +1386,7 @@ def run_workflow(
     # --- VRAM-budget gate (evaluate_vram_skill, docs/resource_estimator_implement.md §10.9 / Phase K) ---
     # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
     gpu_admission_measurement_source: str | None = None,
-    gpu_admission_enforcement: str = "observe_only",
+    gpu_admission_enforcement: AdmissionEnforcement = "observe_only",
     gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,

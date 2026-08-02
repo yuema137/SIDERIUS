@@ -26,6 +26,7 @@ from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
 from agent.schemas.validator import ValidatorOutput
+from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import DataScope
 
 
@@ -94,7 +95,7 @@ def local_validated_model(
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
     gpu_admission_measurement_source: str | None = None,
-    gpu_admission_enforcement: str = "observe_only",
+    gpu_admission_enforcement: AdmissionEnforcement = "observe_only",
     gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,

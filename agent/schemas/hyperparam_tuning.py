@@ -24,6 +24,13 @@ from agent.schemas.ordering import (
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+# One vocabulary for the admission posture, shared with the policy that
+# enforces it. Two independent spellings would let a value be acceptable
+# at intake and impossible one layer down -- which is exactly what this
+# field did before. Same layering as proposal.py importing
+# core.hardware_context.
+from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
@@ -1006,7 +1013,14 @@ class HyperparamTuningInput(BaseModel):
     file_index: int = Field(
         default=6,
         ge=0,
-        description="Validation/training file index (0-39). Default 6 matches the paper's standard split. Ignored when is_trial=True.",
+        # The previous description claimed the range was 0..39; the dataset
+        # has NUM_FILES=20 files. The bound is dataset-owned, so it is not
+        # restated here as a literal.
+        description=(
+            "Validation/training file index, within the configured dataset "
+            "(see dataset_config.NUM_FILES). Default 6 matches the paper's "
+            "standard split. Ignored when is_trial=True."
+        ),
     )
     max_rounds: int = Field(
         default=50,
@@ -1083,7 +1097,11 @@ class HyperparamTuningInput(BaseModel):
     # ``ExperimentRecord``; data restriction is ``data_scope``'s job.
     trial_portion: float = Field(
         default=0.1,
-        ge=0.0,
+        # ge=0.01, matching ExperimentPlan, TrialConfig and ProposalInput.
+        # This was ge=0.0, which accepted a run with NO training data and
+        # was then rejected by the plan schema mid-run. Nothing treats 0.0
+        # as a sentinel; the intake bound was the outlier, not a feature.
+        ge=0.01,
         le=1.0,
         description="Fraction of segments per file for the training scope.",
     )
@@ -1549,7 +1567,7 @@ class HyperparamTuningInput(BaseModel):
             "refuse with policy_unavailable. None = no source configured."
         ),
     )
-    gpu_admission_enforcement: str = Field(
+    gpu_admission_enforcement: AdmissionEnforcement = Field(
         default="observe_only",
         description=(
             "V20 B-G3/D-B4. Whether an adverse GPU admission decision "
@@ -2454,14 +2472,17 @@ class HyperparamTuningOutput(BaseModel):
     # See docs §11.3.
     attempts_per_round: int = Field(
         default=3,
+        ge=1,
         description="Echo of the input attempts_per_round used for this run.",
     )
     attempts_per_formal_round: int = Field(
         default=5,
+        ge=1,
         description="Echo of the input attempts_per_formal_round used for this run.",
     )
     max_fail_rounds: int = Field(
         default=3,
+        ge=1,
         description="Echo of the input max_fail_rounds used for this run.",
     )
     consecutive_fail_rounds_at_exit: int = Field(
