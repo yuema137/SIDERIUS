@@ -630,6 +630,77 @@ def _attribution_reason(status: dict) -> str:
     return f"{outcome}: {reason}"
 
 
+#: What the tuner DOES about each status the pre-flight adapter can emit.
+#:
+#: There is deliberately no default. Before this table, the only capacity
+#: guard was ``resource_check.get("feasible", True)`` -- and the adapter
+#: omits ``feasible`` entirely for any outcome whose legacy pair carries
+#: ``None`` (``preflight_adapter.py:176``). So ``timeout``,
+#: ``host_memory_allocation_failure`` and ``measured_host_memory_exceeded``
+#: all fell through that ``True`` default and the tuner LAUNCHED TRAINING
+#: after a pre-flight that had just been RSS-killed. Every layer was
+#: individually correct and individually tested; the conclusion reached no
+#: consumer.
+#:
+#: "No conclusion" must never resolve to "safe to run".
+PREFLIGHT_CONSUMER_ACTIONS: dict[str, str] = {
+    # The probe measured a footprint; `feasible` then decides.
+    "success": "capacity_verdict",
+    # Our machinery broke. Not a statement about the candidate.
+    "error": "infrastructure_error",
+    # The plugin's own config class rejected the config.
+    "schema_violation": "schema_violation",
+    # Measured nothing usable. Blocks the attempt, blames nobody.
+    "inconclusive": "blocked_unmeasured",
+    "timeout": "blocked_unmeasured",
+    "host_memory": "blocked_unmeasured",
+}
+
+#: Which `InconclusivePreflight.kind` each blocking status carries. They
+#: block identically but are different facts (see the exception docstring).
+_BLOCKED_KIND_FOR_STATUS: dict[str, str] = {
+    "inconclusive": "inconclusive",
+    "timeout": "timeout",
+    "host_memory": "host_memory",
+}
+
+
+def _raise_if_preflight_blocks(resource_check: dict) -> str:
+    """Resolve the pre-flight status to a consumer action, or raise.
+
+    Returns the action for the statuses `run()` handles inline
+    (``capacity_verdict`` / ``infrastructure_error`` / ``schema_violation``)
+    and raises for every status that must stop the attempt here.
+
+    An UNKNOWN status raises rather than proceeding. A new
+    ``PreflightOutcome`` whose legacy status nobody wired up is a wiring
+    bug, and the failure mode this function exists to remove is exactly
+    the one where such a status silently means "go ahead".
+    """
+    status = str(resource_check.get("status", ""))
+    action = PREFLIGHT_CONSUMER_ACTIONS.get(status)
+    if action is None:
+        raise RuntimeError(
+            f"pre-flight returned status {status!r}, which no consumer branch "
+            f"handles. Known: {sorted(PREFLIGHT_CONSUMER_ACTIONS)}. Refusing to "
+            "proceed -- an unhandled pre-flight status must never be read as "
+            "permission to start training."
+        )
+    if action != "blocked_unmeasured":
+        return action
+
+    kind = _BLOCKED_KIND_FOR_STATUS[status]
+    print(
+        f"    [VRAM] pre-flight produced no usable footprint ({kind}) — "
+        "recorded as an inspection gap, NOT as evidence about this model."
+    )
+    raise InconclusivePreflight(
+        str(resource_check.get("message", "")),
+        record=resource_check.get("timeout_record") or {},
+        kind=kind,
+    )
+
+
 def _raise_if_inconclusive(resource_check: dict) -> None:
     """Turn an INCONCLUSIVE pre-flight into its own typed failure.
 
@@ -670,7 +741,9 @@ def _classify_attempt_failure(exc: BaseException, failure_stage: str | None) -> 
     pyright's complexity-analysis ceiling.
     """
     if isinstance(exc, InconclusivePreflight):
-        return "inconclusive_preflight"
+        # Kind-specific so a host-memory kill is never read back as a
+        # measurement timeout, or either as "the probe told us nothing".
+        return f"{getattr(exc, 'kind', 'inconclusive')}_preflight"
     if isinstance(exc, WallClockTimeoutError):
         return "wall_clock_timeout"  # §4 status-audit decision (RT4)
     if failure_stage == "vram_structural_probe" and isinstance(exc, RuntimeError):
@@ -3489,7 +3562,7 @@ class HyperparamTuningAgent:
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
 
-                    _raise_if_inconclusive(resource_check)
+                    _raise_if_preflight_blocks(resource_check)
 
                     # Phase D.4 — constraint-aware retry. The wrapper returns
                     # ``status="schema_violation"`` when the plugin's
