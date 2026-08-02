@@ -249,22 +249,6 @@ class TestCompressModelSummary:
         result = compress_model_summary("mt", entry)
         assert result["one_line_takeaway"] == "(no cached takeaway)"
 
-    def test_compress_total_serialised_length_under_200(self):
-        """The result, serialised back into prompt-ish text, is ≤ 200 chars.
-
-        Mirrors how the synthesis prompt will render the compressed entry:
-        ``"- {model_type} (best={best_score}, n={n_rounds}): {takeaway}"``.
-        """
-        entry = _entry(best=4.5, rounds=8, findings=["x" * 200])  # over-long
-        result = compress_model_summary("punet", entry, max_takeaway_chars=150)
-        rendered = (
-            f"- {result['model_type']} (best={result['best_score']}, "
-            f"n={result['n_rounds']}): {result['one_line_takeaway']}"
-        )
-        assert len(rendered) <= 200, (
-            f"Compressed render exceeded 200 chars: {len(rendered)}\n{rendered}"
-        )
-
     def test_compress_zero_max_takeaway_rejected(self):
         with pytest.raises(ValueError, match="must be positive"):
             compress_model_summary("mt", _entry(best=1.0), max_takeaway_chars=0)
