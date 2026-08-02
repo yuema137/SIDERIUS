@@ -157,16 +157,3 @@ def test_phase_overhead_rejects_unknown_mode():
 
 
 # ── Principle 2: no architecture names anywhere in the module source ────────
-
-
-def test_module_source_has_no_architecture_names():
-    """Principle 2 spot-check on this module specifically. The full
-    guardrail test (A.12) covers the whole tree; this one documents the
-    invariant inline so a future edit to overhead.py that sneaks in a
-    model-family branch fails close to the edit."""
-    source = Path(overhead.__file__).read_text().lower()
-    for banned in ["wavenet", "punet", "fcnet", "transformer", "rnn"]:
-        # "transformer" and "rnn" are common English words — guard against
-        # them appearing as identifier tokens (e.g. ``model_type == "transformer"``).
-        assert f'"{banned}"' not in source, f"architecture literal {banned!r} found"
-        assert f"'{banned}'" not in source, f"architecture literal {banned!r} found"

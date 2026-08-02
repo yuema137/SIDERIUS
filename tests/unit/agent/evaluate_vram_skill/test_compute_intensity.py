@@ -135,14 +135,3 @@ def test_describe_violation_has_no_architecture_names():
 
 
 # ── Principle 2 module-source spot-check ───────────────────────────────────
-
-
-def test_module_source_has_no_architecture_literals():
-    """Spot-check that this module's own source contains no model-family
-    string literals. The full guardrail test (A.12) covers the whole tree;
-    this one documents the invariant inline so a future edit to
-    compute_intensity.py that sneaks in a model branch fails close to the edit."""
-    source = Path(ci.__file__).read_text().lower()
-    for banned in ["wavenet", "punet", "fcnet", "transformer", "rnn"]:
-        assert f'"{banned}"' not in source, f"architecture literal {banned!r} found"
-        assert f"'{banned}'" not in source, f"architecture literal {banned!r} found"
