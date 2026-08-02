@@ -1,4 +1,5 @@
 # core/sandbox_executor.py
+import contextlib
 import json
 import os
 import random
@@ -7,7 +8,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from core.inference_defaults import inference_batch_for
@@ -462,25 +463,405 @@ def _watchdog_deadline_provider(
     return provider
 
 
-def _run_subprocess_with_watchdog(
+def _phase_requirement(sandbox: Any, phase: str) -> tuple[float | None, str | None]:
+    """The measured requirement for **this** phase, or `(None, None)`.
+
+    B-G0 measured the same PUNet candidate at 1,476 MiB for training and
+    2,716 MiB for inference — 1.8x apart on one card, in one run. A
+    single figure shared by both gates therefore judges one phase by a
+    measurement of the other, which is the applicability conflation the
+    attribution rules exist to prevent, arriving through the requirement
+    instead of through the verdict.
+
+    So the requirement is a mapping keyed by phase:
+
+        measured_requirements = {
+            "training":  {"requirement_mib": ..., "provenance": ...},
+            "inference": {"requirement_mib": ..., "provenance": ...},
+        }
+
+    A phase with no entry returns `(None, None)` and is refused in
+    formal mode. There is deliberately **no fallback** — not to the other
+    phase, not to the larger of the two, not to a model-name match. A
+    substituted figure would be an assumption wearing a measurement's
+    provenance.
+    """
+    table = getattr(sandbox, "measured_requirements", None)
+    if not isinstance(table, Mapping):
+        return None, None
+    entry = table.get(phase)
+    if not isinstance(entry, Mapping):
+        return None, None
+    requirement = entry.get("requirement_mib")
+    provenance = entry.get("provenance")
+    return (
+        requirement if isinstance(requirement, int | float) else None,
+        provenance if isinstance(provenance, str) else None,
+    )
+
+
+def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
+    """Refuse a GPU phase the device cannot currently hold (B-C4b).
+
+    Returns a refusal status dict, or `None` to proceed. It is placed
+    after the observer is constructed and **before** the watchdog/plain
+    branch, so both launch paths sit behind one gate — a branch outside
+    it would be a hole that looks like coverage.
+
+    **Never raises, but never fails open in formal mode.** An error is
+    converted into "no measurement was obtained" and handed to the
+    admission policy, which decides by mode: trial proceeds with a
+    recorded warning, formal refuses. Swallowing the error here into an
+    unconditional `return None` would make the guard silently permissive
+    exactly when it is supposed to protect — the fail-open posture this
+    commit exists to remove.
+
+    Pre-spawn this phase's child does not exist yet, so the tree rooted
+    at this process is what "ours" means and everything else on the card
+    is somebody else's. Whatever this process tree already holds is
+    *measured* and counted as ours; PR A's isolated worker made that
+    figure small in practice, but the logic does not assume it is zero.
+
+    The requirement is whatever the run was given. PR B does not produce
+    or promote one (D-B5), so in the default `trial` mode this admits and
+    records that it asserted nothing; formal mode refuses until PR C
+    supplies a measurement. No default moves in this commit.
+    """
+    identity = getattr(sandbox, "device_identity", None)
+    if identity is None:
+        # No device identity means there is no device to decide about —
+        # the pre-PR-B path. Unchanged behaviour, not a refusal.
+        return None
+
+    # B-G3: the typed policy is the production channel. The `getattr`
+    # fallbacks below are the pre-B-G3 path and the validation harness's
+    # injection seam; when a policy is supplied it is authoritative, so
+    # posture and ceiling cannot be read from two disagreeing places.
+    policy = getattr(sandbox, "admission_policy", None)
+    mode = policy.mode if policy is not None else getattr(sandbox, "admission_mode", "trial")
+    ceiling_gib = policy.ceiling_gib if policy is not None else None
+    # Enforcement comes ONLY from the typed policy. The legacy duck-typed
+    # path — a bare `admission_mode` attribute, which is how the B-G
+    # validation harness injects posture — always enforced, and B-G1/B-G2
+    # are evidence about that behaviour, so it keeps enforcing. Defaulting
+    # it to `observe_only` here would have silently disarmed the gate for
+    # every harness scenario while the tests still looked green.
+    #
+    # Production always supplies a policy, so production gets the
+    # `observe_only` compatibility default from the field itself.
+    enforcement = policy.enforcement if policy is not None else "enforce"
+    requirement_mib, requirement_provenance = _phase_requirement(sandbox, phase)
+    snapshot = None
+    sampling_error = None
+    try:
+        from core.runtime_control.gpu_accounting import sample
+
+        # Pre-spawn: this phase's child does not exist yet, so the tree
+        # rooted at this process is what "ours" means, and everything
+        # else on the card is somebody else's. Whatever this process
+        # tree already holds is counted as ours rather than as other —
+        # measurement, not an assumption that it is near zero.
+        snapshot = sample(os.getpid(), identity)
+    except Exception as exc:
+        sampling_error = f"{type(exc).__name__}: {exc}"
+
+    try:
+        from core.runtime_control.admission import evaluate_gpu_admission
+
+        decision = evaluate_gpu_admission(
+            snapshot=snapshot,
+            requirement_mib=requirement_mib,
+            requirement_provenance=requirement_provenance,
+            mode=mode,
+            run_name=getattr(sandbox, "run_name", None) or "candidate",
+            ceiling_gib=ceiling_gib,
+            sampling_error=sampling_error,
+        )
+    except Exception as exc:
+        # The policy itself failed, so there is no decision to consult.
+        # Only an explicitly `trial` posture may proceed: formal must not
+        # fall through to a launch, and an unrecognised mode is a
+        # misconfiguration, which is also not permission.
+        if mode == "trial":
+            return None
+        reason = f"the admission decision could not be evaluated ({type(exc).__name__}: {exc})"
+        print(f"--- [Admission] {phase} refused: {reason}")
+        return {
+            "status": "skipped_resource_admission",
+            "message": reason,
+            "admission": {
+                "admitted": False,
+                "reason_code": "measurement_unavailable",
+                "requirement_source": "unavailable",
+                "reason": reason,
+                "evidence": {"mode": mode, "policy_error": str(exc)},
+            },
+        }
+
+    if decision.admitted:
+        return None
+
+    # B-G3/D-B4 split: the decision above is real either way. What
+    # `enforcement` decides is whether an adverse one STOPS the phase.
+    #
+    # `observe_only` is the compatibility default while PR C does not yet
+    # supply authoritative measurements: without it, making the gate
+    # reachable would stop formal training repository-wide, because every
+    # formal round would correctly refuse `policy_unavailable`.
+    #
+    # The phase is NOT relabelled to keep it running. Calling a formal
+    # round `trial` would make every record claim a posture the round did
+    # not have; provenance that lies is worse than a guard that does not
+    # fire. So the posture stays `formal`, the refusal is recorded as
+    # `would_refuse`, and execution continues.
+    if enforcement != "enforce":
+        observation = {
+            "phase": phase,
+            "enforcement": enforcement,
+            "would_refuse": True,
+            "mode": mode,
+            "reason": decision.reason,
+            "admission": decision.model_dump(mode="json"),
+        }
+        _record_admission_observation(sandbox, observation)
+        print(
+            f"--- [Admission] {phase} WOULD BE REFUSED ({enforcement}): "
+            f"{decision.reason}. Proceeding because enforcement is "
+            f"'{enforcement}'; the phase posture remains '{mode}'."
+        )
+        return None
+
+    print(f"--- [Admission] {phase} refused: {decision.reason}")
+    return {
+        "status": "skipped_resource_admission",
+        "message": decision.reason,
+        "admission": decision.model_dump(mode="json"),
+    }
+
+
+def _record_admission_observation(sandbox: Any, observation: dict) -> None:
+    """Persist an observe-only admission decision.
+
+    Kept out of `_admission_refusal` so that function stays a decision,
+    not a decision plus a writer. The list is what a run is audited by:
+    an `observe_only` interval must leave behind exactly which phases
+    would have been refused and why, or "we observed it" is unfalsifiable.
+    """
+    try:
+        observations = getattr(sandbox, "admission_observations", None)
+        if observations is None:
+            observations = []
+            sandbox.admission_observations = observations
+        observations.append(observation)
+    except Exception:
+        # Recording is auditing, not control. It must never be able to
+        # stop a phase the gate decided to allow.
+        return
+
+
+def _make_phase_observer(sandbox: Any) -> Any:
+    """One observer for one GPU phase, or None when there is no identity.
+
+    Imported lazily so `sandbox_executor` keeps no import-time dependency
+    on the observer, and so a telemetry import failure can never stop a
+    training run.
+    """
+    identity = getattr(sandbox, "device_identity", None)
+    if identity is None:
+        return None
+    try:
+        from core.runtime_control.gpu_observer import GpuPhaseObserver
+
+        return GpuPhaseObserver(identity, policy=getattr(sandbox, "observation_policy", None))
+    except Exception:  # pragma: no cover - telemetry must not break the phase
+        return None
+
+
+def _has_host_memory_evidence(e: subprocess.CalledProcessError) -> bool:
+    """Genuine host-memory corroboration, distinct from a bare signal.
+
+    Deliberately NOT ``_is_oom_failure``: that also returns True for
+    ``returncode == -9``, which is compatible with a kernel OOM kill, a
+    quota watchdog and an operator, and cannot tell them apart. Only the
+    ``MemoryError`` signature is real evidence — the RLIMIT_AS ceiling
+    caught the allocation and Python raised. Feeding ``-9`` in here
+    would let a signal launder itself into a verdict, which is the
+    inference B-C3 exists to refuse.
+    """
+    return bool(e.stderr and _MEMORY_ERROR_RE.search(e.stderr))
+
+
+def _with_failure_attribution(
+    result: dict, e: subprocess.CalledProcessError, observer: Any
+) -> dict:
+    """Classify the failure here, where the evidence still exists (B-C3b).
+
+    This is the only point at which all of it coexists: the child's full
+    stderr (with the attempted-allocation size), the live evidence
+    bundle, and the return code. Downstream the message is truncated to
+    its last 500 characters — and because stdout is appended after
+    stderr, that window normally holds trainer progress output rather
+    than the allocation line. Attribution reconstructed from a stored
+    record would therefore be attribution built on the wrong text.
+
+    Never raises: a failure to classify must not change the phase's own
+    result. An absent attribution reads as ``unknown`` downstream.
+    """
+    with contextlib.suppress(Exception):
+        from core.runtime_control.failure_attribution import (
+            attribute_gpu_failure,
+            attribute_process_termination,
+            extract_attempted_allocation_mib,
+            looks_like_cuda_oom,
+        )
+
+        # Arbitration: a credible device-side OOM is a statement about
+        # the device; anything else is a statement about the process.
+        if looks_like_cuda_oom(e.stderr):
+            verdict = attribute_gpu_failure(
+                bundle=observer.bundle() if observer is not None else None,
+                attempted_allocation_mib=extract_attempted_allocation_mib(e.stderr),
+                failure_text=e.stderr,
+            )
+        else:
+            verdict = attribute_process_termination(
+                returncode=e.returncode,
+                host_memory_evidence=_has_host_memory_evidence(e),
+                # No producer exists for an external-termination marker;
+                # claiming one would manufacture certainty (FU-B-10).
+                external_signal_evidence=False,
+                failure_text=e.stderr,
+            )
+        result["failure_attribution"] = verdict.model_dump(mode="json")
+    return result
+
+
+def _with_gpu_evidence(result: dict, observer: Any) -> dict:
+    """Attach the bounded evidence bundle to a FAILURE result.
+
+    Failure only, per the B-C2b persistence boundary: sampling runs on
+    every attempt because the baseline and peak cannot be reconstructed
+    afterwards, but writing four snapshots into every successful record
+    would be an unannounced schema and storage change on the hot path.
+
+    Never raises. Telemetry must not be able to fail the phase it
+    watched, so a bundle that cannot be produced is simply absent.
+    """
+    if observer is None:
+        return result
+    with contextlib.suppress(Exception):  # telemetry never fails the phase
+        result["gpu_evidence"] = observer.bundle().model_dump(mode="json")
+    return result
+
+
+def _run_observed_subprocess(
     cmd: list[str],
     *,
     env: dict,
     preexec_fn: Callable[[], None] | None,
     capture_stdout: bool,
-    deadline_provider: Callable[[], tuple[float | None, str]],
-    grace_seconds: float,
-    poll_seconds: float,
-    label: str,
+    deadline_provider: Callable[[], tuple[float | None, str]] | None = None,
+    grace_seconds: float = 0.0,
+    poll_seconds: float = 0.0,
+    label: str = "",
+    observer: Any = None,
 ) -> tuple[subprocess.CompletedProcess | None, dict[str, Any] | None]:
-    """Run ``cmd`` in its OWN process group under a §4 deadline.
+    """The single seam every GPU child is launched through (V20 B-C2a1).
 
-    Natural exit → ``(CompletedProcess, None)`` (non-zero exit codes are
-    raised as ``CalledProcessError`` to mirror ``subprocess.run(...,
-    check=True)``). Deadline hit → the whole process GROUP gets
-    SIGTERM, ``grace_seconds``, then SIGKILL; the survivors check
-    asserts the group is gone; returns ``(None, kill_info)``.
+    **Routing only.** This commit changes *where* the four GPU launches
+    are expressed, not *how* any of them runs. Both implementations below
+    are the pre-existing ones, moved behind one door so that the observer
+    in B-C2b attaches once instead of at four call sites, where one
+    branch could silently lose it.
+
+    ``deadline_provider=None`` — plain mode, delegating to the same
+    ``subprocess.run(..., check=True)`` these call sites used before.
+
+    ``deadline_provider`` supplied — deadline mode, the existing §4
+    watchdog: own process group, SIGTERM, ``grace_seconds``, SIGKILL,
+    then assert the group is gone. Returns ``(None, kill_info)`` when the
+    deadline fires.
+
+    **Why plain mode is not also on ``Popen`` yet.** B-C2b needs the child
+    PID while the child is alive, which ``subprocess.run`` cannot give.
+    But moving plain mode to ``Popen`` retires the launch point that 58
+    existing stubs across six test files are aimed at, and a stub that
+    stops intercepting does not fail — it lets the real thing run. That
+    was measured, not predicted: real ``train_engine_sandbox.py``
+    subprocesses launched out of the unit suite. The migration is
+    therefore its own checkpoint (B-C2a2), so a test-infrastructure
+    change, an execution-mechanism change and a telemetry change cannot
+    mask one another.
+
+    **Why the session behaviour is not unified, and will not be.**
+    ``killpg`` needs its own group, so deadline mode passes
+    ``start_new_session=True``. A child in its own session does *not*
+    receive a terminal SIGINT, while a child in the caller's group does —
+    and the chain runs under ``timeout --signal=INT``, so operator stop
+    depends on that signal reaching the work. Unifying the two would
+    change operator stop semantics through a diff that looks like a
+    refactor.
+
+    **The observer is an argument, not a third return value.** B-C2b
+    needs evidence out of this function, and the obvious shape is to
+    return it — but the return tuple is what 48 migrated test stubs
+    across six files were just reshaped around, and widening it would
+    re-break every one of them for a reason unrelated to what they test.
+    So the caller owns the observer, passes it in, and reads
+    ``observer.bundle()`` afterwards. The seam only drives its lifecycle.
     """
+    if deadline_provider is None:
+        # Plain mode. Faithful to the `subprocess.run(..., check=True)`
+        # this replaced, but on `Popen` so B-C2b can hold the child PID
+        # while the child is alive — which is the whole reason for the
+        # migration, and something `subprocess.run` cannot give.
+        #
+        # `start_new_session` is NOT passed, matching `subprocess.run`'s
+        # default: a child in the caller's process group receives a
+        # terminal SIGINT, and the chain runs under `timeout
+        # --signal=INT`. Only the deadline path below takes its own
+        # session, because `killpg` requires one.
+        if observer is not None:
+            # Before the child exists, so it can claim nothing about it.
+            observer.capture_baseline()
+        plain = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE if capture_stdout else None,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=os.getcwd(),
+            env=env,
+            preexec_fn=preexec_fn,
+        )
+        if observer is not None:
+            observer.start(plain.pid)
+        failed = True
+        try:
+            stdout, stderr = plain.communicate()
+            failed = plain.returncode != 0
+        except BaseException:
+            # `subprocess.run` kills and reaps rather than leaking the
+            # child on any exception; reproduce that exactly.
+            plain.kill()
+            plain.wait()
+            raise
+        finally:
+            # In `finally`, so the observer stops on every path — success,
+            # non-zero exit, and any exception. It never affects the
+            # child's own result.
+            if observer is not None:
+                observer.stop(child_pid=plain.pid, failed=failed)
+        if plain.returncode != 0:
+            # `Popen` has no `check`. The property downstream handlers
+            # depend on is the exception, not the keyword.
+            raise subprocess.CalledProcessError(plain.returncode, cmd, output=stdout, stderr=stderr)
+        return (
+            subprocess.CompletedProcess(cmd, plain.returncode, stdout=stdout, stderr=stderr),
+            None,
+        )
+
+    if observer is not None:
+        observer.capture_baseline()
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE if capture_stdout else None,
@@ -491,6 +872,8 @@ def _run_subprocess_with_watchdog(
         preexec_fn=preexec_fn,
         start_new_session=True,  # own process group — killpg reaches every child
     )
+    if observer is not None:
+        observer.start(proc.pid)
     t_start = time.perf_counter()
     stdout, stderr = "", ""
     while True:
@@ -538,6 +921,8 @@ def _run_subprocess_with_watchdog(
                 time.sleep(0.05)
             if survivors:
                 print(f"--- Watchdog [{label}] WARNING: process group {pgid} survived ---")
+            if observer is not None:
+                observer.stop(child_pid=proc.pid, failed=True)
             return None, {
                 "elapsed_s": round(elapsed, 3),
                 "deadline_s": round(deadline, 3),
@@ -547,6 +932,8 @@ def _run_subprocess_with_watchdog(
                 "stdout_tail": (stdout or "")[-2000:],
                 "stderr_tail": (stderr or "")[-2000:],
             }
+    if observer is not None:
+        observer.stop(child_pid=proc.pid, failed=proc.returncode != 0)
     if proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
     return (
@@ -600,10 +987,28 @@ class TidmadSandbox:
         progress_bar: bool = False,
         file_index: int = 6,
         data_scope: DataScope | None = None,
+        device_identity: Any = None,
+        observation_policy: Any = None,
+        admission_policy: Any = None,
     ):
         # Boundary DataScope invariant: every SampleSet is validated against
         # this scope before any file I/O (train / inference / score_vector).
         # Default = complete dataset (behavior identical to pre-scope code).
+        # V20 B-C2b. Explicit and optional: `None` means telemetry is
+        # unavailable, and this class must never discover a device of its
+        # own — implicit rediscovery is how "GPU 0" gets assumed.
+        self.device_identity = device_identity
+        self.observation_policy = observation_policy
+        # V20 B-G3. The typed admission boundary. `None` preserves
+        # pre-B-G3 behaviour exactly: the gate falls back to the
+        # `admission_mode`/`measured_requirements` duck-typed reads, which
+        # in production resolve to trial + no requirement and therefore
+        # admit. Setting it is what makes the gate reachable at all.
+        self.admission_policy = admission_policy
+        #: Adverse decisions taken while enforcement was `observe_only`.
+        #: Empty is a real result: it means nothing would have been
+        #: refused, not that nothing was checked.
+        self.admission_observations: list[dict] = []
         self.data_scope = data_scope or DataScope.default()
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
@@ -825,13 +1230,18 @@ class TidmadSandbox:
                     cmd.extend(["--runtime_policy_json", rp_path])
 
             print(f">>> [Executor] Running training for {exp_id}...")
+            _observer = _make_phase_observer(self)
+            # B-C4b: one gate before BOTH launch branches.
+            _refusal = _admission_refusal(self, phase="training")
+            if _refusal is not None:
+                return _refusal
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
             if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
                 # RT4 (§4): process-group launch + deadline kill. The
                 # deadline tightens mid-flight from the live observation
                 # sidecar (component-deadline interface).
-                result, kill_info = _run_subprocess_with_watchdog(
+                result, kill_info = _run_observed_subprocess(
                     cmd,
                     env=env,
                     preexec_fn=preexec,
@@ -839,6 +1249,7 @@ class TidmadSandbox:
                     deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
+                    observer=_observer,
                     label="training",
                 )
                 if kill_info is not None:
@@ -866,15 +1277,15 @@ class TidmadSandbox:
                         "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
                     }
             else:
-                result = subprocess.run(
+                # B-C2a: same seam as the deadline branch above, so
+                # telemetry attaches once. deadline_provider=None keeps
+                # subprocess.run's semantics, session behaviour included.
+                result, _ = _run_observed_subprocess(
                     cmd,
-                    check=True,
-                    stdout=None if self.progress_bar else subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    cwd=os.getcwd(),
                     env=env,
                     preexec_fn=preexec,
+                    capture_stdout=not self.progress_bar,
+                    observer=_observer,
                 )
             assert result is not None
 
@@ -975,11 +1386,18 @@ class TidmadSandbox:
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             # A crashed subprocess may still have staged partial observation
             # evidence (setup timing, provenance) — attach it (§6.2).
-            return {
-                "status": status,
-                "message": error_msg,
-                "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-            }
+            return _with_failure_attribution(
+                _with_gpu_evidence(
+                    {
+                        "status": status,
+                        "message": error_msg,
+                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                    },
+                    _observer,
+                ),
+                e,
+                _observer,
+            )
         except Exception as e:
             print(f"!!! [Executor Internal Error] !!!: {e!s}")
             return {"status": "error", "message": str(e)}
@@ -1122,11 +1540,16 @@ class TidmadSandbox:
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
+            _observer = _make_phase_observer(self)
+            # B-C4b: one gate before BOTH launch branches.
+            _refusal = _admission_refusal(self, phase="inference")
+            if _refusal is not None:
+                return _refusal
             t_subprocess_start = time.perf_counter()
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("inference"))
             if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
-                result, kill_info = _run_subprocess_with_watchdog(
+                result, kill_info = _run_observed_subprocess(
                     cmd,
                     env=env,
                     preexec_fn=preexec,
@@ -1134,6 +1557,7 @@ class TidmadSandbox:
                     deadline_provider=_watchdog_deadline_provider(policy_obj, rv_sidecar_path),
                     grace_seconds=policy_obj.watchdog.grace_seconds,
                     poll_seconds=policy_obj.watchdog.poll_seconds,
+                    observer=_observer,
                     label="inference",
                 )
                 if kill_info is not None:
@@ -1161,15 +1585,15 @@ class TidmadSandbox:
                         "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
                     }
             else:
-                result = subprocess.run(
+                # B-C2a: same seam as the deadline branch above, so
+                # telemetry attaches once. deadline_provider=None keeps
+                # subprocess.run's semantics, session behaviour included.
+                result, _ = _run_observed_subprocess(
                     cmd,
-                    check=True,
-                    stdout=None if self.progress_bar else subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    cwd=os.getcwd(),
                     env=env,
                     preexec_fn=preexec,
+                    capture_stdout=not self.progress_bar,
+                    observer=_observer,
                 )
             assert result is not None
             subprocess_wall_ms = (time.perf_counter() - t_subprocess_start) * 1000.0
@@ -1205,14 +1629,21 @@ class TidmadSandbox:
             error_msg = _format_subprocess_error(e, "Inference")
             print(f"--- Inference Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
-            return {
-                "status": status,
-                "message": error_msg,
-                "per_file_timings_ms": [],
-                "process_startup_ms": None,
-                "subprocess_wall_ms": None,
-                "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
-            }
+            return _with_failure_attribution(
+                _with_gpu_evidence(
+                    {
+                        "status": status,
+                        "message": error_msg,
+                        "per_file_timings_ms": [],
+                        "process_startup_ms": None,
+                        "subprocess_wall_ms": None,
+                        "runtime_verification": _read_runtime_observation_sidecar(rv_sidecar_path),
+                    },
+                    _observer,
+                ),
+                e,
+                _observer,
+            )
 
     def score_vector(
         self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn: Callable, **kwargs

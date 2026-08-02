@@ -1384,6 +1384,9 @@ def run_workflow(
     formal_time_budget_minutes: float | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, docs/resource_estimator_implement.md §10.9 / Phase K) ---
     # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
+    gpu_admission_measurement_source: str | None = None,
+    gpu_admission_enforcement: str = "observe_only",
+    gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
     # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
@@ -1608,6 +1611,13 @@ def run_workflow(
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
             (plan.is_trial=False). Sized independently because formal runs
             use the full dataset and are 50-100x longer.
+        gpu_admission_measurement_source: V20 B-G3. Reference naming
+            where an authoritative GPU measurement would resolve
+            from. Never a figure. Unresolved before PR C, so formal
+            rounds refuse with policy_unavailable.
+        gpu_pair_ceiling_gib: V20 B-G3. Aggregate GPU ceiling (GiB)
+            passed explicitly to the admission gate. None defers to
+            the environment resolver, i.e. pre-B-G3 behaviour.
         trial_vram_budget_gb: Per-mode VRAM ceiling (GB) for the
             evaluate_vram_skill gate on trial-mode rounds. Fanned out to
             HyperparamTuningInput only — Phase K has no proposer-side VRAM
@@ -2523,6 +2533,9 @@ def run_workflow(
             trial_time_budget_minutes=trial_time_budget_minutes,
             formal_time_budget_minutes=formal_time_budget_minutes,
             data_dir=data_dir,
+            gpu_admission_measurement_source=gpu_admission_measurement_source,
+            gpu_admission_enforcement=gpu_admission_enforcement,
+            gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,
             trial_vram_budget_gb=trial_vram_budget_gb,
             formal_vram_budget_gb=formal_vram_budget_gb,
             formal_strategy=formal_strategy,

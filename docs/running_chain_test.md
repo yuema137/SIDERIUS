@@ -861,6 +861,154 @@ not the formal round. If you want a faster chain run, reduce `--max_rounds` or
 
 ---
 
+## New GPU host — bring-up and revalidation runbook (V20 PR B)
+
+**Why this exists.** The code is hardware-generic: devices are keyed by
+UUID, ceilings come from configuration, and a measurement from one card
+is never silently reused on another. That makes a new host *possible*.
+It does not make it *reproducible* — this runbook is what makes it
+reproducible, and it must be followed in order on every new GPU host.
+
+**The one-sentence rule:** measurements are bound to a GPU UUID, so
+moving hardware invalidates every stored figure for admission purposes,
+even for a byte-identical candidate.
+
+### 0. What is per-host, per-candidate, and neither
+
+| Scope | Items | Repeat when |
+|---|---|---|
+| **Per host** (once) | GPU UUID, ceilings, host quota, concurrency, telemetry policy | new machine, new GPU, driver change that alters UUID |
+| **Per candidate + phase** | driver-visible peak for that config on that UUID | any change to config, batch, segment, portions, task, data shape |
+| **Neither** (generic) | the commands below, the admission logic, the attribution vocabulary | never — no production edit should be needed |
+
+### 1. Resolve the new hardware identity
+
+```bash
+nvidia-smi --query-gpu=index,uuid,name,memory.total --format=csv
+```
+
+Record the **UUID**, not the index. `CUDA_VISIBLE_DEVICES` changes
+indices; it does not change UUIDs. The run's own hardware manifest
+(`core/hardware_context.py::write_manifest`) stamps the UUID it actually
+used — check it agrees.
+
+### 2. Confirm no existing measurement applies
+
+Any figure recorded on another UUID is **not** applicable, however
+similar the hardware. There is no "close enough": a measurement either
+matches the applicability tuple or it does not.
+
+```text
+normalized candidate config · phase · task · dataset/data-shape class
+· runtime settings · measurement type · GPU UUID
+```
+
+Expected consequence on a fresh host: `formal` mode refuses every
+candidate with `reason_code=measurement_unavailable`. **That is the
+system working, not a defect.**
+
+### 3. Configure the host's limits — do not edit code
+
+These are **hardware-owned configuration**, not framework constants:
+
+| Value | Source | Default |
+|---|---|---|
+| aggregate pair ceiling | `SIDERIUS_PAIR_VRAM_CEILING_GIB` | `28.0` GiB (`pair_admission.py:45`) |
+| host per-user quota | `SIDERIUS_GPU_VRAM_QUOTA_MIB` | **undeclared = unknown, not unlimited** |
+
+> **Concrete hazard on a larger card.** The `28.0` GiB default was chosen
+> for a 31.34 GiB RTX 5090. On an 80 GB H100 it would silently cap the
+> device at 28 GiB and refuse legitimate work as
+> `insufficient_headroom` — which reads as "the device is busy" rather
+> than "the ceiling is misconfigured". **Set the ceiling explicitly on
+> any host whose card is not ~32 GiB.**
+
+The effective ceiling is `min(configured, measured device capacity)`:
+policy may be stricter than the hardware, never looser. Both figures are
+recorded on every admission decision, so a later reader can tell which
+one bound.
+
+### 4. Collect a bounded measurement on the new device
+
+Run one candidate, one round, one attempt, one epoch, small portion, on
+an otherwise idle card. What you need from it is the **driver-visible
+peak** for that candidate and phase — not the pre-flight estimate, which
+is a different quantity (see
+`agent/skills/evaluate_vram_skill/evaluate_vram_skill.md`).
+
+Precondition, checked before starting:
+
+```bash
+nvidia-smi --query-compute-apps=pid,used_gpu_memory,gpu_uuid --format=csv
+# expect: header only — no compute apps
+nvidia-smi --query-gpu=memory.used --format=csv
+# expect: the host's idle baseline
+```
+
+### 5. Validate applicability and promote — PR C, not PR B
+
+PR B **consumes** an applicable authoritative measurement. It does not
+decide applicability and does not promote. Until PR C supplies that
+path, a new host has no authoritative measurement and `formal` mode
+stays refused. Do not work around this by hand-writing a registry entry
+or by pointing admission at a predicted estimate — that reintroduces the
+defect PR B exists to remove, behind a guard that then looks like it is
+working.
+
+### 6. Permit test — the equivalent of B-G1
+
+With an applicable measurement and an idle card, a GPU phase must
+**start** and produce artifacts identical to the pre-admission path.
+
+### 7. Refusal test — the equivalent of B-G2
+
+Two distinct refusals, both required:
+
+| Scenario | Setup | Expected |
+|---|---|---|
+| cold start | `formal`, no applicable measurement | `measurement_unavailable`, no subprocess |
+| contention | applicable measurement + a controlled holder so occupancy + requirement > ceiling | `insufficient_headroom`, no subprocess |
+
+Use a **deliberate, bounded memory holder** pinned to the same UUID
+rather than incidental load: its PID and occupancy are then known, so a
+refusal is attributable rather than merely observed. Record the holder's
+**measured driver-visible** MiB — never the requested tensor size; they
+differ.
+
+### 8. Verify cleanup
+
+```bash
+pgrep -af "train_engine_sandbox.py|inference_single.py|preflight_worker_main"
+nvidia-smi --query-compute-apps=pid,used_gpu_memory,gpu_uuid --format=csv
+nvidia-smi --query-gpu=memory.used --format=csv
+```
+
+All three must show the host back at its idle baseline with no
+survivors. A GPU child that never started leaves no artifacts — absence
+of a checkpoint is part of the evidence that a refusal really refused.
+
+### 9. Interpreting the result
+
+| Outcome | Meaning |
+|---|---|
+| **PASS** | permit started and produced artifacts; both refusals occurred before any subprocess launched; GPU returned to baseline |
+| **FAIL** | a phase started despite a refusal, or a refusal blamed the candidate, or a measured-headroom shortfall was admitted |
+| **INCONCLUSIVE** | card not idle at start, telemetry unavailable, holder occupancy materially off target, or any orphan process |
+
+**INCONCLUSIVE is not FAIL.** It means the conditions for a verdict were
+not met — rerun; it does not mean the guard is broken.
+
+### 10. Refusals never blame the candidate
+
+None of `measurement_unavailable`, `policy_unavailable` or
+`insufficient_headroom` is evidence about model size, and none carries
+authority to shrink anything. A record with
+`status="skipped_resource_admission"` is a statement about the machine.
+Only a **measured** capacity failure — attribution
+`candidate_gpu_capacity` — may say the candidate was too large.
+
+---
+
 ## Common pitfalls
 
 | Symptom | Cause | Fix |
@@ -875,6 +1023,7 @@ not the formal round. If you want a faster chain run, reduce `--max_rounds` or
 | `bank_limit plugin` rejection on SDSC | Missing `--ntasks=1` or wrong GPU spec | Already handled by `run_iteration_chain.sh`; don't edit the sbatch args block |
 | `Nodes required for job are DOWN, DRAINED or reserved` on SDSC | Specific GPU type is unavailable on `gpu-shared` at submission time (transient) | Wait a few minutes; if persistent, paste `scontrol show job <id>` output for diagnosis. Often resolves itself within an hour. |
 | Lilab orchestrator fails immediately with `ModuleNotFoundError: No module named 'dotenv'` | Old version of `run_iteration_chain_lilab.sh` invoked system `python3` instead of `uv run python` | **Historical (fixed in `86cee48`)**. Should not recur — script auto-detects `uv`. |
+| Records with `status="skipped_resource_admission"` and no score | **Expected since V20 PR B.** Driver-visible GPU occupancy is measured before each training/inference phase; when the device cannot currently hold it, the phase is refused and never starts. The record consumes the attempt slot but is **not** a candidate failure — no score, no shrink advice, no incumbent update. Check `memory.reason_code`: `insufficient_headroom` (something else held the card), `measurement_unavailable` (formal mode with no applicable authoritative measurement — expected until PR C lands), `policy_unavailable` (misconfigured `admission_mode`; the accepted values are `trial` and `formal`). | Nothing to fix if it is `insufficient_headroom` on a shared GPU — check `nvidia-smi` for the other holder. Default posture is `trial`, which proceeds and only records what it could not prove. |
 | SDSC slurm `.out` file empty for hours despite job running | Old slurm scripts didn't set `PYTHONUNBUFFERED=1`, so python's block-buffered stdout never flushed to disk until the process exited | **Historical (fixed in `331d7c1`)**. `submit_one_iteration.slurm` and `submit_hpt_agent.slurm` both export `PYTHONUNBUFFERED=1` now. |
 
 ---

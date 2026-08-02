@@ -1,0 +1,120 @@
+# evaluate_vram_skill
+
+Estimates how much GPU memory a candidate configuration would need, so a
+round that cannot fit is skipped cheaply instead of discovered by an
+out-of-memory error mid-training.
+
+Created 2026-08-02 (V20 PR B, B-C5). This skill owns the quantity whose
+misuse caused the V19 collapse, and it had no document.
+
+---
+
+## What it measures, and what that number is not
+
+The skill runs a **structural probe** in an isolated worker (PR A,
+`preflight_worker_main.py`) and composes a **predicted allocated peak**
+from it.
+
+> **A predicted allocated peak is not a driver-visible measurement.**
+
+The two differ by a large, architecture-dependent factor. Measured on
+this repository's own hardware (A6, `pr_a_isolated_preflight_wiring.md`
+§24):
+
+| Candidate | Predicted estimate | Driver-visible peak | Ratio |
+|---|---|---|---|
+| wavenet | 6.43 GB | **12.52 GiB** | 1.95x |
+| punet | 1.65 GB | 3.00 GiB | 1.82x |
+
+The difference is CUDA context, allocator fragmentation, cuDNN
+workspaces and caching-allocator overhead — none of which a structural
+probe can see.
+
+**Consequences, all of them load-bearing:**
+
+- The estimate is a **planning input**, and V20 PR B does not promote it
+  to a resource fact. GPU admission (`core/runtime_control/admission.py`)
+  refuses a predicted provenance in `formal` mode rather than using it.
+- Comparing this estimate against a driver-visible ceiling is the exact
+  defect PR B exists to remove. Do not reintroduce it behind a new
+  guard.
+- A gate rejection based on this estimate says the *estimate* did not
+  fit. Only a **measured** capacity failure may tell a planner the model
+  was too large — see §B-C3 of the PR B design.
+
+---
+
+## Hardware applicability — read before reusing any number
+
+Every figure this skill produces is bound to the hardware it ran on.
+The binding is by **GPU UUID**, not by device index: "GPU 0" is a
+position, not an identity, and it changes with `CUDA_VISIBLE_DEVICES`.
+
+A measurement is applicable only when **all** of these match:
+
+```text
+normalized candidate config
+phase (training | inference)
+task
+dataset / data-shape class
+runtime settings (batch, segment length, portions)
+measurement type (predicted estimate vs driver-visible peak)
+GPU UUID
+```
+
+**An RTX 5090 measurement is not an H100 measurement.** Moving to new
+hardware invalidates every stored figure for admission purposes, even
+for a byte-identical candidate. See the cross-hardware bring-up runbook
+in `docs/running_chain_test.md`.
+
+**This skill does not promote anything.** It measures and returns. It
+does not decide whether a figure is applicable elsewhere, does not write
+an authoritative record, and does not make a measurement reusable across
+runs — that is PR C's responsibility, deliberately kept separate so
+there is one measurement authority rather than two.
+
+---
+
+## Interface
+
+Invoked through `_run_skill("evaluate_vram_skill", sandbox, ...)`, and in
+production through `run_production_preflight`
+(`preflight_adapter.py`), which routes to the isolated worker.
+
+**Key returned fields** (`wrapper.py`):
+
+| Field | Meaning |
+|---|---|
+| `feasible` | whether the estimate fits the configured budget |
+| `estimated_gb` | the predicted allocated peak — **not** driver-visible |
+| `limit_gb` | the budget it was compared against |
+| `verdict` | operator-facing explanation |
+| `suggestion` | what to change, when the estimate is the binding constraint |
+| `inference_batch_uncalibrated` | the inference estimate used an unregistered batch |
+
+On a CPU-only host it returns `feasible=True` with
+`estimated_gb=0.0` and a verdict naming the device — there is no VRAM
+constraint to evaluate, and that is not evidence that any model fits a
+GPU.
+
+---
+
+## What it must never do
+
+- Assume GPU 0, or any device index, rather than a resolved UUID.
+- Reuse a figure measured on a different GPU UUID.
+- Present `estimated_gb` as a driver-visible requirement.
+- Authorise a candidate-shrinking instruction on its own — that
+  authority belongs to a measured capacity failure (§B-C3).
+
+---
+
+## Related
+
+- `core/runtime_control/admission.py` — consumes an applicable
+  **measured** requirement; refuses a predicted one in formal mode.
+- `core/runtime_control/failure_attribution.py` — decides whether an
+  out-of-memory says anything about the candidate at all.
+- `docs/design/v20_priorities/pr_b_gpu_aggregation_attribution.md` —
+  the measurement/attribution design and the cross-hardware section.
+- `docs/running_chain_test.md` — new-machine bring-up runbook.

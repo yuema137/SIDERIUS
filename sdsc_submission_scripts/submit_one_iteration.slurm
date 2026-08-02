@@ -64,44 +64,92 @@ export PYTHONUNBUFFERED=1
 WORKSPACE=""
 ITERATION=""
 SOURCE_PATHS=()
+# Only the values this wrapper still needs: for its banner, its manifest
+# verification, and as defaults when the caller supplied none. Every other
+# application setting is forwarded verbatim and defaulted by Python.
 MAX_ROUNDS=20
 MAX_PROPOSAL_ATTEMPTS=3
 LLM_MODEL="gemini-3.1-pro-preview"
 TRIAL_PORTION=0.1
 TRAIN_PORTION=0.1
 EVAL_PORTION=0.1
-MAX_EPOCHS=""
-REFLECT_PROVIDER=""
-REFLECT_MODEL_ID=""
-HUMAN_ADVICE_FILE=""
-PLAN_OVERRIDES=""
 
 # --- Argument parsing ---
+#
+# OWNERSHIP (V20 B-G3 / FU-B-16). This wrapper owns *scheduler* concerns.
+# It does not own the application CLI and must not try to know it.
+#
+# It used to parse ~14 application flags into shell variables and then
+# REBUILD the command line from them, ending with `*) shift ;;`. Every
+# flag it did not name -- 35 of them, including --data_scope, every
+# runtime-control flag and the VRAM budgets -- was silently discarded, so
+# a run configured on the command line executed with different settings
+# on SDSC than on lilab, with nothing in the log to say so.
+#
+# The rule now:
+#
+#     owned here        -> consume
+#     not owned here    -> forward unchanged
+#     unknown to Python -> Python rejects it, loudly
+#
+# `--workspace`, `--iteration` and `--source_paths` are PEEKED, not
+# consumed: this script needs them for its banner and its post-run
+# manifest verification, so it records the value AND forwards the tokens.
+# Consuming them would be the same bug in a smaller form.
+#
+# `--` forwards everything after it verbatim and is the unambiguous
+# interface; bare forwarding is kept so existing invocations still work.
+FORWARD_ARGS=()
+
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --workspace)              WORKSPACE="$2"; shift 2 ;;
-    --iteration)              ITERATION="$2"; shift 2 ;;
-    --source_paths)
+    --)
       shift
+      FORWARD_ARGS+=("$@")
+      break
+      ;;
+    --workspace)
+      WORKSPACE="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
+    --iteration)
+      ITERATION="$2"; FORWARD_ARGS+=("$1" "$2"); shift 2 ;;
+    --source_paths)
+      FORWARD_ARGS+=("$1"); shift
       while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
         SOURCE_PATHS+=("$1")
+        FORWARD_ARGS+=("$1")
         shift
       done
       ;;
-    --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
-    --max_proposal_attempts)  MAX_PROPOSAL_ATTEMPTS="$2"; shift 2 ;;
-    --llm_model)              LLM_MODEL="$2"; shift 2 ;;
-    --trial_portion)          TRIAL_PORTION="$2"; shift 2 ;;
-    --train_portion)          TRAIN_PORTION="$2"; shift 2 ;;
-    --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
-    --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
-    --reflect_provider)       REFLECT_PROVIDER="$2"; shift 2 ;;
-    --reflect_model_id)       REFLECT_MODEL_ID="$2"; shift 2 ;;
-    --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
-    --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
-    *)                        shift ;;  # ignore unknown flags
+    *)
+      # Not owned here. Forward the token exactly as received -- values,
+      # `--flag=value`, negative numbers, paths with spaces and repeated
+      # flags all survive because nothing is re-split or re-quoted.
+      FORWARD_ARGS+=("$1")
+      shift
+      ;;
   esac
 done
+
+# Defaults are appended only when the caller did not supply the flag, so
+# a value from run_chain.sh always wins and a direct `sbatch` invocation
+# (the usage block above) keeps behaving as it did.
+_has_flag() {
+  local needle="$1"; shift
+  local tok
+  for tok in "$@"; do
+    if [[ "$tok" == "$needle" || "$tok" == "$needle="* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+_default_if_absent() {
+  local flag="$1"; shift
+  if ! _has_flag "$flag" "${FORWARD_ARGS[@]}"; then
+    FORWARD_ARGS+=("$flag" "$@")
+  fi
+}
 
 if [ -z "$WORKSPACE" ] || [ -z "$ITERATION" ] || [ ${#SOURCE_PATHS[@]} -eq 0 ]; then
     echo "[FAIL] Required args: --workspace, --iteration, --source_paths" >&2
@@ -129,36 +177,25 @@ echo "    GPUs             : ${SLURM_JOB_GPUS:-0}"
 echo "    CPUs             : ${SLURM_CPUS_PER_TASK:-N/A}"
 echo "############################################################"
 
-# --- Build CLI args for the runner ---
-RUNNER_ARGS=(
-    --workspace "${WORKSPACE}"
-    --iteration "${ITERATION}"
-    --source_paths "${SOURCE_PATHS[@]}"
-    --max_rounds "${MAX_ROUNDS}"
-    --max_proposal_attempts "${MAX_PROPOSAL_ATTEMPTS}"
-    --llm_model "${LLM_MODEL}"
-    --trial_portion "${TRIAL_PORTION}"
-    --train_portion "${TRAIN_PORTION}"
-    --eval_portion "${EVAL_PORTION}"
-    --is_trial
-    --cleanup_denoised
-)
+# --- Fill in defaults the caller did not specify ---
+_default_if_absent --max_rounds "${MAX_ROUNDS}"
+_default_if_absent --max_proposal_attempts "${MAX_PROPOSAL_ATTEMPTS}"
+_default_if_absent --llm_model "${LLM_MODEL}"
+_default_if_absent --trial_portion "${TRIAL_PORTION}"
+_default_if_absent --train_portion "${TRAIN_PORTION}"
+_default_if_absent --eval_portion "${EVAL_PORTION}"
 
-if [ -n "$MAX_EPOCHS" ]; then
-    RUNNER_ARGS+=(--max_epochs "${MAX_EPOCHS}")
+if ! _has_flag --cleanup_denoised "${FORWARD_ARGS[@]}"; then
+    FORWARD_ARGS+=(--cleanup_denoised)
 fi
-if [ -n "$REFLECT_PROVIDER" ]; then
-    RUNNER_ARGS+=(--reflect_provider "${REFLECT_PROVIDER}")
+# Trial posture: only default it in if the caller expressed neither
+# choice. `--no-is_trial` must survive, which is the whole point of
+# making the flag able to express false.
+if ! _has_flag --is_trial "${FORWARD_ARGS[@]}" && ! _has_flag --no-is_trial "${FORWARD_ARGS[@]}"; then
+    FORWARD_ARGS+=(--is_trial)
 fi
-if [ -n "$REFLECT_MODEL_ID" ]; then
-    RUNNER_ARGS+=(--reflect_model_id "${REFLECT_MODEL_ID}")
-fi
-if [ -n "$HUMAN_ADVICE_FILE" ]; then
-    RUNNER_ARGS+=(--human_advice_file "${HUMAN_ADVICE_FILE}")
-fi
-if [ -n "$PLAN_OVERRIDES" ]; then
-    RUNNER_ARGS+=(--plan_overrides "${PLAN_OVERRIDES}")
-fi
+
+RUNNER_ARGS=("${FORWARD_ARGS[@]}")
 
 # --- Execute the runner ---
 set +e

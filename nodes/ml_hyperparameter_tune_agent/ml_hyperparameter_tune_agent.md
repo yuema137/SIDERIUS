@@ -143,7 +143,7 @@ Strategies:
 | `best_file_vector` | `list[float \| None] \| None` | Length-20 score vector from the best experiment. `None` for files not included. |
 | `best_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the best experiment. Enriches `best_file_vector` with raw_baseline + ground_truth columns. |
 | `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful formal (full 20-file) round. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
-| `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, and OOM-skipped rounds. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
+| `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, OOM-skipped, and (V20 PR B) admission-refused rounds — the last are phases that never started, so they carry no score and are not candidate failures. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
 | `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated only when the iteration ended without ever training successfully AND ≥1 attempt was rejected by the pre-flight resource gate. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. |
 | `physical_rejections` | `list[PhysicalRejection]` | One entry per VRAM-gate rejection in this run. Empty list on iterations with no infeasible attempts. |
 | `attempts_per_round` | `int` | Echo of the input value used for this run. |
@@ -254,6 +254,85 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 
 ## Key behavioral notes
 
+### GPU admission and failure attribution (V20 PR B)
+
+Two related changes, both about **not blaming a candidate for something
+it did not cause**. V19 told the planner to shrink a model that was the
+right size, because a CUDA OOM raised while a neighbouring chain held
+the card was read as a statement about the candidate.
+
+**A GPU phase can now be refused before it starts.** Before training and
+before inference, driver-visible occupancy is measured and the phase is
+admitted or refused. A refusal is an *environment* condition:
+
+| Record | Meaning |
+|---|---|
+| `status = "skipped_resource_admission"` | the environment did not permit starting this phase |
+| `memory.resource_type` | `"gpu_memory"` |
+| `memory.reason_code` | `insufficient_headroom` \| `measurement_unavailable` \| `policy_unavailable` |
+| `memory.admission_evidence` | every figure the decision used, for audit |
+
+Deliberately **not** `skipped_time_risk`: that status already carries
+three distinct meanings and feeds the time-factor statistics, so a
+fourth producer would pollute numbers that mean something else.
+
+**Posture is `trial | formal`** (`admission_mode`, default `trial` — the
+same spelling as `time_mode` and `active_mode`; an unrecognised value is
+rejected as a misconfiguration rather than assumed):
+
+| | `trial` | `formal` |
+|---|---|---|
+| measurement unavailable | warn, proceed | refuse |
+| policy unavailable | warn, proceed | refuse |
+| **insufficient headroom** | **refuse** | **refuse** |
+
+Headroom is a measured fact, not a posture — a trial run does not get to
+disbelieve arithmetic.
+
+**Accounting.** A refusal consumes the current attempt slot (planning,
+pre-flight and admission really ran, and not consuming it risks refusing
+forever while the device stays busy) but is **not** a candidate failure:
+no score, no negative planner evidence, no incumbent update, no retry.
+If every attempt in a round is refused, the round produces no
+authoritative result and no candidate is blamed.
+
+**Failure attribution.** When a phase *does* fail on device memory, the
+record may carry `failure_attribution` — one of
+`candidate_gpu_capacity`, `gpu_contention`, `host_memory_pressure`,
+`external_termination`, `unknown`. **Only `candidate_gpu_capacity`
+authorises advice to reduce model size, batch size or segmentation
+size.** Absent means `unknown`, which carries no such authority, so every
+record written before V20 PR B behaves conservatively. The planner
+prompt suppresses shrink instructions for any out-of-memory the
+measurement did not attribute to the configuration.
+
+**Cold start (D-B5).** PR B consumes an applicable authoritative
+measurement; it does not produce or promote one — that is PR C. So in
+`formal` mode a candidate with no applicable measurement is refused with
+`measurement_unavailable`. This is the documented cost of keeping one
+measurement authority rather than two.
+
+**On a new GPU host.** Measurements are bound to a GPU UUID, so nothing
+measured on another card is applicable — a fresh machine legitimately has
+no authoritative measurement for any candidate. Consequences:
+
+- `trial` proceeds and records that it proved nothing, so a new host is
+  usable immediately for exploration.
+- `formal` refuses every candidate with
+  `reason_code="measurement_unavailable"` until an applicable measurement
+  exists. **This is the guard working, not a failure**, and it is not a
+  statement about any candidate.
+- Getting to a working `formal` run means: resolve the new UUID,
+  configure the host's ceilings (the `28.0` GiB default suits a ~32 GiB
+  card and would badly under-serve a larger one), collect a bounded
+  driver-visible measurement, and have PR C validate and promote it.
+  The operator sequence is `docs/running_chain_test.md` → "New GPU host".
+
+**No CLI argument was added or changed by V20 PR B.** Admission is
+configured on the run rather than through a flag, and no default moved:
+`admission_mode` defaults to `trial`, which admits and records that it
+asserted nothing.
+
 ### Data-ordering resolution (V19 PR 2)
 
 Ordering has three levels, and only one of them describes execution.
@@ -319,7 +398,7 @@ Four-part contract:
    | `agent_proposal` | training ran the validated agent proposal | the proposed value |
    | `default` | training ran the default, no usable proposal or override | `shuffle` |
    | `legacy_default` | a **pre-PR2 artifact** has no ordering fields because it predates the feature; the reader reconstructs the historical default | `shuffle` (reconstructed) |
-   | `not_executed` | a **current-code attempt** was rejected at pre-flight (`skipped_oom_risk` / `skipped_time_risk` / `skipped_schema_violation`) and never reached training, so no ordering was applied | `None` |
+   | `not_executed` | a **current-code attempt** was rejected before training and never applied an ordering — at pre-flight (`skipped_oom_risk` / `skipped_time_risk` / `skipped_schema_violation`) or, since V20 PR B, at GPU admission (`skipped_resource_admission`) | `None` |
 
    `not_executed` never fabricates a `shuffle` value: inventing one for
    an attempt that visited no data would misreport the run. Proposal and

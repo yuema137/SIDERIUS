@@ -278,6 +278,13 @@ class ExperimentRecord(BaseModel):
         "error_inference_oom",
         "error_scoring",
         "failed_mode_collapse",
+        # V20 B-C4a0 — the environment did not permit starting the phase.
+        # Deliberately NOT `skipped_time_risk`, which already carries three
+        # distinct meanings and feeds five time-factor consumers; a fourth
+        # producer would pollute statistics that mean something else. This
+        # status says nothing about the candidate and carries no authority
+        # to shrink it. No production emitter yet — that is B-C4.
+        "skipped_resource_admission",
     ]
     model_type: str
     timestamp: str
@@ -291,6 +298,26 @@ class ExperimentRecord(BaseModel):
     failure_stage: str | None = None
     failure_type: str | None = None
     proposed_config: dict[str, Any] | None = None
+    #: V20 B-C2b — bounded GPU evidence around a FAILED phase: the
+    #: pre-spawn baseline, the observed peak, the last sample while the
+    #: child was alive, and what remained afterwards, plus coverage.
+    #: Present only on failure records; absent means it was not captured,
+    #: never that the device was idle. Optional and defaulted, so every
+    #: existing record still validates.
+    gpu_evidence: dict[str, Any] | None = None
+    #: V20 B-C3b — why the phase failed, as classified by the generic
+    #: runtime layer at the point the evidence still existed. Shape:
+    #: ``{attribution, may_recommend_resource_reduction, reason,
+    #: evidence}``. Only ``candidate_gpu_capacity`` carries the authority
+    #: to tell a planner the candidate was too large.
+    #:
+    #: Absent on every record written before B-C3b, and on any failure
+    #: the executor could not classify. Absent means ``unknown`` — it
+    #: never means the candidate was at fault. Readers must go through
+    #: ``may_recommend_resource_reduction`` rather than testing the
+    #: attribution string, so a new outcome cannot silently inherit
+    #: authority.
+    failure_attribution: dict[str, Any] | None = None
     traceback_summary: str | None = None
     counts_toward_completed_rounds: bool | None = None
     counts_toward_attempt_budget: bool = True
@@ -1509,6 +1536,42 @@ class HyperparamTuningInput(BaseModel):
     # and vice versa. The budget here acts as an operator-defined ceiling; the
     # skill compares vram_estimate against min(defensive_floor, budget).
     # See docs/resource_estimator_implement.md §10.4 / §10.5.
+    gpu_admission_measurement_source: str | None = Field(
+        default=None,
+        description=(
+            "V20 B-G3. Where an authoritative GPU measurement for a "
+            "candidate would be resolved from — a REFERENCE, never a "
+            "figure. There is deliberately no field and no flag carrying a "
+            "raw MiB number: one an operator could type would impersonate "
+            "a measurement in formal mode, which is the estimate-as-fact "
+            "defect PR B removes. Until PR C provides an acquisition and "
+            "promotion path, this resolves to nothing and formal rounds "
+            "refuse with policy_unavailable. None = no source configured."
+        ),
+    )
+    gpu_admission_enforcement: str = Field(
+        default="observe_only",
+        description=(
+            "V20 B-G3/D-B4. Whether an adverse GPU admission decision "
+            "STOPS the phase (`enforce`) or is only recorded "
+            "(`observe_only`). Orthogonal to trial/formal posture: the "
+            "posture says what the round is, this says what the run does "
+            "about a refusal. `observe_only` is the compatibility default "
+            "while PR C does not yet supply authoritative measurements, "
+            "so that a reachable gate does not stop formal training "
+            "everywhere in the interval. The phase is never relabelled."
+        ),
+    )
+    gpu_pair_ceiling_gib: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "V20 B-G3. Aggregate GPU ceiling in GiB passed explicitly to "
+            "the admission gate. None = defer to the environment resolver "
+            "(SIDERIUS_PAIR_VRAM_CEILING_GIB, then the compatibility "
+            "default), which is exactly the pre-B-G3 behaviour."
+        ),
+    )
     trial_vram_budget_gb: float | None = Field(
         default=None,
         description=(

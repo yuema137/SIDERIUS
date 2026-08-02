@@ -90,7 +90,11 @@ class TestValidateSampleSetScope:
 
 class TestProductionSandboxScope:
     @patch("core.sandbox_executor.subprocess.run")
-    def test_training_out_of_scope_error_dict_no_subprocess(self, mock_run, sandbox):
+    @patch("core.sandbox_executor.subprocess.Popen")
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_training_out_of_scope_error_dict_no_subprocess(
+        self, mock_run, mock_popen, mock_sprun, sandbox
+    ):
         result = sandbox.execute_training(
             EXP_ID,
             RUN_NAME,
@@ -101,10 +105,22 @@ class TestProductionSandboxScope:
             sample_set=OUT_OF_SCOPE_SS,
         )
         _assert_scope_error_dict(result)
+        # DS3: rejected before ANY file I/O. Asserting only that the
+        # mocked seam went uncalled would go vacuously true if the
+        # executor were ever rewired past that seam — which is how this
+        # coverage was nearly lost in the B-C2a migration. Assert the
+        # real launch primitives too, patched for the duration of the
+        # call rather than checked afterwards.
         mock_run.assert_not_called()
+        mock_popen.assert_not_called()
+        mock_sprun.assert_not_called()
 
     @patch("core.sandbox_executor.subprocess.run")
-    def test_inference_out_of_scope_error_dict_no_subprocess(self, mock_run, sandbox):
+    @patch("core.sandbox_executor.subprocess.Popen")
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_inference_out_of_scope_error_dict_no_subprocess(
+        self, mock_run, mock_popen, mock_sprun, sandbox
+    ):
         result = sandbox.execute_inference(
             EXP_ID,
             RUN_NAME,
@@ -117,7 +133,15 @@ class TestProductionSandboxScope:
         # Inference error dict carries the method's timing keys.
         assert result["per_file_timings_ms"] == []
         assert result["process_startup_ms"] is None
+        # DS3: rejected before ANY file I/O. Asserting only that the
+        # mocked seam went uncalled would go vacuously true if the
+        # executor were ever rewired past that seam — which is how this
+        # coverage was nearly lost in the B-C2a migration. Assert the
+        # real launch primitives too, patched for the duration of the
+        # call rather than checked afterwards.
         mock_run.assert_not_called()
+        mock_popen.assert_not_called()
+        mock_sprun.assert_not_called()
 
     def test_score_vector_out_of_scope_raises(self, sandbox):
         with pytest.raises(ScopeViolationError, match="outside the DataScope"):
@@ -125,7 +149,7 @@ class TestProductionSandboxScope:
                 OUT_OF_SCOPE_SS, anchor_map={}, s_max=1.0, denoised_filename_fn=lambda i: f"{i}.h5"
             )
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_in_scope_passes_validation(self, mock_run, sandbox):
         """In-scope SampleSet proceeds to the subprocess (mocked success +
         sentinel, mirroring test_sandbox_executor's success pattern)."""
@@ -136,7 +160,7 @@ class TestProductionSandboxScope:
                 pass
             mock = type("R", (), {})()
             mock.returncode, mock.stdout, mock.stderr = 0, "done\n", ""
-            return mock
+            return mock, None
 
         mock_run.side_effect = _side_effect
         result = sandbox.execute_training(

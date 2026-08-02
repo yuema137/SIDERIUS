@@ -312,11 +312,30 @@ if ! PAIR_CHECK="$(.venv/bin/python -m core.runtime_control.pair_admission \
       --caps "$ARCH_RUN=$PAIR_CAP_GIB,$LOSS_RUN=$PAIR_CAP_GIB" 2>&1)"; then
   log "PAIR ADMISSION: configured caps can exceed the aggregate ceiling"
   while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
-  if [ "${ALLOW_PAIR_CAP_OVERSUBSCRIPTION:-1}" != "1" ]; then
+  # D-B4 (V20). Fail-CLOSED by default: the aggregate check must pass or
+  # the wave does not launch. Previously `:-1` meant "allow" unless the
+  # operator said otherwise, so an infeasible pair proceeded silently and
+  # the host watchdog was the first component to notice -- during C12 it
+  # was, and what it produced was a kill.
+  #
+  # The override survives, but it must be asked for, it is announced, and
+  # it is recorded. It is forbidden in the formal V20 Gate.
+  if [ "${ALLOW_PAIR_CAP_OVERSUBSCRIPTION:-0}" != "1" ]; then
     DISPOSITION="pair_infeasible_under_host_quota"; exit 1
   fi
-  log "  proceeding: the BINDING guard is the per-attempt predicted-peak"
-  log "  check inside each chain; these are caps, not predictions."
+  # D-B4: the override is FORBIDDEN in the formal V20 Gate. A Gate run
+  # exists to produce a comparable, defensible result; one that knowingly
+  # oversubscribes the host is neither, and allowing it here would mean
+  # the strictest context in the project had the weakest guarantee.
+  log "PAIR ADMISSION: override refused -- this is the formal V20 Gate"
+  log "  ALLOW_PAIR_CAP_OVERSUBSCRIPTION may not be used here. Reduce the"
+  log "  per-chain caps, or run this pair outside the Gate."
+  DISPOSITION="pair_oversubscription_override_forbidden_in_gate"; exit 1
+  log "  !! OVERRIDE ACTIVE: ALLOW_PAIR_CAP_OVERSUBSCRIPTION=1 -- the"
+  log "  !! aggregate ceiling is knowingly oversubscribed (D-B4 default"
+  log "  !! is fail-closed). The BINDING guard is now only the"
+  log "  !! per-attempt predicted-peak check inside each chain."
+  PAIR_OVERSUBSCRIPTION_OVERRIDE=1
 else
   while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
 fi

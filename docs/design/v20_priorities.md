@@ -100,6 +100,323 @@ must be shown attributable to it.
 
 ---
 
+## 1.4 Gradual genericization — a binding design principle
+
+**Operator decision, 2026-08-01.** This is not background. It is a
+design, scope, review and acceptance constraint on every V20 PR.
+
+**Direction.** Reshape SIDERIUS from a TIDMAD-only repository into a
+generic framework that can accommodate different datasets, scientific
+tasks, metrics, execution environments and hardware configurations. This
+happens by gradually separating TIDMAD-specific behaviour from generic
+infrastructure and moving task-specific behaviour into explicit,
+replaceable components.
+
+**Mechanism — in-passing refactoring, never a big-bang rewrite.**
+Whenever a module is touched for new development, that PR must also move
+the touched surface toward the generic design **where doing so is
+reasonably bounded and directly related to the touched code**. There is
+no repository-wide mega-refactor PR. Genericization rides the normal
+development ladder.
+
+The standing review question for every PR:
+
+> **Does the code this change touches still treat TIDMAD, the current
+> task, or the current machine as the framework itself? If so, can that
+> be moved outside the configuration or plugin boundary within this
+> PR's reasonable scope?**
+
+### 1.4.1 The four dimensions
+
+**Dataset.** Generic infrastructure must not assume TIDMAD directory
+layouts, file names, sample formats, fixed train/eval file counts, fixed
+signal shapes, fixed segmentation conventions, or a particular denoising
+data loader. Dataset behaviour enters through typed dataset
+configuration, a dataset adapter/plugin, task-owned data preparation,
+and capabilities the dataset component declares.
+
+**Task.** Generic infrastructure must not hardcode denoising as the only
+task, TIDMAD-specific prompts, architecture names meaningful to one task
+only, fixed training/inference/scoring scripts, the assumption that
+every task is exactly `train → inference → score`, or task-specific
+failure labels inside generic runtime-control modules. Task behaviour
+enters through task configuration, task plugins or adapters, task-owned
+prompts, task-owned phase definitions, and typed task contracts.
+
+**Metric.** Generic infrastructure must not assume one score name, one
+score direction, one aggregation rule, one HealthGate metric set,
+denoising-specific collapse checks, or TIDMAD-specific thresholds.
+Metrics enter through typed metric configuration, metric plugins,
+explicit direction and aggregation semantics, task-owned HealthGate
+configuration, and machine-readable result contracts.
+
+**Hardware.** Generic infrastructure must not assume a specific GPU
+model, a single-GPU machine, a fixed physical GPU index, a fixed
+CUDA-visible layout, a fixed 12 GiB per-attempt cap, a fixed 28 GiB pair
+ceiling, a fixed 30,000 MiB host quota, fixed host-RSS limits, a fixed
+number of concurrent chains, or `nvidia-smi` availability as an
+unconditional fact. Hardware policy enters through one typed
+configuration surface.
+
+Conservative defaults for backward compatibility are permitted, and are
+expected during the transition. They must be **explicit, documented,
+recorded in provenance, overrideable through configuration,
+distinguishable from dynamically discovered hardware facts, and never
+silently presented as universal constants.**
+
+### 1.4.2 Three categories that must never be conflated
+
+This is the same discipline as §1.3, applied to configuration rather
+than to evidence. A number in the code is not self-describing; where it
+came from determines what may be done with it.
+
+| Category | Examples | Where it comes from |
+|---|---|---|
+| **Measured runtime fact** | process tree, driver-visible GPU memory, device UUID, free memory, host RSS, subprocess return code, phase timestamps | measured directly by infrastructure |
+| **Configured policy** | GPU cap, pair ceiling, host quota, fail-open vs fail-closed on telemetry failure, max concurrency, dataset locations, task phases, score direction, HealthGate checks | typed configuration or declared plugin capability — **never** a constant embedded in runtime code |
+| **Task-specific interpretation** | what counts as collapse, which score is scientifically authoritative, whether a phase is training / simulation / reconstruction / analysis, what feedback the scientific agent should receive | the task/plugin layer, **not** generic runtime-control code |
+
+A measured fact carries no policy. A configured policy is not evidence.
+A task interpretation is not a property of the framework. Collapsing any
+two of these is the same class of error as V19's contention
+misattribution: a value used with an authority it never earned.
+
+### 1.4.3 Configuration hierarchy — direction, not a mandate
+
+```text
+ResolvedRunConfig
+├── dataset
+├── task
+├── metrics
+├── hardware
+├── runtime
+├── health_gate
+└── provenance
+```
+
+**This is a design direction. It is not authorization for a
+repository-wide schema rewrite.** For the current PR ladder:
+
+- each PR adds or consumes only the smallest relevant typed subsection;
+- configuration is resolved **once**, near the orchestration boundary;
+- lower-level generic modules receive resolved objects or explicit
+  arguments;
+- lower-level modules must not independently rediscover policy through
+  scattered environment variables;
+- environment variables may remain as **compatibility inputs to the
+  resolver**, not as the policy source of truth;
+- resolved values **and their source** are recorded in provenance.
+
+### 1.4.4 Hardcoding classification
+
+Not every number or task name is a defect. Before changing one,
+classify it:
+
+| Class | Treatment |
+|---|---|
+| example fixture | keep; label as an example |
+| current TIDMAD compatibility default | keep; label explicitly as a compatibility default, record its future configuration source |
+| generic infrastructure policy | must be typed configuration |
+| task-owned configuration | must move to the task/plugin layer |
+| hardware-owned configuration | must move to the hardware configuration surface |
+| **unacceptable hardcoding** | fix in this PR, or file a follow-up with an ID and say why it is deferred |
+
+**Do not mechanically replace every number or term.** Examples and
+compatibility defaults may remain. What they may not do is masquerade
+as universal framework rules.
+
+### 1.4.5 Required in every V20 PR design document
+
+Every PR design document under `docs/design/v20_priorities/` carries a
+section titled **"Genericization impact and in-passing refactor"**
+answering, specifically and not as boilerplate:
+
+1. Which touched modules are generic infrastructure?
+2. Which are task-, dataset-, metric-, or hardware-specific?
+3. Does the PR introduce any new hardcoded assumption?
+4. Which existing hardcoded assumption does it remove or move behind
+   configuration?
+5. Which assumptions remain, and why are they deferred?
+6. What compatibility surface preserves existing TIDMAD behaviour?
+7. What tests prove that generic infrastructure does not depend on a
+   specific dataset, task, metric, or hardware model?
+
+If a PR genuinely touches no relevant abstraction boundary, it says so
+**with evidence**.
+
+### 1.4.6 Shared checklist additions
+
+**Implementation**
+
+- [ ] No new TIDMAD-specific constant enters generic infrastructure
+- [ ] No task-specific prompt, metric, file layout, model family or
+      hardware ceiling is embedded in a generic runtime module
+- [ ] New policy values enter through typed configuration or declared
+      plugin capability
+- [ ] Task-specific assumptions in touched code move behind the
+      appropriate boundary when the refactor is bounded and directly
+      related
+- [ ] Backward compatibility for the current TIDMAD workflow is explicit
+
+**Validation**
+
+- [ ] Unit tests use synthetic or generic fixtures where task-specific
+      data is not required
+- [ ] At least one test exercises a **non-default** configuration
+- [ ] Hardware tests do not assume physical GPU index 0 unless the test
+      is explicitly scoped to that fixture
+- [ ] Dataset/task/metric-specific tests remain in their owning layer
+- [ ] Generic runtime-control tests do not import TIDMAD-specific
+      modules
+
+**Merge criteria**
+
+- [ ] Genericization impact section completed
+- [ ] No unexplained new hardcoded dataset, task, metric or hardware
+      assumption
+- [ ] All new policy is typed, configurable, and represented in
+      provenance where operationally relevant
+- [ ] Existing TIDMAD behaviour remains supported through
+      configuration, not hidden special cases
+- [ ] Deferred genericization work has a follow-up ID and does not
+      undermine the PR's claimed abstraction
+
+**Decomposition (§1.5) — every PR**
+
+- [ ] The PR adds no new responsibility or new branching to a function
+      already coordinating multiple unrelated concerns; where it would,
+      a bounded responsibility boundary was extracted **first**
+- [ ] Every extracted unit has explicit inputs, a typed result, a
+      documented responsibility and bounded side effects — it does not
+      read or mutate arbitrary outer state
+- [ ] Behavioural parity proven: retry and round behaviour, phase
+      ordering, timeout and signal semantics, persisted artifacts and
+      statuses all unchanged
+- [ ] A reachability test fails when the production path bypasses the
+      extracted boundary, demonstrated by revert or mutation
+- [ ] Strict type checking covers the extracted units, and the touched
+      orchestrator is still small enough for the type checker to analyse
+      at all
+- [ ] No behaviour was changed "while refactoring"
+
+---
+
+## 1.5 Responsibility-oriented decomposition — a binding design principle
+
+**Operator decision, 2026-08-01.** Equal in standing to §1.4. Where §1.4
+governs *what* generic infrastructure may know, §1.5 governs *where new
+logic may be put*.
+
+### 1.5.1 The rule
+
+SIDERIUS must not create or further enlarge giant orchestration
+functions. A function that coordinates multiple phases, constructs
+records, handles errors, mutates state, performs I/O **and** decides
+control flow is not a valid extension point.
+
+When new work touches such a function, the PR **first** creates the
+smallest clear responsibility boundary the new work needs:
+
+```text
+identify the responsibility
+→ extract a typed, independently testable boundary
+→ prove behavioural parity
+→ place the new feature inside that boundary
+→ keep the top-level orchestrator doing sequencing
+```
+
+Bounded in-passing decomposition, exactly as with genericization. Never a
+repository-wide rewrite, and never a full rewrite of one giant function
+in a single PR.
+
+### 1.5.2 Split by responsibility, not by line count
+
+Mechanically cutting 2,487 lines into ten 250-line functions achieves
+nothing. Extract coherent responsibilities:
+
+```text
+run()
+├── planning coordinator
+├── preflight coordinator
+├── training phase handler
+├── inference phase handler
+├── scoring phase handler
+├── failure/skip record builder
+├── round transition controller
+└── runtime evidence attachment
+```
+
+A top-level `run()` should end up doing: invoke a phase boundary,
+receive a typed result, apply a small number of high-level transitions,
+delegate task-specific interpretation and persistence.
+
+### 1.5.3 A helper is not automatically a decomposition
+
+Moving code into another file while it still reads and mutates arbitrary
+outer state relocates the complexity without reducing it. Each extracted
+unit requires:
+
+- explicit inputs
+- a typed result
+- a documented responsibility
+- bounded side effects
+- focused tests
+- **production reachability evidence** — a test that fails when the
+  production path bypasses the boundary
+
+### 1.5.4 Decomposition must preserve behaviour, and prove it
+
+- parity before and after extraction
+- unchanged retry and round behaviour
+- unchanged phase ordering
+- unchanged timeout and signal semantics
+- unchanged persisted artifacts and statuses
+- mutation/revert evidence that the tests detect a bypass
+- strict type checking covering the extracted units
+
+Never change retry, phase order, signal, timeout or scientific behaviour
+"while refactoring".
+
+### 1.5.5 Why this is a rule, not a preference
+
+`HyperparamTuningAgent.run()` reached **2,487 lines** and sat *exactly*
+on pyright's strict complexity ceiling: **258 branch nodes pass, 259
+fail**. Past that limit strict mode does not degrade — it abandons the
+whole function, so every annotation inside the tuner's main method was
+going unverified. Nothing surfaced it until an unrelated PR added one
+`if`.
+
+The failure modes are not aesthetic:
+
+- a small change can affect many unrelated paths
+- tests can only be written with heavy mocking
+- type checking silently gives up
+- new logic is easy to wire and easy to leave unreachable
+- no single step can be validated on its own
+- every subsequent feature adds more branches
+
+### 1.5.6 Review trigger
+
+For every PR:
+
+> Does this change add a new responsibility or new branching to a
+> function that is already coordinating multiple unrelated concerns?
+
+If yes, the PR establishes a bounded responsibility boundary first.
+Adding implementation detail to an existing focused function is fine.
+Adding another responsibility to a giant orchestrator is not.
+
+### 1.5.7 Current application
+
+`HyperparamTuningAgent.run()` is a known oversized orchestrator. **B-C4
+admission branches must not be added to it.** Before B-C4, complete
+**B-C4a0** — extract the tuner control boundary admission needs:
+training-result handling, inference-result handling, failure/skip record
+construction, runtime-evidence attachment, and the proceed/stop
+transition. B-C4 then adds admission *through* those boundaries.
+
+---
+
 ## 2. Priority summary
 
 | # | Priority | Observed problem | Why it matters | V20 target behavior | V19 blocker? |
@@ -1733,6 +2050,18 @@ must be audited, built, validated and merged.
 
 ### 20.1 Planning principles
 
+#### Gradual genericization (binding — §1.4)
+
+Every PR below is additionally bound by §1.4: it must not deepen the
+framework's dependence on TIDMAD, the denoising task, one metric family
+or one machine, and it must move the surface it touches toward the
+generic design where that refactor is bounded and directly related.
+
+This is not in tension with the minimal-change principle. Minimal change
+governs *how much* a PR does; genericization governs *which direction*
+the part it does moves in. A PR that is minimal and moves the wrong way
+is still the wrong PR.
+
 #### Minimal-change principle
 
 V20 preserves what already worked in V19: training and inference
@@ -2133,6 +2462,28 @@ unknown attribution
 **A measurement carries rejection authority only when attribution is
 sufficient.**
 
+> **SUPERSEDED 2026-08-01 — see the PR B design's frozen §0.** The
+> vocabulary above is the original scoping sketch and is **not** what
+> was implemented. Two changes, both decided after audit:
+>
+> - **The peer/foreign split was declined for v1 (D-B1).** No peer
+>   identity exists anywhere in the Python codebase, and inventing one
+>   would mean a cross-chain registry — a larger system than the bug
+>   requires. B-C1 measures "ours" versus "everything else" instead.
+> - **"host-quota intervention" was split in two.** It conflated the one
+>   case that is about the candidate's host footprint
+>   (`host_memory_pressure`) with the one that is about the environment
+>   (`external_termination`), and a `-9` cannot tell them apart.
+>
+> The implemented vocabulary is exactly five members —
+> `candidate_gpu_capacity`, `gpu_contention`, `host_memory_pressure`,
+> `external_termination`, `unknown` — of which **only the first**
+> carries resource-reduction authority, enforced at construction.
+> Checkpoint **B1**'s process identity model (campaign/wave/chain/…
+> roles) and **B2**'s persisted peer occupancy are superseded by D-B1
+> and D-B5 for the same reason; the "Expected artifacts" list below
+> still names the process identity model, which PR B does not build.
+
 #### Checkpoints
 
 **B1 — process identity model.** Every GPU process maps to campaign,
@@ -2195,6 +2546,136 @@ and free VRAM as they were before the failure.
 
 
 ### 20.5 PR C — Measured-evidence admission and calibration production wiring
+
+#### D-B5 dependency — PR C owns formal cold-start measurement
+
+**Operator decision 2026-08-01.** PR B refuses a formal GPU phase when
+no applicable *authoritative* driver-visible measurement exists, and
+deliberately does **not** build its own acquisition or promotion path —
+a second measurement authority is the shape of defect this document was
+opened about.
+
+PR C therefore owns supplying the first trustworthy measurement for a
+formal candidate. The consequence, recorded rather than discovered
+later:
+
+```text
+PR B may merge independently.
+
+Formal V20 campaign launch requires BOTH
+  PR B  runtime enforcement
+  PR C  authoritative measurement production / promotion
+```
+
+Since every chain iteration proposes a new plugin, an unknown candidate
+is the normal case — so until PR C lands, formal mode with new
+candidates is blocked by design, not by accident.
+
+#### What PR C is, stated against PR B
+
+**Operator clarification, 2026-08-02.** The two are often conflated
+because both concern "GPU memory", so the split is stated in one line
+each:
+
+```text
+PR B   given a trustworthy measurement, admit or refuse the phase
+       correctly before training starts
+
+PR C   where that measurement came from, whether it genuinely applies
+       to THIS candidate, and when it may be marked authoritative
+```
+
+PR C's checks are the applicability tuple, all of which must match
+before a raw collected figure becomes admission-usable evidence:
+
+```text
+task and dataset / data-shape class
+full model configuration
+phase (training | inference)
+runtime settings — batch, segment, portions
+GPU UUID and hardware environment
+measurement type and quality
+```
+
+Only after those pass may a figure be promoted from *just collected* to
+*authoritative*. **A matching model name is not applicability.** Reusing
+an older machine's number because the architecture is called the same
+thing is precisely the unearned authority §1.3 exists to prevent.
+
+#### Where PR C is developed, and where it must be exercised
+
+These are different questions and were being answered as one.
+
+**PR C's implementation is generic framework work and must not be done
+on H100.** It should be built, unit-tested and reviewed on the normal
+development branch, on whatever machine is convenient. Nothing about
+applicability logic requires a particular card.
+
+**But the measurement and promotion themselves must happen on the
+hardware they describe.** When SIDERIUS moves to H100, PR C's flow has
+to be *run there*:
+
+```text
+resolve the H100 GPU UUID
+→ collect a bounded measurement on that device
+→ PR C checks completeness and applicability
+→ promote it as the H100's authoritative measurement
+→ only then may PR B use it in a formal run
+```
+
+A 5090 measurement cannot become an H100 authoritative record even for a
+byte-identical candidate: driver, memory management and real occupancy
+differ, and A6 already showed predicted and driver-visible figures
+diverging by ~1.9x on one card alone.
+
+| Activity | Needs H100? |
+|---|---|
+| PR C implementation, unit tests, review | **No** — do it on the current machine |
+| Collecting and promoting the H100 measurement | **Yes** — it describes that device |
+| H100 formal campaign | **Yes**, and needs PR B *and* PR C complete |
+| lilab B-G1/B-G2 | **No** — validates PR B with an explicitly labelled validation-only fixture, which is **not** PR C completion |
+
+The last row matters for how B-G's report is read: passing B-G1/B-G2 on
+lilab demonstrates that PR B uses applicable evidence correctly. It does
+not demonstrate acquisition, applicability validation or promotion, and
+the fixture it uses is labelled validation-only precisely so it is never
+mistaken for a promoted record.
+
+Cross-hardware bring-up as an operator sequence lives in
+`docs/running_chain_test.md` ("New GPU host"), with the design rationale
+in the PR B document §4b.
+
+#### Genericization requirement (§1.4)
+
+**A calibration record is a measurement of one thing under one set of
+conditions. It is not a fact about the framework.** PR C's whole
+subject is deciding when past evidence applies to a present candidate,
+so applicability must be indexed by explicit dimensions, at minimum:
+
+```text
+task
+dataset / data-shape class
+phase
+model or config identity
+hardware identity
+measurement type
+```
+
+Without those, TIDMAD calibration records silently become universal
+constants — a record measured on this RTX 5090, on TIDMAD segment
+lengths, for a denoising training phase, would be consulted for a
+different task on different hardware and answer confidently.
+
+That is §1.3's failure mode reached through a different door: evidence
+used with an authority it never earned. §3's applicability rule already
+says historical evidence must be *shown* applicable; PR C must make the
+dimensions of that showing explicit rather than implicit in a bucket
+key.
+
+The registry root (`~/.siderius/runtime_calibration`) is per-user, so
+records from different tasks and machines already share one store.
+Indexing is not optional there.
+
 
 #### Objective
 
@@ -2294,6 +2775,29 @@ observation through admission.
 
 ### 20.6 PR D — Formal HealthGate and zero-valid-trial policy
 
+#### Genericization requirement (§1.4)
+
+**HealthGate is where task-specific science currently lives inside
+generic orchestration**, so this PR is the clearest case of the §1.4.2
+split.
+
+Generic orchestration may own: whether a gate is **blocking or
+observational**, whether its verdict is **authoritative or
+non-authoritative**, gate ordering, severity resolution, and how a
+verdict changes control flow.
+
+The task configuration/plugin owns: what counts as collapse, the
+metrics, the thresholds, what a valid result is, and the scientific
+acceptance rules. `OutputDiversityCheck`'s `unique_int8 > 25` and
+`AmplitudeCollapseCheck` are **denoising-specific**; a spectroscopy or
+reconstruction task would have entirely different collapse signatures
+and the same orchestration.
+
+`configs/health_checks.yaml` is already the right shape — policy in
+configuration rather than code. PR D must not undo that by moving
+thresholds into the orchestrator while making them formal-aware.
+
+
 #### Objective
 
 Define which HealthGate mode a formal scientific campaign uses, and what
@@ -2382,6 +2886,26 @@ real run that deliberately collapses and proves non-authority.
 
 
 ### 20.7 PR E — Campaign-scoped control state
+
+#### Genericization requirement (§1.4)
+
+Campaign STOP, queue state and scoping are **generic campaign-control
+infrastructure**. Two constraints follow.
+
+Names, paths and state schemas must not encode TIDMAD-specific campaign
+names, and must not assume exactly **two** scientific chains. The
+current launcher hardcodes `MAX_CONC=2` (`v19_queue_runner.sh:80`) and
+names the pair `arch`/`loss` (`:412-413`) — both are the *current
+campaign shape*, not a framework property. A campaign with one chain, or
+five, or chains named for something other than architecture and loss,
+must not require a schema change.
+
+`arch` and `loss` are also task-flavoured: they describe what *this*
+exploration varies. A different task might vary a reconstruction prior
+or a simulation parameter. The generic layer should carry a chain
+identity and a role label supplied by configuration, not two names built
+into paths.
+
 
 #### Objective
 
@@ -2558,6 +3082,9 @@ Layer-2 evaluation:
 Bounded real validation:
 Failure classification:
 Attribution:
+Genericization impact:        <- §1.4.5, seven questions, not boilerplate
+Hardcoding introduced:        <- classified per §1.4.4, or "none"
+Hardcoding removed/deferred:  <- with follow-up IDs for the deferred
 Artifacts:
 Stop conditions:
 Merge criteria:

@@ -179,6 +179,59 @@ validate.
   `docs/architecture.md`) — do not invent ad-hoc abstractions. Exception: the
   frozen TIDMAD score formula stays byte-identical; new metrics plug in
   beside it, never rewrite it.
+- **Responsibility-oriented decomposition (binding, operator decision
+  2026-08-01)**: SIDERIUS must not create or further enlarge giant
+  orchestration functions. A function that coordinates multiple phases,
+  constructs records, handles errors, mutates state, performs I/O **and**
+  decides control flow is not a valid extension point — it is several
+  components sharing one scope.
+
+  **The rule**: do not add substantial new branching, record construction,
+  persistence or task logic directly into an already oversized function.
+  Instead:
+
+  ```text
+  identify the responsibility
+  → extract a typed, independently testable boundary
+  → prove behavioural parity
+  → put the new feature inside that boundary
+  → leave the top-level orchestrator doing sequencing
+  ```
+
+  Split by **responsibility, not line count** — phase execution, result
+  interpretation, failure/skip record construction, retry and round
+  transitions, evidence attachment, admission decisions, artifact
+  persistence. A helper that still reads and mutates arbitrary outer
+  state is not a completed decomposition; it is the same complexity in a
+  different file. Each extracted unit needs explicit inputs, a typed
+  result, a documented responsibility, bounded side effects, focused
+  tests, and **reachability evidence** — a test that fails when the
+  production path bypasses the boundary.
+
+  Every decomposition must preserve behaviour and prove it: parity before
+  and after, unchanged retry/round behaviour, unchanged phase ordering,
+  unchanged timeout and signal semantics, unchanged persisted artifacts
+  and statuses, and strict type checking over the extracted units. Never
+  change retry, phase order, signal, timeout or scientific behaviour
+  "while refactoring".
+
+  Bounded in-passing decomposition, as with genericization — **never a
+  repository-wide rewrite**, and never a full rewrite of one giant
+  function in a single PR.
+
+  **Review trigger, every PR**: *does this add a new responsibility or new
+  branching to a function already coordinating unrelated concerns?* If
+  yes, establish the boundary first. Adding detail to a focused function
+  is fine; adding another responsibility to a giant orchestrator is not.
+
+  **Why this is a rule and not a preference**: `HyperparamTuningAgent.run()`
+  reached 2,487 lines and sat *exactly* on pyright's strict complexity
+  ceiling — 258 branch nodes passed, 259 failed. Past that limit strict
+  mode does not degrade, it abandons the whole function, so every
+  annotation inside the tuner's main method was unverified. The defect was
+  invisible until an unrelated PR added one `if`. Waiting for a type
+  checker or a test suite to collapse is not a design process.
+
 - **Cold-start real-training gate runs (operator rule, 2026-07-27)**:
   every new real-training gate run (Gate 1 with real training, Gate 2,
   any smoke that invokes `run_chain.sh` or `run_one_iteration.py` with real

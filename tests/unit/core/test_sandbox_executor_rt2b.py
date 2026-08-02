@@ -79,7 +79,7 @@ def _fake_run(sandbox: TidmadSandbox, *, sidecar: str | None, sentinel: bool, re
             os.makedirs(res_dir, exist_ok=True)
             with open(os.path.join(res_dir, "experiment_results_wavenet_exp_x.json"), "w") as f:
                 json.dump({"final_loss": 0.5, "loss_history": [0.5], "model_params": 10}, f)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
     return run
 
@@ -100,7 +100,7 @@ class TestRejectionPlumbing:
         # Exit 0, sidecar says rejected, NO sentinel, NO results — the
         # pre-RT2-B executor would misclassify this as a silent crash.
         monkeypatch.setattr(
-            "core.sandbox_executor.subprocess.run",
+            "core.sandbox_executor._run_observed_subprocess",
             _fake_run(sandbox, sidecar="rejected", sentinel=False, results=False),
         )
         out = _execute(sandbox)
@@ -110,7 +110,7 @@ class TestRejectionPlumbing:
 
     def test_rejection_carries_cost_model(self, sandbox, monkeypatch):
         monkeypatch.setattr(
-            "core.sandbox_executor.subprocess.run",
+            "core.sandbox_executor._run_observed_subprocess",
             _fake_run(sandbox, sidecar="rejected", sentinel=False, results=False),
         )
         adm = _execute(sandbox)["runtime_verification"]["admission"]
@@ -121,7 +121,7 @@ class TestRejectionPlumbing:
 class TestSuccessPlumbing:
     def test_admitted_run_attaches_observation(self, sandbox, monkeypatch):
         monkeypatch.setattr(
-            "core.sandbox_executor.subprocess.run",
+            "core.sandbox_executor._run_observed_subprocess",
             _fake_run(sandbox, sidecar="admitted", sentinel=True, results=True),
         )
         out = _execute(sandbox)
@@ -133,7 +133,7 @@ class TestSuccessPlumbing:
 
     def test_no_sidecar_is_legacy_behavior(self, sandbox, monkeypatch):
         monkeypatch.setattr(
-            "core.sandbox_executor.subprocess.run",
+            "core.sandbox_executor._run_observed_subprocess",
             _fake_run(sandbox, sidecar=None, sentinel=True, results=True),
         )
         out = _execute(sandbox)
@@ -145,7 +145,7 @@ class TestSuccessPlumbing:
         stale_path = os.path.join(sandbox.dirs["configs"], "runtime_verification_exp_x.json")
         _write_sidecar(stale_path, rejected=True)
         monkeypatch.setattr(
-            "core.sandbox_executor.subprocess.run",
+            "core.sandbox_executor._run_observed_subprocess",
             _fake_run(sandbox, sidecar=None, sentinel=True, results=True),
         )
         out = _execute(sandbox)
@@ -163,7 +163,7 @@ class TestCrashPlumbing:
             session.complete_setup(storage_provenance=_STORAGE)
             raise subprocess.CalledProcessError(1, cmd, output="", stderr="boom")
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", crashing_run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", crashing_run)
         out = _execute(sandbox)
         assert out["status"] == "error"
         assert out["runtime_verification"]["final_status"] == "setup_complete"
@@ -177,9 +177,9 @@ class TestCrashPlumbing:
                 f.write("{not json")
             with open(os.path.join(sandbox.dirs["models"], "_OK_exp_x"), "wb"):
                 pass
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox)
         assert out["status"] == "success"
         assert out["runtime_verification"] is None
@@ -194,9 +194,9 @@ class TestPolicyForwarding:
             seen["rv_path"] = _argv_value(cmd, "--runtime_observation_out")
             with open(os.path.join(sandbox.dirs["models"], "_OK_exp_x"), "wb"):
                 pass
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox, runtime_policy={"operator_budget_seconds": 120.0})
         assert out["status"] == "success"
         assert seen["rv_path"] is not None
@@ -214,9 +214,9 @@ class TestPolicyForwarding:
 
         def run(cmd, **kwargs):  # pragma: no cover - must not be reached
             launched["n"] += 1
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox, runtime_policy={"operator_budget_seconds": -5.0})
         assert out["status"] == "error"
         assert launched["n"] == 0

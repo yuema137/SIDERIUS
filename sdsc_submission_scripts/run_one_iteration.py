@@ -693,7 +693,15 @@ def build_parser() -> argparse.ArgumentParser:
         "run-invariants lock.",
     )
     parser.add_argument(
-        "--is_trial", action="store_true", help="Enable trial mode (default: True for production)."
+        # BooleanOptionalAction, not store_true: the consumer below used to
+        # read `args.is_trial or True`, so an explicit False was erased and
+        # the flag could never express anything. Default stays True, so
+        # omitting it behaves exactly as before; `--no-is_trial` is now the
+        # way to ask for a formal-from-the-start run.
+        "--is_trial",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable trial mode (default: True). Use --no-is_trial for formal.",
     )
     parser.add_argument(
         "--trial_strategy",
@@ -1012,6 +1020,40 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="TIDMAD data directory for evaluate_time_skill's real-dataset warmup. "
         "None falls back to the static formula.",
+    )
+    parser.add_argument(
+        "--gpu_admission_measurement_source",
+        type=str,
+        default=None,
+        help=(
+            "V20 B-G3. Reference naming where an authoritative GPU measurement "
+            "would be resolved from. NOT a figure -- there is deliberately no "
+            "flag taking a raw MiB number, because one an operator could type "
+            "would impersonate a measurement in formal mode. Unresolved before "
+            "PR C, so formal rounds refuse with policy_unavailable."
+        ),
+    )
+    parser.add_argument(
+        "--gpu_admission_enforcement",
+        choices=["observe_only", "enforce"],
+        default="observe_only",
+        help=(
+            "V20 B-G3/D-B4. Whether an adverse GPU admission decision stops "
+            "the phase (enforce) or is only recorded (observe_only). "
+            "Orthogonal to trial/formal. Default observe_only while PR C "
+            "does not supply authoritative measurements, so a reachable "
+            "gate does not stop formal training everywhere."
+        ),
+    )
+    parser.add_argument(
+        "--gpu_pair_ceiling_gib",
+        type=float,
+        default=None,
+        help=(
+            "V20 B-G3. Aggregate GPU ceiling (GiB) passed explicitly to the "
+            "admission gate. Omitted = defer to SIDERIUS_PAIR_VRAM_CEILING_GIB "
+            "and the compatibility default, i.e. pre-B-G3 behaviour."
+        ),
     )
     parser.add_argument(
         "--trial_vram_budget_gb",
@@ -1554,7 +1596,7 @@ def main():
             start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,
             max_proposal_attempts=args.max_proposal_attempts,
-            is_trial=args.is_trial or True,  # default to trial mode
+            is_trial=args.is_trial,  # BooleanOptionalAction, default True
             trial_portion=args.trial_portion,
             train_portion=args.train_portion,
             eval_portion=args.eval_portion,
@@ -1575,6 +1617,9 @@ def main():
             trial_time_budget_minutes=args.trial_time_budget_minutes,
             formal_time_budget_minutes=args.formal_time_budget_minutes,
             data_dir=args.data_dir,
+            gpu_admission_measurement_source=args.gpu_admission_measurement_source,
+            gpu_admission_enforcement=args.gpu_admission_enforcement,
+            gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
             trial_vram_budget_gb=args.trial_vram_budget_gb,
             formal_vram_budget_gb=args.formal_vram_budget_gb,
             # Per-round attempt budget (Phase L)

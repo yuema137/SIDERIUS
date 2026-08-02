@@ -22,6 +22,8 @@ import traceback
 import warnings
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -62,6 +64,8 @@ from core.run_invariants import (
     validate_run_invariants,
     validate_stamped_invariants,
 )
+from core.runtime_control.failure_attribution import may_recommend_resource_reduction
+from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
@@ -86,6 +90,544 @@ from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
 
 SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def _may_advise_resource_reduction(status: dict) -> bool:
+    """Whether a failed phase's attribution authorises shrink advice.
+
+    The task layer decides what the authority *says*; the generic runtime
+    layer decides whether there is any. This reads the second, so a
+    contention-caused OOM cannot reach the planner as a reason to shrink
+    a candidate that was the right size — the V19 failure.
+
+    Absent attribution means ``unknown``: every record written before
+    B-C3b, and any failure the runtime declined to classify. The default
+    is therefore False. A missing verdict costs one piece of feedback; a
+    wrong one costs a scientific conclusion.
+
+    Authority is read through ``may_recommend_resource_reduction`` rather
+    than by testing the attribution string, so an outcome added to the
+    vocabulary later cannot silently inherit it here.
+    """
+    attribution = (status.get("failure_attribution") or {}).get("attribution")
+    return may_recommend_resource_reduction(attribution or "unknown")
+
+
+#: Per-phase wording that is NOT shared. Everything else about a training
+#: and an inference failure record is the same algorithm; these three
+#: strings are the only real difference, and keeping them in one table
+#: is what makes the shared builder honest rather than a near-miss.
+_PHASE_FAILURE_TEXT: dict[str, dict[str, str]] = {
+    "training": {
+        "label": "Training",
+        "status_ok": "error_training",
+        "status_oom": "error_training_oom",
+        "plain_memory": "Fix the error before retrying this config.",
+    },
+    "inference": {
+        "label": "Inference",
+        "status_ok": "error_inference",
+        "status_oom": "error_inference_oom",
+        "plain_memory": "Fix the inference error before retrying.",
+    },
+}
+
+
+def _build_execution_failure_record(
+    status: dict,
+    *,
+    phase: str,
+    exp_id: str,
+    model_type: str,
+    file_index: Any,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> dict:
+    """The record written when a GPU phase's subprocess fails (B-C4a0 E1).
+
+    One builder for training and inference. They were two copies of the
+    same algorithm — read the message, classify the OOM, truncate to 500
+    characters, ask `_oom_memory_wording` whether the failure may be
+    blamed on the candidate, assemble the same eight keys — and the
+    copies had already drifted: the OOM test existed in two spellings
+    until B-C3b's pyright repair.
+
+    `phase` selects the wording and the status pair, and enables the
+    inference-only silent-training-crash re-route. It is deliberately a
+    parameter rather than two functions, because the thing worth having
+    in one place is the *shared* algorithm, not the differences.
+
+    Pure: builds and returns a dict. Validation, evidence stamping and
+    persistence belong to `_emit_record`.
+    """
+    text = _PHASE_FAILURE_TEXT[phase]
+    error_msg = status.get("message", f"Unknown {phase} error")
+    is_oom = _is_cuda_oom(error_msg)
+    # Truncate long tracebacks — keep last 500 chars for the LLM
+    short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+
+    # Phase 6.7 Fix 3 — an inference subprocess that fails because the
+    # trainer-side sentinel was missing carries the ``error_training:``
+    # prefix (raised by ``inference_single._assert_training_sentinel``).
+    # That is a *training* failure surfaced through the inference
+    # subprocess, so the category is re-routed and the planner sees the
+    # real cause instead of "inference crashed for mysterious reasons".
+    # ``execute_training``'s silent-crash check catches the same
+    # condition upstream when the process exited 0.
+    if phase == "inference" and "error_training:" in error_msg:
+        status_tag = "error_training"
+        conclusion = f"Training crashed silently (detected at inference preflight): {short_msg}"
+        discovery = (
+            f"Training subprocess returned 0 but produced no checkpoint sentinel: {short_msg}"
+        )
+        memory_update = (
+            "Silent training crash — investigate the trainer logs for a "
+            "post-save segfault, OOM-kill, or GPU watchdog. Do not retry "
+            "blindly until the root cause is identified."
+        )
+    elif is_oom:
+        status_tag = text["status_oom"]
+        conclusion = f"{text['label']} failed: {short_msg}"
+        # B-C3b: only a MEASURED candidate-capacity verdict may ask for a
+        # smaller config.
+        discovery, memory_update = _oom_memory_wording(status, phase=phase)
+    else:
+        status_tag = text["status_ok"]
+        conclusion = f"{text['label']} failed: {short_msg}"
+        discovery = f"{text['label']} crashed: {short_msg}"
+        memory_update = text["plain_memory"]
+
+    return {
+        "exp_id": exp_id,
+        "status": status_tag,
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": conclusion,
+            "discovery": discovery,
+            "memory_update": memory_update,
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+    }
+
+
+def _is_cuda_oom(message: str) -> bool:
+    """The tuner's own device-OOM test, kept in one place."""
+    return "CUDA out of memory" in message or "OutOfMemoryError" in message
+
+
+#: Frozen B-C4a0 C3 vocabulary. `skipped_resource_admission` means the
+#: ENVIRONMENT did not permit starting the phase. It is deliberately not
+#: `skipped_time_risk`, which already carries three distinct meanings
+#: (guardrail, in-subprocess rejection, time gate) and feeds five
+#: time-factor consumers — a fourth producer would pollute statistics
+#: that mean something else. Like `gpu_contention` in §B-C3, it says
+#: nothing about the candidate and carries no authority to shrink it.
+RESOURCE_ADMISSION_STATUS = "skipped_resource_admission"
+RESOURCE_ADMISSION_REASONS = (
+    "insufficient_headroom",
+    "measurement_unavailable",
+    "policy_unavailable",
+)
+
+
+class AttemptTransition(StrEnum):
+    """What the caller must do after a phase result (B-C4a0 E5).
+
+    These map exactly onto what `run()` does inline today — fall
+    through, `continue`, or set the termination reason and `break` — so
+    a helper can report a decision instead of performing a jump. A
+    helper that executed the jump itself would be a `goto` with a
+    function signature.
+    """
+
+    PROCEED = "proceed"
+    RETRY_ATTEMPT = "retry_attempt"
+    TERMINATE_RUN = "terminate_run"
+
+
+@dataclass(frozen=True)
+class AttemptDecision:
+    """One attempt's own outcome (B-C4a0 E5, constraint C2).
+
+    `resolved_action` is carried **per attempt**, deliberately. The
+    outer `resolved_action` variable is round-scoped, written five levels
+    deep inside scoring, and never reset between attempts — so it holds
+    the value of the last attempt that *reached* scoring. An admission
+    refusal short-circuits before scoring, and reading that outer
+    variable would apply an earlier attempt's gate action to this one.
+
+    `action_was_produced` distinguishes "this attempt produced no gate
+    action" from "it produced CONTINUE". Collapsing the two is how a
+    refusal silently inherits a neighbour's verdict.
+    """
+
+    transition: AttemptTransition
+    attempt_id: str
+    resolved_action: GateAction | None = None
+    action_was_produced: bool = False
+    reason: str | None = None
+
+    @classmethod
+    def admission_refused(cls, *, attempt_id: str, reason: str) -> "AttemptDecision":
+        """The shape B-C4's admission refusal must use.
+
+        No gate action is produced, so none is carried. B-C4 reads this
+        object, never the outer round-scoped variable.
+        """
+        return cls(
+            transition=AttemptTransition.RETRY_ATTEMPT,
+            attempt_id=attempt_id,
+            resolved_action=None,
+            action_was_produced=False,
+            reason=reason,
+        )
+
+
+class RoundDecision(StrEnum):
+    """What the round loop does once its attempts are exhausted."""
+
+    CONTINUE = "continue"
+    BREAK_ITERATION = "break_iteration"
+    SKIP_TO_FORMAL = "skip_to_formal"
+
+
+def _decide_round_outcome(
+    *,
+    scope_violation_reason: str | None,
+    evidence_channel_failure: str | None,
+    resolved_action: GateAction,
+    is_formal_round: bool,
+) -> RoundDecision:
+    """Arbitrate the end of a round (B-C4a0 E5).
+
+    A pure function over four already-computed inputs. The `break`, the
+    `completed_rounds` fast-forward and the operator-facing prints stay
+    in the caller — this decides, it does not act, so it can be tested
+    without a loop around it.
+
+    Order is load-bearing: a non-retryable termination outranks a gate
+    action, because a scope violation is deterministic on retry.
+    """
+    if scope_violation_reason or evidence_channel_failure:
+        return RoundDecision.BREAK_ITERATION
+    if _should_break_iteration(resolved_action):
+        return RoundDecision.BREAK_ITERATION
+    if _should_skip_to_formal(resolved_action, is_formal_round):
+        return RoundDecision.SKIP_TO_FORMAL
+    return RoundDecision.CONTINUE
+
+
+def _vram_skip_memory_extra(resource_check: dict, chosen_vram_budget: float | None) -> dict:
+    """Optional memory fields on a `skipped_oom_risk` record (B-C4a0 E2).
+
+    Phase K — surface the same two VRAM fields the success record
+    carries, so the planner sees the same shape regardless of pass/fail.
+    Omitted when the gate is disabled (`chosen_vram_budget is None`),
+    mirroring §J.3 for time. Mode is inferred from `time_mode` on records
+    where the time gate also ran — there is no separate `vram_mode`.
+    See docs/resource_estimator_implement.md §10.4 / §10.8.
+
+    K.2.5-8 — the soft-fallback flag is independent of the budget being
+    set: the gate runs unconditionally, and the flag says whether the
+    inference estimate was against a registered batch. Recorded on every
+    `skipped_oom_risk` so post-hoc analysis can discount rejections that
+    came from an uncalibrated estimate.
+    """
+    extra: dict[str, Any] = {}
+    if chosen_vram_budget is not None:
+        extra["vram_estimate_gb"] = resource_check.get("estimated_gb")
+        extra["vram_budget_gb"] = resource_check.get("limit_gb")
+    if resource_check.get("inference_batch_uncalibrated"):
+        extra["inference_batch_uncalibrated"] = True
+    return extra
+
+
+def _time_skip_memory_extra(time_check: dict, plan) -> dict:
+    """Optional memory fields on a `skipped_time_risk` record (B-C4a0 E2).
+
+    Phase J — the same three fields the success record carries, so the
+    planner sees the same shape regardless of pass/fail (§J.3).
+
+    refine_inference_time_estimator.md Commit D — `inference_ms_source`
+    is surfaced on skipped records too, so a verdict produced under the
+    measured path is distinguishable from one produced under the legacy
+    x2.7 ratio.
+
+    K.2.5-8 — both gates call the same inference estimator and carry the
+    same soft-fallback flag; the time wrapper's is the natural source.
+    """
+    extra: dict[str, Any] = {
+        "time_estimate_minutes": time_check.get("estimated_minutes"),
+        "time_budget_minutes": time_check.get("limit_minutes"),
+        "time_mode": "trial" if plan.is_trial else "formal",
+        "inference_ms_source": (time_check.get("breakdown") or {}).get("inference_ms_source"),
+    }
+    if time_check.get("inference_batch_uncalibrated"):
+        extra["inference_batch_uncalibrated"] = True
+    return extra
+
+
+def _build_skip_record(
+    *,
+    status: str,
+    exp_id: str,
+    model_type: str,
+    file_index: Any,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+    conclusion: str,
+    discovery: str,
+    memory_update: str,
+    memory_extra: dict[str, Any] | None = None,
+) -> dict:
+    """A record for an attempt that was skipped before it ran (B-C4a0 E2).
+
+    The three inline skip paths — schema violation, VRAM gate, time gate
+    — were the same eight-key shape over the same nine-field identity
+    block, differing only in three strings and a few optional memory
+    fields. `memory_extra` is applied before the position stamps so the
+    resulting key order matches what each site produced inline.
+
+    Pure. Persistence is `_emit_record`'s job.
+    """
+    memory: dict[str, Any] = {
+        "expert_advice_followed": expert_advice_str,
+        "hypothesis": hypothesis,
+        "conclusion": conclusion,
+        "discovery": discovery,
+        "memory_update": memory_update,
+    }
+    if memory_extra:
+        memory.update(memory_extra)
+    memory["round_index"] = round_index
+    memory["attempt_in_round"] = attempt_in_round
+    return {
+        "exp_id": exp_id,
+        "status": status,
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "memory": memory,
+    }
+
+
+def _build_resource_admission_record(
+    *,
+    resource_type: str,
+    reason_code: str,
+    detail: str,
+    exp_id: str,
+    model_type: str,
+    file_index: Any,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+    admission_evidence: dict | None = None,
+) -> dict:
+    """The record for a phase the environment would not admit (B-C4a0 C3).
+
+    **No production caller yet — emitting this is B-C4.** The typed
+    surface exists now so the boundary is in place before the decision
+    that uses it, rather than being invented alongside it.
+
+    The wording states what it is *not*: a refusal here is an
+    infrastructure condition, and reading it as evidence about the
+    candidate is the V19 mistake in a different coordinate.
+    """
+    if reason_code not in RESOURCE_ADMISSION_REASONS:
+        raise ValueError(
+            f"unknown admission reason_code {reason_code!r}; "
+            f"expected one of {RESOURCE_ADMISSION_REASONS}"
+        )
+    record = _build_skip_record(
+        status=RESOURCE_ADMISSION_STATUS,
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        conclusion=(
+            f"Skipped before starting: the environment did not permit this "
+            f"{resource_type} phase ({reason_code}). {detail}"
+        ),
+        discovery=(
+            "This is a statement about the machine at this moment, NOT about "
+            "the candidate. It is not evidence that the model was too large."
+        ),
+        memory_update=(
+            "Resource admission refused the phase. Do NOT reduce model "
+            "capacity, batch size or segmentation size in response to it."
+        ),
+        memory_extra={
+            "resource_type": resource_type,
+            "reason_code": reason_code,
+            "admission_evidence": admission_evidence or {},
+        },
+    )
+    # B-C4c budget rule (operator, 2026-08-02): planning, pre-flight and
+    # admission really ran, so the attempt slot really was used. Not
+    # consuming it risks an unbounded retry loop while the device stays
+    # busy. Consuming a control-flow budget is NOT blaming the
+    # candidate — the same decoupling `gpu_contention` relies on — so
+    # this is deliberately not a completed round and not a failure.
+    record["counts_toward_attempt_budget"] = True
+    record["counts_toward_completed_rounds"] = False
+    return record
+
+
+def _emit_record(sandbox, record: dict, *, status: dict | None = None) -> None:
+    """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
+
+    Every `save_record` in this module must be preceded by
+    `ExperimentRecord.model_validate` on the same dict: one unvalidated
+    write makes the whole iteration unresumable (`core/resume.py`
+    rejects the run_output it cannot parse). That pairing was a
+    convention repeated at nine sites; here it is structural.
+
+    `status` is the executor's result dict when there is one. It is the
+    single seam through which runtime evidence reaches a record, so a
+    later admission refusal has exactly one place to attach its own.
+    Passing `None` — the default, and what every non-executor path does
+    today — stamps nothing, which is what those paths do now.
+    """
+    if status is not None:
+        _attach_runtime_evidence(record, status)
+    ExperimentRecord.model_validate(record)
+    sandbox.save_record(record)
+
+
+def _attach_runtime_evidence(record: dict, status: dict) -> None:
+    """Carry the executor's bounded evidence and its verdict onto a record.
+
+    Both keys are optional: absent evidence means it was not captured,
+    never that the device was idle, and an absent verdict means
+    ``unknown``, never that the candidate was at fault.
+
+    One helper for both failure sites, which also keeps four conditional
+    branches out of ``run()`` — pyright's strict mode refuses to analyse
+    that method at all once it grows past its complexity ceiling, and a
+    method too complex to type-check is one nobody is checking.
+    """
+    for key in ("gpu_evidence", "failure_attribution"):
+        value = status.get(key)
+        if value is not None:
+            record[key] = value
+
+
+def _handle_admission_refusal(
+    status: dict,
+    *,
+    phase: str,
+    sandbox,
+    exp_id: str,
+    model_type: str,
+    file_index: Any,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """Record a phase the environment refused to start (B-C4c).
+
+    Returns True when the caller must skip the rest of this attempt.
+
+    The refusal is an infrastructure condition. It consumes the attempt
+    slot — planning, pre-flight and admission really ran — but it is not
+    a candidate failure, produces no negative planner evidence, updates
+    no incumbent, and triggers no retry. Those five properties are
+    separable, and collapsing any of them is how an environment problem
+    becomes a scientific conclusion about a model.
+
+    Every admission refusal goes through `_build_resource_admission_record`
+    so the wording and the accounting exist in one place; a
+    hand-assembled equivalent elsewhere would drift.
+    """
+    if status.get("status") != RESOURCE_ADMISSION_STATUS:
+        return False
+    admission = status.get("admission") or {}
+    record = _build_resource_admission_record(
+        resource_type="gpu_memory",
+        reason_code=admission.get("reason_code") or "policy_unavailable",
+        detail=str(status.get("message") or "the environment refused the phase"),
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        admission_evidence=admission,
+    )
+    _emit_record(sandbox, record)
+    print(
+        f"  Saved admission refusal ({phase}): {record['status']} "
+        f"[{record['memory']['reason_code']}]"
+    )
+    return True
+
+
+def _oom_memory_wording(status: dict, *, phase: str) -> tuple[str, str]:
+    """``(discovery, memory_update)`` for a MEASURED out-of-memory.
+
+    One place decides what an OOM tells the planner, for both the
+    training and the inference site, so the two cannot drift apart and
+    the rule can be tested without standing up a whole agent run.
+
+    Authority comes from the runtime's verdict. Only a measured
+    candidate-capacity failure — one that would not have fitted with the
+    whole device to itself — may ask for a smaller config. Everything
+    else says so explicitly rather than staying silent: the agent can
+    still SEE the OOM in memory, and silence lets it infer the shrink
+    instruction the measurement refused to support.
+    """
+    if _may_advise_resource_reduction(status):
+        if phase == "inference":
+            return (
+                "CUDA OOM during inference — reduce batch_size or model size.",
+                "Inference OOM — the model trained but can't infer. Try smaller batch.",
+            )
+        return (
+            "CUDA OOM — reduce model size, batch_size, or segmentation_size.",
+            "This config exceeds GPU memory. Try smaller architecture.",
+        )
+    where = " during inference" if phase == "inference" else ""
+    return (
+        f"CUDA OOM{where}, but the measurement does NOT attribute it to this config "
+        f"({_attribution_reason(status)}). This is not evidence that the model was "
+        "too large.",
+        "OOM not attributed to this config. Do NOT reduce model capacity, batch "
+        "size or segmentation size in response to it.",
+    )
+
+
+def _attribution_reason(status: dict) -> str:
+    """The runtime's own sentence for why, for the planner to read."""
+    payload = status.get("failure_attribution") or {}
+    outcome = payload.get("attribution") or "unknown"
+    reason = payload.get("reason") or "no attribution was recorded for this failure"
+    return f"{outcome}: {reason}"
 
 
 def _raise_if_inconclusive(resource_check: dict) -> None:
@@ -1651,6 +2193,67 @@ def _build_guardrail_rejection_record(
     }
 
 
+def _build_admission_policy(agent_input, *, is_trial: bool, device_identity: Any) -> Any:
+    """Assemble this attempt's `GpuAdmissionPolicy` (V20 B-G3).
+
+    The production channel that had been missing: before this, nothing
+    set `admission_mode` or `measured_requirements`, so the gate's
+    `getattr` defaults made it permanently `trial` with no requirement —
+    correct code that could never refuse.
+
+    **Posture is derived, not configured.** It comes from the same
+    `is_trial` that drives the time gate and the VRAM budget pick, so
+    admission cannot disagree with the round actually executing. There
+    is deliberately no `--admission_mode` flag: a second input could
+    contradict the first, and the contradiction would be silent.
+
+    **The source is a reference, never a figure.** No raw MiB reaches
+    this object, so an operator cannot type a number that then acts as a
+    measurement in formal mode. Until PR C resolves the reference, formal
+    refuses `policy_unavailable` — the correct answer.
+
+    Extracted as its own helper for the same reason as
+    `_build_runtime_policy`: the exact policy the tuner ships is
+    unit-testable against the launch configuration, without going
+    through `run()`.
+    """
+    from core.runtime_control.admission import GpuAdmissionPolicy
+
+    # The UUID is provenance, not control: it is recorded so a refusal can
+    # be checked against the card it ran on, and it never selects a device.
+    # So a device identity that cannot supply a usable string must degrade
+    # to "unknown" rather than raise — building provenance may not be able
+    # to abort an attempt that the gate itself would have allowed.
+    raw_uuid = getattr(device_identity, "uuid", None)
+    device_uuid = raw_uuid if isinstance(raw_uuid, str) else None
+
+    return GpuAdmissionPolicy(
+        mode="trial" if is_trial else "formal",
+        measurement_source=getattr(agent_input, "gpu_admission_measurement_source", None),
+        ceiling_gib=getattr(agent_input, "gpu_pair_ceiling_gib", None),
+        enforcement=getattr(agent_input, "gpu_admission_enforcement", "observe_only"),
+        device_uuid=device_uuid,
+        provenance={
+            "mode_source": "plan.is_trial",
+            "measurement_source_configured": getattr(
+                agent_input, "gpu_admission_measurement_source", None
+            )
+            is not None,
+            "ceiling_source": (
+                "launcher"
+                if getattr(agent_input, "gpu_pair_ceiling_gib", None) is not None
+                else "environment_or_default"
+            ),
+            "device_uuid_source": "hardware_discovery",
+            "enforcement_source": (
+                "launcher"
+                if getattr(agent_input, "gpu_admission_enforcement", None) is not None
+                else "compatibility_default"
+            ),
+        },
+    )
+
+
 def _build_runtime_policy(
     agent_input, *, chosen_time_budget: float | None, is_trial: bool, base_dir: str
 ) -> dict:
@@ -1749,8 +2352,7 @@ def _check_and_record_guardrail_skip(
         n_steps=n_steps,
         agent_input=agent_input,
     )
-    ExperimentRecord.model_validate(record)
-    sandbox.save_record(record)
+    _emit_record(sandbox, record)
     return True
 
 
@@ -1789,8 +2391,7 @@ def _handle_in_subprocess_rejection(
         rv_block=rv_block,
         fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
     )
-    ExperimentRecord.model_validate(reject_record)
-    sandbox.save_record(reject_record)
+    _emit_record(sandbox, reject_record)
     _append_runtime_observation(sandbox, run_name, rv_block)
     return True
 
@@ -2169,6 +2770,19 @@ class HyperparamTuningAgent:
             )
 
         # --- Initialize sandbox and brain (via factory for DI / pseudo-mode) ---
+        # V20 B-C2b — device identity resolved ONCE here, at the
+        # orchestration boundary, and passed down explicitly. The executor
+        # must never discover a device of its own: implicit rediscovery is
+        # how "GPU 0" gets assumed on a multi-GPU host. `None` (a CPU host,
+        # or a manifest predating UUIDs) means telemetry unavailable, which
+        # is a gap, not a default device.
+        device_identity = device_identity_from_hardware(hardware_context)
+        if device_identity is None:
+            print(
+                "[Tuner] GPU telemetry unavailable: the hardware record carries "
+                "no device UUID (legacy manifest or CPU-only host). Phase "
+                "evidence will be absent rather than attributed to a guessed device."
+            )
         sandbox = self._sandbox_factory(
             metadata_source="local",
             run_name=run_name,
@@ -2176,6 +2790,7 @@ class HyperparamTuningAgent:
             progress_bar=agent_input.progress_bar,
             file_index=file_index,
             data_scope=agent_input.data_scope,
+            device_identity=device_identity,
         )
 
         # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
@@ -2905,35 +3520,30 @@ class HyperparamTuningAgent:
                             )
                             or "unspecified schema violation"
                         )
-                        schema_record = {
-                            "exp_id": exp_id,
-                            "status": "skipped_schema_violation",
-                            "model_type": model_type,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index": file_index,
-                            "params": record_params,
-                            "denoising_score": None,
-                            "memory": {
-                                "expert_advice_followed": expert_advice_str,
-                                "hypothesis": hypothesis,
-                                "conclusion": (
-                                    f"Skipped: plugin schema rejected the proposed model_config. "
-                                    f"Violating fields: {violating_fields}. "
-                                    f"Offending values: {offending}."
-                                ),
-                                "discovery": resource_check.get("verdict", ""),
-                                "memory_update": (
-                                    f"DO NOT repeat this exact combination — plugin schema requires: "
-                                    f"{violation_summary}. Propose a config that satisfies every "
-                                    f"@model_validator(mode='after') and per-field bound in the "
-                                    f"plugin's PLUGIN_CONFIG_CLASS."
-                                ),
-                            },
-                        }
-                        schema_record["memory"]["round_index"] = round_index
-                        schema_record["memory"]["attempt_in_round"] = attempt_in_round
-                        ExperimentRecord.model_validate(schema_record)
-                        sandbox.save_record(schema_record)
+                        schema_record = _build_skip_record(
+                            status="skipped_schema_violation",
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            file_index=file_index,
+                            record_params=record_params,
+                            expert_advice_str=expert_advice_str,
+                            hypothesis=hypothesis,
+                            round_index=round_index,
+                            attempt_in_round=attempt_in_round,
+                            conclusion=(
+                                f"Skipped: plugin schema rejected the proposed model_config. "
+                                f"Violating fields: {violating_fields}. "
+                                f"Offending values: {offending}."
+                            ),
+                            discovery=resource_check.get("verdict", ""),
+                            memory_update=(
+                                f"DO NOT repeat this exact combination — plugin schema requires: "
+                                f"{violation_summary}. Propose a config that satisfies every "
+                                f"@model_validator(mode='after') and per-field bound in the "
+                                f"plugin's PLUGIN_CONFIG_CLASS."
+                            ),
+                        )
+                        _emit_record(sandbox, schema_record)
                         continue
 
                     if not resource_check.get("feasible", True):
@@ -2987,51 +3597,29 @@ class HyperparamTuningAgent:
                             # if the rejection-capture payload is malformed.
                             print(f"   [B.3] PhysicalRejection capture skipped: {_rej_err}")
 
-                        oom_record = {
-                            "exp_id": exp_id,
-                            "status": "skipped_oom_risk",
-                            "model_type": model_type,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index": file_index,
-                            "params": record_params,
-                            "denoising_score": None,
-                            "memory": {
-                                "expert_advice_followed": expert_advice_str,
-                                "hypothesis": hypothesis,
-                                "conclusion": (
-                                    f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
-                                    f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
-                                ),
-                                "discovery": resource_check.get("verdict", ""),
-                                "memory_update": resource_check.get(
-                                    "suggestion", "Reduce batch_size or segmentation_size."
-                                ),
-                            },
-                        }
-                        # Phase K — surface the same two VRAM fields the success
-                        # record carries so the planner sees the same shape
-                        # regardless of pass/fail. Omitted when the gate is
-                        # disabled (chosen_vram_budget is None), mirroring §J.3
-                        # for time. Mode is inferred from `time_mode` on records
-                        # where the time gate also ran — no separate vram_mode.
-                        # See docs/resource_estimator_implement.md §10.4 / §10.8.
-                        if chosen_vram_budget is not None:
-                            oom_record["memory"]["vram_estimate_gb"] = resource_check.get(
-                                "estimated_gb"
-                            )
-                            oom_record["memory"]["vram_budget_gb"] = resource_check.get("limit_gb")
-                        # K.2.5-8 — soft-fallback flag is independent of the
-                        # budget being set; the gate runs unconditionally and the
-                        # flag tells us whether the inference estimate was
-                        # against a registered batch. Recorded on every
-                        # skipped_oom_risk so post-hoc analysis can discount
-                        # rejections that came from an uncalibrated estimate.
-                        if resource_check.get("inference_batch_uncalibrated"):
-                            oom_record["memory"]["inference_batch_uncalibrated"] = True
-                        oom_record["memory"]["round_index"] = round_index
-                        oom_record["memory"]["attempt_in_round"] = attempt_in_round
-                        ExperimentRecord.model_validate(oom_record)
-                        sandbox.save_record(oom_record)
+                        oom_record = _build_skip_record(
+                            status="skipped_oom_risk",
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            file_index=file_index,
+                            record_params=record_params,
+                            expert_advice_str=expert_advice_str,
+                            hypothesis=hypothesis,
+                            round_index=round_index,
+                            attempt_in_round=attempt_in_round,
+                            conclusion=(
+                                f"Skipped: estimated VRAM ({resource_check.get('estimated_gb', '?')} GB) "
+                                f"exceeds 80% safety limit ({resource_check.get('limit_gb', '?')} GB)."
+                            ),
+                            discovery=resource_check.get("verdict", ""),
+                            memory_update=resource_check.get(
+                                "suggestion", "Reduce batch_size or segmentation_size."
+                            ),
+                            memory_extra=_vram_skip_memory_extra(
+                                resource_check, chosen_vram_budget
+                            ),
+                        )
+                        _emit_record(sandbox, oom_record)
                         continue
 
                     # Phase 6.6 A.11 — capture the batch the VRAM skill picked
@@ -3161,56 +3749,29 @@ class HyperparamTuningAgent:
                             print(f"   Verdict   : {time_check.get('verdict', '')}")
                             print(f"   Suggestion: {time_check.get('suggestion', '')}")
 
-                            time_record = {
-                                "exp_id": exp_id,
-                                "status": "skipped_time_risk",
-                                "model_type": model_type,
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "file_index": file_index,
-                                "params": record_params,
-                                "denoising_score": None,
-                                "memory": {
-                                    "expert_advice_followed": expert_advice_str,
-                                    "hypothesis": hypothesis,
-                                    "conclusion": (
-                                        f"Skipped: estimated wall-time "
-                                        f"({time_check.get('estimated_minutes', '?')} min) "
-                                        f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
-                                    ),
-                                    "discovery": time_check.get("verdict", ""),
-                                    "memory_update": time_check.get(
-                                        "suggestion",
-                                        "Reduce model size, batch_size, segmentation_size, or train_portion.",
-                                    ),
-                                    # Phase J — same three fields the success
-                                    # record carries, so the planner sees the
-                                    # same shape regardless of pass/fail.
-                                    # See docs/resource_estimator_implement.md §J.3.
-                                    "time_estimate_minutes": time_check.get("estimated_minutes"),
-                                    "time_budget_minutes": time_check.get("limit_minutes"),
-                                    "time_mode": "trial" if plan.is_trial else "formal",
-                                    # refine_inference_time_estimator.md Commit D —
-                                    # surface the inference-ms branch on skipped
-                                    # records too so a verdict that says "skipped"
-                                    # under the measured path is distinguishable
-                                    # from one under the legacy × 2.7 ratio.
-                                    "inference_ms_source": (
-                                        (time_check.get("breakdown") or {}).get(
-                                            "inference_ms_source"
-                                        )
-                                    ),
-                                },
-                            }
-                            # K.2.5-8 — propagate inference soft-fallback flag.
-                            # Either gate's result carries the same flag (both
-                            # call the same inference estimator); the time
-                            # wrapper's flag is the natural source here.
-                            if time_check.get("inference_batch_uncalibrated"):
-                                time_record["memory"]["inference_batch_uncalibrated"] = True
-                            time_record["memory"]["round_index"] = round_index
-                            time_record["memory"]["attempt_in_round"] = attempt_in_round
-                            ExperimentRecord.model_validate(time_record)
-                            sandbox.save_record(time_record)
+                            time_record = _build_skip_record(
+                                status="skipped_time_risk",
+                                exp_id=exp_id,
+                                model_type=model_type,
+                                file_index=file_index,
+                                record_params=record_params,
+                                expert_advice_str=expert_advice_str,
+                                hypothesis=hypothesis,
+                                round_index=round_index,
+                                attempt_in_round=attempt_in_round,
+                                conclusion=(
+                                    f"Skipped: estimated wall-time "
+                                    f"({time_check.get('estimated_minutes', '?')} min) "
+                                    f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                ),
+                                discovery=time_check.get("verdict", ""),
+                                memory_update=time_check.get(
+                                    "suggestion",
+                                    "Reduce model size, batch_size, segmentation_size, or train_portion.",
+                                ),
+                                memory_extra=_time_skip_memory_extra(time_check, plan),
+                            )
+                            _emit_record(sandbox, time_record)
                             continue
 
                     # RT2-G: operator runtime policy for the in-subprocess
@@ -3226,6 +3787,17 @@ class HyperparamTuningAgent:
                         is_trial=plan.is_trial,
                         base_dir=sandbox.base_dir,
                     )
+                    # B-G3: resolved per round, because posture follows the
+                    # round actually executing. Set on the sandbox rather
+                    # than threaded through every phase signature — the gate
+                    # fires inside the executor for both training and
+                    # inference, and one authoritative value per attempt is
+                    # what keeps them from disagreeing.
+                    sandbox.admission_policy = _build_admission_policy(
+                        agent_input,
+                        is_trial=plan.is_trial,
+                        device_identity=getattr(sandbox, "device_identity", None),
+                    )
 
                     failure_stage = "training"
                     print("\n[Step 1/3] Training...")
@@ -3234,6 +3806,20 @@ class HyperparamTuningAgent:
                     train_time = round(time.time() - t0, 1)
                     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
                     _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
+                    if _handle_admission_refusal(
+                        train_status,
+                        phase="training",
+                        sandbox=sandbox,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
+                        continue
                     if _handle_in_subprocess_rejection(
                         train_status,
                         sandbox=sandbox,
@@ -3257,36 +3843,19 @@ class HyperparamTuningAgent:
                                 "message", "scope violation in training"
                             )
                             break
-                        error_msg = train_status.get("message", "Unknown training error")
-                        is_oom = (
-                            "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                        error_record = _build_execution_failure_record(
+                            train_status,
+                            phase="training",
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            file_index=file_index,
+                            record_params=record_params,
+                            expert_advice_str=expert_advice_str,
+                            hypothesis=hypothesis,
+                            round_index=round_index,
+                            attempt_in_round=attempt_in_round,
                         )
-                        # Truncate long tracebacks — keep last 500 chars for the LLM
-                        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                        error_record = {
-                            "exp_id": exp_id,
-                            "status": "error_training_oom" if is_oom else "error_training",
-                            "model_type": model_type,
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "file_index": file_index,
-                            "params": record_params,
-                            "denoising_score": None,
-                            "memory": {
-                                "expert_advice_followed": expert_advice_str,
-                                "hypothesis": hypothesis,
-                                "conclusion": f"Training failed: {short_msg}",
-                                "discovery": "CUDA OOM — reduce model size, batch_size, or segmentation_size."
-                                if is_oom
-                                else f"Training crashed: {short_msg}",
-                                "memory_update": "This config exceeds GPU memory. Try smaller architecture."
-                                if is_oom
-                                else "Fix the error before retrying this config.",
-                            },
-                        }
-                        error_record["memory"]["round_index"] = round_index
-                        error_record["memory"]["attempt_in_round"] = attempt_in_round
-                        ExperimentRecord.model_validate(error_record)
-                        sandbox.save_record(error_record)
+                        _emit_record(sandbox, error_record, status=train_status)
                         print(f"  Saved error record: {error_record['status']}")
                         continue
 
@@ -3306,6 +3875,20 @@ class HyperparamTuningAgent:
                         inference_time = round(time.time() - t0, 1)
                         _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
                         _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
+                        if _handle_admission_refusal(
+                            inf_status,
+                            phase="inference",
+                            sandbox=sandbox,
+                            exp_id=exp_id,
+                            model_type=model_type,
+                            file_index=file_index,
+                            record_params=record_params,
+                            expert_advice_str=expert_advice_str,
+                            hypothesis=hypothesis,
+                            round_index=round_index,
+                            attempt_in_round=attempt_in_round,
+                        ):
+                            continue
                         if inf_status.get("status") == "error":
                             # DataScope DS5 — non-retryable: terminate the run.
                             if inf_status.get("error_type") == "scope_violation":
@@ -3313,67 +3896,19 @@ class HyperparamTuningAgent:
                                     "message", "scope violation in inference"
                                 )
                                 break
-                            error_msg = inf_status.get("message", "Unknown inference error")
-                            is_oom = (
-                                "CUDA out of memory" in error_msg or "OutOfMemoryError" in error_msg
+                            error_record = _build_execution_failure_record(
+                                inf_status,
+                                phase="inference",
+                                exp_id=exp_id,
+                                model_type=model_type,
+                                file_index=file_index,
+                                record_params=record_params,
+                                expert_advice_str=expert_advice_str,
+                                hypothesis=hypothesis,
+                                round_index=round_index,
+                                attempt_in_round=attempt_in_round,
                             )
-
-                            # Phase 6.7 Fix 3 — when the inference subprocess fails
-                            # because the trainer-side sentinel was missing, the
-                            # error message carries the ``error_training:`` prefix
-                            # (raised by ``inference_single._assert_training_sentinel``).
-                            # That is a *training* failure surfaced through the
-                            # inference subprocess, not an inference failure.
-                            # Re-route the category so the planner sees the right
-                            # cause instead of "inference crashed for mysterious
-                            # reasons" — and the executor-side silent-crash check
-                            # in ``execute_training`` already catches the same
-                            # condition upstream when the process exited 0.
-                            is_silent_train_crash = "error_training:" in error_msg
-
-                            short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                            if is_silent_train_crash:
-                                status_tag = "error_training"
-                                conclusion = f"Training crashed silently (detected at inference preflight): {short_msg}"
-                                discovery = f"Training subprocess returned 0 but produced no checkpoint sentinel: {short_msg}"
-                                memory_update = (
-                                    "Silent training crash — investigate the trainer logs for a "
-                                    "post-save segfault, OOM-kill, or GPU watchdog. Do not retry "
-                                    "blindly until the root cause is identified."
-                                )
-                            elif is_oom:
-                                status_tag = "error_inference_oom"
-                                conclusion = f"Inference failed: {short_msg}"
-                                discovery = (
-                                    "CUDA OOM during inference — reduce batch_size or model size."
-                                )
-                                memory_update = "Inference OOM — the model trained but can't infer. Try smaller batch."
-                            else:
-                                status_tag = "error_inference"
-                                conclusion = f"Inference failed: {short_msg}"
-                                discovery = f"Inference crashed: {short_msg}"
-                                memory_update = "Fix the inference error before retrying."
-
-                            error_record = {
-                                "exp_id": exp_id,
-                                "status": status_tag,
-                                "model_type": model_type,
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "file_index": file_index,
-                                "params": record_params,
-                                "denoising_score": None,
-                                "memory": {
-                                    "expert_advice_followed": expert_advice_str,
-                                    "hypothesis": hypothesis,
-                                    "conclusion": conclusion,
-                                    "discovery": discovery,
-                                    "memory_update": memory_update,
-                                },
-                            }
-                            error_record["memory"]["round_index"] = round_index
-                            error_record["memory"]["attempt_in_round"] = attempt_in_round
-                            ExperimentRecord.model_validate(error_record)
-                            sandbox.save_record(error_record)
+                            _emit_record(sandbox, error_record, status=inf_status)
                             print(f"  Saved error record: {error_record['status']}")
                             continue
 
@@ -3583,8 +4118,7 @@ class HyperparamTuningAgent:
                             }
                             error_record["memory"]["round_index"] = round_index
                             error_record["memory"]["attempt_in_round"] = attempt_in_round
-                            ExperimentRecord.model_validate(error_record)
-                            sandbox.save_record(error_record)
+                            _emit_record(sandbox, error_record)
                             print(f"  Saved error record: {error_record['status']}")
                             continue
                         scoring_time = round(time.time() - t0, 1)
@@ -4058,8 +4592,7 @@ class HyperparamTuningAgent:
                         or None
                     )
 
-                    ExperimentRecord.model_validate(final_record)
-                    sandbox.save_record(final_record)
+                    _emit_record(sandbox, final_record)
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
                     )
@@ -4181,12 +4714,10 @@ class HyperparamTuningAgent:
                     }
                     _apply_watchdog_failure_fields(failure_record, e)
                     try:
-                        ExperimentRecord.model_validate(failure_record)
-                        # Save the RAW dict (validation is the gate, not the
-                        # serializer): model_dump() drops extra keys, which
-                        # would silently lose the §4 watchdog provenance —
-                        # every other record path also saves the raw dict.
-                        sandbox.save_record(failure_record)
+                        # The RAW dict is saved (validation is the gate, not
+                        # the serializer): model_dump() drops extra keys, which
+                        # would silently lose the §4 watchdog provenance.
+                        _emit_record(sandbox, failure_record)
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
@@ -4195,6 +4726,12 @@ class HyperparamTuningAgent:
             # DataScope DS5 — a scope violation is deterministic on retry:
             # terminate the run immediately, before any retry/fail-round
             # bookkeeping.
+            _round_decision = _decide_round_outcome(
+                scope_violation_reason=_scope_violation_reason,
+                evidence_channel_failure=_evidence_channel_failure,
+                resolved_action=resolved_action,
+                is_formal_round=is_formal_round,
+            )
             if _scope_violation_reason or _evidence_channel_failure:
                 print(
                     _non_retryable_termination_message(
@@ -4224,11 +4761,11 @@ class HyperparamTuningAgent:
             #   on the formal round — no re-run.
             # See docs/design/pluggable_health_checks.md §4 for action
             # semantics and §8 for severity resolution.
-            if _should_break_iteration(resolved_action):
+            if _round_decision is RoundDecision.BREAK_ITERATION:
                 print(f"  [HEALTH GATE] SKIP_ITER at round {round_index} — aborting iteration.")
                 _gate_aborted = True
                 break
-            if _should_skip_to_formal(resolved_action, is_formal_round):
+            if _round_decision is RoundDecision.SKIP_TO_FORMAL:
                 print(
                     f"  [HEALTH GATE] SKIP_TO_FORMAL at round {round_index} — "
                     f"jumping to formal round {max_rounds}."

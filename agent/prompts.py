@@ -1036,6 +1036,40 @@ def get_planner_user_prompt(
             f"budget is evidence about capacity.\n"
         )
 
+    # V20 B-C3b. The note above covers a pre-flight that measured nothing.
+    # This one covers the harder case: a real, MEASURED out-of-memory that
+    # the runtime attributed to something other than this candidate — a
+    # neighbouring process holding the card, host pressure, an external
+    # kill, or evidence too thin to settle it. The agent can see an OOM in
+    # memory and will otherwise draw the one inference the measurement
+    # explicitly refused to support. That inference is what collapsed the
+    # V19 campaign to toy models.
+    unattributed_oom_note = ""
+    unattributed_oom_records = [
+        r
+        for r in memory_history
+        if str(r.get("status", "")).endswith("_oom")
+        and not (r.get("failure_attribution") or {}).get("may_recommend_resource_reduction", False)
+    ]
+    if unattributed_oom_records:
+        reasons = {
+            (r.get("failure_attribution") or {}).get("attribution", "unknown")
+            for r in unattributed_oom_records
+        }
+        unattributed_oom_note = (
+            f"\n### NOTE - OUT-OF-MEMORY NOT ATTRIBUTED TO YOUR CONFIG "
+            f"({len(unattributed_oom_records)} attempt(s)):\n"
+            f"Those attempts hit a real out-of-memory error, but the runtime "
+            f"measurement did NOT attribute it to your configuration "
+            f"(outcome(s): {', '.join(sorted(reasons))}).\n"
+            f"It does NOT mean the model was too large. Do NOT reduce model "
+            f"capacity, batch size, or segmentation size in response to those "
+            f"attempts, and do not treat that architecture as infeasible. Only "
+            f"an out-of-memory attributed to CANDIDATE CAPACITY — one that "
+            f"would not have fitted even with the whole device to itself — is "
+            f"evidence about your model's size.\n"
+        )
+
     # Build a timing summary for the last successful experiment so the planner
     # can judge speed against whatever budget is set in the expert advice.
     slow_warning = ""
@@ -1133,7 +1167,7 @@ def get_planner_user_prompt(
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}{inconclusive_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
+{oom_warning}{inconclusive_note}{unattributed_oom_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.

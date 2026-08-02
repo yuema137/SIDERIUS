@@ -74,7 +74,7 @@ def _train_success_side_effect(sandbox, exp_id=EXP_ID, stdout="done\n", stderr="
         sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
         with open(sentinel, "wb"):
             pass
-        return _ok_result(stdout=stdout, stderr=stderr)
+        return _ok_result(stdout=stdout, stderr=stderr), None
 
     return _side_effect
 
@@ -315,7 +315,7 @@ class TestSandboxPreexecWiring:
     launched. The role-wiring assertions patch ``_subprocess_rss_gb`` to
     capture the role string rather than inspect the opaque preexec closure."""
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_passes_preexec_fn(self, mock_run, sandbox, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "16")
         mock_run.side_effect = _train_success_side_effect(sandbox)
@@ -324,10 +324,10 @@ class TestSandboxPreexecWiring:
         assert "preexec_fn" in kwargs
         assert callable(kwargs["preexec_fn"])
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_inference_passes_preexec_fn(self, mock_run, sandbox, monkeypatch):
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "16")
-        mock_run.return_value = _ok_result()
+        mock_run.return_value = (_ok_result(), None)
         sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
         assert "preexec_fn" in kwargs
@@ -346,7 +346,7 @@ class TestSandboxPreexecWiring:
         assert "preexec_fn" in kwargs
         assert callable(kwargs["preexec_fn"])
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_env_zero_disables_preexec(self, mock_run, sandbox, monkeypatch):
         """SIDERIUS_SUBPROCESS_RSS_GB=0 → preexec_fn is None."""
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "0")
@@ -356,7 +356,7 @@ class TestSandboxPreexecWiring:
         assert kwargs["preexec_fn"] is None
 
     @patch("core.sandbox_executor._subprocess_rss_gb")
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_uses_training_role(self, mock_run, mock_rss, sandbox):
         """Training subprocess resolves ceiling via role='training'."""
         mock_run.side_effect = _train_success_side_effect(sandbox)
@@ -365,9 +365,9 @@ class TestSandboxPreexecWiring:
         mock_rss.assert_called_with("training")
 
     @patch("core.sandbox_executor._subprocess_rss_gb")
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_inference_uses_inference_role(self, mock_run, mock_rss, sandbox):
-        mock_run.return_value = _ok_result()
+        mock_run.return_value = (_ok_result(), None)
         mock_rss.return_value = 40
         sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
         mock_rss.assert_called_with("inference")
@@ -389,7 +389,7 @@ class TestSandboxPreexecWiring:
 
 
 class TestSandboxOomStatus:
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_memory_error_returns_oom_status(self, mock_run, sandbox):
         mock_run.side_effect = _called_process_error(
             returncode=1,
@@ -399,20 +399,20 @@ class TestSandboxOomStatus:
         assert out["status"] == "oom_host_ram"
         assert "[oom_host_ram]" in out["message"]
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_sigkill_returns_oom_status(self, mock_run, sandbox):
         mock_run.side_effect = _called_process_error(returncode=-9)
         out = sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         assert out["status"] == "oom_host_ram"
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_non_oom_still_error(self, mock_run, sandbox):
         mock_run.side_effect = _called_process_error(returncode=1, stderr="ValueError: bad")
         out = sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         assert out["status"] == "error"
         assert "[oom_host_ram]" not in out["message"]
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_inference_memory_error_returns_oom_status(self, mock_run, sandbox):
         mock_run.side_effect = _called_process_error(
             returncode=1,

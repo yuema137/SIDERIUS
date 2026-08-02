@@ -12,6 +12,29 @@ another node directly.
 
 ## Core Principles
 
+### 0. No component may be smuggled into another component's function
+
+**Binding, operator decision 2026-08-01.** A function that coordinates
+multiple phases, builds records, handles errors, mutates state, performs
+I/O and decides control flow is not one component — it is several
+sharing a scope, and the graph architecture below stops describing the
+code the moment that happens.
+
+New work must not add substantial branching, record construction,
+persistence or task logic to an already oversized function. Extract a
+typed, independently testable boundary first, prove behavioural parity,
+then put the new logic inside it. Split by responsibility, never by line
+count, and decompose in passing as touched work requires — never as a
+repository-wide rewrite.
+
+An extracted unit is only complete when it has explicit inputs, a typed
+result, bounded side effects, focused tests, and a reachability test
+that fails if production bypasses it. A helper that still reads and
+mutates arbitrary outer state has relocated complexity, not reduced it.
+
+Full rule and rationale: `docs/design/v20_priorities.md` §1.5 and
+`CLAUDE.md`.
+
 ### 1. The system is a directed graph
 
 The entire SIDERIUS system is a **directed graph** where:

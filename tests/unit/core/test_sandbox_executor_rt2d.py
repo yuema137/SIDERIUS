@@ -56,9 +56,9 @@ class TestInferencePlumbing:
         def run(cmd, **kwargs):
             seen["rv_path"] = _argv_value(cmd, "--runtime_observation_out")
             assert os.path.isfile(sidecar_path)  # NOT deleted pre-launch
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox)
         assert out["status"] == "success"
         assert seen["rv_path"] == sidecar_path
@@ -74,9 +74,9 @@ class TestInferencePlumbing:
             )
             session.record_phase_actual("inference", 2.0)
             session.finalize("inference_complete")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox)
         rv = out["runtime_verification"]
         assert rv["final_status"] == "inference_complete"
@@ -89,7 +89,7 @@ class TestInferencePlumbing:
             RuntimeVerificationSession.resume_or_start(rv_path, resumed_status="inference_started")
             raise subprocess.CalledProcessError(1, cmd, output="", stderr="boom")
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox)
         assert out["status"] == "error"
         assert out["runtime_verification"]["final_status"] == "inference_started"
@@ -99,9 +99,9 @@ class TestInferencePlumbing:
 
         def run(cmd, **kwargs):
             seen["rp_path"] = _argv_value(cmd, "--runtime_policy_json")
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", run)
         out = _execute(sandbox, runtime_policy={"operator_budget_seconds": 60.0})
         assert out["status"] == "success"
         assert seen["rp_path"] is not None

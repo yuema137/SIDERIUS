@@ -93,6 +93,9 @@ def local_validated_model(
     formal_time_budget_minutes: float | None = None,
     data_dir: str | None = None,
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K two-budget split) ---
+    gpu_admission_measurement_source: str | None = None,
+    gpu_admission_enforcement: str = "observe_only",
+    gpu_pair_ceiling_gib: float | None = None,
     trial_vram_budget_gb: float | None = None,
     formal_vram_budget_gb: float | None = None,
     # --- Formal-mode training levers (Phase M) + eval-scope (Phase R) ---
@@ -170,6 +173,11 @@ def local_validated_model(
         plan.is_trial. When the chosen budget is None the gate is skipped
         for that round (one-time warning per mode at startup).
         See §2.7.2 fan-in / Phase I.
+      - gpu_admission_measurement_source / gpu_pair_ceiling_gib :
+          V20 B-G3 admission configuration. The source is a
+          REFERENCE, never a figure; the ceiling is the aggregate
+          GPU cap. Both default to None, which is exactly the
+          pre-B-G3 behaviour.
       - trial_vram_budget_gb / formal_vram_budget_gb :
         workflow-supplied per-mode VRAM ceilings for the tuner's per-round
         evaluate_vram_skill gate (Phase K two-budget split). Each budget
@@ -278,6 +286,9 @@ def local_validated_model(
         trial_time_budget_minutes=trial_time_budget_minutes,
         formal_time_budget_minutes=formal_time_budget_minutes,
         data_dir=data_dir,
+        gpu_admission_measurement_source=gpu_admission_measurement_source,
+        gpu_admission_enforcement=gpu_admission_enforcement,
+        gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,
         trial_vram_budget_gb=trial_vram_budget_gb,
         formal_vram_budget_gb=formal_vram_budget_gb,
         formal_strategy=formal_strategy,

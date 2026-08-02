@@ -35,13 +35,22 @@ def _cmd_from(mock_run) -> list[str]:
 def _launch(sandbox, **ordering):
     """Capture the argv without launching anything.
 
-    Patches ``subprocess.run``, NOT ``_run_subprocess_with_watchdog``: the
-    watchdog path is taken only when a runtime policy with the watchdog
-    enabled is supplied, so with no policy the plain ``subprocess.run``
-    branch runs — and patching the wrong one launches real training.
+    Patches ``_run_observed_subprocess`` — the single seam every GPU
+    child now goes through (V20 B-C2a).
+
+    This used to patch ``core.sandbox_executor.subprocess.run``, because
+    with no runtime policy the plain branch called it directly. B-C2a
+    routed that branch through the seam, and the old patch simply
+    stopped intercepting: real training launched and the test hung for
+    minutes rather than failing. A stub that no longer intercepts does
+    not raise. Patching the seam is also the durable choice, since it is
+    now the only launch point either branch can take.
     """
-    with patch("core.sandbox_executor.subprocess.run") as mock_run:
-        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+    with patch("core.sandbox_executor._run_observed_subprocess") as mock_run:
+        mock_run.return_value = (
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            None,
+        )
         try:
             sandbox.execute_training(
                 exp_id="e1",

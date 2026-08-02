@@ -17,6 +17,7 @@ import subprocess
 
 import pytest
 
+import core.sandbox_executor as sandbox_executor
 from core.runtime_control.session import (
     RuntimeControlPolicy,
     RuntimeVerificationSession,
@@ -24,13 +25,13 @@ from core.runtime_control.session import (
 )
 from core.sandbox_executor import (
     TidmadSandbox,
-    _run_subprocess_with_watchdog,
+    _run_observed_subprocess,
     _watchdog_deadline_provider,
 )
 
 
 def _run(cmd: list[str], *, deadline: float | None, grace: float = 0.5, poll: float = 0.1):
-    return _run_subprocess_with_watchdog(
+    return _run_observed_subprocess(
         cmd,
         env=os.environ.copy(),
         preexec_fn=None,
@@ -154,7 +155,7 @@ class TestExecutorKillHandling:
             )
             return None, kill_info
 
-        monkeypatch.setattr("core.sandbox_executor._run_subprocess_with_watchdog", fake_watchdog)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", fake_watchdog)
         out = sandbox.execute_training(
             exp_id="exp_w",
             run_name="rt4",
@@ -174,22 +175,31 @@ class TestExecutorKillHandling:
         # Killed attempt's partial observation still surfaces (§6.2).
         assert out["runtime_verification"]["final_status"] == "setup_complete"
 
-    def test_watchdog_disabled_uses_plain_run(self, tmp_path, monkeypatch):
+    def test_watchdog_disabled_arms_no_deadline(self, tmp_path, monkeypatch):
+        """Disabled watchdog means no deadline is armed.
+
+        This asserted `used == {"watchdog": 0, "run": 1}` until B-C2a2 —
+        the `run` half meaning "the plain implementation underneath is
+        still subprocess.run". That is false by construction now that
+        plain mode is on Popen, and worse, the old assertion would only
+        have failed *after* a real training subprocess had launched.
+
+        The durable property is the one the test was always really
+        about: the seam is entered without a deadline_provider.
+        """
         sandbox = TidmadSandbox(run_name="rt4b", workspace=str(tmp_path))
-        used = {"watchdog": 0, "run": 0}
+        used = {"with_deadline": 0, "without_deadline": 0}
 
-        def fake_watchdog(cmd, **kwargs):  # pragma: no cover - must not run
-            used["watchdog"] += 1
-            return None, None
-
-        def fake_run(cmd, **kwargs):
-            used["run"] += 1
+        def recording_seam(cmd, **kwargs):
+            if kwargs.get("deadline_provider") is not None:
+                used["with_deadline"] += 1
+            else:
+                used["without_deadline"] += 1
             with open(os.path.join(sandbox.dirs["models"], "_OK_exp_p"), "wb"):
                 pass
-            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""), None
 
-        monkeypatch.setattr("core.sandbox_executor._run_subprocess_with_watchdog", fake_watchdog)
-        monkeypatch.setattr("core.sandbox_executor.subprocess.run", fake_run)
+        monkeypatch.setattr("core.sandbox_executor._run_observed_subprocess", recording_seam)
         out = sandbox.execute_training(
             exp_id="exp_p",
             run_name="rt4b",
@@ -201,4 +211,4 @@ class TestExecutorKillHandling:
             runtime_policy={"operator_budget_seconds": 60.0},  # watchdog default off
         )
         assert out["status"] == "success"
-        assert used == {"watchdog": 0, "run": 1}
+        assert used == {"with_deadline": 0, "without_deadline": 1}

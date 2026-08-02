@@ -82,6 +82,9 @@ DATA_DIR=""
 TRIAL_TIME_BUDGET_MINUTES=""        # §3.2: empty == omit == Python None
 FORMAL_TIME_BUDGET_MINUTES=""       # §3.2: empty == omit == Python None
 FORMAL_EVAL_PORTION=1.0             # Phase R §13: eval-side scope for formal training; default 1.0 = production full-clone (lower for smoke/CI)
+GPU_ADMISSION_MEASUREMENT_SOURCE="" # B-G3: reference, never a figure; empty == omit
+GPU_ADMISSION_ENFORCEMENT=""        # B-G3/D-B4: empty == omit == observe_only
+GPU_PAIR_CEILING_GIB=""             # B-G3: empty == omit == defer to env/default
 TRIAL_VRAM_BUDGET_GB=""             # §3.2: empty == omit == Python None
 FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
 # §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
@@ -309,6 +312,9 @@ parse_chain_args() {
         --runtime_watchdog_safety_factor) RUNTIME_WATCHDOG_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_floor_seconds) RUNTIME_WATCHDOG_FLOOR_SECONDS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
+        --gpu_admission_measurement_source) GPU_ADMISSION_MEASUREMENT_SOURCE="$2"; shift 2 ;;
+        --gpu_admission_enforcement) GPU_ADMISSION_ENFORCEMENT="$2"; shift 2 ;;
+        --gpu_pair_ceiling_gib)   GPU_PAIR_CEILING_GIB="$2"; shift 2 ;;
         --trial_vram_budget_gb)   TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --formal_vram_budget_gb)  FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
         --exploration_mode)       EXPLORATION_MODE="$2"; shift 2 ;;
@@ -550,6 +556,15 @@ build_app_args() {
     # forward nothing and run_one_iteration.py reads the YAML.
     [ "$ML_LIT_REVIEW_ENABLED" -eq 1 ] && APP_ARGS+=(--ml_lit_review_enabled)
     APP_ARGS+=(--formal_eval_portion "$FORMAL_EVAL_PORTION")
+    if [ -n "$GPU_ADMISSION_MEASUREMENT_SOURCE" ]; then
+        APP_ARGS+=(--gpu_admission_measurement_source "$GPU_ADMISSION_MEASUREMENT_SOURCE")
+    fi
+    if [ -n "$GPU_ADMISSION_ENFORCEMENT" ]; then
+        APP_ARGS+=(--gpu_admission_enforcement "$GPU_ADMISSION_ENFORCEMENT")
+    fi
+    if [ -n "$GPU_PAIR_CEILING_GIB" ]; then
+        APP_ARGS+=(--gpu_pair_ceiling_gib "$GPU_PAIR_CEILING_GIB")
+    fi
     if [ -n "$TRIAL_VRAM_BUDGET_GB" ]; then
         APP_ARGS+=(--trial_vram_budget_gb "$TRIAL_VRAM_BUDGET_GB")
     fi

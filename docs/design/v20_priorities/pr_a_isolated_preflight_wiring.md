@@ -2484,3 +2484,76 @@ comparison is **15.52 GiB vs 28.05 GiB** (28,732 MiB, §6.3), which also
 means V19 exceeded the 28 GiB ceiling while A6 stayed 12.5 GiB under it.
 Fixed in the analyzer and in this record; the understated figure
 appeared in the first A6 report and is corrected here.
+
+---
+
+## 25. Genericization impact and in-passing refactor
+
+Added retrospectively on 2026-08-01, after `v20_priorities.md` §1.4 made
+this section mandatory. PR A merged as `5c18946` before the requirement
+existed, so this records what it did and did not do rather than
+constraining it — and the honest answer is that it moved the boundary in
+the right direction in one place and left three couplings untouched.
+
+### 25.1 Module classification
+
+| Module | Class |
+|---|---|
+| `isolated_probe.py` — worker lifecycle, IPC, host-memory bound, orphan handling | **generic process-isolation infrastructure** |
+| `preflight_adapter.py` — outcome mapping, snapshot construction | generic, with a task-shaped payload passing through it |
+| `preflight_worker_main.py` — classification of the skill's result | generic wrapper around a **task-specific** estimator |
+| `evaluate_vram_skill/wrapper.py` — the estimator itself (untouched) | **task-specific**: it knows model families, `segmentation_size`, denoising batch semantics |
+| tuner call site | task layer |
+
+**The separation PR A actually achieved.** Isolating the pre-flight into
+a subprocess is generic infrastructure: nothing in the worker lifecycle,
+the IPC contract, the deadline, the host-RSS bound or the orphan
+handling is specific to TIDMAD or to denoising. Candidate construction
+and estimator logic stayed **outside** that layer, in the skill the
+worker invokes. That boundary is the useful one and it held.
+
+### 25.2 Hardcoded assumptions
+
+**Introduced: none.** The IPC widening carried existing fields across a
+boundary; it did not add a constant.
+
+**Removed: one, partially.** `IsolatedProbeSpec.vram_budget_gb` became
+nullable (D-A4), and the cap is now resolved **once by the parent** and
+frozen into `HardwareSnapshot` rather than rediscovered inside the
+worker. That is a small move in exactly the §1.4.3 direction —
+configuration resolved at one boundary, passed down as a resolved
+object, not re-derived by a lower layer.
+
+**Remaining, and untouched:**
+
+| Assumption | Where | Class | ID |
+|---|---|---|---|
+| `HardwareSnapshot` describes **one** device, with `device_index` defaulting to 0 | `isolated_probe.py` | hardware-owned configuration | **FU-A-13** |
+| `_ROLE_DEFAULT_RSS_GB = {"training": 40, "inference": 60, "scoring": 24}` | `sandbox_executor.py:92-96` | hardware policy keyed by **task phase name** | **FU-B-6** (shared with PR B) |
+| The estimator's model-family knowledge | `evaluate_vram_skill/wrapper.py` | task-specific, correctly placed | — |
+
+FU-A-13 is the one PR A could arguably have addressed: the snapshot
+already carries `device_name` and `cuda_visible_devices`, so adding a
+UUID would have been bounded. It was not required at the time and the
+single-GPU host made it invisible. PR B's `DeviceIdentity` (§8.3) is
+where it now lands, and PR B should reconcile the two rather than
+maintain a second device-identity shape.
+
+### 25.3 Compatibility surface
+
+`vram_budget_gb=None` means *no operator ceiling*, not *unset*: the
+worker then uses the parent's frozen `usable_cap_gb` (D-A4). Existing
+runs that pass a budget behave identically; the A5/A6 evidence covers
+both paths.
+
+### 25.4 Tests proving independence
+
+Present: the 13 reachability guardrails assert structurally that the
+adapter module imports no torch and that production reaches it — a
+generic-infrastructure property, not a task one. The 27 composition
+tests drive a **synthetic** worker, not TIDMAD data.
+
+Absent, and honestly so: no test asserts that `isolated_probe` or
+`preflight_adapter` is free of task imports, and none exercises a
+non-zero device index. Both are folded into PR B's §8.8 rather than
+retrofitted to a merged PR.

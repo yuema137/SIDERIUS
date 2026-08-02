@@ -67,7 +67,7 @@ def _make_train_success_side_effect(sandbox, exp_id, stdout="done\n", stderr="")
         sentinel = os.path.join(sandbox.dirs["models"], f"_OK_{exp_id}")
         with open(sentinel, "wb"):
             pass
-        return _make_mock_result(returncode=0, stdout=stdout, stderr=stderr)
+        return _make_mock_result(returncode=0, stdout=stdout, stderr=stderr), None
 
     return _side_effect
 
@@ -95,33 +95,43 @@ class TestProgressBarFlag:
 
 
 class TestExecuteTrainingStdout:
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_progress_bar_false_captures_stdout(self, mock_run, sandbox):
         mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
         sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
-        assert kwargs["stdout"] == subprocess.PIPE
+        assert kwargs["capture_stdout"] is True
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_progress_bar_true_streams_stdout(self, mock_run, sandbox_progress):
         mock_run.side_effect = _make_train_success_side_effect(sandbox_progress, EXP_ID)
         sandbox_progress.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
         _, kwargs = mock_run.call_args
-        assert kwargs["stdout"] is None
+        assert kwargs["capture_stdout"] is False
 
-    @patch("core.sandbox_executor.subprocess.run")
-    def test_stderr_always_captured(self, mock_run, sandbox):
-        mock_run.side_effect = _make_train_success_side_effect(sandbox, EXP_ID)
-        sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
-        _, kwargs = mock_run.call_args
-        assert kwargs["stderr"] == subprocess.PIPE
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_training_stderr_reaches_the_caller(self, mock_run, sandbox):
+        """B-C2a2: `stderr=PIPE` moved below the seam, so asserting the
+        kwarg here would assert nothing. What the test existed to protect
+        is that a failed child's stderr reaches the caller — asserted
+        behaviourally, which survives any future launch change."""
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["x"], output="", stderr="DIAGNOSTIC-STDERR"
+        )
+        result = sandbox.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        assert "DIAGNOSTIC-STDERR" in result["message"]
 
-    @patch("core.sandbox_executor.subprocess.run")
-    def test_stderr_always_captured_with_progress(self, mock_run, sandbox_progress):
-        mock_run.side_effect = _make_train_success_side_effect(sandbox_progress, EXP_ID)
-        sandbox_progress.execute_training(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG)
-        _, kwargs = mock_run.call_args
-        assert kwargs["stderr"] == subprocess.PIPE
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_training_stderr_reaches_the_caller_with_progress(self, mock_run, sandbox_progress):
+        """Same, with the progress bar on — the branch that leaves stdout
+        uncaptured must still capture stderr."""
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["x"], output="", stderr="DIAGNOSTIC-STDERR"
+        )
+        result = sandbox_progress.execute_training(
+            EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, TRAIN_CFG, LOSS_CFG
+        )
+        assert "DIAGNOSTIC-STDERR" in result["message"]
 
 
 # ==========================================
@@ -143,26 +153,31 @@ class TestExecuteInferenceStdout:
         # Also create a dummy model file
         model_path = os.path.join(sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth")
         open(model_path, "w").close()
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         return sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_progress_bar_false_captures_stdout(self, mock_run, sandbox):
         self._run(sandbox, mock_run)
         _, kwargs = mock_run.call_args
-        assert kwargs["stdout"] == subprocess.PIPE
+        assert kwargs["capture_stdout"] is True
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_progress_bar_true_streams_stdout(self, mock_run, sandbox_progress):
         self._run(sandbox_progress, mock_run)
         _, kwargs = mock_run.call_args
-        assert kwargs["stdout"] is None
+        assert kwargs["capture_stdout"] is False
 
-    @patch("core.sandbox_executor.subprocess.run")
-    def test_stderr_always_captured(self, mock_run, sandbox):
-        self._run(sandbox, mock_run)
-        _, kwargs = mock_run.call_args
-        assert kwargs["stderr"] == subprocess.PIPE
+    @patch("core.sandbox_executor._run_observed_subprocess")
+    def test_inference_stderr_reaches_the_caller(self, mock_run, sandbox):
+        """See the training equivalent: behaviour, not the kwarg."""
+        model_path = os.path.join(sandbox.dirs["models"], f"model_fcnet_{EXP_ID}_agent.pth")
+        open(model_path, "w").close()
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["x"], output="", stderr="DIAGNOSTIC-STDERR"
+        )
+        result = sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
+        assert "DIAGNOSTIC-STDERR" in result["message"]
 
 
 # ==========================================
@@ -196,13 +211,13 @@ class TestExecuteInferenceBatch:
         idx = cmd.index(flag)
         return cmd[idx + 1]
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_explicit_inference_batch_is_used(self, mock_run, sandbox):
         """When the caller passes ``inference_batch=8``, the CLI must carry
         ``--inference_batch_size 8`` — not whatever the registry says for
         ``fcnet`` (which defaults to 25)."""
         self._seed_files(sandbox)
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         sandbox.execute_inference(
             EXP_ID,
             RUN_NAME,
@@ -214,13 +229,13 @@ class TestExecuteInferenceBatch:
         (cmd,), _ = mock_run.call_args
         assert self._cli_token_after(cmd, "--inference_batch_size") == "8"
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_none_falls_back_to_registry(self, mock_run, sandbox):
         """Back-compat: callers not yet wired through the tuner (A.6-A.11
         landing window) pass no batch. The executor falls through to
         ``inference_batch_for('fcnet')`` which is 25."""
         self._seed_files(sandbox)
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         sandbox.execute_inference(
             EXP_ID,
             RUN_NAME,
@@ -232,24 +247,24 @@ class TestExecuteInferenceBatch:
         (cmd,), _ = mock_run.call_args
         assert self._cli_token_after(cmd, "--inference_batch_size") == "25"
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_omitted_kwarg_falls_back_to_registry(self, mock_run, sandbox):
         """Positional call without the kwarg must match the ``None`` path
         (default value is ``None``) — pins the default so a future refactor
         can't silently swap it."""
         self._seed_files(sandbox)
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
         (cmd,), _ = mock_run.call_args
         assert self._cli_token_after(cmd, "--inference_batch_size") == "25"
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_explicit_beats_registry_on_known_type(self, mock_run, sandbox):
         """Even when the model_type HAS a registry entry, the explicit value
         must still win — this is the whole point of A.10. Registry is no
         longer the source of truth once the tuner is wired (A.11)."""
         self._seed_files(sandbox)
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         # transformer's registry entry is 1; force-pass 4 instead.
         import json
         import os
@@ -312,18 +327,18 @@ class TestExecuteInferenceTimingSidecar:
         def _side_effect(*args, **kwargs):
             with open(timing_path, "w") as f:
                 json.dump(payload, f)
-            return _make_mock_result()
+            return _make_mock_result(), None
 
         return _side_effect
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_trial_mode_appends_timing_flag(self, mock_run, sandbox):
         """When ``sample_set`` is provided, ``--timing_out_json {path}`` must
         appear in the cmd so the subprocess knows where to write the
         sidecar."""
         self._seed_files(sandbox)
         sample_set = {"0": [0, 1], "1": [0]}
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         sandbox.execute_inference(
             EXP_ID,
             RUN_NAME,
@@ -337,19 +352,19 @@ class TestExecuteInferenceTimingSidecar:
         idx = cmd.index("--timing_out_json")
         assert cmd[idx + 1] == self._expected_timing_path(sandbox)
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_normal_mode_omits_timing_flag(self, mock_run, sandbox):
         """Baseline / single-file mode (no sample_set) must not include the
         flag — the subprocess ignores it there anyway, but keeping the cmd
         clean prevents accidental sidecar writes from polluting the configs
         dir during baseline runs."""
         self._seed_files(sandbox)
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         sandbox.execute_inference(EXP_ID, RUN_NAME, "fcnet", MODEL_CFG, LOSS_CFG)
         (cmd,), _ = mock_run.call_args
         assert "--timing_out_json" not in cmd
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_success_returns_per_file_timings_and_decomposed_wall(self, mock_run, sandbox):
         """On successful trial-mode inference, the return dict must carry
         the parsed sidecar plus the parent-measured wall time, with
@@ -383,7 +398,7 @@ class TestExecuteInferenceTimingSidecar:
         # in. Pin only that the clamp prevented a negative value.
         assert result["process_startup_ms"] >= 0.0
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_success_with_missing_sidecar_returns_empty_timings(self, mock_run, sandbox):
         """If the subprocess succeeded but no sidecar was written (e.g. the
         subprocess crashed silently between the loop and the write — or the
@@ -394,7 +409,7 @@ class TestExecuteInferenceTimingSidecar:
         self._seed_files(sandbox)
         sample_set = {"0": [0]}
         # Standard mock — does NOT write the sidecar.
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         result = sandbox.execute_inference(
             EXP_ID,
             RUN_NAME,
@@ -408,7 +423,7 @@ class TestExecuteInferenceTimingSidecar:
         assert result["process_startup_ms"] is None
         assert isinstance(result["subprocess_wall_ms"], float)
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_failure_path_returns_uniform_keys(self, mock_run, sandbox):
         """``CalledProcessError`` must still return the new keys (with
         empty/None values) so callers can read the dict uniformly without
@@ -441,7 +456,7 @@ class TestExecuteInferenceTimingSidecar:
 
 class TestExecuteScoringStdout:
     def _run(self, sandbox, mock_run):
-        mock_run.return_value = _make_mock_result()
+        mock_run.return_value = (_make_mock_result(), None)
         # Patch open so score_results JSON reads back as valid dict
         score_data = json.dumps({"denoising_score": 0.9})
         with patch("builtins.open", mock_open(read_data=score_data)):
@@ -465,6 +480,8 @@ class TestExecuteScoringStdout:
 
     @patch("core.sandbox_executor.subprocess.run")
     def test_stderr_always_captured(self, mock_run, sandbox):
+        """Scoring is CPU-only and keeps its direct `subprocess.run`, so
+        this kwarg assertion remains meaningful here (B-C2a2 class F)."""
         self._run(sandbox, mock_run)
         _, kwargs = mock_run.call_args
         assert kwargs["stderr"] == subprocess.PIPE
@@ -528,7 +545,7 @@ class TestSandboxPluginDir:
         sb2 = TidmadSandbox(run_name="run_b", workspace=str(tmp_path))
         assert sb1.plugin_dir != sb2.plugin_dir
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_subprocess_receives_plugin_dir_in_env(self, mock_run, sandbox):
         """End-to-end wiring check: execute_training must pass the sandbox's
         plugin_dir to the training subprocess via SIDERIUS_PLUGIN_DIRS. If
@@ -602,7 +619,7 @@ class TestExecuteTrainingSilentCrash:
     keeps producer and consumer in lock-step.
     """
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_returncode_zero_no_sentinel_returns_error_training(
         self,
         mock_run,
@@ -612,10 +629,13 @@ class TestExecuteTrainingSilentCrash:
         exits cleanly but no sentinel was written. Status is ``error`` with
         an ``error_training:``-prefixed message — not the misleading
         ``error_inference`` it used to surface as."""
-        mock_run.return_value = _make_mock_result(
-            returncode=0,
-            stdout="Trainer started\nTrainer finished\n",
-            stderr="W0426 12:00:01 cuda_memory_allocator.cc:213] reclaim spike\n",
+        mock_run.return_value = (
+            _make_mock_result(
+                returncode=0,
+                stdout="Trainer started\nTrainer finished\n",
+                stderr="W0426 12:00:01 cuda_memory_allocator.cc:213] reclaim spike\n",
+            ),
+            None,
         )
 
         out = sandbox.execute_training(
@@ -633,7 +653,7 @@ class TestExecuteTrainingSilentCrash:
         )
         assert EXP_ID in out["message"]
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_silent_crash_message_includes_stderr_tail(
         self,
         mock_run,
@@ -644,10 +664,13 @@ class TestExecuteTrainingSilentCrash:
         it into the surfaced message."""
         # 25 stderr lines — only the LAST 20 should appear in the tail.
         stderr_lines = [f"line {i}: noisy warning" for i in range(25)]
-        mock_run.return_value = _make_mock_result(
-            returncode=0,
-            stdout="",
-            stderr="\n".join(stderr_lines) + "\n",
+        mock_run.return_value = (
+            _make_mock_result(
+                returncode=0,
+                stdout="",
+                stderr="\n".join(stderr_lines) + "\n",
+            ),
+            None,
         )
 
         out = sandbox.execute_training(
@@ -669,7 +692,7 @@ class TestExecuteTrainingSilentCrash:
         # first that should be cut).
         assert "line 4: noisy warning" not in out["message"]
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_silent_crash_does_not_read_train_results_json(
         self,
         mock_run,
@@ -680,10 +703,13 @@ class TestExecuteTrainingSilentCrash:
         file is also not guaranteed to exist after a silent crash, and
         opening it would mask the real cause behind a ``FileNotFoundError``
         / ``JSONDecodeError`` raised inside the executor itself."""
-        mock_run.return_value = _make_mock_result(
-            returncode=0,
-            stdout="",
-            stderr="",
+        mock_run.return_value = (
+            _make_mock_result(
+                returncode=0,
+                stdout="",
+                stderr="",
+            ),
+            None,
         )
 
         # Confirm no result JSON exists at the expected path — proves the
@@ -708,7 +734,7 @@ class TestExecuteTrainingSilentCrash:
         assert out["status"] == "error"
         assert "results" not in out
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_sentinel_present_keeps_success_status(self, mock_run, sandbox):
         """Mirror image of the silent-crash branch: when the sentinel IS
         present, the executor proceeds to the success path. This is the
@@ -810,7 +836,7 @@ class TestSandboxLossDir:
         assert sb.plugin_dir.startswith(str(tmp_path))
         assert sb.loss_dir.startswith(str(tmp_path))
 
-    @patch("core.sandbox_executor.subprocess.run")
+    @patch("core.sandbox_executor._run_observed_subprocess")
     def test_training_subprocess_receives_loss_dir_in_env(self, mock_run, sandbox):
         """End-to-end wiring check: ``execute_training`` must pass the
         sandbox's loss_dir to the training subprocess via

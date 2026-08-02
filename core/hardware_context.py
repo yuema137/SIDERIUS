@@ -66,6 +66,16 @@ class GpuDeviceProvenance(BaseModel):
     total_memory_bytes: int
     compute_capability: tuple[int, int]
 
+    # --- V20 B-C2b device identity (optional; old manifests load unchanged) ---
+    #: Stable GPU UUID, normalized to the driver's ``GPU-<hex>`` form.
+    #: The identity primary key: a device name is not one, because two
+    #: cards of the same model are indistinguishable by it.
+    uuid: str | None = None
+    #: Index as the *driver* reports it, which under
+    #: ``CUDA_VISIBLE_DEVICES`` is not the logical index above. Resolved
+    #: by matching UUIDs, never by assuming the two orders agree.
+    physical_index: int | None = None
+
 
 class HardwareContext(BaseModel):
     """Discovered physical facts about the active device.
@@ -107,6 +117,17 @@ class HardwareContext(BaseModel):
         default_factory=list,
         description="ALL visible CUDA devices in deterministic logical-index order.",
     )
+    # --- V20 B-C2b (FU-A-13): identity of the ACTIVE device ---
+    #: UUID of the device this context describes. ``None`` on CPU-only
+    #: hosts, on older manifests, and whenever discovery could not read
+    #: it — in which case identity is *degraded*, never fabricated.
+    active_device_uuid: str | None = None
+    #: 1 = legacy, identity keyed on ``device_name``. 2 = UUID-keyed.
+    #: Versioned rather than replaced in place: old records have no UUID,
+    #: and silently changing what identity means would invalidate
+    #: existing measurements and resume state for no stated reason.
+    hardware_fingerprint_version: int = Field(default=1, ge=1)
+
     driver_version: str | None = Field(
         default=None,
         description="NVIDIA driver version via bounded nvidia-smi probe; None on any failure.",
@@ -188,6 +209,52 @@ def _probe_repo_commit(errors: list[str]) -> str | None:
         return None
 
 
+def _normalize_uuid(raw: object) -> str | None:
+    """Driver form ``GPU-<hex>``. torch reports the bare hex; nvidia-smi
+    prefixes it. Normalizing here means the two sources compare equal
+    instead of silently never matching."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    return text if text.startswith(("GPU-", "MIG-")) else f"GPU-{text}"
+
+
+def _physical_index_by_uuid(errors: list[str]) -> dict[str, int]:
+    """UUID -> driver index, from ``nvidia-smi``.
+
+    ``torch``'s index is the *logical* one: under
+    ``CUDA_VISIBLE_DEVICES=2`` torch calls that device 0. The two orders
+    are related only through the UUID, so the mapping is resolved by
+    matching identities and never by assuming the orders agree.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+            check=True,
+        ).stdout
+    except Exception as err:
+        errors.append(f"physical_index_map: {type(err).__name__}: {err}")
+        return {}
+    mapping: dict[str, int] = {}
+    for line in out.splitlines():
+        parts = [c.strip() for c in line.split(",")]
+        if len(parts) < 2:
+            continue
+        try:
+            idx = int(parts[0])
+        except ValueError:
+            continue
+        uuid = _normalize_uuid(parts[1])
+        if uuid:
+            mapping[uuid] = idx
+    return mapping
+
+
 def _probe_devices(errors: list[str]) -> tuple[int | None, list[GpuDeviceProvenance]]:
     """Enumerate ALL visible CUDA devices in logical-index order (O1a)."""
     try:
@@ -196,15 +263,19 @@ def _probe_devices(errors: list[str]) -> tuple[int | None, list[GpuDeviceProvena
         errors.append(f"devices: device_count: {type(err).__name__}: {err}")
         return None, []
     devices: list[GpuDeviceProvenance] = []
+    physical_by_uuid = _physical_index_by_uuid(errors) if count else {}
     for idx in range(count):
         try:
             props = torch.cuda.get_device_properties(idx)
+            uuid = _normalize_uuid(getattr(props, "uuid", None))
             devices.append(
                 GpuDeviceProvenance(
                     logical_index=idx,
                     name=props.name,
                     total_memory_bytes=int(props.total_memory),
                     compute_capability=(int(props.major), int(props.minor)),
+                    uuid=uuid,
+                    physical_index=physical_by_uuid.get(uuid) if uuid else None,
                 )
             )
         except Exception as err:
@@ -260,7 +331,14 @@ def discover() -> HardwareContext:
     props = torch.cuda.get_device_properties(0)
     visible_count, devices = _probe_devices(errors)
     driver_version = _probe_driver_version(errors)
+    # Identity of the ACTIVE device (logical 0). Absent on hosts where the
+    # driver or torch cannot report it — degraded, never fabricated.
+    active_uuid = next((d.uuid for d in devices if d.logical_index == 0), None) or _normalize_uuid(
+        getattr(props, "uuid", None)
+    )
     return HardwareContext(
+        active_device_uuid=active_uuid,
+        hardware_fingerprint_version=2 if active_uuid else 1,
         device_name=props.name,
         total_memory_bytes=int(props.total_memory),
         compute_capability=(int(props.major), int(props.minor)),
