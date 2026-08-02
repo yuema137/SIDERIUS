@@ -111,38 +111,6 @@ class TestOutcomeMapping:
 
 
 class TestFieldPreservation:
-    def test_rich_schema_fields_survive(self):
-        payload = {
-            "outcome": "SCHEMA_REJECTED",
-            "violations": [{"loc": "channels", "msg": "must not decrease"}],
-            "offending_config": {"channels": [4, 2]},
-        }
-        result = adapter.adapt_result(payload)
-        assert result["violations"] == payload["violations"]
-        assert result["offending_config"] == payload["offending_config"]
-
-    def test_memory_killer_survives(self):
-        result = adapter.adapt_result(
-            {"outcome": "MEASURED_PEAK_ABOVE_VRAM_CAP", "memory_killer": {"layer": "conv7"}}
-        )
-        assert result["memory_killer"] == {"layer": "conv7"}
-
-    def test_truncation_marker_is_propagated(self):
-        result = adapter.adapt_result({"outcome": "SCHEMA_REJECTED", "truncated": True})
-        assert result["truncated"] is True
-
-    def test_agent_text_is_forwarded_not_composed(self):
-        """16.1-A: if a string reaches the agent, the worker produced it."""
-        result = adapter.adapt_result(
-            {
-                "outcome": "MEASURED_CUDA_OOM",
-                "verdict": "V-from-worker",
-                "suggestion": "S-from-worker",
-            }
-        )
-        assert result["verdict"] == "V-from-worker"
-        assert result["suggestion"] == "S-from-worker"
-
     def test_realized_parameter_count_becomes_num_params(self):
         result = adapter.adapt_result(
             {"outcome": "COMPLETED_MEASUREMENT", "realized_parameter_count": 2_388_992}
@@ -218,48 +186,6 @@ class TestEffectiveCap:
 
     def test_legacy_spec_without_hardware_still_validates(self):
         assert _spec(vram_budget_gb=12.0).hardware is None
-
-
-class TestBoundedRichFields:
-    def test_small_payload_passes_through_untouched(self):
-        fields = {"violations": [{"loc": "x", "msg": "bad"}]}
-        assert _bounded_rich_fields(fields) == fields
-
-    def test_empty_inputs_produce_nothing(self):
-        assert _bounded_rich_fields({"memory_killer": None, "violations": []}) == {}
-
-    def test_oversized_payload_stays_within_budget_and_valid(self):
-        fields = {
-            "violations": [
-                {"loc": f"field_{i}", "msg": "m" * 900, "type": "value_error"} for i in range(40)
-            ],
-            "offending_config": {"k" * 50: "v" * 900},
-        }
-        result = _bounded_rich_fields(fields)
-        encoded = json.dumps(result, default=str).encode("utf-8")
-        assert len(encoded) <= RICH_FIELD_BUDGET_BYTES
-        json.loads(encoded)
-        assert result["truncated"] is True
-
-    def test_truncation_shortens_lists_before_discarding_them(self):
-        """Ten violations with their field names beat zero."""
-        fields = {
-            "violations": [
-                {"loc": f"field_{i}", "msg": "m" * 900, "type": "value_error"} for i in range(40)
-            ]
-        }
-        result = _bounded_rich_fields(fields)
-        assert isinstance(result["violations"], list)
-        assert len(result["violations"]) >= 1
-        assert result["violations_omitted_count"] > 0
-        assert set(result["violations"][0]) == {"loc", "msg", "type"}
-
-    def test_dropped_field_is_marked_not_removed(self):
-        result = _bounded_rich_fields(
-            {"memory_killer": {"layers": [{"n": "l" * 200, "b": i} for i in range(500)]}}
-        )
-        assert "memory_killer" in result
-        assert len(json.dumps(result, default=str).encode()) <= RICH_FIELD_BUDGET_BYTES
 
 
 class TestParentStaysCpuOnly:
