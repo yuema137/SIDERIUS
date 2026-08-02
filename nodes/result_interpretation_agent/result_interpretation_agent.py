@@ -650,11 +650,23 @@ def _build_synthesis_prompt(
             "",
         ]
         for model_type, summary in compressed_items:
-            takeaway = (
-                summary.get("one_line_takeaway") or summary.get("key_findings", [""])[0]
-                if summary.get("key_findings")
-                else "(no cached takeaway)"
-            )
+            # Read the field the producer actually emits.
+            #
+            # This was:
+            #     (A or B) if summary.get("key_findings") else "(no cached takeaway)"
+            # and `compress_model_summary` returns exactly
+            # {model_type, best_score, n_rounds, one_line_takeaway} -- never
+            # `key_findings`. The guard was therefore always falsy and EVERY
+            # compressed model rendered the placeholder, discarding a
+            # takeaway the producer had already computed and truncated to
+            # `max_takeaway_chars`. Both sides were tested and both were
+            # green; nothing tested the join.
+            #
+            # No legacy fallback: `compressed_items` is fed only by
+            # `compress_model_summary` (one call site, result.py:1301), and
+            # 40 persisted interpretation artifacts contain zero
+            # compressed-shaped entries carrying `key_findings`.
+            takeaway = summary.get("one_line_takeaway") or "(no cached takeaway)"
             best = summary.get("best_score", per_model_best.get(model_type))
             n_rounds = summary.get("n_rounds", 0)
             lines += [

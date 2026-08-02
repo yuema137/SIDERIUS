@@ -183,8 +183,14 @@ class InconclusivePreflight(Exception):
     guidance to shrink anything.
     """
 
-    def __init__(self, message: str, *, record: dict | None = None):
+    def __init__(self, message: str, *, record: dict | None = None, kind: str = "inconclusive"):
         self.record = record or {}
+        #: WHY the pre-flight produced no usable footprint. All three kinds
+        #: block the attempt identically, but they are different facts and
+        #: must stay distinguishable downstream: a host-memory kill is not a
+        #: timeout, and neither is "the probe ran and told us nothing".
+        #: Conflating them is what sent V19 chasing its own models.
+        self.kind = kind
         super().__init__(message)
 
 
