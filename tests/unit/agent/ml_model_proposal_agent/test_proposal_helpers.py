@@ -72,6 +72,18 @@ class TestEvidenceDepth:
         pipeline = _pipeline()
         assert resolve_exploration_mode(interp, pipeline) == "exploit"
 
+    def test_many_proposed_models_triggers_exploit(self):
+        """Well above the threshold, not just at it.
+
+        This test was written but never ran: it was indented inside
+        `test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best`
+        and took `self`, so pytest never collected it. Restored to its
+        intended class.
+        """
+        interp = _interp(model_types=[f"m{i}" for i in range(10)])
+        pipeline = _pipeline()
+        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+
 
 def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
     interpretation = {
@@ -90,11 +102,6 @@ def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
     )
     assert [candidate["model_type"] for candidate in selected] == ["punet"]
     assert selected[0]["best_score"] == -1.77
-
-    def test_many_proposed_models_triggers_exploit(self):
-        interp = _interp(model_types=[f"m{i}" for i in range(10)])
-        pipeline = _pipeline()
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
 
 
 # ---------------------------------------------------------------------------

@@ -426,7 +426,11 @@ class TestExperimentRecordSuccess:
     def test_missing_file_index_uses_default(self, valid_success_record):
         del valid_success_record["file_index"]
         record = ExperimentRecord.model_validate(valid_success_record)
-        assert record.file_index == ExperimentRecord.model_fields["file_index"].default
+        # Hardcoded, not read from the model. Comparing against
+        # `model_fields[...].default` compares the schema to itself, so it
+        # passed for ANY default and could not detect a change from 6.
+        # 6 is the TIDMAD paper's standard train/validation split.
+        assert record.file_index == 6
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +890,11 @@ class TestExperimentRecordOOM:
     def test_oom_missing_file_index_uses_default(self, valid_oom_record):
         del valid_oom_record["file_index"]
         record = ExperimentRecord.model_validate(valid_oom_record)
-        assert record.file_index == ExperimentRecord.model_fields["file_index"].default
+        # Hardcoded, not read from the model. Comparing against
+        # `model_fields[...].default` compares the schema to itself, so it
+        # passed for ANY default and could not detect a change from 6.
+        # 6 is the TIDMAD paper's standard train/validation split.
+        assert record.file_index == 6
 
 
 class TestExperimentRecordSchemaViolation:

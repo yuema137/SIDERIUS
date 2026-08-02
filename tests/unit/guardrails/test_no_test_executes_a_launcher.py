@@ -102,6 +102,21 @@ def _executed_strings(path: Path) -> list[str]:
         return []
     out: list[str] = []
     for call in _spawn_calls(tree):
+        # An argv LIST is one command, not a bag of unrelated strings.
+        # `subprocess.run(["bash", "<launcher>"])` presented as two
+        # separate constants, so the interpreter was never adjacent to
+        # the path and nothing matched -- the guardrail was blind to the
+        # most common calling form in this repo. Found by the mutation
+        # proof required for the 2026-08-02 consolidation.
+        for node in ast.walk(call):
+            if isinstance(node, (ast.List, ast.Tuple)):
+                parts = [
+                    e.value
+                    for e in node.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                ]
+                if len(parts) >= 2:
+                    out.append(" ".join(parts))
         for node in ast.walk(call):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 out.append(node.value)
@@ -184,22 +199,75 @@ def _executes_a_dynamic_path(text: str) -> bool:
 SELF = Path(__file__).resolve()
 
 
-@pytest.mark.parametrize("path", _test_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
-def test_no_test_file_executes_a_production_launcher(path: Path):
-    if path.resolve() == SELF:
-        pytest.skip("this module quotes execution forms as test data")
-    offenders = []
-    for literal in _executed_strings(path):
-        launcher = _executes_a_launcher(literal)
-        if launcher:
-            offenders.append((launcher, literal.strip()[:160]))
-        elif _executes_a_dynamic_path(literal):
-            offenders.append(("<interpolated path>", literal.strip()[:160]))
+def _scan_every_test_file() -> tuple[dict[str, list[tuple[str, str]]], int, int]:
+    """Scan every test file once. Returns (offenders, scanned, with_spawns).
+
+    One pass rather than one pytest case per file. The parametrized form
+    generated 361 cases of which 322 inspected an empty list, because
+    only ~39 test files contain a subprocess call at all and only one
+    mentions a launcher. Those 322 cases restated "this file has no
+    subprocess call" 322 times.
+
+    Consolidating REPORTS MORE, not less: a bulk regression now surfaces
+    every offending file in one run, instead of however many pytest
+    happens to show before truncating. `with_spawns` is returned so the
+    scan can prove it actually inspected something — see
+    `test_the_scan_still_finds_spawn_calls`.
+    """
+    offenders: dict[str, list[tuple[str, str]]] = {}
+    scanned = 0
+    with_spawns = 0
+    for path in _test_files():
+        if path.resolve() == SELF:
+            # This module quotes execution forms as test data.
+            continue
+        scanned += 1
+        literals = _executed_strings(path)
+        if literals:
+            with_spawns += 1
+        found: list[tuple[str, str]] = []
+        for literal in literals:
+            launcher = _executes_a_launcher(literal)
+            if launcher:
+                found.append((launcher, literal.strip()[:160]))
+            elif _executes_a_dynamic_path(literal):
+                found.append(("<interpolated path>", literal.strip()[:160]))
+        if found:
+            offenders[str(path.relative_to(REPO_ROOT))] = found
+    return offenders, scanned, with_spawns
+
+
+def test_no_test_file_executes_a_production_launcher():
+    """The guarantee this module exists for, over the whole corpus."""
+    offenders, _, _ = _scan_every_test_file()
+    detail = "\n".join(f"  {name}: {calls}" for name, calls in sorted(offenders.items()))
     assert not offenders, (
-        f"{path.relative_to(REPO_ROOT)} would EXECUTE a production launcher, "
-        "which can start a real chain and make real API calls. Use mocks, a "
-        "dry-run mode, a test-only hook, an extracted pure function, or an "
-        f"isolated fake command instead. Found: {offenders}"
+        "These test files would EXECUTE a production launcher, which can "
+        "start a real chain and make real API calls. Use mocks, a dry-run "
+        "mode, a test-only hook, an extracted pure function, or an isolated "
+        f"fake command instead.\n{detail}"
+    )
+
+
+def test_the_scan_covers_every_test_file():
+    """Anti-vacuity, part 1: if `rglob` ever returned nothing, the scan
+    above would pass having examined no files."""
+    _, scanned, _ = _scan_every_test_file()
+    assert scanned > 100, f"only {scanned} test files scanned"
+
+
+def test_the_scan_still_finds_spawn_calls():
+    """Anti-vacuity, part 2, and the one the parametrized form never had.
+
+    Scanning every file proves nothing if `_executed_strings` silently
+    stops extracting — a rename in `_SPAWNERS`, or an ast change, would
+    make every file look clean and the guardrail would pass forever. So
+    pin that the extractor still finds subprocess strings in the corpus.
+    """
+    _, _, with_spawns = _scan_every_test_file()
+    assert with_spawns >= 10, (
+        f"only {with_spawns} files yielded any subprocess string; the "
+        "extractor is probably broken, which would make the guardrail vacuous"
     )
 
 
@@ -258,6 +326,35 @@ class TestTheDetectorItself:
     )
     def test_it_permits_sourcing_an_interpolated_path(self, command):
         assert not _executes_a_dynamic_path(command)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["bash", "sdsc_submission_scripts/v19_gate0_pair_runner.sh"],
+            ["python", "sdsc_submission_scripts/run_one_iteration.py", "--workspace", "/tmp/w"],
+            ["bash", "-c", "bash sdsc_submission_scripts/run_chain.sh"],
+        ],
+    )
+    def test_it_catches_an_argv_list(self, argv):
+        """The blind spot the consolidation's mutation proof exposed.
+
+        The detector only ever saw individual string constants, so an
+        argv list never placed the interpreter next to the launcher path
+        and nothing matched -- while argv lists are how this repo calls
+        subprocess almost everywhere.
+        """
+        assert _executes_a_launcher(" ".join(argv))
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["bash", "-n", "sdsc_submission_scripts/run_chain.sh"],
+            ["grep", "-n", "vram", "sdsc_submission_scripts/v19_queue_runner.sh"],
+            ["cat", "sdsc_submission_scripts/run_chain.sh"],
+        ],
+    )
+    def test_it_permits_a_reading_argv_list(self, argv):
+        assert _executes_a_launcher(" ".join(argv)) is None
 
     def test_a_mention_is_not_an_execution(self):
         """`.index("bash .../run_chain.sh")` locates a heredoc; it runs

@@ -65,11 +65,11 @@ class TestPolicyIsAlwaysAParameter:
             REPO / "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
         ):
             src = renderer.read_text()
-            assert (
-                "history_window_iterations"
-                not in src.replace("health_feedback_history_window_iterations", "")
-                or True
-            )  # window name may appear in comments; the binding check:
+            # A `... or True` assertion on the bare window name used to sit
+            # here. It was neutered because the name may legitimately appear
+            # in a comment, which left an assertion that could never fail --
+            # a live false negative dressed as coverage. The two checks below
+            # are the binding ones, and they were always the real content.
             assert "HealthFeedbackRetentionPolicy(" not in src
             assert "DEFAULT_HISTORY_WINDOW" not in src
 
