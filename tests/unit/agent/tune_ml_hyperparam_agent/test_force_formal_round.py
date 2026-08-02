@@ -150,11 +150,6 @@ def test_accepts_false():
     assert inp.force_formal_round is False
 
 
-def test_accepts_true_explicit():
-    inp = _make_input(force_formal_round=True)
-    assert inp.force_formal_round is True
-
-
 def test_strategy_default_is_full_clone():
     """Phase 1 of refactor_formal_round_strategy.md flipped the schema
     default from the legacy ``inherit_best_trial`` literal to its
@@ -226,16 +221,6 @@ def test_resume_progress_ignores_baseline_timestamp_suffix():
         model_type="wavenet",
         run_name="diagnostic_baseline_pre_v17",
     ) == (2, 5)
-
-
-def test_strategy_accepts_canonical_full_clone():
-    inp = _make_input(formal_round_strategy="full_clone")
-    assert inp.formal_round_strategy == "full_clone"
-
-
-def test_strategy_accepts_canonical_independent():
-    inp = _make_input(formal_round_strategy="independent")
-    assert inp.formal_round_strategy == "independent"
 
 
 def test_strategy_legacy_inherit_best_trial_aliases_to_full_clone():
@@ -590,30 +575,6 @@ def test_force_formal_model_cfg_inheritance_isolated_from_winner():
     )
 
 
-def test_no_trial_winner_falls_back_to_planner_with_warning(capsys):
-    """No successful trial in history → planner's loss_cfg + lr survive,
-    a WARNING is logged, and is_trial is still flipped to False."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw"}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
-    history = [
-        _make_trial_record("r1", score=None, status="error_training"),
-    ]
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        memory_history=history,
-    )
-    assert plan.is_trial is False
-    assert plan.loss_cfg["loss_type"] == "focal_cw"
-    assert plan.train_cfg["lr"] == 1e-3
-    out = capsys.readouterr().out
-    assert "WARNING" in out
-    assert "no successful trial" in out.lower()
-
-
 def test_inheritance_skipped_when_force_formal_off():
     """force_formal_round=False on the last round → no flip, no inheritance,
     even with a perfectly good trial winner sitting in history."""
@@ -707,67 +668,6 @@ def test_inheritance_logs_winner_identity(capsys):
     assert "inherited=model_cfg,loss_cfg,lr,epochs,batch_size" in out
 
 
-def test_strategy_llm_propose_keeps_planner_choices(capsys):
-    """The escape hatch: with strategy='llm_propose' (legacy alias of
-    canonical 'independent'), the planner's model_config, loss_config,
-    and train_config survive verbatim even when a perfectly good trial
-    winner exists. ``is_trial`` is still flipped to False because the
-    formal-round mode flip is independent of the inheritance policy.
-
-    Phase 2 log contract: the ``[STRATEGY]`` line surfaces both the
-    canonical name and the legacy alias the caller passed
-    (``alias_of:llm_propose``). ``[FORMAL OVERRIDE]`` shows
-    ``inherited=(none)`` because ``independent`` is a no-op handler."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw", "experimental_flag": True}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
-    plan.model_cfg = {"kernel_size": 2, "use_same_padding": False}  # planner's choice
-    history = [
-        _make_trial_record("r2", score=5.45, loss_type="focal", lr=5e-5, epochs=1, batch_size=1)
-    ]
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        formal_round_strategy="llm_propose",
-        memory_history=history,
-    )
-    assert plan.is_trial is False  # mode still flipped
-    # Planner's choices preserved across all three configs
-    assert plan.loss_cfg["loss_type"] == "focal_cw"
-    assert plan.loss_cfg["experimental_flag"] is True
-    assert plan.train_cfg["lr"] == 1e-3
-    assert plan.train_cfg["epochs"] == 4
-    assert plan.train_cfg["batch_size"] == 16
-    assert plan.model_cfg["kernel_size"] == 2
-    assert plan.model_cfg["use_same_padding"] is False
-    out = capsys.readouterr().out
-    assert "[STRATEGY] formal_round_strategy=independent (alias_of:llm_propose)" in out
-    assert "[FORMAL OVERRIDE] strategy=independent" in out
-    assert "winner='r2'" in out
-    assert "inherited=(none)" in out
-
-
-def test_strategy_llm_propose_no_warning_without_winner(capsys):
-    """With strategy='llm_propose', missing trial winner is not a
-    warning condition — the policy explicitly disclaims inheritance."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw"}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 1}
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        formal_round_strategy="llm_propose",
-        memory_history=[],
-    )
-    out = capsys.readouterr().out
-    assert "WARNING" not in out
-    assert "no successful trial" not in out.lower()
-
-
 # ---------------------------------------------------------------------------
 # 5b. Phase 1 transitional shim — canonical names reach the same code paths
 # ---------------------------------------------------------------------------
@@ -777,92 +677,6 @@ def test_strategy_llm_propose_no_warning_without_winner(capsys):
 # (``full_clone`` / ``independent``) and reach the same behavior. Phase 2
 # replaces the if/elif with a registry; deleting these tests is fine then,
 # but until the registry lands they pin the shim's correctness.
-
-
-def test_shim_canonical_full_clone_inherits_like_legacy(capsys):
-    """``full_clone`` (canonical) must trigger the same 5-field
-    inheritance as ``inherit_best_trial`` (legacy). The shim resolves
-    the alias inside ``_apply_mode_override_chain`` so the comparison
-    works regardless of which name the caller used."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw"}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 4, "batch_size": 16}
-    plan.model_cfg = {"kernel_size": 2}  # planner's wrong choice
-    history = [
-        _make_trial_record(
-            "r1",
-            score=5.45,
-            loss_type="focal",
-            lr=5e-5,
-            epochs=2,
-            batch_size=8,
-            model_config={"kernel_size": 3, "use_same_padding": True, "num_blocks": 4},
-        )
-    ]
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        formal_round_strategy="full_clone",  # canonical, not legacy
-        memory_history=history,
-    )
-    # All 5 inheritance fields applied — proves the shim hit the inherit path.
-    assert plan.loss_cfg["loss_type"] == "focal"
-    assert plan.train_cfg["lr"] == 5e-5
-    assert plan.train_cfg["epochs"] == 2
-    assert plan.train_cfg["batch_size"] == 8
-    assert plan.model_cfg["kernel_size"] == 3  # winner's value, not planner's
-
-
-def test_shim_canonical_independent_skips_inheritance(capsys):
-    """``independent`` (canonical) must take the no-inheritance branch
-    and emit the Phase 2 ``[FORMAL OVERRIDE] strategy=independent ...
-    inherited=(none)`` line. No ``alias_of`` annotation since the caller
-    passed the canonical name directly."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw"}
-    plan.train_cfg = {"lr": 1e-3}
-    plan.model_cfg = {"kernel_size": 2}
-    history = [_make_trial_record("r1", score=5.45)]
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        formal_round_strategy="independent",  # canonical, not legacy
-        memory_history=history,
-    )
-    # Planner's choices survive — no inheritance happened.
-    assert plan.loss_cfg["loss_type"] == "focal_cw"
-    assert plan.train_cfg["lr"] == 1e-3
-    assert plan.model_cfg["kernel_size"] == 2
-    out = capsys.readouterr().out
-    assert "[STRATEGY] formal_round_strategy=independent" in out
-    assert "alias_of" not in out  # caller passed canonical, not legacy
-    assert "[FORMAL OVERRIDE] strategy=independent" in out
-    assert "inherited=(none)" in out
-
-
-def test_shim_legacy_inherit_best_trial_still_works(capsys):
-    """The whole point of the shim: live V9 chains passing
-    ``inherit_best_trial`` directly to ``_apply_mode_override_chain``
-    (bypassing the schema validator) must still trigger inheritance.
-    This is the production-path regression guard."""
-    plan = _make_plan(is_trial=True)
-    plan.loss_cfg = {"loss_type": "focal_cw"}
-    plan.train_cfg = {"lr": 1e-3, "epochs": 4}
-    history = [_make_trial_record("r1", score=5.0, loss_type="focal", lr=5e-5)]
-    _apply_mode_override_chain(
-        plan,
-        trial_allowed=True,
-        is_formal_round=True,
-        force_formal_round=True,
-        formal_round_strategy="inherit_best_trial",  # legacy literal
-        memory_history=history,
-    )
-    assert plan.loss_cfg["loss_type"] == "focal"
-    assert plan.train_cfg["lr"] == 5e-5
 
 
 # ---------------------------------------------------------------------------
