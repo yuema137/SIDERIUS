@@ -1664,6 +1664,111 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
+## 16a-BD. Behavior Delta: legacy v1 `k` removed from production time authority
+
+**Operator decision, 2026-08-03.** Supersedes FU-C-10, which is now **closed by
+implementation** rather than deferred.
+
+**Before**
+
+```text
+current live timing measurement (ms/step, this candidate, now)
+  → × legacy v1 historical k        (asymmetric EMA over past runs,
+                                     ~/.siderius/time_calibration_<gpu>.json)
+  → × SAFETY_MULTIPLIER             (configured)
+  → seconds → verdict
+```
+
+**After**
+
+```text
+current live timing measurement (ms/step, this candidate, now)
+  → × SAFETY_MULTIPLIER             (configured)
+  → seconds → verdict
+```
+
+**Reason.** Runtime depends on current machine conditions, current GPU
+contention and current caching. A stored correction prices today's work with
+yesterday's clock. This is the same principle that cancelled C-C5b, applied to
+the one remaining path that still violated it.
+
+**Runtime evidence authority.** The live measurement of the concrete candidate
+is now the **sole** runtime evidence. No v1 `k`, no v1 history records, no v2
+history records, no promoted buckets, no calibration report can influence the
+verdict.
+
+**Configured policy retained — removing history is not removing safety.**
+`SAFETY_MULTIPLIER = 1.3` is unchanged; the operator's time budget is
+unchanged; the deterministic projection from the live measurement is unchanged.
+These are configured rules, not learned experience.
+
+**Failure semantics.** Unchanged and deliberately re-verified: when the live
+measurement is unavailable, the estimator still falls back to the **static
+prior** stamped `formal_execution_eligible: False`. **No historical fallback
+was introduced** — asserted by
+`test_a_missing_live_measurement_does_not_fall_back_to_history`.
+
+**Retry / attempt / round accounting.** No change. Nothing in the removal
+touches attempt consumption, round transitions or retry policy.
+
+**LLM impact.** None. **GPU cost impact.** None — one multiplication removed.
+
+**Legacy data handling.** `~/.siderius/time_calibration_<gpu>.json` is
+**preserved, not deleted or rewritten**. Verified byte-unchanged (mtime still
+2026-07-20). The `calibration.py` module remains importable for audit and
+historical inspection; it is now structurally unable to reach the production
+verdict, which is what the guard tests assert.
+
+> **Open question deliberately NOT decided here.** The tuner's Phase F
+> post-flight (`ml_hyperparameter_tune_agent.py:4861-4863`) still *writes* to
+> the legacy table via `update_k`/`save_table`. The operator's instruction was
+> to remove the production **read and application**; the write influences no
+> verdict, and stopping it is a separate behaviour change. Left in place so the
+> historical series stays continuous for drift analysis — which is exactly the
+> observability-only role history now has. **Flagged for the operator**: if the
+> legacy table should become fully frozen, the write is a one-line follow-up.
+
+**Files and functions changed**
+
+| File | Change |
+|---|---|
+| `agent/skills/training_skill/estimator.py` | `load_table`/`lookup_k` calls and the `* k` multiplication removed; `k_correction` removed from the breakdown; `calibration` import removed; docstrings corrected |
+| `agent/skills/evaluate_time_skill/wrapper.py` | `k_correction` pass-through removed (it was a required key access) |
+
+`k_correction` was **removed, not pinned to `1.0`**: a neutral-valued
+correction field reads as "no correction today" and is a socket for one
+tomorrow. Its absence is the contract.
+
+**Tests proving the change** —
+`tests/unit/core/test_live_timing_is_the_sole_runtime_evidence.py` (11 tests):
+structural (no import, no call, no field, no republish), behavioural (an
+extreme `k=50` table does not move the estimate; `gpu_name` is inert; an absent
+table is identical), and **positive controls** (a slower live measurement
+increases the estimate; the projection is exactly linear in it; the configured
+margin is still applied).
+
+**Mutation proofs**
+
+| Mutation | Result |
+|---|---|
+| reintroduce `lookup_k(load_table(...))` into the estimate | **5 tests fail** — 2 structural, 2 behavioural (1625 s → 3250 s), 1 in the inverted estimator test |
+| disconnect the live measurement (pin `ms_per_step`) | **3 positive controls fail**, while every absence-guard stays green — the exact blind spot the controls exist to close |
+
+**Gate 1: N/A** — no LLM-facing prompt, schema or decision surface changes.
+**Gate 2: N/A** — this implements no GPU-requirement acquisition and touches no
+PR B admission path. **C1 Layer-3: re-run required at the new head.**
+
+**Inverted test, recorded.**
+`test_ms_per_step_passthrough_applies_gpu_calibration` asserted the *opposite*
+of this decision (k=2.0 → 3250 s). It is renamed
+`test_a_gpu_name_no_longer_applies_historical_calibration` and inverted rather
+than deleted — it is the one test that named the removed behaviour, so it is
+where a reader will look for the change.
+
+**Commit SHAs:** recorded below with the checkpoint map.
+
+---
+
 ## 16b. C1 checkpoint → commit SHA map
 
 Branch `feature/v20-pr-c1-calibration-identity-promotion`.
@@ -1696,7 +1801,7 @@ rediscovered as a bug.
 | # | Plan said | Code does | Why | Evidence |
 |---|---|---|---|---|
 | D-1 | C-C5b wires the read seam into the time-budget consumer | No production consumer of v2 duration exists | **Operator decision 2026-08-02**: runtime is live; a stored duration prices today's work with yesterday's clock | C-C5b cancellation section; 9 guards + positive control |
-| D-2 | (unstated) "current live measurement is the sole time-decision input" | True **of the v2 registry only** | Legacy v1 per-GPU `k` (asymmetric EMA) still scales the estimate at `training_skill/estimator.py:282-283`; pre-existing, out of C1 scope | FU-C-10; scope-correction note in C-C5b |
+| D-2 | (unstated) "current live measurement is the sole time-decision input" | **Now true outright** — after the 2026-08-03 removal of legacy v1 `k`. It was true only of the v2 registry for one day in between, and this document said so rather than overclaiming | The audit found the legacy `k` still scaling the estimate; the operator then decided to remove it inside C1 rather than defer | Behavior Delta §16a-BD; `test_live_timing_is_the_sole_runtime_evidence.py` |
 | D-3 | Applicability envelope over a fixed dimension list | Dimensions derived from the evidence (`_measured_dimensions`) | A fixed list silently excluded whichever producer vocabulary it did not name (`seg_size` vs `segment_length`) — a never-match that looks exactly like an empty registry | `8606b47`; `TestTheEnvelopeVocabularyFollowsTheEvidence` |
 | D-4 | Each side computes its own config identity | One shared `candidate_config_hash` in `calibration_context.py` | The engine counted `requires_grad` params, the pre-flight counted all of them — identical for a fully-trainable model, silently divergent for any frozen layer | `8f97251`, `d901412`; `test_the_derivation_does_not_define_its_own_hash` |
 | D-5 | C-C7 report reads a registry object | C-C7 takes `root=` and constructs inside its own guard | `CalibrationRegistry.__init__` mkdirs six directories, so construction was the one raising step *outside* the "never raises" guarantee | Mutation proof under C-C7 §6 |
@@ -1709,7 +1814,8 @@ rediscovered as a bug.
 | ID | Finding | Disposition |
 |---|---|---|
 | FU-C-9 | `is_trial=False` (legacy single-file mode) builds no SampleSet; `resolve_training_workload` raises `AttributeError: 'NoneType' object has no attribute 'items'` | Pre-existing defect in a deprecated path; not touched by C1 |
-| FU-C-10 | Legacy v1 per-GPU `k` correction lets history scale the production time estimate, outside the v2 subsystem the observability-only rule was written for | **Operator decision needed**: should the rule extend to the legacy mechanism? Removing `k` changes production time-estimation behaviour and is out of C1 scope |
+| ~~FU-C-10~~ | Legacy v1 per-GPU `k` let history scale the production time estimate | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator decided the rule extends to the legacy mechanism, and it was removed inside C1. See Behavior Delta §16a-BD. Not deferred. |
+| FU-C-11 | The tuner's Phase F post-flight still *writes* the legacy k table (`ml_hyperparameter_tune_agent.py:4861-4863`), though nothing reads it into a verdict | Left in place deliberately — the write influences no decision and keeps the historical series continuous for drift analysis. One-line follow-up if the operator wants the table fully frozen |
 
 ---
 
@@ -2426,12 +2532,17 @@ sole production time-decision input.**
 > influence on any production decision.** The legacy per-GPU `k` predates PR C
 > entirely.
 >
-> **Deliberately not changed here.** Removing or gating `k` would alter
-> production time-estimation behaviour and resource authority, which is a
-> material change outside C1's scope and an operator decision, not a
-> refactor made in passing. Filed as **FU-C-10** and reported with the PR so
-> the operator can decide whether the observability-only rule should extend to
-> the legacy mechanism.
+> **RESOLVED 2026-08-03 — the operator extended the rule to the legacy
+> mechanism, and `k` was removed inside C1 before merge.** The paragraph above
+> describes the code as it stood for one day, and is kept because the sequence
+> matters: the audit found the gap, the document stated it accurately rather
+> than overclaiming, and the operator then decided. See the Behavior Delta in
+> §16a-BD.
+>
+> **So the claim is now unqualified:** the current live measurement of the
+> concrete candidate is the sole runtime evidence in the production time
+> decision. Both history systems — legacy v1 and the v2 registry — are
+> observability-only.
 
 *Sequence of events, recorded honestly.* The C-C5b wiring was implemented,
 tested and committed (`95c4539` production, `b920b22` tests, `0d32187` docs)
@@ -2928,10 +3039,10 @@ source, not memory.
       review" with the C-C5b cancellation; the C-C5b section header itself
       marked superseded rather than deleted.
 - [x] Every follow-up is filed with its evidence — see the follow-up table
-      in §16a, extended with **FU-C-9** (legacy single-file mode crashes the
-      time estimator on a `None` SampleSet) and **FU-C-10** (legacy v1 `k`
-      lets history scale the production estimate — operator decision
-      required).
+      in §16a: **FU-C-9** (legacy single-file mode crashes the time estimator
+      on a `None` SampleSet), **FU-C-10** (legacy v1 `k` — **closed by
+      implementation**, §16a-BD) and **FU-C-11** (the Phase F post-flight
+      still writes the legacy table, which decides nothing).
 
 **6. Failure and edge cases.** n/a.
 
