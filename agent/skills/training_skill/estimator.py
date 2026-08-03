@@ -3,7 +3,7 @@ agent/skills/training_skill/estimator.py
 
 Per-phase VRAM and wall-time estimator for the TRAINING phase of a
 proposed experiment. Lifted from ``evaluate_vram_skill.wrapper._estimate_bytes``
-and the step-count × ms/step × k logic in
+and the step-count × ms/step logic in
 ``evaluate_time_skill.wrapper.run_skill`` during Phase K.2.5 so the two
 resource aggregators (``evaluate_vram_skill`` = peak over phases;
 ``evaluate_time_skill`` = sum over phases) can compose training +
@@ -18,12 +18,19 @@ Contract (K.2.5 Commit 2):
     Returns ``{"phase": "training", "total_bytes", "breakdown"}``.
   * ``estimate_wall_time_seconds(model_type, model_config, train_config,
     sample_set, *, train_portion, ms_per_step, gpu_name, num_params,
-    loss_type)`` — total_steps × ms/step × k(gpu, model_type) ×
-    SAFETY_MULTIPLIER. Returns ``{"phase": "training", "seconds",
-    "breakdown"}``. When ``ms_per_step`` is not supplied, the static
-    formula is used (k stays 1.0) — mirrors the wrapper's pre-K.2.5
-    fallback so callers without a live warmup signal still get an order-
-    of-magnitude estimate.
+    loss_type)`` — total_steps × ms/step × SAFETY_MULTIPLIER. Returns
+    ``{"phase": "training", "seconds", "breakdown"}``. When
+    ``ms_per_step`` is not supplied, the static formula is used —
+    mirrors the wrapper's pre-K.2.5 fallback so callers without a live
+    warmup signal still get an order-of-magnitude estimate, stamped
+    ``formal_execution_eligible: False``.
+
+    OPERATOR DECISION 2026-08-03: the live ``ms_per_step`` of THIS
+    candidate is the SOLE runtime evidence here. A legacy per-GPU
+    historical ``k`` used to multiply into this formula; it is gone, and
+    ``gpu_name`` is now recorded for provenance only. The only remaining
+    multiplier is ``SAFETY_MULTIPLIER``, which is configured policy, not
+    learned experience.
 
 The estimator is pure (no side effects other than CPU model
 instantiation for ``_count_params``): the real-dataset warmup stays in
@@ -38,22 +45,28 @@ from typing import Any
 
 import torch
 
-from agent.skills.evaluate_time_skill import calibration
+# NOTE: `agent.skills.evaluate_time_skill.calibration` is deliberately NOT
+# imported here. This module produces the production runtime estimate, and the
+# operator decision of 2026-08-03 makes the current live measurement its sole
+# runtime evidence. The absence of this import is asserted by
+# `test_live_timing_is_the_sole_runtime_evidence.py` — re-adding it fails.
 
 # ── constants (mirror the legacy wrapper verbatim) ───────────────────────────
 
 _BYTES_F32 = 4
 _BYTES_I64 = 8
 
-# Safety margin applied on top of ms/step × k. Raised from 1.1 to 2.0 for the
+# Safety margin applied on top of ms/step. Raised from 1.1 to 2.0 for the
 # static fallback path (Phase 6.8 §4.2): the original 1.1 was calibrated for
 # warmup variance (~10%), but the static formula itself is 2-5x wrong for novel
 # architectures, so the multiplier must absorb formula error, not just variance.
 # Recalibrated 2026-04-30 from 2.0 → 1.3: V7 empirical data shows the warmup-
 # measured ms/step path is consistently 1.7-3× over actual training time, and
 # the 2.0 multiplier was causing the gate to skip configs that would have fit.
-# 1.3 keeps a margin for warmup variance + k correction without compounding
-# the formula's structural over-prediction.
+# 1.3 keeps a margin for warmup variance without compounding the formula's
+# structural over-prediction. It is a CONFIGURED margin: the 2026-08-03
+# removal of historical scaling deliberately did not touch it, because
+# removing history is not removing safety.
 SAFETY_MULTIPLIER: float = 1.3
 
 # Static ms/step fallback used when the aggregator cannot supply a warmup-
@@ -249,18 +262,24 @@ def estimate_wall_time_seconds(
 ) -> dict[str, Any]:
     """Estimate training-phase wall-time in seconds.
 
-    Computes ``total_steps × ms/step × k(gpu, model_type) × SAFETY_MULTIPLIER``
-    — byte-identical to the pre-K.2.5 single-phase formula in
-    ``evaluate_time_skill.wrapper.run_skill``.
+    Computes ``total_steps × ms/step × SAFETY_MULTIPLIER``.
+
+    This was ``total_steps × ms/step × k(gpu, model_type) ×
+    SAFETY_MULTIPLIER`` until 2026-08-03, when the operator removed the
+    historical ``k`` so the current live measurement is the sole runtime
+    evidence in the production time decision.
 
     Args:
-        ms_per_step:   Warmup-measured ms per fwd+bwd step. ``None`` → static
-                       prior (``max(params × seg × bs × _STATIC_MS_PER_FLOP,
-                       _MIN_MS_PER_STEP)``, k=1.0) — stamped
-                       ``formal_execution_eligible: False`` (rev 4).
-        gpu_name:      CUDA device name (e.g. ``"NVIDIA RTX 5090"``). Only
-                       consulted with the warmup path; static fallback keeps
-                       k=1.0 regardless.
+        ms_per_step:   Warmup-measured ms per fwd+bwd step — the live
+                       measurement, and the only runtime evidence used.
+                       ``None`` → static prior (``max(params × seg × bs ×
+                       _STATIC_MS_PER_FLOP, _MIN_MS_PER_STEP)``) stamped
+                       ``formal_execution_eligible: False`` (rev 4). There is
+                       deliberately NO historical fallback.
+        gpu_name:      CUDA device name (e.g. ``"NVIDIA RTX 5090"``). Recorded
+                       in the breakdown for provenance only — it no longer
+                       selects a historical correction and does not affect the
+                       returned seconds.
         num_params:    Exact parameter count. Needed only when ``ms_per_step``
                        is ``None`` (static fallback). If not provided, the
                        model is instantiated internally via ``_count_params``.
@@ -278,19 +297,23 @@ def estimate_wall_time_seconds(
 
     if ms_per_step is not None and ms_per_step > 0:
         ms_source = "real_dataset_warmup"
-        if gpu_name:
-            cal_table = calibration.load_table(gpu_name)
-            k = calibration.lookup_k(cal_table, model_type)
-        else:
-            k = 1.0
     else:
         if num_params is None:
             num_params = _count_params(model_type, model_config, loss_type)
         ms_per_step = _static_ms_per_step(num_params, seg_size, batch_size)
         ms_source = "static_uncalibrated"
-        k = 1.0
 
-    total_ms = total_steps * ms_per_step * k * SAFETY_MULTIPLIER
+    # V20 PR C1, operator decision 2026-08-03: the current live measurement of
+    # THIS candidate is the sole runtime evidence in the production time
+    # decision. The legacy per-GPU historical `k` (an asymmetric EMA over past
+    # runs) used to multiply in here; it is gone. Runtime depends on current
+    # machine conditions, GPU contention and caching, so a stored correction
+    # prices today's work with yesterday's clock.
+    #
+    # What REMAINS is configured policy, not history: SAFETY_MULTIPLIER is a
+    # fixed operator-set margin, and the operator's time budget is applied by
+    # the caller. Removing history does not mean removing safety.
+    total_ms = total_steps * ms_per_step * SAFETY_MULTIPLIER
     seconds = total_ms / 1000.0
 
     return {
@@ -305,7 +328,9 @@ def estimate_wall_time_seconds(
             # static prior is a risk screen — enforcement lands in RT2/RT3;
             # this field is the interface they consume.
             "formal_execution_eligible": ms_source == "real_dataset_warmup",
-            "k_correction": round(k, 4),
+            # `k_correction` was removed, not pinned to 1.0. A field left at a
+            # neutral value is a socket: it reads as "no correction applied
+            # today" and invites one tomorrow. Its absence is the contract.
             "safety_multiplier": SAFETY_MULTIPLIER,
             "gpu_name": gpu_name,
         },

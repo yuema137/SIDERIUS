@@ -67,7 +67,7 @@ from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
 # the model is hopelessly slow and we abort the warmup rather than burn
-# the full warmup quota plus k_correction × safety on a config that the
+# the full warmup quota plus the configured safety margin on a config that the
 # downstream time gate will reject anyway. The threshold is set high
 # enough that a healthy first-step (cudnn autotune + cudaMalloc) on the
 # largest seed model still completes well under it.
@@ -815,7 +815,9 @@ def run_skill(sandbox, **kwargs) -> dict:
     breakdown = {
         "total_train_steps": tbd["total_train_steps"],
         "ms_per_step_warmup": tbd["ms_per_step"],
-        "k_correction": tbd["k_correction"],
+        # `k_correction` is gone (operator decision 2026-08-03): the legacy
+        # per-GPU historical scaling no longer reaches the production time
+        # verdict, and this breakdown no longer carries a slot for it.
         "safety_multiplier": tbd["safety_multiplier"],
         "train_minutes": round(training["seconds"] / 60.0, 2),
         "num_params": num_params,
