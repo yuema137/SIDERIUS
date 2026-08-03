@@ -1942,6 +1942,29 @@ constraint).
       experiment result, attempt/round accounting, retry behaviour,
       scientific output or agent feedback — fail-open for the scientific
       workflow, fail-closed for calibration authority.
+
+      - [x] **part 1** — the pure converter. Three results, not two:
+            `DerivedDurationRecord` / `QuarantinedDerivation` /
+            `NotDerivable`. The third was not anticipated by the design and
+            is required: a rejected, watchdog-killed or non-steady attempt is
+            not an incomplete identity that might later be repaired, and
+            parking it in quarantine would leave failure evidence in a
+            namespace meaning "salvageable". Reuses the existing
+            `component_calibration_eligible` gate rather than defining a
+            second notion of clean. 22 cases, 5 mutation proofs.
+      - [x] **part 2** — persistence and idempotency.
+            `CalibrationObservation` gains an optional `identity`
+            (`MeasurementIdentity`); the derived producer always sets it and
+            persistence refuses an eligible record without one, while the
+            probe producer keeps working. Idempotency is content addressing,
+            not a ledger: reprocessing one event yields the same id and
+            dedups, so it cannot advance a promotion sample count twice.
+            A registry failure returns `kind="failed"` with the reason
+            instead of raising — System A is already durable, so a storage
+            problem costs this run its calibration sample and nothing else.
+            8 further cases, 4 mutation proofs.
+      - [ ] **part 3** — production wiring at the success seam, with
+            workflow-parity, failure-isolation and reachability tests.
 - [ ] Proceed autonomously unless inspection reveals a material deviation.
 
 **4. Validation plan.**

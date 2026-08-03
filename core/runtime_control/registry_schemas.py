@@ -168,6 +168,13 @@ class CalibrationObservation(BaseModel):
         "(observations are immutable, so this field can never be raised "
         "in place) — never trust it as authority.",
     )
+    #: V20 PR C1 / C-C2: the v2 exact-match identity (task, data-shape
+    #: class, device instance, measurement kind...). Optional so the probe
+    #: producer, which has no resolved identity yet, keeps working; the
+    #: DERIVED producer always sets it, and persistence refuses an eligible
+    #: derived record without one. A bucket built from a record whose
+    #: identity is absent would be the v1 situation again.
+    identity: MeasurementIdentity | None = None
     timestamp_metadata: str | None = Field(
         default=None, description="Excluded from the content hash."
     )
@@ -443,3 +450,8 @@ class MeasurementIdentity(BaseModel):
     @property
     def identity_key(self) -> str:
         return "|".join(self.components())
+
+
+# `CalibrationObservation.identity` forward-references a model defined
+# below it; resolve now that both exist.
+CalibrationObservation.model_rebuild()

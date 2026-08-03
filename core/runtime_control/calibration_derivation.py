@@ -47,7 +47,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from core.runtime_control.observation_store import component_calibration_eligible
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import RuntimeObservation
-from core.runtime_control.registry_schemas import MeasurementIdentity
+from core.runtime_control.registry_schemas import (
+    CalibrationObservation,
+    MeasurementIdentity,
+)
 
 #: System A's measurement units, mapped to the phase they describe. Explicit
 #: rather than a cast: an unrecognised unit means we do not know what was
@@ -255,3 +258,83 @@ def _config_hash(context: dict[str, Any]) -> str:
     from core.runtime_control.identity import config_hash12
 
     return f"cfg:{config_hash12(context)}"
+
+
+# ── Persistence: the second responsibility, deliberately separate ───────────
+#
+# Derivation is pure; this writes. Keeping them apart is what makes the
+# failure-isolation contract statable: a persistence failure cannot corrupt a
+# derivation, and a derivation cannot half-write.
+
+
+class PersistOutcome(BaseModel):
+    """What persistence did, in a form the caller can record.
+
+    Never raises for a storage problem. System A is already durable by the
+    time this runs, and the operator rule for C-C3c is explicit: fail-open
+    for the scientific workflow, fail-closed for calibration authority. A
+    registry that is full, locked or absent must cost this run its
+    calibration sample and nothing else.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["eligible", "quarantined", "not_derivable", "failed"]
+    record_id: str | None = None
+    #: Present for "failed" and "not_derivable"; the reason is always
+    #: recordable, so a missing calibration sample is never silent.
+    detail: str | None = None
+
+
+def persist_duration_calibration_record(
+    result: DerivationResult,
+    *,
+    registry: Any,
+    hardware_compatibility_id: str,
+    execution_environment_id: str,
+    concurrency_identity: str,
+    producer_identity: str,
+    provenance: str,
+    software_stack: dict[str, Any],
+) -> PersistOutcome:
+    """Write a derivation to the v2 registry, or explain why it did not.
+
+    Idempotent through content addressing: an identical derivation produces
+    an identical record id, which `record_observation` dedups. Reprocessing
+    one System A event therefore cannot advance a promotion sample count
+    twice -- there is no separate ledger to keep in step.
+    """
+    if isinstance(result, NotDerivable):
+        return PersistOutcome(kind="not_derivable", detail=result.reason)
+
+    try:
+        if isinstance(result, QuarantinedDerivation):
+            qid = registry.quarantine_observation(
+                {**result.observation_payload, "source": result.source_reference},
+                reason=result.reason,
+                missing_identity_fields=result.missing_identity_fields,
+            )
+            return PersistOutcome(kind="quarantined", record_id=qid, detail=result.reason)
+
+        observation = CalibrationObservation(
+            operation=result.identity.phase,  # type: ignore[arg-type]
+            measurement_unit=result.measurement_unit,
+            measured_value_ms=result.measured_value_ms,
+            workload=dict(result.workload),
+            model_family=result.identity.model_family,
+            identity=result.identity,
+            hardware_compatibility_id=hardware_compatibility_id,
+            execution_environment_id=execution_environment_id,
+            concurrency_identity=concurrency_identity,  # type: ignore[arg-type]
+            software_stack=dict(software_stack),
+            producer_identity=producer_identity,
+            provenance=provenance,  # type: ignore[arg-type]
+            source_run=dict(result.source_reference),
+            uncertainty_inputs={"n_measured_units": result.n_measured_units},
+        )
+        oid = registry.record_observation(observation)
+        return PersistOutcome(kind="eligible", record_id=oid)
+    except Exception as exc:
+        # Explicit, not silent: the caller records this so an operator can
+        # see that a sample was lost and why.
+        return PersistOutcome(kind="failed", detail=f"{type(exc).__name__}: {exc}")

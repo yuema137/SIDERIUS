@@ -40,6 +40,7 @@ from core.runtime_control.calibration_derivation import (
     NotDerivable,
     QuarantinedDerivation,
     derive_duration_calibration_record,
+    persist_duration_calibration_record,
 )
 from core.runtime_control.records import RuntimeObservation
 
@@ -265,3 +266,137 @@ class TestThePureBoundary:
         assert not any("calibration_registry" in name for name in imported), (
             "the converter must not reach the registry; persistence is a separate responsibility"
         )
+
+
+class TestPersistenceIsIsolatedAndIdempotent:
+    """The safety boundary C-C3c exists to hold.
+
+    System A is already durable when this runs. The operator rule is
+    explicit: fail-open for the scientific workflow, fail-closed for
+    calibration authority. A registry that is full, locked or absent must
+    cost this run its calibration sample and nothing else.
+    """
+
+    @staticmethod
+    def _kwargs(registry):
+        return dict(
+            registry=registry,
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+            software_stack={"torch": "2.10.0+cu128"},
+        )
+
+    def _registry(self, tmp_path):
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+
+        return CalibrationRegistry(tmp_path / "runtime_calibration_v2")
+
+    def test_an_eligible_derivation_is_written_once(self, tmp_path):
+        registry = self._registry(tmp_path)
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        outcome = persist_duration_calibration_record(result, **self._kwargs(registry))
+        assert outcome.kind == "eligible"
+        assert outcome.record_id
+        assert len(registry.load_manifest().observation_ids) == 1
+
+    def test_reprocessing_the_same_event_does_not_add_a_second_sample(self, tmp_path):
+        """Idempotency through content addressing, not a ledger. If this
+        broke, one attempt could carry a bucket over the promotion
+        threshold by itself."""
+        registry = self._registry(tmp_path)
+        kwargs = self._kwargs(registry)
+        first = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **kwargs,
+        )
+        second = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **kwargs,
+        )
+        assert first.record_id == second.record_id
+        assert len(registry.load_manifest().observation_ids) == 1
+
+    def test_a_quarantined_derivation_never_enters_the_eligible_list(self, tmp_path):
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=None),
+            **self._kwargs(registry),
+        )
+        assert outcome.kind == "quarantined"
+        manifest = registry.load_manifest()
+        assert manifest.observation_ids == []
+        assert len(manifest.quarantined_ids) == 1
+
+    def test_failure_evidence_is_written_to_neither_namespace(self, tmp_path):
+        """NotDerivable persists nothing at all. A rejected or timed-out
+        attempt is not salvageable evidence waiting for a better identity."""
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(
+                _observation(final_status="error"), "training", identity=CONTEXT
+            ),
+            **self._kwargs(registry),
+        )
+        assert outcome.kind == "not_derivable"
+        manifest = registry.load_manifest()
+        assert manifest.observation_ids == []
+        assert manifest.quarantined_ids == []
+
+    def test_a_registry_failure_is_reported_not_raised(self):
+        """The isolation contract. System A is durable already; a storage
+        problem here must not become an exception the attempt loop has to
+        survive."""
+
+        class BrokenRegistry:
+            def record_observation(self, obs):
+                raise OSError("disk full")
+
+            def quarantine_observation(self, *args, **kwargs):
+                raise OSError("disk full")
+
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **self._kwargs(BrokenRegistry()),
+        )
+        assert outcome.kind == "failed"
+        assert "disk full" in (outcome.detail or "")
+
+    def test_a_quarantine_failure_is_also_reported_not_raised(self):
+        class BrokenRegistry:
+            def quarantine_observation(self, *args, **kwargs):
+                raise OSError("disk full")
+
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=None),
+            **self._kwargs(BrokenRegistry()),
+        )
+        assert outcome.kind == "failed"
+
+    def test_the_written_record_carries_the_v2_identity(self, tmp_path):
+        """Without it the record is back in the v1 situation: a measurement
+        in a bucket that cannot say what it is about."""
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        stored = registry.load_observation(outcome.record_id or "")
+        assert stored.identity is not None
+        assert stored.identity.task_identity == CONTEXT.task_identity
+        assert stored.identity.hardware_uuid == CONTEXT.hardware_uuid
+        assert stored.identity.measurement_kind == "duration"
+
+    def test_the_stored_duration_is_system_a_s_number(self, tmp_path):
+        registry = self._registry(tmp_path)
+        obs = _observation()
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        stored = registry.load_observation(outcome.record_id or "")
+        source = obs.components["training"].measurement
+        assert source is not None
+        assert stored.measured_value_ms == source.unit_time_ms_median
