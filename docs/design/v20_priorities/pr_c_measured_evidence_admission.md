@@ -2307,28 +2307,75 @@ qualify as loop constants. Anything realized only during execution is
 evidence *about* a candidate, not part of its identity, and would make the
 identity unknowable before launch.
 
-**In progress.** `candidate_config_hash` promoted to the single public helper
-in `calibration_context` (the private `_config_hash` duplicate in
-`calibration_derivation` is deleted, with a structural test forbidding its
-return). `core/runtime_control/calibration_prelaunch.py` holds the lookup
-boundary and the O-6 asymmetry helper — **not yet production-wired, and
-deliberately uncommitted until it is**, so it cannot become a fourth instance
-of "component exists, production never calls it".
+**Landed.** `d901412` — `candidate_config_hash` promoted to the single public
+helper in `calibration_context`; the private `_config_hash` duplicate in
+`calibration_derivation` is **deleted**, with a structural test forbidding its
+return (a reintroduced copy would pass every behavioural test while drifting
+from the reader).
+
+**C-C5b wiring landed.** `95c4539` (production), `b920b22` (tests). The loop
+is closed:
+
+```text
+wrapper.run_skill                      [before subprocess launch]
+  -> _prelaunch_calibration(sandbox, ...)
+      -> lookup_applicable_duration(...)          v2 registry
+          -> registry.as_estimate(..., request=)  C-C5a authority seam
+  -> _gate_decision(historical_calibration=..., ...)
+  -> time-budget verdict
+... only then is training launched
+```
+
+**O-6 is structural, not conventional.** `decision.kind` is computed by
+`policy.decide(...)` **before** the historical block runs, and nothing in that
+block writes it. `historical_support_only` returns `may_support_allow` — there
+is no value it can return that denies a candidate. A field named
+`should_reject` would have made rejection expressible, and expressible
+eventually becomes reachable.
+
+> **Deviation from the plan, recorded deliberately.** Applicable under-budget
+> history is read, surfaced (`historical_supports_allow`, provenance, reasons)
+> and may support an allow interpretation — but it does **not flip an existing
+> verdict**. Granting history verdict-changing power is a material authority
+> change beyond "may support ALLOW", and prior-tier evidence is already
+> `cannot_block` in the §7.4 matrix. Deferred pending an explicit operator
+> decision; **not** implemented inside C1.
+
+**Mutation evidence.**
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M10 | remove the production read call | `test_run_skill_calls_the_prelaunch_lookup` **and** `test_the_result_reaches_the_gate` |
+
+M10 kills two guards, deliberately: calling the lookup and discarding its
+result is the #159 shape, so reaching the lookup is not sufficient evidence.
+
+**GPU isolation.** Three structural guards: `admission.py` imports no
+calibration module; `evaluate_gpu_admission` exposes no
+duration/estimate-shaped parameter; `calibration_prelaunch` neither imports
+nor calls the admission path. Milliseconds cannot reach a mebibyte decision.
+
+**Tests.** `test_calibration_prelaunch.py` — 25, including the positive
+control (an applicable validated record IS consumed end-to-end through a real
+registry), six cross-dimension refusals, cross-candidate-config, three
+incomplete-identity refusals that must name the missing field, unusable
+registry as refusal, empty registry says so. `tests/unit/agent` +
+`tests/unit/core`: **4667 passed, 2 skipped**.
 
 **5. Acceptance criteria.**
-- [ ] A production time-budget decision reaches the safe read seam.
-- [ ] Applicable promoted duration evidence is actually consumed.
-- [ ] Inapplicable evidence is ignored/downgraded.
-- [ ] Deleting the production read call fails a reachability test.
-- [ ] Duration evidence cannot affect GPU admission.
-- [ ] Absent applicable calibration preserves current non-authoritative
+- [x] A production time-budget decision reaches the safe read seam (`95c4539`).
+- [x] Applicable promoted duration evidence is actually consumed.
+- [x] Inapplicable evidence is ignored/downgraded.
+- [x] Deleting the production read call fails a reachability test (M10).
+- [x] Duration evidence cannot affect GPU admission (3 structural guards).
+- [x] Absent applicable calibration preserves current non-authoritative
       fallback behaviour.
 - [ ] Retry, attempt/round accounting, scientific result and LLM calls
       unchanged.
-- [ ] O-6 preserved: applicable history may support ALLOW; it may never
+- [x] O-6 preserved: applicable history may support ALLOW; it may never
       directly REJECT. Rejection requires a live measurement of the concrete
       candidate.
-- [ ] A structural guard proves the duration-calibration module is neither
+- [x] A structural guard proves the duration-calibration module is neither
       imported by nor passed into the GPU-admission path.
 
 **6. Completion standard.** C-C5b is **not** complete when
