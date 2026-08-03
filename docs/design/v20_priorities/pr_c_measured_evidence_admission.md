@@ -1,9 +1,15 @@
 # Design: V20 PR C — Measured evidence and formal admission
 
-- **Status**: **DESIGN DRAFT — awaiting operator review.** No implementation
-  has begun and none is authorized until this document is approved
-  (`v20_priorities.md` §20.1). When approved, implementation starts on a
-  fresh branch cut from the then-current `master`.
+- **Status**: **DESIGN — revision 3, awaiting final operator review.** The
+  ten §8.C operator decisions are **APPROVED (2026-08-03)**; the document
+  itself is not yet approved for implementation. No implementation has
+  begun, and neither implementation branch has been created
+  (`v20_priorities.md` §20.1).
+- **Implementation shape**: this document is the umbrella design and
+  launch-blocker record. Implementation is **two PRs** — C1 (calibration
+  identity, reachability, promotion) and C2 (authoritative GPU requirement
+  acquisition and delivery). See §15. Each is cut from the then-current
+  `master` when approved.
 - **Parent plan**: `docs/design/v20_priorities.md` §20.5 (PR C scope),
   §13.1 (launch gate), §1.4 (genericization contract)
 - **Audited against**: `master` @ `5c58c29` (2026-08-02), i.e. after PR A
@@ -450,9 +456,9 @@ something it did not measure* — and from PR B's lane discipline.
 6. Candidate / environment / contention / timeout / host-memory / unknown
    causes stay distinguishable. PR B's three lanes are not merged.
 7. **No missing field or unknown state may fail open into "safe to
-   proceed."** §2.8 is the existing list; PR C adds nothing to it.
+   proceed."** §2.10 is the existing list; PR C adds nothing to it.
 
-### 6.1 Three categories that must not collapse
+### 7.1 Three categories that must not collapse
 
 ```
 Measured fact          what was observed about this candidate, phase,
@@ -562,57 +568,97 @@ code turns out not to determine them.
 - Where the applicability evaluator and evidence-selection boundary live,
   and which of §10.1's three hooks each uses.
 - Report shape, counts and rejection-reason representation (the former
-  D-C28, D-C29, D-C31) — subject to the 8.A rule that zero buckets is
+  8.B, 8.B, 8.A) — subject to the 8.A rule that zero buckets is
   reported honestly.
 - Which of the seven provenance fields each admission record carries and how
-  they are typed (former D-C30) — the *set* is fixed by 8.A, the encoding is
+  they are typed (former 8.B) — the *set* is fixed by 8.A, the encoding is
   not.
 - Whether `measurement_source` (`admission.py:165`, written and never read)
   is resolved or removed.
 - Whether `probe_lifecycle.ProbeRequest.model_family` becomes required.
 
-### 8.C True operator decisions
+### 8.C Operator decisions — APPROVED 2026-08-03
 
-Ten. Each changes behaviour, cost, or what the system is allowed to
-conclude.
+All ten answered. They are binding on implementation; a design that cannot
+meet one is a design to bring back, not to work around.
 
-1. **O-1 — Migration of the existing registry.** Content-addressing makes
-   any added field invalidate all 20 records (§2.7). Options: (a) new schema
-   version in a new tree, leaving the old readable; (b) re-hash migration,
-   old ids stop resolving; (c) hash a stable subset — **not recommended**,
-   two records differing only by task would share an id, which is the
-   confusion PR C exists to remove. *Recommendation: (a)* — 20 records, 0
-   promotions, small blast radius, no evidence destroyed.
-2. **O-2 — Incomplete identity: refuse the write, or store as explicitly
-   unusable?** *Recommendation: store as unusable* — a refused write is
-   invisible; an unusable record is auditable.
-3. **O-3 — What triggers promotion evaluation in production?** Nothing does
-   today.
-4. **O-4 — Minimum sample count and consistency policy.** `CalibrationPolicy`
-   ships `consistency_max_min_ratio = 1.5` and two minimum counts. **Not
-   filled in here deliberately.** Note the coupling: `CalibrationPolicy`'s
-   identity hash covers every field, so changing one moves
-   `runtime_policy_identity` and invalidates **every existing workspace
-   lock** (`core/run_invariants.py`), whose only remedy is a new workspace.
-5. **O-5 — May contended observations be promoted?** `concurrency_identity`
-   already forks the bucket, so contended evidence is separable; the
-   question is whether that bucket may ever be authoritative.
-6. **O-6 — May applicable historical calibration *reject*, or only allow?**
-   *Recommendation: allow only.* A wrong allow costs an OOM; a wrong reject
-   costs a scientific conclusion, which is the V19 failure mode.
-7. **O-7 — What does formal do when the probe is inconclusive or
-   unavailable?** Today it proceeds on an unlabelled advisory (§4). Neither
-   allow nor reject is permitted by 8.A, so this needs a third answer.
-8. **O-8 — Live measurement contradicting validated calibration:**
-   invalidate the bucket, supersede it, or annotate it?
-9. **O-9 — Is there a time-based expiry**, or is forking on stack/hardware
-   change sufficient? Both are already bucket dimensions.
-10. **O-10 — Which chain is the formal producer of PR B's authoritative GPU
-    requirement?** §3.2 shows the only real GPU-memory measurement is
-    `observed_peak`, a sampled lower bound of *observed occupancy*, measured
-    during the phase it would gate. Confirm that this is the intended
-    producer and how its three properties are handled — a lower bound
-    admitted as a requirement under-states need.
+- **O-1 — Migration.** Create a **new schema version in a new registry
+  tree**. Preserve the existing 20 records read-only in the old tree; do
+  **not** re-hash them.
+- **O-2 — Incomplete identity.** Write to an explicit
+  **`unusable` / quarantine namespace**. Such records stay auditable but are
+  never bucketed, promoted, or authoritative.
+- **O-3 — Promotion trigger.** After each successful eligible observation
+  write, **idempotently evaluate only the affected bucket** and record the
+  result.
+- **O-4 — Thresholds.** Preserve the **currently configured values** for v1;
+  invent nothing. Read from `CalibrationPolicy`
+  (`core/runtime_control/calibration_policy.py:74-92`) on `master` @
+  `5c58c29`:
+
+  | Field | Value | Class |
+  |---|---|---|
+  | `provisional_min_observations` | **2** | D4 |
+  | `validated_min_observations` | **3** | D4 |
+  | `consistency_max_min_ratio` | **1.5** | D4 |
+  | `contention_memory_floor_gb` | 1.0 | D3 |
+  | `contention_memory_fraction` | 0.10 | D3 |
+  | `contention_utilization_pct` | 20.0 | D3 |
+  | `contention_window_seconds` | 10.0 | D3 |
+  | `contention_sample_interval_seconds` | 2.0 | D3 |
+  | `derating_throttle_mask` | 248 | D3 |
+
+  Resolved policy identity today: `calibration_policy@1.0.0+b83994605c57`.
+
+  **Consequence, and the reason this is not a free change:** the identity
+  hash covers **every** field (`:91-95`). Changing any one moves
+  `runtime_policy_identity`, which trips `validate_run_invariants`
+  (`core/run_invariants.py:284-300`) for **every existing workspace**, whose
+  only v1 remedy is a new workspace. These values gain authority **only
+  after** the Layer-2 validation passes.
+- **O-5 — Contention.** Duration measurements may be promoted only **inside
+  the exact recorded concurrency class**. **Contended GPU occupancy may
+  never become a candidate GPU requirement.**
+- **O-6 — Historical authority.** Applicable historical calibration may
+  **ALLOW**, never **REJECT**. Rejection requires a live measurement of the
+  concrete candidate.
+- **O-7 — Inconclusive or unavailable probe.** Stop the current attempt
+  **before the GPU phase**. It consumes an attempt, produces no completed
+  round, carries **no candidate blame and no shrink advice**. Only the
+  existing outer attempt budget may lead to another attempt — **add no
+  same-attempt retry loop.** (This is PR B's lane 1 discipline, and the
+  no-new-retry clause keeps LLM call count and cost unchanged.)
+- **O-8 — Conflict.** A live measurement **wins for the current admission
+  decision**. A contradictory bucket is preserved but marked
+  **contradicted and non-authoritative** until revalidated.
+- **O-9 — Expiry.** **No wall-clock expiry in v1.** Identity changes fork
+  evidence; live contradiction invalidates authority.
+- **O-10 — Authoritative GPU producer.** Normal-phase
+  `GpuPhaseObserver.observed_peak` is **telemetry and consistency evidence
+  only**. It is **not** the authoritative requirement producer.
+
+  The authoritative GPU requirement comes from a **dedicated isolated,
+  bounded, pre-phase measurement** of the concrete candidate:
+
+  ```
+  before the formal phase starts
+    -> isolated subprocess, same candidate
+    -> target GPU, actual phase, batch, segment, config, runtime settings
+    -> measure the candidate process tree's own driver-visible peak
+    -> record sampling completeness, attribution, GPU UUID, phase
+    -> on success: a typed authoritative requirement
+    -> hand to PR B's admission gate
+  ```
+
+  If it cannot produce a trustworthy measurement, **it produces no
+  requirement** — and O-7 governs what happens next.
+
+  *Rationale, recorded because it is the crux of this PR:* a peak sampled
+  **during** a phase cannot decide whether that phase should start. It is
+  also a lower bound and describes occupancy rather than need. Promoting it
+  would under-state the requirement — the failure direction that causes an
+  OOM.
+
 
 ### Superseded decision list
 
@@ -856,7 +902,7 @@ bought no meaningful headroom.
 **PR C must not add promotion, applicability, evidence-selection, reporting
 or final-admission branching into `run()`.**
 
-### 9.1 The three existing hooks, in order of preference
+### 10.1 The three existing hooks, in order of preference
 
 1. **`_handle_admission_refusal(...) -> bool`**
    (`ml_hyperparameter_tune_agent.py:537-589`) — already called at exactly
@@ -884,7 +930,7 @@ samples, calls `evaluate_gpu_admission` and splits enforce/observe-only.
 `(requirement_mib, requirement_provenance)` pair that `admission.py:286-295`
 documents as PR C's responsibility to supply.
 
-### 9.2 Caveat on the existing extractions
+### 10.2 Caveat on the existing extractions
 
 Per CLAUDE.md — *"a helper that still reads and mutates arbitrary outer
 state is not a completed decomposition"* — several PR-B-era helpers are
@@ -994,7 +1040,7 @@ real candidate -> real observation -> real identity and provenance
 
 Implementation and unit tests need no H100. **A measurement promoted as
 H100-authoritative must be collected on the H100 itself; a 5090 measurement
-must never become H100-authoritative** (D-C16). Not run while drafting.
+must never become H100-authoritative** (8.A). Not run while drafting.
 
 ---
 
@@ -1002,7 +1048,7 @@ must never become H100-authoritative** (D-C16). Not run while drafting.
 
 Stop and report rather than proceeding if:
 
-- the migration decision (D-C3) would destroy or orphan existing evidence;
+- the migration decision (O-1) would destroy or orphan existing evidence;
 - a change would let any lane's refusal produce shrink advice;
 - a change would alter retry behaviour, LLM call count, or cost;
 - an applicability rule cannot be stated without a task-specific special
@@ -1016,13 +1062,13 @@ Stop and report rather than proceeding if:
   source;
 - Layer-2 matrix complete, every row with an expected outcome;
 - one bounded Layer-3 confirmation on the target hardware;
-- no new fail-open default (§2.8 unchanged in length);
+- no new fail-open default (the §2.10 table unchanged in length);
 - `run()` gains no new responsibility;
 - exact-head CI green, including the repository's configured blocking
   pyright check — currently `typeCheckingMode: "basic"`
   (`pyrightconfig.json:28`), despite the CI step being *named*
   "strict, blocking". PR C must not claim strict; see FU-C-1;
-- every operator decision in §7 answered in this document before
+- every operator decision in §8.C answered in this document before
   implementation.
 
 ## 14. Deferred
@@ -1049,7 +1095,100 @@ Stop and report rather than proceeding if:
 
 ---
 
-## 15. Commit plan
+## 15. Implementation splits into two PRs
+
+**This document remains the umbrella design and launch-blocker record.
+Implementation is two separately reviewable PRs.**
+
+§3 established two causal systems with different units, producers,
+consumers and authority. Once O-10 fixed the authoritative GPU producer as a
+*dedicated pre-phase probe* rather than the registry, they stopped being one
+chain in any sense — so one PR would violate the project rule that a PR
+addresses one causal problem.
+
+```
+PR C1  calibration identity, reachability and promotion
+       unit: milliseconds        consumer: time-budget decisions
+       does NOT feed PR B
+
+PR C2  authoritative GPU requirement acquisition and delivery
+       unit: mebibytes           consumer: PR B's admission gate
+       depends on C1's identity framework, not on its values
+```
+
+They **share** `MeasurementIdentity`, `ApplicabilityEnvelope` and
+`PromotionPolicy` (§8.1), established by C1. They **must never share a
+physical measurement value or an authority**: `measurement_kind` is an
+exact-match identity dimension precisely so a promoted millisecond can never
+answer a memory query.
+
+### 15.1 PR C1 — calibration identity, reachability and promotion
+
+Scope: schema v2 and the new registry tree (O-1); the three-model split; the
+generic task/dataset measurement capability (§15.3); time-calibration
+write-path reachability; promotion (O-3, O-4, O-5) and applicability;
+honest calibration-quality reporting.
+
+Checkpoints: **C-C1, C-C2, C-C3, C-C4, C-C5, C-C7, C-C8** below.
+
+Merge criteria, in addition to §14: a normal formal run leaves a duration
+observation in the **new** tree; a bucket reaches `validated` only under the
+O-4 values; the report tells the truth about an uncalibrated system; the old
+tree is untouched and still readable.
+
+**Explicit non-goal:** C1 delivers **no** GPU requirement to PR B. Formal
+admission continues to report `policy_unavailable` after C1, and that is
+correct, not a regression.
+
+### 15.2 PR C2 — authoritative GPU requirement acquisition and delivery
+
+Scope: the dedicated isolated pre-phase GPU measurement (O-10);
+candidate-owned driver-visible process-tree memory; cold-start acquisition
+(the D-B5 case PR B deferred); the typed evidence-selection boundary;
+delivery to PR B's gate; O-7 behaviour when the probe is inconclusive or
+unavailable.
+
+Checkpoints: **C-C5a, C-C6** below, re-scoped around the pre-phase probe.
+
+Merge criteria, in addition to §14: an applicable pre-phase measurement
+produces `requirement_mib` with provenance in `AUTHORITATIVE_PROVENANCE`; an
+inconclusive probe stops the attempt per O-7 with no candidate blame and no
+shrink advice; **PR B's three refusal lanes remain distinct**
+(`test_refusal_lane_distinctness.py` unchanged and green); with no
+authoritative evidence, behaviour is byte-identical to today.
+
+**Explicit non-goal:** C2 changes no enforcement default. Flipping
+`observe_only` to `enforce` is a production-default change needing its own
+evidence and approval.
+
+### 15.3 Shared prerequisite — a typed measurement capability
+
+`probe_runner_availability()` (`probe_wiring.py:72-79`) refuses unless
+`TIDMAD_DATA_DIR` is readable, so on any other task the measured path
+disables itself silently (§2.8). This is a **named checkpoint in C1**, not a
+remark in another commit's scope, because C2's pre-phase probe inherits the
+same gate.
+
+Generic runtime-control consumes a typed object and stops importing
+`TIDMAD_DATA_DIR`:
+
+```
+ResolvedMeasurementCapability
+  task_identity
+  dataset_adapter
+  data_shape_class
+  probe_available
+  target_device
+  supported_phases
+  unavailability_reason      # never silently False
+```
+
+`unavailability_reason` is required when `probe_available` is False — an
+unavailable probe must say why, per O-7 and the no-fail-open invariant.
+
+---
+
+## 16. Commit plan
 
 Nine commits. Each is independently reviewable and does not carry unrelated
 cleanup. `[ ]` = not done; `[x]` only after implementation **and** recorded
@@ -1076,19 +1215,28 @@ evidence.
 > C-C6 has anything to deliver. C-C2's identity model and C-C5's
 > applicability evaluator are shared by both tracks; nothing else is.
 >
-> If O-10 concludes that `observed_peak` cannot safely become a requirement
-> (it is a sampled lower bound of observed occupancy, measured during the
-> phase it would gate), then **C-C5a has no producer and Track 2 stops
-> there** — and PR C delivers Track 1 plus an honest report that no
-> authoritative GPU requirement exists. That is a legitimate outcome, not a
-> failure; it is strictly better than the current state, where the gate
-> silently reports `policy_unavailable` on every formal round.
+> **O-10 answered this (2026-08-03):** `observed_peak` is *not* the
+> producer. It is telemetry and consistency evidence. C-C5a instead builds
+> a dedicated isolated bounded **pre-phase** measurement — the only kind
+> that can decide whether a phase should start.
+>
+> The two tracks are now two PRs (§15), because after O-10 they share no
+> producer, no unit, no consumer and no authority — only the identity
+> framework.
+>
+> If C-C5a's pre-phase probe cannot produce a trustworthy measurement for a
+> given candidate, it produces **no requirement**, and O-7 governs: the
+> attempt stops before the GPU phase, consumes an attempt, completes no
+> round, blames nothing and advises no shrink. That is a designed outcome,
+> not a failure path.
 
 
-**Three commits are BLOCKED on operator decisions and are deliberately left
-without low-level steps** — writing them now would mean inventing the very
-details the decision determines. They are marked `BLOCKED` with the decision
-that unblocks them.
+**All ten §8.C decisions were approved on 2026-08-03.** Each checkpoint
+below names the decisions that govern it. Where a checkpoint's low-level
+steps were previously withheld pending a decision, they are now to be
+drafted **from the approved answer plus fresh code inspection** — not
+invented, and not carried over from the first draft, whose assumptions
+several answers overturned.
 
 **Standing rule for every commit below.** Once this design and the §8.C
 decisions are approved, Claude implements, tests, documents and commits each
@@ -1107,15 +1255,21 @@ and ask rather than widening the commit.
 
 ---
 
-### C-C1 — Populate the two identity fields production drops
+### C-C1 — Populate the two identity fields production drops  `[C1]`
 
 **1. Goal.** `model_family` and `software_stack` are dropped at two
 production call sites (§2.5), so every registry record buckets under
 `family=unknown` with a constant stack digest. Fixing this is a precondition
 for any applicability rule: without it, every record is in one bucket.
 
+**Bounded to known candidates.** A candidate whose family resolves gets a
+real family and a real stack. A candidate whose family does not resolve
+keeps today's behaviour untouched. The `unusable` state belongs to schema
+v2 (C-C2, O-2) and must not be promised by a commit that changes no
+schema.
+
 Belongs here because it changes **no schema** — both fields already exist —
-so it can land and be validated before the migration decision (D-C3) is
+so it can land and be validated before the migration decision (O-1) is
 made.
 
 **2. Scope.**
@@ -1125,7 +1279,7 @@ made.
   default).
 - The resolver for a real family value —
   `calibration_policy.classify_model_family` (`:259`) exists and has zero
-  callers; whether it is the right resolver is **D-C2**.
+  callers; whether it is the right resolver is **8.B**.
 
 *Non-goals:* no change to `bucket_components`; no schema field added; no
 change to what the probe measures; the `"unknown"` value must remain legal
@@ -1151,9 +1305,11 @@ for records that genuinely cannot be classified.
   `probe_observations` path, not a hand-built observation.
 - Unit: a non-empty `software_stack` produces a different `stack_identity`
   than `{}` — i.e. the bucket actually forks.
-- Negative: a candidate whose family genuinely cannot be classified still
-  produces a valid record, marked unusable rather than silently
-  `"unknown"`-bucketed (subject to D-C1).
+- Negative: a candidate whose family genuinely cannot be classified keeps
+  the **existing non-authoritative behaviour**. C-C1 changes no schema, so it
+  cannot introduce the `unusable` state — that arrives with schema v2 in
+  C-C2 under O-2. Asserting an unusable marker here would be a promise this
+  commit's own scope forbids.
 - Backward-compat: existing records keep their ids; this commit adds no
   field, so §2.7 does not apply. **Assert that explicitly.**
 - No Gate / real-training test.
@@ -1166,13 +1322,17 @@ for records that genuinely cannot be classified.
 - [ ] `stack_identity` for a populated stack differs from the constant
       `stack_identity({})` digest observed today.
 - [ ] All 20 existing records still load — `load_observation` raises on
-      none of them.
+      none of them. Verified against a **copy in a temporary tree**, never
+      against `~/.siderius/runtime_calibration`. The live per-user registry
+      is read-only evidence for this work: no test, script or checkpoint may
+      write to it, and O-1 preserves the old tree untouched.
 - [ ] Mutation: reverting either call site to its current form fails at
       least one new test.
 
 **6. Failure and edge cases.**
-- Family unresolvable → explicit unusable marker, **not** `"unknown"`
-  silently entering a shared bucket (O-2). Must not stop the run.
+- Family unresolvable → unchanged non-authoritative behaviour, and the run
+  continues. The explicit `unusable` namespace is C-C2's (O-2); C-C1 must
+  not pre-empt it.
 - Stack capture fails → record the gap explicitly; must not fabricate a
   stack, and must not fall back to `{}` silently, since `{}` is currently
   indistinguishable from "captured an empty stack".
@@ -1190,7 +1350,7 @@ their tests. Carries no schema change, no new dimension, no reporting.
 
 ---
 
-### C-C2 — Typed identity contract for a calibration record  `BLOCKED: O-1`
+### C-C2 — Typed identity contract for a calibration record  `[C1] governed by O-1, O-2`
 
 **1. Goal.** Add task identity, dataset/data-shape class and device-instance
 identity to calibration identity (§2.6), so a record states what it
@@ -1207,7 +1367,7 @@ System B.
 schema version in a new directory, a re-hash migration, or a partial hash.
 
 **3. Implementation plan.** **Deliberately not written.** Every step depends
-on D-C3: option 1 means a v2 tree and a reader that handles both; option 2
+on O-1: option 1 means a v2 tree and a reader that handles both; option 2
 means a migration script; option 3 changes `hash_payload` itself. Writing
 steps now would commit to one before the operator chooses.
 - [ ] Operator answers O-1 (and the 8.B config-identity choice).
@@ -1215,7 +1375,7 @@ steps now would commit to one before the operator chooses.
       writing the steps.
 - [ ] Draft the steps and bring them back for review.
 
-**4. Validation plan (shape known now, cases pending D-C3).**
+**4. Validation plan (shape known now, cases pending O-1).**
 - Unit: two records identical except for task land in different buckets.
 - Unit: two records identical except for GPU UUID land in different buckets
   — **a 5090 measurement must never be H100-authoritative** (frozen, 8.A).
@@ -1246,7 +1406,7 @@ admission wiring.
 
 ---
 
-### C-C3 — Make the registry write path reachable  `BLOCKED: O-3`
+### C-C3 — Make the registry write path reachable  `[C1] governed by O-3`
 
 **1. Goal.** `record_observation` is reached only through a gate the happy
 path cannot open (§2.3), which is why there are 20 records and 0 promotions.
@@ -1262,7 +1422,7 @@ so on any other task the path is dead regardless of the trigger.
 *Dependencies:* C-C1; **O-3** (what triggers promotion evaluation), and the
 §2.8 dataset gate must be addressed or the fix is TIDMAD-only.
 
-**3. Implementation plan.** **Not written** — D-C6 determines whether the
+**3. Implementation plan.** **Not written** — O-3 determines whether the
 trigger is a new decision branch, a scheduled evaluation, or a write-time
 hook. Inspect `decide` and the `REQUEST_PROBE` branches before drafting.
 - [ ] Operator answers O-3.
@@ -1300,7 +1460,7 @@ returns inconclusive (must not become allow or reject — invariant 4).
 
 ---
 
-### C-C4 — Wire promotion evaluation and recording  `BLOCKED: O-4, O-5`
+### C-C4 — Wire promotion evaluation and recording  `[C1] governed by O-4, O-5, O-9`
 
 **1. Goal.** `evaluate_promotions` and `record_promotion` have zero
 production callers (§2.2), so `bucket_status` can never return
@@ -1311,7 +1471,7 @@ production callers (§2.2), so `bucket_status` can never return
 establishes.
 
 *Non-goals:* not changing the consistency ratio or minimum counts without
-the operator setting them (D-C7, D-C8).
+the operator setting them (O-4, O-4).
 
 *Dependencies:* C-C2, C-C3.
 
@@ -1343,7 +1503,7 @@ observations; contended-only buckets; stack or hardware change mid-bucket.
 
 ---
 
-### C-C5 — Applicability evaluator on the production path
+### C-C5 — Applicability evaluator on the production path  `[C1] governed by O-6, O-8`
 
 **1. Goal.** `applicability_for_request` and `downgrade_for_applicability`
 have zero callers. Invariant 3 requires that a bucket match is **not**
@@ -1388,12 +1548,19 @@ inconclusive probe.
 
 ---
 
-### C-C5a — Establish a GPU-memory measurement kind  `DECISION: O-10`
+### C-C5a — Isolated pre-phase GPU requirement measurement  `[C2] governed by O-10`
 
-**1. Goal.** Create the quantity PR B's gate consumes. Today no production
-measurement of a GPU *requirement* exists (§3.1); the nearest thing is
-`GpuEvidenceBundle.observed_peak`, which is observed occupancy and a sampled
-lower bound.
+**1. Goal.** Create the quantity PR B's gate consumes, per O-10: a
+**dedicated isolated bounded pre-phase measurement** of the concrete
+candidate on the target GPU.
+
+O-10 explicitly rules out promoting normal-phase
+`GpuEvidenceBundle.observed_peak`, and the reason is decisive: a peak
+sampled *during* a phase cannot decide whether that phase should start. It
+is additionally a sampled lower bound and describes occupancy rather than
+need, so promoting it would under-state the requirement — the failure
+direction that causes an OOM. `observed_peak` stays as telemetry and as
+consistency evidence against which a promoted requirement can be checked.
 
 Belongs in its own commit because it is the **only** checkpoint that turns
 a memory observation into promotable evidence. Merging it into C-C6 would
@@ -1410,14 +1577,20 @@ B's attribution; not changing `estimated_gb`'s status as a prior.
 
 *Dependencies:* C-C1, C-C2, C-C5; **O-10**.
 
-**3. Implementation plan.** **Not written — blocked on O-10.** The three
-properties in §3.2 each need an answer first: how a sampled lower bound is
-converted (or refused) as a requirement; how ours-vs-other attribution is
-applied; what a first-ever configuration does with no prior measurement.
-- [ ] Operator answers O-10.
-- [ ] Re-read `gpu_observer.py` and `gpu_accounting.sample`'s ours/other
-      split before drafting steps.
-- [ ] Draft the steps and bring them back for review.
+**3. Implementation plan.** To be drafted from O-10 plus fresh inspection.
+The shape is fixed by the decision; the details are not yet written because
+they depend on code not yet read at this level.
+- [ ] Read `agent/skills/evaluate_vram_skill/isolated_probe.py` — PR A's
+      isolated worker is the closest existing mechanism and may be the
+      right host for this, rather than a new subprocess design.
+- [ ] Read `gpu_accounting.sample`'s ours/other process-tree split; the
+      measurement must be **candidate-owned**, not device total.
+- [ ] Determine how sampling completeness is represented so an incomplete
+      sample cannot silently become a requirement (O-7 governs the
+      inconclusive case).
+- [ ] Establish `measurement_kind` as an exact-match identity dimension so a
+      duration bucket can never answer a memory query.
+- [ ] Draft the remaining steps and bring them back before implementing.
 
 **4. Validation plan.**
 - Unit: a GPU-memory observation and a duration observation with otherwise
@@ -1448,7 +1621,7 @@ admission wiring — that is C-C6.
 
 ---
 
-### C-C6 — Supply PR B's admission gate  `DECISION: O-6, O-7, O-8`
+### C-C6 — Supply PR B's admission gate  `[C2] governed by O-6, O-7, O-8`
 
 **1. Goal.** `_phase_requirement` reads
 `getattr(sandbox, "measured_requirements", None)`, which no production code
@@ -1497,7 +1670,7 @@ delivers), C-C5; **O-6, O-7, O-8, O-10**.
       (`test_refusal_lane_distinctness.py` unchanged and green).
 
 **6. Failure and edge cases.** Evidence applicable but stale; live evidence
-contradicting calibration (D-C25); probe unavailable (D-C24); UUID missing.
+contradicting calibration (O-8); probe unavailable (O-7); UUID missing.
 None may fail open.
 
 **7. Verification commands and evidence.** To be written with the steps.
@@ -1507,7 +1680,7 @@ change, no promotion logic.
 
 ---
 
-### C-C7 — Calibration-state reporting and provenance
+### C-C7 — Calibration-state reporting and provenance  `[C1]`
 
 **1. Goal.** No production reader of the registry exists, so the campaign
 cannot state its own calibration state. Today an honest report would read
@@ -1530,8 +1703,8 @@ rule (zero buckets is never 'active') is frozen by 8.A.
 
 **4. Validation plan.** Counts are correct against a known fixture registry;
 rejection reasons are represented; every admission record carries the seven
-fields of D-C30; the report cannot claim calibration is active when zero
-authoritative buckets exist (D-C31).
+fields of 8.B; the report cannot claim calibration is active when zero
+authoritative buckets exist (8.A).
 
 **5. Acceptance criteria.**
 - [ ] Against the current live registry the report reads 20 / 0 / 0 — i.e.
@@ -1541,7 +1714,7 @@ authoritative buckets exist (D-C31).
       resolved policy source.
 
 **6. Failure and edge cases.** Empty registry; registry unreadable; mixed
-schema versions (per D-C3); a bucket promoted then invalidated.
+schema versions (per O-1); a bucket promoted then invalidated.
 
 **7. Verification commands and evidence.** To be written with the steps.
 
@@ -1549,7 +1722,7 @@ schema versions (per D-C3); a bucket promoted then invalidated.
 
 ---
 
-### C-C8 — Documentation sync
+### C-C8 — Documentation sync  `[C1 and C2]`
 
 **1. Goal.** Keep the operator's map current, per the node/skill doc-sync
 rule.
@@ -1582,11 +1755,11 @@ exact-head CI — recorded once at the end per §12.
 
 ---
 
-## 16. Expected artifacts
+## 17. Expected artifacts
 
 - This document, updated with operator answers to §7.
-- A migration note recording the D-C3 decision and what happened to the 20
+- A migration note recording the O-1 decision and what happened to the 20
   existing records.
 - Layer-2 matrix results.
 - One Layer-3 confirmation record with device identity.
-- A calibration-state report (D-C28/D-C31) showing honest counts.
+- A calibration-state report (8.B/8.A) showing honest counts.
