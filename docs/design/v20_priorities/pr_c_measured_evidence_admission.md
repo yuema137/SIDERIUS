@@ -342,7 +342,7 @@ the three come from different places, and one of them has no producer at all.
 | **Runtime duration** | bounded probe → `probe_observations` (`probe.py:518`); warm-up in `evaluate_time_skill/wrapper.py` | ms per `optimizer_step` / `inference_batch` | in-process timing |
 | **GPU allocated** | `torch.cuda.max_memory_allocated()` — **exactly one production call site**, `core/runtime_control/probe_production.py:223` | GiB | **inside** the candidate process; PyTorch allocator |
 | **GPU reserved** | `torch.cuda.max_memory_reserved()` — **no production call site anywhere.** This kind has **no producer today** | — | would be in-process; PyTorch caching allocator |
-| **GPU driver-visible** | `GpuAccountingSnapshot` via **one bounded `nvidia-smi` query** (`gpu_accounting.py:222`, backend field at `:77`) | MiB | **outside** the process; driver/NVML |
+| **GPU driver-visible** | `GpuAccountingSnapshot` via **two bounded `nvidia-smi` queries** (`gpu_accounting.py:315` device totals, `:335` per-process rows; backend field at `:77`) | MiB | **outside** the process; driver/NVML |
 | **Host memory** | `HostMemoryEvidence` (isolated pre-flight); `read_process_rss_bytes` | GiB / bytes | OS |
 
 **Why the vantage point is the whole point.** The allocator sees what the
@@ -1241,6 +1241,96 @@ authoritative evidence, behaviour is byte-identical to today.
 **Explicit non-goal:** C2 changes no enforcement default. Flipping
 `observe_only` to `enforce` is a production-default change needing its own
 evidence and approval.
+
+### 15.2.1 Producer audit — findings (read-only, 2026-08-03 UTC)
+
+Two findings change what C2 can be built on. Both were verified directly, not
+inherited from the audit report.
+
+**F1 — PR A's isolated worker cannot host this measurement: it never touches
+the GPU.**
+
+Verified: there is **no** `.cuda()`, `max_memory_allocated`,
+`reset_peak_memory_stats` or `memory_reserved` anywhere in
+`agent/skills/evaluate_vram_skill/`, and `structural_probe.py:231` declares
+`device: torch.device | str = "cpu"` with every call site omitting the
+argument. The pre-flight runs a **CPU structural trace plus arithmetic**:
+there is no real backward (`unpack_hook` raises by design), no optimizer at
+all, and the CUDA context and cuDNN workspace are two frozen constants
+(`overhead.py:52-53`). Its `cuda_peak_allocated_gb` and
+`cuda_peak_reserved_gb` fields are declared and never written.
+
+**This contradicts PR B's design document.**
+`pr_b_gpu_aggregation_attribution.md:2080-2085` proposes *"Direction C —
+reuse the pre-flight worker's own measurement… that worker really allocates
+— its in-process ancestor is what held 6,962 MiB in V19."* The 6,962 MiB was
+V19's **in-process** pre-flight, which PR A replaced; the worker PR A shipped
+allocates nothing on the device. A C2 plan built on that paragraph would
+inherit a false premise. Corrected in place in that document.
+
+What PR A's worker *does* contribute is its process-control shell — own
+process group, parent-side RSS bound, TERM/grace/KILL, orphan detection,
+atomic bounded result, and a typed outcome vocabulary with explicit authority
+semantics. That shell is sound; its measurement core is not what C2 needs.
+
+**The realistic host is a different subsystem that already exists:**
+`core/runtime_control/probe_subprocess.py` + `probe_worker_main.py` +
+`probe_production.py` — real model, real optimizer mirroring the trainer
+(`probe_production.py:158-168`), real data with no synthetic fallback
+(`:135-152`), real forward/backward/step (`:195-199`), 3 warmup + 7 timed
+steps (`probe.py:60-68`), own process group, hard deadline, and a parent-side
+device-sampling seam (`probe_subprocess.py:397-401`). It is not currently
+reachable from the chain.
+
+**F2 — the existing probe reports one cumulative peak, not per-phase peaks.**
+
+`probe_production.py` calls `reset_peak_memory_stats()` **exactly once**
+(one occurrence in the file), inside `_setup` at `:123`. `_peak_vram_gb`
+(`:219-223`) then returns `max_memory_allocated()` — a running maximum over
+setup **plus** 10 training steps **plus** 5 inference batches, in one
+process. So `ProbeResult.peak_vram_gb` is a single end-to-end number, and the
+inference portion runs with the model, gradients and optimizer state still
+resident.
+
+That is incompatible with the per-phase contract `_phase_requirement`
+requires (`core/sandbox_executor.py:467-500`), whose own docstring records
+B-G0 measuring the same PUNet candidate at **1,476 MiB training vs 2,716 MiB
+inference — 1.8x apart on one card, in one run**.
+
+**Classified as a C2 producer limitation, not a live production defect.**
+Verified consumption:
+
+- `_phase_requirement` **never reads** `peak_vram_gb`; it reads
+  `sandbox.measured_requirements`, which has no producer (§2.4). So nothing
+  today consumes this value as a phase-specific requirement.
+- The one production consumer is `decision_policy.py:286-300`, a
+  **whole-candidate** budget check (`estimate.peak_vram_gb > budget.vram_gb`).
+  A cumulative maximum **over-states** there, which is the conservative
+  direction for a rejection gate — it can refuse too eagerly, never admit too
+  eagerly.
+
+No hotfix in C1. C2 must reset per phase and record two independent peaks.
+
+**F3 — the under-read risk is unbounded by evidence, and every axis points
+the same way.**
+
+The repository states outright that there are **zero data points** on
+worker-peak versus training-peak (`pr_b:2087-2091`). The only retention
+measurement is ~60 MB of reserved-minus-allocated in a 5-step process
+(`docs/phase66_deterministic_vram_and_hardening.md:821-822`), which cannot
+explain A6's 1.95x gap at 12.5 GiB — so most of that divergence is something
+a short probe would not reproduce. Divergence axes, all in the OOM
+direction: allocated < reserved < driver-visible; one reused batch < a
+DataLoader's pipeline; 10 steps < an epoch; solo < two concurrent chains.
+
+This is the question §15.2 says decides whether C2 is safe at all, and it
+remains open.
+
+**F4 — smaller, recorded for correctness of this document.** §3.1 describes
+`GpuAccountingSnapshot` as *"one bounded nvidia-smi query"*.
+`gpu_accounting.sample` issues **two** (`:315` for device totals, `:335` for
+per-process rows), each with its own 10 s timeout.
+
 
 ### 15.3 Shared prerequisite — a typed measurement capability
 
