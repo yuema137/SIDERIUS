@@ -1323,6 +1323,14 @@ Stop and report rather than proceeding if:
   CLI** for this task and sits outside the production decision path, so it
   is not on the critical gate; it should move behind the same adapter as
   FU-C-6 when that exists.
+- **FU-C-8**: `.claude/settings.json:9` registers the commit-approval hook by
+  absolute path (`/home/yuema137/SIDERIUS/.claude/hooks/...`). The hooks are
+  developer tooling rather than production code or tests, so this is not a
+  breach of the portability rule in `CLAUDE.md` — but in a checkout at any
+  other path the guard **silently stops running** rather than failing, which
+  is the worse failure mode for a safety hook. Found while inspecting the
+  hook for its sanctioned approval mechanism during C-C4. Unrelated to
+  calibration; deliberately **not** fixed inside PR C1.
 
 ---
 
@@ -2113,48 +2121,141 @@ fully tested and called from nowhere, the same shape as #156, #157 and #159.
 
 ---
 
-### C-C5 — Applicability evaluator on the production path  `[C1] governed by O-6, O-8`
+### C-C5 — split into C-C5a and C-C5b  `[C1] governed by O-6, O-8`
 
-**1. Goal.** `applicability_for_request` and `downgrade_for_applicability`
-have zero callers. Invariant 3 requires that a bucket match is **not**
-applicability.
+**Why the split (operator decision, 2026-08-02).** The C-C5 audit found that
+the "production path" this checkpoint was written against **does not exist**.
+System B has only *write* paths in production:
 
-**2. Scope.** `calibration_policy.py:583-660`, plus a focused applicability
-boundary per §9.
+| production site | direction |
+|---|---|
+| `ml_hyperparameter_tune_agent.py:2714` (C-C3c/C-C4) | write |
+| `probe_wiring.py:162` `_persist` | write |
+| `scripts/runtime_replay/legacy_migration.py:65` | write (migration) |
 
-*Non-goals:* not making a bucket match sufficient; not merging phases.
+`as_estimate` — the only function that converts a stored observation into an
+estimate carrying authority — has **zero** production callers, as do
+`applicability_for_request`, `downgrade_for_applicability` and
+`ApplicabilityEnvelope`. Nothing in production has ever read a promoted
+bucket back.
 
-*Dependencies:* C-C2, C-C4. The reuse rules are **frozen** by 8.A, not
-open; only their encoding is an 8.B choice.
+This is not a live production bug; it is an **interface that would grant
+authority incorrectly the moment anyone wired it up**. Fixing an uncalled
+function and declaring C1 closed would leave "writes and promotion work, but
+production never reads" — so C-C5 becomes two bounded checkpoints: make the
+seam intrinsically safe (C-C5a), then prove production actually reads it
+(C-C5b).
+
+---
+
+### C-C5a — Make the authority-producing read seam intrinsically safe  `[C1]`
+
+**1. Goal.** `as_estimate` must never return measured/promoted authority
+merely because a matching bucket is validated.
+
+**2. Scope.** A new `core/runtime_control/calibration_read.py` boundary and
+the `as_estimate` seam. *Non-goals:* no consumer wiring (that is C-C5b).
 
 **3. Implementation plan.**
-- [ ] Confirm the 8.A reuse invariants are all expressible in the
-      identity/envelope split; if one is not, that is a design deviation.
-- [ ] Re-read `classify_applicability` and confirm its fail-closed
-      behaviour at `:612-616` still holds under the new dimensions.
-- [ ] Extract the applicability evaluator as a typed boundary with a
-      reachability test (§9).
-- [ ] Draft remaining steps after the decisions land.
+- [x] Audited every repository caller before changing the signature: no
+      production, script or migration callers; no `__all__` export contract;
+      docs reference only the §3.3 cross-machine rule, which is preserved.
+- [x] Added `CandidateRequest` (identity + bounded dimensions) and
+      `AuthorityDecision`, plus `evaluate_candidate_authority` — a typed,
+      independently testable boundary that never raises.
+- [x] Wired it inside `as_estimate` so the measured-provenance return is
+      reachable **only** from the granted branch. The check cannot be
+      bypassed by a caller who forgets it, because there is no longer a
+      lower-level method that returns measured authority without it.
+- [x] Order enforced: identity match → validated bucket → applicability →
+      otherwise downgrade.
 
-**4. Validation plan.** The full Layer-2 matrix (§10) — every row, with an
-expected outcome. Training-vs-inference substitution must fail
-(frozen, 8.A). Cross-UUID reuse must fail. Cross-task must fail. Cross-kind
-must fail (§3).
+**4. Validation plan / Layer-2 matrix.** Executed in
+`tests/unit/core/test_calibration_read_authority.py` (21 tests):
+
+| row | outcome |
+|---|---|
+| matching identity + in-range candidate | **granted**, `interpolation` |
+| cross-task | refused |
+| cross-device-uuid | refused |
+| cross-phase | refused |
+| cross-measurement-kind | refused |
+| cross-family / cross-candidate-config / cross-data-shape / cross-stack | refused |
+| candidate outside an observed range (3 rows) | refused, `unsupported_extrapolation` |
+| dimension with no measured evidence | refused, `not_applicable` |
+| **no candidate request** | refused (`NO_CANDIDATE`) |
+| observation without identity | refused |
+| bucket without an envelope | refused |
+| unknown model family | refused |
+
+A positive control is included so a matrix of refusals cannot pass by
+refusing everything, and a companion assertion proves the identity rows are
+in-range — otherwise each would pass for the wrong reason.
 
 **5. Acceptance criteria.**
-- [ ] Every Layer-2 row produces its expected label.
-- [ ] A matching bucket with a non-applicable candidate is downgraded, not
+- [x] Every Layer-2 row produces its expected label.
+- [x] A matching bucket with a non-applicable candidate is downgraded, not
       accepted.
-- [ ] Mutation: removing any single applicability dimension fails a named
-      row.
+- [x] Mutation: removing an applicability dimension fails a named row.
 
-**6. Failure and edge cases.** No measured range for a dimension (already
-fails closed — preserve); candidate at a range boundary; missing family;
-inconclusive probe.
+**6. Failure and edge cases.** All fail closed: absent candidate, absent
+identity, absent envelope, unmeasured dimension, unknown family, empty
+request.
 
-**7. Verification commands and evidence.** To be written with the steps.
+**7. Verification commands and evidence.**
 
-**8. Commit boundary.** Applicability only.
+```bash
+.venv/bin/python -m pytest tests/unit/core/ -q     # 1464 passed, 2 skipped
+```
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M7 | remove the identity comparison | all **8** identity rows |
+| M8 | remove the applicability call | all **5** range/fail-closed rows |
+| M9 | grant authority without consulting the decision | reachability guard **+** `test_a_validated_local_bucket_alone_is_not_authority` |
+
+*Stale-contract tests updated after classification*, not relaxed:
+`test_local_validated_evidence_keeps_measured_provenance` and
+`test_validated_bucket_restores_measured_authority_end_to_end` (unit) and two
+lifecycle tests (integration) asserted `validated + local ⇒ measured` with no
+candidate. Their C7/D4 subject is preserved; each now names the candidate, and
+the old expectation is **inverted and locked** by
+`test_a_validated_local_bucket_alone_is_not_authority`.
+
+> **Finding for C-C5b.** The two write paths differ: the C-C3c derivation
+> populates `MeasurementIdentity`, but `probe.py::probe_observations` does
+> **not**. Probe-written records therefore can never be authoritative — the
+> correct fail-closed outcome, but it means C-C5b must consume evidence from
+> the derivation path, or the probe path must start populating identity.
+> Asserted explicitly in the lifecycle test rather than left implicit.
+
+**8. Commit boundary.** The read seam only. No consumer wiring.
+
+---
+
+### C-C5b — Wire the safe read seam to the time-budget consumer  `[C1]`
+
+**1. Goal.** Prove a production time-budget decision actually reaches the safe
+seam. Without this, C1 remains "writes and promotion complete, production
+never reads".
+
+**2. Scope.** The smallest existing time-budget decision boundary.
+*Non-goals:* no new logic inside the giant `run()` method.
+
+**3. Implementation plan.** Not yet written — begins with a consumer audit.
+
+**5. Acceptance criteria.**
+- [ ] A production time-budget decision reaches the safe read seam.
+- [ ] Applicable promoted duration evidence is actually consumed.
+- [ ] Inapplicable evidence is ignored/downgraded.
+- [ ] Deleting the production read call fails a reachability test.
+- [ ] Duration evidence cannot affect GPU admission.
+- [ ] Absent applicable calibration preserves current non-authoritative
+      fallback behaviour.
+- [ ] Retry, attempt/round accounting, scientific result and LLM calls
+      unchanged.
+
+**8. Commit boundary.** Consumer wiring only.
 
 ---
 
@@ -2396,7 +2497,7 @@ source, not memory.
 
 **5. Acceptance criteria.**
 - [ ] No status line in the V20 folder contradicts the merged code.
-- [ ] Every follow-up (FU-C-1..FU-C-5) is filed with its evidence.
+- [ ] Every follow-up (FU-C-1..FU-C-8) is filed with its evidence.
 
 **6. Failure and edge cases.** n/a.
 
@@ -2434,4 +2535,4 @@ Per PR, since the two are reviewed separately.
 
 **Both**
 - Mutation proofs per merged family, each against real production source.
-- Follow-ups FU-C-1..FU-C-5 filed with evidence.
+- Follow-ups FU-C-1..FU-C-8 filed with evidence.
