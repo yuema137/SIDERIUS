@@ -101,11 +101,22 @@ def test_static_formula_uses_patched_constants():
     assert bd["ms_per_step"] == round(expected_ms, 4)
 
 
-def test_warmup_path_entered_with_valid_data_dir(tmp_path):
-    """When data_dir exists AND CUDA is available, _measure_ms_per_step
-    attempts the warmup path (we mock torch to verify entry)."""
-    data_dir = str(tmp_path)
+def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
+    """With a real data_dir AND CUDA available, the entry guards must not
+    fire -- control reaches the measurement block.
 
+    This test used to assert only `assert ms is None`, which is what EVERY
+    guard-rejection test in this file asserts: `_measure_ms_per_step`
+    returns an identical `(None, empty_breakdown)` from every early return.
+    Verified on 2026-08-02 by replacing the data_dir guard with `if True:`
+    so the warmup could never be entered -- all five tests stayed green.
+
+    The return value cannot distinguish the cases, but the emitted log can:
+    each guard prints its own reason (`wrapper.py:309` no data_dir, `:317`
+    CUDA not available) and a post-entry failure prints `[warmup failed]`
+    (`:454`). Asserting on those is what makes entry observable without a
+    production change.
+    """
     mock_torch = MagicMock()
     mock_torch.cuda.is_available.return_value = True
     mock_torch.cuda.get_device_name.return_value = "Mock GPU"
@@ -113,24 +124,33 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path):
     with patch.dict("sys.modules", {"torch": mock_torch}):
         from agent.skills.evaluate_time_skill.wrapper import _measure_ms_per_step
 
-        # The function will try to import TIDMADEpochDataset etc.,
-        # which will fail — that's fine, we just want to verify we got
-        # past the data_dir guard.
         ms, _breakdown = _measure_ms_per_step(
             model_type="punet",
             model_config={"segmentation_size": 1000},
             train_config={"batch_size": 1, "epochs": 1},
             loss_config={},
-            data_dir=data_dir,
+            data_dir=str(tmp_path),
             sample_set={"0": list(range(100))},
         )
-        # On setup failure (no real dataset), returns None but the
-        # aggregator field tells us we got past the early-return guards
-        # The fact that we don't hit the "no data_dir" path means the
-        # data_dir plumbing is working.
-        # We can't assert ms is not None without real data, but we verify
-        # the function didn't return at the data_dir guard.
-        # (If data_dir guard rejected us, aggregator would be None)
-        # Actually the function may still return None due to import errors,
-        # but it should have entered the try block past the data_dir check.
-        assert ms is None  # expected — no real data/CUDA
+
+    out = capsys.readouterr().out
+
+    # The two ENTRY guards, each with its own reason string.
+    assert "no data_dir" not in out, "the data_dir guard rejected a valid directory"
+    assert "CUDA not available" not in out, "the CUDA guard rejected an available device"
+
+    # Something only reachable AFTER both guards. Which one fires depends on
+    # how far the environment gets (no HDF5 files here, so dataset
+    # construction is the usual stop); asserting any of them proves entry
+    # without pinning this test to one environment's failure mode. Note the
+    # post-entry messages also say "[warmup skipped]", so the absence of that
+    # phrase cannot be the signal.
+    post_entry = ("mini dataset too small", "unknown model_type", "[warmup failed]")
+    assert any(marker in out for marker in post_entry), (
+        "control never reached the measurement block -- it was turned away by "
+        f"an entry guard. Emitted: {out[-400:]!r}"
+    )
+
+    # Without a real dataset the measurement cannot complete; the point of
+    # this test is WHERE it stopped, not that it produced a number.
+    assert ms is None

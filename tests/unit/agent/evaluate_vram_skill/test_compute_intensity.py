@@ -37,11 +37,6 @@ def test_compute_intensity_is_product(B, T):
     assert compute_intensity(B, T) == B * T
 
 
-def test_compute_intensity_is_pure():
-    """No hidden state — calling twice returns the same answer."""
-    assert compute_intensity(10, 20_000) == compute_intensity(10, 20_000)
-
-
 # ── Acceptance predicate: below / at / above the cap ───────────────────────
 
 

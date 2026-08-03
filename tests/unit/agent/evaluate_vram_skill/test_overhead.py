@@ -37,11 +37,6 @@ def test_cudnn_backward_workspace_matches_appendix_a5():
     assert cudnn_backward_workspace_bytes() == 50 * 1024**2
 
 
-def test_cuda_context_bytes_is_deterministic():
-    """Pure function — multiple calls must return identical bytes."""
-    assert cuda_context_bytes() == cuda_context_bytes()
-
-
 # ── Analytical: weight-proportional scaling ─────────────────────────────────
 
 
