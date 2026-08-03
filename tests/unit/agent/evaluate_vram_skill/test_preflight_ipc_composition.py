@@ -122,14 +122,28 @@ SCHEMA_REJECTED = {
 class TestFieldsSurviveTheComposedPath:
     """Each field, through a real subprocess, not a hand-built dict."""
 
-    def test_limit_gb_survives(self, tmp_path):
-        assert _run(tmp_path, COMPLETED)["limit_gb"] == 12.0
-
-    def test_dominant_phase_survives(self, tmp_path):
-        assert _run(tmp_path, COMPLETED)["dominant_phase"] == "training"
-
-    def test_verdict_survives(self, tmp_path):
-        assert _run(tmp_path, COMPLETED)["verdict"] == COMPLETED["verdict"]
+    # One subprocess per PAYLOAD rather than per field. Seven cases used to
+    # spawn a worker each to read one key out of three payloads; the
+    # transport is the same for every key in a payload, so the extra spawns
+    # bought nothing but wall-clock. The two cases below this one keep their
+    # own spawns because they send DIFFERENT payloads.
+    @pytest.mark.parametrize(
+        ("payload", "forwarded"),
+        [
+            (COMPLETED, ("limit_gb", "dominant_phase", "verdict")),
+            (ABOVE_CAP, ("suggestion", "memory_killer")),
+            (
+                SCHEMA_REJECTED,
+                ("violations", "offending_config", "truncated", "violations_omitted_count"),
+            ),
+        ],
+        ids=["completed", "above_cap", "schema_rejected"],
+    )
+    def test_every_forwarded_field_survives(self, tmp_path, payload, forwarded):
+        adapted = _run(tmp_path, payload)
+        for key in forwarded:
+            assert key in adapted, f"{key!r} did not survive the composed path at all"
+            assert adapted[key] == payload[key], f"{key!r} was altered in transit"
 
     def test_verdict_is_not_merely_the_detail_fallback(self, tmp_path):
         """The adapter falls back to ``detail`` when verdict is missing.
@@ -140,24 +154,6 @@ class TestFieldsSurviveTheComposedPath:
         """
         payload = {**COMPLETED, "verdict": "VERDICT-TEXT", "detail": "DETAIL-TEXT"}
         assert _run(tmp_path, payload)["verdict"] == "VERDICT-TEXT"
-
-    def test_suggestion_survives(self, tmp_path):
-        adapted = _run(tmp_path, ABOVE_CAP)
-        assert adapted["suggestion"] == ABOVE_CAP["suggestion"]
-
-    def test_memory_killer_survives(self, tmp_path):
-        assert _run(tmp_path, ABOVE_CAP)["memory_killer"] == ABOVE_CAP["memory_killer"]
-
-    def test_bounded_rich_fields_survive(self, tmp_path):
-        adapted = _run(tmp_path, SCHEMA_REJECTED)
-        assert adapted["violations"] == SCHEMA_REJECTED["violations"]
-        assert adapted["offending_config"] == SCHEMA_REJECTED["offending_config"]
-        assert adapted["truncated"] is True
-
-    def test_truncation_count_travels_with_the_truncation_flag(self, tmp_path):
-        """``truncated`` without the count says something was dropped but
-        not how much — the measured part would be the part lost."""
-        assert _run(tmp_path, SCHEMA_REJECTED)["violations_omitted_count"] == 7
 
     def test_a_dropped_field_keeps_its_marker_rather_than_becoming_none(self, tmp_path):
         """The worker replaces an over-budget field with an explicit
