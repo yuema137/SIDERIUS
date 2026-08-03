@@ -51,6 +51,11 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from core.runtime_control.calibration_read import (
+    NO_CANDIDATE,
+    CandidateRequest,
+    evaluate_candidate_authority,
+)
 from core.runtime_control.estimate_types import RuntimeEstimate, make_estimate
 from core.runtime_control.registry_schemas import (
     REGISTRY_SCHEMA_VERSION,
@@ -546,6 +551,7 @@ class CalibrationRegistry:
         *,
         current_environment_id: str,
         validation_level: str | None = None,
+        request: CandidateRequest | None = None,
     ) -> RuntimeEstimate:
         """Wrap an observation as decision evidence. Evidence collected in
         a DIFFERENT execution environment is demoted to
@@ -557,25 +563,52 @@ class CalibrationRegistry:
         are never mutated, so promotion is the only status source.
         ``validation_level`` overrides the lookup for callers that already
         resolved it; only ``"validated"`` keeps measured provenance
-        (``"provisional"`` is explicitly not calibration-authoritative)."""
-        from core.runtime_control.calibration_policy import bucket_key
+        (``"provisional"`` is explicitly not calibration-authoritative).
+
+        C-C5a: a validated local bucket is NECESSARY but NOT SUFFICIENT.
+        ``request`` names the concrete candidate this estimate is for, and
+        measured authority additionally requires an exact identity match and
+        applicability to that candidate. Omitting ``request`` fails closed --
+        this method must not be able to hand back blocking authority that
+        nobody checked, on the assumption a caller will remember to check it
+        separately."""
+        from core.runtime_control.calibration_policy import ApplicabilityEnvelope, bucket_key
 
         level = validation_level
+        key = bucket_key(obs)
         if level is None:
-            level, _ = self.bucket_status(bucket_key(obs))
+            level, _ = self.bucket_status(key)
         local = obs.execution_environment_id == current_environment_id
         seconds = obs.measured_value_ms / 1000.0
+
+        authority = NO_CANDIDATE
         if local and level == "validated":
-            return make_estimate(
-                provenance=obs.provenance,
-                confidence="medium",
-                expected_seconds=seconds,
-                training_seconds=seconds if obs.operation == "training" else None,
-                inference_seconds=seconds if obs.operation == "inference" else None,
-                setup_seconds=seconds if obs.operation == "setup" else None,
-                concurrency_identity=obs.concurrency_identity,
+            # The envelope describes what this bucket actually observed, so
+            # it is derived from the bucket's own records -- never from the
+            # single observation being wrapped, which is a point rather than
+            # a range.
+            siblings = [o for o in self.iter_observations() if bucket_key(o) == key]
+            authority = evaluate_candidate_authority(
+                obs,
+                request,
+                envelope=ApplicabilityEnvelope.from_observations(siblings) if siblings else None,
             )
+            if authority.granted:
+                return make_estimate(
+                    provenance=obs.provenance,
+                    confidence="medium",
+                    expected_seconds=seconds,
+                    training_seconds=seconds if obs.operation == "training" else None,
+                    inference_seconds=seconds if obs.operation == "inference" else None,
+                    setup_seconds=seconds if obs.operation == "setup" else None,
+                    concurrency_identity=obs.concurrency_identity,
+                )
         warnings = []
+        if local and level == "validated" and not authority.granted:
+            warnings.append(
+                "validated bucket is not applicable to this candidate: "
+                + "; ".join(authority.reasons)
+            )
         if not local:
             warnings.append(
                 "cross-machine observation (different execution environment): "
