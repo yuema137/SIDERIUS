@@ -1,0 +1,596 @@
+"""System A's measurement, derived — never re-measured.
+
+V20 PR C1 / C-C3c. Operator architecture, 2026-08-03 UTC: System A stays the
+single source of truth for measured runtime duration; System B receives a
+typed deterministic derivative of the `RuntimeObservation` System A already
+writes after a successful phase.
+
+These tests drive REAL preserved production records —
+`docs/design/pregate_evidence/runtime_observations/*.jsonl`, H100 evidence
+from the pre-gate campaign — rather than hand-built observations. The whole
+class of defect this PR keeps finding is a converter that is correct against
+a shape its producer never emits.
+
+THREE OUTCOMES, NOT TWO. The converter returns exactly one of:
+
+    DerivedDurationRecord   eligible; identity complete, measurement clean
+    QuarantinedDerivation   the measurement is real, the identity is not
+                            complete enough to bucket it (O-2)
+    NotDerivable            this is not calibration evidence at all
+
+The third is the one worth being careful about. A rejected attempt, a
+watchdog kill or a non-steady measurement is not an incomplete identity that
+might later be repaired -- it is an event that must never reach throughput
+calibration, and nothing is persisted for it. Collapsing it into quarantine
+would leave failure evidence sitting in a namespace whose purpose is
+"salvageable".
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+
+import pytest
+
+from core.runtime_control.calibration_derivation import (
+    SUPPORTED_UNITS,
+    DerivedDurationRecord,
+    IdentityContext,
+    NotDerivable,
+    QuarantinedDerivation,
+    derive_duration_calibration_record,
+    evaluate_affected_bucket_after_write,
+    persist_duration_calibration_record,
+)
+from core.runtime_control.records import RuntimeObservation
+
+EVIDENCE = pathlib.Path("docs/design/pregate_evidence/runtime_observations")
+
+CONTEXT = IdentityContext(
+    task_identity="tidmad_denoise",
+    data_shape_class="psd10000000_seg200_files20",
+    hardware_uuid="GPU-1111-aaaa",
+    runtime_stack_identity="stack:cb380df61b90",
+)
+
+
+def _raw() -> dict:
+    """One real persisted System A record."""
+    path = sorted(EVIDENCE.glob("*.jsonl"))[0]
+    return json.loads(path.read_text().splitlines()[0])
+
+
+def _observation(**mutations) -> RuntimeObservation:
+    payload = json.loads(json.dumps(_raw()))
+    for key, value in mutations.items():
+        payload[key] = value
+    return RuntimeObservation.model_validate(payload)
+
+
+class TestTheMeasurementIsCarriedNotRecomputed:
+    def test_the_duration_is_system_a_s_own_number(self):
+        """The architectural constraint. If this ever differs from System A's
+        median, System B has started measuring, which it must not."""
+        obs = _observation()
+        result = derive_duration_calibration_record(obs, "training", identity=CONTEXT)
+        assert isinstance(result, DerivedDurationRecord)
+
+        source = obs.components["training"].measurement
+        assert source is not None
+        assert result.measured_value_ms == source.unit_time_ms_median
+        assert result.n_measured_units == source.n_measured_units
+        assert result.measurement_unit == source.unit
+
+    def test_it_is_always_a_duration_and_never_a_requirement(self):
+        """A promoted millisecond must never be able to answer a memory
+        query. `measurement_kind` is an identity dimension precisely so the
+        two cannot meet."""
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        assert isinstance(result, DerivedDurationRecord)
+        assert result.identity.measurement_kind == "duration"
+
+    def test_identity_comes_from_the_context_and_the_recorded_family(self):
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        assert isinstance(result, DerivedDurationRecord)
+        identity = result.identity
+        assert identity.task_identity == CONTEXT.task_identity
+        assert identity.hardware_uuid == CONTEXT.hardware_uuid
+        assert identity.runtime_stack_identity == CONTEXT.runtime_stack_identity
+        # The family is the trainer's own, not the context's -- System A and
+        # System B must share one family namespace.
+        assert identity.model_family == _raw()["calibration_context"]["model_family"]
+
+    def test_the_envelope_inputs_are_what_actually_ran(self):
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        assert isinstance(result, DerivedDurationRecord)
+        context = _raw()["calibration_context"]
+        assert result.workload["batch_size"] == context["batch_size"]
+        assert result.workload["seg_size"] == context["seg_size"]
+
+    def test_training_and_inference_derive_to_different_identities(self):
+        train = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        infer = derive_duration_calibration_record(_observation(), "inference", identity=CONTEXT)
+        assert isinstance(train, DerivedDurationRecord)
+        assert isinstance(infer, DerivedDurationRecord)
+        assert train.identity.identity_key != infer.identity.identity_key
+
+
+class TestFailureEvidenceIsNotCalibrationEvidence:
+    """The D4 rule, enforced at the converter.
+
+    `calibration_policy.py:279-285` records it: "measured OOM, wall-cap hits
+    and abnormal termination are valuable failure evidence but must not
+    update throughput calibration", and anticipates "another producer" doing
+    exactly that. This converter would be that producer if it did not gate.
+    """
+
+    @pytest.mark.parametrize(
+        "label,mutation",
+        [
+            ("watchdog fired", {"watchdog_status": "killed"}),
+            ("failed terminal status", {"final_status": "error"}),
+        ],
+    )
+    def test_a_failed_attempt_yields_nothing(self, label, mutation):
+        result = derive_duration_calibration_record(
+            _observation(**mutation), "training", identity=CONTEXT
+        )
+        assert isinstance(result, NotDerivable), label
+        assert result.reason
+
+    def test_a_rejected_admission_yields_nothing(self):
+        payload = json.loads(json.dumps(_raw()))
+        payload["admission"]["decision"] = "rejected"
+        obs = RuntimeObservation.model_validate(payload)
+        assert isinstance(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT), NotDerivable
+        )
+
+    def test_a_non_steady_measurement_yields_nothing(self):
+        """A rate that had not stabilised is not a rate."""
+        payload = json.loads(json.dumps(_raw()))
+        payload["components"]["training"]["measurement"]["steady_state_reached"] = False
+        obs = RuntimeObservation.model_validate(payload)
+        assert isinstance(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT), NotDerivable
+        )
+
+    def test_not_derivable_is_distinct_from_quarantine(self):
+        """Failure evidence must not land in the salvageable namespace. A
+        rejected attempt is not an identity that might later be repaired."""
+        failed = derive_duration_calibration_record(
+            _observation(final_status="error"), "training", identity=CONTEXT
+        )
+        incomplete = derive_duration_calibration_record(_observation(), "training", identity=None)
+        assert isinstance(failed, NotDerivable)
+        assert isinstance(incomplete, QuarantinedDerivation)
+
+    @pytest.mark.parametrize("phase", ["setup", "scoring", "orchestration"])
+    def test_a_non_throughput_phase_is_not_derivable(self, phase):
+        """`setup` IS measured by System A, but it is not a throughput rate;
+        scoring and orchestration have no production measurement. None may be
+        reinterpreted as one."""
+        result = derive_duration_calibration_record(_observation(), phase, identity=CONTEXT)
+        assert isinstance(result, NotDerivable)
+
+
+class TestIncompleteIdentityQuarantines:
+    def test_a_missing_identity_context_quarantines_with_the_fact_kept(self):
+        result = derive_duration_calibration_record(_observation(), "training", identity=None)
+        assert isinstance(result, QuarantinedDerivation)
+        assert "identity_context" in result.missing_identity_fields
+        # The measurement is preserved: it really happened.
+        assert result.observation_payload["measured_value_ms"] > 0
+
+    def test_a_missing_model_family_quarantines(self):
+        payload = json.loads(json.dumps(_raw()))
+        payload["calibration_context"]["model_family"] = ""
+        obs = RuntimeObservation.model_validate(payload)
+        result = derive_duration_calibration_record(obs, "training", identity=CONTEXT)
+        assert isinstance(result, QuarantinedDerivation)
+        assert "model_family" in result.missing_identity_fields
+
+    def test_no_fabricated_default_reaches_an_eligible_record(self):
+        """ "unknown" is never substituted for a family that was not
+        recorded. That is the whole point of the quarantine namespace."""
+        payload = json.loads(json.dumps(_raw()))
+        payload["calibration_context"]["model_family"] = "   "
+        obs = RuntimeObservation.model_validate(payload)
+        result = derive_duration_calibration_record(obs, "training", identity=CONTEXT)
+        assert not isinstance(result, DerivedDurationRecord)
+
+    def test_an_unmapped_unit_quarantines_rather_than_guessing(self):
+        payload = json.loads(json.dumps(_raw()))
+        payload["components"]["training"]["measurement"]["unit"] = "furlongs"
+        obs = RuntimeObservation.model_validate(payload)
+        result = derive_duration_calibration_record(obs, "training", identity=CONTEXT)
+        assert isinstance(result, QuarantinedDerivation)
+        assert "furlongs" in result.reason
+
+    def test_every_supported_unit_names_its_phase_explicitly(self):
+        """No unchecked cast. An unrecognised unit means we do not know what
+        was measured, and a guess would enter a bucket other measurements
+        are averaged into."""
+        assert set(SUPPORTED_UNITS.values()) <= {"training", "inference"}
+        assert "optimizer_step" in SUPPORTED_UNITS
+
+
+class TestIdempotency:
+    def test_the_same_event_derives_to_the_same_identity(self):
+        """Content addressing is the idempotency mechanism: an identical
+        derivation hashes to the identical registry id and dedups, so
+        reprocessing cannot advance a promotion sample count twice."""
+        a = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        b = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        assert isinstance(a, DerivedDurationRecord)
+        assert isinstance(b, DerivedDurationRecord)
+        assert a.identity.identity_key == b.identity.identity_key
+        assert a.source_reference == b.source_reference
+
+    def test_the_source_reference_links_back_to_system_a(self):
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        assert isinstance(result, DerivedDurationRecord)
+        assert result.source_reference["derived_from"] == "runtime_observation"
+        assert result.source_reference["system_a_timestamp"] == _raw()["timestamp"]
+
+    def test_two_different_phases_of_one_event_are_not_one_record(self):
+        train = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        infer = derive_duration_calibration_record(_observation(), "inference", identity=CONTEXT)
+        assert isinstance(train, DerivedDurationRecord)
+        assert isinstance(infer, DerivedDurationRecord)
+        assert train.source_reference != infer.source_reference
+
+
+class TestThePureBoundary:
+    def test_the_converter_performs_no_io(self):
+        """Pure by construction: no registry, no filesystem, no clock. A
+        converter that wrote would make failure isolation impossible to
+        reason about."""
+        import ast
+        from pathlib import Path
+
+        import core.runtime_control.calibration_derivation as mod
+
+        tree = ast.parse(Path(mod.__file__).read_text())
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+
+        forbidden = {"os", "pathlib", "time", "datetime"}
+        assert not (imported & forbidden), (
+            f"the pure converter imports I/O or clock modules: {imported & forbidden}"
+        )
+        assert not any("calibration_registry" in name for name in imported), (
+            "the converter must not reach the registry; persistence is a separate responsibility"
+        )
+
+
+class TestPersistenceIsIsolatedAndIdempotent:
+    """The safety boundary C-C3c exists to hold.
+
+    System A is already durable when this runs. The operator rule is
+    explicit: fail-open for the scientific workflow, fail-closed for
+    calibration authority. A registry that is full, locked or absent must
+    cost this run its calibration sample and nothing else.
+    """
+
+    @staticmethod
+    def _kwargs(registry):
+        return dict(
+            registry=registry,
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+            software_stack={"torch": "2.10.0+cu128"},
+        )
+
+    def _registry(self, tmp_path):
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+
+        return CalibrationRegistry(tmp_path / "runtime_calibration_v2")
+
+    def test_an_eligible_derivation_is_written_once(self, tmp_path):
+        registry = self._registry(tmp_path)
+        result = derive_duration_calibration_record(_observation(), "training", identity=CONTEXT)
+        outcome = persist_duration_calibration_record(result, **self._kwargs(registry))
+        assert outcome.kind == "eligible"
+        assert outcome.record_id
+        assert len(registry.load_manifest().observation_ids) == 1
+
+    def test_reprocessing_the_same_event_does_not_add_a_second_sample(self, tmp_path):
+        """Idempotency through content addressing, not a ledger. If this
+        broke, one attempt could carry a bucket over the promotion
+        threshold by itself."""
+        registry = self._registry(tmp_path)
+        kwargs = self._kwargs(registry)
+        first = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **kwargs,
+        )
+        second = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **kwargs,
+        )
+        assert first.record_id == second.record_id
+        assert len(registry.load_manifest().observation_ids) == 1
+
+    def test_a_quarantined_derivation_never_enters_the_eligible_list(self, tmp_path):
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=None),
+            **self._kwargs(registry),
+        )
+        assert outcome.kind == "quarantined"
+        manifest = registry.load_manifest()
+        assert manifest.observation_ids == []
+        assert len(manifest.quarantined_ids) == 1
+
+    def test_failure_evidence_is_written_to_neither_namespace(self, tmp_path):
+        """NotDerivable persists nothing at all. A rejected or timed-out
+        attempt is not salvageable evidence waiting for a better identity."""
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(
+                _observation(final_status="error"), "training", identity=CONTEXT
+            ),
+            **self._kwargs(registry),
+        )
+        assert outcome.kind == "not_derivable"
+        manifest = registry.load_manifest()
+        assert manifest.observation_ids == []
+        assert manifest.quarantined_ids == []
+
+    def test_a_registry_failure_is_reported_not_raised(self):
+        """The isolation contract. System A is durable already; a storage
+        problem here must not become an exception the attempt loop has to
+        survive."""
+
+        class BrokenRegistry:
+            def record_observation(self, obs):
+                raise OSError("disk full")
+
+            def quarantine_observation(self, *args, **kwargs):
+                raise OSError("disk full")
+
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **self._kwargs(BrokenRegistry()),
+        )
+        assert outcome.kind == "failed"
+        assert "disk full" in (outcome.detail or "")
+
+    def test_a_quarantine_failure_is_also_reported_not_raised(self):
+        class BrokenRegistry:
+            def quarantine_observation(self, *args, **kwargs):
+                raise OSError("disk full")
+
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=None),
+            **self._kwargs(BrokenRegistry()),
+        )
+        assert outcome.kind == "failed"
+
+    def test_the_written_record_carries_the_v2_identity(self, tmp_path):
+        """Without it the record is back in the v1 situation: a measurement
+        in a bucket that cannot say what it is about."""
+        registry = self._registry(tmp_path)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(_observation(), "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        stored = registry.load_observation(outcome.record_id or "")
+        assert stored.identity is not None
+        assert stored.identity.task_identity == CONTEXT.task_identity
+        assert stored.identity.hardware_uuid == CONTEXT.hardware_uuid
+        assert stored.identity.measurement_kind == "duration"
+
+    def test_the_stored_duration_is_system_a_s_number(self, tmp_path):
+        registry = self._registry(tmp_path)
+        obs = _observation()
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        stored = registry.load_observation(outcome.record_id or "")
+        source = obs.components["training"].measurement
+        assert source is not None
+        assert stored.measured_value_ms == source.unit_time_ms_median
+
+
+class TestAffectedBucketPromotion:
+    """O-3: after a successful eligible write, evaluate only that bucket.
+
+    The frozen O-4 policy is visible in these numbers and must stay that way:
+    `provisional_min_observations=2`, `validated_min_observations=3`,
+    `consistency_max_min_ratio=1.5`. Changing any of them moves
+    `runtime_policy_identity`, which invalidates every existing workspace
+    lock -- whose only v1 remedy is a new workspace.
+    """
+
+    @staticmethod
+    def _kwargs(registry):
+        return dict(
+            registry=registry,
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+            software_stack={"torch": "2.10.0+cu128"},
+        )
+
+    def _write(self, registry, ms: float):
+        """One derived observation at a given measured rate."""
+        payload = json.loads(json.dumps(_raw()))
+        payload["components"]["training"]["measurement"]["unit_time_ms_median"] = ms
+        obs = RuntimeObservation.model_validate(payload)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        assert outcome.record_id
+        return registry.load_observation(outcome.record_id)
+
+    @pytest.fixture
+    def registry(self, tmp_path):
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+
+        return CalibrationRegistry(tmp_path / "runtime_calibration_v2")
+
+    def test_one_observation_does_not_promote(self, registry):
+        written = self._write(registry, 23.0)
+        outcome = evaluate_affected_bucket_after_write(registry, written)
+        assert outcome.kind == "not_promoted"
+        assert "below the minimum" in (outcome.reason or "")
+
+    def test_the_refusal_says_why(self, registry):
+        """ "Zero authoritative buckets" must be explainable, not an absence.
+        The live registry sat at 20 observations and 0 promotions precisely
+        because nothing recorded a reason."""
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 23.0))
+        assert outcome.reason
+        assert outcome.n_observations == 1
+
+    def test_two_consistent_observations_promote_to_provisional(self, registry):
+        self._write(registry, 23.0)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 23.5))
+        assert outcome.kind == "promoted"
+        assert outcome.level == "provisional"
+        assert outcome.n_observations == 2
+
+    def test_three_consistent_observations_reach_validated(self, registry):
+        self._write(registry, 23.0)
+        self._write(registry, 23.5)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 24.0))
+        assert outcome.kind == "promoted"
+        assert outcome.level == "validated"
+
+    def test_an_inconsistent_bucket_does_not_promote(self, registry):
+        """The drift rule: a new observation that breaks the 1.5 ratio blocks
+        validation rather than being averaged in."""
+        self._write(registry, 23.0)
+        self._write(registry, 23.5)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 240.0))
+        assert outcome.kind == "not_promoted"
+
+    def test_re_evaluating_an_unchanged_bucket_is_idempotent(self, registry):
+        """NOT free, unlike observations. `CalibrationPromotion`
+        content-addresses `derived_from_generation`, which increments on
+        every committed index write -- so the same evidence re-evaluated
+        later hashes differently and would write a second promotion.
+        Equivalence is checked on (bucket_key, source ids, level) instead.
+        """
+        self._write(registry, 23.0)
+        written = self._write(registry, 23.5)
+        first = evaluate_affected_bucket_after_write(registry, written)
+        second = evaluate_affected_bucket_after_write(registry, written)
+        assert first.kind == "promoted"
+        assert second.kind == "already_promoted"
+        assert second.promotion_id == first.promotion_id
+
+    def test_a_failure_is_reported_not_raised(self):
+        """Promotion is a derived view. A failure costs the bucket its
+        authority, never the run its result."""
+
+        class BrokenRegistry:
+            def iter_observations(self):
+                raise OSError("registry unreadable")
+
+        outcome = evaluate_affected_bucket_after_write(
+            BrokenRegistry(), object.__new__(type("X", (), {}))
+        )
+        assert outcome.kind == "failed"
+        assert outcome.reason
+
+    def test_the_frozen_policy_values_are_the_ones_in_force(self):
+        """A guard on O-4, not a restatement of it: these exact numbers are
+        what the promotions above depend on, and changing one moves
+        `runtime_policy_identity`."""
+        from core.runtime_control.calibration_policy import DEFAULT_POLICY
+
+        assert DEFAULT_POLICY.provisional_min_observations == 2
+        assert DEFAULT_POLICY.validated_min_observations == 3
+        assert DEFAULT_POLICY.consistency_max_min_ratio == 1.5
+        assert DEFAULT_POLICY.identity == "calibration_policy@1.0.0+b83994605c57"
+
+    def test_only_the_affected_bucket_is_evaluated(self, registry):
+        """A write tells us exactly one bucket changed. Evaluating every
+        observation would let an unrelated candidate's samples push this
+        bucket over the promotion threshold.
+
+        Caught by mutation: removing the bucket filter left every earlier
+        test green, because they all used a single bucket.
+        """
+        from core.runtime_control.calibration_policy import bucket_key
+
+        # Two observations in bucket A, one in bucket B (different family).
+        self._write(registry, 23.0)
+        written_a = self._write(registry, 23.5)
+
+        other = json.loads(json.dumps(_raw()))
+        other["calibration_context"]["model_family"] = "some_other_family"
+        obs_b = RuntimeObservation.model_validate(other)
+        out_b = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs_b, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        written_b = registry.load_observation(out_b.record_id or "")
+        assert bucket_key(written_a) != bucket_key(written_b)
+
+        # Bucket B has ONE observation and must not promote, even though the
+        # registry now holds three in total.
+        outcome_b = evaluate_affected_bucket_after_write(registry, written_b)
+        assert outcome_b.kind == "not_promoted"
+        assert outcome_b.n_observations == 1, (
+            "the evaluation counted observations from another bucket"
+        )
+
+    def test_a_dirty_observation_in_the_bucket_is_screened_out(self, registry):
+        """`evaluate_bucket` RAISES on an unscreened dirty observation, so
+        without the filter this whole hook would return `failed` — or worse,
+        average an ineligible measurement into a promoted rate.
+
+        Caught by mutation: removing the screen left every earlier test
+        green, because none of them created a dirty record.
+        """
+        from core.runtime_control.calibration_policy import bucket_key, eligibility_problems
+        from core.runtime_control.registry_schemas import CalibrationObservation
+
+        self._write(registry, 23.0)
+        written = self._write(registry, 23.5)
+
+        # The dirty marker must NOT be a bucket dimension, or the record
+        # simply lands in a different bucket and proves nothing. An empty
+        # `measurement_unit` fails that way -- it is bucket component 2.
+        # `source_run["outcome"]` is not a bucket dimension, and it is the
+        # D4 failure-evidence screen: exactly the record that must never be
+        # averaged into a throughput rate.
+        dirty = CalibrationObservation(
+            operation="training",
+            measurement_unit="optimizer_step",
+            measured_value_ms=999.0,
+            source_run={"outcome": "oom"},
+            workload={"batch_size": 8, "seg_size": 10_000},
+            model_family=_raw()["calibration_context"]["model_family"],
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            software_stack={"torch": "2.10.0+cu128"},
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+        )
+        assert eligibility_problems(dirty), "fixture is no longer dirty"
+        assert bucket_key(dirty) == bucket_key(written), "fixture left the bucket"
+        registry.record_observation(dirty)
+
+        outcome = evaluate_affected_bucket_after_write(registry, written)
+        assert outcome.kind == "promoted", f"the dirty record broke the hook: {outcome.reason}"
+        assert outcome.n_observations == 2, (
+            "an ineligible observation was averaged into the promoted rate"
+        )

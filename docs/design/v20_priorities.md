@@ -2136,8 +2136,9 @@ site: calibration promotion (§3.2) and the isolated pre-flight worker
 | PR | Title | Main problem | Dependency | Blocking for V20 launch? |
 |---|---|---|---|---|
 | **A** | Wire isolated pre-flight into production | Long-lived parent retains a CUDA context and allocator cache | none | **Yes** |
-| **B** | Chain/pair GPU aggregation and contention attribution | The per-attempt cap does not constrain actual chain process-tree usage | PR A validation | **Conditional, likely yes** |
-| **C** | Measured-evidence admission + calibration production wiring | Observations are collected but never promoted or applied | independent after design review | **Yes** |
+| **B** | Chain/pair GPU aggregation and contention attribution | The per-attempt cap does not constrain actual chain process-tree usage | PR A validation | **MERGED 2026-08-02** (PR #153) |
+| **C1** | Calibration identity, promotion and honest reporting | Observations are collected but never promoted, applied, or reported as unauthoritative | independent after design review | **Yes** — implemented, in review |
+| **C2** | Authoritative GPU requirement acquisition and delivery | PR B's admission gate has no production input | C2 producer audit | **Yes** — not authorized yet |
 | **D** | Formal HealthGate and zero-valid-trial policy | V19 deliberately used observe-only mode; formal proceeded with no valid trial | operator policy decision | **Yes** |
 | **E** | Campaign-scoped control state | An old campaign's STOP can block a new campaign | independent | **Yes** |
 
@@ -2546,6 +2547,24 @@ and free VRAM as they were before the failure.
 
 
 ### 20.5 PR C — Measured-evidence admission and calibration production wiring
+
+> **Status, 2026-08-02.** PR C is implemented as **two** PRs. The
+> authoritative record for both is
+> `docs/design/v20_priorities/pr_c_measured_evidence_admission.md`.
+>
+> * **C1 — calibration identity, promotion and honest reporting.**
+>   Implemented on `feature/v20-pr-c1-calibration-identity-promotion`, in
+>   review. Layer-3 validated on real hardware (§17b there).
+>   **C1 supplies nothing to PR B's admission gate, by design** — duration is
+>   milliseconds, and a promoted millisecond is never a memory requirement.
+>   So the D-B5 dependency below is **C2's**, not C1's.
+> * **C1 scope correction:** historical duration is **observability-only** —
+>   collected, promoted and reported, but never an input to the production
+>   allow/reject time decision (operator decision, 2026-08-02). The paragraph
+>   below describing PR C as owning "calibration production wiring" is
+>   therefore accurate for C2 and **not** for C1.
+> * **C2 — authoritative GPU requirement acquisition and delivery.** Not
+>   authorized; gated on the read-only producer audit.
 
 #### D-B5 dependency — PR C owns formal cold-start measurement
 

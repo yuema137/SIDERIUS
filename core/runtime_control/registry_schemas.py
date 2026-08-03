@@ -29,9 +29,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.runtime_control.estimate_types import ConcurrencyIdentity
 from core.runtime_control.identity import _canonicalize
+from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import PredictionSource
 
-REGISTRY_SCHEMA_VERSION = "1.0.0"
+#: Bumped to 2.0.0 by V20 PR C1 / C-C2b. The version is INSIDE every
+#: record's content hash (``hash_payload`` dumps the whole model), so a
+#: bump is indistinguishable from corruption to a loader reading the old
+#: tree -- which is exactly why operator decision O-1 gives each major
+#: version its own tree rather than migrating in place. See
+#: ``calibration_registry.default_registry_root``.
+REGISTRY_SCHEMA_VERSION = "2.0.0"
 
 ObservationOperation = Literal["setup", "training", "inference", "io"]
 #: D4 lifecycle (operator, 2026-07-30): "unvalidated" IS the candidate
@@ -161,6 +168,13 @@ class CalibrationObservation(BaseModel):
         "(observations are immutable, so this field can never be raised "
         "in place) — never trust it as authority.",
     )
+    #: V20 PR C1 / C-C2: the v2 exact-match identity (task, data-shape
+    #: class, device instance, measurement kind...). Optional so the probe
+    #: producer, which has no resolved identity yet, keeps working; the
+    #: DERIVED producer always sets it, and persistence refuses an eligible
+    #: derived record without one. A bucket built from a record whose
+    #: identity is absent would be the v1 situation again.
+    identity: MeasurementIdentity | None = None
     timestamp_metadata: str | None = Field(
         default=None, description="Excluded from the content hash."
     )
@@ -255,6 +269,52 @@ class CalibrationPromotion(BaseModel):
         return content_id(self.hash_payload())
 
 
+class QuarantineRecord(BaseModel):
+    """An observation that cannot be trusted with an identity, kept anyway.
+
+    V20 PR C1 / C-C2c, operator decision O-2. A measurement whose identity is
+    incomplete is still a measurement that really happened, and refusing the
+    write would destroy it. But it cannot be bucketed either: a record whose
+    task, device or family is unknown would either land in the wrong bucket
+    or manufacture a new one, and both are worse than not being there.
+
+    So it goes to a namespace of its own -- auditable, countable, and
+    structurally unable to reach a bucket, a promotion, an applicability
+    verdict or any authority. It is evidence about a measurement that was
+    taken, not evidence about a candidate.
+
+    The refused-write alternative was considered and rejected: a write that
+    never happened is invisible, and the operator learns nothing about how
+    often identity is incomplete. A quarantined record answers "how much
+    evidence are we losing, and why".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: str = REGISTRY_SCHEMA_VERSION
+    #: The record as it would have been written, verbatim. Kept whole so a
+    #: later build with a complete identity can re-derive it rather than
+    #: re-measure.
+    observation_payload: dict[str, Any]
+    #: Why it is unusable, in words a reader can act on.
+    reason: str = Field(min_length=1)
+    #: Which identity dimensions were absent or blank. Empty when the record
+    #: was quarantined for a reason other than missing identity.
+    missing_identity_fields: tuple[str, ...] = ()
+    timestamp_metadata: str | None = Field(
+        default=None, description="Wall clock; excluded from the content hash."
+    )
+
+    def hash_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        payload.pop("timestamp_metadata", None)
+        return payload
+
+    @property
+    def quarantine_id(self) -> str:
+        return content_id(self.hash_payload())
+
+
 class RegistryManifest(BaseModel):
     """Compact index + schema entry point (registry.json). Rebuildable
     from the record files; ``generation`` increments on every committed
@@ -267,3 +327,133 @@ class RegistryManifest(BaseModel):
     environment_profile_ids: list[str] = Field(default_factory=list)
     legacy_sources: list[LegacySourceReference] = Field(default_factory=list)
     promotion_ids: list[str] = Field(default_factory=list)
+    #: O-2. Deliberately a SEPARATE list from `observation_ids`: every
+    #: reader that walks observations walks that list, so a quarantined
+    #: record cannot reach a bucket by being forgotten about.
+    quarantined_ids: list[str] = Field(default_factory=list)
+
+
+# ── V20 PR C1 / C-C2: the v2 identity model ─────────────────────────────────
+#
+# The v1 bucket key (`calibration_policy.bucket_components`) put identity,
+# applicability and policy into one seven-part string. Three consequences,
+# each measured on the live registry during the PR C audit:
+#
+#   * a matching bucket READ as applicability, when it is only a candidate
+#     set that still has to be checked;
+#   * `task` and `data_shape_class` were absent entirely, while the registry
+#     lives at one per-user root -- so two different tasks with the same
+#     family, hardware and stack shared a bucket;
+#   * the device INSTANCE was absent: `hardware_compatibility_id` describes a
+#     model of GPU, not the card. A measurement from one card could speak for
+#     any other card of the same model, and -- with a matching profile -- for
+#     an entry from a different model class entirely.
+#
+# So identity is separated from applicability and from policy:
+#
+#   MeasurementIdentity    WHO this measurement is about.  Exact match.
+#   ApplicabilityEnvelope  WHO ELSE it may speak for.      Bounded ranges.
+#   CalibrationPolicy      WHEN it becomes trustworthy.    Configured.
+#
+# This module owns the first. The envelope and the policy live in
+# `calibration_policy.py` beside the rules that read them.
+
+#: What a measurement measures. A first-class identity dimension, so a
+#: promoted millisecond can never answer a memory query -- the failure the
+#: PR C audit found when the ladder assumed the calibration registry could
+#: supply PR B's `requirement_mib`. It cannot: it stores `measured_value_ms`.
+#:
+#: Deliberately NOT declared: `gpu_allocated` and `gpu_reserved`. Allocated
+#: has exactly one production call site and is an in-process allocator view;
+#: reserved has no producer anywhere. Declaring a kind nothing emits is how
+#: `IsolatedProbeResult.cuda_peak_allocated_gb` came to exist as a field that
+#: reads like a measurement and is never written.
+MeasurementKind = Literal[
+    "duration",
+    "gpu_requirement",
+    "host_memory",
+]
+
+#: Family value meaning "we could not classify this". First-class -- never
+#: the nearest known family -- and never authoritative (frozen invariant,
+#: PR C design §8.A).
+UNKNOWN_MODEL_FAMILY = "unknown"
+
+
+class MeasurementIdentity(BaseModel):
+    """Exact-match identity of a measurement: WHO it is about.
+
+    Every field here is compared for equality. Nothing in this model is a
+    range, a threshold or a tolerance -- those are the envelope's and the
+    policy's job. If two measurements differ in any field below, they are
+    about different things and may not substitute for one another.
+
+    `extra="forbid"` because a silently-absorbed field would be an identity
+    dimension nobody compares.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    measurement_kind: MeasurementKind
+    #: Which task this measurement was taken for. Absent from v1 entirely,
+    #: which is only safe if one account runs one task.
+    task_identity: str = Field(min_length=1)
+    #: The data-shape class the measurement was taken under. Not the dataset
+    #: path: a shape class is what makes two datasets interchangeable for
+    #: resource purposes.
+    data_shape_class: str = Field(min_length=1)
+    model_family: str = Field(min_length=1)
+    #: Full candidate configuration, content-hashed. `model_family` alone
+    #: cannot separate two candidates of the same family with materially
+    #: different configs.
+    candidate_config_hash: str = Field(min_length=1)
+    #: The framework's five-phase vocabulary, not the registry's legacy
+    #: four-value `ObservationOperation`. Nothing loses meaning: `io` is
+    #: declared there and produced nowhere, while `scoring` and
+    #: `orchestration` are real phases v1 could not express.
+    phase: RuntimePhase
+    #: The device INSTANCE, not its model. `hardware_compatibility_id`
+    #: describes a class of card; two identical cards in one host are not the
+    #: same device, and a measurement from one is not authoritative for the
+    #: other.
+    hardware_uuid: str = Field(min_length=1)
+    #: `stack_identity(...)` digest of the software stack.
+    runtime_stack_identity: str = Field(min_length=1)
+
+    @property
+    def family_is_known(self) -> bool:
+        """False when the family could not be classified.
+
+        Callers must not treat an unknown-family measurement as
+        authoritative (frozen invariant §8.A). Exposed as a property rather
+        than enforced by a validator because the RECORD is legitimate --
+        it is evidence, and quarantining it is O-2's job; what is forbidden
+        is granting it authority.
+        """
+        return self.model_family != UNKNOWN_MODEL_FAMILY
+
+    def components(self) -> tuple[str, ...]:
+        """Ordered identity components, stack LAST.
+
+        Mirrors `bucket_components`' convention so drift analysis can group
+        by `components()[:-1]` -- same everything, different stack.
+        """
+        return (
+            self.measurement_kind,
+            self.task_identity,
+            self.data_shape_class,
+            self.model_family,
+            self.candidate_config_hash,
+            self.phase,
+            self.hardware_uuid,
+            self.runtime_stack_identity,
+        )
+
+    @property
+    def identity_key(self) -> str:
+        return "|".join(self.components())
+
+
+# `CalibrationObservation.identity` forward-references a model defined
+# below it; resolve now that both exist.
+CalibrationObservation.model_rebuild()

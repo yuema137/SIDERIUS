@@ -35,11 +35,11 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from statistics import median
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.runtime_control.estimate_types import (
     ConcurrencyIdentity,
@@ -669,3 +669,88 @@ def downgrade_for_applicability(
         warnings=(*estimate.warnings, note),
         **payload,
     )
+
+
+# ── V20 PR C1 / C-C2: the applicability envelope ────────────────────────────
+
+
+class ApplicabilityEnvelope(BaseModel):
+    """WHO ELSE a bucket of measurements may speak for.
+
+    The second of the three models the PR C design separates (§8.1).
+    `MeasurementIdentity` answers "is this the same thing?" by equality;
+    this answers "is the candidate inside the region we actually observed?"
+    by bounded range. Neither substitutes for the other, and neither is
+    policy.
+
+    Built from what a bucket MEASURED, never from what a caller hopes. A
+    dimension with no observed span is absent from `ranges`, and
+    `applicability_for_request` fails closed on it -- absent evidence is
+    never supporting evidence. That rule already exists; this model gives
+    it a typed carrier instead of a bare dict passed between functions.
+
+    A matching identity plus an out-of-range candidate is NOT applicable.
+    That is the frozen invariant "a bucket match is not applicability"
+    (§8.A) made structural: you cannot obtain an envelope verdict by
+    matching the key, because the key is not in this model.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: Dimension -> (observed_min, observed_max), from real measurements.
+    #: Typical dimensions: parameter_count, batch_size, segment_length.
+    ranges: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    #: How many observations backed these ranges. A span derived from one
+    #: sample is a point, not a range; promotion policy owns the threshold,
+    #: but the count travels with the envelope so a reader can judge it.
+    sample_count: int = Field(default=0, ge=0)
+    #: The concurrency class every backing observation was taken under.
+    #: Mixing idle and contended evidence into one span would describe a
+    #: condition that never occurred.
+    concurrency_identity: ConcurrencyIdentity | None = None
+
+    @model_validator(mode="after")
+    def _spans_are_ordered(self) -> ApplicabilityEnvelope:
+        for dim, span in self.ranges.items():
+            if span[0] > span[1]:
+                raise ValueError(
+                    f"{dim}: observed_min {span[0]} exceeds observed_max {span[1]}; "
+                    "an inverted span would make every request look out of range"
+                )
+        return self
+
+    def classify(self, requested: dict[str, float]) -> tuple[RuntimeApplicability, tuple[str, ...]]:
+        """Weakest label across the requested dimensions, with reasons."""
+        return applicability_for_request(requested=requested, observed_ranges=self.ranges)
+
+    @classmethod
+    def from_observations(
+        cls,
+        observations: Sequence[CalibrationObservation],
+        *,
+        dimensions: Sequence[str] = ("batch_size", "segment_length"),
+    ) -> ApplicabilityEnvelope:
+        """Derive the envelope from a bucket's own observations.
+
+        Reads the numeric dimensions out of `workload`; a dimension no
+        observation carries is simply absent, which is what makes the
+        read side fail closed on it rather than inventing a span.
+        """
+        spans: dict[str, tuple[float, float]] = {}
+        for dim in dimensions:
+            values = [
+                float(obs.workload[dim])
+                for obs in observations
+                if isinstance(obs.workload.get(dim), (int, float))
+            ]
+            if values:
+                spans[dim] = (min(values), max(values))
+        # Annotated, not inferred: a set comprehension over a Literal-typed
+        # expression widens the element type to `str`, so `regimes.pop()`
+        # would be `str` and could not populate a `ConcurrencyIdentity` field.
+        regimes: set[ConcurrencyIdentity] = {obs.concurrency_identity for obs in observations}
+        return cls(
+            ranges=spans,
+            sample_count=len(observations),
+            concurrency_identity=regimes.pop() if len(regimes) == 1 else None,
+        )

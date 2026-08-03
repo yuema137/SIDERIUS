@@ -92,6 +92,19 @@ class BootstrapReport(BaseModel):
             lines.append(f"  registry     : {self.registry_root}")
         if self.observation_ids:
             lines.append(f"  observations : {len(self.observation_ids)} recorded")
+        # C-C7: "N recorded" is the number that misled for weeks -- the live
+        # v1 registry showed 20 and was never once authoritative. The state
+        # line says whether any of it can actually decide anything, and why
+        # not when it cannot. Read-only and never raises; a reporting failure
+        # must not change what bootstrap concluded.
+        if self.registry_root:
+            from core.runtime_control.calibration_state import collect_calibration_state
+
+            # `root=` and not a constructed registry: CalibrationRegistry
+            # mkdirs in __init__, so constructing it here would put the one
+            # raising step OUTSIDE the collector's guard and hand render() an
+            # exception from a read-only or vanished root.
+            lines.append("  " + collect_calibration_state(root=self.registry_root).summary_line())
         lines.append(f"  elapsed      : {self.elapsed_seconds:.1f}s")
         if not self.ready:
             lines.append("")
@@ -454,14 +467,17 @@ def production_dependencies() -> BootstrapDependencies:
     def _build_observations(
         result, *, hardware_compatibility_id, execution_environment_id, workload
     ):
-        import torch
+        from core.runtime_control.provenance import capture_software_stack
 
         return probe_observations(
             result,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
             workload=workload,
-            software_stack={"torch": torch.__version__, "cuda": torch.version.cuda},
+            # Shared with the tuner's probe path so both describe one stack
+            # under one identity. Byte-identical to the dict literal this
+            # replaced, so the records already written keep their bucket.
+            software_stack=capture_software_stack(),
             source_run={"run_name": "bootstrap", "tool": "scripts/runtime_bootstrap.py"},
             timestamp_metadata=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         )

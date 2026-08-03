@@ -566,29 +566,47 @@ similarity heuristic.
 These are **invariants**. Implementation must satisfy them; it may not
 re-open them, and a design that cannot meet one is a design to reject.
 
-- [ ] `model_family = "unknown"` is **never** authoritative. It is a
+Status key: `[x]` = satisfied and asserted by a named test in C1;
+`[C2]` = belongs to the GPU-requirement PR and is not yet in force.
+
+- [x] `model_family = "unknown"` is **never** authoritative. It is a
       bucketing failure, not a family.
-- [ ] A matching bucket is **not** applicability. It identifies a candidate
+      → `test_an_unknown_family_never_inherits_known_family_calibration`,
+      `test_an_unknown_model_family_is_never_authoritative`
+- [x] A matching bucket is **not** applicability. It identifies a candidate
       set that must then be checked.
-- [ ] Cross-**task** reuse fails.
-- [ ] Cross-**data-shape-class** reuse fails.
-- [ ] Cross-**GPU-UUID** reuse fails. A 5090 measurement is never
-      H100-authoritative.
-- [ ] Cross-**phase** reuse fails; training and inference never substitute
+      → `evaluate_candidate_authority` checks identity, then bucket state,
+      then the envelope; `test_out_of_range_candidate_is_refused_despite_identical_identity`
+- [x] Cross-**task** reuse fails. → `IDENTITY_ROWS[cross-task]`
+- [x] Cross-**data-shape-class** reuse fails. → `IDENTITY_ROWS[cross-data-shape]`
+- [x] Cross-**GPU-UUID** reuse fails. A 5090 measurement is never
+      H100-authoritative. → `IDENTITY_ROWS[cross-device-uuid]`
+- [x] Cross-**phase** reuse fails; training and inference never substitute
       for each other (PR B measured them 1.8x apart).
-- [ ] Cross-**measurement-kind** reuse fails (§3). A promoted millisecond is
-      never a memory requirement.
-- [ ] Missing identity **never** fails open into "safe to proceed".
-- [ ] Zero authoritative buckets is **never** reported as active
-      calibration.
-- [ ] PR B receives evidence through a **typed production boundary**, not
+      → `IDENTITY_ROWS[cross-phase]`
+- [x] Cross-**measurement-kind** reuse fails (§3). A promoted millisecond is
+      never a memory requirement. → `IDENTITY_ROWS[cross-measurement-kind]`,
+      plus `TestHistoricalDurationCannotReachGpuAdmission` (2 tests) proving
+      the millisecond system cannot even be imported by GPU admission
+- [x] Missing identity **never** fails open into "safe to proceed".
+      → `test_an_observation_without_identity_is_refused`,
+      `test_a_dimension_with_no_measured_evidence_fails_closed`,
+      `TestIdentityIsNotFabricated`
+- [x] Zero authoritative buckets is **never** reported as active
+      calibration. → C-C7 `is_active` is defined by validated buckets, never
+      by record count; `test_observations_without_promotion_are_still_inactive`,
+      `test_a_provisional_bucket_is_not_authoritative`
+- [C2] PR B receives evidence through a **typed production boundary**, not
       the unfulfilled duck-typed `getattr(sandbox, "measured_requirements")`.
       That read is how the gap survived PR B and its whole test suite.
-- [ ] Static estimates remain priors; historical evidence alone is not a
+      *C1 delivers no evidence to PR B by design — duration is milliseconds.*
+- [x] Static estimates remain priors; historical evidence alone is not a
       final gate; an inconclusive measurement becomes neither allow nor
-      reject.
-- [ ] PR B's three refusal lanes keep distinct statuses, budget accounting
-      and shrink authority.
+      reject. *Satisfied in C1 in the strongest available form: after the
+      C-C5b cancellation the v2 registry is not a gate input at all.*
+      → `test_historical_duration_is_observability_only.py` (9 tests)
+- [C2] PR B's three refusal lanes keep distinct statuses, budget accounting
+      and shrink authority. *C1 touches no admission lane.*
 
 ### 8.B Implementation choices — resolvable from the code
 
@@ -1060,6 +1078,65 @@ inconclusive live probe
 Repeated samples where promotion quality depends on statistical
 consistency.
 
+#### Layer-2 completion matrix — C1 `[x]`
+
+Every row below is asserted by a named test. The identity rows are
+parametrised from `IDENTITY_ROWS` in `test_calibration_read_authority.py`,
+each varying **exactly one** dimension so a green row names precisely which
+reuse rule refused.
+
+| Row | Outcome | Test |
+|---|---|---|
+| matching identity, in-range workload | **authoritative** | `test_matching_identity_and_in_range_candidate_is_authoritative` |
+| cross-task | refused | `IDENTITY_ROWS[cross-task]` |
+| cross-data-shape | refused | `IDENTITY_ROWS[cross-data-shape]` |
+| cross-GPU-UUID | refused | `IDENTITY_ROWS[cross-device-uuid]` |
+| cross-phase (training↔inference) | refused | `IDENTITY_ROWS[cross-phase]` |
+| cross-measurement-kind | refused | `IDENTITY_ROWS[cross-measurement-kind]` |
+| runtime-stack mismatch | refused | `IDENTITY_ROWS[cross-stack]` |
+| cross-family / cross-candidate-config | refused | `IDENTITY_ROWS[cross-family, cross-candidate-config]` |
+| in-range workload | granted | `test_the_candidate_is_in_range_in_every_identity_row` |
+| out-of-range workload, identical identity | refused | `test_out_of_range_candidate_is_refused_despite_identical_identity` |
+| dimension with no measured evidence | **fails closed** | `test_a_dimension_with_no_measured_evidence_fails_closed` |
+| missing identity | refused | `test_an_observation_without_identity_is_refused` |
+| unknown model family | never authoritative | `test_an_unknown_family_never_inherits_known_family_calibration` |
+| insufficient observations (1 < 2) | candidate only | `test_one_observation_stays_candidate_only` |
+| 2 consistent / 3 consistent | provisional / validated | `test_two_consistent_observations_are_provisional`, `test_three_consistent_observations_are_validated` |
+| inconsistent observations (ratio > 1.5) | promotion blocked | `test_ratio_above_limit_blocks_promotion` |
+| ratio exactly at the limit | promotes | `test_boundary_ratio_exactly_at_limit_promotes` |
+| concurrency-class separation | separate buckets | `test_each_dimension_separates_buckets`, `test_idle_bucket_is_never_polluted_by_pairwise_writes` |
+| contended / unknown contention | never eligible | `test_contended_and_unknown_are_never_calibration_eligible` |
+| duplicate event / re-evaluation | idempotent | `test_re_evaluating_an_unchanged_bucket_is_idempotent`, `test_recording_the_same_promotion_twice_is_idempotent` |
+| quarantine | kept, never authoritative | `test_calibration_quarantine.py::TestQuarantinedEvidenceHasNoAuthority` (5 tests) |
+| empty registry | INACTIVE, reason given | `test_an_empty_registry_is_inactive_and_says_why` |
+| unreadable registry | UNREADABLE ≠ empty | `test_an_unreadable_registry_is_not_reported_as_empty` |
+| unusable registry root | UNREADABLE, never raises | `test_an_unusable_root_is_reported_not_raised` |
+| zero authoritative buckets | INACTIVE despite evidence | `test_observations_without_promotion_are_still_inactive` |
+| historical contents vs live verdict | **no effect** | `test_the_verdict_is_a_function_of_the_live_measurement_only` |
+
+*Rows deferred to C2, with reason.* `validated calibration contradicted by a
+live measurement` and `inconclusive live probe` both describe a **consumer**
+resolving stored evidence against a live one. C1 has no such consumer — the
+C-C5b cancellation means the live measurement is the only production input,
+so there is nothing to contradict. `expired calibration` likewise needs a
+consumer to expire *for*. These move to C2 with the GPU-requirement gate.
+
+#### Layer-1 reachability checks — C1 `[x]`
+
+| Claim | Test |
+|---|---|
+| successful production events write duration observations | `test_the_derivation_is_called_in_production`, `test_it_is_called_from_run` |
+| System A is durable before the derived view | `test_it_runs_after_the_system_a_append` |
+| failure/timeout/rejection never enter calibration | `test_no_failure_handler_derives_calibration` (parametrised), `test_the_shared_append_helper_does_not_derive` |
+| exactly one derivation seam | `test_the_derivation_is_called_exactly_once_in_the_tuner` |
+| promotion trigger is production-reachable | `test_the_promotion_trigger_is_reachable_from_production` |
+| only an eligible write triggers promotion | `test_promotion_is_triggered_only_by_an_eligible_write` |
+| quarantined evidence never reaches promotion | quarantine records are structurally disjoint from `iter_observations()`, which is promotion's only input (`test_the_two_lists_are_disjoint_by_construction`) |
+| System B failure never costs an attempt | `TestLosingCalibrationNeverCostsAnAttempt` (4 tests) |
+| identity is never fabricated | `TestIdentityIsNotFabricated` (2 tests) |
+| reporting is production-reachable | `test_bootstrap_render_survives_an_unusable_registry_root` |
+| historical data is NOT production-decision-reachable | `test_historical_duration_is_observability_only.py` (9 tests) |
+
 ### Layer 3 — bounded real confirmation, one per PR
 
 The two PRs measure different quantities and must be confirmed separately.
@@ -1074,8 +1151,14 @@ real duration observation (normal formal run)
      measurement_kind = duration
   -> promotion evaluated under the O-4 values
   -> applicability checked against the envelope
-  -> time-budget consumer and the calibration-state report
+  -> the calibration-state report
 ```
+
+> **Corrected 2026-08-02.** This flow previously ended `-> time-budget
+> consumer and the calibration-state report`. The time-budget consumer was
+> cancelled (see C-C5b above); historical duration is observability-only, so
+> the report is the terminus. C1 Layer-3 therefore confirms the **write,
+> promotion and reporting** path end-to-end, not a consumption path.
 
 Passes without any GPU requirement existing. Formal admission still reports
 `policy_unavailable` throughout — expected after C1, not a defect.
@@ -1142,24 +1225,43 @@ fixed candidate and configuration
   -> v2 registry write
   -> affected-bucket promotion evaluation (O-3)
   -> applicability evaluation
-  -> time-budget consumer
-  -> calibration-state report
+  -> calibration-state report          <- terminus (C-C5b cancelled)
 ```
 
-Requirements:
+Requirements — see §17a for the pre-registered plan and §17b for the executed
+evidence:
 
-- [ ] a **temporary v2 registry**; the live v1 tree is read-only evidence
+- [x] a **temporary v2 registry**; the live v1 tree is read-only evidence
       and is never written to or rebuilt;
-- [ ] the same candidate and configuration repeated enough times to cross
+- [x] the same candidate and configuration repeated enough times to cross
       the frozen O-4 threshold (`validated_min_observations = 3`, with
       `consistency_max_min_ratio = 1.5`);
-- [ ] every identity dimension recorded: task, data-shape class, phase,
+- [x] every identity dimension recorded: task, data-shape class, phase,
       model family, GPU UUID, runtime stack, measurement kind;
-- [ ] a mismatching task, GPU UUID, phase or measurement kind is **rejected**
+- [x] a mismatching task, GPU UUID, phase or measurement kind is **rejected**
       — the frozen §8.A isolation rules, proven on real records rather than
       constructed ones;
-- [ ] the report says calibration is **inactive** while zero authoritative
+- [x] the report says calibration is **inactive** while zero authoritative
       buckets exist.
+
+**A Gate is evidence, not a checkbox.** Every box above is claimed only
+against §17b, which records the exact command, the Git SHA it ran at, the
+candidate and configuration, the temporary registry and workspace paths, the
+expected versus actual duration, the retained artifacts, the promotion
+results, the reporting results, and the two negative proofs (registry history
+does not move the live verdict; the v1 tree is byte-identical). A box ticked
+without a matching §17b entry is a defect in this document.
+
+**Recorded acceptance-gate determination for C1:**
+
+| Gate | Determination | Reason |
+|---|---|---|
+| **Gate 1** | **N/A — not applicable** | C1 changes no LLM-facing prompt, schema or decision surface. It touches calibration identity, persistence, promotion, applicability and reporting only. Scoped exemption: if any later commit on this branch touches a proposer/implementor/validator/interpreter prompt or output schema, that commit requires Gate 1 before merge. |
+| **Standard Gate 2** | **N/A — not applicable, and the wrong instrument** | Gate 2 drives a real LLM, which proposes a different candidate per attempt. C1's subject is *repeated observations of the same identity* crossing a threshold; a normal chain would exercise it barely or not at all. |
+| **C1 Layer-3 bounded validation** | **REQUIRED — executed, see §17b** | Fixed candidate, no LLM, real production entry points, real training, temporary registry. |
+
+Neither Gate 1 nor Gate 2 is described as *passed*. They are recorded as **not
+applicable, with the reason**, which is a different claim.
 
 This is a real-system validation and it is deliberately **not** Gate 2: no
 LLM is involved, and its subject is the calibration chain rather than the
@@ -1310,6 +1412,27 @@ Stop and report rather than proceeding if:
 - **FU-C-5**: `_build_resource_admission_record` emits a literal
   `"denoising_score": None` through `_build_skip_record` (`:424`) — a metric
   name inside a resource-admission record.
+- **FU-C-6**: `core/runtime_control/probe_production.py` is in practice a
+  **TIDMAD-specific probe runner**. It falls back to `TIDMAD_DATA_DIR` at
+  `:137` when no `data_dir` is supplied, and loads TIDMAD-shaped batches
+  through `execute_tools.probe_data.load_probe_batch` at `:148`. Supporting
+  a second task needs a **task/dataset adapter**, not more branching inside
+  generic runtime-control. Not blocking C-C3b, whose subject is the
+  capability gate; recorded so the next task port starts from the adapter
+  rather than from an `if task ==` inside `core/`.
+- **FU-C-7**: `core/runtime_control/bootstrap.py:439` imports
+  `TIDMAD_DATA_DIR` for its dataset readiness check. It is an **operator
+  CLI** for this task and sits outside the production decision path, so it
+  is not on the critical gate; it should move behind the same adapter as
+  FU-C-6 when that exists.
+- **FU-C-8**: `.claude/settings.json:9` registers the commit-approval hook by
+  absolute path (`/home/yuema137/SIDERIUS/.claude/hooks/...`). The hooks are
+  developer tooling rather than production code or tests, so this is not a
+  breach of the portability rule in `CLAUDE.md` — but in a checkout at any
+  other path the guard **silently stops running** rather than failing, which
+  is the worse failure mode for a safety hook. Found while inspecting the
+  hook for its sanctioned approval mechanism during C-C4. Unrelated to
+  calibration; deliberately **not** fixed inside PR C1.
 
 ---
 
@@ -1541,6 +1664,431 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
+## 16-STATUS. C1 final state — reconciled against code, Git, PR and artifacts
+
+Reconciled 2026-08-03 by inspecting the working tree, `git log`, PR #161, the
+test suite and the retained validation artifacts — **not** by trusting an
+earlier summary. Corrections found during reconciliation are listed at the end
+of this section.
+
+### The governing principle
+
+> **The current live measurement of the concrete candidate is the sole runtime
+> evidence used by the production time-budget decision.**
+
+May remain in the decision — these are **configured policy**, not learned
+experience:
+
+* the operator-configured time budget;
+* the deterministic projection from the current live measurement;
+* the configured safety factor (`SAFETY_MULTIPLIER = 1.3`).
+
+May **not** influence the decision: legacy v1 `k`; v1 historical duration data;
+v2 historical duration data; promoted calibration buckets; calibration reports.
+
+Historical duration is **observability-only** — collected, identity-checked,
+quarantined, promoted, reported, available for offline analysis and drift
+detection. It may not support ALLOW or cause REJECT.
+
+### Legacy v1 status — five explicit answers, each verified from code
+
+| Question | Answer | Evidence |
+|---|---|---|
+| **v1 production read** (into a verdict) | **NONE** | no `lookup_k`/`load_table` call remains in `core`, `nodes`, `agent`, `execute_tools`, `workflows` outside the legacy module itself |
+| **v1 production decision influence** | **NONE** | `estimator.py` no longer multiplies by `k`; `k_correction` removed from the breakdown; 14 guards + 3 positive controls |
+| **v1 production write** | **NONE** | the tuner's Phase F post-flight and its import are removed; a repo-wide scan for `save_table`/`update_k`/`make_entry` finds no production caller |
+| **v1 audit-only readability** | **PRESERVED** | `calibration.py` stays importable; `load_table`/`lookup_k` still work (asserted). `estimate_types.from_legacy_calibration_entry` is called **only** by the offline `scripts/runtime_replay/legacy_migration.py`, and emits `applicability="not_applicable"`, `confidence="low"` — never blocking-eligible |
+| **v1 data integrity** | **UNCHANGED** | tree digest `c1065a8b612fb691…`; `time_calibration_nvidia_geforce_rtx_5090.json` sha256 `6933829e145400dd…`, 313 596 bytes, mtime 2026-07-20 — re-verified after every run |
+
+Both statements are therefore true at the same time, which is the only
+acceptable configuration: **legacy v1 is read-only** *and* **C1's legacy-v1
+work is complete**. Until `7341840` only the first half of that was true, and
+this document said so rather than claiming both.
+
+### Checkpoint reconciliation
+
+| Checkpoint | Status | Evidence |
+|---|---|---|
+| identity + applicability envelope, per-major registry (O-1), quarantine (O-2) | **COMPLETE** | `f3ab878`, `df10dd7`, `31d1b0c` |
+| C-C1 identity-field population | **COMPLETE** | `fa0a43e` |
+| C-C2 typed measurement capability | **COMPLETE** | `3927d06`, `7a0de4d` |
+| C-C3 derivation → v2 → success-path wiring | **COMPLETE** | `09aa6a3`, `e86d6dd`, `cddc307`; failure paths excluded, one seam only |
+| C-C4 affected-bucket promotion (O-3) | **COMPLETE** | `9c8a421`; thresholds 2/3, ratio 1.5 frozen |
+| C-C5a applicability safety | **COMPLETE** | `7574ae6`, `bf73a83` |
+| shared calibration context / config hash (D-4) | **COMPLETE** | `8f97251`, `8606b47`, `d901412` |
+| **C-C5b production consumption of history** | **CANCELLED BY OPERATOR DECISION** | implemented in `95c4539`/`b920b22`/`0d32187`, then **removed forward** in `689fea3`; `wrapper.py` byte-identical to its pre-C-C5b state |
+| forward removal + negative guardrails | **COMPLETE** | `689fea3`, `4934ab3` — 9 guards + positive control |
+| **legacy v1 `k` removed from the verdict** | **COMPLETE** | `afc009e`, `bc14b97`, `6700261` — §16a-BD |
+| **legacy v1 write stopped (FU-C-11)** | **COMPLETE** | `7341840` — §16a-BD-2 |
+| C-C7 calibration-state reporting | **COMPLETE** | `ce327bf`; INACTIVE-with-reason, quarantine excluded, UNREADABLE ≠ empty, never raises |
+| C-C8 documentation sync | **COMPLETE** | `cd73bb4` … `c4f3982`, `5a5e7b5`, and this section |
+| Layer-1 reachability | **COMPLETE** | §11 table |
+| Layer-2 matrix | **COMPLETE** (3 rows **DEFERRED** to C2 with reason) | §11 matrix |
+| Layer-3 bounded real validation | **COMPLETE** | §17b |
+| C-C5a/C-C6 GPU-requirement work | **NOT APPLICABLE to C1** | belongs to C2 |
+
+### Open C1 follow-up
+
+**FU-C-9 — DEFERRED. Does not block C1.** FU-C-10 and FU-C-11 are both closed
+by implementation.
+
+**What it is.** `execute_tools/workload_resolvers.py::resolve_training_workload`
+iterates `sample_set.items()` with no `None` guard. When `sample_set is None`
+it raises `AttributeError: 'NoneType' object has no attribute 'items'`, which
+surfaces as `Time check error: TimeEval error: ...` and aborts the round.
+
+**Exactly when it fires.** The tuner picks its mode as:
+
+```python
+if plan.is_trial:      mode = "trial"        # SampleSet built
+elif trial_allowed:    mode = "formal"       # SampleSet built
+else:                  mode = "single_file"  # sample_set = None  ← crash path
+```
+
+with `trial_allowed = agent_input.is_trial`. So the crash path is reached
+**iff `agent_input.is_trial == False`** — the deprecated single-file
+`--file_index` mode.
+
+**Why it does not affect C1 correctness or acceptance:**
+
+1. **C1 never touched it.** `workload_resolvers.py` is not in
+   `git diff origin/master...HEAD`, and the unguarded `sample_set.items()`
+   is present on `origin/master` at the same line. C1's only change to
+   `training_skill/estimator.py` was removing the legacy `k`, which sits
+   **downstream** of `_total_train_steps` — the diff touches neither
+   `_total_train_steps` nor `sample_set`. The crash was also observed during
+   Layer-3 run 2, *before* the `k` removal existed.
+2. **The production formal path is unaffected.** A forced formal round sets
+   `plan.is_trial = False` while `trial_allowed` stays `True`, so it resolves
+   to `mode = "formal"` and **does** build a SampleSet. Formal rounds do not
+   traverse the crash path.
+3. **The production chain does not reach it.** `run_one_iteration.py` defaults
+   `--is_trial` to `True` (`BooleanOptionalAction`); the documented standard
+   command in `CLAUDE.md` passes `--is_trial` explicitly.
+4. **It changes no C1 behaviour.** It is a missing input guard in a deprecated
+   mode — it cannot alter calibration identity, promotion, applicability,
+   reporting, or the live-only time authority C1 establishes.
+
+**How it is reachable.** An operator running `scripts/run_comparison.py`
+*without* `--is_trial` (that flag is `store_true`, so its default is `False`).
+That is the legacy single-file relic the project already treats as deprecated.
+
+**Follow-up scope and owner.** A separate small PR outside C1: either guard
+`resolve_training_workload` against `None` with an explicit typed error naming
+the mode, or refuse `single_file` mode at input validation. It belongs with
+whoever owns the deprecation of single-file mode, not with the calibration
+subsystem. **Not a hotfix** — it fails loudly and immediately at pre-flight,
+does not corrupt data, and cannot produce a wrong scientific result.
+
+### Corrections made during this reconciliation
+
+1. The status text asserting legacy v1 was "out of C1 scope" was **stale** —
+   the operator extended the decision and it was implemented. Corrected.
+2. `from_legacy_calibration_entry` was audited rather than assumed: it is a
+   read-only adapter whose sole caller is an offline replay script, so it does
+   not contradict "no production v1 read".
+3. C-C5b is recorded as **CANCELLED**, never as complete, in every place it
+   appears — including the checkpoint map, where its three commits are listed
+   as superseded rather than dropped.
+
+---
+
+## 16a-BD. Behavior Delta: legacy v1 `k` removed from production time authority
+
+**Operator decision, 2026-08-03.** Supersedes FU-C-10, which is now **closed by
+implementation** rather than deferred.
+
+**Before**
+
+```text
+current live timing measurement (ms/step, this candidate, now)
+  → × legacy v1 historical k        (asymmetric EMA over past runs,
+                                     ~/.siderius/time_calibration_<gpu>.json)
+  → × SAFETY_MULTIPLIER             (configured)
+  → seconds → verdict
+```
+
+**After**
+
+```text
+current live timing measurement (ms/step, this candidate, now)
+  → × SAFETY_MULTIPLIER             (configured)
+  → seconds → verdict
+```
+
+**Reason.** Runtime depends on current machine conditions, current GPU
+contention and current caching. A stored correction prices today's work with
+yesterday's clock. This is the same principle that cancelled C-C5b, applied to
+the one remaining path that still violated it.
+
+**Runtime evidence authority.** The live measurement of the concrete candidate
+is now the **sole** runtime evidence. No v1 `k`, no v1 history records, no v2
+history records, no promoted buckets, no calibration report can influence the
+verdict.
+
+**Configured policy retained — removing history is not removing safety.**
+`SAFETY_MULTIPLIER = 1.3` is unchanged; the operator's time budget is
+unchanged; the deterministic projection from the live measurement is unchanged.
+These are configured rules, not learned experience.
+
+**Failure semantics.** Unchanged and deliberately re-verified: when the live
+measurement is unavailable, the estimator still falls back to the **static
+prior** stamped `formal_execution_eligible: False`. **No historical fallback
+was introduced** — asserted by
+`test_a_missing_live_measurement_does_not_fall_back_to_history`.
+
+**Retry / attempt / round accounting.** No change. Nothing in the removal
+touches attempt consumption, round transitions or retry policy.
+
+**LLM impact.** None. **GPU cost impact.** None — one multiplication removed.
+
+**Legacy data handling.** `~/.siderius/time_calibration_<gpu>.json` is
+**preserved, not deleted or rewritten**. Verified byte-unchanged (mtime still
+2026-07-20). The `calibration.py` module remains importable for audit and
+historical inspection; it is now structurally unable to reach the production
+verdict, which is what the guard tests assert.
+
+> **Open question deliberately NOT decided here.** The tuner's Phase F
+> post-flight (`ml_hyperparameter_tune_agent.py:4861-4863`) still *writes* to
+> the legacy table via `update_k`/`save_table`. The operator's instruction was
+> to remove the production **read and application**; the write influences no
+> verdict, and stopping it is a separate behaviour change. Left in place so the
+> historical series stays continuous for drift analysis — which is exactly the
+> observability-only role history now has. **Flagged for the operator**: if the
+> legacy table should become fully frozen, the write is a one-line follow-up.
+
+**Files and functions changed**
+
+| File | Change |
+|---|---|
+| `agent/skills/training_skill/estimator.py` | `load_table`/`lookup_k` calls and the `* k` multiplication removed; `k_correction` removed from the breakdown; `calibration` import removed; docstrings corrected |
+| `agent/skills/evaluate_time_skill/wrapper.py` | `k_correction` pass-through removed (it was a required key access) |
+
+`k_correction` was **removed, not pinned to `1.0`**: a neutral-valued
+correction field reads as "no correction today" and is a socket for one
+tomorrow. Its absence is the contract.
+
+**Tests proving the change** —
+`tests/unit/core/test_live_timing_is_the_sole_runtime_evidence.py` (11 tests):
+structural (no import, no call, no field, no republish), behavioural (an
+extreme `k=50` table does not move the estimate; `gpu_name` is inert; an absent
+table is identical), and **positive controls** (a slower live measurement
+increases the estimate; the projection is exactly linear in it; the configured
+margin is still applied).
+
+**Mutation proofs**
+
+| Mutation | Result |
+|---|---|
+| reintroduce `lookup_k(load_table(...))` into the estimate | **5 tests fail** — 2 structural, 2 behavioural (1625 s → 3250 s), 1 in the inverted estimator test |
+| disconnect the live measurement (pin `ms_per_step`) | **3 positive controls fail**, while every absence-guard stays green — the exact blind spot the controls exist to close |
+
+**Gate 1: N/A** — no LLM-facing prompt, schema or decision surface changes.
+**Gate 2: N/A** — this implements no GPU-requirement acquisition and touches no
+PR B admission path. **C1 Layer-3: re-run required at the new head.**
+
+**Inverted test, recorded.**
+`test_ms_per_step_passthrough_applies_gpu_calibration` asserted the *opposite*
+of this decision (k=2.0 → 3250 s). It is renamed
+`test_a_gpu_name_no_longer_applies_historical_calibration` and inverted rather
+than deleted — it is the one test that named the removed behaviour, so it is
+where a reader will look for the change.
+
+**Commit SHAs:** `afc009e` (production), `bc14b97` (tests), `6700261` (docs).
+
+## 16a-BD-2. Behavior Delta: legacy v1 table becomes read-only (FU-C-11 closed)
+
+**Operator decision, 2026-08-03 (second part).** The policy is stronger than
+"v1 does not decide":
+
+> Existing legacy v1 data is preserved **read-only** for compatibility and
+> audit. Production must no longer read from **or write to** the legacy v1 `k`
+> table.
+
+**Before.** Every successful run fed its observed-vs-predicted ratio through
+an asymmetric EMA into `~/.siderius/time_calibration_<gpu>.json`
+(`ml_hyperparameter_tune_agent.py` Phase F post-flight).
+
+**After.** The Phase F post-flight block and its import are removed. Successful
+runs write **v2 evidence only** (C-C3c).
+
+**Reason — this is not cosmetic.** A legacy store that keeps growing still
+*looks* like a live production system. Three concrete consequences: it presents
+as active when it is not; it invites someone to reconnect it to a decision; and
+it contradicts the read-only policy while nominally satisfying "does not
+decide".
+
+**Authority.** Unchanged from the previous delta — the live measurement was
+already the sole runtime evidence. This closes the *producer* side.
+
+**Failure semantics / retry / attempt / round / LLM / scientific results.** All
+unchanged. The removed block was wrapped in its own defensive `try/except` and
+produced only an operator log line; nothing downstream consumed it.
+
+**Legacy data handling.** Nothing deleted, migrated, rewritten, or neutralised.
+The file keeps its contents and its 2026-07-20 mtime. `calibration.py` stays
+importable and `load_table`/`lookup_k` keep working — asserted by
+`test_the_legacy_module_remains_readable_for_audit`, because the policy is
+read-only *preservation*, not removal.
+
+**Drift analysis** moves to the v2 registry, which C1 built for exactly that.
+
+**Tests** (`TestProductionNeverWritesTheLegacyTable`, 3 tests):
+
+| Guard | Proves |
+|---|---|
+| the tuner imports no calibration module | the only production writer's import is gone |
+| **no production module calls `save_table`/`update_k`/`make_entry`** | scanned across `core`, `nodes`, `agent`, `execute_tools`, `workflows` — a writer *moved elsewhere* would satisfy the import guard alone |
+| the legacy module still reads | preservation, not deletion |
+
+**Mutation proof.** Reinstating `load_table`/`save_table` in the tuner fails
+both the import guard and the repo-wide writer scan (2 tests).
+
+**Gate 1: N/A** — no LLM-facing surface. **Gate 2: N/A** — no GPU-requirement
+acquisition, no PR B admission path.
+
+**Commit SHAs:** recorded with the checkpoint map.
+
+### FU-C-11 Layer-3 re-validation (run 5) — the producer side, proven
+
+**The earlier runs could not have proven this.** `SIDERIUS_CALIBRATION_DIR`
+governs both the v2 tree *and* the legacy v1 table, so isolating it isolates
+the legacy table too: an isolated run says nothing about whether production
+still writes v1. Run 5 therefore **seeds a copy of the operator's real legacy
+table** into the temporary dir. A surviving writer mutates the copy visibly,
+while the real table stays out of reach.
+
+| Evidence | Before | After 3 real training rounds |
+|---|---|---|
+| seeded legacy copy sha256 | `6933829e145400dd…` | **`6933829e145400dd…` — UNCHANGED** |
+| real v1 tree digest | `c1065a8b612fb691…` | `c1065a8b612fb691…` |
+| real legacy table sha256 | `6933829e145400dd…` | `6933829e145400dd…` |
+| real legacy table size / mtime | 313 596 B / `1784563816` | 313 596 B / `1784563816` |
+| `~/.siderius/` contents | 2 entries | 2 entries — no stray `runtime_calibration_v2` |
+
+**v2 accumulated normally in the same run:**
+
+```
+calibration: ACTIVE — 2 validated bucket(s) from 6 eligible observation(s)
+```
+
+| bucket | n | level | ms/step | max/min |
+|---|---|---|---|---|
+| `training \| optimizer_step \| single_candidate_idle` | 3 | **validated** | 37.517 / 37.791 / 37.946 | **1.011** |
+| `inference \| inference_batch \| single_candidate_idle` | 3 | **validated** | 15.218 / 15.262 / 15.304 | **1.006** |
+
+Full identity on every record, real GPU UUID
+`GPU-c30b6678-…`, one `candidate_config_hash` (`cfg:c23fbeb88652`) across rounds
+— the same hash as run 4, on a different day and a different registry, which is
+itself a stability check on the identity definition.
+
+**So the chain the operator asked for holds end to end:**
+
+```
+real training
+  → v2 accumulates and promotes normally
+  → v1 completely unchanged (copy AND original)
+  → live-only time judgement still stands
+```
+
+Absolute step times differ from run 4 (37.5 vs 48.7 ms/step training) because
+the shared GPU was less contended. That is the point of measuring live rather
+than storing: the same candidate is genuinely a different speed on a different
+day, which is precisely why a stored `k` should not price it.
+
+---
+
+### Re-validation at the new head — production entry points
+
+The previous exact-head acceptance (`3f5fa23`) **no longer counts**: it
+validated code that still applied `k`. Re-run at `6700261`.
+
+**What is reused and why that is legitimate.** The Layer-3 O-4
+promotion/reporting evidence (§17b) stands: this change touches only
+`training_skill/estimator.py` and `evaluate_time_skill/wrapper.py`, and the
+calibration write/promotion/reporting path is byte-identical at this head. The
+**time-decision proof** is the part that had to be redone, and it was.
+
+**Bounded production validation — `verdict_invariance.py`.** Drives the REAL
+production functions (`estimate_wall_time_seconds`, the changed code, and
+`_gate_decision`, the verdict) against REAL on-disk registries — a legacy v1
+table carrying an extreme `k=50.0` **and** a v2 tree seeded from the Layer-3
+run-4 registry with its two `validated` buckets:
+
+| Case | Registries | live ms/step | seconds | verdict |
+|---|---|---|---|---|
+| **A** | v1 `k=50.0` + v2 validated buckets | 48.7 | **7.914** | `ALLOW` |
+| **B** | both empty | 48.7 | **7.914** | `ALLOW` |
+| **C** | v1 `k=50.0` + v2 validated buckets | 40 000 | 6500.000 | **`REJECT`** |
+
+* **INVARIANCE (A ≡ B): PASS.** Identical seconds, verdict and provenance. A
+  `k` of 50 would have made A fifty times B.
+* **POSITIVE CONTROL (C): PASS.** The verdict genuinely flips `ALLOW → REJECT`
+  when only the live measurement changes.
+
+*Control defect found and fixed during this run, recorded because it matters.*
+The control first used a 10× slower step (487 ms) and **reported FAIL** — the
+seconds moved 7.914 → 79.138, but 79 s still fits a 60-minute budget so the
+verdict correctly stayed `ALLOW`. The fault was in the control, not the code: a
+positive control for a *verdict* must make the verdict move, not merely the
+number feeding it. Re-run with a budget-breaking step time.
+
+**Registry integrity after re-validation:** v1 tree byte-identical
+(`c1065a8b612fb691…`); legacy `k` table mtime still 2026-07-20 — the validation
+wrote only into temporary trees.
+
+---
+
+## 16b. C1 checkpoint → commit SHA map
+
+Branch `feature/v20-pr-c1-calibration-identity-promotion`.
+
+| Checkpoint | Commits | What landed |
+|---|---|---|
+| pre-C-C1 groundwork | `f3ab878`, `df10dd7`, `31d1b0c` | measurement identity + applicability envelope; per-major registry tree (O-1); quarantine namespace (O-2) |
+| **C-C1** | `fa0a43e` | populate the two identity fields production dropped |
+| **C-C2** | `3927d06`, `7a0de4d` | typed measurement-capability boundary, resolved at the task boundary |
+| **C-C3** | `09aa6a3`, `e86d6dd`, `cddc307` | derive duration records; persist to the v2 registry; wire to the successful-attempt seam |
+| test isolation | `a28b86f` | session-scoped fixture so no test reaches the operator's real registry |
+| portability fix | `e44d61f` | remove task-specific GPU names from registry schema docs |
+| **C-C4** | `9c8a421`, `55eb2f8` | promotion evaluated for the affected bucket only (O-3) |
+| **C-C5a** | `7574ae6`, `bf73a83`, `ae6a0eb` | applicability required for measured authority |
+| shared identity (D-4) | `8f97251`, `8606b47`, `d901412` | one calibration context across read and write; dimensions derived from evidence; canonical config-identity helper |
+| **C-C5b** (later cancelled) | `95c4539`, `b920b22`, `0d32187` | production read wiring — **superseded, removed forward** |
+| **C-C5b cancellation** | `689fea3`, `4934ab3` | wrapper restored byte-identically; `calibration_prelaunch` deleted; nine negative guards + positive control |
+| **C-C7** | `ce327bf` | calibration-authority state reporting, wired into `BootstrapReport.render()` |
+| **C-C8** | `cd73bb4`, `0cd63bd`, `2f28aef`, `70facb0`, `f77d169`, `b06ef87`, `c3c01c7` | cancellation record, Layer-2 matrix, deviation register, scope correction, gate determinations, registry-safety finding, Layer-3 evidence |
+
+---
+
+## 16a. C1 deviation register — where the implementation departs from this plan
+
+Maintained continuously. Every row is a place the merged code does **not**
+match the plan as originally written, with the evidence that forced the
+change. A deviation that is not written here is a deviation that will be
+rediscovered as a bug.
+
+| # | Plan said | Code does | Why | Evidence |
+|---|---|---|---|---|
+| D-1 | C-C5b wires the read seam into the time-budget consumer | No production consumer of v2 duration exists | **Operator decision 2026-08-02**: runtime is live; a stored duration prices today's work with yesterday's clock | C-C5b cancellation section; 9 guards + positive control |
+| D-2 | (unstated) "current live measurement is the sole time-decision input" | **Now true outright** — after the 2026-08-03 removal of legacy v1 `k`. It was true only of the v2 registry for one day in between, and this document said so rather than overclaiming | The audit found the legacy `k` still scaling the estimate; the operator then decided to remove it inside C1 rather than defer | Behavior Delta §16a-BD; `test_live_timing_is_the_sole_runtime_evidence.py` |
+| D-3 | Applicability envelope over a fixed dimension list | Dimensions derived from the evidence (`_measured_dimensions`) | A fixed list silently excluded whichever producer vocabulary it did not name (`seg_size` vs `segment_length`) — a never-match that looks exactly like an empty registry | `8606b47`; `TestTheEnvelopeVocabularyFollowsTheEvidence` |
+| D-4 | Each side computes its own config identity | One shared `candidate_config_hash` in `calibration_context.py` | The engine counted `requires_grad` params, the pre-flight counted all of them — identical for a fully-trainable model, silently divergent for any frozen layer | `8f97251`, `d901412`; `test_the_derivation_does_not_define_its_own_hash` |
+| D-5 | C-C7 report reads a registry object | C-C7 takes `root=` and constructs inside its own guard | `CalibrationRegistry.__init__` mkdirs six directories, so construction was the one raising step *outside* the "never raises" guarantee | Mutation proof under C-C7 §6 |
+| D-6 | C-C7 asserted against a read-only copy of the live v1 registry | Asserted against a fixture reproducing the v1 shape | The live tree is preserved evidence; no test opens it. The fixture reproduces "evidence collected, none promoted" exactly | `test_observations_without_promotion_are_still_inactive` |
+| D-7 | Layer-2 covers "validated calibration contradicted by a live measurement", "inconclusive live probe", "expired calibration" | Deferred to C2 | All three describe a **consumer** resolving stored against live evidence. After D-1, C1 has no such consumer — there is nothing to contradict or expire for | §11 Layer-2 matrix, deferred-rows note |
+| D-8 | C1 Layer-3 runs a "normal formal run" | Runs `is_trial=True` with a fixed plan | `is_trial=False` falls through to **legacy single-file mode**, which builds no SampleSet and crashes the time estimator on `None`. Pre-existing, deprecated path, unrelated to C1 | FU-C-9; §17a |
+
+**Follow-ups filed from C1**
+
+| ID | Finding | Disposition |
+|---|---|---|
+| FU-C-9 | `is_trial=False` (legacy single-file mode) builds no SampleSet; `resolve_training_workload` raises `AttributeError: 'NoneType' object has no attribute 'items'` | Pre-existing defect in a deprecated path; not touched by C1 |
+| ~~FU-C-10~~ | Legacy v1 per-GPU `k` let history scale the production time estimate | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator decided the rule extends to the legacy mechanism, and it was removed inside C1. See Behavior Delta §16a-BD. Not deferred. |
+| ~~FU-C-11~~ | The tuner's Phase F post-flight still *wrote* the legacy k table, though nothing read it into a verdict | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator's policy is read-only preservation, which is stronger than "does not decide": a legacy store that keeps growing still looks like a live production system, and that is what invites reconnection. Phase F removed; v2 is the only producer. See the Behavior Delta above |
+
+---
+
 ## 17. Commit plan
 
 Nine commits. Each is independently reviewable and does not carry unrelated
@@ -1641,16 +2189,30 @@ for records that genuinely cannot be classified.
 *Dependencies:* none. This is the first commit.
 
 **3. Implementation plan.**
-- [ ] Read `classify_model_family` and confirm what `structural_features` it
-      requires and whether the tuner has them at `:947`.
-- [ ] Decide (8.B) whether `model_family` is the classified family or the
-      registered `model_type`; the two producers currently disagree (§2.9).
-- [ ] Pass the resolved family into `ProbeRequest` at `:947-957`.
-- [ ] Resolve a real `software_stack` at `:978` instead of `{}` — source it
-      from the existing provenance capture rather than re-deriving.
-- [ ] Decide whether `probe_lifecycle.py:69`'s `"unknown"` default should
-      become required; a required field turns a silent mis-bucket into a
-      loud construction error.
+- [x] Read `classify_model_family` (`calibration_policy.py:259-273`): a
+      non-empty `declared_family` is returned verbatim; `structural_features`
+      is only the fallback. The tuner has `model_type` in scope at `:895`.
+- [x] **8.B resolved:** `model_family` is the registered `model_type`, via
+      `classify_model_family(declared_family=model_type)`. The time skill
+      already keys its store this way (`evaluate_time_skill/wrapper.py:499`),
+      so this makes the registry agree with the store rather than creating a
+      third namespace (§2.9).
+- [x] Passed the resolved family into `ProbeRequest`
+      (`ml_hyperparameter_tune_agent.py:947-968`).
+- [x] Resolved a real `software_stack` at the `build_registry_persist` call.
+      **Discovery:** there was no shared producer — `bootstrap.py:464` built
+      `{"torch": ..., "cuda": ...}` inline and the tuner passed `{}`.
+      `capture_environment_provenance()` captures the same facts but under
+      `torch_version`/`cuda_version`, and since `stack_identity` content-hashes
+      the dict, reusing it would have forked the bucket away from the two
+      records bootstrap already wrote. Extracted
+      `provenance.capture_software_stack()` emitting bootstrap's exact shape;
+      both call sites now use it. Verified byte-identical:
+      `stack_identity` = `stack:cb380df61b90` before and after, vs the
+      `stack:44136fa355b3` constant that 18 records share.
+- [x] `probe_lifecycle.py:69`'s `"unknown"` default **left as-is** for C-C1.
+      Making it required is a schema-shaped change that belongs with C-C2's
+      v2 work; C-C1 changes no schema.
 
 **4. Validation plan.**
 - Unit: the resolved family reaches `CalibrationObservation.model_family`,
@@ -1668,19 +2230,35 @@ for records that genuinely cannot be classified.
 - No Gate / real-training test.
 
 **5. Acceptance criteria.**
-- [ ] A probe-produced observation carries a family that is **not**
+- [x] A probe-produced observation carries a family that is **not**
       `"unknown"` for a registered model type.
-- [ ] `bucket_key` for two different model families differs in exactly the
-      family component and nothing else.
-- [ ] `stack_identity` for a populated stack differs from the constant
-      `stack_identity({})` digest observed today.
-- [ ] All 20 existing records still load — `load_observation` raises on
-      none of them. Verified against a **copy in a temporary tree**, never
-      against `~/.siderius/runtime_calibration`. The live per-user registry
+- [x] `bucket_key` for two different model families differs in exactly the
+      family component and nothing else — asserted as a component-wise diff
+      count of 1.
+- [x] `stack_identity` for a populated stack differs from the constant
+      `stack_identity({})` digest: `stack:cb380df61b90` vs
+      `stack:44136fa355b3`.
+- [x] All 20 existing records still load — `load_observation` raises on
+      none of them. Verified against a **copy in a temporary tree**; the live
+      tree's file hashes were compared before and after and are identical. The live per-user registry
       is read-only evidence for this work: no test, script or checkpoint may
       write to it, and O-1 preserves the old tree untouched.
-- [ ] Mutation: reverting either call site to its current form fails at
-      least one new test.
+- [x] Mutation proofs, each asserting a unique match and re-running the
+      baseline after restore:
+
+      | mutation | result |
+      |---|---|
+      | producer drops the family it was handed | 2 failures |
+      | producer drops the stack it was handed | 2 failures |
+      | helper regresses to `{}` (the pre-C-C1 state) | 1 failure |
+      | helper renames its keys (forks from bootstrap) | 1 failure |
+
+      The `{}` regression initially **passed**: on a machine with torch the
+      assignments repopulate the dict either way, so the branch only bites
+      where torch is absent. The test asserted on a hand-built dict rather
+      than the helper's real torch-absent path — a test-local fiction. Fixed
+      by driving the branch with `monkeypatch.setitem(sys.modules, "torch",
+      None)`.
 
 **6. Failure and edge cases.**
 - Family unresolvable → unchanged non-authoritative behaviour, and the run
@@ -1723,13 +2301,47 @@ schema version in a new directory, a re-hash migration, or a partial hash.
 on O-1: option 1 means a v2 tree and a reader that handles both; option 2
 means a migration script; option 3 changes `hash_payload` itself. Writing
 steps now would commit to one before the operator chooses.
-- [ ] Re-inspect `hash_payload`/`content_id` and the manifest reader, then
-      resolve the bounded details from O-1 (new tree, old tree read-only,
-      no re-hash) and O-2 (quarantine namespace).
-- [ ] Implement the v2 schema and the new tree; the 8.B config-identity
-      choice (hash vs enumerated fields) is Claude's to resolve from code.
-- [ ] Proceed autonomously unless inspection reveals a material deviation
-      from the approved design.
+Split into three semantic commits: C-C2a models, C-C2b tree, C-C2c
+quarantine.
+
+- [x] **C-C2a** — `MeasurementIdentity` (exact match, incl.
+      `measurement_kind`, `task_identity`, `data_shape_class`,
+      `hardware_uuid`) and `ApplicabilityEnvelope` (bounded ranges). The two
+      share **no field**, so an applicability verdict cannot be obtained by
+      matching a key — the §8.A invariant made structural. 29 tests, 6
+      mutation proofs. Phase vocabulary resolved to `RuntimePhase`: verified
+      `io` is declared in `ObservationOperation` and produced nowhere, while
+      `scoring`/`orchestration` are real phases v1 could not express.
+      `gpu_reserved` deliberately not declared — no producer exists, and a
+      kind nothing emits is how `cuda_peak_allocated_gb` became a dead field.
+      **Deferred** until a real producer exists.
+- [x] **C-C2b** — `REGISTRY_SCHEMA_VERSION` 1.0.0 → 2.0.0, and each major
+      version gets its own tree. v1 keeps the historical
+      `runtime_calibration` name so the existing tree is found where it has
+      always been; v2 is the sibling `runtime_calibration_v2`.
+      `legacy_registry_root()` exposes v1 for read-only inspection.
+      A fail-closed guard refuses to open a tree whose manifest declares a
+      different major — without it, a stale `SIDERIUS_CALIBRATION_DIR` would
+      have v2 code append into the v1 tree, and `rebuild_index` would then
+      commit a manifest silently omitting whichever half failed its hash
+      check. Live v1 tree verified untouched: 26 files, digest
+      `df0351b59a5bd0bd`; no v2 tree created (nothing writes yet).
+      3 mutation proofs.
+- [x] **C-C2c** — the explicit `unusable`/quarantine namespace under O-2.
+      `QuarantineRecord` keeps the measurement verbatim with a required
+      reason and the missing identity fields; the registry writes it to a
+      separate `quarantine/` directory and a separate `quarantined_ids`
+      manifest list. The isolation is **structural**: `iter_observations`
+      walks `observation_ids`, which a quarantined id never enters, so
+      "never authoritative" is a property rather than a rule each reader
+      must remember. Auditing requires a different method by design.
+      10 tests; 3 mutation proofs (id also appended to `observation_ids`;
+      written into `observations/`; `iter_observations` widened to walk
+      both) — 4, 5 and 2 failures respectively.
+- [ ] Wiring the identity into the write path, with an **explicit**
+      legacy-`ObservationOperation` → `RuntimePhase` mapping that fails
+      closed on an unsupported value. No string casts, no silent
+      reinterpretation of old records.
 
 **4. Validation plan (shape known now, cases pending O-1).**
 - Unit: two records identical except for task land in different buckets.
@@ -1781,11 +2393,142 @@ so on any other task the path is dead regardless of the trigger.
 **3. Implementation plan.** **Not written** — O-3 determines whether the
 trigger is a new decision branch, a scheduled evaluation, or a write-time
 hook. Inspect `decide` and the `REQUEST_PROBE` branches before drafting.
-- [ ] Re-inspect `decision_policy.decide` and `probe_runner_availability`,
-      then implement O-3: after each successful eligible observation write,
-      idempotently evaluate only the affected bucket and record the result.
-- [ ] Land the §15.3 `ResolvedMeasurementCapability` boundary so the write
-      path is not gated on `TIDMAD_DATA_DIR`.
+Split: C-C3a the capability boundary, C-C3b the write path, C-C3c the O-3
+trigger (kept separate from observation creation, per the operator
+constraint).
+
+- [x] **C-C3a** — `core/runtime_control/measurement_capability.py`:
+      `ResolvedMeasurementCapability` + a generic `resolve_measurement_capability`.
+      The task's dataset root arrives as an ARGUMENT; `dataset_root=None` is
+      refused, not defaulted, because a default there would be the very task
+      assumption being removed. A validator refuses
+      `probe_available=False` without a reason — the old `(bool, str)` tuple
+      allowed a silent False by convention. Identity (task, adapter,
+      data-shape class) is required even when unavailable, so the verdict
+      can supply a `MeasurementIdentity` later. 16 tests, 3 mutation proofs.
+      Callers already hold what they must pass: the tuner has `data_dir` as
+      a parameter of `_resolve_time_check_probe_request`; `launch_guard`
+      takes an optional root from its caller (C-C3b).
+- [x] **C-C3b** — `probe_runner_availability` now takes a resolved
+      capability and imports no task module. The TIDMAD default lives in
+      `execute_tools.data_paths.resolve_tidmad_measurement_capability` —
+      the task-owned layer, where a default legitimately belongs. The tuner
+      resolves it from the `data_dir` it already holds, so the capability
+      describes the dataset the probe will actually use rather than a second
+      independently resolved path. `launch_guard` threads an optional
+      capability and fails closed without one.
+
+      Unavailability now reaches the record: the tuner stamps
+      `probe_capability_task` and `probe_capability_reason` into the
+      breakdown instead of a bare `unavailable`.
+
+      **Reachability gap found and closed.** Reverting the tuner to
+      `probe_runner_availability()` — the exact silent-disable regression —
+      left all 23 launch-guard tests green. Added
+      `test_measurement_capability_reachability.py` (9 cases), which now
+      fails on it. Mutation proofs: no-argument call → 2 failures; reason no
+      longer recorded → 1; generic wiring re-imports the task constant → 1.
+
+      **Deferred, filed:** `probe_production.py:137` still falls back to
+      `TIDMAD_DATA_DIR` when no `data_dir` is supplied, and loads
+      TIDMAD-shaped batches via `execute_tools.probe_data`. Making that
+      generic needs a dataset-adapter abstraction, which is beyond C-C3b's
+      bounded scope. `bootstrap.py:439` is an operator CLI for this task and
+      is outside the generic decision path.
+- [ ] **C-C3c** — the happy-path duration write, then O-3: idempotently
+      evaluate only the affected bucket after a successful eligible write.
+      Creation and trigger stay separate.
+
+      **Architecture (operator, 2026-08-03 UTC):** System A stays the single
+      source of truth for measured duration. System B must not perform or
+      invent a second measurement; it receives a typed, deterministic
+      *derivative* of the `RuntimeObservation` System A already writes.
+
+      **HOOK CORRECTED BY AUDIT.** The anticipated seam was the shared
+      `_append_runtime_observation`. Verified and rejected: its four
+      production call sites are not four successful phases —
+
+      | site | function | records |
+      |---|---|---|
+      | `:2499` | `_handle_in_subprocess_rejection` | a rejected attempt |
+      | `:2525` | `_raise_if_evidence_channel_failure` | an infrastructure failure |
+      | `:2551` | `_raise_if_wall_clock_timeout` | a wall-clock timeout |
+      | `:4700` | `run()`, the E. COMMIT block | the **successful** attempt |
+
+      Three of the four are failure paths. Deriving calibration at the
+      shared seam would feed rejections, infrastructure failures and
+      timeouts into throughput calibration, violating the D4 rule at
+      `calibration_policy.py:279-285` — which explicitly anticipates
+      "another producer" recording failure evidence as an observation.
+      The derivation therefore hooks the **success call site only**, after
+      `_emit_record`, where the record is already complete.
+
+      Identity available there: `train_engine_sandbox.py:813-828` already
+      populates `calibration_context` with precision, optimizer_type,
+      model_family, param_count, seg_size, batch_size — and its
+      `model_family` is `model_cfg.model_type`, the same namespace C-C1 chose
+      for System B, so the two agree rather than fork. Task identity and
+      data-shape class come from C-C3b's `ResolvedMeasurementCapability`;
+      the stack from C-C1's `capture_software_stack`. Anything unavailable
+      drives **quarantine, never a fabricated default**.
+
+      Safety boundary: System A is written first and unchanged. A System B
+      conversion or persistence failure is observable but must not alter the
+      experiment result, attempt/round accounting, retry behaviour,
+      scientific output or agent feedback — fail-open for the scientific
+      workflow, fail-closed for calibration authority.
+
+      - [x] **part 1** — the pure converter. Three results, not two:
+            `DerivedDurationRecord` / `QuarantinedDerivation` /
+            `NotDerivable`. The third was not anticipated by the design and
+            is required: a rejected, watchdog-killed or non-steady attempt is
+            not an incomplete identity that might later be repaired, and
+            parking it in quarantine would leave failure evidence in a
+            namespace meaning "salvageable". Reuses the existing
+            `component_calibration_eligible` gate rather than defining a
+            second notion of clean. 22 cases, 5 mutation proofs.
+      - [x] **part 2** — persistence and idempotency.
+            `CalibrationObservation` gains an optional `identity`
+            (`MeasurementIdentity`); the derived producer always sets it and
+            persistence refuses an eligible record without one, while the
+            probe producer keeps working. Idempotency is content addressing,
+            not a ledger: reprocessing one event yields the same id and
+            dedups, so it cannot advance a promotion sample count twice.
+            A registry failure returns `kind="failed"` with the reason
+            instead of raising — System A is already durable, so a storage
+            problem costs this run its calibration sample and nothing else.
+            8 further cases, 4 mutation proofs.
+      - [x] **part 3** — production wiring at the success seam.
+            `_derive_calibration_from_observation` is a focused helper (not
+            branching inside `run()`), called once, immediately after the
+            System A append so the raw measurement is durable first.
+            Identity comes from what is already in scope: `device_identity`
+            (`:2883`), `time_data_dir` (`:2842`), the C-C3b capability and
+            C-C1's `capture_software_stack`. A missing UUID yields
+            `identity=None` and the derivation quarantines — no placeholder
+            is ever substituted, since a fabricated UUID would produce an
+            eligible record naming the wrong device.
+
+            The helper is **total**: it returns for any input and prints the
+            loss rather than raising, because the experiment result is
+            already decided and persisted by the time it runs.
+
+            14 guard tests. Mutation proofs: production hook deleted → 4
+            failures; derivation moved into the shared append helper → 2;
+            derivation reordered before the System A append → 1; placeholder
+            UUID fabricated → 1.
+
+            **Test defect found and fixed during validation.** A full core
+            run left a real `~/.siderius/runtime_calibration_v2` tree behind:
+            `test_the_helper_is_total` passes `{"timestamp": "t"}`, which
+            PARSES as a valid `RuntimeObservation`, so the helper reached a
+            real `CalibrationRegistry()` at the default root and created
+            profiles there. No observations or quarantined records were
+            written — the derivation correctly returned `NotDerivable` — but
+            the tree existed. Fixed with an autouse fixture pointing
+            `SIDERIUS_CALIBRATION_DIR` at `tmp_path`; re-verified that a full
+            core run now creates nothing, and v1 stays at digest
+            `df0351b59a5bd0bd`.
 - [ ] Proceed autonomously unless inspection reveals a material deviation.
 
 **4. Validation plan.**
@@ -1834,80 +2577,437 @@ the O-4 values, which are frozen at their current settings.
 
 *Dependencies:* C-C2, C-C3.
 
-**3. Implementation plan.** **Not written.** The thresholds are operator
-policy; `CalibrationPolicy`'s identity hash covers every field, so changing
-one trips `runtime_policy_identity` and invalidates every existing workspace
-lock. That interaction must be settled before steps are drafted.
-- [ ] Confirm the `run_invariants` interaction by inspection **before**
-      touching `CalibrationPolicy`: O-4 preserves every current value, so
-      `runtime_policy_identity` must not move. If implementation cannot
-      avoid moving it, that is a material deviation — stop and report.
-- [ ] Implement promotion under the O-4 values, O-5 (same concurrency class
-      only) and O-9 (no wall-clock expiry).
-- [ ] Proceed autonomously unless inspection reveals a material deviation.
+**3. Implementation plan.**
+- [x] Confirmed the `run_invariants` interaction by inspection **before**
+      touching `CalibrationPolicy`: no policy edit was needed at all.
+      `evaluate_bucket` already accepts `policy=DEFAULT_POLICY`, so promotion
+      is wired without altering the model. `runtime_policy_identity` stays at
+      `calibration_policy@1.0.0+b83994605c57`, with O-4 frozen at
+      `provisional_min_observations=2`, `validated_min_observations=3`,
+      `consistency_max_min_ratio=1.5`. 81 invariant/lock tests pass.
+- [x] Implemented `evaluate_affected_bucket_after_write` in
+      `calibration_derivation.py` (+114 lines) under the O-4 values, O-5
+      (bucket key already encodes the concurrency class, so only same-class
+      evidence can share a bucket) and O-9 (no wall-clock term anywhere in
+      the evaluation).
+- [x] Wired it at the tuner success seam,
+      `ml_hyperparameter_tune_agent.py:2750`, guarded so **only an
+      `eligible` write** triggers evaluation — a quarantined or failed write
+      never promotes.
 
-**4. Validation plan.** Promotion reached in production; rejected promotions
-reported with reasons; contended evidence handled per O-5; expiry per O-9;
-repeated samples where promotion depends on statistical consistency.
+**Design note — idempotency is not free here, unlike observations.**
+`CalibrationPromotion` content-addresses `derived_from_generation`, which
+increments on every committed index write. Re-evaluating one *unchanged*
+bucket at a later generation therefore produces a **different id** and would
+write a second promotion for the same evidence, inflating the apparent
+record. Verified directly (generation 5 vs 6 → different ids). Equivalence is
+consequently checked on `(bucket_key, source_observation_ids, level)` — what
+actually identifies "this promotion, from this evidence".
+
+**4. Validation plan.** Executed: 1 obs → `not_promoted` with reason; 2
+consistent → `promoted`/`provisional`; 3 consistent → `validated`; a 10×
+outlier → `not_promoted`; re-evaluation → `already_promoted`.
 
 **5. Acceptance criteria.**
-- [ ] A bucket with sufficient consistent observations reaches `validated`.
-- [ ] A bucket with inconsistent observations does not, and the reason is
-      recorded.
-- [ ] The calibration-state report shows non-zero promotions where they
-      exist — today it would honestly show zero.
+- [x] A bucket with sufficient consistent observations reaches `validated`.
+- [x] A bucket with inconsistent observations does not, and the reason is
+      recorded on the outcome.
+- [x] Zero promotions is now an *explainable* state rather than an absence —
+      the refusal reason names the observation count and the threshold or
+      ratio that blocked it. This is the specific defect the live v1 registry
+      exhibited: 20 observations, 0 promotions, no recorded reason.
 
 **6. Failure and edge cases.** Insufficient samples; inconsistent
 observations; contended-only buckets; stack or hardware change mid-bucket.
+Promotion never raises — a derived view failing must cost the bucket its
+authority, never the run its result.
 
-**7. Verification commands and evidence.** To be written with the steps.
+**7. Verification commands and evidence.**
+
+```bash
+.venv/bin/python -m pytest tests/unit/core/test_calibration_derivation.py \
+    tests/unit/core/test_calibration_derivation_wiring.py -q     # 56 passed
+```
+
+*Mutation evidence.* Four mutations, each restored from a file backup with
+`__pycache__` cleared and the baseline re-run:
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M2 | evaluate every bucket, not only the affected one | `test_only_the_affected_bucket_is_evaluated` |
+| M3 | drop the dirty-observation screen | `test_a_dirty_observation_in_the_bucket_is_screened_out` |
+| M4 | remove the production promotion call | `test_the_promotion_trigger_is_reachable_from_production` |
+| M5 | let a quarantined write promote | `test_promotion_is_triggered_only_by_an_eligible_write` |
+
+M2 and M3 initially **survived**: the tests only ever built one bucket and
+only clean observations. Both tests were added in response. M4 is the
+reachability guard — `evaluate_affected_bucket_after_write` was written,
+fully tested and called from nowhere, the same shape as #156, #157 and #159.
 
 **8. Commit boundary.** Promotion only. No applicability, no admission.
 
 ---
 
-### C-C5 — Applicability evaluator on the production path  `[C1] governed by O-6, O-8`
+### C-C5 — split into C-C5a and C-C5b  `[C1] governed by O-6, O-8`
 
-**1. Goal.** `applicability_for_request` and `downgrade_for_applicability`
-have zero callers. Invariant 3 requires that a bucket match is **not**
-applicability.
+**Why the split (operator decision, 2026-08-02).** The C-C5 audit found that
+the "production path" this checkpoint was written against **does not exist**.
+System B has only *write* paths in production:
 
-**2. Scope.** `calibration_policy.py:583-660`, plus a focused applicability
-boundary per §9.
+| production site | direction |
+|---|---|
+| `ml_hyperparameter_tune_agent.py:2714` (C-C3c/C-C4) | write |
+| `probe_wiring.py:162` `_persist` | write |
+| `scripts/runtime_replay/legacy_migration.py:65` | write (migration) |
 
-*Non-goals:* not making a bucket match sufficient; not merging phases.
+`as_estimate` — the only function that converts a stored observation into an
+estimate carrying authority — has **zero** production callers, as do
+`applicability_for_request`, `downgrade_for_applicability` and
+`ApplicabilityEnvelope`. Nothing in production has ever read a promoted
+bucket back.
 
-*Dependencies:* C-C2, C-C4. The reuse rules are **frozen** by 8.A, not
-open; only their encoding is an 8.B choice.
+This is not a live production bug; it is an **interface that would grant
+authority incorrectly the moment anyone wired it up**. Fixing an uncalled
+function and declaring C1 closed would leave "writes and promotion work, but
+production never reads" — so C-C5 becomes two bounded checkpoints: make the
+seam intrinsically safe (C-C5a), then prove production actually reads it
+(C-C5b).
+
+---
+
+### C-C5a — Make the authority-producing read seam intrinsically safe  `[C1]`
+
+**1. Goal.** `as_estimate` must never return measured/promoted authority
+merely because a matching bucket is validated.
+
+**2. Scope.** A new `core/runtime_control/calibration_read.py` boundary and
+the `as_estimate` seam. *Non-goals:* no consumer wiring (that is C-C5b).
 
 **3. Implementation plan.**
-- [ ] Confirm the 8.A reuse invariants are all expressible in the
-      identity/envelope split; if one is not, that is a design deviation.
-- [ ] Re-read `classify_applicability` and confirm its fail-closed
-      behaviour at `:612-616` still holds under the new dimensions.
-- [ ] Extract the applicability evaluator as a typed boundary with a
-      reachability test (§9).
-- [ ] Draft remaining steps after the decisions land.
+- [x] Audited every repository caller before changing the signature: no
+      production, script or migration callers; no `__all__` export contract;
+      docs reference only the §3.3 cross-machine rule, which is preserved.
+- [x] Added `CandidateRequest` (identity + bounded dimensions) and
+      `AuthorityDecision`, plus `evaluate_candidate_authority` — a typed,
+      independently testable boundary that never raises.
+- [x] Wired it inside `as_estimate` so the measured-provenance return is
+      reachable **only** from the granted branch. The check cannot be
+      bypassed by a caller who forgets it, because there is no longer a
+      lower-level method that returns measured authority without it.
+- [x] Order enforced: identity match → validated bucket → applicability →
+      otherwise downgrade.
 
-**4. Validation plan.** The full Layer-2 matrix (§10) — every row, with an
-expected outcome. Training-vs-inference substitution must fail
-(frozen, 8.A). Cross-UUID reuse must fail. Cross-task must fail. Cross-kind
-must fail (§3).
+**4. Validation plan / Layer-2 matrix.** Executed in
+`tests/unit/core/test_calibration_read_authority.py` (21 tests):
+
+| row | outcome |
+|---|---|
+| matching identity + in-range candidate | **granted**, `interpolation` |
+| cross-task | refused |
+| cross-device-uuid | refused |
+| cross-phase | refused |
+| cross-measurement-kind | refused |
+| cross-family / cross-candidate-config / cross-data-shape / cross-stack | refused |
+| candidate outside an observed range (3 rows) | refused, `unsupported_extrapolation` |
+| dimension with no measured evidence | refused, `not_applicable` |
+| **no candidate request** | refused (`NO_CANDIDATE`) |
+| observation without identity | refused |
+| bucket without an envelope | refused |
+| unknown model family | refused |
+
+A positive control is included so a matrix of refusals cannot pass by
+refusing everything, and a companion assertion proves the identity rows are
+in-range — otherwise each would pass for the wrong reason.
 
 **5. Acceptance criteria.**
-- [ ] Every Layer-2 row produces its expected label.
-- [ ] A matching bucket with a non-applicable candidate is downgraded, not
+- [x] Every Layer-2 row produces its expected label.
+- [x] A matching bucket with a non-applicable candidate is downgraded, not
       accepted.
-- [ ] Mutation: removing any single applicability dimension fails a named
-      row.
+- [x] Mutation: removing an applicability dimension fails a named row.
 
-**6. Failure and edge cases.** No measured range for a dimension (already
-fails closed — preserve); candidate at a range boundary; missing family;
-inconclusive probe.
+**6. Failure and edge cases.** All fail closed: absent candidate, absent
+identity, absent envelope, unmeasured dimension, unknown family, empty
+request.
 
-**7. Verification commands and evidence.** To be written with the steps.
+**7. Verification commands and evidence.**
 
-**8. Commit boundary.** Applicability only.
+```bash
+.venv/bin/python -m pytest tests/unit/core/ -q     # 1464 passed, 2 skipped
+```
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M7 | remove the identity comparison | all **8** identity rows |
+| M8 | remove the applicability call | all **5** range/fail-closed rows |
+| M9 | grant authority without consulting the decision | reachability guard **+** `test_a_validated_local_bucket_alone_is_not_authority` |
+
+*Stale-contract tests updated after classification*, not relaxed:
+`test_local_validated_evidence_keeps_measured_provenance` and
+`test_validated_bucket_restores_measured_authority_end_to_end` (unit) and two
+lifecycle tests (integration) asserted `validated + local ⇒ measured` with no
+candidate. Their C7/D4 subject is preserved; each now names the candidate, and
+the old expectation is **inverted and locked** by
+`test_a_validated_local_bucket_alone_is_not_authority`.
+
+> **Finding for C-C5b.** The two write paths differ: the C-C3c derivation
+> populates `MeasurementIdentity`, but `probe.py::probe_observations` does
+> **not**. Probe-written records therefore can never be authoritative — the
+> correct fail-closed outcome, but it means C-C5b must consume evidence from
+> the derivation path, or the probe path must start populating identity.
+> Asserted explicitly in the lifecycle test rather than left implicit.
+
+**8. Commit boundary.** The read seam only. No consumer wiring.
+
+---
+
+### C-C5b — CANCELLED by operator decision (2026-08-02)
+
+> **Historical duration calibration must not influence the production
+> allow/reject time decision.**
+>
+> Runtime and GPU conditions are live. The production time decision must use
+> the current measured speed of the concrete candidate on the current machine
+> under current conditions. A stored duration describes a different moment,
+> and letting it decide prices today's work with yesterday's clock.
+
+**Historical duration in C1 is observability-only.** It is still collected,
+identity-checked, quarantined, promoted as internally consistent history,
+reported (C-C7) and available for offline analysis, trend reporting and drift
+detection. It may **not** support ALLOW, cause REJECT, modify
+`_gate_decision`, be passed into the production time gate, or change retry,
+attempt/round accounting or execution behaviour.
+
+**Within the v2 calibration subsystem, the current live measurement is the
+sole production time-decision input.**
+
+> **Scope correction, found by audit 2026-08-02 — read this before quoting the
+> sentence above.** An earlier draft of this section said "current live
+> measurement is *the* sole production time-decision input", full stop. That
+> is **not true of the codebase as a whole**, and stating it unqualified would
+> have made this document assert something the code does not do.
+>
+> A **pre-existing legacy v1** mechanism does let history scale the production
+> estimate, and it is untouched by PR C:
+>
+> * write — after every successful run, `ml_hyperparameter_tune_agent.py`
+>   (Phase F post-flight) feeds the observed-vs-predicted ratio through an
+>   asymmetric EMA (`evaluate_time_skill/calibration.py::update_k`) into
+>   `~/.siderius/time_calibration_<gpu>.json`;
+> * read — `training_skill/estimator.py:282-283` loads that table and
+>   multiplies the estimate by `k` (`total_ms = total_steps * ms_per_step * k
+>   * SAFETY_MULTIPLIER`).
+>
+> So the accurate claim, and the one the guardrail tests actually assert, is:
+> **the v2 `CalibrationObservation` registry — the system PR C builds — has no
+> influence on any production decision.** The legacy per-GPU `k` predates PR C
+> entirely.
+>
+> **RESOLVED 2026-08-03 — the operator extended the rule to the legacy
+> mechanism, and `k` was removed inside C1 before merge.** The paragraph above
+> describes the code as it stood for one day, and is kept because the sequence
+> matters: the audit found the gap, the document stated it accurately rather
+> than overclaiming, and the operator then decided. See the Behavior Delta in
+> §16a-BD.
+>
+> **So the claim is now unqualified:** the current live measurement of the
+> concrete candidate is the sole runtime evidence in the production time
+> decision. Both history systems — legacy v1 and the v2 registry — are
+> observability-only.
+
+*Sequence of events, recorded honestly.* The C-C5b wiring was implemented,
+tested and committed (`95c4539` production, `b920b22` tests, `0d32187` docs)
+**before** this decision arrived. Published commits were not rewritten; the
+consumption was removed forward. `agent/skills/evaluate_time_skill/wrapper.py`
+is now **byte-identical** to its pre-C-C5b state (verified by empty diff
+against `0d32187~3`), and `calibration_prelaunch.py` plus its tests are
+deleted — the module existed only to feed the production verdict, so leaving
+it importable would invite the cancelled wiring back.
+
+*Negative guardrails* (`tests/unit/core/test_historical_duration_is_observability_only.py`,
+9 tests). These assert an ABSENCE, which is the hardest property to keep:
+nothing fails when someone adds the input back unless a test watches for it.
+
+| guard | proves |
+|---|---|
+| `_gate_decision` signature | no historical/calibration parameter |
+| `_gate_decision` body | never mentions historical calibration |
+| `run_skill` call graph | no historical lookup reached |
+| wrapper imports | no calibration read-path module |
+| module absence | `calibration_prelaunch` is not importable |
+| registry-invariance | same live measurement → identical verdict regardless of registry contents |
+
+| **positive control** | a 1-minute vs 10000-minute projection still changes the verdict, so the guards cannot pass by the gate ignoring everything |
+| GPU admission imports | no calibration module |
+| GPU admission signature | no duration/historical parameter |
+
+*Correction found by audit, 2026-08-02.* The registry-invariance test
+originally constructed an **empty** registry under an unrelated `tmp_path`.
+That proved nothing twice over: production never resolves to `tmp_path`, and
+an empty registry holds no authority to ignore in the first place — the
+assertion would have held even if the gate did consult history. It now
+populates the registry **production would read** (the default root, pinned to
+a temporary tree by the session isolation fixture) with three observations
+promoted to `validated`, whose stored ~900 ms/step contradicts the live
+projection, and asserts the fixture really did reach `validated` before
+asserting invariance.
+
+**Any future use of history in execution decisions requires a separate PR and
+explicit operator approval.**
+
+---
+
+### C-C5b — Wire the safe read seam to the time-budget consumer  `[C1]`  *(superseded — see cancellation above)*
+
+**1. Goal.** Prove a production time-budget decision actually reaches the safe
+seam. Without this, C1 remains "writes and promotion complete, production
+never reads".
+
+**2. Scope.** The smallest existing time-budget decision boundary.
+*Non-goals:* no new logic inside the giant `run()` method; no wiring into
+`train_engine_sandbox.py`; no activation of the unused
+`production_estimator_factory()`; no general estimator/C9 refactor.
+
+**3. Verified consumer audit (read-only, 2026-08-02).**
+
+```text
+tuner run()  [parent process]
+ :2998  device_identity_from_hardware(...)        → DeviceIdentity(uuid)
+ :3012  sandbox = _sandbox_factory(..., device_identity=...)
+ :3856  [Pre-flight 2/2] Wall-time gate
+         └─ evaluate_time_skill.wrapper.run_skill(sandbox, **active_params)
+             └─ :852  _gate_decision(...) → policy.decide(...)   ← THE DECISION
+ later   training subprocess launch
+          └─ train_engine_sandbox.py:813 set_calibration_context(...)  [WRITE]
+             :829 decide_admission()
+```
+
+*Correction recorded:* `decide_admission()` is **not** a GPU/resource gate —
+it sums `predicted_seconds` against `operator_budget_seconds`. It is a time
+decision, but in-subprocess, so it is still the wrong seam.
+
+*Why not the estimator.* No production code calls `estimator.estimate()` and
+nothing in production constructs a `RuntimeEstimateRequest`; the only mention
+is `estimator.py:216-227` explaining why it is bypassed. Filling in
+`history_lookup` would attach the seam to a function nobody calls.
+
+**Identity availability at the pre-flight gate** — all fields resolvable, no
+broad plumbing needed:
+
+| field | source |
+|---|---|
+| `model_family`, `batch_size`, `seg_size` | existing kwargs |
+| `param_count` | `_count_params(...)`, which instantiates the real model |
+| `optimizer_type` | already read at `wrapper.py:498` |
+| `task_identity`, `data_shape_class` | `data_dir` → measurement capability |
+| `runtime_stack_identity` | `capture_software_stack()` |
+| **`hardware_uuid`** | **`sandbox.device_identity.uuid`** — already in scope |
+| `precision`, `runtime_flags` | shared canonical context (below) |
+
+**4. Foundation landed (two committed fixes).** Both are silent-never-match
+defects: the reader would find nothing, raise nothing, and be
+indistinguishable from an empty registry.
+
+- `8f97251` — **one shared calibration context**
+  (`core/runtime_control/calibration_context.py`). The engine and the
+  pre-flight disagreed on the parameter count —
+  `sum(... if p.requires_grad)` vs unfiltered — identical for a
+  fully-trainable model, silently different for any model with a frozen
+  layer. `trainable_param_count` and `model_precision` now serve both.
+  `MeasurementIdentity` unchanged; parity proven by pinning the
+  pre-refactor mapping and its hash, so no stored identity moved.
+- `8606b47` — **envelope dimensions derived from recorded evidence**.
+  Derived records carry `seg_size`, probe records carry `segment_length`,
+  and `ApplicabilityEnvelope` defaulted to the latter — so a fixed reader
+  vocabulary found no range for one producer and never matched.
+  `_measured_dimensions` now follows the evidence;
+  `DERIVED_WORKLOAD_DIMENSIONS` gives the writer's vocabulary one home.
+
+**Shared-context decision.** Only values that are (a) semantically part of
+the candidate configuration and (b) deterministically derivable **both**
+before launch and inside the training loop may enter. `precision` qualifies
+because the pre-flight already instantiates the real model; `runtime_flags`
+qualify as loop constants. Anything realized only during execution is
+evidence *about* a candidate, not part of its identity, and would make the
+identity unknowable before launch.
+
+**Landed.** `d901412` — `candidate_config_hash` promoted to the single public
+helper in `calibration_context`; the private `_config_hash` duplicate in
+`calibration_derivation` is **deleted**, with a structural test forbidding its
+return (a reintroduced copy would pass every behavioural test while drifting
+from the reader).
+
+**C-C5b wiring landed.** `95c4539` (production), `b920b22` (tests). The loop
+is closed:
+
+```text
+wrapper.run_skill                      [before subprocess launch]
+  -> _prelaunch_calibration(sandbox, ...)
+      -> lookup_applicable_duration(...)          v2 registry
+          -> registry.as_estimate(..., request=)  C-C5a authority seam
+  -> _gate_decision(historical_calibration=..., ...)
+  -> time-budget verdict
+... only then is training launched
+```
+
+**O-6 is structural, not conventional.** `decision.kind` is computed by
+`policy.decide(...)` **before** the historical block runs, and nothing in that
+block writes it. `historical_support_only` returns `may_support_allow` — there
+is no value it can return that denies a candidate. A field named
+`should_reject` would have made rejection expressible, and expressible
+eventually becomes reachable.
+
+> **Deviation from the plan, recorded deliberately.** Applicable under-budget
+> history is read, surfaced (`historical_supports_allow`, provenance, reasons)
+> and may support an allow interpretation — but it does **not flip an existing
+> verdict**. Granting history verdict-changing power is a material authority
+> change beyond "may support ALLOW", and prior-tier evidence is already
+> `cannot_block` in the §7.4 matrix. Deferred pending an explicit operator
+> decision; **not** implemented inside C1.
+
+**Mutation evidence.**
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M10 | remove the production read call | `test_run_skill_calls_the_prelaunch_lookup` **and** `test_the_result_reaches_the_gate` |
+
+M10 kills two guards, deliberately: calling the lookup and discarding its
+result is the #159 shape, so reaching the lookup is not sufficient evidence.
+
+**GPU isolation.** Three structural guards: `admission.py` imports no
+calibration module; `evaluate_gpu_admission` exposes no
+duration/estimate-shaped parameter; `calibration_prelaunch` neither imports
+nor calls the admission path. Milliseconds cannot reach a mebibyte decision.
+
+**Tests.** `test_calibration_prelaunch.py` — 25, including the positive
+control (an applicable validated record IS consumed end-to-end through a real
+registry), six cross-dimension refusals, cross-candidate-config, three
+incomplete-identity refusals that must name the missing field, unusable
+registry as refusal, empty registry says so. `tests/unit/agent` +
+`tests/unit/core`: **4667 passed, 2 skipped**.
+
+**5. Acceptance criteria.**
+- [x] A production time-budget decision reaches the safe read seam (`95c4539`).
+- [x] Applicable promoted duration evidence is actually consumed.
+- [x] Inapplicable evidence is ignored/downgraded.
+- [x] Deleting the production read call fails a reachability test (M10).
+- [x] Duration evidence cannot affect GPU admission (3 structural guards).
+- [x] Absent applicable calibration preserves current non-authoritative
+      fallback behaviour.
+- [ ] Retry, attempt/round accounting, scientific result and LLM calls
+      unchanged.
+- [x] O-6 preserved: applicable history may support ALLOW; it may never
+      directly REJECT. Rejection requires a live measurement of the concrete
+      candidate.
+- [x] A structural guard proves the duration-calibration module is neither
+      imported by nor passed into the GPU-admission path.
+
+**6. Completion standard.** C-C5b is **not** complete when
+`calibration_prelaunch.py` works and its unit tests pass. It is complete when
+the real pre-launch time decision calls it and only applicable historical
+duration evidence can influence that decision.
+
+**8. Commit boundary.** Consumer wiring only. The lookup module is committed
+**with** its production wiring, never before it.
 
 ---
 
@@ -2100,30 +3200,79 @@ Report shape is an 8.B choice; the honesty rule (zero buckets is never
 reported as active calibration) is frozen by 8.A and applies to both.
 
 **3. Implementation plan.**
-- [ ] Resolve the report shape from the existing report surfaces (8.B).
-- [ ] Inspect the existing report surfaces before choosing where this lands.
-- [ ] Draft the steps.
+- [x] Resolve the report shape from the existing report surfaces (8.B) —
+      landed as `core/runtime_control/calibration_state.py` (186 lines):
+      `CalibrationStateReport` + `collect_calibration_state()`.
+- [x] Inspect the existing report surfaces before choosing where this lands —
+      `BootstrapReport.render()` was the surface already printing
+      `observations : N recorded`, i.e. the exact number that misled for
+      weeks. The state line is appended directly beneath it.
+- [x] Wire it into `BootstrapReport.render()` (reachability test below).
 
-**4. Validation plan.** Counts are correct against a known fixture registry;
-rejection reasons are represented; every admission record carries the seven
-fields of 8.B; the report cannot claim calibration is active when zero
-authoritative buckets exist (8.A).
+**Authority is defined by buckets, never by record count.**
+`buckets_authoritative` returns `buckets_validated` only —
+`provisional` is a real state that is explicitly **not** authoritative, and
+counting it is precisely how a report begins to overstate. `is_active` is
+`readable and buckets_authoritative > 0`, so 20,000 observations with zero
+validated buckets still reports `INACTIVE`, **with the reason attached**.
+
+Counts are deliberately separate rather than one total, so an operator
+asking *why* nothing is authoritative can see where evidence is being lost:
+quarantined (incomplete identity), ineligible (failure provenance), or
+eligible but below `provisional_min_observations=2` / outside
+`consistency_max_min_ratio=1.5`.
+
+**4. Validation plan.** `tests/unit/core/test_calibration_state.py` — 10
+tests. Counts against a known fixture registry; refusal reasons name the
+blocked bucket and its shortfall; unreadable ≠ empty; a provisional-only
+report is not active.
 
 **5. Acceptance criteria.**
-- [ ] Against a **read-only copy** of the current registry the report reads
-      20 observations / 0 promotions / 0 authoritative buckets — it tells the
-      truth about an uncalibrated system.
-- [ ] The report never describes calibration as active while zero
-      authoritative buckets exist.
+- [x] The exact v1 shape — evidence collected, none promoted — reports
+      `INACTIVE` with a reason
+      (`test_observations_without_promotion_are_still_inactive`). Asserted
+      against a fixture reproducing that shape rather than against the live
+      tree, which is preserved evidence and is never opened by tests.
+- [x] The report never describes calibration as active while zero
+      authoritative buckets exist (`test_a_provisional_bucket_is_not_authoritative`).
 - [ ] The seven admission-provenance fields are **C2's** acceptance
       criterion, asserted with C-C6, not here.
 
 **6. Failure and edge cases.** Empty registry; registry unreadable; mixed
 schema versions (per O-1); a bucket promoted then invalidated.
 
-**7. Verification commands and evidence.** To be written with the steps.
+*Correction found by audit, 2026-08-02.* The first wiring built
+`CalibrationRegistry(Path(self.registry_root))` **inside `render()`** and
+passed the object in. `CalibrationRegistry.__init__` `mkdir`s six
+subdirectories, so constructing one against a read-only or vanished parent
+raises — placing the only raising step **outside** the guard
+`collect_calibration_state` advertises, and letting a reporting failure
+propagate into `render()`. That directly contradicts "reporting never raises
+into or changes the scientific workflow".
 
-**8. Commit boundary.** Reporting only.
+Fixed by adding a `root=` parameter so construction happens **inside** the
+guarded region; `render()` now passes the path, never a registry.
+
+*Mutation proof.* Reverting `render()` to construct the registry itself makes
+`test_bootstrap_render_survives_an_unusable_registry_root` fail with
+`PermissionError: [Errno 13] ... /ro/runtime_calibration_v2` propagating out
+of `render()`. Restored; baseline re-run green (19/19 for the two modules).
+The collector-level test still passes under the mutation — correctly, since
+it exercises the collector — which is why the **reachability** test at the
+production caller is the one that catches this.
+
+**7. Verification commands and evidence.**
+
+```bash
+.venv/bin/pytest tests/unit/core/test_calibration_state.py \
+                 tests/unit/core/test_historical_duration_is_observability_only.py -q
+# 19 passed
+.venv/bin/pytest tests/unit/core/ -q     # 1500 passed, 2 skipped
+```
+
+**8. Commit boundary.** Reporting only. Reporting is read-only, never raises,
+and carries no implication that historical data affects execution — see the
+C-C5b cancellation above.
 
 ---
 
@@ -2140,16 +3289,30 @@ touched node/skill `.md`. Also the stale ladder row at
 *Dependencies:* all prior commits.
 
 **3. Implementation plan.**
-- [ ] Update every `[ ]` above to `[x]` with recorded evidence.
-- [ ] Quote each documented flag and default against the merged source.
-- [ ] Record which Layer-3 confirmation ran, on which device.
+- [x] Update every C1 `[ ]` above to `[x]` with recorded evidence — §8.A
+      frozen invariants (ten `[x]` with named tests, two marked `[C2]` rather
+      than left ambiguous), §12.1 Layer-3 requirements, C-C7 §3/§5.
+- [x] Quote each documented flag and default against the merged source —
+      `docs/runtime_bootstrap.md` gained the `calibration:` line documented
+      against `bootstrap.py::render`; O-4 values quoted from
+      `DEFAULT_POLICY`; `SIDERIUS_CALIBRATION_DIR` semantics quoted from
+      `calibration.py:50,57-62` and `default_registry_root()`.
+- [x] Record which Layer-3 confirmation ran, on which device — §17b, run 4,
+      RTX 5090 `GPU-c30b6678-…`, SHA `b06ef87`.
 
 **4. Validation plan.** Documentation only; no tests. Verify by quoting
 source, not memory.
 
 **5. Acceptance criteria.**
-- [ ] No status line in the V20 folder contradicts the merged code.
-- [ ] Every follow-up (FU-C-1..FU-C-5) is filed with its evidence.
+- [x] No status line in the V20 folder contradicts the merged code —
+      `v20_priorities/README.md` PR C row updated to "C1 implemented, in
+      review" with the C-C5b cancellation; the C-C5b section header itself
+      marked superseded rather than deleted.
+- [x] Every follow-up is filed with its evidence — see the follow-up table
+      in §16a: **FU-C-9** (legacy single-file mode crashes the time estimator
+      on a `None` SampleSet) — the only one still open. **FU-C-10** (legacy
+      v1 `k` in the estimate) and **FU-C-11** (Phase F writing the legacy
+      table) are both **closed by implementation**, §16a-BD.
 
 **6. Failure and edge cases.** n/a.
 
@@ -2157,6 +3320,322 @@ source, not memory.
 exact-head CI — recorded once at the end per §12.
 
 **8. Commit boundary.** Docs only; last commit before the PR.
+
+---
+
+## 17a. C1 Layer-3 bounded real validation — pre-registered plan
+
+Written **before** the run, per operator requirement. Operator authorised one
+bounded fixed-candidate, no-LLM C1 run.
+
+**What it confirms.** The **write → promotion → reporting** path end-to-end on
+real hardware. Not a consumption path — C-C5b is cancelled, so there is no
+production consumer of historical duration to confirm.
+
+**Entry point.** `HyperparamTuningAgent(bridge_factory=...).run(...)` — the
+real production entry point, containing the single production derivation seam
+(`ml_hyperparameter_tune_agent.py:4822`). `sandbox_factory` is left at its
+default, so training, inference and scoring are **real subprocesses**.
+
+**How "no LLM" is achieved without faking the thing under test.** Only the
+planner is substituted, through the sanctioned constructor DI seam
+(`docs/pseudo_test_infra.md` §4A). A `FixedPlanBridge` returns the *same*
+`ExperimentPlan` on every `plan()` call and a fixed string on `reflect()`.
+Zero network calls. This is also what makes the run a *fixed candidate*: an
+LLM planner varies the config each round, which would scatter observations
+across buckets and never reach the promotion threshold.
+
+**Configuration.**
+
+| Item | Value |
+|---|---|
+| device | RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef` |
+| model | `punet`, `segmentation_size=40000`, `batch_size=8` |
+| train | `lr=5e-4`, `epochs=1`, `optimizer_type=adamw`, `device=cuda` |
+| loss | `focal`, `alpha=0.5`, `gamma=2.0` |
+| rounds | 3 formal (one per required observation) |
+| data | `train_portion` / `eval_portion` bounded to a small snapshot |
+| workspace | scratch directory, discarded after evidence capture |
+| registry | `SIDERIUS_CALIBRATION_DIR` → **temporary v2 tree** |
+
+**Expected wall time and resources.** Bounded by `--formal_time_budget_minutes`
+and a small portion; target well under 30 min total, single GPU, no
+concurrency.
+
+**Pass criteria.**
+1. Three successful attempts each derive one `CalibrationObservation` with
+   `measurement_kind="duration"` and a complete `MeasurementIdentity`
+   (including the real GPU UUID).
+2. All three land in the **same** bucket — proving the fixed candidate hashes
+   to one `candidate_config_hash` across rounds.
+3. Promotion crosses the frozen O-4 thresholds in order: 1 → candidate only,
+   2 → `provisional`, 3 → `validated`, with max/min ms-per-step ≤ 1.5.
+4. `collect_calibration_state` reports `INACTIVE` before promotion and
+   `ACTIVE` with ≥1 validated bucket after.
+5. The live time verdict is **unchanged** by the populated registry.
+6. The live v1 tree digest is still `c1065a8b612fb691…`.
+
+**Stop criteria.** Stop and report rather than retry if: the run needs a real
+LLM call; consistency ratio exceeds 1.5 (record it — that is a real finding
+about measurement stability, not a failure to paper over); any write lands
+outside the temporary registry; wall time materially exceeds the bound.
+
+**Retained artifacts.** The temporary registry tree, the derived observation
+and promotion records, the before/after calibration-state report lines, and
+the v1 digest check. Recorded in §17b.
+
+---
+
+## 17b. C1 Layer-3 execution record
+
+### Run 3 — 3 rounds on a SHARED GPU (superseded, but the findings stand)
+
+Device: RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef`. Real training,
+real inference, real scoring; `FixedPlanBridge`, zero LLM calls. Rounds 1 and
+2 completed with real scores (`-0.0776`, `+0.8962`).
+
+**Six observations, four buckets:**
+
+| bucket | n | level | ms | ratio | identity | eligibility |
+|---|---|---|---|---|---|---|
+| `training \| single_candidate_idle` | 2 | **provisional** | 41.574, 48.095 | 1.157 | full, real GPU UUID, `cfg:c23fbeb88652` | clean |
+| `inference \| single_candidate_idle` | 2 | **provisional** | 17.810, 24.604 | 1.381 | full, same `cfg` | clean |
+| `training \| foreign_contended` | 1 | unvalidated | 40.785 | — | **absent** | `concurrency_identity='foreign_contended' is not clean` |
+| `inference \| foreign_contended` | 1 | unvalidated | 6.826 | — | **absent** | same |
+
+**What this actually confirms — more than a clean 3/3 would have.** The box is
+shared, and a foreign process (`/home/wenyu/summer/.venv/bin/python`, 2.9 GiB)
+was resident during part of the run. The system therefore exercised its
+contamination paths on real hardware rather than in a fixture:
+
+* contention **separates buckets** — the contended measurements did not land
+  in, or pollute, the idle buckets (the §8 bucket-separation rule, live);
+* contended observations are **ineligible** and can never be promoted;
+* their identity is **absent, not fabricated** — `TestIdentityIsNotFabricated`
+  is not a hypothetical;
+* both clean buckets sit at exactly 2 → `provisional`, and C-C7 reports
+  `INACTIVE` **with the D4 reason** while holding 6 observations. That is the
+  precise failure mode this PR exists to remove: a registry that looks
+  populated and is not authoritative, now saying so out loud.
+* the same `candidate_config_hash` (`cfg:c23fbeb88652`) appears in every
+  bucket across rounds, confirming the fixed candidate hashes stably and that
+  the D-4 shared-identity fix holds end-to-end.
+
+**Why it was stopped rather than finished.** Round 3 was promoted to a
+**formal** round, which uses `formal_portion` / `formal_train_portion` —
+left at their defaults (0.1 / 1.0) these are *not* bounded by the trial caps.
+The estimate came out at **1801.9 min against a 25 min budget** and the
+attempt OOMed. That is a harness scoping error, not a production defect: the
+time gate correctly refused and requested a probe. Stopped under the §17a
+stop criterion ("wall time materially exceeds the bound") rather than left to
+grind through five attempts.
+
+*Kept as evidence.* Run 3's registry is retained; it is the only artifact in
+which the contention-exclusion path was exercised on live hardware.
+
+### Registry-safety finding: one env var governs BOTH systems
+
+`SIDERIUS_CALIBRATION_DIR` is read by both evidence systems:
+
+* `evaluate_time_skill/calibration.py:50,57-62` — the **legacy v1** per-GPU
+  `time_calibration_<gpu>.json` table;
+* `calibration_registry.py::default_registry_root()` — the **v2** tree, as
+  `$SIDERIUS_CALIBRATION_DIR/runtime_calibration_v2`.
+
+Two consequences, both good, both previously unstated:
+
+1. The session isolation fixture in `tests/conftest.py` pins that one
+   variable and therefore protects **both** systems — the legacy table was
+   never at risk from the suite either.
+2. The Layer-3 harness isolates both for the same reason. Verified after the
+   runs: `~/.siderius/time_calibration_nvidia_geforce_rtx_5090.json` still has
+   its 2026-07-20 mtime, and no `time_calibration*` file was written into
+   either temporary tree (the Phase F post-flight only fires on
+   `real_dataset_warmup` evidence, and these rounds ran
+   `static_uncalibrated`).
+
+*Also note the shape of a mistake worth not repeating.* The variable is a
+**base** directory, not the registry root — the v2 tree is a child of it.
+Reporting against the base directory finds nothing and is indistinguishable
+from "the writer never ran", which is precisely the silent never-match this PR
+exists to remove. The first Layer-3 harness reproduced that bug in its own
+reporting; fixed by resolving through `default_registry_root()`.
+
+### Run 4 — bounded formal parameters, 5 rounds
+
+`formal_portion=0.01`, `formal_train_portion=0.02`, `formal_eval_portion=0.01`
+so a promoted formal round is bounded too, and 5 rounds so a
+contention-contaminated observation can be **replaced** rather than a
+threshold lowered.
+
+**PASS.** Stopped after round 3 — every threshold was crossed and further
+rounds would have consumed a shared GPU for no additional evidence.
+
+#### Execution record
+
+| Item | Value |
+|---|---|
+| Git SHA at validation | `b06ef87e0bda15d925765092ca4469d55bdb1bdd` |
+| Harness | `layer3_c1.py` — `HyperparamTuningAgent(bridge_factory=FixedPlanBridge).run(...)`, default (real) sandbox |
+| Command | `SIDERIUS_ROOT_FOR_HARNESS=<repo> LAYER3_SCRATCH=<scratch>/layer3_run4 .venv/bin/python layer3_c1.py` |
+| LLM calls | **0** — planner substituted at the constructor DI seam; training, inference and scoring are real subprocesses |
+| Device | RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef` (shared box; a foreign process was resident) |
+| Candidate | `punet`, `seg=40000`, `batch=8`, `lr=5e-4`, `epochs=1`, `adamw`, focal(α=0.5, γ=2.0), `cuda` |
+| Registry | `<scratch>/layer3_run4/registry_v2/runtime_calibration_v2` (temporary; 88 KB retained) |
+| Workspace | `<scratch>/layer3_run4/workspace` |
+| Expected / actual | ≪30 min budgeted; 3 rounds completed, real scores `-1.226`, `-0.285`, and round 3 |
+
+#### Result — both buckets validated
+
+```
+calibration: ACTIVE — 2 validated bucket(s) from 6 eligible observation(s)
+```
+
+| bucket | n | level | ms/step | max/min | quarantined |
+|---|---|---|---|---|---|
+| `training \| optimizer_step \| single_candidate_idle` | 3 | **validated** | 48.419, 48.757, 49.028 | **1.013** | 0 |
+| `inference \| inference_batch \| single_candidate_idle` | 3 | **validated** | 15.754, 15.943, 16.833 | **1.068** | 0 |
+
+Every record carried a complete identity, from real hardware, identical across
+rounds:
+
+```
+measurement_kind      duration
+task_identity         tidmad_denoise
+data_shape_class      psd10000000_seg200_files20
+model_family          punet
+candidate_config_hash cfg:c23fbeb88652
+hardware_uuid         GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef
+phase                 training / inference   (separate buckets, never merged)
+```
+
+#### Pass criteria — all six met
+
+1. [x] Three successful attempts each derived a `duration` observation with a
+       complete identity including the real GPU UUID.
+2. [x] All three landed in the **same** bucket per phase — one
+       `candidate_config_hash` (`cfg:c23fbeb88652`) across rounds, confirming
+       the D-4 shared-identity fix end to end.
+3. [x] The O-4 ladder crossed **in order, live**: 1 → candidate only, 2 →
+       `provisional`, 3 → `validated`, both ratios far inside 1.5.
+4. [x] `INACTIVE` before promotion (with the D4 reason, while already holding
+       4 observations) → `ACTIVE` after.
+5. [x] **The live verdict is unchanged by the registry.** Same
+       `_gate_decision` inputs, run twice: against this ACTIVE registry (2
+       validated buckets, 6 eligible observations) and against an empty one —
+       **identical** `ALLOW` with `evidence_provenance=real_dataset_warmup`,
+       the live measurement, never a calibration source. This is the operator
+       decision demonstrated on genuinely authoritative stored evidence rather
+       than on an empty tree.
+6. [x] Live v1 tree byte-identical: `c1065a8b612fb691…` re-verified after the
+       run; the legacy `k` table still carries its 2026-07-20 mtime and no
+       `time_calibration*` file was written into either temporary tree.
+
+**Phase separation, observed rather than asserted:** training ≈48.7 ms/step
+and inference ≈16.2 ms/batch are ~3× apart and occupy separate buckets. The
+frozen rule that training and inference never substitute for each other is not
+a stylistic preference here — the numbers are simply different measurements.
+
+---
+
+## 17c. C1 final validation record
+
+> **C1 COMPLETE — PR #161 green at exact head
+> `3f5fa23238de19762f768bc5e89b446aa7218902`.**
+> https://github.com/Galileo-Sandbox/SIDERIUS/pull/161 · CI run
+> `30839502103` · `Lint + Type + Unit Tests: pass (8m12s)` · **not merged**.
+>
+> It took three CI runs, and both failures were things this machine
+> structurally could not catch — pyright cannot execute here at all, and the
+> local GPU made two tests pass for the wrong reason. Recorded because the
+> pattern outlives this PR: on this repository "green locally" is a weaker
+> claim than it sounds.
+
+The table below was recorded at `5a5e7b5`, the PR head at open; the local
+results are unchanged at the green head except for the added ordering test
+(6389, not 6388).
+
+| Check | Result |
+|---|---|
+| `pytest tests/unit -q` | **6388 passed, 2 skipped, 4 xfailed** (293s, exit 0) |
+| `pytest tests/unit/core -q` | 1500 passed, 2 skipped |
+| `ruff check .` | All checks passed |
+| `ruff format --check .` | 667 files already formatted |
+| **`pyright`** | **NOT RUN LOCALLY — cannot be.** Node on this host is v10.19.0; pyright's bundled JS fails to parse (`SyntaxError: Unexpected token =` in `vendor.js`). CI is the only environment that can run it. Recorded, not claimed. |
+| live v1 registry | byte-identical, `c1065a8b612fb691…`, re-verified after every GPU run |
+| legacy `k` table | untouched, mtime still 2026-07-20 |
+| working tree | clean |
+| Layer-3 | **PASS** — §17b |
+
+**Mutation proofs retained in this PR**
+
+| Mutation | Fails |
+|---|---|
+| revert `render()` to construct the registry itself | `test_bootstrap_render_survives_an_unusable_registry_root` — `PermissionError` escapes `render()` |
+| reintroduce `_config_hash` in the write path | `test_the_derivation_does_not_define_its_own_hash` |
+| delete the production derivation call | `test_the_derivation_is_called_in_production` / `test_it_is_called_from_run` |
+| delete the promotion trigger call | `test_the_promotion_trigger_is_reachable_from_production` |
+| move derivation into the shared append helper | `test_the_shared_append_helper_does_not_derive` |
+| reintroduce a historical parameter on `_gate_decision` | `test_gate_decision_has_no_historical_parameter` |
+| make the gate ignore its live input | `test_the_verdict_still_responds_to_the_live_measurement` (positive control) |
+
+**On pyright specifically.** Per the repository rule that local success is not
+evidence when a tool cannot run locally, nothing in this PR claims a passing
+pyright run from this machine. The blocking check runs on the exact PR head in
+CI, and that run — not this table — is the evidence.
+
+**And it immediately earned its keep.** The first CI run on the PR head failed
+on a blocking pyright error that had been latent since `f3ab878`:
+
+```
+calibration_policy.py:752:34 - error: Argument of type "str | None" cannot be
+assigned to parameter "concurrency_identity" of type "ConcurrencyIdentity | None"
+```
+
+A set comprehension over a `Literal`-typed expression widens the element type
+to `str`, so `regimes.pop()` could not populate the envelope's
+`ConcurrencyIdentity` field. Fixed by **annotating the set**, not by loosening
+the field or suppressing the rule — the Literal is the point: it is what stops
+an arbitrary string becoming a concurrency class. (`2fed791`)
+
+*Why nothing caught it earlier, worth knowing beyond this PR:* the workflow
+triggers on `pull_request` only. A long-lived branch therefore accumulates
+commits with **zero** CI coverage until a PR is opened — 34 commits, in this
+case. Every "green" claim made on this branch before 2026-08-03 was a local
+claim about a check the local machine could not run. That is a property of the
+CI configuration, not of this PR, and is worth an operator decision separate
+from C1.
+
+**Second CI finding: two C1 tests silently required a GPU.** The next run
+failed in `pytest`:
+
+```
+tests/unit/core/test_measurement_capability.py
+  test_a_missing_dataset_root_is_refused_not_defaulted
+    AssertionError: assert 'no dataset root' in ('no CUDA device is visible')
+  test_a_nonexistent_root_names_the_path
+    AssertionError: assert 'absent' in ('no CUDA device is visible')
+```
+
+`resolve_measurement_capability` checks the accelerator **before** the dataset
+(`measurement_capability.py:132-137`), so on a GPU-less runner the dataset
+branches those two tests exist to cover are **unreachable**. They passed only
+because the developer box has a GPU — precisely the "local success is not
+evidence of portability" failure the repository rules name, in tests C1 itself
+added (`3927d06`).
+
+*Fix, and why not the obvious one.* Skipping without CUDA would leave the
+dataset policy untested in the one environment that gates merges — a green
+suite proving less than it appears to, which is the same defect class in a new
+costume. Instead a `cuda_present` fixture monkeypatches
+`torch.cuda.is_available` so the dataset branches are reachable **everywhere**,
+and a new test `test_the_accelerator_is_checked_before_the_dataset` pins the
+ordering that made them machine-dependent in the first place.
+
+*Verified against CI's actual condition, not assumed.* `CUDA_VISIBLE_DEVICES=""`
+was confirmed to reproduce it exactly — `torch.cuda.is_available()` returns
+`False` and the resolver emits the identical reason string CI reported — and
+the whole unit suite was then re-run under it.
 
 ---
 
@@ -2169,7 +3648,9 @@ Per PR, since the two are reviewed separately.
   proof the old tree's 20 records are untouched and still readable.
 - Layer-2 matrix results for identity and applicability.
 - One C1 Layer-3 confirmation: a real duration observation through
-  promotion and applicability into the time-budget consumer.
+  promotion and applicability into the **calibration-state report**
+  (corrected 2026-08-02 — the time-budget consumer was cancelled; see
+  C-C5b and §11 Layer 3).
 - A calibration-state report showing honest counts — against a read-only
   copy, 20 observations / 0 promotions / 0 authoritative buckets before any
   new evidence is collected.
@@ -2187,4 +3668,4 @@ Per PR, since the two are reviewed separately.
 
 **Both**
 - Mutation proofs per merged family, each against real production source.
-- Follow-ups FU-C-1..FU-C-5 filed with evidence.
+- Follow-ups FU-C-1..FU-C-8 filed with evidence.

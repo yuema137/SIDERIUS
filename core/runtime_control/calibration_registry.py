@@ -51,24 +51,79 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+from core.runtime_control.calibration_read import (
+    NO_CANDIDATE,
+    CandidateRequest,
+    evaluate_candidate_authority,
+)
 from core.runtime_control.estimate_types import RuntimeEstimate, make_estimate
 from core.runtime_control.registry_schemas import (
+    REGISTRY_SCHEMA_VERSION,
     CalibrationObservation,
     CalibrationPromotion,
     CalibrationSummary,
     ExecutionEnvironmentProfile,
     HardwareCompatibilityProfile,
     LegacySourceReference,
+    QuarantineRecord,
     RegistryManifest,
 )
 
 LEGACY_ADAPTER_VERSION = "1.0.0"
 
 
-def default_registry_root() -> Path:
+def schema_major(schema_version: str) -> int:
+    """Major component of a registry schema version."""
+    try:
+        return int(schema_version.split(".", 1)[0])
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"not a registry schema version: {schema_version!r}") from exc
+
+
+def registry_dirname(schema_version: str = REGISTRY_SCHEMA_VERSION) -> str:
+    """Directory name for a schema version.
+
+    v1 keeps the historical name so the existing tree is found exactly where
+    it has always been; v2 and later get a suffixed sibling.
+    """
+    major = schema_major(schema_version)
+    return "runtime_calibration" if major <= 1 else f"runtime_calibration_v{major}"
+
+
+def default_registry_root(schema_version: str = REGISTRY_SCHEMA_VERSION) -> Path:
+    """Root for the CURRENT schema version.
+
+    V20 PR C1 / C-C2b, operator decision O-1: a new schema version gets a
+    NEW TREE. The old one is left in place, byte for byte, and is never
+    re-hashed.
+
+    That is not a stylistic choice. `CalibrationObservation.hash_payload()`
+    dumps the whole model, and `schema_version` is inside it, so adding any
+    field -- even an optional one defaulting to None -- changes every
+    existing record's content id. `load_observation` then raises
+    "content-hash mismatch ... (corruption or tampering)", and
+    `rebuild_index` silently drops every record into its rejected list and
+    commits an empty manifest. Verified empirically against a live record
+    during the PR C audit: one added optional field moved
+    sha256:09e767d8... to sha256:6cff7c0d....
+
+    Migrating in place would therefore mean either rewriting 20 records
+    whose ids other artifacts may cite, or teaching the loader to accept a
+    hash it cannot verify. A sibling tree costs a directory.
+    """
     override = os.environ.get("SIDERIUS_CALIBRATION_DIR")
     base = Path(override) if override else Path.home() / ".siderius"
-    return base / "runtime_calibration"
+    return base / registry_dirname(schema_version)
+
+
+def legacy_registry_root() -> Path:
+    """The v1 tree, for READ-ONLY inspection.
+
+    Nothing in the v2 write path may target this. It exists so an operator
+    tool can report what the old tree holds without the v2 loader trying to
+    verify hashes computed under a different schema.
+    """
+    return default_registry_root("1.0.0")
 
 
 def _digest_of(full_id: str) -> str:
@@ -76,6 +131,19 @@ def _digest_of(full_id: str) -> str:
     if scheme != "sha256" or len(digest) != 64:
         raise ValueError(f"not a full sha256 content id: {full_id!r}")
     return digest
+
+
+def _measured_dimensions(observations: list[Any]) -> tuple[str, ...]:
+    """Numeric workload keys present across a bucket's own observations.
+
+    Derived from the evidence rather than declared, because producers spell
+    the workload differently and a hardcoded list silently excludes whichever
+    one it does not name.
+    """
+    keys: set[str] = set()
+    for obs in observations:
+        keys.update(k for k, v in (obs.workload or {}).items() if isinstance(v, (int, float)))
+    return tuple(sorted(keys))
 
 
 class CalibrationRegistry:
@@ -88,12 +156,17 @@ class CalibrationRegistry:
         self._env_dir = self.root / "environment_profiles"
         self._summary_dir = self.root / "summaries"
         self._promo_dir = self.root / "promotions"
+        #: O-2. Physically separate from `observations/` so a quarantined
+        #: record cannot be picked up by a directory walk that means to read
+        #: usable evidence.
+        self._quarantine_dir = self.root / "quarantine"
         for d in (
             self._obs_dir,
             self._hw_dir,
             self._env_dir,
             self._summary_dir,
             self._promo_dir,
+            self._quarantine_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
         self._index_path = self.root / "registry.json"
@@ -148,12 +221,40 @@ class CalibrationRegistry:
         if not self._index_path.exists():
             return RegistryManifest()
         try:
-            return RegistryManifest.model_validate_json(self._index_path.read_text())
+            manifest = RegistryManifest.model_validate_json(self._index_path.read_text())
         except Exception as exc:
             raise ValueError(
                 f"registry index corrupt at {self._index_path}: {exc}. "
                 "Run rebuild_index() to reconstruct it from the records."
             ) from exc
+        self._refuse_foreign_schema(manifest)
+        return manifest
+
+    def _refuse_foreign_schema(self, manifest: RegistryManifest) -> None:
+        """Fail closed when this tree was written under another major schema.
+
+        O-1 gives each major version its own tree, but a tree is just a path
+        -- an operator pointing `SIDERIUS_CALIBRATION_DIR` at the old one, or
+        a stale override in a launcher, would otherwise have v2 code append
+        v2 records beside v1 records in a directory whose manifest claims v1.
+
+        The failure that would follow is silent: `rebuild_index` verifies
+        every file's content hash and *excludes* the ones that do not match,
+        committing a manifest that omits them. Half the evidence would
+        disappear with no error. Refusing here turns that into a message
+        naming both versions and both paths.
+        """
+        found = schema_major(manifest.schema_version)
+        expected = schema_major(REGISTRY_SCHEMA_VERSION)
+        if found != expected:
+            raise ValueError(
+                f"registry at {self.root} was written under schema major {found} "
+                f"(version {manifest.schema_version!r}), but this build writes "
+                f"major {expected} (version {REGISTRY_SCHEMA_VERSION!r}). "
+                "Each major version has its own tree (operator decision O-1); "
+                f"the current one is {default_registry_root()}. The older tree is "
+                "read-only evidence and must not be written to or re-hashed."
+            )
 
     # ── writers ────────────────────────────────────────────────────────
     def put_hardware_profile(self, profile: HardwareCompatibilityProfile) -> str:
@@ -239,6 +340,61 @@ class CalibrationRegistry:
         self._locked_index_update(_mutate)
 
     # ── readers ────────────────────────────────────────────────────────
+    def quarantine_observation(
+        self,
+        payload: dict,
+        *,
+        reason: str,
+        missing_identity_fields: tuple[str, ...] = (),
+        timestamp_metadata: str | None = None,
+    ) -> str:
+        """Record a measurement that cannot be trusted with an identity.
+
+        O-2. The record is written and indexed, so an operator can count and
+        inspect it, but its id goes to `quarantined_ids` -- never
+        `observation_ids`. Every reader that walks observations walks that
+        list, so this record is structurally unable to reach a bucket, a
+        promotion, an applicability verdict or any authority.
+
+        Returns the quarantine id.
+        """
+        record = QuarantineRecord(
+            observation_payload=payload,
+            reason=reason,
+            missing_identity_fields=missing_identity_fields,
+            timestamp_metadata=timestamp_metadata,
+        )
+        qid = record.quarantine_id
+        self._write_record(self._quarantine_dir, qid, record.model_dump(mode="json"))
+
+        def _mutate(m: RegistryManifest) -> bool:
+            if qid in m.quarantined_ids:
+                return False
+            m.quarantined_ids.append(qid)
+            m.quarantined_ids.sort()
+            return True
+
+        self._locked_index_update(_mutate)
+        return qid
+
+    def load_quarantined(self, full_id: str) -> QuarantineRecord:
+        path = self._quarantine_dir / f"{_digest_of(full_id)}.json"
+        record = QuarantineRecord.model_validate_json(path.read_text())
+        if record.quarantine_id != full_id:
+            raise ValueError(
+                f"content-hash mismatch for {path.name}: stored content hashes "
+                f"to {record.quarantine_id} (corruption or tampering)"
+            )
+        return record
+
+    def iter_quarantined(self) -> Iterator[QuarantineRecord]:
+        """Audit surface. Deliberately a DIFFERENT method from
+        `iter_observations`: a caller that wants usable evidence must not
+        receive these by default, and a caller that wants to audit what was
+        lost has to say so."""
+        for qid in self.load_manifest().quarantined_ids:
+            yield self.load_quarantined(qid)
+
     def load_observation(self, full_id: str) -> CalibrationObservation:
         path = self._obs_dir / f"{_digest_of(full_id)}.json"
         obs = CalibrationObservation.model_validate_json(path.read_text())
@@ -408,6 +564,7 @@ class CalibrationRegistry:
         *,
         current_environment_id: str,
         validation_level: str | None = None,
+        request: CandidateRequest | None = None,
     ) -> RuntimeEstimate:
         """Wrap an observation as decision evidence. Evidence collected in
         a DIFFERENT execution environment is demoted to
@@ -419,25 +576,64 @@ class CalibrationRegistry:
         are never mutated, so promotion is the only status source.
         ``validation_level`` overrides the lookup for callers that already
         resolved it; only ``"validated"`` keeps measured provenance
-        (``"provisional"`` is explicitly not calibration-authoritative)."""
-        from core.runtime_control.calibration_policy import bucket_key
+        (``"provisional"`` is explicitly not calibration-authoritative).
+
+        C-C5a: a validated local bucket is NECESSARY but NOT SUFFICIENT.
+        ``request`` names the concrete candidate this estimate is for, and
+        measured authority additionally requires an exact identity match and
+        applicability to that candidate. Omitting ``request`` fails closed --
+        this method must not be able to hand back blocking authority that
+        nobody checked, on the assumption a caller will remember to check it
+        separately."""
+        from core.runtime_control.calibration_policy import ApplicabilityEnvelope, bucket_key
 
         level = validation_level
+        key = bucket_key(obs)
         if level is None:
-            level, _ = self.bucket_status(bucket_key(obs))
+            level, _ = self.bucket_status(key)
         local = obs.execution_environment_id == current_environment_id
         seconds = obs.measured_value_ms / 1000.0
+
+        authority = NO_CANDIDATE
         if local and level == "validated":
-            return make_estimate(
-                provenance=obs.provenance,
-                confidence="medium",
-                expected_seconds=seconds,
-                training_seconds=seconds if obs.operation == "training" else None,
-                inference_seconds=seconds if obs.operation == "inference" else None,
-                setup_seconds=seconds if obs.operation == "setup" else None,
-                concurrency_identity=obs.concurrency_identity,
+            # The envelope describes what this bucket actually observed, so
+            # it is derived from the bucket's own records -- never from the
+            # single observation being wrapped, which is a point rather than
+            # a range.
+            siblings = [o for o in self.iter_observations() if bucket_key(o) == key]
+            authority = evaluate_candidate_authority(
+                obs,
+                request,
+                # Dimensions come from what the bucket ACTUALLY recorded, not
+                # from a fixed list. Two producers spell the workload
+                # differently -- C-C3c derived records carry `seg_size`
+                # (`DERIVED_WORKLOAD_DIMENSIONS`), probe records carry
+                # `segment_length` -- so any hardcoded vocabulary silently
+                # finds no range for one of them, fails closed on it, and
+                # never matches. Fail-closed is correct; never matching is
+                # indistinguishable from an empty registry.
+                envelope=ApplicabilityEnvelope.from_observations(
+                    siblings, dimensions=_measured_dimensions(siblings)
+                )
+                if siblings
+                else None,
             )
+            if authority.granted:
+                return make_estimate(
+                    provenance=obs.provenance,
+                    confidence="medium",
+                    expected_seconds=seconds,
+                    training_seconds=seconds if obs.operation == "training" else None,
+                    inference_seconds=seconds if obs.operation == "inference" else None,
+                    setup_seconds=seconds if obs.operation == "setup" else None,
+                    concurrency_identity=obs.concurrency_identity,
+                )
         warnings = []
+        if local and level == "validated" and not authority.granted:
+            warnings.append(
+                "validated bucket is not applicable to this candidate: "
+                + "; ".join(authority.reasons)
+            )
         if not local:
             warnings.append(
                 "cross-machine observation (different execution environment): "

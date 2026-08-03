@@ -71,7 +71,9 @@ class TestLaunchSelfTest:
         import core.runtime_control.launch_guard as guard
 
         monkeypatch.setattr(
-            guard, "_probe_runner_availability", lambda: (False, "no CUDA device is visible")
+            guard,
+            "_probe_runner_availability",
+            lambda capability=None: (False, "no CUDA device is visible"),
         )
         with pytest.raises(LaunchGuardFailure, match="requires a real bounded-probe runner"):
             run_launch_self_test(require_probe_runner=True)
@@ -125,7 +127,7 @@ class TestProductionWiring:
         calls, persisted = [], []
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.probe_runner_availability",
-            lambda: (True, "test"),
+            lambda capability=None: (True, "test"),
         )
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.build_production_probe_runner",
@@ -162,7 +164,7 @@ class TestProductionWiring:
 
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.probe_runner_availability",
-            lambda: (True, "test"),
+            lambda capability=None: (True, "test"),
         )
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.build_production_probe_runner",
@@ -200,7 +202,7 @@ class TestProductionWiring:
 
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.probe_runner_availability",
-            lambda: (True, "test"),
+            lambda capability=None: (True, "test"),
         )
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.build_production_probe_runner", _broken
@@ -228,7 +230,7 @@ class TestProductionWiring:
 
         monkeypatch.setattr(
             "core.runtime_control.probe_wiring.probe_runner_availability",
-            lambda: (False, "no CUDA device is visible"),
+            lambda capability=None: (False, "no CUDA device is visible"),
         )
         time_check = {"feasible": True, "breakdown": {"runtime_decision": "REQUEST_PROBE"}}
         action = tuner._resolve_time_check_probe_request(
@@ -413,7 +415,9 @@ class TestProbeRequirementIsExplicit:
         import core.runtime_control.launch_guard as guard
 
         monkeypatch.setattr(
-            guard, "_probe_runner_availability", lambda: (False, "no CUDA device is visible")
+            guard,
+            "_probe_runner_availability",
+            lambda capability=None: (False, "no CUDA device is visible"),
         )
         report = run_launch_self_test(require_probe_runner=False)
         assert report.probe_runner_available is False

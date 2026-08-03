@@ -108,7 +108,6 @@ def test_run_skill_returns_contract_shape(monkeypatch):
     assert set(result["breakdown"].keys()) >= {
         "total_train_steps",
         "ms_per_step_warmup",
-        "k_correction",
         "safety_multiplier",
         "train_minutes",
         "num_params",
@@ -211,12 +210,14 @@ def test_run_skill_safety_multiplier_surfaced_in_breakdown(monkeypatch):
     train_bd = result["phase_breakdown"]["training"]["breakdown"]
     assert train_bd["safety_multiplier"] == te.SAFETY_MULTIPLIER
 
-    # Training phase seconds == total_steps × ms/step × k × safety / 1000.
+    # Training phase seconds == total_steps × ms/step × safety / 1000.
+    # The historical `k` factor was removed on 2026-08-03 (operator decision):
+    # the live measurement is the sole runtime evidence, and the only
+    # multiplier left is the CONFIGURED safety margin.
     train_minutes = result["phase_breakdown"]["training"]["seconds"] / 60.0
     raw = train_bd["total_train_steps"] * train_bd["ms_per_step"] / 60_000.0
-    assert train_minutes == pytest.approx(
-        raw * train_bd["k_correction"] * te.SAFETY_MULTIPLIER, rel=1e-3
-    )
+    assert train_minutes == pytest.approx(raw * te.SAFETY_MULTIPLIER, rel=1e-3)
+    assert "k_correction" not in train_bd
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +530,6 @@ class TestBreakdownSurfacesWarmupAggregator:
         legacy_keys = {
             "total_train_steps",
             "ms_per_step_warmup",
-            "k_correction",
             "safety_multiplier",
             "train_minutes",
             "num_params",

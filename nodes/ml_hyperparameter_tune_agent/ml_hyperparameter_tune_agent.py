@@ -44,7 +44,6 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.ordering import parse_file_order_cli, resolve_ordering
 from agent.schemas.score_table import ScoreComparisonTable
-from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
     _aggregate_inference_file_timings,
 )
@@ -925,6 +924,7 @@ def _resolve_time_check_probe_request(
     if breakdown.get("runtime_decision") != "REQUEST_PROBE":
         return "proceed"
 
+    from core.runtime_control.calibration_policy import classify_model_family
     from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
     from core.runtime_control.probe_lifecycle import ProbeRequest
     from core.runtime_control.probe_wiring import (
@@ -932,11 +932,25 @@ def _resolve_time_check_probe_request(
         build_registry_persist,
         probe_runner_availability,
     )
+    from core.runtime_control.provenance import capture_software_stack
 
-    available, detail = probe_runner_availability()
+    # V20 PR C1 / C-C3b. The capability is resolved by the TASK layer, which
+    # knows which dataset it needs; generic runtime-control used to import
+    # `TIDMAD_DATA_DIR` itself and so refused silently on any other task.
+    # `data_dir` is already this function's parameter, so the resolved root
+    # is the one the probe will actually use.
+    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+    capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+    available, detail = probe_runner_availability(capability)
     if not available:
         breakdown["probe_resolution"] = "unavailable"
         breakdown["probe_resolution_detail"] = detail
+        # The reason is recorded, never a bare False: an unavailable
+        # measurement path that does not say why is what let the V19 posture
+        # persist unnoticed.
+        breakdown["probe_capability_task"] = capability.task_identity
+        breakdown["probe_capability_reason"] = capability.unavailability_reason
         print(
             f"  [PROBE] REQUEST_PROBE could not be resolved by measurement in this "
             f"environment ({detail}). Recorded as advisory — this is NOT a measured "
@@ -944,8 +958,20 @@ def _resolve_time_check_probe_request(
         )
         return "proceed"
 
+    # V20 PR C1 / C-C1. `model_family` was omitted here, so it took
+    # `ProbeRequest`'s "unknown" default and reached the calibration bucket
+    # key as component 6 -- every probe-produced record on this machine
+    # buckets under family=unknown, which is one bucket, not separation.
+    # `model_type` was already in scope; it simply was not passed.
+    #
+    # `classify_model_family` treats a non-empty declared family as
+    # authoritative, and the time skill already keys its own store on
+    # `model_family=model_type` (evaluate_time_skill/wrapper.py). Declaring
+    # it here makes the registry agree with the store instead of writing a
+    # second family namespace.
     request = ProbeRequest(
         model_identity=model_type,
+        model_family=classify_model_family(declared_family=model_type),
         train_steps=int(breakdown.get("total_train_steps") or 0),
         inference_batches=0,
         workload={
@@ -975,7 +1001,11 @@ def _resolve_time_check_probe_request(
         ),
         persist=build_registry_persist(
             workload=request.workload,
-            software_stack={},
+            # Was `{}`, which `stack_identity` hashes to one constant for
+            # every record -- so the stack dimension of the bucket key, the
+            # documented drift anchor, was inert. Shared helper so this and
+            # the bootstrap CLI describe one stack under one identity.
+            software_stack=capture_software_stack(),
             source_run={"run_name": run_name, "exp_id": exp_id},
         ),
     )
@@ -2615,6 +2645,121 @@ def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -
         )
     except Exception as exc:
         print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
+
+
+def _derive_calibration_from_observation(
+    sandbox,
+    *,
+    rv_block: dict | None,
+    device_identity,
+    data_dir: str | None,
+) -> None:
+    """Derive a v2 calibration record from a SUCCESSFUL attempt's observation.
+
+    V20 PR C1 / C-C3c. System A has already persisted the raw measurement by
+    the time this runs; this is the derived calibration view of that same
+    measurement, never a second one.
+
+    WHY THIS IS NOT INSIDE `_append_runtime_observation`. That helper has
+    four production call sites and three of them record failures -- a
+    subprocess rejection, an evidence-channel failure and a wall-clock
+    timeout. Deriving there would feed failure evidence into throughput
+    calibration, which `calibration_policy` forbids and explicitly
+    anticipates ("should another producer ever record failure evidence as an
+    observation"). This is called only from the success path.
+
+    Best-effort, like the System A append beside it: the scientific result
+    is already decided and persisted, and losing a calibration sample must
+    never cost an attempt. The loss is printed rather than swallowed, so a
+    missing sample is visible.
+    """
+    if not rv_block:
+        return
+    try:
+        from core.runtime_control.calibration_derivation import (
+            DERIVABLE_PHASES,
+            IdentityContext,
+            derive_duration_calibration_record,
+            evaluate_affected_bucket_after_write,
+            persist_duration_calibration_record,
+        )
+        from core.runtime_control.calibration_policy import stack_identity
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+        from core.runtime_control.probe_production import (
+            collect_execution_environment_profile,
+            collect_hardware_compatibility_profile,
+        )
+        from core.runtime_control.provenance import capture_software_stack
+        from core.runtime_control.records import RuntimeObservation
+        from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+        observation = RuntimeObservation.model_validate(rv_block)
+        capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        uuid = getattr(device_identity, "uuid", None)
+        stack = capture_software_stack()
+
+        # A missing dimension drives QUARANTINE, never a fabricated default:
+        # `IdentityContext` refuses a blank, so an absent UUID or task yields
+        # `identity=None` and the derivation quarantines with the reason.
+        identity = None
+        if uuid and capability.task_identity and capability.data_shape_class:
+            identity = IdentityContext(
+                task_identity=capability.task_identity,
+                data_shape_class=capability.data_shape_class,
+                hardware_uuid=str(uuid),
+                runtime_stack_identity=stack_identity(stack),
+            )
+
+        registry = CalibrationRegistry()
+        hardware_id = registry.put_hardware_profile(collect_hardware_compatibility_profile())
+        environment_id = registry.put_environment_profile(
+            collect_execution_environment_profile(
+                installation_id=registry.installation_id(),
+                hardware_compatibility_id=hardware_id,
+                concurrency_regime="single_candidate_idle",
+            )
+        )
+
+        for phase in DERIVABLE_PHASES:
+            outcome = persist_duration_calibration_record(
+                derive_duration_calibration_record(observation, phase, identity=identity),
+                registry=registry,
+                hardware_compatibility_id=hardware_id,
+                execution_environment_id=environment_id,
+                concurrency_identity="single_candidate_idle",
+                producer_identity="derived_runtime_observation@1.0.0",
+                provenance=(
+                    "real_training_verification"
+                    if phase == "training"
+                    else "real_inference_verification"
+                ),
+                software_stack=stack,
+            )
+            if outcome.kind in ("failed", "quarantined"):
+                print(f"[runtime_control] calibration {phase}: {outcome.kind} — {outcome.detail}")
+                continue
+            if outcome.kind != "eligible" or not outcome.record_id:
+                continue
+
+            # O-3: an eligible write is the ONLY promotion trigger, and it
+            # evaluates only the bucket that write landed in. A refusal is
+            # printed too -- "zero authoritative buckets" has to be an
+            # explainable state, which is exactly what the live v1 registry
+            # (20 observations, 0 promotions, no recorded reason) was not.
+            promotion = evaluate_affected_bucket_after_write(
+                registry, registry.load_observation(outcome.record_id)
+            )
+            if promotion.kind == "promoted":
+                print(
+                    f"[runtime_control] calibration {phase}: bucket promoted to "
+                    f"{promotion.level} on {promotion.n_observations} observation(s)"
+                )
+            elif promotion.kind in ("not_promoted", "failed"):
+                print(
+                    f"[runtime_control] calibration {phase}: not authoritative — {promotion.reason}"
+                )
+    except Exception as exc:
+        print(f"[runtime_control] calibration derivation failed (non-fatal): {exc}")
 
 
 class HyperparamTuningAgent:
@@ -4669,53 +4814,29 @@ class HyperparamTuningAgent:
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
                     )
+                    # V20 PR C1 / C-C3c: the derived calibration view of the
+                    # SAME measurement System A just persisted. Success path
+                    # only -- see the helper's docstring for why not the
+                    # shared append helper.
+                    _derive_calibration_from_observation(
+                        sandbox,
+                        rv_block=final_record["runtime_verification"],
+                        device_identity=device_identity,
+                        data_dir=time_data_dir,
+                    )
 
-                    # Phase F post-flight: update per-GPU calibration from this
-                    # successful run. Only runs when the gate used the real-dataset
-                    # warmup path (the static formula has no warmup signal to
-                    # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
-                    if time_check is not None:
-                        bd = time_check.get("breakdown") or {}
-                        if bd.get("source") == "real_dataset_warmup":
-                            gpu_name = bd.get("gpu_name")
-                            warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
-                            total_steps = int(bd.get("total_train_steps") or 0)
-                            if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
-                                try:
-                                    actual_ms = train_time * 1000.0 / total_steps
-                                    entry = time_calibration.make_entry(
-                                        gpu_name=gpu_name,
-                                        model_type=model_type,
-                                        seg_size=int(
-                                            active_params["model_config"].get(
-                                                "segmentation_size", 0
-                                            )
-                                        ),
-                                        batch_size=int(
-                                            active_params["train_config"].get("batch_size", 1)
-                                        ),
-                                        total_steps=total_steps,
-                                        warmup_ms_per_step=warmup_ms,
-                                        actual_ms_per_step=actual_ms,
-                                        estimated_minutes=float(
-                                            time_check.get("estimated_minutes") or 0.0
-                                        ),
-                                        actual_minutes=train_time / 60.0,
-                                    )
-                                    table = time_calibration.load_table(gpu_name)
-                                    time_calibration.update_k(table, entry)
-                                    time_calibration.save_table(gpu_name, table)
-                                    drift = time_calibration.detect_drift(table)
-                                    if drift:
-                                        print(f"  [time-calibration] {drift}")
-                                    else:
-                                        new_k = time_calibration.lookup_k(table, model_type)
-                                        print(
-                                            f"  [time-calibration] {gpu_name} / {model_type}: "
-                                            f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
-                                        )
-                                except Exception as cal_exc:  # pragma: no cover — defensive
-                                    print(f"  [time-calibration skipped] {cal_exc}")
+                    # Phase F post-flight REMOVED (operator decision 2026-08-03).
+                    # A successful run used to feed its observed-vs-predicted
+                    # ratio through an asymmetric EMA into the legacy v1 per-GPU
+                    # k table. That table is now PRESERVED READ-ONLY for
+                    # compatibility and audit: production neither reads it into
+                    # a verdict nor writes to it.
+                    #
+                    # Stopping the write is not cosmetic. A legacy store that
+                    # keeps growing still looks like a live production system,
+                    # and a live-looking store is what invites someone to wire it
+                    # back into a decision. New evidence goes to the v2 registry
+                    # only (C-C3c, just above), where drift analysis belongs.
 
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner
