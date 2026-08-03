@@ -137,6 +137,45 @@ def pytest_collection_modifyitems(config, items):
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_calibration_registry(tmp_path_factory):
+    """No test may touch the operator's real calibration registry.
+
+    `CalibrationRegistry()` with no root resolves to
+    `$SIDERIUS_CALIBRATION_DIR` or `$HOME/.siderius/...`, and production
+    constructs one that way (`ml_hyperparameter_tune_agent`, the V20 PR C1
+    calibration derivation). So ANY test that drives the agent -- not only
+    the calibration tests -- reaches the real tree.
+
+    Found exactly that way: a full-suite run created a live
+    `~/.siderius/runtime_calibration_v2` directory. A per-module fixture was
+    not enough, because the writer is production code reached from the tuner
+    suite. Session-scoped and autouse so the protection does not depend on
+    each future test remembering it.
+
+    The live v1 tree is preserved evidence -- 20 observations that document
+    an uncalibrated system -- and rebuilding or appending to it would
+    destroy what several V20 findings rest on.
+
+    TESTING DEFAULT PATH RESOLUTION. This fixture pins the override, so a
+    test of the un-overridden rule must delete the variable itself and
+    redirect `$HOME`, or it will silently assert the override branch and
+    prove nothing about the default. See
+    `test_calibration_registry.py::test_the_default_rule_applies_when_no_override_is_set`.
+    Every other test writes into the temporary root.
+    """
+    root = tmp_path_factory.mktemp("calibration_registry_isolation")
+    previous = os.environ.get("SIDERIUS_CALIBRATION_DIR")
+    os.environ["SIDERIUS_CALIBRATION_DIR"] = str(root)
+    try:
+        yield root
+    finally:
+        if previous is None:
+            os.environ.pop("SIDERIUS_CALIBRATION_DIR", None)
+        else:
+            os.environ["SIDERIUS_CALIBRATION_DIR"] = previous
+
+
 @pytest.fixture
 def synthetic_h5(tmp_path):
     """

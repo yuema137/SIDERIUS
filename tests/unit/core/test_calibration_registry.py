@@ -213,6 +213,27 @@ class TestStorage:
         assert root.parent == tmp_path / "custom"
         assert root.name == registry_dirname()
 
+    def test_the_default_rule_applies_when_no_override_is_set(self, tmp_path, monkeypatch):
+        """The `$HOME` fallback -- the branch the session fixture hides.
+
+        `tests/conftest.py::_isolate_calibration_registry` pins
+        `SIDERIUS_CALIBRATION_DIR` for the whole session so that no test can
+        reach the operator's real tree. That protection would otherwise mean
+        the un-overridden branch is never exercised again: every test would
+        take the override path and the real default rule could break
+        unnoticed. So this test deletes the variable deliberately and
+        redirects `$HOME`, asserting the rule while writing nothing.
+
+        Any future test of default path resolution must do the same.
+        """
+        monkeypatch.delenv("SIDERIUS_CALIBRATION_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "fakehome"))
+
+        root = default_registry_root()
+
+        assert root == tmp_path / "fakehome" / ".siderius" / registry_dirname()
+        assert not root.exists(), "resolving a path must not create it"
+
     def test_each_major_schema_gets_its_own_tree(self, tmp_path, monkeypatch):
         """O-1. A bump must not land new records beside old ones: the
         version is inside every record's content hash, so a v2 record in the
