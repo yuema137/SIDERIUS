@@ -1845,11 +1845,28 @@ so on any other task the path is dead regardless of the trigger.
 **3. Implementation plan.** **Not written** — O-3 determines whether the
 trigger is a new decision branch, a scheduled evaluation, or a write-time
 hook. Inspect `decide` and the `REQUEST_PROBE` branches before drafting.
-- [ ] Re-inspect `decision_policy.decide` and `probe_runner_availability`,
-      then implement O-3: after each successful eligible observation write,
-      idempotently evaluate only the affected bucket and record the result.
-- [ ] Land the §15.3 `ResolvedMeasurementCapability` boundary so the write
-      path is not gated on `TIDMAD_DATA_DIR`.
+Split: C-C3a the capability boundary, C-C3b the write path, C-C3c the O-3
+trigger (kept separate from observation creation, per the operator
+constraint).
+
+- [x] **C-C3a** — `core/runtime_control/measurement_capability.py`:
+      `ResolvedMeasurementCapability` + a generic `resolve_measurement_capability`.
+      The task's dataset root arrives as an ARGUMENT; `dataset_root=None` is
+      refused, not defaulted, because a default there would be the very task
+      assumption being removed. A validator refuses
+      `probe_available=False` without a reason — the old `(bool, str)` tuple
+      allowed a silent False by convention. Identity (task, adapter,
+      data-shape class) is required even when unavailable, so the verdict
+      can supply a `MeasurementIdentity` later. 16 tests, 3 mutation proofs.
+      Callers already hold what they must pass: the tuner has `data_dir` as
+      a parameter of `_resolve_time_check_probe_request`; `launch_guard`
+      takes an optional root from its caller (C-C3b).
+- [ ] **C-C3b** — retire `probe_runner_availability`'s direct
+      `TIDMAD_DATA_DIR` import in favour of the boundary; thread the root
+      from the three callers.
+- [ ] **C-C3c** — the normal happy-path duration write, then O-3:
+      idempotently evaluate only the affected bucket after a successful
+      eligible write. Creation and trigger stay separate.
 - [ ] Proceed autonomously unless inspection reveals a material deviation.
 
 **4. Validation plan.**
