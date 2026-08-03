@@ -2042,33 +2042,72 @@ the O-4 values, which are frozen at their current settings.
 
 *Dependencies:* C-C2, C-C3.
 
-**3. Implementation plan.** **Not written.** The thresholds are operator
-policy; `CalibrationPolicy`'s identity hash covers every field, so changing
-one trips `runtime_policy_identity` and invalidates every existing workspace
-lock. That interaction must be settled before steps are drafted.
-- [ ] Confirm the `run_invariants` interaction by inspection **before**
-      touching `CalibrationPolicy`: O-4 preserves every current value, so
-      `runtime_policy_identity` must not move. If implementation cannot
-      avoid moving it, that is a material deviation — stop and report.
-- [ ] Implement promotion under the O-4 values, O-5 (same concurrency class
-      only) and O-9 (no wall-clock expiry).
-- [ ] Proceed autonomously unless inspection reveals a material deviation.
+**3. Implementation plan.**
+- [x] Confirmed the `run_invariants` interaction by inspection **before**
+      touching `CalibrationPolicy`: no policy edit was needed at all.
+      `evaluate_bucket` already accepts `policy=DEFAULT_POLICY`, so promotion
+      is wired without altering the model. `runtime_policy_identity` stays at
+      `calibration_policy@1.0.0+b83994605c57`, with O-4 frozen at
+      `provisional_min_observations=2`, `validated_min_observations=3`,
+      `consistency_max_min_ratio=1.5`. 81 invariant/lock tests pass.
+- [x] Implemented `evaluate_affected_bucket_after_write` in
+      `calibration_derivation.py` (+114 lines) under the O-4 values, O-5
+      (bucket key already encodes the concurrency class, so only same-class
+      evidence can share a bucket) and O-9 (no wall-clock term anywhere in
+      the evaluation).
+- [x] Wired it at the tuner success seam,
+      `ml_hyperparameter_tune_agent.py:2750`, guarded so **only an
+      `eligible` write** triggers evaluation — a quarantined or failed write
+      never promotes.
 
-**4. Validation plan.** Promotion reached in production; rejected promotions
-reported with reasons; contended evidence handled per O-5; expiry per O-9;
-repeated samples where promotion depends on statistical consistency.
+**Design note — idempotency is not free here, unlike observations.**
+`CalibrationPromotion` content-addresses `derived_from_generation`, which
+increments on every committed index write. Re-evaluating one *unchanged*
+bucket at a later generation therefore produces a **different id** and would
+write a second promotion for the same evidence, inflating the apparent
+record. Verified directly (generation 5 vs 6 → different ids). Equivalence is
+consequently checked on `(bucket_key, source_observation_ids, level)` — what
+actually identifies "this promotion, from this evidence".
+
+**4. Validation plan.** Executed: 1 obs → `not_promoted` with reason; 2
+consistent → `promoted`/`provisional`; 3 consistent → `validated`; a 10×
+outlier → `not_promoted`; re-evaluation → `already_promoted`.
 
 **5. Acceptance criteria.**
-- [ ] A bucket with sufficient consistent observations reaches `validated`.
-- [ ] A bucket with inconsistent observations does not, and the reason is
-      recorded.
-- [ ] The calibration-state report shows non-zero promotions where they
-      exist — today it would honestly show zero.
+- [x] A bucket with sufficient consistent observations reaches `validated`.
+- [x] A bucket with inconsistent observations does not, and the reason is
+      recorded on the outcome.
+- [x] Zero promotions is now an *explainable* state rather than an absence —
+      the refusal reason names the observation count and the threshold or
+      ratio that blocked it. This is the specific defect the live v1 registry
+      exhibited: 20 observations, 0 promotions, no recorded reason.
 
 **6. Failure and edge cases.** Insufficient samples; inconsistent
 observations; contended-only buckets; stack or hardware change mid-bucket.
+Promotion never raises — a derived view failing must cost the bucket its
+authority, never the run its result.
 
-**7. Verification commands and evidence.** To be written with the steps.
+**7. Verification commands and evidence.**
+
+```bash
+.venv/bin/python -m pytest tests/unit/core/test_calibration_derivation.py \
+    tests/unit/core/test_calibration_derivation_wiring.py -q     # 56 passed
+```
+
+*Mutation evidence.* Four mutations, each restored from a file backup with
+`__pycache__` cleared and the baseline re-run:
+
+| # | Mutation | Killed by |
+|---|---|---|
+| M2 | evaluate every bucket, not only the affected one | `test_only_the_affected_bucket_is_evaluated` |
+| M3 | drop the dirty-observation screen | `test_a_dirty_observation_in_the_bucket_is_screened_out` |
+| M4 | remove the production promotion call | `test_the_promotion_trigger_is_reachable_from_production` |
+| M5 | let a quarantined write promote | `test_promotion_is_triggered_only_by_an_eligible_write` |
+
+M2 and M3 initially **survived**: the tests only ever built one bucket and
+only clean observations. Both tests were added in response. M4 is the
+reachability guard — `evaluate_affected_bucket_after_write` was written,
+fully tested and called from nowhere, the same shape as #156, #157 and #159.
 
 **8. Commit boundary.** Promotion only. No applicability, no admission.
 
