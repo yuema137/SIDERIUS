@@ -2240,9 +2240,80 @@ seam. Without this, C1 remains "writes and promotion complete, production
 never reads".
 
 **2. Scope.** The smallest existing time-budget decision boundary.
-*Non-goals:* no new logic inside the giant `run()` method.
+*Non-goals:* no new logic inside the giant `run()` method; no wiring into
+`train_engine_sandbox.py`; no activation of the unused
+`production_estimator_factory()`; no general estimator/C9 refactor.
 
-**3. Implementation plan.** Not yet written — begins with a consumer audit.
+**3. Verified consumer audit (read-only, 2026-08-02).**
+
+```text
+tuner run()  [parent process]
+ :2998  device_identity_from_hardware(...)        → DeviceIdentity(uuid)
+ :3012  sandbox = _sandbox_factory(..., device_identity=...)
+ :3856  [Pre-flight 2/2] Wall-time gate
+         └─ evaluate_time_skill.wrapper.run_skill(sandbox, **active_params)
+             └─ :852  _gate_decision(...) → policy.decide(...)   ← THE DECISION
+ later   training subprocess launch
+          └─ train_engine_sandbox.py:813 set_calibration_context(...)  [WRITE]
+             :829 decide_admission()
+```
+
+*Correction recorded:* `decide_admission()` is **not** a GPU/resource gate —
+it sums `predicted_seconds` against `operator_budget_seconds`. It is a time
+decision, but in-subprocess, so it is still the wrong seam.
+
+*Why not the estimator.* No production code calls `estimator.estimate()` and
+nothing in production constructs a `RuntimeEstimateRequest`; the only mention
+is `estimator.py:216-227` explaining why it is bypassed. Filling in
+`history_lookup` would attach the seam to a function nobody calls.
+
+**Identity availability at the pre-flight gate** — all fields resolvable, no
+broad plumbing needed:
+
+| field | source |
+|---|---|
+| `model_family`, `batch_size`, `seg_size` | existing kwargs |
+| `param_count` | `_count_params(...)`, which instantiates the real model |
+| `optimizer_type` | already read at `wrapper.py:498` |
+| `task_identity`, `data_shape_class` | `data_dir` → measurement capability |
+| `runtime_stack_identity` | `capture_software_stack()` |
+| **`hardware_uuid`** | **`sandbox.device_identity.uuid`** — already in scope |
+| `precision`, `runtime_flags` | shared canonical context (below) |
+
+**4. Foundation landed (two committed fixes).** Both are silent-never-match
+defects: the reader would find nothing, raise nothing, and be
+indistinguishable from an empty registry.
+
+- `8f97251` — **one shared calibration context**
+  (`core/runtime_control/calibration_context.py`). The engine and the
+  pre-flight disagreed on the parameter count —
+  `sum(... if p.requires_grad)` vs unfiltered — identical for a
+  fully-trainable model, silently different for any model with a frozen
+  layer. `trainable_param_count` and `model_precision` now serve both.
+  `MeasurementIdentity` unchanged; parity proven by pinning the
+  pre-refactor mapping and its hash, so no stored identity moved.
+- `8606b47` — **envelope dimensions derived from recorded evidence**.
+  Derived records carry `seg_size`, probe records carry `segment_length`,
+  and `ApplicabilityEnvelope` defaulted to the latter — so a fixed reader
+  vocabulary found no range for one producer and never matched.
+  `_measured_dimensions` now follows the evidence;
+  `DERIVED_WORKLOAD_DIMENSIONS` gives the writer's vocabulary one home.
+
+**Shared-context decision.** Only values that are (a) semantically part of
+the candidate configuration and (b) deterministically derivable **both**
+before launch and inside the training loop may enter. `precision` qualifies
+because the pre-flight already instantiates the real model; `runtime_flags`
+qualify as loop constants. Anything realized only during execution is
+evidence *about* a candidate, not part of its identity, and would make the
+identity unknowable before launch.
+
+**In progress.** `candidate_config_hash` promoted to the single public helper
+in `calibration_context` (the private `_config_hash` duplicate in
+`calibration_derivation` is deleted, with a structural test forbidding its
+return). `core/runtime_control/calibration_prelaunch.py` holds the lookup
+boundary and the O-6 asymmetry helper — **not yet production-wired, and
+deliberately uncommitted until it is**, so it cannot become a fourth instance
+of "component exists, production never calls it".
 
 **5. Acceptance criteria.**
 - [ ] A production time-budget decision reaches the safe read seam.
@@ -2254,8 +2325,19 @@ never reads".
       fallback behaviour.
 - [ ] Retry, attempt/round accounting, scientific result and LLM calls
       unchanged.
+- [ ] O-6 preserved: applicable history may support ALLOW; it may never
+      directly REJECT. Rejection requires a live measurement of the concrete
+      candidate.
+- [ ] A structural guard proves the duration-calibration module is neither
+      imported by nor passed into the GPU-admission path.
 
-**8. Commit boundary.** Consumer wiring only.
+**6. Completion standard.** C-C5b is **not** complete when
+`calibration_prelaunch.py` works and its unit tests pass. It is complete when
+the real pre-launch time decision calls it and only applicable historical
+duration evidence can influence that decision.
+
+**8. Commit boundary.** Consumer wiring only. The lookup module is committed
+**with** its production wiring, never before it.
 
 ---
 

@@ -44,6 +44,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.runtime_control.calibration_context import candidate_config_hash
 from core.runtime_control.observation_store import component_calibration_eligible
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import RuntimeObservation
@@ -240,7 +241,7 @@ def derive_duration_calibration_record(
             task_identity=identity.task_identity,
             data_shape_class=identity.data_shape_class,
             model_family=model_family,
-            candidate_config_hash=_config_hash(context),
+            candidate_config_hash=candidate_config_hash(context),
             phase=phase,
             hardware_uuid=identity.hardware_uuid,
             runtime_stack_identity=identity.runtime_stack_identity,
@@ -255,19 +256,6 @@ def derive_duration_calibration_record(
         },
         source_reference=_source_reference(obs, phase),
     )
-
-
-def _config_hash(context: dict[str, Any]) -> str:
-    """Deterministic identity for the candidate configuration.
-
-    Built from the calibration context the trainer already records
-    (precision, optimizer, family, params, segment, batch), so two
-    materially different configurations of one family do not share a
-    bucket.
-    """
-    from core.runtime_control.identity import config_hash12
-
-    return f"cfg:{config_hash12(context)}"
 
 
 # ── Persistence: the second responsibility, deliberately separate ───────────

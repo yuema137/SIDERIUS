@@ -172,3 +172,69 @@ class TestTheEnvelopeVocabularyFollowsTheEvidence:
         from core.runtime_control.calibration_derivation import DERIVED_WORKLOAD_DIMENSIONS
 
         assert DERIVED_WORKLOAD_DIMENSIONS == ("batch_size", "seg_size", "param_count")
+
+
+class TestOneHashDefinitionServesBothPaths:
+    """The write path reads its context back from a persisted
+    `RuntimeObservation`; the read path builds it from a live candidate.
+    Both must reach the SAME function.
+
+    A second implementation would not fail loudly. It would produce a
+    different `candidate_config_hash`, every lookup would miss, and the
+    subsystem would report nothing while consuming nothing -- the exact
+    defect shape this PR exists to remove. `_config_hash` used to be a
+    private duplicate in `calibration_derivation`; the read side importing it
+    was the warning sign.
+    """
+
+    def test_the_two_paths_agree_on_the_same_configuration(self):
+        from core.runtime_control.calibration_context import candidate_config_hash
+
+        # Write path: the mapping as System A persisted it.
+        persisted = build_calibration_context(INPUTS)
+        # Read path: rebuilt from the live candidate's typed inputs.
+        rebuilt = build_calibration_context(
+            CalibrationContextInputs(
+                precision="float32",
+                optimizer_type="adamw",
+                model_family="wavenet",
+                param_count=156_320,
+                seg_size=40_000,
+                batch_size=8,
+            )
+        )
+        assert candidate_config_hash(persisted) == candidate_config_hash(rebuilt), (
+            "the write and read paths disagree on candidate_config_hash; "
+            "every calibration lookup would silently miss"
+        )
+
+    def test_a_materially_different_candidate_hashes_differently(self):
+        """The positive control: agreement is worthless if everything agrees."""
+        from core.runtime_control.calibration_context import candidate_config_hash
+
+        other = build_calibration_context(
+            CalibrationContextInputs(**{**INPUTS.model_dump(), "batch_size": 16})
+        )
+        assert candidate_config_hash(build_calibration_context(INPUTS)) != candidate_config_hash(
+            other
+        )
+
+    def test_the_derivation_does_not_define_its_own_hash(self):
+        """Structural. A reintroduced private copy in the write path would
+        pass every behavioural test above while drifting from the reader."""
+        import ast
+        from pathlib import Path
+
+        import core.runtime_control.calibration_derivation as deriv
+
+        tree = ast.parse(Path(deriv.__file__).read_text())
+        defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert "_config_hash" not in defined, (
+            "calibration_derivation defines its own config hash again; the "
+            "read path would drift from it and match nothing"
+        )
+
+    def test_the_hash_is_prefixed_so_its_kind_is_visible(self):
+        from core.runtime_control.calibration_context import candidate_config_hash
+
+        assert candidate_config_hash(build_calibration_context(INPUTS)).startswith("cfg:")

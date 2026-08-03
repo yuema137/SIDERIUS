@@ -121,3 +121,21 @@ def build_calibration_context(inputs: CalibrationContextInputs) -> dict[str, Any
         "batch_size": inputs.batch_size,
         "runtime_flags": training_loop_runtime_flags(),
     }
+
+
+def candidate_config_hash(context: dict[str, Any]) -> str:
+    """`MeasurementIdentity.candidate_config_hash` for a calibration context.
+
+    THE one definition. It lives beside `build_calibration_context` because
+    the mapping and its hash are a single responsibility: a reader that built
+    the mapping correctly but hashed it differently would still match
+    nothing, and the failure would look identical.
+
+    Takes the context MAPPING rather than the typed inputs, because the write
+    path reads it back from a persisted `RuntimeObservation.calibration_
+    context` while the read path builds it from a live candidate. Both must
+    reach this function, and neither may reimplement it.
+    """
+    from core.runtime_control.identity import config_hash12
+
+    return f"cfg:{config_hash12(context)}"
