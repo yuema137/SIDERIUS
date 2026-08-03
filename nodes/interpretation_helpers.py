@@ -229,9 +229,9 @@ def evaluate_prediction(
     Args:
         prediction: Serialized FalsifiablePrediction dict with metric,
                     current_value (SOTA at proposal time), and optionally
-                    predicted_value (used only for boldness calculation).
-                    Common LLM aliases for 'denoising_score' are accepted:
-                    'best_score', 'score', 'overall denoising score', etc.
+                    predicted_value. Common LLM aliases for 'denoising_score'
+                    are accepted: 'best_score', 'score', 'overall denoising
+                    score', etc.
         actual_results: Dict with at least 'best_denoising_score' and
                         optionally 'best_file_vector'.
         current_sota: SOTA override. When provided, takes precedence over
@@ -241,8 +241,15 @@ def evaluate_prediction(
                         (nearly competitive). Default 0.05 (5%).
 
     Returns:
-        Dict with: metric, actual_value, current_sota, delta_from_sota,
-        outcome ('confirmed'/'partial'/'refuted'), boldness, information_gain.
+        Dict with: metric, predicted_value, actual_value, current_sota,
+        delta_from_sota, outcome ('confirmed'/'partial'/'refuted'), boldness,
+        information_gain.
+
+        `predicted_value` is echoed back from the input because
+        `generate_discoveries` renders it ("predicted 6.0000") and receives
+        only this dict -- it has no access to the original prediction. It was
+        omitted here until 2026-08-02, so every discovery sentence in
+        production read "(predicted N/A)".
 
     Outcome labels (preset):
         confirmed — actual > current_sota (beat SOTA)
@@ -261,6 +268,7 @@ def evaluate_prediction(
     if actual is None or sota is None:
         return {
             "metric": metric,
+            "predicted_value": predicted,
             "actual_value": actual,
             "current_sota": sota,
             "delta_from_sota": None,
@@ -287,6 +295,7 @@ def evaluate_prediction(
 
     return {
         "metric": metric,
+        "predicted_value": predicted,
         "actual_value": actual,
         "current_sota": sota,
         "delta_from_sota": round(delta, 4),

@@ -609,8 +609,10 @@ class InterpretationOutput(BaseModel):
         description="Evaluation of the previous proposal's FalsifiablePrediction. "
         "Outcome is SOTA-based (not predicted-value-based): "
         "confirmed = beat SOTA, partial = within 5%% of SOTA, refuted = clearly below. "
-        "Contains: metric, actual_value, current_sota, delta_from_sota, "
-        "outcome ('confirmed'/'partial'/'refuted'), boldness, information_gain. "
+        "Contains: metric, predicted_value, actual_value, current_sota, "
+        "delta_from_sota, outcome ('confirmed'/'partial'/'refuted'), boldness, "
+        "information_gain. predicted_value is echoed from the proposal so that "
+        "generate_discoveries can render it; the outcome does not depend on it. "
         "None if no previous prediction exists.",
     )
     new_discoveries: list[VocabEntry] = Field(
