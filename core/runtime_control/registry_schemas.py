@@ -345,8 +345,9 @@ class RegistryManifest(BaseModel):
 #     lives at one per-user root -- so two different tasks with the same
 #     family, hardware and stack shared a bucket;
 #   * the device INSTANCE was absent: `hardware_compatibility_id` describes a
-#     model of GPU, not the card. A 5090 measurement could speak for another
-#     5090, and (with a matching profile) for an H100-class entry.
+#     model of GPU, not the card. A measurement from one card could speak for
+#     any other card of the same model, and -- with a matching profile -- for
+#     an entry from a different model class entirely.
 #
 # So identity is separated from applicability and from policy:
 #
@@ -412,8 +413,9 @@ class MeasurementIdentity(BaseModel):
     #: `orchestration` are real phases v1 could not express.
     phase: RuntimePhase
     #: The device INSTANCE, not its model. `hardware_compatibility_id`
-    #: describes a class of card; two 5090s in one host are not the same
-    #: device, and a measurement from one is not authoritative for the other.
+    #: describes a class of card; two identical cards in one host are not the
+    #: same device, and a measurement from one is not authoritative for the
+    #: other.
     hardware_uuid: str = Field(min_length=1)
     #: `stack_identity(...)` digest of the software stack.
     runtime_stack_identity: str = Field(min_length=1)
