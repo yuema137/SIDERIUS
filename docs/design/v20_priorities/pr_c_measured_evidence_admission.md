@@ -1900,9 +1900,48 @@ constraint).
       generic needs a dataset-adapter abstraction, which is beyond C-C3b's
       bounded scope. `bootstrap.py:439` is an operator CLI for this task and
       is outside the generic decision path.
-- [ ] **C-C3c** — the normal happy-path duration write, then O-3:
-      idempotently evaluate only the affected bucket after a successful
-      eligible write. Creation and trigger stay separate.
+- [ ] **C-C3c** — the happy-path duration write, then O-3: idempotently
+      evaluate only the affected bucket after a successful eligible write.
+      Creation and trigger stay separate.
+
+      **Architecture (operator, 2026-08-03 UTC):** System A stays the single
+      source of truth for measured duration. System B must not perform or
+      invent a second measurement; it receives a typed, deterministic
+      *derivative* of the `RuntimeObservation` System A already writes.
+
+      **HOOK CORRECTED BY AUDIT.** The anticipated seam was the shared
+      `_append_runtime_observation`. Verified and rejected: its four
+      production call sites are not four successful phases —
+
+      | site | function | records |
+      |---|---|---|
+      | `:2499` | `_handle_in_subprocess_rejection` | a rejected attempt |
+      | `:2525` | `_raise_if_evidence_channel_failure` | an infrastructure failure |
+      | `:2551` | `_raise_if_wall_clock_timeout` | a wall-clock timeout |
+      | `:4700` | `run()`, the E. COMMIT block | the **successful** attempt |
+
+      Three of the four are failure paths. Deriving calibration at the
+      shared seam would feed rejections, infrastructure failures and
+      timeouts into throughput calibration, violating the D4 rule at
+      `calibration_policy.py:279-285` — which explicitly anticipates
+      "another producer" recording failure evidence as an observation.
+      The derivation therefore hooks the **success call site only**, after
+      `_emit_record`, where the record is already complete.
+
+      Identity available there: `train_engine_sandbox.py:813-828` already
+      populates `calibration_context` with precision, optimizer_type,
+      model_family, param_count, seg_size, batch_size — and its
+      `model_family` is `model_cfg.model_type`, the same namespace C-C1 chose
+      for System B, so the two agree rather than fork. Task identity and
+      data-shape class come from C-C3b's `ResolvedMeasurementCapability`;
+      the stack from C-C1's `capture_software_stack`. Anything unavailable
+      drives **quarantine, never a fabricated default**.
+
+      Safety boundary: System A is written first and unchanged. A System B
+      conversion or persistence failure is observable but must not alter the
+      experiment result, attempt/round accounting, retry behaviour,
+      scientific output or agent feedback — fail-open for the scientific
+      workflow, fail-closed for calibration authority.
 - [ ] Proceed autonomously unless inspection reveals a material deviation.
 
 **4. Validation plan.**
