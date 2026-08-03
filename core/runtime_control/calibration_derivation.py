@@ -68,6 +68,16 @@ SUPPORTED_UNITS: dict[str, RuntimePhase] = {
 #: than being reinterpreted.
 DERIVABLE_PHASES: tuple[RuntimePhase, ...] = ("training", "inference")
 
+#: The numeric workload keys a derived record carries, and therefore the ONLY
+#: dimensions an applicability envelope can be built over for these records.
+#:
+#: Shared with the read side deliberately. `ApplicabilityEnvelope` defaults to
+#: ("batch_size", "segment_length"), but these records store `seg_size` -- so a
+#: reader using the default would find no range for segment length, fail closed
+#: on it, and never match anything. Fail-closed is right; silently never
+#: matching is not, because it is indistinguishable from "nothing recorded yet".
+DERIVED_WORKLOAD_DIMENSIONS = ("batch_size", "seg_size", "param_count")
+
 
 class IdentityContext(BaseModel):
     """The identity System A's record does not carry.
@@ -240,7 +250,7 @@ def derive_duration_calibration_record(
         n_measured_units=measurement.n_measured_units,
         workload={
             k: context[k]
-            for k in ("batch_size", "seg_size", "param_count")
+            for k in DERIVED_WORKLOAD_DIMENSIONS
             if isinstance(context.get(k), (int, float))
         },
         source_reference=_source_reference(obs, phase),

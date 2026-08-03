@@ -133,6 +133,19 @@ def _digest_of(full_id: str) -> str:
     return digest
 
 
+def _measured_dimensions(observations: list[Any]) -> tuple[str, ...]:
+    """Numeric workload keys present across a bucket's own observations.
+
+    Derived from the evidence rather than declared, because producers spell
+    the workload differently and a hardcoded list silently excludes whichever
+    one it does not name.
+    """
+    keys: set[str] = set()
+    for obs in observations:
+        keys.update(k for k, v in (obs.workload or {}).items() if isinstance(v, (int, float)))
+    return tuple(sorted(keys))
+
+
 class CalibrationRegistry:
     """Typed, atomic, concurrency-safe registry over the approved layout."""
 
@@ -591,7 +604,19 @@ class CalibrationRegistry:
             authority = evaluate_candidate_authority(
                 obs,
                 request,
-                envelope=ApplicabilityEnvelope.from_observations(siblings) if siblings else None,
+                # Dimensions come from what the bucket ACTUALLY recorded, not
+                # from a fixed list. Two producers spell the workload
+                # differently -- C-C3c derived records carry `seg_size`
+                # (`DERIVED_WORKLOAD_DIMENSIONS`), probe records carry
+                # `segment_length` -- so any hardcoded vocabulary silently
+                # finds no range for one of them, fails closed on it, and
+                # never matches. Fail-closed is correct; never matching is
+                # indistinguishable from an empty registry.
+                envelope=ApplicabilityEnvelope.from_observations(
+                    siblings, dimensions=_measured_dimensions(siblings)
+                )
+                if siblings
+                else None,
             )
             if authority.granted:
                 return make_estimate(
