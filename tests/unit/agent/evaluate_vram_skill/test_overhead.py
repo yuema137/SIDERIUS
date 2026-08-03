@@ -40,25 +40,30 @@ def test_cudnn_backward_workspace_matches_appendix_a5():
 # ── Analytical: weight-proportional scaling ─────────────────────────────────
 
 
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3, 50 * 1024**3])
-def test_training_overhead_scales_linearly_with_params_adam(params_bytes):
-    """Adam: grads (1×P) + m,v (2×P) = 3 × params_bytes."""
-    assert training_overhead_bytes(params_bytes, "adam") == 3 * params_bytes
+@pytest.mark.parametrize(
+    ("optimizer", "multiple"),
+    [
+        ("adam", 3),  # grads (1xP) + m,v (2xP)
+        ("adamw", 3),  # same state shape -- decoupled decay adds no buffers
+        ("sgd", 1),  # no momentum state; overhead is exactly the grads
+    ],
+)
+def test_training_overhead_is_the_grads_plus_the_optimizer_state(optimizer, multiple):
+    """`grad_bytes + multiplier * params_bytes`, checked per optimizer and
+    across the full magnitude range.
 
+    Three families used to do this in 13 cases: an adam scaling test, an
+    `adamw == adam` relative test, and an `sgd == params_bytes` test. The
+    relative one could not fail if both sides moved together, and the other
+    two duplicated the multiplier assertions in
+    `test_multiplier_table_has_expected_keys`.
 
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3])
-def test_training_overhead_adamw_matches_adam(params_bytes):
-    """AdamW has the same state shape as Adam — decoupled weight decay does
-    not add new buffers."""
-    assert training_overhead_bytes(params_bytes, "adamw") == training_overhead_bytes(
-        params_bytes, "adam"
-    )
-
-
-@pytest.mark.parametrize("params_bytes", [0, 1024, 10 * 1024**2, 1 * 1024**3])
-def test_training_overhead_sgd_is_grads_only(params_bytes):
-    """Plain SGD has no momentum state — overhead is exactly the grads."""
-    assert training_overhead_bytes(params_bytes, "sgd") == params_bytes
+    Stated as an absolute multiple per optimizer, this covers what the
+    literal table cannot: that `training_overhead_bytes` actually READS the
+    table for each key, and that the grads term is a full 1xP on top of it.
+    """
+    for params_bytes in [0, 1024, 10 * 1024**2, 1 * 1024**3, 50 * 1024**3]:
+        assert training_overhead_bytes(params_bytes, optimizer) == multiple * params_bytes
 
 
 def test_training_overhead_case_insensitive():
@@ -107,14 +112,23 @@ def test_phase_overhead_inference_ignores_params_and_optimizer():
         assert phase_overhead_bytes(params_bytes, "inference") == _CUDA_CONTEXT_BYTES
 
 
-def test_phase_overhead_inference_accepts_none_optimizer():
-    """Inference does not need an optimizer — optimizer=None must not raise."""
-    result = phase_overhead_bytes(1024, "inference", optimizer=None)
-    assert result == _CUDA_CONTEXT_BYTES
+# `test_phase_overhead_inference_accepts_none_optimizer` lived here. It
+# called `phase_overhead_bytes(1024, "inference", optimizer=None)`, and
+# `optimizer` DEFAULTS to None, so it was the same call the test above
+# already makes with `params_bytes=1024`.
 
 
 def test_phase_overhead_training_sums_three_terms():
-    """Training = analytical(params, opt) + cuda_context + cudnn_backward."""
+    """Training = analytical(params, opt) + cuda_context + cudnn_backward,
+    and is strictly greater than inference.
+
+    `test_phase_overhead_training_strictly_exceeds_inference` asserted
+    `tr - inf == training_overhead + cudnn`. Since `inf` IS the cuda
+    context, that is this test's equation rearranged -- no mutation could
+    fail one without the other. Its `tr > inf` sanity claim (the Appendix
+    A.5 discovery that training is not merely inference plus rounding) is
+    kept here.
+    """
     params = 100 * 1024**2  # 100 MB of params
     expected = (
         training_overhead_bytes(params, "adamw")
@@ -122,17 +136,7 @@ def test_phase_overhead_training_sums_three_terms():
         + _CUDNN_BACKWARD_WORKSPACE_BYTES
     )
     assert phase_overhead_bytes(params, "training", optimizer="adamw") == expected
-
-
-def test_phase_overhead_training_strictly_exceeds_inference():
-    """Physical sanity (Appendix A.5 discovery): training overhead must be
-    strictly greater than inference for any non-trivial params_bytes."""
-    params = 10 * 1024**2
-    tr = phase_overhead_bytes(params, "training", optimizer="adam")
-    inf = phase_overhead_bytes(params, "inference")
-    assert tr > inf
-    # And the difference equals exactly (analytical + backward workspace):
-    assert tr - inf == training_overhead_bytes(params, "adam") + _CUDNN_BACKWARD_WORKSPACE_BYTES
+    assert expected > phase_overhead_bytes(params, "inference")
 
 
 def test_phase_overhead_training_requires_optimizer():
