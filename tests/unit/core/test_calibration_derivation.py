@@ -40,6 +40,7 @@ from core.runtime_control.calibration_derivation import (
     NotDerivable,
     QuarantinedDerivation,
     derive_duration_calibration_record,
+    evaluate_affected_bucket_after_write,
     persist_duration_calibration_record,
 )
 from core.runtime_control.records import RuntimeObservation
@@ -400,3 +401,196 @@ class TestPersistenceIsIsolatedAndIdempotent:
         source = obs.components["training"].measurement
         assert source is not None
         assert stored.measured_value_ms == source.unit_time_ms_median
+
+
+class TestAffectedBucketPromotion:
+    """O-3: after a successful eligible write, evaluate only that bucket.
+
+    The frozen O-4 policy is visible in these numbers and must stay that way:
+    `provisional_min_observations=2`, `validated_min_observations=3`,
+    `consistency_max_min_ratio=1.5`. Changing any of them moves
+    `runtime_policy_identity`, which invalidates every existing workspace
+    lock -- whose only v1 remedy is a new workspace.
+    """
+
+    @staticmethod
+    def _kwargs(registry):
+        return dict(
+            registry=registry,
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+            software_stack={"torch": "2.10.0+cu128"},
+        )
+
+    def _write(self, registry, ms: float):
+        """One derived observation at a given measured rate."""
+        payload = json.loads(json.dumps(_raw()))
+        payload["components"]["training"]["measurement"]["unit_time_ms_median"] = ms
+        obs = RuntimeObservation.model_validate(payload)
+        outcome = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        assert outcome.record_id
+        return registry.load_observation(outcome.record_id)
+
+    @pytest.fixture
+    def registry(self, tmp_path):
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+
+        return CalibrationRegistry(tmp_path / "runtime_calibration_v2")
+
+    def test_one_observation_does_not_promote(self, registry):
+        written = self._write(registry, 23.0)
+        outcome = evaluate_affected_bucket_after_write(registry, written)
+        assert outcome.kind == "not_promoted"
+        assert "below the minimum" in (outcome.reason or "")
+
+    def test_the_refusal_says_why(self, registry):
+        """ "Zero authoritative buckets" must be explainable, not an absence.
+        The live registry sat at 20 observations and 0 promotions precisely
+        because nothing recorded a reason."""
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 23.0))
+        assert outcome.reason
+        assert outcome.n_observations == 1
+
+    def test_two_consistent_observations_promote_to_provisional(self, registry):
+        self._write(registry, 23.0)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 23.5))
+        assert outcome.kind == "promoted"
+        assert outcome.level == "provisional"
+        assert outcome.n_observations == 2
+
+    def test_three_consistent_observations_reach_validated(self, registry):
+        self._write(registry, 23.0)
+        self._write(registry, 23.5)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 24.0))
+        assert outcome.kind == "promoted"
+        assert outcome.level == "validated"
+
+    def test_an_inconsistent_bucket_does_not_promote(self, registry):
+        """The drift rule: a new observation that breaks the 1.5 ratio blocks
+        validation rather than being averaged in."""
+        self._write(registry, 23.0)
+        self._write(registry, 23.5)
+        outcome = evaluate_affected_bucket_after_write(registry, self._write(registry, 240.0))
+        assert outcome.kind == "not_promoted"
+
+    def test_re_evaluating_an_unchanged_bucket_is_idempotent(self, registry):
+        """NOT free, unlike observations. `CalibrationPromotion`
+        content-addresses `derived_from_generation`, which increments on
+        every committed index write -- so the same evidence re-evaluated
+        later hashes differently and would write a second promotion.
+        Equivalence is checked on (bucket_key, source ids, level) instead.
+        """
+        self._write(registry, 23.0)
+        written = self._write(registry, 23.5)
+        first = evaluate_affected_bucket_after_write(registry, written)
+        second = evaluate_affected_bucket_after_write(registry, written)
+        assert first.kind == "promoted"
+        assert second.kind == "already_promoted"
+        assert second.promotion_id == first.promotion_id
+
+    def test_a_failure_is_reported_not_raised(self):
+        """Promotion is a derived view. A failure costs the bucket its
+        authority, never the run its result."""
+
+        class BrokenRegistry:
+            def iter_observations(self):
+                raise OSError("registry unreadable")
+
+        outcome = evaluate_affected_bucket_after_write(
+            BrokenRegistry(), object.__new__(type("X", (), {}))
+        )
+        assert outcome.kind == "failed"
+        assert outcome.reason
+
+    def test_the_frozen_policy_values_are_the_ones_in_force(self):
+        """A guard on O-4, not a restatement of it: these exact numbers are
+        what the promotions above depend on, and changing one moves
+        `runtime_policy_identity`."""
+        from core.runtime_control.calibration_policy import DEFAULT_POLICY
+
+        assert DEFAULT_POLICY.provisional_min_observations == 2
+        assert DEFAULT_POLICY.validated_min_observations == 3
+        assert DEFAULT_POLICY.consistency_max_min_ratio == 1.5
+        assert DEFAULT_POLICY.identity == "calibration_policy@1.0.0+b83994605c57"
+
+    def test_only_the_affected_bucket_is_evaluated(self, registry):
+        """A write tells us exactly one bucket changed. Evaluating every
+        observation would let an unrelated candidate's samples push this
+        bucket over the promotion threshold.
+
+        Caught by mutation: removing the bucket filter left every earlier
+        test green, because they all used a single bucket.
+        """
+        from core.runtime_control.calibration_policy import bucket_key
+
+        # Two observations in bucket A, one in bucket B (different family).
+        self._write(registry, 23.0)
+        written_a = self._write(registry, 23.5)
+
+        other = json.loads(json.dumps(_raw()))
+        other["calibration_context"]["model_family"] = "some_other_family"
+        obs_b = RuntimeObservation.model_validate(other)
+        out_b = persist_duration_calibration_record(
+            derive_duration_calibration_record(obs_b, "training", identity=CONTEXT),
+            **self._kwargs(registry),
+        )
+        written_b = registry.load_observation(out_b.record_id or "")
+        assert bucket_key(written_a) != bucket_key(written_b)
+
+        # Bucket B has ONE observation and must not promote, even though the
+        # registry now holds three in total.
+        outcome_b = evaluate_affected_bucket_after_write(registry, written_b)
+        assert outcome_b.kind == "not_promoted"
+        assert outcome_b.n_observations == 1, (
+            "the evaluation counted observations from another bucket"
+        )
+
+    def test_a_dirty_observation_in_the_bucket_is_screened_out(self, registry):
+        """`evaluate_bucket` RAISES on an unscreened dirty observation, so
+        without the filter this whole hook would return `failed` — or worse,
+        average an ineligible measurement into a promoted rate.
+
+        Caught by mutation: removing the screen left every earlier test
+        green, because none of them created a dirty record.
+        """
+        from core.runtime_control.calibration_policy import bucket_key, eligibility_problems
+        from core.runtime_control.registry_schemas import CalibrationObservation
+
+        self._write(registry, 23.0)
+        written = self._write(registry, 23.5)
+
+        # The dirty marker must NOT be a bucket dimension, or the record
+        # simply lands in a different bucket and proves nothing. An empty
+        # `measurement_unit` fails that way -- it is bucket component 2.
+        # `source_run["outcome"]` is not a bucket dimension, and it is the
+        # D4 failure-evidence screen: exactly the record that must never be
+        # averaged into a throughput rate.
+        dirty = CalibrationObservation(
+            operation="training",
+            measurement_unit="optimizer_step",
+            measured_value_ms=999.0,
+            source_run={"outcome": "oom"},
+            workload={"batch_size": 8, "seg_size": 10_000},
+            model_family=_raw()["calibration_context"]["model_family"],
+            hardware_compatibility_id="hw-test",
+            execution_environment_id="env-test",
+            concurrency_identity="single_candidate_idle",
+            software_stack={"torch": "2.10.0+cu128"},
+            producer_identity="derived@1.0.0",
+            provenance="real_training_verification",
+        )
+        assert eligibility_problems(dirty), "fixture is no longer dirty"
+        assert bucket_key(dirty) == bucket_key(written), "fixture left the bucket"
+        registry.record_observation(dirty)
+
+        outcome = evaluate_affected_bucket_after_write(registry, written)
+        assert outcome.kind == "promoted", f"the dirty record broke the hook: {outcome.reason}"
+        assert outcome.n_observations == 2, (
+            "an ineligible observation was averaged into the promoted rate"
+        )

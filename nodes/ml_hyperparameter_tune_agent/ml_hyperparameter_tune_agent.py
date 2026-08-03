@@ -2681,6 +2681,7 @@ def _derive_calibration_from_observation(
             DERIVABLE_PHASES,
             IdentityContext,
             derive_duration_calibration_record,
+            evaluate_affected_bucket_after_write,
             persist_duration_calibration_record,
         )
         from core.runtime_control.calibration_policy import stack_identity
@@ -2737,6 +2738,27 @@ def _derive_calibration_from_observation(
             )
             if outcome.kind in ("failed", "quarantined"):
                 print(f"[runtime_control] calibration {phase}: {outcome.kind} — {outcome.detail}")
+                continue
+            if outcome.kind != "eligible" or not outcome.record_id:
+                continue
+
+            # O-3: an eligible write is the ONLY promotion trigger, and it
+            # evaluates only the bucket that write landed in. A refusal is
+            # printed too -- "zero authoritative buckets" has to be an
+            # explainable state, which is exactly what the live v1 registry
+            # (20 observations, 0 promotions, no recorded reason) was not.
+            promotion = evaluate_affected_bucket_after_write(
+                registry, registry.load_observation(outcome.record_id)
+            )
+            if promotion.kind == "promoted":
+                print(
+                    f"[runtime_control] calibration {phase}: bucket promoted to "
+                    f"{promotion.level} on {promotion.n_observations} observation(s)"
+                )
+            elif promotion.kind in ("not_promoted", "failed"):
+                print(
+                    f"[runtime_control] calibration {phase}: not authoritative — {promotion.reason}"
+                )
     except Exception as exc:
         print(f"[runtime_control] calibration derivation failed (non-fatal): {exc}")
 

@@ -110,6 +110,31 @@ class TestItIsNotWiredToAnyFailurePath:
             "four call sites include three failure paths"
         )
 
+    def test_the_promotion_trigger_is_reachable_from_production(self):
+        """O-3 reachability. `evaluate_affected_bucket_after_write` was
+        written, fully tested and called from NOWHERE -- the same shape as
+        #156, #157 and #159, each a component whose only consumer discarded
+        it. Deleting the production call fails here."""
+        assert "evaluate_affected_bucket_after_write" in _calls_within(_function(DERIVATION)), (
+            "the promotion trigger is defined and tested but never called "
+            "from production, so no bucket can ever become authoritative"
+        )
+
+    def test_promotion_is_triggered_only_by_an_eligible_write(self):
+        """A quarantined or failed write must not promote: quarantined
+        evidence is exactly what must not gain authority."""
+        code = ast.unparse(_function(DERIVATION))
+        # The CALL, not the import of the same name at the top of the
+        # function -- anchoring on the bare name matched the import and
+        # made this assertion meaningless.
+        call = "evaluate_affected_bucket_after_write(registry"
+        check = "if outcome.kind != 'eligible'"
+        assert call in code, "the promotion trigger is not called from production"
+        assert check in code, "the eligible-write guard is gone"
+        trigger = code.index(call)
+        guard = code.index(check)
+        assert guard < trigger, "the promotion trigger is not guarded by an eligible-write check"
+
     def test_the_derivation_is_called_exactly_once_in_the_tuner(self):
         """One seam. A second call site would be a second policy about what
         counts as calibration evidence."""

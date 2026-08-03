@@ -338,3 +338,120 @@ def persist_duration_calibration_record(
         # Explicit, not silent: the caller records this so an operator can
         # see that a sample was lost and why.
         return PersistOutcome(kind="failed", detail=f"{type(exc).__name__}: {exc}")
+
+
+# ── O-3: promotion evaluation, triggered by a successful eligible write ─────
+
+
+class PromotionOutcome(BaseModel):
+    """What the affected-bucket evaluation decided, and why.
+
+    A refusal is as important to record as a promotion. "Zero authoritative
+    buckets" must be an explainable state, not an absence -- the live
+    registry sat at 20 observations and 0 promotions for weeks precisely
+    because nothing said why.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["promoted", "already_promoted", "not_promoted", "failed"]
+    bucket_key: str | None = None
+    level: Literal["provisional", "validated"] | None = None
+    promotion_id: str | None = None
+    n_observations: int = 0
+    reason: str | None = None
+
+
+def evaluate_affected_bucket_after_write(
+    registry: Any,
+    written: Any,
+    *,
+    policy: Any = None,
+) -> PromotionOutcome:
+    """O-3: after a successful ELIGIBLE write, evaluate only that bucket.
+
+    Only the affected bucket, not the whole registry: a write tells us
+    exactly one bucket changed, and re-deriving the rest would turn a
+    per-attempt hook into a full scan.
+
+    IDEMPOTENCY IS NOT FREE HERE, unlike observations. `CalibrationPromotion`
+    content-addresses `derived_from_generation`, which increments on every
+    committed index write -- so re-evaluating one unchanged bucket at a later
+    generation produces a DIFFERENT id and would write a second promotion for
+    the same evidence, inflating the apparent record. Equivalence is
+    therefore checked on (bucket_key, source_observation_ids, level), which
+    is what actually identifies "this promotion, from this evidence". `level`
+    is redundant under a fixed policy -- the same evidence yields the same
+    level -- but it means a policy change that re-grades a bucket records the
+    new grade instead of being mistaken for a duplicate.
+
+    Never raises. Promotion is a derived view; a failure here costs the
+    bucket its authority, never the run its result.
+    """
+    from core.runtime_control.calibration_policy import (
+        DEFAULT_POLICY,
+        bucket_key,
+        eligibility_problems,
+        evaluate_bucket,
+    )
+
+    resolved_policy = policy if policy is not None else DEFAULT_POLICY
+    try:
+        target = bucket_key(written)
+
+        # Only clean observations may be evaluated; `evaluate_bucket` raises
+        # on a dirty one rather than quietly averaging it in.
+        siblings = [
+            obs
+            for obs in registry.iter_observations()
+            if bucket_key(obs) == target and not eligibility_problems(obs)
+        ]
+        if not siblings:
+            return PromotionOutcome(
+                kind="not_promoted",
+                bucket_key=target,
+                reason="no clean observations in this bucket",
+            )
+
+        manifest = registry.load_manifest()
+        promotion = evaluate_bucket(
+            siblings, policy=resolved_policy, generation=manifest.generation
+        )
+        if promotion is None:
+            return PromotionOutcome(
+                kind="not_promoted",
+                bucket_key=target,
+                n_observations=len(siblings),
+                reason=(
+                    f"{len(siblings)} observation(s): below the minimum "
+                    f"({resolved_policy.provisional_min_observations}) or outside "
+                    f"the consistency ratio ({resolved_policy.consistency_max_min_ratio})"
+                ),
+            )
+
+        # Equivalence, not content id -- see the docstring.
+        for existing in registry.iter_promotions():
+            if (
+                existing.bucket_key == promotion.bucket_key
+                and tuple(existing.source_observation_ids)
+                == tuple(promotion.source_observation_ids)
+                and existing.level == promotion.level
+            ):
+                return PromotionOutcome(
+                    kind="already_promoted",
+                    bucket_key=target,
+                    level=existing.level,
+                    promotion_id=existing.promotion_id,
+                    n_observations=existing.n_observations,
+                )
+
+        pid = registry.record_promotion(promotion)
+        return PromotionOutcome(
+            kind="promoted",
+            bucket_key=target,
+            level=promotion.level,
+            promotion_id=pid,
+            n_observations=promotion.n_observations,
+        )
+    except Exception as exc:
+        return PromotionOutcome(kind="failed", reason=f"{type(exc).__name__}: {exc}")
