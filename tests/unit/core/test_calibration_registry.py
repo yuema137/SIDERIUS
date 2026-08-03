@@ -20,12 +20,15 @@ from core.runtime_control.calibration_registry import (
     CalibrationRegistry,
     adapt_legacy_k_table,
     default_registry_root,
+    legacy_registry_root,
+    registry_dirname,
 )
 from core.runtime_control.estimate_types import from_legacy_calibration_entry
 from core.runtime_control.registry_schemas import (
     CalibrationObservation,
     ExecutionEnvironmentProfile,
     HardwareCompatibilityProfile,
+    RegistryManifest,
     content_id,
     display_id,
 )
@@ -198,8 +201,44 @@ class TestStorage:
         assert manifest.observation_ids == [obs.observation_id]
 
     def test_env_override_honored(self, tmp_path, monkeypatch):
+        """The override relocates the BASE; the version owns the leaf name.
+
+        This asserted the leaf was literally `runtime_calibration`, which
+        stopped being the current version's directory when C-C2b gave each
+        major schema its own tree (O-1). The subject of the test is the
+        override, so it now asserts the base and derives the leaf.
+        """
         monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path / "custom"))
-        assert default_registry_root() == tmp_path / "custom" / "runtime_calibration"
+        root = default_registry_root()
+        assert root.parent == tmp_path / "custom"
+        assert root.name == registry_dirname()
+
+    def test_each_major_schema_gets_its_own_tree(self, tmp_path, monkeypatch):
+        """O-1. A bump must not land new records beside old ones: the
+        version is inside every record's content hash, so a v2 record in the
+        v1 tree is unverifiable there and `rebuild_index` would silently
+        drop it."""
+        monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path / "custom"))
+        assert default_registry_root("1.0.0") != default_registry_root("2.0.0")
+        assert default_registry_root("1.0.0") == legacy_registry_root()
+        # v1 keeps the historical name so the existing tree is found where
+        # it has always been.
+        assert registry_dirname("1.0.0") == "runtime_calibration"
+        assert registry_dirname("2.0.0") == "runtime_calibration_v2"
+
+    def test_a_tree_from_another_major_schema_is_refused(self, tmp_path):
+        """Fail closed. A stale `SIDERIUS_CALIBRATION_DIR` pointing at the
+        old tree would otherwise have this build append v2 records into a
+        directory whose manifest claims v1 -- and `rebuild_index` would then
+        commit a manifest omitting whichever half fails its hash check, with
+        no error."""
+        root = tmp_path / "foreign"
+        root.mkdir()
+        (root / "registry.json").write_text(
+            RegistryManifest.model_construct(schema_version="1.0.0").model_dump_json()
+        )
+        with pytest.raises(ValueError, match="schema major"):
+            CalibrationRegistry(root).load_manifest()
 
 
 class TestProfilesAndCrossMachine:

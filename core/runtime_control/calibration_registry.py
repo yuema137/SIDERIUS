@@ -53,6 +53,7 @@ from typing import Any
 
 from core.runtime_control.estimate_types import RuntimeEstimate, make_estimate
 from core.runtime_control.registry_schemas import (
+    REGISTRY_SCHEMA_VERSION,
     CalibrationObservation,
     CalibrationPromotion,
     CalibrationSummary,
@@ -65,10 +66,58 @@ from core.runtime_control.registry_schemas import (
 LEGACY_ADAPTER_VERSION = "1.0.0"
 
 
-def default_registry_root() -> Path:
+def schema_major(schema_version: str) -> int:
+    """Major component of a registry schema version."""
+    try:
+        return int(schema_version.split(".", 1)[0])
+    except (ValueError, IndexError) as exc:
+        raise ValueError(f"not a registry schema version: {schema_version!r}") from exc
+
+
+def registry_dirname(schema_version: str = REGISTRY_SCHEMA_VERSION) -> str:
+    """Directory name for a schema version.
+
+    v1 keeps the historical name so the existing tree is found exactly where
+    it has always been; v2 and later get a suffixed sibling.
+    """
+    major = schema_major(schema_version)
+    return "runtime_calibration" if major <= 1 else f"runtime_calibration_v{major}"
+
+
+def default_registry_root(schema_version: str = REGISTRY_SCHEMA_VERSION) -> Path:
+    """Root for the CURRENT schema version.
+
+    V20 PR C1 / C-C2b, operator decision O-1: a new schema version gets a
+    NEW TREE. The old one is left in place, byte for byte, and is never
+    re-hashed.
+
+    That is not a stylistic choice. `CalibrationObservation.hash_payload()`
+    dumps the whole model, and `schema_version` is inside it, so adding any
+    field -- even an optional one defaulting to None -- changes every
+    existing record's content id. `load_observation` then raises
+    "content-hash mismatch ... (corruption or tampering)", and
+    `rebuild_index` silently drops every record into its rejected list and
+    commits an empty manifest. Verified empirically against a live record
+    during the PR C audit: one added optional field moved
+    sha256:09e767d8... to sha256:6cff7c0d....
+
+    Migrating in place would therefore mean either rewriting 20 records
+    whose ids other artifacts may cite, or teaching the loader to accept a
+    hash it cannot verify. A sibling tree costs a directory.
+    """
     override = os.environ.get("SIDERIUS_CALIBRATION_DIR")
     base = Path(override) if override else Path.home() / ".siderius"
-    return base / "runtime_calibration"
+    return base / registry_dirname(schema_version)
+
+
+def legacy_registry_root() -> Path:
+    """The v1 tree, for READ-ONLY inspection.
+
+    Nothing in the v2 write path may target this. It exists so an operator
+    tool can report what the old tree holds without the v2 loader trying to
+    verify hashes computed under a different schema.
+    """
+    return default_registry_root("1.0.0")
 
 
 def _digest_of(full_id: str) -> str:
@@ -148,12 +197,40 @@ class CalibrationRegistry:
         if not self._index_path.exists():
             return RegistryManifest()
         try:
-            return RegistryManifest.model_validate_json(self._index_path.read_text())
+            manifest = RegistryManifest.model_validate_json(self._index_path.read_text())
         except Exception as exc:
             raise ValueError(
                 f"registry index corrupt at {self._index_path}: {exc}. "
                 "Run rebuild_index() to reconstruct it from the records."
             ) from exc
+        self._refuse_foreign_schema(manifest)
+        return manifest
+
+    def _refuse_foreign_schema(self, manifest: RegistryManifest) -> None:
+        """Fail closed when this tree was written under another major schema.
+
+        O-1 gives each major version its own tree, but a tree is just a path
+        -- an operator pointing `SIDERIUS_CALIBRATION_DIR` at the old one, or
+        a stale override in a launcher, would otherwise have v2 code append
+        v2 records beside v1 records in a directory whose manifest claims v1.
+
+        The failure that would follow is silent: `rebuild_index` verifies
+        every file's content hash and *excludes* the ones that do not match,
+        committing a manifest that omits them. Half the evidence would
+        disappear with no error. Refusing here turns that into a message
+        naming both versions and both paths.
+        """
+        found = schema_major(manifest.schema_version)
+        expected = schema_major(REGISTRY_SCHEMA_VERSION)
+        if found != expected:
+            raise ValueError(
+                f"registry at {self.root} was written under schema major {found} "
+                f"(version {manifest.schema_version!r}), but this build writes "
+                f"major {expected} (version {REGISTRY_SCHEMA_VERSION!r}). "
+                "Each major version has its own tree (operator decision O-1); "
+                f"the current one is {default_registry_root()}. The older tree is "
+                "read-only evidence and must not be written to or re-hashed."
+            )
 
     # ── writers ────────────────────────────────────────────────────────
     def put_hardware_profile(self, profile: HardwareCompatibilityProfile) -> str:

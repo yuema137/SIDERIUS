@@ -1571,13 +1571,37 @@ schema version in a new directory, a re-hash migration, or a partial hash.
 on O-1: option 1 means a v2 tree and a reader that handles both; option 2
 means a migration script; option 3 changes `hash_payload` itself. Writing
 steps now would commit to one before the operator chooses.
-- [ ] Re-inspect `hash_payload`/`content_id` and the manifest reader, then
-      resolve the bounded details from O-1 (new tree, old tree read-only,
-      no re-hash) and O-2 (quarantine namespace).
-- [ ] Implement the v2 schema and the new tree; the 8.B config-identity
-      choice (hash vs enumerated fields) is Claude's to resolve from code.
-- [ ] Proceed autonomously unless inspection reveals a material deviation
-      from the approved design.
+Split into three semantic commits: C-C2a models, C-C2b tree, C-C2c
+quarantine.
+
+- [x] **C-C2a** — `MeasurementIdentity` (exact match, incl.
+      `measurement_kind`, `task_identity`, `data_shape_class`,
+      `hardware_uuid`) and `ApplicabilityEnvelope` (bounded ranges). The two
+      share **no field**, so an applicability verdict cannot be obtained by
+      matching a key — the §8.A invariant made structural. 29 tests, 6
+      mutation proofs. Phase vocabulary resolved to `RuntimePhase`: verified
+      `io` is declared in `ObservationOperation` and produced nowhere, while
+      `scoring`/`orchestration` are real phases v1 could not express.
+      `gpu_reserved` deliberately not declared — no producer exists, and a
+      kind nothing emits is how `cuda_peak_allocated_gb` became a dead field.
+      **Deferred** until a real producer exists.
+- [x] **C-C2b** — `REGISTRY_SCHEMA_VERSION` 1.0.0 → 2.0.0, and each major
+      version gets its own tree. v1 keeps the historical
+      `runtime_calibration` name so the existing tree is found where it has
+      always been; v2 is the sibling `runtime_calibration_v2`.
+      `legacy_registry_root()` exposes v1 for read-only inspection.
+      A fail-closed guard refuses to open a tree whose manifest declares a
+      different major — without it, a stale `SIDERIUS_CALIBRATION_DIR` would
+      have v2 code append into the v1 tree, and `rebuild_index` would then
+      commit a manifest silently omitting whichever half failed its hash
+      check. Live v1 tree verified untouched: 26 files, digest
+      `df0351b59a5bd0bd`; no v2 tree created (nothing writes yet).
+      3 mutation proofs.
+- [ ] **C-C2c** — the explicit `unusable`/quarantine namespace under O-2.
+- [ ] Wiring the identity into the write path, with an **explicit**
+      legacy-`ObservationOperation` → `RuntimePhase` mapping that fails
+      closed on an unsupported value. No string casts, no silent
+      reinterpretation of old records.
 
 **4. Validation plan (shape known now, cases pending O-1).**
 - Unit: two records identical except for task land in different buckets.

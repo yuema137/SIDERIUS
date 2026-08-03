@@ -32,7 +32,13 @@ from core.runtime_control.identity import _canonicalize
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.records import PredictionSource
 
-REGISTRY_SCHEMA_VERSION = "1.0.0"
+#: Bumped to 2.0.0 by V20 PR C1 / C-C2b. The version is INSIDE every
+#: record's content hash (``hash_payload`` dumps the whole model), so a
+#: bump is indistinguishable from corruption to a loader reading the old
+#: tree -- which is exactly why operator decision O-1 gives each major
+#: version its own tree rather than migrating in place. See
+#: ``calibration_registry.default_registry_root``.
+REGISTRY_SCHEMA_VERSION = "2.0.0"
 
 ObservationOperation = Literal["setup", "training", "inference", "io"]
 #: D4 lifecycle (operator, 2026-07-30): "unvalidated" IS the candidate
