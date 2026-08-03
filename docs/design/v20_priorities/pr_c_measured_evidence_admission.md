@@ -1060,6 +1060,65 @@ inconclusive live probe
 Repeated samples where promotion quality depends on statistical
 consistency.
 
+#### Layer-2 completion matrix — C1 `[x]`
+
+Every row below is asserted by a named test. The identity rows are
+parametrised from `IDENTITY_ROWS` in `test_calibration_read_authority.py`,
+each varying **exactly one** dimension so a green row names precisely which
+reuse rule refused.
+
+| Row | Outcome | Test |
+|---|---|---|
+| matching identity, in-range workload | **authoritative** | `test_matching_identity_and_in_range_candidate_is_authoritative` |
+| cross-task | refused | `IDENTITY_ROWS[cross-task]` |
+| cross-data-shape | refused | `IDENTITY_ROWS[cross-data-shape]` |
+| cross-GPU-UUID | refused | `IDENTITY_ROWS[cross-device-uuid]` |
+| cross-phase (training↔inference) | refused | `IDENTITY_ROWS[cross-phase]` |
+| cross-measurement-kind | refused | `IDENTITY_ROWS[cross-measurement-kind]` |
+| runtime-stack mismatch | refused | `IDENTITY_ROWS[cross-stack]` |
+| cross-family / cross-candidate-config | refused | `IDENTITY_ROWS[cross-family, cross-candidate-config]` |
+| in-range workload | granted | `test_the_candidate_is_in_range_in_every_identity_row` |
+| out-of-range workload, identical identity | refused | `test_out_of_range_candidate_is_refused_despite_identical_identity` |
+| dimension with no measured evidence | **fails closed** | `test_a_dimension_with_no_measured_evidence_fails_closed` |
+| missing identity | refused | `test_an_observation_without_identity_is_refused` |
+| unknown model family | never authoritative | `test_an_unknown_family_never_inherits_known_family_calibration` |
+| insufficient observations (1 < 2) | candidate only | `test_one_observation_stays_candidate_only` |
+| 2 consistent / 3 consistent | provisional / validated | `test_two_consistent_observations_are_provisional`, `test_three_consistent_observations_are_validated` |
+| inconsistent observations (ratio > 1.5) | promotion blocked | `test_ratio_above_limit_blocks_promotion` |
+| ratio exactly at the limit | promotes | `test_boundary_ratio_exactly_at_limit_promotes` |
+| concurrency-class separation | separate buckets | `test_each_dimension_separates_buckets`, `test_idle_bucket_is_never_polluted_by_pairwise_writes` |
+| contended / unknown contention | never eligible | `test_contended_and_unknown_are_never_calibration_eligible` |
+| duplicate event / re-evaluation | idempotent | `test_re_evaluating_an_unchanged_bucket_is_idempotent`, `test_recording_the_same_promotion_twice_is_idempotent` |
+| quarantine | kept, never authoritative | `test_calibration_quarantine.py::TestQuarantinedEvidenceHasNoAuthority` (5 tests) |
+| empty registry | INACTIVE, reason given | `test_an_empty_registry_is_inactive_and_says_why` |
+| unreadable registry | UNREADABLE ≠ empty | `test_an_unreadable_registry_is_not_reported_as_empty` |
+| unusable registry root | UNREADABLE, never raises | `test_an_unusable_root_is_reported_not_raised` |
+| zero authoritative buckets | INACTIVE despite evidence | `test_observations_without_promotion_are_still_inactive` |
+| historical contents vs live verdict | **no effect** | `test_the_verdict_is_a_function_of_the_live_measurement_only` |
+
+*Rows deferred to C2, with reason.* `validated calibration contradicted by a
+live measurement` and `inconclusive live probe` both describe a **consumer**
+resolving stored evidence against a live one. C1 has no such consumer — the
+C-C5b cancellation means the live measurement is the only production input,
+so there is nothing to contradict. `expired calibration` likewise needs a
+consumer to expire *for*. These move to C2 with the GPU-requirement gate.
+
+#### Layer-1 reachability checks — C1 `[x]`
+
+| Claim | Test |
+|---|---|
+| successful production events write duration observations | `test_the_derivation_is_called_in_production`, `test_it_is_called_from_run` |
+| System A is durable before the derived view | `test_it_runs_after_the_system_a_append` |
+| failure/timeout/rejection never enter calibration | `test_no_failure_handler_derives_calibration` (parametrised), `test_the_shared_append_helper_does_not_derive` |
+| exactly one derivation seam | `test_the_derivation_is_called_exactly_once_in_the_tuner` |
+| promotion trigger is production-reachable | `test_the_promotion_trigger_is_reachable_from_production` |
+| only an eligible write triggers promotion | `test_promotion_is_triggered_only_by_an_eligible_write` |
+| quarantined evidence never reaches promotion | quarantine records are structurally disjoint from `iter_observations()`, which is promotion's only input (`test_the_two_lists_are_disjoint_by_construction`) |
+| System B failure never costs an attempt | `TestLosingCalibrationNeverCostsAnAttempt` (4 tests) |
+| identity is never fabricated | `TestIdentityIsNotFabricated` (2 tests) |
+| reporting is production-reachable | `test_bootstrap_render_survives_an_unusable_registry_root` |
+| historical data is NOT production-decision-reachable | `test_historical_duration_is_observability_only.py` (9 tests) |
+
 ### Layer 3 — bounded real confirmation, one per PR
 
 The two PRs measure different quantities and must be confirmed separately.
@@ -1074,8 +1133,14 @@ real duration observation (normal formal run)
      measurement_kind = duration
   -> promotion evaluated under the O-4 values
   -> applicability checked against the envelope
-  -> time-budget consumer and the calibration-state report
+  -> the calibration-state report
 ```
+
+> **Corrected 2026-08-02.** This flow previously ended `-> time-budget
+> consumer and the calibration-state report`. The time-budget consumer was
+> cancelled (see C-C5b above); historical duration is observability-only, so
+> the report is the terminus. C1 Layer-3 therefore confirms the **write,
+> promotion and reporting** path end-to-end, not a consumption path.
 
 Passes without any GPU requirement existing. Formal admission still reports
 `policy_unavailable` throughout — expected after C1, not a defect.
@@ -2747,6 +2812,69 @@ exact-head CI — recorded once at the end per §12.
 
 ---
 
+## 17a. C1 Layer-3 bounded real validation — pre-registered plan
+
+Written **before** the run, per operator requirement. Operator authorised one
+bounded fixed-candidate, no-LLM C1 run.
+
+**What it confirms.** The **write → promotion → reporting** path end-to-end on
+real hardware. Not a consumption path — C-C5b is cancelled, so there is no
+production consumer of historical duration to confirm.
+
+**Entry point.** `HyperparamTuningAgent(bridge_factory=...).run(...)` — the
+real production entry point, containing the single production derivation seam
+(`ml_hyperparameter_tune_agent.py:4822`). `sandbox_factory` is left at its
+default, so training, inference and scoring are **real subprocesses**.
+
+**How "no LLM" is achieved without faking the thing under test.** Only the
+planner is substituted, through the sanctioned constructor DI seam
+(`docs/pseudo_test_infra.md` §4A). A `FixedPlanBridge` returns the *same*
+`ExperimentPlan` on every `plan()` call and a fixed string on `reflect()`.
+Zero network calls. This is also what makes the run a *fixed candidate*: an
+LLM planner varies the config each round, which would scatter observations
+across buckets and never reach the promotion threshold.
+
+**Configuration.**
+
+| Item | Value |
+|---|---|
+| device | RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef` |
+| model | `punet`, `segmentation_size=40000`, `batch_size=8` |
+| train | `lr=5e-4`, `epochs=1`, `optimizer_type=adamw`, `device=cuda` |
+| loss | `focal`, `alpha=0.5`, `gamma=2.0` |
+| rounds | 3 formal (one per required observation) |
+| data | `train_portion` / `eval_portion` bounded to a small snapshot |
+| workspace | scratch directory, discarded after evidence capture |
+| registry | `SIDERIUS_CALIBRATION_DIR` → **temporary v2 tree** |
+
+**Expected wall time and resources.** Bounded by `--formal_time_budget_minutes`
+and a small portion; target well under 30 min total, single GPU, no
+concurrency.
+
+**Pass criteria.**
+1. Three successful attempts each derive one `CalibrationObservation` with
+   `measurement_kind="duration"` and a complete `MeasurementIdentity`
+   (including the real GPU UUID).
+2. All three land in the **same** bucket — proving the fixed candidate hashes
+   to one `candidate_config_hash` across rounds.
+3. Promotion crosses the frozen O-4 thresholds in order: 1 → candidate only,
+   2 → `provisional`, 3 → `validated`, with max/min ms-per-step ≤ 1.5.
+4. `collect_calibration_state` reports `INACTIVE` before promotion and
+   `ACTIVE` with ≥1 validated bucket after.
+5. The live time verdict is **unchanged** by the populated registry.
+6. The live v1 tree digest is still `c1065a8b612fb691…`.
+
+**Stop criteria.** Stop and report rather than retry if: the run needs a real
+LLM call; consistency ratio exceeds 1.5 (record it — that is a real finding
+about measurement stability, not a failure to paper over); any write lands
+outside the temporary registry; wall time materially exceeds the bound.
+
+**Retained artifacts.** The temporary registry tree, the derived observation
+and promotion records, the before/after calibration-state report lines, and
+the v1 digest check. Recorded in §17b.
+
+---
+
 ## 18. Expected artifacts
 
 Per PR, since the two are reviewed separately.
@@ -2756,7 +2884,9 @@ Per PR, since the two are reviewed separately.
   proof the old tree's 20 records are untouched and still readable.
 - Layer-2 matrix results for identity and applicability.
 - One C1 Layer-3 confirmation: a real duration observation through
-  promotion and applicability into the time-budget consumer.
+  promotion and applicability into the **calibration-state report**
+  (corrected 2026-08-02 — the time-budget consumer was cancelled; see
+  C-C5b and §11 Layer 3).
 - A calibration-state report showing honest counts — against a read-only
   copy, 20 observations / 0 promotions / 0 authoritative buckets before any
   new evidence is collected.
