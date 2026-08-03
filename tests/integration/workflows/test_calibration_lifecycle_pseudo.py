@@ -148,9 +148,22 @@ class TestCalibrationLifecyclePseudo:
 
         level, promo = registry.bucket_status(bucket_key(training))
         assert level == "validated" and promo is not None
+
+        # UPDATED BY C-C5a. This asserted that reaching `validated` restored
+        # measured authority outright. Promotion is still the subject and is
+        # still asserted above -- but a validated bucket is now NECESSARY and
+        # NOT SUFFICIENT: authority additionally requires an identity match
+        # and applicability to a named candidate.
+        #
+        # Probe-written observations carry no `MeasurementIdentity` (only the
+        # C-C3c derivation path populates it), so they cannot be shown to be
+        # about the same task, device instance, phase and measurement kind as
+        # any request. Fail-closed is the correct outcome, and it is asserted
+        # rather than left implicit.
         est = registry.as_estimate(training, current_environment_id=env_id)
-        assert est.provenance == "bounded_live_probe"
-        assert est.blocking_eligible is True
+        assert est.provenance == "historical_observation_prior"
+        assert est.blocking_eligible is False
+        assert any("not applicable to this candidate" in w for w in est.warnings)
 
     def test_contended_probes_never_promote(self, env):
         registry, _, _ = env
@@ -165,8 +178,14 @@ class TestCalibrationLifecyclePseudo:
             training, _ = _probe_and_record(env, train_ms=ms)
         for promo in evaluate_promotions(registry.iter_observations(), generation=0):
             registry.record_promotion(promo)
+        # UPDATED BY C-C5a. The test's subject -- validated history must not
+        # price a candidate outside its measured range -- is unchanged, but
+        # the enforcement moved. It used to require the CALLER to fetch a
+        # summary, call `applicability_for_request` and then remember to call
+        # `downgrade_for_applicability`; a caller who skipped those three
+        # steps got blocking authority. The seam now refuses on its own.
         est = registry.as_estimate(training, current_environment_id=env_id)
-        assert est.blocking_eligible is True
+        assert est.blocking_eligible is False
 
         summary = registry.derive_summary(operation="training")
         assert summary.parameter_count_range == (45_408, 45_408)

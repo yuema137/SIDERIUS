@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from core.runtime_control.calibration_read import CandidateRequest
 from core.runtime_control.calibration_registry import (
     CalibrationRegistry,
     adapt_legacy_k_table,
@@ -28,6 +29,7 @@ from core.runtime_control.registry_schemas import (
     CalibrationObservation,
     ExecutionEnvironmentProfile,
     HardwareCompatibilityProfile,
+    MeasurementIdentity,
     RegistryManifest,
     content_id,
     display_id,
@@ -81,6 +83,28 @@ def _obs(hw_id: str, env_id: str, **over) -> CalibrationObservation:
     )
     base.update(over)
     return CalibrationObservation(**base)
+
+
+#: C-C5a: measured authority now additionally requires an identity match and
+#: applicability to the concrete candidate, so any test asserting measured
+#: provenance must say WHO the estimate is for. `_obs` deliberately keeps no
+#: identity by default -- a record without one is pre-C-C2 shaped and must
+#: never be authoritative.
+IDENTITY = MeasurementIdentity(
+    measurement_kind="duration",
+    task_identity="tidmad_denoising",
+    data_shape_class="tidmad_int8_1d",
+    model_family="wavenet",
+    candidate_config_hash="cfg-abc",
+    phase="training",
+    hardware_uuid="GPU-1111",
+    runtime_stack_identity="stack-1",
+)
+
+#: Inside the span of `_obs`'s own workload, so applicability holds.
+APPLICABLE = CandidateRequest(
+    identity=IDENTITY, dimensions={"batch_size": 8, "segment_length": 40_000}
+)
 
 
 @pytest.fixture
@@ -288,16 +312,41 @@ class TestProfilesAndCrossMachine:
         assert est.blocking_eligible is False
         assert any("cross-machine" in w for w in est.warnings)
 
-    def test_local_validated_evidence_keeps_measured_provenance(self, registry):
-        # C7/D4: authority comes from the bucket's PROMOTION level, never
-        # from a self-declared status on the immutable observation.
-        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id)
+    def test_local_validated_applicable_evidence_keeps_measured_provenance(self, registry):
+        """C7/D4: authority comes from the bucket's PROMOTION level, never
+        from a self-declared status on the immutable observation.
+
+        UPDATED BY C-C5a. This asserted that `validated` + local was enough,
+        which is the stale contract: it granted blocking authority without
+        ever asking who the estimate was for. The C7/D4 subject is unchanged
+        and still asserted -- the test now also supplies the candidate, which
+        is what the seam was always missing.
+        """
+        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id, identity=IDENTITY)
+        registry.record_observation(obs)
         est = registry.as_estimate(
-            obs, current_environment_id=ENV_LOCAL.profile_id, validation_level="validated"
+            obs,
+            current_environment_id=ENV_LOCAL.profile_id,
+            validation_level="validated",
+            request=APPLICABLE,
         )
         assert est.provenance == "bounded_live_probe"
         assert est.blocking_eligible is True
         assert est.training_seconds is not None and est.inference_seconds is None
+
+    def test_a_validated_local_bucket_alone_is_not_authority(self, registry):
+        """The inverted stale contract, locked. A bucket match is not
+        applicability (frozen §8.A): with no candidate to check against,
+        `as_estimate` must fail closed rather than assume a caller will
+        remember to check separately."""
+        obs = _obs(HW.profile_id, ENV_LOCAL.profile_id, identity=IDENTITY)
+        registry.record_observation(obs)
+        est = registry.as_estimate(
+            obs, current_environment_id=ENV_LOCAL.profile_id, validation_level="validated"
+        )
+        assert est.provenance == "historical_observation_prior"
+        assert est.blocking_eligible is False
+        assert any("not applicable to this candidate" in w for w in est.warnings)
 
     def test_local_unpromoted_bucket_is_demoted(self, registry):
         obs = _obs(HW.profile_id, ENV_LOCAL.profile_id)
@@ -323,7 +372,10 @@ class TestPromotionPersistence:
     def _promoted(self, registry, values=(20.0, 21.0, 22.0)):
         from core.runtime_control.calibration_policy import evaluate_promotions
 
-        obs = [_obs(HW.profile_id, ENV_LOCAL.profile_id, measured_value_ms=v) for v in values]
+        obs = [
+            _obs(HW.profile_id, ENV_LOCAL.profile_id, measured_value_ms=v, identity=IDENTITY)
+            for v in values
+        ]
         for o in obs:
             registry.record_observation(o)
         promos = evaluate_promotions(obs, generation=registry.load_manifest().generation)
@@ -353,9 +405,13 @@ class TestPromotionPersistence:
         assert registry.bucket_status("some|other|bucket") == ("unvalidated", None)
 
     def test_validated_bucket_restores_measured_authority_end_to_end(self, registry):
+        """UPDATED BY C-C5a: a real promotion still restores authority, but
+        only for a candidate the evidence actually covers."""
         obs, promos = self._promoted(registry)
         registry.record_promotion(promos[0])
-        est = registry.as_estimate(obs[0], current_environment_id=ENV_LOCAL.profile_id)
+        est = registry.as_estimate(
+            obs[0], current_environment_id=ENV_LOCAL.profile_id, request=APPLICABLE
+        )
         assert est.provenance == "bounded_live_probe"
         assert est.blocking_eligible is True
 
