@@ -2233,7 +2233,68 @@ the old expectation is **inverted and locked** by
 
 ---
 
-### C-C5b — Wire the safe read seam to the time-budget consumer  `[C1]`
+### C-C5b — CANCELLED by operator decision (2026-08-02)
+
+> **Historical duration calibration must not influence the production
+> allow/reject time decision.**
+>
+> Runtime and GPU conditions are live. The production time decision must use
+> the current measured speed of the concrete candidate on the current machine
+> under current conditions. A stored duration describes a different moment,
+> and letting it decide prices today's work with yesterday's clock.
+
+**Historical duration in C1 is observability-only.** It is still collected,
+identity-checked, quarantined, promoted as internally consistent history,
+reported (C-C7) and available for offline analysis, trend reporting and drift
+detection. It may **not** support ALLOW, cause REJECT, modify
+`_gate_decision`, be passed into the production time gate, or change retry,
+attempt/round accounting or execution behaviour.
+
+**Current live measurement is the sole production time-decision input.**
+
+*Sequence of events, recorded honestly.* The C-C5b wiring was implemented,
+tested and committed (`95c4539` production, `b920b22` tests, `0d32187` docs)
+**before** this decision arrived. Published commits were not rewritten; the
+consumption was removed forward. `agent/skills/evaluate_time_skill/wrapper.py`
+is now **byte-identical** to its pre-C-C5b state (verified by empty diff
+against `0d32187~3`), and `calibration_prelaunch.py` plus its tests are
+deleted — the module existed only to feed the production verdict, so leaving
+it importable would invite the cancelled wiring back.
+
+*Negative guardrails* (`tests/unit/core/test_historical_duration_is_observability_only.py`,
+9 tests). These assert an ABSENCE, which is the hardest property to keep:
+nothing fails when someone adds the input back unless a test watches for it.
+
+| guard | proves |
+|---|---|
+| `_gate_decision` signature | no historical/calibration parameter |
+| `_gate_decision` body | never mentions historical calibration |
+| `run_skill` call graph | no historical lookup reached |
+| wrapper imports | no calibration read-path module |
+| module absence | `calibration_prelaunch` is not importable |
+| registry-invariance | same live measurement → identical verdict regardless of registry contents |
+
+| **positive control** | a 1-minute vs 10000-minute projection still changes the verdict, so the guards cannot pass by the gate ignoring everything |
+| GPU admission imports | no calibration module |
+| GPU admission signature | no duration/historical parameter |
+
+*Correction found by audit, 2026-08-02.* The registry-invariance test
+originally constructed an **empty** registry under an unrelated `tmp_path`.
+That proved nothing twice over: production never resolves to `tmp_path`, and
+an empty registry holds no authority to ignore in the first place — the
+assertion would have held even if the gate did consult history. It now
+populates the registry **production would read** (the default root, pinned to
+a temporary tree by the session isolation fixture) with three observations
+promoted to `validated`, whose stored ~900 ms/step contradicts the live
+projection, and asserts the fixture really did reach `validated` before
+asserting invariance.
+
+**Any future use of history in execution decisions requires a separate PR and
+explicit operator approval.**
+
+---
+
+### C-C5b — Wire the safe read seam to the time-budget consumer  `[C1]`  *(superseded — see cancellation above)*
 
 **1. Goal.** Prove a production time-budget decision actually reaches the safe
 seam. Without this, C1 remains "writes and promotion complete, production
@@ -2577,30 +2638,79 @@ Report shape is an 8.B choice; the honesty rule (zero buckets is never
 reported as active calibration) is frozen by 8.A and applies to both.
 
 **3. Implementation plan.**
-- [ ] Resolve the report shape from the existing report surfaces (8.B).
-- [ ] Inspect the existing report surfaces before choosing where this lands.
-- [ ] Draft the steps.
+- [x] Resolve the report shape from the existing report surfaces (8.B) —
+      landed as `core/runtime_control/calibration_state.py` (186 lines):
+      `CalibrationStateReport` + `collect_calibration_state()`.
+- [x] Inspect the existing report surfaces before choosing where this lands —
+      `BootstrapReport.render()` was the surface already printing
+      `observations : N recorded`, i.e. the exact number that misled for
+      weeks. The state line is appended directly beneath it.
+- [x] Wire it into `BootstrapReport.render()` (reachability test below).
 
-**4. Validation plan.** Counts are correct against a known fixture registry;
-rejection reasons are represented; every admission record carries the seven
-fields of 8.B; the report cannot claim calibration is active when zero
-authoritative buckets exist (8.A).
+**Authority is defined by buckets, never by record count.**
+`buckets_authoritative` returns `buckets_validated` only —
+`provisional` is a real state that is explicitly **not** authoritative, and
+counting it is precisely how a report begins to overstate. `is_active` is
+`readable and buckets_authoritative > 0`, so 20,000 observations with zero
+validated buckets still reports `INACTIVE`, **with the reason attached**.
+
+Counts are deliberately separate rather than one total, so an operator
+asking *why* nothing is authoritative can see where evidence is being lost:
+quarantined (incomplete identity), ineligible (failure provenance), or
+eligible but below `provisional_min_observations=2` / outside
+`consistency_max_min_ratio=1.5`.
+
+**4. Validation plan.** `tests/unit/core/test_calibration_state.py` — 10
+tests. Counts against a known fixture registry; refusal reasons name the
+blocked bucket and its shortfall; unreadable ≠ empty; a provisional-only
+report is not active.
 
 **5. Acceptance criteria.**
-- [ ] Against a **read-only copy** of the current registry the report reads
-      20 observations / 0 promotions / 0 authoritative buckets — it tells the
-      truth about an uncalibrated system.
-- [ ] The report never describes calibration as active while zero
-      authoritative buckets exist.
+- [x] The exact v1 shape — evidence collected, none promoted — reports
+      `INACTIVE` with a reason
+      (`test_observations_without_promotion_are_still_inactive`). Asserted
+      against a fixture reproducing that shape rather than against the live
+      tree, which is preserved evidence and is never opened by tests.
+- [x] The report never describes calibration as active while zero
+      authoritative buckets exist (`test_a_provisional_bucket_is_not_authoritative`).
 - [ ] The seven admission-provenance fields are **C2's** acceptance
       criterion, asserted with C-C6, not here.
 
 **6. Failure and edge cases.** Empty registry; registry unreadable; mixed
 schema versions (per O-1); a bucket promoted then invalidated.
 
-**7. Verification commands and evidence.** To be written with the steps.
+*Correction found by audit, 2026-08-02.* The first wiring built
+`CalibrationRegistry(Path(self.registry_root))` **inside `render()`** and
+passed the object in. `CalibrationRegistry.__init__` `mkdir`s six
+subdirectories, so constructing one against a read-only or vanished parent
+raises — placing the only raising step **outside** the guard
+`collect_calibration_state` advertises, and letting a reporting failure
+propagate into `render()`. That directly contradicts "reporting never raises
+into or changes the scientific workflow".
 
-**8. Commit boundary.** Reporting only.
+Fixed by adding a `root=` parameter so construction happens **inside** the
+guarded region; `render()` now passes the path, never a registry.
+
+*Mutation proof.* Reverting `render()` to construct the registry itself makes
+`test_bootstrap_render_survives_an_unusable_registry_root` fail with
+`PermissionError: [Errno 13] ... /ro/runtime_calibration_v2` propagating out
+of `render()`. Restored; baseline re-run green (19/19 for the two modules).
+The collector-level test still passes under the mutation — correctly, since
+it exercises the collector — which is why the **reachability** test at the
+production caller is the one that catches this.
+
+**7. Verification commands and evidence.**
+
+```bash
+.venv/bin/pytest tests/unit/core/test_calibration_state.py \
+                 tests/unit/core/test_historical_duration_is_observability_only.py -q
+# 19 passed
+.venv/bin/pytest tests/unit/core/ -q     # 1500 passed, 2 skipped
+```
+
+**8. Commit boundary.** Reporting only. Reporting is read-only, never raises,
+and carries no implication that historical data affects execution — see the
+C-C5b cancellation above.
 
 ---
 
