@@ -1664,6 +1664,28 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
+## 16b. C1 checkpoint → commit SHA map
+
+Branch `feature/v20-pr-c1-calibration-identity-promotion`.
+
+| Checkpoint | Commits | What landed |
+|---|---|---|
+| pre-C-C1 groundwork | `f3ab878`, `df10dd7`, `31d1b0c` | measurement identity + applicability envelope; per-major registry tree (O-1); quarantine namespace (O-2) |
+| **C-C1** | `fa0a43e` | populate the two identity fields production dropped |
+| **C-C2** | `3927d06`, `7a0de4d` | typed measurement-capability boundary, resolved at the task boundary |
+| **C-C3** | `09aa6a3`, `e86d6dd`, `cddc307` | derive duration records; persist to the v2 registry; wire to the successful-attempt seam |
+| test isolation | `a28b86f` | session-scoped fixture so no test reaches the operator's real registry |
+| portability fix | `e44d61f` | remove task-specific GPU names from registry schema docs |
+| **C-C4** | `9c8a421`, `55eb2f8` | promotion evaluated for the affected bucket only (O-3) |
+| **C-C5a** | `7574ae6`, `bf73a83`, `ae6a0eb` | applicability required for measured authority |
+| shared identity (D-4) | `8f97251`, `8606b47`, `d901412` | one calibration context across read and write; dimensions derived from evidence; canonical config-identity helper |
+| **C-C5b** (later cancelled) | `95c4539`, `b920b22`, `0d32187` | production read wiring — **superseded, removed forward** |
+| **C-C5b cancellation** | `689fea3`, `4934ab3` | wrapper restored byte-identically; `calibration_prelaunch` deleted; nine negative guards + positive control |
+| **C-C7** | `ce327bf` | calibration-authority state reporting, wired into `BootstrapReport.render()` |
+| **C-C8** | `cd73bb4`, `0cd63bd`, `2f28aef`, `70facb0`, `f77d169`, `b06ef87`, `c3c01c7` | cancellation record, Layer-2 matrix, deviation register, scope correction, gate determinations, registry-safety finding, Layer-3 evidence |
+
+---
+
 ## 16a. C1 deviation register — where the implementation departs from this plan
 
 Maintained continuously. Every row is a place the merged code does **not**
