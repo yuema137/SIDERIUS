@@ -86,21 +86,37 @@ class TestBudgetsAreSeparate:
 
 
 class TestTimeoutIsInconclusive:
-    @pytest.mark.parametrize("operation", ["model_inspection", "batch_candidate", "batch_search"])
-    def test_a_timeout_of_any_operation_is_inconclusive(self, operation):
-        assert timeout_disposition(operation) == "inconclusive"
-        assert _record(operation=operation).disposition == "inconclusive"
+    def test_a_timeout_of_any_operation_is_inconclusive(self):
+        """`timeout_disposition` ignores its argument by design -- the rule
+        is "a step that did not finish measured nothing", whichever step it
+        was. Iterated in one body rather than parametrized, because three
+        operations through an argument-ignoring function are one case, not
+        three."""
+        for operation in ("model_inspection", "batch_candidate", "batch_search"):
+            assert timeout_disposition(operation) == "inconclusive"
 
-    def test_an_inconclusive_result_is_not_capacity_evidence(self):
-        assert _record().is_capacity_evidence is False
+    @pytest.mark.parametrize(
+        ("disposition", "is_evidence", "may_downsize"),
+        [
+            ("measured_capacity_failure", True, True),
+            ("completed", False, False),
+            ("inconclusive", False, False),
+            ("infrastructure_failure", False, False),
+        ],
+    )
+    def test_the_disposition_decides_evidence_and_authority(
+        self, disposition, is_evidence, may_downsize
+    ):
+        """The whole table, both axes, in one place.
 
-    def test_an_inconclusive_result_may_not_recommend_downsizing(self):
-        assert may_recommend_downsizing("inconclusive") is False
-
-    def test_only_a_measured_capacity_failure_may_recommend_downsizing(self):
-        assert may_recommend_downsizing("measured_capacity_failure") is True
-        for other in ("completed", "inconclusive", "infrastructure_failure"):
-            assert may_recommend_downsizing(other) is False
+        Five tests used to assert single cells of it -- inconclusive is not
+        evidence, inconclusive may not downsize, only measured may downsize,
+        measured is evidence, infrastructure is neither. Stated as a table,
+        a mutation that widens either predicate fails on the row it wrongly
+        admits instead of on whichever cell happened to be covered.
+        """
+        assert _record(disposition=disposition).is_capacity_evidence is is_evidence
+        assert may_recommend_downsizing(disposition) is may_downsize
 
     def test_a_candidate_timeout_records_which_candidate(self):
         r = _record(operation="batch_candidate", candidate_batch=64, budget_seconds=120.0)
@@ -213,20 +229,15 @@ class TestFailureClassification:
         assert exc.record["operation"] == "batch_search"
 
 
-class TestMeasuredResultsStillReject:
-    """The repair must not disarm the real gate."""
-
-    def test_a_measured_capacity_failure_is_capacity_evidence(self):
-        assert _record(disposition="measured_capacity_failure").is_capacity_evidence is True
-
-    def test_infrastructure_failure_is_neither_capacity_nor_downsizing(self):
-        r = _record(disposition="infrastructure_failure")
-        assert r.is_capacity_evidence is False
-        assert may_recommend_downsizing(r.disposition) is False
-
-    def test_dispositions_are_mutually_exclusive(self):
-        with pytest.raises(ValidationError):
-            _record(disposition="not_a_disposition")
+# `TestMeasuredResultsStillReject` lived here with three cases. The first two
+# -- measured-is-evidence, infrastructure-is-neither -- are rows of
+# `test_the_disposition_decides_evidence_and_authority` above, which asserts
+# the same two predicates across all four dispositions.
+#
+# The third asserted that `disposition="not_a_disposition"` raises
+# ValidationError. That is a `Literal` refusing an unknown string, which
+# Pydantic enforces by declaration; per CLAUDE.md's test-justification rule
+# it is not something pytest should re-check.
 
 
 class TestFormalAdviceLimits:

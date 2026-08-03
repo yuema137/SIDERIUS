@@ -95,23 +95,9 @@ def test_file_index_zero_padded_to_four_digits():
     assert os.path.basename(path_19).endswith("_0019.h5")
 
 
-def test_absolute_path_is_safe_for_downstream_join():
-    """When downstream code (scoring_utils.process_segment) prepends a
-    data_dir via os.path.join, an absolute right-hand side must discard
-    the base. This is the guarantee that lets Bug A's fix not break the
-    scoring-side code path.
-    """
-    result = os.path.join(
-        "/some/other/data_dir",
-        _build_denoised_filename(
-            model_type="wavenet",
-            run_name="r",
-            exp_id="e",
-            file_index=0,
-            base_dir="/tmp/workspace",
-        ),
-    )
-    assert result.startswith("/tmp/workspace/"), (
-        "os.path.join(base, absolute) must yield the absolute path; "
-        "downstream scoring code depends on this."
-    )
+# NOTE: a `test_absolute_path_is_safe_for_downstream_join` case was removed on
+# 2026-08-02. It asserted that os.path.join(base, <absolute>) discards the
+# base -- a documented property of the standard library, not of
+# `_build_denoised_filename`. Given the test above pinning that the returned
+# path starts with base_dir, no edit to production could fail it without
+# already failing that one.

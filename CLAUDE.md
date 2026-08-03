@@ -158,8 +158,45 @@ validate.
   introduced, define a Pydantic model for it before wiring it into execution.
 - **Avoid deep dependency between modules**: each module should be testable
   individually, pluggable, and decoupled.
-- **Always think what test we can add for each single module**: pytest is a
-  powerful tool. Equip our code with it wherever practical.
+- **Every test must name a defect only it can catch (binding, operator
+  decision 2026-08-02)**: before adding or keeping a test, answer:
+
+  > If this test were deleted, which real defect would no longer be
+  > caught by Pydantic, pyright, ruff, another existing test, or a Gate?
+
+  If there is no answer, the test is decoration. Do not pytest what a
+  declaration already enforces: an optional field defaulting to `None`,
+  a `Literal` rejecting an unknown string, a declared type accepting
+  its own type, a required field being required, or a scalar
+  round-tripping through JSON with no custom serializer.
+
+  **A new test must also state how it fails when the behaviour breaks.**
+  Both defects found on 2026-08-02 — a `... or True` assertion and a
+  guardrail blind to the most common `subprocess` calling form — passed
+  review because nobody asked that question. 383 cases were guarding
+  nothing.
+
+  **Never assert a value read back from the thing under test.**
+  `record.file_index == Model.model_fields["file_index"].default`
+  compares the schema to itself and passes for any default. Hardcode the
+  expectation.
+
+  **Test the concept, not the field.** A rule that spans models needs one
+  test naming the concept and asserting across every model that declares
+  it — the per-field shape cannot express it, which is how ten
+  cross-schema divergences and eleven unpinned production defaults
+  survived a 6,900-test suite.
+
+  **Consolidating a test family requires stating**: which non-equivalent
+  input classes the originals covered, how the replacement preserves each,
+  which assertion fails when each class breaks, and why a static checker
+  or Gate cannot cover it. Ten tests calling one function are not
+  thereby equivalent.
+
+  Preserve without argument: regression tests naming a dated incident,
+  SHA, campaign ID or a production value that failed; reachability tests
+  proving a guard is actually called; and prompt text that IS a safety
+  control.
 - **Be humble and curious**: if you are not sure about something (the detail of
   a desired feature, the format of data), do not guess — ASK the user
   explicitly.

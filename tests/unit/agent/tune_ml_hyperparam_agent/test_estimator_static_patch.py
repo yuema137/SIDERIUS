@@ -45,9 +45,3 @@ def test_static_formula_above_floor_uses_computed():
     computed = 1_000_000 * 2000 * 8 * 3e-9
     assert computed > 2.0
     assert ms == computed
-
-
-def test_static_formula_5x_higher_than_old():
-    """The new coefficient is exactly 5x the old one."""
-    old_coeff = 6e-10
-    assert _STATIC_MS_PER_FLOP / old_coeff == 5.0

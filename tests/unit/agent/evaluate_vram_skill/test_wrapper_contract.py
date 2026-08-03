@@ -231,51 +231,48 @@ _REQUIRED_KEYS = frozenset(
 )
 
 
-def test_return_dict_has_all_required_keys_on_feasible_path():
-    """Every key in the contract must be present in the return dict."""
+# Eight cases used to run this exact call -- `_Patches()` plus
+# `run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())`,
+# `_gpu_ctx` defaulting to the same 32.0 GB -- and read one key each. They are
+# grouped below by CONTRACT rather than by field: what the dict contains, and
+# what the values mean. Every equivalence class the eight covered is kept.
+
+
+def test_feasible_path_returns_the_declared_shape():
+    """What the dict CONTAINS on the success path."""
     with _Patches():
         out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
+
     assert _REQUIRED_KEYS.issubset(out.keys()), f"Missing keys: {_REQUIRED_KEYS - set(out.keys())}"
-
-
-def test_removed_inference_batch_uncalibrated_is_absent():
-    """Phase K's ``inference_batch_uncalibrated`` is obsolete under the
-    probe-driven resolver. Its presence would mean a merge leak."""
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
+    # Phase K's `inference_batch_uncalibrated` is obsolete under the
+    # probe-driven resolver; its reappearance would mean a merge leak.
     assert "inference_batch_uncalibrated" not in out
+    assert out["status"] == "success"
+    assert out["feasible"] is True
+    # The killer slot is populated only when the wrapper REFUSED the config.
+    assert out["memory_killer"] is None
+    # `scoring` is a passthrough slot left for Phase 6.7, so this is `>=`.
+    assert set(out["phase_breakdown"].keys()) >= {"training", "inference"}
 
 
-def test_inference_batch_is_populated_on_feasible_path():
-    """``inference_batch`` must be the int the resolver chose."""
+def test_feasible_path_reports_the_measured_values():
+    """What the values MEAN. Separated from the shape contract because a
+    wrapper that returned the right keys filled with constants would satisfy
+    the test above."""
     with _Patches() as p:
         p.resolved_batch = 16
         out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
+
+    # Forwarded from the resolver, not hardcoded: `_Patches` was told 16.
     assert out["inference_batch"] == 16
     assert isinstance(out["inference_batch"], int)
-
-
-def test_memory_killer_is_none_on_feasible_path():
-    """On success the killer slot is ``None`` — it is only populated when
-    the wrapper refused the config."""
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
-    assert out["feasible"] is True
-    assert out["memory_killer"] is None
-
-
-def test_feasible_status_is_success():
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
-    assert out["status"] == "success"
-
-
-def test_phase_breakdown_has_training_and_inference():
-    """The breakdown is keyed by phase name. Both probed phases must land
-    in the map; ``scoring`` is a passthrough slot left for Phase 6.7."""
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(), **_run_kwargs())
-    assert set(out["phase_breakdown"].keys()) >= {"training", "inference"}
+    # GB units, and the cap is the physical ceiling: 32 GB x 0.80 = 25.6 GB.
+    assert isinstance(out["estimated_gb"], float)
+    assert isinstance(out["limit_gb"], float)
+    assert out["limit_gb"] == pytest.approx(25.6, abs=0.01)
+    # The agent-facing verdict names the cap it was measured against.
+    assert "25.6 GB" in out["verdict"] or "25.60 GB" in out["verdict"]
+    assert "Dominant phase" in out["verdict"]
 
 
 # ── 2. hardware_context=None fallback ───────────────────────────────────────
@@ -516,18 +513,13 @@ def test_vram_budget_gb_cannot_exceed_physical_cap():
 # ── 10. Killer renderers receive the cap = ctx.usable_cap_bytes ────────────
 
 
-def test_feasible_verdict_mentions_cap_and_dominant_phase():
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(32.0), **_run_kwargs())
-    # 32 GB × 0.80 = 25.6 GB cap
-    assert "25.6 GB" in out["verdict"] or "25.60 GB" in out["verdict"]
-    assert "Dominant phase" in out["verdict"]
-
-
-def test_estimated_gb_and_limit_gb_are_floats_in_gb_units():
-    with _Patches():
-        out = wrapper.run_skill(sandbox=None, hardware_context=_gpu_ctx(32.0), **_run_kwargs())
-    assert isinstance(out["estimated_gb"], float)
-    assert isinstance(out["limit_gb"], float)
-    # 32 GB × 0.80 = 25.6 GB
-    assert out["limit_gb"] == pytest.approx(25.6, abs=0.01)
+# `test_feasible_verdict_mentions_cap_and_dominant_phase` and
+# `test_estimated_gb_and_limit_gb_are_floats_in_gb_units` lived here. Both ran
+# `_gpu_ctx(32.0)`, which is `_gpu_ctx()`'s default, so they repeated the
+# feasible-path call a seventh and eighth time. Their assertions moved into
+# `test_feasible_path_reports_the_measured_values` above, beside the other
+# value assertions on the same call.
+#
+# `test_vram_budget_gb_cannot_exceed_physical_cap` above stays separate: it
+# passes `vram_budget_gb=30.0` and is about the VETO direction of `min()`,
+# not about what a plain feasible run returns.

@@ -477,23 +477,15 @@ class TestBatchSearchSurvivesAnUnprobeableCandidate:
                 self._model(fail_above=8), segmentation_size=100, cap_bytes=10**12
             )
 
-    @pytest.mark.parametrize(
-        "exc",
-        [
-            MemoryError("out of memory"),
-            RuntimeError("CUDA out of memory. Tried to allocate 61.00 GiB"),
-            RuntimeError("std::bad_alloc"),
-        ],
-    )
-    def test_every_memory_shaped_error_is_recognised(self, exc):
-        from agent.skills.evaluate_vram_skill.probe_budgets import is_memory_exception
-
-        assert is_memory_exception(exc) is True
-
-    def test_an_unrelated_runtime_error_is_not(self):
-        from agent.skills.evaluate_vram_skill.probe_budgets import is_memory_exception
-
-        assert is_memory_exception(RuntimeError("shape mismatch")) is False
+    # `test_every_memory_shaped_error_is_recognised` (MemoryError, CUDA OOM,
+    # std::bad_alloc) and `test_an_unrelated_runtime_error_is_not` (shape
+    # mismatch) lived here, calling `is_memory_exception` directly.
+    #
+    # `classify_host_memory_exception` opens with
+    # `if not is_memory_exception(exc): return None`, so it returns None
+    # EXACTLY when the predicate is False. All four of those inputs appear in
+    # `TestOneClassifierEverywhere`'s nine-row table, which therefore pins the
+    # predicate's answer for each of them and the classification on top.
 
 
 def _raising_probe(fail_above: int):
@@ -668,19 +660,20 @@ class TestOneClassifierEverywhere:
             "agent/skills/evaluate_vram_skill/preflight_worker_main.py",
         ],
     )
-    def test_every_path_uses_the_shared_helper(self, path):
-        source = (REPO_ROOT / path).read_text()
-        assert "probe_budgets import" in source
-        assert ("is_memory_exception" in source) or ("classify_host_memory_exception" in source)
+    def test_every_path_uses_the_shared_helper_and_defines_no_other(self, path):
+        """Both halves of "one classifier", per file. They were two tests
+        iterating the same three paths; a file that imports the helper AND
+        keeps a private one is the state neither caught alone.
 
-    def test_no_path_defines_its_own_memory_check(self):
-        for path in (
-            "agent/skills/evaluate_vram_skill/batch_resolver.py",
-            "agent/skills/evaluate_vram_skill/wrapper.py",
-            "agent/skills/evaluate_vram_skill/preflight_worker_main.py",
-        ):
-            source = (REPO_ROOT / path).read_text()
-            assert "def _is_memory_error" not in source, path
+        Comment lines are stripped first: a comment explaining why a private
+        check was removed would otherwise re-fail this.
+        """
+        source = (REPO_ROOT / path).read_text()
+        code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
+
+        assert "probe_budgets import" in code, path
+        assert ("is_memory_exception" in code) or ("classify_host_memory_exception" in code), path
+        assert "def _is_memory_error" not in code, path
 
 
 class TestInconclusiveIsNotTimeout:

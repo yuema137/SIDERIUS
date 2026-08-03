@@ -42,12 +42,6 @@ class TestMandatoryHeaderPresence:
     See §3.4.5.6 for the header-form decision (Markdown ``##`` prefix,
     no trailing colon)."""
 
-    def test_mandatory_header_present(self):
-        assert (
-            "## MANDATORY — Integrated reasoning (science + engineering)"
-            in PROPOSAL_REASONING_PROMPT
-        )
-
     def test_mandatory_header_precedes_what_you_produce(self):
         """Placement invariant: the clause must sit BEFORE
         ``## What you produce`` so the cognitive contract on
@@ -71,46 +65,12 @@ class TestMandatoryHeaderPresence:
         assert receive_idx < header_idx
 
 
-class TestTwoConstraintSystemsFraming:
-    """The v3 opener must frame two *simultaneous* constraint systems —
-    scientific goals (from the DiscoveryMemo) and physical constraints
-    (from ``[PHYSICAL REJECTION]`` + ``[HARDWARE CONTEXT]``). This is the
-    core cognitive shift over v1 ('acknowledge and pivot') toward v3
-    ('solve both jobs at once').
-
-    See §3.4.5.4 for the canonical v3 text."""
-
-    def test_scientist_and_engineer_framing(self):
-        assert "You are both a scientist and an engineer" in PROPOSAL_REASONING_PROMPT
-
-    def test_two_constraint_systems_must_be_satisfied_simultaneously(self):
-        assert "two constraint systems" in PROPOSAL_REASONING_PROMPT
-        assert "simultaneously" in PROPOSAL_REASONING_PROMPT
-        assert "not\nsequentially" in PROPOSAL_REASONING_PROMPT
-
-    def test_names_scientific_goals_source(self):
-        assert "scientific goals" in PROPOSAL_REASONING_PROMPT
-        # The scientific-goals source is the DiscoveryMemo; the staged
-        # stage-2 template introduces the DiscoveryMemo in its opening
-        # paragraph.
-        assert "DiscoveryMemo" in PROPOSAL_REASONING_PROMPT
-
-    def test_names_physical_constraints_sources(self):
-        assert "physical constraints" in PROPOSAL_REASONING_PROMPT
-        assert "[PHYSICAL REJECTION]" in PROPOSAL_REASONING_PROMPT
-        assert "[HARDWARE CONTEXT]" in PROPOSAL_REASONING_PROMPT
-        assert "Effective cap" in PROPOSAL_REASONING_PROMPT
-
-
 class TestDesignConstraintTreatment:
     """The load-bearing distinction v3 makes: the previous failure is a
     *design constraint to be solved alongside the scientific bottlenecks*,
     not a historical footnote. This phrase directly addresses the Phase A
     failure mode (LLM pivoted to a different arch class but did not treat
     the rejection as an input to its design)."""
-
-    def test_treat_failure_as_design_constraint(self):
-        assert "design constraint to be solved alongside" in PROPOSAL_REASONING_PROMPT
 
     def test_not_a_historical_footnote(self):
         # The .md wraps "historical" → newline → "footnote" — allow \s+.
@@ -127,13 +87,6 @@ class TestCausalHypothesisIntegrationContract:
         assert "single integrated paragraph" in PROPOSAL_REASONING_PROMPT
         assert "causal_hypothesis" in PROPOSAL_REASONING_PROMPT
 
-    def test_citation_scientific_bottleneck(self):
-        assert "scientific bottleneck" in PROPOSAL_REASONING_PROMPT
-        # The canonical clause scopes the scientific bottleneck to the
-        # Stage 1 comparisons (see §3.4.5.4). Uses "from the Stage 1"
-        # rather than the legacy "from the memo".
-        assert "from the Stage 1" in PROPOSAL_REASONING_PROMPT
-
     def test_citation_physical_failure_three_requirements(self):
         """Preserved from v1: model_type, dominant OOM layer, overshoot."""
         # Note the backticks around model_type — the .md uses Markdown
@@ -142,27 +95,6 @@ class TestCausalHypothesisIntegrationContract:
         assert "dominant layer that caused the OOM" in PROPOSAL_REASONING_PROMPT
         assert "overshoot evidence" in PROPOSAL_REASONING_PROMPT
         assert "Effective cap vs Predicted peak" in PROPOSAL_REASONING_PROMPT
-
-    def test_citation_integrated_synthesis(self):
-        """The third citation — this is v3's novelty — the architecture
-        must do both jobs: achieve scientific improvement AND stay under
-        the effective cap that defeated the previous proposal."""
-        # Tokens may span a line break in the rendered prompt.
-        assert re.search(r"scientific\s+improvement", PROPOSAL_REASONING_PROMPT) is not None
-        assert "remaining strictly within" in PROPOSAL_REASONING_PROMPT
-        assert "defeated the previous proposal" in PROPOSAL_REASONING_PROMPT
-
-    def test_three_citation_bullets_appear_in_order(self):
-        """The three bullet-prefixed requirements must appear in the order:
-        scientific bottleneck → physical failure → integrated synthesis."""
-        pattern = re.compile(
-            r"  - names the scientific bottleneck.*?"
-            r"  - names the physical failure.*?"
-            r"  - explains how your new architecture achieves the desired\s+"
-            r"scientific\s+improvement",
-            re.DOTALL,
-        )
-        assert pattern.search(PROPOSAL_REASONING_PROMPT) is not None
 
 
 class TestClosingConstraintText:
@@ -194,20 +126,6 @@ class TestClosingConstraintText:
             is not None
         )
         assert "incomplete" in PROPOSAL_REASONING_PROMPT
-
-    def test_closing_cite_as_design_constraint(self):
-        """v3 closes with an explicit instruction to cite the previous
-        failure as a design constraint to be solved alongside the
-        scientific bottlenecks. This sentence is the terminal marker for
-        the MANDATORY clause and anchors
-        ``test_clause_structure_intact`` below."""
-        assert (
-            re.search(
-                r"Cite the previous failure\s+as a design constraint to be solved alongside",
-                PROPOSAL_REASONING_PROMPT,
-            )
-            is not None
-        )
 
 
 class TestClausePositionInvariant:

@@ -132,3 +132,37 @@ class TestTheProducerContractTheConsumerRelieson:
         prompt = _render({"punet": out})
         assert long_finding not in prompt
         assert out["one_line_takeaway"] in prompt
+
+
+class TestTheV12BudgetAppliesToWhatIsActuallySent:
+    """The 200-char budget, measured against production's real line.
+
+    `test_stability_filter.py` used to assert this against a test-local
+    format string -- `"- {mt} (best=..., n=...): {takeaway}"` -- while
+    production emits `"- **{mt}** (best=..., n_rounds=...): {takeaway}"`,
+    ten characters longer. Its docstring claimed to mirror the prompt and
+    did not, so the V12 clamp was being verified against a fiction.
+
+    Measuring the rendered prompt instead means the budget cannot drift
+    from the renderer again.
+    """
+
+    @staticmethod
+    def _rendered_line(prompt: str, model_type: str) -> str:
+        for line in prompt.splitlines():
+            if line.startswith(f"- **{model_type}**"):
+                return line
+        raise AssertionError(f"no compressed line for {model_type!r} in the prompt")
+
+    def test_an_over_long_finding_still_fits_the_budget(self):
+        out = compress_model_summary("punet", _entry({"key_findings": ["x" * 400]}), 150)
+        line = self._rendered_line(_render({"punet": out}), "punet")
+        assert len(line) <= 200, f"{len(line)} chars: {line}"
+
+    def test_the_budget_covers_the_markup_production_actually_emits(self):
+        """The exact gap the old test missed: the `**` and the longer
+        `n_rounds=` label are part of what is sent."""
+        out = compress_model_summary("punet", _entry({"key_findings": ["x" * 400]}), 150)
+        line = self._rendered_line(_render({"punet": out}), "punet")
+        assert "**punet**" in line
+        assert "n_rounds=" in line

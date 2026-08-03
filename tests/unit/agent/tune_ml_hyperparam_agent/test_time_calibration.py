@@ -45,11 +45,6 @@ def test_gpu_slug_lowercase_and_safe():
     assert cal.gpu_slug("") == "unknown_gpu"
 
 
-def test_gpu_slug_is_deterministic():
-    name = "NVIDIA A100-SXM4-80GB"
-    assert cal.gpu_slug(name) == cal.gpu_slug(name)
-
-
 def test_calibration_path_uses_slugged_filename(monkeypatch, tmp_path):
     monkeypatch.setenv(cal._ENV_VAR, str(tmp_path))
     p = cal.calibration_path("NVIDIA RTX 5090")

@@ -43,26 +43,38 @@ class TestEvaluatePrediction:
 
     # --- Core outcome labels ---
 
+    # Each outcome branch is stated once, as a whole contract: the label, the
+    # sign of the delta, and the information_gain that follows from it.
+    # Six cases used to split these across two sections -- an outcome test
+    # and an information_gain test per branch -- running byte-identical
+    # calls. `test_boldness_uses_sota_baseline` was a third copy of the
+    # confirmed call.
+
     def test_confirmed_beats_sota(self):
-        """actual > sota → confirmed, delta_from_sota > 0."""
+        """actual > sota: confirmed, positive delta, gain == delta."""
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
         assert result["outcome"] == "confirmed"
         assert result["actual_value"] == 5.5
         assert result["delta_from_sota"] > 0
+        assert abs(result["information_gain"] - result["delta_from_sota"]) < 1e-6
+        # boldness = |predicted - sota| / |sota| = |6.0 - 5.0| / 5.0
+        assert abs(result["boldness"] - 0.2) < 1e-4
 
     def test_partial_within_margin(self):
-        """actual slightly below sota but within 5% → partial, delta_from_sota < 0."""
+        """actual slightly below sota but within 5%: partial, no gain."""
         # sota=5.0, margin=0.05 → partial if actual >= 4.75
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
         assert result["outcome"] == "partial"
         assert result["delta_from_sota"] < 0
+        assert result["information_gain"] == 0.0
 
     def test_refuted_clearly_below_sota(self):
-        """actual clearly below sota (> 5% gap) → refuted."""
+        """actual clearly below sota (> 5% gap): refuted, no gain."""
         # sota=5.0, 5% threshold=4.75 → refuted if actual < 4.75
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.0})
         assert result["outcome"] == "refuted"
         assert result["delta_from_sota"] < 0
+        assert result["information_gain"] == 0.0
 
     def test_exactly_at_sota_is_partial(self):
         """actual == sota (not strictly greater) → partial (not confirmed)."""
@@ -130,13 +142,10 @@ class TestEvaluatePrediction:
 
     # --- Boldness and information_gain ---
 
-    def test_boldness_uses_sota_baseline(self):
-        """boldness = |predicted - sota| / |sota|."""
-        # predicted=6.0, sota=5.0 → boldness = 1.0/5.0 = 0.2
-        result = evaluate_prediction(
-            self._pred(current_value=5.0, predicted_value=6.0), {"best_denoising_score": 5.5}
-        )
-        assert abs(result["boldness"] - 0.2) < 1e-4
+    # `test_boldness_uses_sota_baseline` was a third copy of the confirmed
+    # call (`_pred`'s predicted_value already defaults to 6.0); its
+    # assertion now sits there. The zero case below stays: it is the other
+    # leg of the ternary, and reaches it with a DIFFERENT input.
 
     def test_boldness_zero_when_no_predicted_value(self):
         """No predicted_value in prediction → boldness=0."""
@@ -146,23 +155,9 @@ class TestEvaluatePrediction:
         )
         assert result["boldness"] == 0.0
 
-    def test_information_gain_confirmed_equals_delta(self):
-        """Confirmed outcome: information_gain = delta_from_sota."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
-        assert result["outcome"] == "confirmed"
-        assert abs(result["information_gain"] - result["delta_from_sota"]) < 1e-6
-
-    def test_information_gain_zero_when_refuted(self):
-        """Refuted outcome: information_gain = 0."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 3.0})
-        assert result["outcome"] == "refuted"
-        assert result["information_gain"] == 0.0
-
-    def test_information_gain_zero_when_partial(self):
-        """Partial outcome: information_gain = 0."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
-        assert result["outcome"] == "partial"
-        assert result["information_gain"] == 0.0
+    # The three `test_information_gain_*` cases lived here, each repeating
+    # the call of its outcome test above to assert one more field of the
+    # same result. Folded into those contracts.
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +218,14 @@ class TestGenerateDiscoveries:
         assert any("PARTIAL" in d.description for d in discoveries)
         assert any("N/A" in d.description for d in discoveries)
 
-    def test_no_prediction(self):
+    def test_no_prediction_and_no_sota_yields_nothing(self):
+        """With nothing to compare against, there is no finding to report.
+
+        This asserted `all(d.kind == "discovery" for d in discoveries)` over
+        a list that is EMPTY in this configuration -- Discovery 1 needs a
+        prediction and Discovery 2 needs a SOTA, so both are skipped. `all()`
+        over an empty list is True, so no production edit could fail it.
+        """
         discoveries = generate_discoveries(
             prediction_eval=None,
             model_type="test_model",
@@ -231,8 +233,7 @@ class TestGenerateDiscoveries:
             inherited_components=[],
             proposed_vocab_links=[],
         )
-        # No prediction = no prediction discovery, but might still have score comparison
-        assert all(d.kind == "discovery" for d in discoveries)
+        assert discoveries == []
 
     def test_score_vs_sota(self):
         eval_result = {
@@ -323,21 +324,11 @@ class TestGenerateDiscoveries:
 
 
 class TestBuildRuntimeVocab:
-    def test_seed_only(self):
-        seed = [
-            VocabEntry(name="dilated_causal_conv", kind="feature", description="test"),
-            VocabEntry(name="receptive_field", kind="capability", description="test"),
-        ]
-        result = build_runtime_vocab(seed, [], [])
-        assert len(result) == 2
-
-    def test_adds_discoveries(self):
-        seed = [VocabEntry(name="feature_a", kind="feature", description="test")]
-        discovery = VocabEntry(name="discovery_1", kind="discovery", description="Found X")
-        result = build_runtime_vocab(seed, [discovery], [])
-        assert len(result) == 2
-        names = {v.name for v in result}
-        assert "discovery_1" in names
+    # `test_seed_only`, `test_adds_discoveries` and `test_adds_candidates`
+    # lived here. `test_vocab_grows_across_iterations` below performs exactly
+    # those three steps in sequence -- seed only, then add a discovery, then
+    # add a discovery and a candidate -- and additionally asserts the
+    # resulting kind set. It is a strict superset of all three.
 
     def test_deduplicates_by_name(self):
         seed = [VocabEntry(name="feature_a", kind="feature", description="original")]
@@ -347,14 +338,12 @@ class TestBuildRuntimeVocab:
         # Discovery overwrites seed entry with same name
         assert result[0].description == "updated"
 
-    def test_adds_candidates(self):
-        seed = [VocabEntry(name="feature_a", kind="feature", description="test")]
-        candidates = [{"name": "new_feature", "kind": "feature", "description": "discovered"}]
-        result = build_runtime_vocab(seed, [], candidates)
-        assert len(result) == 2
-
     def test_vocab_grows_across_iterations(self):
-        """Simulate 3 iterations of vocab growth."""
+        """Simulate 3 iterations of vocab growth.
+
+        Also the seed-only, add-a-discovery and add-a-candidate cases: each
+        is one step of this sequence, asserted as it happens.
+        """
         # Iteration 1: seed only
         vocab = build_runtime_vocab(
             [VocabEntry(name="f1", kind="feature", description="feature 1")],
@@ -380,6 +369,10 @@ class TestBuildRuntimeVocab:
         assert len(vocab) == 4
         kinds = {v.kind for v in vocab}
         assert kinds == {"feature", "discovery"}
+        # The candidate arrived as a plain dict and must be a real entry by
+        # name, not merely counted -- the absorbed `test_adds_candidates`
+        # and `test_adds_discoveries` each checked membership.
+        assert {v.name for v in vocab} == {"f1", "d1", "d2", "f2"}
 
 
 # ---------------------------------------------------------------------------
@@ -676,11 +669,13 @@ def _make_candidate(name, kind="feature", seen_in_runs=None, tier="candidate"):
 
 
 class TestPromoteCandidates:
-    def test_feature_with_enough_runs_promoted(self):
-        entry = _make_candidate("log_fno", kind="feature", seen_in_runs=["r1", "r2", "r3"])
-        vocab, promoted = promote_candidates([entry])
-        assert promoted == ["log_fno"]
-        assert vocab[0].tier == "canonical"
+    # Four cases lived here as separate tests -- a feature with enough runs,
+    # a candidate with too few, a discovery that must never promote, and an
+    # already-canonical entry. `test_mixed_vocab_only_eligible_promoted`
+    # below is those four as rows of one vocab, asserting the resulting tier
+    # of each by name, plus the promoted list. The capability case stays: no
+    # entry in that mixed vocab has kind="capability", so it is the only
+    # thing pinning the second member of the eligible-kind set.
 
     def test_capability_with_enough_runs_promoted(self):
         entry = _make_candidate(
@@ -688,27 +683,6 @@ class TestPromoteCandidates:
         )
         vocab, promoted = promote_candidates([entry])
         assert promoted == ["freq_selectivity"]
-        assert vocab[0].tier == "canonical"
-
-    def test_insufficient_runs_stays_candidate(self):
-        # Post-v15 default lowered to min_runs=2; one run is below the floor.
-        entry = _make_candidate("log_fno", seen_in_runs=["r1"])
-        vocab, promoted = promote_candidates([entry])
-        assert promoted == []
-        assert vocab[0].tier == "candidate"
-
-    def test_discovery_never_promoted_regardless_of_runs(self):
-        entry = _make_candidate(
-            "disc_finding", kind="discovery", seen_in_runs=["r1", "r2", "r3", "r4", "r5"]
-        )
-        vocab, promoted = promote_candidates([entry])
-        assert promoted == []
-        assert vocab[0].tier == "candidate"
-
-    def test_already_canonical_untouched(self):
-        entry = _make_candidate("dilated_causal_conv", tier="canonical", seen_in_runs=[])
-        vocab, promoted = promote_candidates([entry])
-        assert promoted == []
         assert vocab[0].tier == "canonical"
 
     def test_returns_correct_promoted_names(self):
@@ -723,11 +697,24 @@ class TestPromoteCandidates:
         _, promoted = promote_candidates(entries)
         assert set(promoted) == {"b", "c"}
 
-    def test_custom_min_runs(self):
-        entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2"])
-        vocab, promoted = promote_candidates([entry], min_runs=2)
-        assert promoted == ["log_fno"]
-        assert vocab[0].tier == "canonical"
+    def test_custom_min_runs_actually_moves_the_threshold(self):
+        """The parameter, exercised.
+
+        This case used to pass `min_runs=2`, which IS the signature's
+        default (post-v15, lowered from 3). It therefore tested the default
+        path under a name that claimed otherwise: hardcoding the literal 2
+        inside the comparison and ignoring the argument left it green.
+
+        Three runs promote by default and must NOT promote at min_runs=4.
+        """
+        entry = _make_candidate("log_fno", seen_in_runs=["r1", "r2", "r3"])
+
+        _, promoted_by_default = promote_candidates([entry])
+        assert promoted_by_default == ["log_fno"]
+
+        vocab, promoted = promote_candidates([entry], min_runs=4)
+        assert promoted == []
+        assert vocab[0].tier == "candidate"
 
     def test_empty_vocab(self):
         vocab, promoted = promote_candidates([])
@@ -739,10 +726,18 @@ class TestPromoteCandidates:
             _make_candidate("feat_a", kind="feature", seen_in_runs=["r1", "r2", "r3"]),
             _make_candidate("feat_b", kind="feature", seen_in_runs=["r1"]),
             _make_candidate("disc_x", kind="discovery", seen_in_runs=["r1", "r2", "r3"]),
-            _make_candidate("canon_y", tier="canonical"),
+            # Enough runs to promote if the tier guard were dropped. With the
+            # empty seen_in_runs this fixture used to carry, the run-count
+            # test rejected it first and the tier guard was never reached --
+            # widening `tier == "candidate"` to include canonical changed
+            # nothing, here or in the standalone test this absorbed.
+            _make_candidate("canon_y", tier="canonical", seen_in_runs=["r1", "r2", "r3"]),
         ]
         vocab, promoted = promote_candidates(entries)
-        assert promoted == ["feat_a"]
+        assert promoted == ["feat_a"], (
+            "an already-canonical entry must not be re-promoted: it would be "
+            "announced as newly promoted on every iteration"
+        )
         by_name = {e.name: e for e in vocab}
         assert by_name["feat_a"].tier == "canonical"
         assert by_name["feat_b"].tier == "candidate"
@@ -756,19 +751,17 @@ class TestPromoteCandidates:
 
 
 class TestSeenInRunsTracking:
-    def test_new_candidate_gets_proposed_by_run(self):
-        candidate = {
-            "name": "gated_fno",
-            "kind": "feature",
-            "description": "test",
-            "proposed_by_run": "wavenet_v2",
-        }
-        result = build_runtime_vocab([], [], [candidate])
-        entry = next(e for e in result if e.name == "gated_fno")
-        assert entry.seen_in_runs == ["wavenet_v2"]
+    # `test_new_candidate_gets_proposed_by_run` lived here. The test below
+    # opens with that exact case -- a first-appearance candidate whose
+    # seen_in_runs must be its proposing run -- and asserts it before going
+    # on to the second iteration.
 
     def test_existing_candidate_seen_in_runs_extended(self):
-        """Second iteration adds a new run to an existing candidate."""
+        """Second iteration adds a new run to an existing candidate.
+
+        Starts from first appearance, so the initial-population case is
+        asserted here too.
+        """
         # Iteration 1: candidate first appears
         vocab = build_runtime_vocab(
             [],
@@ -866,22 +859,12 @@ class TestComputeVocabDiversityRatio:
         ]
         assert compute_vocab_diversity_ratio(vocab) == 1.0
 
-    def test_half_candidates(self):
-        vocab = [
-            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
-            VocabEntry(name="b", kind="feature", description="y", tier="candidate"),
-        ]
-        assert abs(compute_vocab_diversity_ratio(vocab) - 0.5) < 1e-9
-
-    def test_discoveries_excluded_from_ratio(self):
-        """Discoveries are never counted — only feature/capability entries matter."""
-        vocab = [
-            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
-            VocabEntry(name="d1", kind="discovery", description="found X", tier="candidate"),
-            VocabEntry(name="d2", kind="discovery", description="found Y", tier="candidate"),
-        ]
-        # 1 feature/capability total, 0 candidates → 0.0
-        assert compute_vocab_diversity_ratio(vocab) == 0.0
+    # `test_half_candidates` (1 canonical + 1 candidate) and
+    # `test_discoveries_excluded_from_ratio` (1 feature + 2 discoveries)
+    # lived here. `test_mixed_vocab` below is both at once: its 1/3 is only
+    # reachable if canonical entries are in the denominator and discoveries
+    # are in NEITHER -- counting the three discoveries would give 4/6, and
+    # dropping canonical from the denominator would give 1/1.
 
     def test_mixed_vocab(self):
         """2 canonical features, 1 candidate feature, 3 discoveries → ratio = 1/3."""

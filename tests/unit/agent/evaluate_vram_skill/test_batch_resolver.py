@@ -292,10 +292,3 @@ def test_default_candidate_batches_matches_spec():
 
 
 # ── Principle 2 module-source spot-check ──────────────────────────────────
-
-
-def test_module_source_has_no_architecture_literals():
-    source = Path(batch_resolver.__file__).read_text().lower()
-    for banned in ["wavenet", "punet", "fcnet", "transformer", "rnn"]:
-        assert f'"{banned}"' not in source, f"architecture literal {banned!r} found"
-        assert f"'{banned}'" not in source, f"architecture literal {banned!r} found"

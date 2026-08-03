@@ -60,6 +60,23 @@ class TestEveryOutcomeReachesAnAction:
             "training"
         )
 
+    def test_no_consumer_action_is_orphaned(self):
+        """The other direction, which was not asserted.
+
+        An action keyed on a status the adapter can no longer emit is dead
+        policy that reads as coverage: the table still looks exhaustive, so
+        the rename that orphaned it goes unnoticed -- and the status that
+        REPLACED it has no action at all. Checking only
+        `emitted - handled` cannot see that, because the orphan keeps the
+        difference empty.
+        """
+        emitted = {status for status, _ in OUTCOME_TO_LEGACY.values()}
+        orphaned = sorted(set(PREFLIGHT_CONSUMER_ACTIONS) - emitted)
+        assert orphaned == [], (
+            f"the consumer has actions for {orphaned}, which pre-flight "
+            "cannot emit; the adapter was renamed out from under this table"
+        )
+
     def test_an_unknown_status_refuses_rather_than_proceeding(self):
         """The failure mode, generalised: an unrecognised status must never
         be read as permission."""

@@ -156,37 +156,120 @@ def make_input(summary, workspace="/tmp/interp_test", run_name="r1"):
 
 
 # ---------------------------------------------------------------------------
+# Shared runs — one agent.run() per contract, not one per field
+# ---------------------------------------------------------------------------
+#
+# 21 tests used to run the SAME agent.run() with the SAME input and assert
+# one field each. That granularity was illusory: they passed and failed
+# together, because a break anywhere in the reduction broke all of them.
+#
+# Grouped by SEMANTICS, deliberately not as one model_dump() snapshot: a
+# snapshot makes a failure unreadable and churns whenever an unrelated
+# field is added. Each group below names one public contract, so a failure
+# message points at one behaviour.
+#
+# Tests whose field comes from an INDEPENDENT path or risk are NOT here --
+# cache dispatch, persistence, the Phase-1-vs-synthesis decision, the
+# legacy-summary branch, vocab carry-forward and chain accounting all keep
+# their own runs.
+
+
+def _run_once(workspace, summaries):
+    with patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge:
+        MockBridge.return_value.generate.side_effect = _llm_dispatch
+        a = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+        a.bridge = MockBridge.return_value
+        return a.run(
+            InterpretationInput(
+                summaries=summaries,
+                storage={
+                    "backend": "local",
+                    "local": {"workspace": str(workspace), "run_name": "r1"},
+                },
+            )
+        )
+
+
+@pytest.fixture(scope="module")
+def single_model_output(tmp_path_factory):
+    return _run_once(tmp_path_factory.mktemp("single"), [PUNET_SUMMARY])
+
+
+@pytest.fixture(scope="module")
+def multi_model_output(tmp_path_factory):
+    """FCNET first, deliberately.
+
+    With the higher-scoring PUNET first, replacing the global-max
+    reduction with "take the first model" produced an identical result
+    and no test failed. Ordering the weaker summary first makes that
+    mutation detectable. The pre-consolidation tests used the same
+    ordering and had the same blind spot.
+    """
+    return _run_once(tmp_path_factory.mktemp("multi"), [FCNET_SUMMARY, PUNET_SUMMARY])
+
+
+class TestSingleModelContract:
+    """One completed summary -> a schema-valid digest whose aggregates are
+    computed from that summary and whose knowledge artifacts are
+    populated for the model."""
+
+    def test_score_aggregation(self, single_model_output):
+        """Broken max/min reduction, broken per-model keying, a dropped
+        round-count sum, or a dropped echo of the winning config each
+        fail a different line here."""
+        out = single_model_output
+        assert out.best_denoising_score == 1.8
+        assert out.worst_denoising_score == 1.2
+        assert out.per_model_best["punet"] == 1.8
+        assert out.per_model_worst["punet"] == 1.2
+        assert out.total_experiments == 3
+        assert out.best_config["model_config"]["depth"] == 4
+
+    def test_knowledge_artifacts(self, single_model_output):
+        """Schema drift, a broken model-description registry lookup, and
+        a Phase-1 result not stored under the model key are three
+        different failures."""
+        out = single_model_output
+        assert isinstance(out, InterpretationOutput)
+        assert "punet" in out.model_types
+        assert len(out.model_descriptions["punet"]) > 100
+        assert (
+            out.model_knowledge_cache["punet"]["key_findings"]
+            == FAKE_PER_MODEL_RESPONSE["key_findings"]
+        )
+
+
+class TestMultiModelContract:
+    """Two summaries -> aggregates are cross-model reductions while
+    per-model artifacts stay independent and complete."""
+
+    def test_cross_model_aggregation(self, multi_model_output):
+        """A reduction that takes the first model instead of the global
+        extreme fails the overall assertions; one that collapses the
+        per-model maps fails the per-model ones."""
+        out = multi_model_output
+        assert out.best_denoising_score == 1.8
+        assert out.worst_denoising_score == 0.5
+        assert out.per_model_best["punet"] == 1.8
+        assert out.per_model_best["fcnet"] == 0.9
+        assert out.total_experiments == 5
+
+    def test_every_model_reaches_every_map(self, multi_model_output):
+        """A loop that stops after the first model fails here, and the
+        assertion names which map lost it."""
+        out = multi_model_output
+        for model in ("punet", "fcnet"):
+            assert model in out.model_types
+            assert model in out.model_knowledge_cache
+            assert model in out.model_descriptions
+
+
+# ---------------------------------------------------------------------------
 # Single-model tests
 # ---------------------------------------------------------------------------
 
 
 class TestSingleModel:
-    def test_best_score_extracted(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.best_denoising_score == 1.8
-
-    def test_worst_score_extracted(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.worst_denoising_score == 1.2
-
-    def test_best_config_from_summary(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.best_config["model_config"]["depth"] == 4
-
-    def test_total_experiments(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.total_experiments == 3
-
-    def test_per_model_scores(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert output.per_model_best["punet"] == 1.8
-        assert output.per_model_worst["punet"] == 1.2
-
     def test_phase1_findings_used(self, agent, tmp_path):
         """Single-model: phase 1 findings used directly, synthesis skipped."""
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
@@ -198,15 +281,6 @@ class TestSingleModel:
             or "plateau" in output.take_home_message.lower()
         )
 
-    def test_per_model_summaries_populated(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert "punet" in output.model_knowledge_cache
-        assert (
-            output.model_knowledge_cache["punet"]["key_findings"]
-            == FAKE_PER_MODEL_RESPONSE["key_findings"]
-        )
-
     def test_output_written_to_file(self, agent, tmp_path):
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path), run_name="myrun")
         agent.run(inp)
@@ -216,18 +290,6 @@ class TestSingleModel:
         assert "punet" in data["model_types"]
         assert data["best_denoising_score"] == 1.8
 
-    def test_output_is_valid(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert isinstance(output, InterpretationOutput)
-        assert "punet" in output.model_types
-
-    def test_model_description_loaded(self, agent, tmp_path):
-        inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
-        output = agent.run(inp)
-        assert "punet" in output.model_descriptions
-        assert len(output.model_descriptions["punet"]) > 100
-
 
 # ---------------------------------------------------------------------------
 # Multi-model tests
@@ -235,41 +297,6 @@ class TestSingleModel:
 
 
 class TestMultiModel:
-    def test_two_models_both_in_output(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert "punet" in output.model_types
-        assert "fcnet" in output.model_types
-
-    def test_overall_best_is_cross_model_max(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.best_denoising_score == 1.8
-        assert output.worst_denoising_score == 0.5
-
-    def test_per_model_scores_independent(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.per_model_best["punet"] == 1.8
-        assert output.per_model_best["fcnet"] == 0.9
-
-    def test_total_experiments_across_models(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.total_experiments == 5  # 3 + 2
-
     def test_synthesis_used_for_multi_model(self, agent, tmp_path):
         inp = InterpretationInput(
             summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
@@ -278,24 +305,6 @@ class TestMultiModel:
         output = agent.run(inp)
         assert output.key_findings == FAKE_SYNTHESIS_RESPONSE["key_findings"]
         assert output.take_home_message == FAKE_SYNTHESIS_RESPONSE["take_home_message"]
-
-    def test_per_model_summaries_for_all(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert "punet" in output.model_knowledge_cache
-        assert "fcnet" in output.model_knowledge_cache
-
-    def test_descriptions_loaded_for_all(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert "punet" in output.model_descriptions
-        assert "fcnet" in output.model_descriptions
 
 
 # ---------------------------------------------------------------------------
@@ -780,35 +789,21 @@ class TestFormalScore:
 
 
 class TestOutputEnrichedFields:
-    def test_per_model_score_tables_populated(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[ENRICHED_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.per_model_score_tables is not None
-        assert "punet" in output.per_model_score_tables
-        table = output.per_model_score_tables["punet"]
+    def test_enriched_fields_are_projected_without_loss(self, agent, tmp_path):
+        """Three projections of one enriched summary, one run.
+
+        A dropped/flattened score table fails the isinstance or the row
+        count; params or segments not forwarded each fail their own
+        equality. The None branch below is a DIFFERENT input and keeps
+        its own run.
+        """
+        inp = make_input(ENRICHED_SUMMARY, workspace=str(tmp_path))
+        out = agent.run(inp)
+        table = out.per_model_score_tables["punet"]
         assert isinstance(table, ScoreComparisonTable)
         assert len(table.rows) == 20
-
-    def test_per_model_params_populated(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[ENRICHED_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.per_model_params is not None
-        assert output.per_model_params["punet"] == 55000
-
-    def test_per_model_training_segments_populated(self, agent, tmp_path):
-        inp = InterpretationInput(
-            summaries=[ENRICHED_SUMMARY],
-            storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
-        )
-        output = agent.run(inp)
-        assert output.per_model_training_segments is not None
-        assert output.per_model_training_segments["punet"] == 200
+        assert out.per_model_params["punet"] == 55000
+        assert out.per_model_training_segments["punet"] == 200
 
     def test_none_fields_produce_none_output(self, agent, tmp_path):
         """Old-style summary (no score_table etc) produces None for enriched fields."""
@@ -1143,19 +1138,24 @@ class TestDegradedInterpreterPath:
             a.bridge = MockBridge.return_value
             return a
 
-    def test_returns_output_instead_of_raising(self, tmp_path):
-        """Agent must NOT propagate the LLM exception — it must catch and
-        return a degraded InterpretationOutput so the chain keeps going."""
-        agent = self._make_failing_agent()
-        inp = self._make_input(tmp_path)
-        output = agent.run(inp)
-        assert isinstance(output, InterpretationOutput)
+    def test_degraded_digest_shape(self, tmp_path):
+        """The digest is returned, flagged, empty of invented content and
+        labelled -- one failing run, one contract.
 
-    def test_is_degraded_flag_true(self, tmp_path):
+        An escaping exception fails the run itself; an unset flag fails
+        is_degraded; hallucinated findings synthesised by the fallback
+        fail the empty-list assertions; a silently degraded digest fails
+        the marker. Carry-forward, persistence and the healthy control
+        stay separate below -- they are the parts most likely to break
+        WHILE this shape still holds.
+        """
         agent = self._make_failing_agent()
-        inp = self._make_input(tmp_path)
-        output = agent.run(inp)
-        assert output.is_degraded is True
+        out = agent.run(self._make_input(tmp_path))
+        assert isinstance(out, InterpretationOutput)
+        assert out.is_degraded is True
+        assert out.key_findings == []
+        assert out.bottlenecks == []
+        assert "DEGRADED" in out.take_home_message
 
     def test_runtime_vocab_carried_forward_unchanged(self, tmp_path):
         """Degraded output must preserve the incoming runtime_vocab verbatim
@@ -1167,21 +1167,6 @@ class TestDegradedInterpreterPath:
         out_names = sorted(e.name for e in output.runtime_vocab)
         in_names = sorted(e["name"] for e in self.INCOMING_VOCAB)
         assert out_names == in_names
-
-    def test_key_findings_and_bottlenecks_empty(self, tmp_path):
-        """Degraded digest must not invent findings — the LLM never returned."""
-        agent = self._make_failing_agent()
-        inp = self._make_input(tmp_path)
-        output = agent.run(inp)
-        assert output.key_findings == []
-        assert output.bottlenecks == []
-        assert output.new_discoveries == []
-
-    def test_take_home_message_marks_degraded(self, tmp_path):
-        agent = self._make_failing_agent()
-        inp = self._make_input(tmp_path)
-        output = agent.run(inp)
-        assert "DEGRADED" in output.take_home_message
 
     def test_digest_persisted_to_disk(self, tmp_path):
         """The whole point of the fallback is that the digest file exists —

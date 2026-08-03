@@ -168,9 +168,11 @@ class TestTwoIterTrace:
 
         rows = [json.loads(line) for line in (tmp_path / TRACE_FILENAME).read_text().splitlines()]
         assert len(rows) == 8
-        # Iteration indices should be non-decreasing across the trace
-        iters = [r["iter"] for r in rows]
-        assert iters == sorted(iters)
+        # A `iters == sorted(iters)` assertion was removed on 2026-08-02: the
+        # probes are emitted in ascending iteration order by the loop above,
+        # and production never reorders, so it restated the test's own
+        # sequencing. The per-iteration check below is the real one -- it
+        # fails if `iter` is not persisted per row.
         # Each iteration should have all 4 phases in order
         for it in (1, 2):
             phases_for_it = [r["phase"] for r in rows if r["iter"] == it]

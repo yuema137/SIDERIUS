@@ -391,13 +391,3 @@ def test_per_layer_entry_field_names_are_the_contract():
 
 
 # ── Principle 2 module-source spot-check ──────────────────────────────────
-
-
-def test_module_source_has_no_architecture_literals():
-    """The full guardrail test (A.12) covers the whole tree; this one
-    documents the invariant inline on killer_report.py so a future edit
-    that sneaks in a model-family branch fails close to the edit."""
-    source = Path(killer_report.__file__).read_text().lower()
-    for banned in ["wavenet", "punet", "fcnet", "transformer", "rnn"]:
-        assert f'"{banned}"' not in source, f"architecture literal {banned!r} found"
-        assert f"'{banned}'" not in source, f"architecture literal {banned!r} found"
