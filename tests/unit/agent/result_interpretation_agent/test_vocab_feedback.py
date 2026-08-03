@@ -43,26 +43,38 @@ class TestEvaluatePrediction:
 
     # --- Core outcome labels ---
 
+    # Each outcome branch is stated once, as a whole contract: the label, the
+    # sign of the delta, and the information_gain that follows from it.
+    # Six cases used to split these across two sections -- an outcome test
+    # and an information_gain test per branch -- running byte-identical
+    # calls. `test_boldness_uses_sota_baseline` was a third copy of the
+    # confirmed call.
+
     def test_confirmed_beats_sota(self):
-        """actual > sota → confirmed, delta_from_sota > 0."""
+        """actual > sota: confirmed, positive delta, gain == delta."""
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
         assert result["outcome"] == "confirmed"
         assert result["actual_value"] == 5.5
         assert result["delta_from_sota"] > 0
+        assert abs(result["information_gain"] - result["delta_from_sota"]) < 1e-6
+        # boldness = |predicted - sota| / |sota| = |6.0 - 5.0| / 5.0
+        assert abs(result["boldness"] - 0.2) < 1e-4
 
     def test_partial_within_margin(self):
-        """actual slightly below sota but within 5% → partial, delta_from_sota < 0."""
+        """actual slightly below sota but within 5%: partial, no gain."""
         # sota=5.0, margin=0.05 → partial if actual >= 4.75
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
         assert result["outcome"] == "partial"
         assert result["delta_from_sota"] < 0
+        assert result["information_gain"] == 0.0
 
     def test_refuted_clearly_below_sota(self):
-        """actual clearly below sota (> 5% gap) → refuted."""
+        """actual clearly below sota (> 5% gap): refuted, no gain."""
         # sota=5.0, 5% threshold=4.75 → refuted if actual < 4.75
         result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.0})
         assert result["outcome"] == "refuted"
         assert result["delta_from_sota"] < 0
+        assert result["information_gain"] == 0.0
 
     def test_exactly_at_sota_is_partial(self):
         """actual == sota (not strictly greater) → partial (not confirmed)."""
@@ -130,13 +142,10 @@ class TestEvaluatePrediction:
 
     # --- Boldness and information_gain ---
 
-    def test_boldness_uses_sota_baseline(self):
-        """boldness = |predicted - sota| / |sota|."""
-        # predicted=6.0, sota=5.0 → boldness = 1.0/5.0 = 0.2
-        result = evaluate_prediction(
-            self._pred(current_value=5.0, predicted_value=6.0), {"best_denoising_score": 5.5}
-        )
-        assert abs(result["boldness"] - 0.2) < 1e-4
+    # `test_boldness_uses_sota_baseline` was a third copy of the confirmed
+    # call (`_pred`'s predicted_value already defaults to 6.0); its
+    # assertion now sits there. The zero case below stays: it is the other
+    # leg of the ternary, and reaches it with a DIFFERENT input.
 
     def test_boldness_zero_when_no_predicted_value(self):
         """No predicted_value in prediction → boldness=0."""
@@ -146,23 +155,9 @@ class TestEvaluatePrediction:
         )
         assert result["boldness"] == 0.0
 
-    def test_information_gain_confirmed_equals_delta(self):
-        """Confirmed outcome: information_gain = delta_from_sota."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
-        assert result["outcome"] == "confirmed"
-        assert abs(result["information_gain"] - result["delta_from_sota"]) < 1e-6
-
-    def test_information_gain_zero_when_refuted(self):
-        """Refuted outcome: information_gain = 0."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 3.0})
-        assert result["outcome"] == "refuted"
-        assert result["information_gain"] == 0.0
-
-    def test_information_gain_zero_when_partial(self):
-        """Partial outcome: information_gain = 0."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
-        assert result["outcome"] == "partial"
-        assert result["information_gain"] == 0.0
+    # The three `test_information_gain_*` cases lived here, each repeating
+    # the call of its outcome test above to assert one more field of the
+    # same result. Folded into those contracts.
 
 
 # ---------------------------------------------------------------------------
