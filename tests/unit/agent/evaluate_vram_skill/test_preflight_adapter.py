@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import get_args
 
 import pytest
@@ -64,23 +65,25 @@ def _spec(**over) -> IsolatedProbeSpec:
 
 
 class TestOutcomeMapping:
-    def test_mapping_is_exhaustive_over_the_declared_vocabulary(self):
-        """A new PreflightOutcome must fail here, not reach production."""
+    def test_the_import_time_exhaustiveness_guard_is_wired(self):
+        """The vocabulary and the table must agree, and the check that
+        enforces it must actually run on import.
+
+        The set comparison alone cannot fail on its own: `preflight_adapter`
+        calls `_assert_mapping_is_exhaustive()` at module scope, so a
+        divergence makes the import raise and this whole file errors during
+        collection. What is NOT otherwise covered is someone deleting that
+        module-scope call, after which a missing row would reach production
+        silently. Hence the reachability half.
+        """
         assert set(get_args(PreflightOutcome)) == set(adapter.OUTCOME_TO_LEGACY)
 
-    @pytest.mark.parametrize("outcome", get_args(PreflightOutcome))
-    def test_every_outcome_adapts_without_raising(self, outcome):
-        result = adapter.adapt_result({"outcome": outcome, "detail": "d"})
-        assert result["status"] == adapter.OUTCOME_TO_LEGACY[outcome][0]
-        assert result["preflight_outcome"] == outcome
-
-    def test_unmapped_outcome_raises_rather_than_defaulting(self):
-        with pytest.raises(adapter.PreflightWiringError, match="unmapped"):
-            adapter.adapt_result({"outcome": "SOMETHING_NEW"})
-
-    def test_missing_outcome_raises(self):
-        with pytest.raises(adapter.PreflightWiringError):
-            adapter.adapt_result({})
+        source = Path(adapter.__file__).read_text()
+        code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
+        assert "\n_assert_mapping_is_exhaustive()" in code, (
+            "the exhaustiveness check is no longer invoked at import; a new "
+            "PreflightOutcome without a table row would now reach production"
+        )
 
     @pytest.mark.parametrize(
         ("outcome", "status", "feasible"),
@@ -97,10 +100,45 @@ class TestOutcomeMapping:
         ],
     )
     def test_legacy_pair_is_exact(self, outcome, status, feasible):
-        """The §6.1 table, asserted row by row rather than by inspection."""
-        result = adapter.adapt_result({"outcome": outcome})
+        """The §6.1 table, asserted row by row rather than by inspection.
+
+        `feasible=None` in this table means the key is ABSENT, not present
+        and null -- `adapt_result` writes it only when it is not None. That
+        distinction is the whole of #156: the tuner read
+        `.get("feasible", True)` and a missing key meant "safe to run".
+
+        This assertion used to be `result.get("feasible") == feasible`,
+        which returns None for an absent key and so passed either way. Only
+        one row (PROBE_INFRASTRUCTURE_FAILURE, below) pinned absence, so
+        five of the six None rows were unguarded. Verified by making the
+        adapter always write the key: this table stayed green.
+        """
+        result = adapter.adapt_result({"outcome": outcome, "detail": "d"})
+
         assert result["status"] == status
-        assert result.get("feasible") == feasible
+        assert result["preflight_outcome"] == outcome, (
+            "the typed outcome must survive the adaptation -- it is the only "
+            "thing distinguishing rows that share a legacy pair"
+        )
+
+        if feasible is None:
+            assert "feasible" not in result, (
+                f"{outcome} carries no capacity verdict, so the key must be "
+                "ABSENT; present-and-null reads as a conclusion downstream"
+            )
+        else:
+            assert result["feasible"] is feasible
+
+    @pytest.mark.parametrize(
+        "payload",
+        [{"outcome": "SOMETHING_NEW"}, {}],
+        ids=["unmapped", "missing"],
+    )
+    def test_an_unknown_outcome_raises_rather_than_defaulting(self, payload):
+        """Both reach the same guard: an outcome not in the table. Neither
+        may fall through to a legacy pair."""
+        with pytest.raises(adapter.PreflightWiringError, match="unmapped"):
+            adapter.adapt_result(payload)
 
     def test_capacity_outcomes_stay_distinguishable_despite_a_shared_pair(self):
         """D-A1: same control flow, different typed cause."""
