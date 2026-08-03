@@ -810,21 +810,29 @@ def run_experiment_streaming(
             # knows them. runtime_flags are literal facts of THIS loop
             # (no workers / pinning / accumulation / compile); flipping
             # any of them must update this record (§6a reserved field).
+            # C-C5b: built through the SHARED definition, so the pre-launch
+            # time gate can reconstruct this identity exactly. Two
+            # independent constructions of this mapping would drift, and a
+            # drifted hash never matches -- which looks identical to "no
+            # calibration recorded yet".
+            from core.runtime_control.calibration_context import (
+                CalibrationContextInputs,
+                build_calibration_context,
+                model_precision,
+                trainable_param_count,
+            )
+
             runtime_session.set_calibration_context(
-                {
-                    "precision": str(next(model.parameters()).dtype).replace("torch.", ""),
-                    "optimizer_type": train_cfg.optimizer_type,
-                    "model_family": model_cfg.model_type,
-                    "param_count": sum(p.numel() for p in model.parameters() if p.requires_grad),
-                    "seg_size": seg_size,
-                    "batch_size": train_cfg.batch_size,
-                    "runtime_flags": {
-                        "num_workers": 0,
-                        "pin_memory": False,
-                        "grad_accumulation": False,
-                        "torch_compile": False,
-                    },
-                }
+                build_calibration_context(
+                    CalibrationContextInputs(
+                        precision=model_precision(model),
+                        optimizer_type=train_cfg.optimizer_type,
+                        model_family=model_cfg.model_type,
+                        param_count=trainable_param_count(model),
+                        seg_size=seg_size,
+                        batch_size=train_cfg.batch_size,
+                    )
+                )
             )
             admission = runtime_session.decide_admission()
             if admission.decision == "rejected":
