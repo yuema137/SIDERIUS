@@ -12,6 +12,15 @@ So historical duration remains fully COLLECTED, identity-checked,
 quarantined, promoted and reported -- and is barred from execution decisions.
 Observability, not authority.
 
+WHAT THIS FILE DOES AND DOES NOT COVER. These guards are about the **v2
+`CalibrationObservation` registry**, the system PR C builds. They do not claim
+that no historical number anywhere can reach a time estimate, because that is
+not true today: a pre-existing legacy v1 mechanism writes an asymmetric-EMA
+per-GPU correction (`evaluate_time_skill/calibration.py::update_k`) and
+`training_skill/estimator.py:282-283` multiplies the estimate by it. That
+mechanism predates PR C and is out of C1's scope -- filed as FU-C-10. Asserting
+the broader claim here would make this file lie about its own reach.
+
 WHY THESE ARE NEGATIVE TESTS. This file asserts an ABSENCE, which is the
 hardest thing to keep true: nothing fails when someone adds the input back,
 unless a test is watching for it. C-C5b wiring was implemented and committed

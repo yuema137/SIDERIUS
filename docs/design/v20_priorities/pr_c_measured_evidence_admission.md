@@ -566,29 +566,47 @@ similarity heuristic.
 These are **invariants**. Implementation must satisfy them; it may not
 re-open them, and a design that cannot meet one is a design to reject.
 
-- [ ] `model_family = "unknown"` is **never** authoritative. It is a
+Status key: `[x]` = satisfied and asserted by a named test in C1;
+`[C2]` = belongs to the GPU-requirement PR and is not yet in force.
+
+- [x] `model_family = "unknown"` is **never** authoritative. It is a
       bucketing failure, not a family.
-- [ ] A matching bucket is **not** applicability. It identifies a candidate
+      → `test_an_unknown_family_never_inherits_known_family_calibration`,
+      `test_an_unknown_model_family_is_never_authoritative`
+- [x] A matching bucket is **not** applicability. It identifies a candidate
       set that must then be checked.
-- [ ] Cross-**task** reuse fails.
-- [ ] Cross-**data-shape-class** reuse fails.
-- [ ] Cross-**GPU-UUID** reuse fails. A 5090 measurement is never
-      H100-authoritative.
-- [ ] Cross-**phase** reuse fails; training and inference never substitute
+      → `evaluate_candidate_authority` checks identity, then bucket state,
+      then the envelope; `test_out_of_range_candidate_is_refused_despite_identical_identity`
+- [x] Cross-**task** reuse fails. → `IDENTITY_ROWS[cross-task]`
+- [x] Cross-**data-shape-class** reuse fails. → `IDENTITY_ROWS[cross-data-shape]`
+- [x] Cross-**GPU-UUID** reuse fails. A 5090 measurement is never
+      H100-authoritative. → `IDENTITY_ROWS[cross-device-uuid]`
+- [x] Cross-**phase** reuse fails; training and inference never substitute
       for each other (PR B measured them 1.8x apart).
-- [ ] Cross-**measurement-kind** reuse fails (§3). A promoted millisecond is
-      never a memory requirement.
-- [ ] Missing identity **never** fails open into "safe to proceed".
-- [ ] Zero authoritative buckets is **never** reported as active
-      calibration.
-- [ ] PR B receives evidence through a **typed production boundary**, not
+      → `IDENTITY_ROWS[cross-phase]`
+- [x] Cross-**measurement-kind** reuse fails (§3). A promoted millisecond is
+      never a memory requirement. → `IDENTITY_ROWS[cross-measurement-kind]`,
+      plus `TestHistoricalDurationCannotReachGpuAdmission` (2 tests) proving
+      the millisecond system cannot even be imported by GPU admission
+- [x] Missing identity **never** fails open into "safe to proceed".
+      → `test_an_observation_without_identity_is_refused`,
+      `test_a_dimension_with_no_measured_evidence_fails_closed`,
+      `TestIdentityIsNotFabricated`
+- [x] Zero authoritative buckets is **never** reported as active
+      calibration. → C-C7 `is_active` is defined by validated buckets, never
+      by record count; `test_observations_without_promotion_are_still_inactive`,
+      `test_a_provisional_bucket_is_not_authoritative`
+- [C2] PR B receives evidence through a **typed production boundary**, not
       the unfulfilled duck-typed `getattr(sandbox, "measured_requirements")`.
       That read is how the gap survived PR B and its whole test suite.
-- [ ] Static estimates remain priors; historical evidence alone is not a
+      *C1 delivers no evidence to PR B by design — duration is milliseconds.*
+- [x] Static estimates remain priors; historical evidence alone is not a
       final gate; an inconclusive measurement becomes neither allow nor
-      reject.
-- [ ] PR B's three refusal lanes keep distinct statuses, budget accounting
-      and shrink authority.
+      reject. *Satisfied in C1 in the strongest available form: after the
+      C-C5b cancellation the v2 registry is not a gate input at all.*
+      → `test_historical_duration_is_observability_only.py` (9 tests)
+- [C2] PR B's three refusal lanes keep distinct statuses, budget accounting
+      and shrink authority. *C1 touches no admission lane.*
 
 ### 8.B Implementation choices — resolvable from the code
 
@@ -1627,6 +1645,33 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
+## 16a. C1 deviation register — where the implementation departs from this plan
+
+Maintained continuously. Every row is a place the merged code does **not**
+match the plan as originally written, with the evidence that forced the
+change. A deviation that is not written here is a deviation that will be
+rediscovered as a bug.
+
+| # | Plan said | Code does | Why | Evidence |
+|---|---|---|---|---|
+| D-1 | C-C5b wires the read seam into the time-budget consumer | No production consumer of v2 duration exists | **Operator decision 2026-08-02**: runtime is live; a stored duration prices today's work with yesterday's clock | C-C5b cancellation section; 9 guards + positive control |
+| D-2 | (unstated) "current live measurement is the sole time-decision input" | True **of the v2 registry only** | Legacy v1 per-GPU `k` (asymmetric EMA) still scales the estimate at `training_skill/estimator.py:282-283`; pre-existing, out of C1 scope | FU-C-10; scope-correction note in C-C5b |
+| D-3 | Applicability envelope over a fixed dimension list | Dimensions derived from the evidence (`_measured_dimensions`) | A fixed list silently excluded whichever producer vocabulary it did not name (`seg_size` vs `segment_length`) — a never-match that looks exactly like an empty registry | `8606b47`; `TestTheEnvelopeVocabularyFollowsTheEvidence` |
+| D-4 | Each side computes its own config identity | One shared `candidate_config_hash` in `calibration_context.py` | The engine counted `requires_grad` params, the pre-flight counted all of them — identical for a fully-trainable model, silently divergent for any frozen layer | `8f97251`, `d901412`; `test_the_derivation_does_not_define_its_own_hash` |
+| D-5 | C-C7 report reads a registry object | C-C7 takes `root=` and constructs inside its own guard | `CalibrationRegistry.__init__` mkdirs six directories, so construction was the one raising step *outside* the "never raises" guarantee | Mutation proof under C-C7 §6 |
+| D-6 | C-C7 asserted against a read-only copy of the live v1 registry | Asserted against a fixture reproducing the v1 shape | The live tree is preserved evidence; no test opens it. The fixture reproduces "evidence collected, none promoted" exactly | `test_observations_without_promotion_are_still_inactive` |
+| D-7 | Layer-2 covers "validated calibration contradicted by a live measurement", "inconclusive live probe", "expired calibration" | Deferred to C2 | All three describe a **consumer** resolving stored against live evidence. After D-1, C1 has no such consumer — there is nothing to contradict or expire for | §11 Layer-2 matrix, deferred-rows note |
+| D-8 | C1 Layer-3 runs a "normal formal run" | Runs `is_trial=True` with a fixed plan | `is_trial=False` falls through to **legacy single-file mode**, which builds no SampleSet and crashes the time estimator on `None`. Pre-existing, deprecated path, unrelated to C1 | FU-C-9; §17a |
+
+**Follow-ups filed from C1**
+
+| ID | Finding | Disposition |
+|---|---|---|
+| FU-C-9 | `is_trial=False` (legacy single-file mode) builds no SampleSet; `resolve_training_workload` raises `AttributeError: 'NoneType' object has no attribute 'items'` | Pre-existing defect in a deprecated path; not touched by C1 |
+| FU-C-10 | Legacy v1 per-GPU `k` correction lets history scale the production time estimate, outside the v2 subsystem the observability-only rule was written for | **Operator decision needed**: should the rule extend to the legacy mechanism? Removing `k` changes production time-estimation behaviour and is out of C1 scope |
+
+---
+
 ## 17. Commit plan
 
 Nine commits. Each is independently reviewable and does not carry unrelated
@@ -2315,7 +2360,37 @@ detection. It may **not** support ALLOW, cause REJECT, modify
 `_gate_decision`, be passed into the production time gate, or change retry,
 attempt/round accounting or execution behaviour.
 
-**Current live measurement is the sole production time-decision input.**
+**Within the v2 calibration subsystem, the current live measurement is the
+sole production time-decision input.**
+
+> **Scope correction, found by audit 2026-08-02 — read this before quoting the
+> sentence above.** An earlier draft of this section said "current live
+> measurement is *the* sole production time-decision input", full stop. That
+> is **not true of the codebase as a whole**, and stating it unqualified would
+> have made this document assert something the code does not do.
+>
+> A **pre-existing legacy v1** mechanism does let history scale the production
+> estimate, and it is untouched by PR C:
+>
+> * write — after every successful run, `ml_hyperparameter_tune_agent.py`
+>   (Phase F post-flight) feeds the observed-vs-predicted ratio through an
+>   asymmetric EMA (`evaluate_time_skill/calibration.py::update_k`) into
+>   `~/.siderius/time_calibration_<gpu>.json`;
+> * read — `training_skill/estimator.py:282-283` loads that table and
+>   multiplies the estimate by `k` (`total_ms = total_steps * ms_per_step * k
+>   * SAFETY_MULTIPLIER`).
+>
+> So the accurate claim, and the one the guardrail tests actually assert, is:
+> **the v2 `CalibrationObservation` registry — the system PR C builds — has no
+> influence on any production decision.** The legacy per-GPU `k` predates PR C
+> entirely.
+>
+> **Deliberately not changed here.** Removing or gating `k` would alter
+> production time-estimation behaviour and resource authority, which is a
+> material change outside C1's scope and an operator decision, not a
+> refactor made in passing. Filed as **FU-C-10** and reported with the PR so
+> the operator can decide whether the observability-only rule should extend to
+> the legacy mechanism.
 
 *Sequence of events, recorded honestly.* The C-C5b wiring was implemented,
 tested and committed (`95c4539` production, `b920b22` tests, `0d32187` docs)
