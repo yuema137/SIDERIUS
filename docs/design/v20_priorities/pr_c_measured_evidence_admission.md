@@ -1664,6 +1664,89 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
+## 16-STATUS. C1 final state — reconciled against code, Git, PR and artifacts
+
+Reconciled 2026-08-03 by inspecting the working tree, `git log`, PR #161, the
+test suite and the retained validation artifacts — **not** by trusting an
+earlier summary. Corrections found during reconciliation are listed at the end
+of this section.
+
+### The governing principle
+
+> **The current live measurement of the concrete candidate is the sole runtime
+> evidence used by the production time-budget decision.**
+
+May remain in the decision — these are **configured policy**, not learned
+experience:
+
+* the operator-configured time budget;
+* the deterministic projection from the current live measurement;
+* the configured safety factor (`SAFETY_MULTIPLIER = 1.3`).
+
+May **not** influence the decision: legacy v1 `k`; v1 historical duration data;
+v2 historical duration data; promoted calibration buckets; calibration reports.
+
+Historical duration is **observability-only** — collected, identity-checked,
+quarantined, promoted, reported, available for offline analysis and drift
+detection. It may not support ALLOW or cause REJECT.
+
+### Legacy v1 status — five explicit answers, each verified from code
+
+| Question | Answer | Evidence |
+|---|---|---|
+| **v1 production read** (into a verdict) | **NONE** | no `lookup_k`/`load_table` call remains in `core`, `nodes`, `agent`, `execute_tools`, `workflows` outside the legacy module itself |
+| **v1 production decision influence** | **NONE** | `estimator.py` no longer multiplies by `k`; `k_correction` removed from the breakdown; 14 guards + 3 positive controls |
+| **v1 production write** | **NONE** | the tuner's Phase F post-flight and its import are removed; a repo-wide scan for `save_table`/`update_k`/`make_entry` finds no production caller |
+| **v1 audit-only readability** | **PRESERVED** | `calibration.py` stays importable; `load_table`/`lookup_k` still work (asserted). `estimate_types.from_legacy_calibration_entry` is called **only** by the offline `scripts/runtime_replay/legacy_migration.py`, and emits `applicability="not_applicable"`, `confidence="low"` — never blocking-eligible |
+| **v1 data integrity** | **UNCHANGED** | tree digest `c1065a8b612fb691…`; `time_calibration_nvidia_geforce_rtx_5090.json` sha256 `6933829e145400dd…`, 313 596 bytes, mtime 2026-07-20 — re-verified after every run |
+
+Both statements are therefore true at the same time, which is the only
+acceptable configuration: **legacy v1 is read-only** *and* **C1's legacy-v1
+work is complete**. Until `7341840` only the first half of that was true, and
+this document said so rather than claiming both.
+
+### Checkpoint reconciliation
+
+| Checkpoint | Status | Evidence |
+|---|---|---|
+| identity + applicability envelope, per-major registry (O-1), quarantine (O-2) | **COMPLETE** | `f3ab878`, `df10dd7`, `31d1b0c` |
+| C-C1 identity-field population | **COMPLETE** | `fa0a43e` |
+| C-C2 typed measurement capability | **COMPLETE** | `3927d06`, `7a0de4d` |
+| C-C3 derivation → v2 → success-path wiring | **COMPLETE** | `09aa6a3`, `e86d6dd`, `cddc307`; failure paths excluded, one seam only |
+| C-C4 affected-bucket promotion (O-3) | **COMPLETE** | `9c8a421`; thresholds 2/3, ratio 1.5 frozen |
+| C-C5a applicability safety | **COMPLETE** | `7574ae6`, `bf73a83` |
+| shared calibration context / config hash (D-4) | **COMPLETE** | `8f97251`, `8606b47`, `d901412` |
+| **C-C5b production consumption of history** | **CANCELLED BY OPERATOR DECISION** | implemented in `95c4539`/`b920b22`/`0d32187`, then **removed forward** in `689fea3`; `wrapper.py` byte-identical to its pre-C-C5b state |
+| forward removal + negative guardrails | **COMPLETE** | `689fea3`, `4934ab3` — 9 guards + positive control |
+| **legacy v1 `k` removed from the verdict** | **COMPLETE** | `afc009e`, `bc14b97`, `6700261` — §16a-BD |
+| **legacy v1 write stopped (FU-C-11)** | **COMPLETE** | `7341840` — §16a-BD-2 |
+| C-C7 calibration-state reporting | **COMPLETE** | `ce327bf`; INACTIVE-with-reason, quarantine excluded, UNREADABLE ≠ empty, never raises |
+| C-C8 documentation sync | **COMPLETE** | `cd73bb4` … `c4f3982`, `5a5e7b5`, and this section |
+| Layer-1 reachability | **COMPLETE** | §11 table |
+| Layer-2 matrix | **COMPLETE** (3 rows **DEFERRED** to C2 with reason) | §11 matrix |
+| Layer-3 bounded real validation | **COMPLETE** | §17b |
+| C-C5a/C-C6 GPU-requirement work | **NOT APPLICABLE to C1** | belongs to C2 |
+
+### Open C1 follow-up
+
+**FU-C-9** — `is_trial=False` (legacy single-file mode) builds no SampleSet and
+the time estimator raises `AttributeError` on `None`. Pre-existing defect in a
+deprecated path, unrelated to C1's changes. **The only open C1 item.**
+FU-C-10 and FU-C-11 are both closed by implementation.
+
+### Corrections made during this reconciliation
+
+1. The status text asserting legacy v1 was "out of C1 scope" was **stale** —
+   the operator extended the decision and it was implemented. Corrected.
+2. `from_legacy_calibration_entry` was audited rather than assumed: it is a
+   read-only adapter whose sole caller is an offline replay script, so it does
+   not contradict "no production v1 read".
+3. C-C5b is recorded as **CANCELLED**, never as complete, in every place it
+   appears — including the checkpoint map, where its three commits are listed
+   as superseded rather than dropped.
+
+---
+
 ## 16a-BD. Behavior Delta: legacy v1 `k` removed from production time authority
 
 **Operator decision, 2026-08-03.** Supersedes FU-C-10, which is now **closed by
@@ -1767,7 +1850,7 @@ where a reader will look for the change.
 
 **Commit SHAs:** `afc009e` (production), `bc14b97` (tests), `6700261` (docs).
 
-### Behavior Delta: legacy v1 table becomes read-only (FU-C-11 closed)
+## 16a-BD-2. Behavior Delta: legacy v1 table becomes read-only (FU-C-11 closed)
 
 **Operator decision, 2026-08-03 (second part).** The policy is stronger than
 "v1 does not decide":
@@ -1819,6 +1902,53 @@ both the import guard and the repo-wide writer scan (2 tests).
 acquisition, no PR B admission path.
 
 **Commit SHAs:** recorded with the checkpoint map.
+
+### FU-C-11 Layer-3 re-validation (run 5) — the producer side, proven
+
+**The earlier runs could not have proven this.** `SIDERIUS_CALIBRATION_DIR`
+governs both the v2 tree *and* the legacy v1 table, so isolating it isolates
+the legacy table too: an isolated run says nothing about whether production
+still writes v1. Run 5 therefore **seeds a copy of the operator's real legacy
+table** into the temporary dir. A surviving writer mutates the copy visibly,
+while the real table stays out of reach.
+
+| Evidence | Before | After 3 real training rounds |
+|---|---|---|
+| seeded legacy copy sha256 | `6933829e145400dd…` | **`6933829e145400dd…` — UNCHANGED** |
+| real v1 tree digest | `c1065a8b612fb691…` | `c1065a8b612fb691…` |
+| real legacy table sha256 | `6933829e145400dd…` | `6933829e145400dd…` |
+| real legacy table size / mtime | 313 596 B / `1784563816` | 313 596 B / `1784563816` |
+| `~/.siderius/` contents | 2 entries | 2 entries — no stray `runtime_calibration_v2` |
+
+**v2 accumulated normally in the same run:**
+
+```
+calibration: ACTIVE — 2 validated bucket(s) from 6 eligible observation(s)
+```
+
+| bucket | n | level | ms/step | max/min |
+|---|---|---|---|---|
+| `training \| optimizer_step \| single_candidate_idle` | 3 | **validated** | 37.517 / 37.791 / 37.946 | **1.011** |
+| `inference \| inference_batch \| single_candidate_idle` | 3 | **validated** | 15.218 / 15.262 / 15.304 | **1.006** |
+
+Full identity on every record, real GPU UUID
+`GPU-c30b6678-…`, one `candidate_config_hash` (`cfg:c23fbeb88652`) across rounds
+— the same hash as run 4, on a different day and a different registry, which is
+itself a stability check on the identity definition.
+
+**So the chain the operator asked for holds end to end:**
+
+```
+real training
+  → v2 accumulates and promotes normally
+  → v1 completely unchanged (copy AND original)
+  → live-only time judgement still stands
+```
+
+Absolute step times differ from run 4 (37.5 vs 48.7 ms/step training) because
+the shared GPU was less contended. That is the point of measuring live rather
+than storing: the same candidate is genuinely a different speed on a different
+day, which is precisely why a stored `k` should not price it.
 
 ---
 
