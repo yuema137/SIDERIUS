@@ -29,11 +29,10 @@ def test_cap_matches_calibration():
 # ── Primitive arithmetic ────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "B, T",
-    [(1, 1), (4, 40000), (25, 40000), (1, 800_000), (1000, 1000), (0, 99999)],
-)
+@pytest.mark.parametrize("B, T", [(1, 1), (25, 40000), (0, 99999)])
 def test_compute_intensity_is_product(B, T):
+    """Unit, boundary-of-the-incident, and the zero case. Three of the six
+    original params were interior points of the same expression."""
     assert compute_intensity(B, T) == B * T
 
 
@@ -46,8 +45,9 @@ def test_compute_intensity_is_product(B, T):
         (1, 1),
         (1, 40_000),
         (10, 40_000),  # 400k
-        (20, 40_000),  # 800k — exactly the cap, <= accepts
         (4, 100_000),  # 400k
+        # (20, 40_000) — exactly the cap — was here; the `<=` boundary is
+        # pinned explicitly, with four factorisations, in the test below.
     ],
 )
 def test_passes_at_or_below_cap(B, T):
@@ -67,7 +67,9 @@ def test_passes_at_exact_boundary_accepts():
 @pytest.mark.parametrize(
     "B, T",
     [
-        (25, 40_000),  # 1,000,000 — the actual Phase 6.5 Stage 2 failure
+        # (25, 40_000) — the Phase 6.5 Stage 2 failure — was here; it has its
+        # own named regression test below, which is where a reader looking
+        # for the incident will go.
         (21, 40_000),  # 840,000 — just over cap
         (_MAX_BATCH_TIMESTEPS + 1, 1),
         (1, _MAX_BATCH_TIMESTEPS + 1),
@@ -87,11 +89,10 @@ def test_passes_at_stage2_failure_point_rejects():
 # ── Violation message ───────────────────────────────────────────────────────
 
 
-def test_describe_violation_names_dimensions_verbatim():
-    """The message names config levers the Proposer can actually tune."""
-    msg = describe_violation(25, 40_000)
-    assert "batch_size" in msg
-    assert "segmentation_size" in msg
+# `test_describe_violation_names_dimensions_verbatim` lived here, asserting
+# `batch_size` and `segmentation_size` appear in the message.
+# `test_describe_violation_suggests_a_reduction` below asserts both of those
+# names AND the word "reduce" on the same call, so it was a strict subset.
 
 
 def test_describe_violation_includes_product_and_cap():
