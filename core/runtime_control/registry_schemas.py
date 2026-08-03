@@ -262,6 +262,52 @@ class CalibrationPromotion(BaseModel):
         return content_id(self.hash_payload())
 
 
+class QuarantineRecord(BaseModel):
+    """An observation that cannot be trusted with an identity, kept anyway.
+
+    V20 PR C1 / C-C2c, operator decision O-2. A measurement whose identity is
+    incomplete is still a measurement that really happened, and refusing the
+    write would destroy it. But it cannot be bucketed either: a record whose
+    task, device or family is unknown would either land in the wrong bucket
+    or manufacture a new one, and both are worse than not being there.
+
+    So it goes to a namespace of its own -- auditable, countable, and
+    structurally unable to reach a bucket, a promotion, an applicability
+    verdict or any authority. It is evidence about a measurement that was
+    taken, not evidence about a candidate.
+
+    The refused-write alternative was considered and rejected: a write that
+    never happened is invisible, and the operator learns nothing about how
+    often identity is incomplete. A quarantined record answers "how much
+    evidence are we losing, and why".
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: str = REGISTRY_SCHEMA_VERSION
+    #: The record as it would have been written, verbatim. Kept whole so a
+    #: later build with a complete identity can re-derive it rather than
+    #: re-measure.
+    observation_payload: dict[str, Any]
+    #: Why it is unusable, in words a reader can act on.
+    reason: str = Field(min_length=1)
+    #: Which identity dimensions were absent or blank. Empty when the record
+    #: was quarantined for a reason other than missing identity.
+    missing_identity_fields: tuple[str, ...] = ()
+    timestamp_metadata: str | None = Field(
+        default=None, description="Wall clock; excluded from the content hash."
+    )
+
+    def hash_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        payload.pop("timestamp_metadata", None)
+        return payload
+
+    @property
+    def quarantine_id(self) -> str:
+        return content_id(self.hash_payload())
+
+
 class RegistryManifest(BaseModel):
     """Compact index + schema entry point (registry.json). Rebuildable
     from the record files; ``generation`` increments on every committed
@@ -274,6 +320,10 @@ class RegistryManifest(BaseModel):
     environment_profile_ids: list[str] = Field(default_factory=list)
     legacy_sources: list[LegacySourceReference] = Field(default_factory=list)
     promotion_ids: list[str] = Field(default_factory=list)
+    #: O-2. Deliberately a SEPARATE list from `observation_ids`: every
+    #: reader that walks observations walks that list, so a quarantined
+    #: record cannot reach a bucket by being forgotten about.
+    quarantined_ids: list[str] = Field(default_factory=list)
 
 
 # ── V20 PR C1 / C-C2: the v2 identity model ─────────────────────────────────

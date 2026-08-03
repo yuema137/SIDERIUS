@@ -1597,7 +1597,17 @@ quarantine.
       check. Live v1 tree verified untouched: 26 files, digest
       `df0351b59a5bd0bd`; no v2 tree created (nothing writes yet).
       3 mutation proofs.
-- [ ] **C-C2c** — the explicit `unusable`/quarantine namespace under O-2.
+- [x] **C-C2c** — the explicit `unusable`/quarantine namespace under O-2.
+      `QuarantineRecord` keeps the measurement verbatim with a required
+      reason and the missing identity fields; the registry writes it to a
+      separate `quarantine/` directory and a separate `quarantined_ids`
+      manifest list. The isolation is **structural**: `iter_observations`
+      walks `observation_ids`, which a quarantined id never enters, so
+      "never authoritative" is a property rather than a rule each reader
+      must remember. Auditing requires a different method by design.
+      10 tests; 3 mutation proofs (id also appended to `observation_ids`;
+      written into `observations/`; `iter_observations` widened to walk
+      both) — 4, 5 and 2 failures respectively.
 - [ ] Wiring the identity into the write path, with an **explicit**
       legacy-`ObservationOperation` → `RuntimePhase` mapping that fails
       closed on an unsupported value. No string casts, no silent

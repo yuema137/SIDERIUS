@@ -60,6 +60,7 @@ from core.runtime_control.registry_schemas import (
     ExecutionEnvironmentProfile,
     HardwareCompatibilityProfile,
     LegacySourceReference,
+    QuarantineRecord,
     RegistryManifest,
 )
 
@@ -137,12 +138,17 @@ class CalibrationRegistry:
         self._env_dir = self.root / "environment_profiles"
         self._summary_dir = self.root / "summaries"
         self._promo_dir = self.root / "promotions"
+        #: O-2. Physically separate from `observations/` so a quarantined
+        #: record cannot be picked up by a directory walk that means to read
+        #: usable evidence.
+        self._quarantine_dir = self.root / "quarantine"
         for d in (
             self._obs_dir,
             self._hw_dir,
             self._env_dir,
             self._summary_dir,
             self._promo_dir,
+            self._quarantine_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
         self._index_path = self.root / "registry.json"
@@ -316,6 +322,61 @@ class CalibrationRegistry:
         self._locked_index_update(_mutate)
 
     # ── readers ────────────────────────────────────────────────────────
+    def quarantine_observation(
+        self,
+        payload: dict,
+        *,
+        reason: str,
+        missing_identity_fields: tuple[str, ...] = (),
+        timestamp_metadata: str | None = None,
+    ) -> str:
+        """Record a measurement that cannot be trusted with an identity.
+
+        O-2. The record is written and indexed, so an operator can count and
+        inspect it, but its id goes to `quarantined_ids` -- never
+        `observation_ids`. Every reader that walks observations walks that
+        list, so this record is structurally unable to reach a bucket, a
+        promotion, an applicability verdict or any authority.
+
+        Returns the quarantine id.
+        """
+        record = QuarantineRecord(
+            observation_payload=payload,
+            reason=reason,
+            missing_identity_fields=missing_identity_fields,
+            timestamp_metadata=timestamp_metadata,
+        )
+        qid = record.quarantine_id
+        self._write_record(self._quarantine_dir, qid, record.model_dump(mode="json"))
+
+        def _mutate(m: RegistryManifest) -> bool:
+            if qid in m.quarantined_ids:
+                return False
+            m.quarantined_ids.append(qid)
+            m.quarantined_ids.sort()
+            return True
+
+        self._locked_index_update(_mutate)
+        return qid
+
+    def load_quarantined(self, full_id: str) -> QuarantineRecord:
+        path = self._quarantine_dir / f"{_digest_of(full_id)}.json"
+        record = QuarantineRecord.model_validate_json(path.read_text())
+        if record.quarantine_id != full_id:
+            raise ValueError(
+                f"content-hash mismatch for {path.name}: stored content hashes "
+                f"to {record.quarantine_id} (corruption or tampering)"
+            )
+        return record
+
+    def iter_quarantined(self) -> Iterator[QuarantineRecord]:
+        """Audit surface. Deliberately a DIFFERENT method from
+        `iter_observations`: a caller that wants usable evidence must not
+        receive these by default, and a caller that wants to audit what was
+        lost has to say so."""
+        for qid in self.load_manifest().quarantined_ids:
+            yield self.load_quarantined(qid)
+
     def load_observation(self, full_id: str) -> CalibrationObservation:
         path = self._obs_dir / f"{_digest_of(full_id)}.json"
         obs = CalibrationObservation.model_validate_json(path.read_text())
