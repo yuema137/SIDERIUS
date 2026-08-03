@@ -62,6 +62,40 @@ def capture_environment_provenance() -> dict[str, Any]:
     return prov
 
 
+def capture_software_stack() -> dict[str, Any]:
+    """The software stack that backs a calibration observation's identity.
+
+    This is the *drift anchor*: `stack_identity` (`calibration_policy.py`)
+    content-hashes the returned dict, so the KEY NAMES are part of the
+    bucket key. Two producers emitting the same facts under different key
+    names would fork the bucket for one machine, which is why this lives in
+    one place rather than at each call site.
+
+    The shape is `{"torch": ..., "cuda": ...}`, matching what
+    `runtime_bootstrap` already wrote, so records produced by the bootstrap
+    CLI and by the tuner describe the same stack with the same identity.
+
+    Returns:
+        Both keys, always. A value is ``None`` when torch is unavailable, or
+        when `torch.version.cuda` is None on a CPU-only build.
+
+    An absent stack is deliberately **not** ``{}``. An empty dict is what a
+    caller passes when it never looked, and `stack_identity({})` is a
+    constant digest shared by every such record — that is exactly the state
+    this helper exists to end. ``{"torch": None, "cuda": None}`` says "we
+    looked and there was nothing to find", which is a different fact.
+    """
+    stack: dict[str, Any] = {"torch": None, "cuda": None}
+    try:
+        import torch
+
+        stack["torch"] = torch.__version__
+        stack["cuda"] = torch.version.cuda
+    except Exception:
+        pass
+    return stack
+
+
 def read_process_read_bytes() -> int | None:
     """Bytes this process has read from the storage layer (``/proc/self/io``).
 

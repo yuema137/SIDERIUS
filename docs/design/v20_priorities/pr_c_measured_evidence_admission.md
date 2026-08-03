@@ -1369,16 +1369,30 @@ for records that genuinely cannot be classified.
 *Dependencies:* none. This is the first commit.
 
 **3. Implementation plan.**
-- [ ] Read `classify_model_family` and confirm what `structural_features` it
-      requires and whether the tuner has them at `:947`.
-- [ ] Decide (8.B) whether `model_family` is the classified family or the
-      registered `model_type`; the two producers currently disagree (§2.9).
-- [ ] Pass the resolved family into `ProbeRequest` at `:947-957`.
-- [ ] Resolve a real `software_stack` at `:978` instead of `{}` — source it
-      from the existing provenance capture rather than re-deriving.
-- [ ] Decide whether `probe_lifecycle.py:69`'s `"unknown"` default should
-      become required; a required field turns a silent mis-bucket into a
-      loud construction error.
+- [x] Read `classify_model_family` (`calibration_policy.py:259-273`): a
+      non-empty `declared_family` is returned verbatim; `structural_features`
+      is only the fallback. The tuner has `model_type` in scope at `:895`.
+- [x] **8.B resolved:** `model_family` is the registered `model_type`, via
+      `classify_model_family(declared_family=model_type)`. The time skill
+      already keys its store this way (`evaluate_time_skill/wrapper.py:499`),
+      so this makes the registry agree with the store rather than creating a
+      third namespace (§2.9).
+- [x] Passed the resolved family into `ProbeRequest`
+      (`ml_hyperparameter_tune_agent.py:947-968`).
+- [x] Resolved a real `software_stack` at the `build_registry_persist` call.
+      **Discovery:** there was no shared producer — `bootstrap.py:464` built
+      `{"torch": ..., "cuda": ...}` inline and the tuner passed `{}`.
+      `capture_environment_provenance()` captures the same facts but under
+      `torch_version`/`cuda_version`, and since `stack_identity` content-hashes
+      the dict, reusing it would have forked the bucket away from the two
+      records bootstrap already wrote. Extracted
+      `provenance.capture_software_stack()` emitting bootstrap's exact shape;
+      both call sites now use it. Verified byte-identical:
+      `stack_identity` = `stack:cb380df61b90` before and after, vs the
+      `stack:44136fa355b3` constant that 18 records share.
+- [x] `probe_lifecycle.py:69`'s `"unknown"` default **left as-is** for C-C1.
+      Making it required is a schema-shaped change that belongs with C-C2's
+      v2 work; C-C1 changes no schema.
 
 **4. Validation plan.**
 - Unit: the resolved family reaches `CalibrationObservation.model_family`,
@@ -1396,19 +1410,35 @@ for records that genuinely cannot be classified.
 - No Gate / real-training test.
 
 **5. Acceptance criteria.**
-- [ ] A probe-produced observation carries a family that is **not**
+- [x] A probe-produced observation carries a family that is **not**
       `"unknown"` for a registered model type.
-- [ ] `bucket_key` for two different model families differs in exactly the
-      family component and nothing else.
-- [ ] `stack_identity` for a populated stack differs from the constant
-      `stack_identity({})` digest observed today.
-- [ ] All 20 existing records still load — `load_observation` raises on
-      none of them. Verified against a **copy in a temporary tree**, never
-      against `~/.siderius/runtime_calibration`. The live per-user registry
+- [x] `bucket_key` for two different model families differs in exactly the
+      family component and nothing else — asserted as a component-wise diff
+      count of 1.
+- [x] `stack_identity` for a populated stack differs from the constant
+      `stack_identity({})` digest: `stack:cb380df61b90` vs
+      `stack:44136fa355b3`.
+- [x] All 20 existing records still load — `load_observation` raises on
+      none of them. Verified against a **copy in a temporary tree**; the live
+      tree's file hashes were compared before and after and are identical. The live per-user registry
       is read-only evidence for this work: no test, script or checkpoint may
       write to it, and O-1 preserves the old tree untouched.
-- [ ] Mutation: reverting either call site to its current form fails at
-      least one new test.
+- [x] Mutation proofs, each asserting a unique match and re-running the
+      baseline after restore:
+
+      | mutation | result |
+      |---|---|
+      | producer drops the family it was handed | 2 failures |
+      | producer drops the stack it was handed | 2 failures |
+      | helper regresses to `{}` (the pre-C-C1 state) | 1 failure |
+      | helper renames its keys (forks from bootstrap) | 1 failure |
+
+      The `{}` regression initially **passed**: on a machine with torch the
+      assignments repopulate the dict either way, so the branch only bites
+      where torch is absent. The test asserted on a hand-built dict rather
+      than the helper's real torch-absent path — a test-local fiction. Fixed
+      by driving the branch with `monkeypatch.setitem(sys.modules, "torch",
+      None)`.
 
 **6. Failure and edge cases.**
 - Family unresolvable → unchanged non-authoritative behaviour, and the run

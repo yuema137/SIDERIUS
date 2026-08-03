@@ -925,6 +925,7 @@ def _resolve_time_check_probe_request(
     if breakdown.get("runtime_decision") != "REQUEST_PROBE":
         return "proceed"
 
+    from core.runtime_control.calibration_policy import classify_model_family
     from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
     from core.runtime_control.probe_lifecycle import ProbeRequest
     from core.runtime_control.probe_wiring import (
@@ -932,6 +933,7 @@ def _resolve_time_check_probe_request(
         build_registry_persist,
         probe_runner_availability,
     )
+    from core.runtime_control.provenance import capture_software_stack
 
     available, detail = probe_runner_availability()
     if not available:
@@ -944,8 +946,20 @@ def _resolve_time_check_probe_request(
         )
         return "proceed"
 
+    # V20 PR C1 / C-C1. `model_family` was omitted here, so it took
+    # `ProbeRequest`'s "unknown" default and reached the calibration bucket
+    # key as component 6 -- every probe-produced record on this machine
+    # buckets under family=unknown, which is one bucket, not separation.
+    # `model_type` was already in scope; it simply was not passed.
+    #
+    # `classify_model_family` treats a non-empty declared family as
+    # authoritative, and the time skill already keys its own store on
+    # `model_family=model_type` (evaluate_time_skill/wrapper.py). Declaring
+    # it here makes the registry agree with the store instead of writing a
+    # second family namespace.
     request = ProbeRequest(
         model_identity=model_type,
+        model_family=classify_model_family(declared_family=model_type),
         train_steps=int(breakdown.get("total_train_steps") or 0),
         inference_batches=0,
         workload={
@@ -975,7 +989,11 @@ def _resolve_time_check_probe_request(
         ),
         persist=build_registry_persist(
             workload=request.workload,
-            software_stack={},
+            # Was `{}`, which `stack_identity` hashes to one constant for
+            # every record -- so the stack dimension of the bucket key, the
+            # documented drift anchor, was inert. Shared helper so this and
+            # the bootstrap CLI describe one stack under one identity.
+            software_stack=capture_software_stack(),
             source_run={"run_name": run_name, "exp_id": exp_id},
         ),
     )

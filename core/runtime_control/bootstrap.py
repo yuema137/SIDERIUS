@@ -454,14 +454,17 @@ def production_dependencies() -> BootstrapDependencies:
     def _build_observations(
         result, *, hardware_compatibility_id, execution_environment_id, workload
     ):
-        import torch
+        from core.runtime_control.provenance import capture_software_stack
 
         return probe_observations(
             result,
             hardware_compatibility_id=hardware_compatibility_id,
             execution_environment_id=execution_environment_id,
             workload=workload,
-            software_stack={"torch": torch.__version__, "cuda": torch.version.cuda},
+            # Shared with the tuner's probe path so both describe one stack
+            # under one identity. Byte-identical to the dict literal this
+            # replaced, so the records already written keep their bucket.
+            software_stack=capture_software_stack(),
             source_run={"run_name": "bootstrap", "tool": "scripts/runtime_bootstrap.py"},
             timestamp_metadata=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         )
