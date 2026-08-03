@@ -1101,7 +1101,164 @@ while drafting.
 
 ---
 
-## 12. Stop conditions
+## 12. Gate assignment and bounded real validation
+
+§11 gives the three validation layers. This section assigns the **named
+gates** from `docs/gates/gate_testing_standard.md`, because "Layer 3" and
+"Gate 2" are not the same thing and the difference decides what actually has
+to be run before each merge.
+
+No real GPU or LLM run in this section may start without operator approval,
+with the exact command and expected cost presented first.
+
+### 12.1 PR C1
+
+**Gate 1 — NOT REQUIRED.**
+
+Gate 1 exists for *"any commit that changes an LLM-facing system prompt or
+schema (implementor, proposer, validator, interpreter)"*. C1 changes
+calibration identity, persistence, promotion, applicability and reporting.
+None of it is LLM-facing.
+
+If implementation later touches a proposer, implementor, validator or
+interpreter prompt or output schema, **that specific change requires Gate 1
+before merge** — the exemption is scoped to what C1 is planned to touch, not
+to the PR as a whole.
+
+**Standard Gate 2 — NOT REQUIRED, and would be the wrong instrument.**
+
+Gate 2 drives a real LLM, which may propose a *different candidate on every
+attempt*. C1's subject is repeated observations of the **same** identity
+reaching a promotion threshold. A normal agent chain would produce a handful
+of unrelated candidates and exercise the thing under test barely or not at
+all — expensive, slow, and uncontrolled for this purpose.
+
+**C1 requires instead: one bounded, no-LLM, real-training calibration
+validation**, through the real production entry points:
+
+```
+fixed candidate and configuration
+  -> repeated real duration observations
+  -> v2 registry write
+  -> affected-bucket promotion evaluation (O-3)
+  -> applicability evaluation
+  -> time-budget consumer
+  -> calibration-state report
+```
+
+Requirements:
+
+- [ ] a **temporary v2 registry**; the live v1 tree is read-only evidence
+      and is never written to or rebuilt;
+- [ ] the same candidate and configuration repeated enough times to cross
+      the frozen O-4 threshold (`validated_min_observations = 3`, with
+      `consistency_max_min_ratio = 1.5`);
+- [ ] every identity dimension recorded: task, data-shape class, phase,
+      model family, GPU UUID, runtime stack, measurement kind;
+- [ ] a mismatching task, GPU UUID, phase or measurement kind is **rejected**
+      — the frozen §8.A isolation rules, proven on real records rather than
+      constructed ones;
+- [ ] the report says calibration is **inactive** while zero authoritative
+      buckets exist.
+
+This is a real-system validation and it is deliberately **not** Gate 2: no
+LLM is involved, and its subject is the calibration chain rather than the
+agent loop.
+
+### 12.2 PR C2
+
+**Gate 1 — NOT REQUIRED BY DEFAULT.** C2 changes resource measurement and
+admission plumbing. It becomes required if C2 changes planner/proposer
+resource feedback, an LLM-facing status or schema, or any prompt text that
+explains an admission or measurement outcome.
+
+**Gate 2 Lite — REQUIRED BEFORE MERGE.** C2 changes what happens *before a
+formal GPU phase starts*, so it must be proven in a real chain that reaches
+a formal round. Canonical Lite Plan (`gate_testing_standard.md` §"Gate 2
+parameter plans"), quoted rather than reinvented:
+
+| Parameter | Value |
+|---|---|
+| `--num_iterations` / `--start_iteration` | 1 |
+| `--max_rounds` | 2 (1 trial + 1 forced formal) |
+| `--max_proposal_attempts` | 3 |
+| `--data_scope` | `4-9` (6 files) |
+| `--health_gate_files` | `4,5,6,7,8,9` (matches scope exactly, DS8-mandatory) |
+| Seeds | **NONE — cold start** |
+| trial / train / eval portions | 0.02 / 1.0 / 0.01 |
+| formal / formal_train / formal_eval | 0.02 / 1.0 / 0.01 |
+| `--max_epochs` | 1 |
+| `--trial_time_budget_minutes` | 5 |
+| `--formal_time_budget_minutes` | 30 |
+| VRAM budgets | 24 / 24 (generous — the VRAM gate must not eat a Gate attempt) |
+| `--runtime_watchdog` | on |
+| `force_formal_round` | **ON** — required, since the feature under test is formal admission |
+| `--llm_config` | `openai_tiered_v1.json` |
+
+Estimated ~30-45 min, ~$1.
+
+**In addition to the standard Gate 2 criteria, C2 must prove:**
+
+- [ ] the isolated pre-phase measurement starts **before** the formal GPU
+      phase;
+- [ ] it uses the concrete candidate, actual phase, batch, segment, task and
+      target GPU;
+- [ ] candidate-owned **driver-visible process-tree** memory is recorded
+      (`own_tree_mib`), not the device total;
+- [ ] sampling completeness and attribution are recorded;
+- [ ] the typed authoritative requirement reaches PR B's gate;
+- [ ] admission no longer resolves to `policy_unavailable`;
+- [ ] the formal GPU child starts **only after** admission allows it;
+- [ ] training and inference requirements remain distinct (B-G0 measured
+      them 1.8x apart);
+- [ ] timeout, unavailable measurement, host-memory failure and contention
+      produce **no candidate blame and no shrink advice**;
+- [ ] evidence, authority and final disposition are all persisted.
+
+### 12.3 C2 refusal-path validation — executor level, not Gate 2
+
+A full Gate 2 run per refusal case would be slow, expensive and
+non-deterministic, and a refusal that only ever happens by luck is not
+really tested. Drive the **real production executor** directly for:
+
+- pre-phase measurement unavailable;
+- pre-phase measurement inconclusive;
+- wrong GPU UUID;
+- wrong task or data-shape identity;
+- phase mismatch;
+- contention-attributable evidence.
+
+Pass criteria for the inconclusive and unavailable cases (O-7):
+
+- [ ] the GPU phase does not start;
+- [ ] the attempt is consumed;
+- [ ] no completed round is recorded;
+- [ ] no candidate blame;
+- [ ] no shrink advice;
+- [ ] **no same-attempt retry loop is introduced** — only the existing outer
+      attempt budget may produce another attempt.
+
+### 12.4 The final V20 Gate
+
+C1 and C2 passing their own validation does **not** replace it.
+
+After PR C1, C2, D and E are complete, one bounded final Gate runs through
+the real production entry points and exercises the composition:
+
+- calibration reachability;
+- authoritative pre-phase GPU measurement;
+- PR B admission;
+- HealthGate formal policy (PR D);
+- zero-valid-trial behaviour;
+- campaign-scoped control state (PR E).
+
+Its subject is how the launch blockers behave **together**. It is not the
+first validation of any individual PR, and a PR that has not passed its own
+gate does not enter it.
+
+---
+
+## 13. Stop conditions
 
 Stop and report rather than proceeding if:
 
@@ -1113,12 +1270,16 @@ Stop and report rather than proceeding if:
 - production is found to still admit formally on non-authoritative evidence
   in a way not described here.
 
-## 13. Merge criteria
+## 14. Merge criteria
 
 - All Layer-1 tests pass, each with a mutation proof against real production
   source;
 - Layer-2 matrix complete, every row with an expected outcome;
-- one bounded Layer-3 confirmation on the target hardware;
+- the per-PR bounded real validation assigned in §12 — C1's
+  fixed-candidate no-LLM calibration run, C2's Gate 2 Lite — each approved
+  by the operator before it runs;
+- neither PR's validation substitutes for the final V20 Gate (§12.4), whose
+  subject is how the launch blockers behave together;
 - no new fail-open default (the §2.10 table unchanged in length);
 - `run()` gains no new responsibility;
 - exact-head CI green, including the repository's configured blocking
@@ -1128,7 +1289,7 @@ Stop and report rather than proceeding if:
 - every operator decision in §8.C answered in this document before
   implementation.
 
-## 14. Deferred
+## 15. Deferred
 
 - Unifying `operation` and `RuntimePhase` vocabularies.
 - Merging System A and System B.
@@ -1152,7 +1313,7 @@ Stop and report rather than proceeding if:
 
 ---
 
-## 15. Implementation splits into two PRs
+## 16. Implementation splits into two PRs
 
 **This document remains the umbrella design and launch-blocker record.
 Implementation is two separately reviewable PRs.**
@@ -1188,10 +1349,21 @@ honest calibration-quality reporting.
 
 Checkpoints: **C-C1, C-C2, C-C3, C-C4, C-C5, C-C7, C-C8** below.
 
-Merge criteria, in addition to §14: a normal formal run leaves a duration
-observation in the **new** tree; a bucket reaches `validated` only under the
-O-4 values; the report tells the truth about an uncalibrated system; the old
-tree is untouched and still readable.
+**Merge criteria** (in addition to §14):
+
+- Layer 1 deterministic tests, each with a mutation proof against real
+  production source;
+- Layer 2 identity/applicability matrix;
+- **the fixed-candidate, no-LLM, real-training calibration validation of
+  §12.1** — not a standard Gate 2, which would drive an LLM proposing a
+  different candidate each attempt and so barely exercise repeated
+  observations of one identity;
+- **Gate 1 only if** implementation ends up touching an LLM-facing prompt or
+  schema;
+- a normal formal run leaves a duration observation in the **new** tree; a
+  bucket reaches `validated` only under the frozen O-4 values; the report
+  tells the truth about an uncalibrated system; the v1 tree is untouched and
+  still readable.
 
 **Explicit non-goal:** C1 delivers **no** GPU requirement to PR B. Formal
 admission continues to report `policy_unavailable` after C1, and that is
@@ -1231,12 +1403,22 @@ The last two are the ones that decide whether this PR is safe at all. Until
 they are answered, writing the producer would mean choosing the architecture
 of the most safety-critical measurement in the system while implementing it.
 
-Merge criteria, in addition to §14: an applicable pre-phase measurement
-produces `requirement_mib` with provenance in `AUTHORITATIVE_PROVENANCE`; an
-inconclusive probe stops the attempt per O-7 with no candidate blame and no
-shrink advice; **PR B's three refusal lanes remain distinct**
-(`test_refusal_lane_distinctness.py` unchanged and green); with no
-authoritative evidence, behaviour is byte-identical to today.
+**Merge criteria** (in addition to §14):
+
+- Layer 1 deterministic tests with mutation proofs;
+- the controlled GPU applicability scenarios of §11;
+- **Gate 2 Lite (§12.2) — required**, cold start, no `--seed_paths`,
+  partial `--data_scope 4-9` with matching `--health_gate_files`, one forced
+  formal round, plus the ten PR-C-specific pass criteria;
+- the §12.3 executor-level refusal cases, driven directly rather than by
+  repeated Gate 2 runs;
+- **Gate 1 only if** C2 changes planner/proposer resource feedback, an
+  LLM-facing status or schema, or admission/measurement prompt text;
+- an applicable pre-phase measurement produces `requirement_mib` with
+  provenance in `AUTHORITATIVE_PROVENANCE`; an inconclusive probe stops the
+  attempt per O-7 with no candidate blame and no shrink advice; **PR B's
+  three refusal lanes remain distinct**
+  (`test_refusal_lane_distinctness.py` unchanged and green).
 
 **Explicit non-goal:** C2 changes no enforcement default. Flipping
 `observe_only` to `enforce` is a production-default change needing its own
@@ -1359,7 +1541,7 @@ unavailable probe must say why, per O-7 and the no-fail-open invariant.
 
 ---
 
-## 16. Commit plan
+## 17. Commit plan
 
 Nine commits. Each is independently reviewable and does not carry unrelated
 cleanup. `[ ]` = not done; `[x]` only after implementation **and** recorded
@@ -2042,7 +2224,7 @@ exact-head CI — recorded once at the end per §12.
 
 ---
 
-## 17. Expected artifacts
+## 18. Expected artifacts
 
 Per PR, since the two are reviewed separately.
 
