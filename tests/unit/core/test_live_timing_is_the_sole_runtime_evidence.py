@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -197,3 +198,86 @@ class TestTheLiveMeasurementStillDecides:
 
         assert out["breakdown"]["ms_source"] == "static_uncalibrated"
         assert out["breakdown"]["formal_execution_eligible"] is False
+
+
+class TestProductionNeverWritesTheLegacyTable:
+    """FU-C-11, closed 2026-08-03.
+
+    "Does not decide" was weaker than the policy. The tuner's Phase F
+    post-flight still fed every successful run through an asymmetric EMA into
+    the legacy v1 table, so the store kept GROWING while deciding nothing --
+    and a legacy store that looks like a live production system is exactly
+    what invites someone to wire it back into a decision.
+
+    The final policy: existing v1 data is preserved READ-ONLY for
+    compatibility and audit. Production neither reads it into a verdict nor
+    writes to it. New evidence goes to the v2 registry only.
+    """
+
+    #: Every entry point that mutates the legacy table.
+    LEGACY_WRITERS: ClassVar[set[str]] = {"save_table", "update_k", "make_entry"}
+
+    @staticmethod
+    def _module_source(dotted: str) -> ast.Module:
+        import importlib
+
+        mod = importlib.import_module(dotted)
+        return ast.parse(Path(mod.__file__).read_text())
+
+    def test_the_tuner_does_not_import_the_legacy_calibration_module(self):
+        """The tuner was the only production writer. The import existed solely
+        for the Phase F block; both are gone."""
+        tree = self._module_source(
+            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
+        )
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.update(f"{node.module}.{a.name}" for a in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+
+        offenders = {m for m in imported if "evaluate_time_skill.calibration" in m}
+        assert not offenders, (
+            f"the tuner imports {offenders}; the legacy v1 table must be read-only to production"
+        )
+
+    def test_no_production_module_calls_a_legacy_writer(self):
+        """Scanned across production trees, not just the one file that used to
+        do it -- a writer moved elsewhere would satisfy the import guard."""
+        repo = Path(__file__).resolve().parents[3]
+        legacy_module = repo / "agent" / "skills" / "evaluate_time_skill" / "calibration.py"
+
+        offenders: dict[str, set[str]] = {}
+        for tree_root in ("core", "nodes", "agent", "execute_tools", "workflows"):
+            for path in (repo / tree_root).rglob("*.py"):
+                if path == legacy_module or "__pycache__" in path.parts:
+                    continue
+                try:
+                    parsed = ast.parse(path.read_text())
+                except SyntaxError:  # pragma: no cover - not our concern here
+                    continue
+                called = {
+                    getattr(c.func, "id", getattr(c.func, "attr", None))
+                    for c in ast.walk(parsed)
+                    if isinstance(c, ast.Call)
+                }
+                hit = called & self.LEGACY_WRITERS
+                if hit:
+                    offenders[str(path.relative_to(repo))] = hit
+
+        assert not offenders, f"production code writes the legacy v1 table: {offenders}"
+
+    def test_the_legacy_module_remains_readable_for_audit(self, tmp_path, monkeypatch):
+        """Preserved, not deleted. Compatibility and audit readers must keep
+        working -- the policy is read-only, not removed."""
+        monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path))
+        from agent.skills.evaluate_time_skill import calibration
+
+        TestTheLegacyTableCannotMoveTheEstimate._write_k_table(tmp_path, 3.0)
+
+        table = calibration.load_table("NVIDIA GeForce RTX 5090")
+        assert calibration.lookup_k(table, "punet") == 3.0, (
+            "an existing v1 table is no longer readable; the policy is "
+            "read-only preservation, not deletion"
+        )

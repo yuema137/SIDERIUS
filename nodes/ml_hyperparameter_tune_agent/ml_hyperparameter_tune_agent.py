@@ -44,7 +44,6 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.ordering import parse_file_order_cli, resolve_ordering
 from agent.schemas.score_table import ScoreComparisonTable
-from agent.skills.evaluate_time_skill import calibration as time_calibration
 from agent.skills.evaluate_time_skill.wrapper import (
     _aggregate_inference_file_timings,
 )
@@ -4826,52 +4825,18 @@ class HyperparamTuningAgent:
                         data_dir=time_data_dir,
                     )
 
-                    # Phase F post-flight: update per-GPU calibration from this
-                    # successful run. Only runs when the gate used the real-dataset
-                    # warmup path (the static formula has no warmup signal to
-                    # calibrate against). See docs/resource_estimator_implement.md §2.6.5.
-                    if time_check is not None:
-                        bd = time_check.get("breakdown") or {}
-                        if bd.get("source") == "real_dataset_warmup":
-                            gpu_name = bd.get("gpu_name")
-                            warmup_ms = float(bd.get("ms_per_step_warmup") or 0.0)
-                            total_steps = int(bd.get("total_train_steps") or 0)
-                            if gpu_name and warmup_ms > 0 and total_steps > 0 and train_time > 0:
-                                try:
-                                    actual_ms = train_time * 1000.0 / total_steps
-                                    entry = time_calibration.make_entry(
-                                        gpu_name=gpu_name,
-                                        model_type=model_type,
-                                        seg_size=int(
-                                            active_params["model_config"].get(
-                                                "segmentation_size", 0
-                                            )
-                                        ),
-                                        batch_size=int(
-                                            active_params["train_config"].get("batch_size", 1)
-                                        ),
-                                        total_steps=total_steps,
-                                        warmup_ms_per_step=warmup_ms,
-                                        actual_ms_per_step=actual_ms,
-                                        estimated_minutes=float(
-                                            time_check.get("estimated_minutes") or 0.0
-                                        ),
-                                        actual_minutes=train_time / 60.0,
-                                    )
-                                    table = time_calibration.load_table(gpu_name)
-                                    time_calibration.update_k(table, entry)
-                                    time_calibration.save_table(gpu_name, table)
-                                    drift = time_calibration.detect_drift(table)
-                                    if drift:
-                                        print(f"  [time-calibration] {drift}")
-                                    else:
-                                        new_k = time_calibration.lookup_k(table, model_type)
-                                        print(
-                                            f"  [time-calibration] {gpu_name} / {model_type}: "
-                                            f"ratio={entry['ratio']:.3f} → k={new_k:.3f}"
-                                        )
-                                except Exception as cal_exc:  # pragma: no cover — defensive
-                                    print(f"  [time-calibration skipped] {cal_exc}")
+                    # Phase F post-flight REMOVED (operator decision 2026-08-03).
+                    # A successful run used to feed its observed-vs-predicted
+                    # ratio through an asymmetric EMA into the legacy v1 per-GPU
+                    # k table. That table is now PRESERVED READ-ONLY for
+                    # compatibility and audit: production neither reads it into
+                    # a verdict nor writes to it.
+                    #
+                    # Stopping the write is not cosmetic. A legacy store that
+                    # keeps growing still looks like a live production system,
+                    # and a live-looking store is what invites someone to wire it
+                    # back into a decision. New evidence goes to the v2 registry
+                    # only (C-C3c, just above), where drift analysis belongs.
 
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner

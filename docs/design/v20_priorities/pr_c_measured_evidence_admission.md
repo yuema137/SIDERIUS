@@ -1767,6 +1767,61 @@ where a reader will look for the change.
 
 **Commit SHAs:** `afc009e` (production), `bc14b97` (tests), `6700261` (docs).
 
+### Behavior Delta: legacy v1 table becomes read-only (FU-C-11 closed)
+
+**Operator decision, 2026-08-03 (second part).** The policy is stronger than
+"v1 does not decide":
+
+> Existing legacy v1 data is preserved **read-only** for compatibility and
+> audit. Production must no longer read from **or write to** the legacy v1 `k`
+> table.
+
+**Before.** Every successful run fed its observed-vs-predicted ratio through
+an asymmetric EMA into `~/.siderius/time_calibration_<gpu>.json`
+(`ml_hyperparameter_tune_agent.py` Phase F post-flight).
+
+**After.** The Phase F post-flight block and its import are removed. Successful
+runs write **v2 evidence only** (C-C3c).
+
+**Reason — this is not cosmetic.** A legacy store that keeps growing still
+*looks* like a live production system. Three concrete consequences: it presents
+as active when it is not; it invites someone to reconnect it to a decision; and
+it contradicts the read-only policy while nominally satisfying "does not
+decide".
+
+**Authority.** Unchanged from the previous delta — the live measurement was
+already the sole runtime evidence. This closes the *producer* side.
+
+**Failure semantics / retry / attempt / round / LLM / scientific results.** All
+unchanged. The removed block was wrapped in its own defensive `try/except` and
+produced only an operator log line; nothing downstream consumed it.
+
+**Legacy data handling.** Nothing deleted, migrated, rewritten, or neutralised.
+The file keeps its contents and its 2026-07-20 mtime. `calibration.py` stays
+importable and `load_table`/`lookup_k` keep working — asserted by
+`test_the_legacy_module_remains_readable_for_audit`, because the policy is
+read-only *preservation*, not removal.
+
+**Drift analysis** moves to the v2 registry, which C1 built for exactly that.
+
+**Tests** (`TestProductionNeverWritesTheLegacyTable`, 3 tests):
+
+| Guard | Proves |
+|---|---|
+| the tuner imports no calibration module | the only production writer's import is gone |
+| **no production module calls `save_table`/`update_k`/`make_entry`** | scanned across `core`, `nodes`, `agent`, `execute_tools`, `workflows` — a writer *moved elsewhere* would satisfy the import guard alone |
+| the legacy module still reads | preservation, not deletion |
+
+**Mutation proof.** Reinstating `load_table`/`save_table` in the tuner fails
+both the import guard and the repo-wide writer scan (2 tests).
+
+**Gate 1: N/A** — no LLM-facing surface. **Gate 2: N/A** — no GPU-requirement
+acquisition, no PR B admission path.
+
+**Commit SHAs:** recorded with the checkpoint map.
+
+---
+
 ### Re-validation at the new head — production entry points
 
 The previous exact-head acceptance (`3f5fa23`) **no longer counts**: it
@@ -1854,7 +1909,7 @@ rediscovered as a bug.
 |---|---|---|
 | FU-C-9 | `is_trial=False` (legacy single-file mode) builds no SampleSet; `resolve_training_workload` raises `AttributeError: 'NoneType' object has no attribute 'items'` | Pre-existing defect in a deprecated path; not touched by C1 |
 | ~~FU-C-10~~ | Legacy v1 per-GPU `k` let history scale the production time estimate | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator decided the rule extends to the legacy mechanism, and it was removed inside C1. See Behavior Delta §16a-BD. Not deferred. |
-| FU-C-11 | The tuner's Phase F post-flight still *writes* the legacy k table (`ml_hyperparameter_tune_agent.py:4861-4863`), though nothing reads it into a verdict | Left in place deliberately — the write influences no decision and keeps the historical series continuous for drift analysis. One-line follow-up if the operator wants the table fully frozen |
+| ~~FU-C-11~~ | The tuner's Phase F post-flight still *wrote* the legacy k table, though nothing read it into a verdict | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator's policy is read-only preservation, which is stronger than "does not decide": a legacy store that keeps growing still looks like a live production system, and that is what invites reconnection. Phase F removed; v2 is the only producer. See the Behavior Delta above |
 
 ---
 
@@ -3079,9 +3134,9 @@ source, not memory.
       marked superseded rather than deleted.
 - [x] Every follow-up is filed with its evidence — see the follow-up table
       in §16a: **FU-C-9** (legacy single-file mode crashes the time estimator
-      on a `None` SampleSet), **FU-C-10** (legacy v1 `k` — **closed by
-      implementation**, §16a-BD) and **FU-C-11** (the Phase F post-flight
-      still writes the legacy table, which decides nothing).
+      on a `None` SampleSet) — the only one still open. **FU-C-10** (legacy
+      v1 `k` in the estimate) and **FU-C-11** (Phase F writing the legacy
+      table) are both **closed by implementation**, §16a-BD.
 
 **6. Failure and edge cases.** n/a.
 
