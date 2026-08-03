@@ -1225,24 +1225,43 @@ fixed candidate and configuration
   -> v2 registry write
   -> affected-bucket promotion evaluation (O-3)
   -> applicability evaluation
-  -> time-budget consumer
-  -> calibration-state report
+  -> calibration-state report          <- terminus (C-C5b cancelled)
 ```
 
-Requirements:
+Requirements — see §17a for the pre-registered plan and §17b for the executed
+evidence:
 
-- [ ] a **temporary v2 registry**; the live v1 tree is read-only evidence
+- [x] a **temporary v2 registry**; the live v1 tree is read-only evidence
       and is never written to or rebuilt;
-- [ ] the same candidate and configuration repeated enough times to cross
+- [x] the same candidate and configuration repeated enough times to cross
       the frozen O-4 threshold (`validated_min_observations = 3`, with
       `consistency_max_min_ratio = 1.5`);
-- [ ] every identity dimension recorded: task, data-shape class, phase,
+- [x] every identity dimension recorded: task, data-shape class, phase,
       model family, GPU UUID, runtime stack, measurement kind;
-- [ ] a mismatching task, GPU UUID, phase or measurement kind is **rejected**
+- [x] a mismatching task, GPU UUID, phase or measurement kind is **rejected**
       — the frozen §8.A isolation rules, proven on real records rather than
       constructed ones;
-- [ ] the report says calibration is **inactive** while zero authoritative
+- [x] the report says calibration is **inactive** while zero authoritative
       buckets exist.
+
+**A Gate is evidence, not a checkbox.** Every box above is claimed only
+against §17b, which records the exact command, the Git SHA it ran at, the
+candidate and configuration, the temporary registry and workspace paths, the
+expected versus actual duration, the retained artifacts, the promotion
+results, the reporting results, and the two negative proofs (registry history
+does not move the live verdict; the v1 tree is byte-identical). A box ticked
+without a matching §17b entry is a defect in this document.
+
+**Recorded acceptance-gate determination for C1:**
+
+| Gate | Determination | Reason |
+|---|---|---|
+| **Gate 1** | **N/A — not applicable** | C1 changes no LLM-facing prompt, schema or decision surface. It touches calibration identity, persistence, promotion, applicability and reporting only. Scoped exemption: if any later commit on this branch touches a proposer/implementor/validator/interpreter prompt or output schema, that commit requires Gate 1 before merge. |
+| **Standard Gate 2** | **N/A — not applicable, and the wrong instrument** | Gate 2 drives a real LLM, which proposes a different candidate per attempt. C1's subject is *repeated observations of the same identity* crossing a threshold; a normal chain would exercise it barely or not at all. |
+| **C1 Layer-3 bounded validation** | **REQUIRED — executed, see §17b** | Fixed candidate, no LLM, real production entry points, real training, temporary registry. |
+
+Neither Gate 1 nor Gate 2 is described as *passed*. They are recorded as **not
+applicable, with the reason**, which is a different claim.
 
 This is a real-system validation and it is deliberately **not** Gate 2: no
 LLM is involved, and its subject is the calibration chain rather than the

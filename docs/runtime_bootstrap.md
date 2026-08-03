@@ -60,7 +60,39 @@ Exit code `0` = READY, `1` = NOT READY, `2` = usage error.
   [ok  ] bounded inference probe: 8.06 ms/batch
   [ok  ] registry self-validation: generation 3, all records hash-verified
   [ok  ] launch self-test: 8 checks | policy=runtime_decision_policy@1.0.0+…
+  registry     : /home/you/.siderius/runtime_calibration_v2
+  observations : 20 recorded
+  calibration: INACTIVE — 20 observation(s), 0 validated bucket(s); no bucket
+                has reached `validated`; only validated evidence is
+                calibration-authoritative (D4)
+  elapsed      : 41.2s
 ```
+
+### The `calibration:` line (V20 PR C1 / C-C7)
+
+Read this line, not `observations : N recorded`. The two answer different
+questions, and for weeks the registry above genuinely held 20 observations
+while nothing in it was ever authoritative — the count looked reassuring and
+meant nothing.
+
+| State | Meaning |
+|---|---|
+| `ACTIVE — N validated bucket(s) …` | calibration can decide something |
+| `INACTIVE — …` | evidence exists (possibly a lot) but **no bucket has reached `validated`**; the reason is printed |
+| `UNREADABLE (…)` | the registry could not be read at all. **Not** the same as empty — opposite meanings, identical record count |
+
+`ACTIVE` is defined by **validated buckets only**. `provisional` is a real
+state and deliberately does not count: a bucket at two consistent
+observations is on its way to authority, not in possession of it. So twenty
+thousand observations with zero validated buckets still prints `INACTIVE`.
+
+The line is read-only and never raises — a reporting failure cannot change
+what bootstrap concluded or cost a run its result.
+
+**It does not mean history decides anything.** Duration calibration is
+observability-only: it is collected, promoted and reported, and it does not
+feed the production allow/reject time decision. See
+`docs/design/v20_priorities/pr_c_measured_evidence_admission.md` (C-C5b).
 
 Every `FAIL` line carries a remedy. Common ones:
 
