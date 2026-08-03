@@ -98,8 +98,43 @@ class TestIdentityTravelsWithTheVerdict:
             )
 
 
+@pytest.fixture
+def cuda_present(monkeypatch):
+    """Make the DATASET branches reachable on any machine.
+
+    The resolver checks the accelerator FIRST, so on a GPU-less host every
+    call returns "no CUDA device is visible" and the dataset policy below is
+    never evaluated. Without this, the two tests that follow assert a reason
+    the code cannot produce there -- they passed only on a developer box with
+    a GPU and failed on CI (found 2026-08-03, CI run 30838392820).
+
+    Skipping instead would be worse: it would leave the dataset policy
+    untested in the one environment that gates merges.
+    """
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    return torch
+
+
 class TestTheResolverIsGeneric:
-    def test_a_missing_dataset_root_is_refused_not_defaulted(self):
+    def test_the_accelerator_is_checked_before_the_dataset(self, monkeypatch):
+        """Pins the ordering that made the two tests below machine-dependent.
+
+        It is deliberate -- no dataset makes a probe runnable without an
+        accelerator -- but it is load-bearing for every caller reading the
+        reason string, so it is asserted rather than assumed.
+        """
+        torch = pytest.importorskip("torch")
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+        cap = resolve_measurement_capability(**IDENTITY, dataset_root=None)
+
+        assert cap.probe_available is False
+        assert "CUDA" in (cap.unavailability_reason or ""), (
+            "with no accelerator the resolver must refuse on the accelerator, not on the dataset"
+        )
+
+    def test_a_missing_dataset_root_is_refused_not_defaulted(self, cuda_present):
         """The defect, inverted. The old code reached for `TIDMAD_DATA_DIR`
         when it needed a dataset; this refuses and says so, because a
         default here would be exactly the task assumption being removed."""
@@ -109,7 +144,7 @@ class TestTheResolverIsGeneric:
         assert cap.probe_available is False
         assert "no dataset root" in (cap.unavailability_reason or "")
 
-    def test_a_nonexistent_root_names_the_path(self, tmp_path):
+    def test_a_nonexistent_root_names_the_path(self, cuda_present, tmp_path):
         cap = resolve_measurement_capability(**IDENTITY, dataset_root=str(tmp_path / "absent"))
         assert cap.probe_available is False
         assert "absent" in (cap.unavailability_reason or "")

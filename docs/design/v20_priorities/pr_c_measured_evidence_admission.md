@@ -3212,6 +3212,37 @@ claim about a check the local machine could not run. That is a property of the
 CI configuration, not of this PR, and is worth an operator decision separate
 from C1.
 
+**Second CI finding: two C1 tests silently required a GPU.** The next run
+failed in `pytest`:
+
+```
+tests/unit/core/test_measurement_capability.py
+  test_a_missing_dataset_root_is_refused_not_defaulted
+    AssertionError: assert 'no dataset root' in ('no CUDA device is visible')
+  test_a_nonexistent_root_names_the_path
+    AssertionError: assert 'absent' in ('no CUDA device is visible')
+```
+
+`resolve_measurement_capability` checks the accelerator **before** the dataset
+(`measurement_capability.py:132-137`), so on a GPU-less runner the dataset
+branches those two tests exist to cover are **unreachable**. They passed only
+because the developer box has a GPU — precisely the "local success is not
+evidence of portability" failure the repository rules name, in tests C1 itself
+added (`3927d06`).
+
+*Fix, and why not the obvious one.* Skipping without CUDA would leave the
+dataset policy untested in the one environment that gates merges — a green
+suite proving less than it appears to, which is the same defect class in a new
+costume. Instead a `cuda_present` fixture monkeypatches
+`torch.cuda.is_available` so the dataset branches are reachable **everywhere**,
+and a new test `test_the_accelerator_is_checked_before_the_dataset` pins the
+ordering that made them machine-dependent in the first place.
+
+*Verified against CI's actual condition, not assumed.* `CUDA_VISIBLE_DEVICES=""`
+was confirmed to reproduce it exactly — `torch.cuda.is_available()` returns
+`False` and the resolver emits the identical reason string CI reported — and
+the whole unit suite was then re-run under it.
+
 ---
 
 ## 18. Expected artifacts
