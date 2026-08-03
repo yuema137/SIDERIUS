@@ -2077,6 +2077,31 @@ mode refuses. First-measurement production belongs to PR C.
   them until PR C lands. PR B would ship a guard that blocks the system
   it is meant to protect.
 
+> **CORRECTION 2026-08-03 UTC (V20 PR C2 producer audit).** The premise
+> below is **false for the worker PR A shipped**, and Direction C is not
+> available on those terms.
+>
+> PR A's isolated worker **never touches the GPU**. There is no `.cuda()`,
+> `max_memory_allocated`, `reset_peak_memory_stats` or `memory_reserved`
+> anywhere in `agent/skills/evaluate_vram_skill/`, and
+> `structural_probe.py:231` declares `device: torch.device | str = "cpu"`
+> with every call site omitting the argument. It runs a CPU structural trace
+> plus arithmetic — no real backward (`unpack_hook` raises by design), no
+> optimizer, and the CUDA context and cuDNN workspace are frozen constants
+> (`overhead.py:52-53`). Its `cuda_peak_allocated_gb` /
+> `cuda_peak_reserved_gb` fields are declared and never written.
+>
+> The 6,962 MiB figure is V19's **in-process** pre-flight — the very thing
+> PR A replaced. `pr_a_isolated_preflight_wiring.md:1867-1869` records that:
+> *"So V19's 6,962 MiB was the in-process pre-flight's allocations, not a
+> context."*
+>
+> Kept unedited below as the reasoning at the time. The realistic host for a
+> real GPU measurement is `core/runtime_control/probe_subprocess.py` +
+> `probe_production.py`, which already runs a real model, real optimizer and
+> real forward/backward/step — see
+> `pr_c_measured_evidence_admission.md` §15.2.1.
+
 **Direction C — reuse the pre-flight worker's own measurement.**
 PR A already runs an isolated worker on the GPU *before* training
 (`isolated_probe.py:451`), and that worker really allocates — its
