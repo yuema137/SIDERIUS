@@ -3049,7 +3049,75 @@ reporting; fixed by resolving through `default_registry_root()`.
 `formal_portion=0.01`, `formal_train_portion=0.02`, `formal_eval_portion=0.01`
 so a promoted formal round is bounded too, and 5 rounds so a
 contention-contaminated observation can be **replaced** rather than a
-threshold lowered. Results below.
+threshold lowered.
+
+**PASS.** Stopped after round 3 — every threshold was crossed and further
+rounds would have consumed a shared GPU for no additional evidence.
+
+#### Execution record
+
+| Item | Value |
+|---|---|
+| Git SHA at validation | `b06ef87e0bda15d925765092ca4469d55bdb1bdd` |
+| Harness | `layer3_c1.py` — `HyperparamTuningAgent(bridge_factory=FixedPlanBridge).run(...)`, default (real) sandbox |
+| Command | `SIDERIUS_ROOT_FOR_HARNESS=<repo> LAYER3_SCRATCH=<scratch>/layer3_run4 .venv/bin/python layer3_c1.py` |
+| LLM calls | **0** — planner substituted at the constructor DI seam; training, inference and scoring are real subprocesses |
+| Device | RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef` (shared box; a foreign process was resident) |
+| Candidate | `punet`, `seg=40000`, `batch=8`, `lr=5e-4`, `epochs=1`, `adamw`, focal(α=0.5, γ=2.0), `cuda` |
+| Registry | `<scratch>/layer3_run4/registry_v2/runtime_calibration_v2` (temporary; 88 KB retained) |
+| Workspace | `<scratch>/layer3_run4/workspace` |
+| Expected / actual | ≪30 min budgeted; 3 rounds completed, real scores `-1.226`, `-0.285`, and round 3 |
+
+#### Result — both buckets validated
+
+```
+calibration: ACTIVE — 2 validated bucket(s) from 6 eligible observation(s)
+```
+
+| bucket | n | level | ms/step | max/min | quarantined |
+|---|---|---|---|---|---|
+| `training \| optimizer_step \| single_candidate_idle` | 3 | **validated** | 48.419, 48.757, 49.028 | **1.013** | 0 |
+| `inference \| inference_batch \| single_candidate_idle` | 3 | **validated** | 15.754, 15.943, 16.833 | **1.068** | 0 |
+
+Every record carried a complete identity, from real hardware, identical across
+rounds:
+
+```
+measurement_kind      duration
+task_identity         tidmad_denoise
+data_shape_class      psd10000000_seg200_files20
+model_family          punet
+candidate_config_hash cfg:c23fbeb88652
+hardware_uuid         GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef
+phase                 training / inference   (separate buckets, never merged)
+```
+
+#### Pass criteria — all six met
+
+1. [x] Three successful attempts each derived a `duration` observation with a
+       complete identity including the real GPU UUID.
+2. [x] All three landed in the **same** bucket per phase — one
+       `candidate_config_hash` (`cfg:c23fbeb88652`) across rounds, confirming
+       the D-4 shared-identity fix end to end.
+3. [x] The O-4 ladder crossed **in order, live**: 1 → candidate only, 2 →
+       `provisional`, 3 → `validated`, both ratios far inside 1.5.
+4. [x] `INACTIVE` before promotion (with the D4 reason, while already holding
+       4 observations) → `ACTIVE` after.
+5. [x] **The live verdict is unchanged by the registry.** Same
+       `_gate_decision` inputs, run twice: against this ACTIVE registry (2
+       validated buckets, 6 eligible observations) and against an empty one —
+       **identical** `ALLOW` with `evidence_provenance=real_dataset_warmup`,
+       the live measurement, never a calibration source. This is the operator
+       decision demonstrated on genuinely authoritative stored evidence rather
+       than on an empty tree.
+6. [x] Live v1 tree byte-identical: `c1065a8b612fb691…` re-verified after the
+       run; the legacy `k` table still carries its 2026-07-20 mtime and no
+       `time_calibration*` file was written into either temporary tree.
+
+**Phase separation, observed rather than asserted:** training ≈48.7 ms/step
+and inference ≈16.2 ms/batch are ~3× apart and occupy separate buckets. The
+frozen rule that training and inference never substitute for each other is not
+a stylistic preference here — the numbers are simply different measurements.
 
 ---
 
