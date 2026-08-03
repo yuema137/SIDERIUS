@@ -2908,16 +2908,30 @@ touched node/skill `.md`. Also the stale ladder row at
 *Dependencies:* all prior commits.
 
 **3. Implementation plan.**
-- [ ] Update every `[ ]` above to `[x]` with recorded evidence.
-- [ ] Quote each documented flag and default against the merged source.
-- [ ] Record which Layer-3 confirmation ran, on which device.
+- [x] Update every C1 `[ ]` above to `[x]` with recorded evidence — §8.A
+      frozen invariants (ten `[x]` with named tests, two marked `[C2]` rather
+      than left ambiguous), §12.1 Layer-3 requirements, C-C7 §3/§5.
+- [x] Quote each documented flag and default against the merged source —
+      `docs/runtime_bootstrap.md` gained the `calibration:` line documented
+      against `bootstrap.py::render`; O-4 values quoted from
+      `DEFAULT_POLICY`; `SIDERIUS_CALIBRATION_DIR` semantics quoted from
+      `calibration.py:50,57-62` and `default_registry_root()`.
+- [x] Record which Layer-3 confirmation ran, on which device — §17b, run 4,
+      RTX 5090 `GPU-c30b6678-…`, SHA `b06ef87`.
 
 **4. Validation plan.** Documentation only; no tests. Verify by quoting
 source, not memory.
 
 **5. Acceptance criteria.**
-- [ ] No status line in the V20 folder contradicts the merged code.
-- [ ] Every follow-up (FU-C-1..FU-C-8) is filed with its evidence.
+- [x] No status line in the V20 folder contradicts the merged code —
+      `v20_priorities/README.md` PR C row updated to "C1 implemented, in
+      review" with the C-C5b cancellation; the C-C5b section header itself
+      marked superseded rather than deleted.
+- [x] Every follow-up is filed with its evidence — see the follow-up table
+      in §16a, extended with **FU-C-9** (legacy single-file mode crashes the
+      time estimator on a `None` SampleSet) and **FU-C-10** (legacy v1 `k`
+      lets history scale the production estimate — operator decision
+      required).
 
 **6. Failure and edge cases.** n/a.
 
