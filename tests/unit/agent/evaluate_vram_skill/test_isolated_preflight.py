@@ -669,9 +669,7 @@ class TestOneClassifierEverywhere:
         check was removed would otherwise re-fail this.
         """
         source = (REPO_ROOT / path).read_text()
-        code = "\n".join(
-            line for line in source.splitlines() if not line.lstrip().startswith("#")
-        )
+        code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
 
         assert "probe_budgets import" in code, path
         assert ("is_memory_exception" in code) or ("classify_host_memory_exception" in code), path
