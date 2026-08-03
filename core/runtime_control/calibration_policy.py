@@ -745,7 +745,10 @@ class ApplicabilityEnvelope(BaseModel):
             ]
             if values:
                 spans[dim] = (min(values), max(values))
-        regimes = {obs.concurrency_identity for obs in observations}
+        # Annotated, not inferred: a set comprehension over a Literal-typed
+        # expression widens the element type to `str`, so `regimes.pop()`
+        # would be `str` and could not populate a `ConcurrencyIdentity` field.
+        regimes: set[ConcurrencyIdentity] = {obs.concurrency_identity for obs in observations}
         return cls(
             ranges=spans,
             sample_count=len(observations),

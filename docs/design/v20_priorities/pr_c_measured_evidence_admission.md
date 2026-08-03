@@ -3157,6 +3157,41 @@ a stylistic preference here — the numbers are simply different measurements.
 
 ---
 
+## 17c. C1 final validation record
+
+At SHA `5a5e7b5d6d7059cf79a5cc38138225a5ee6dc007`, the PR head at open.
+
+| Check | Result |
+|---|---|
+| `pytest tests/unit -q` | **6388 passed, 2 skipped, 4 xfailed** (293s, exit 0) |
+| `pytest tests/unit/core -q` | 1500 passed, 2 skipped |
+| `ruff check .` | All checks passed |
+| `ruff format --check .` | 667 files already formatted |
+| **`pyright`** | **NOT RUN LOCALLY — cannot be.** Node on this host is v10.19.0; pyright's bundled JS fails to parse (`SyntaxError: Unexpected token =` in `vendor.js`). CI is the only environment that can run it. Recorded, not claimed. |
+| live v1 registry | byte-identical, `c1065a8b612fb691…`, re-verified after every GPU run |
+| legacy `k` table | untouched, mtime still 2026-07-20 |
+| working tree | clean |
+| Layer-3 | **PASS** — §17b |
+
+**Mutation proofs retained in this PR**
+
+| Mutation | Fails |
+|---|---|
+| revert `render()` to construct the registry itself | `test_bootstrap_render_survives_an_unusable_registry_root` — `PermissionError` escapes `render()` |
+| reintroduce `_config_hash` in the write path | `test_the_derivation_does_not_define_its_own_hash` |
+| delete the production derivation call | `test_the_derivation_is_called_in_production` / `test_it_is_called_from_run` |
+| delete the promotion trigger call | `test_the_promotion_trigger_is_reachable_from_production` |
+| move derivation into the shared append helper | `test_the_shared_append_helper_does_not_derive` |
+| reintroduce a historical parameter on `_gate_decision` | `test_gate_decision_has_no_historical_parameter` |
+| make the gate ignore its live input | `test_the_verdict_still_responds_to_the_live_measurement` (positive control) |
+
+**On pyright specifically.** Per the repository rule that local success is not
+evidence when a tool cannot run locally, nothing in this PR claims a passing
+pyright run from this machine. The blocking check runs on the exact PR head in
+CI, and that run — not this table — is the evidence.
+
+---
+
 ## 18. Expected artifacts
 
 Per PR, since the two are reviewed separately.
