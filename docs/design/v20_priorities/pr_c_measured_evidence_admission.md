@@ -1729,10 +1729,56 @@ this document said so rather than claiming both.
 
 ### Open C1 follow-up
 
-**FU-C-9** — `is_trial=False` (legacy single-file mode) builds no SampleSet and
-the time estimator raises `AttributeError` on `None`. Pre-existing defect in a
-deprecated path, unrelated to C1's changes. **The only open C1 item.**
-FU-C-10 and FU-C-11 are both closed by implementation.
+**FU-C-9 — DEFERRED. Does not block C1.** FU-C-10 and FU-C-11 are both closed
+by implementation.
+
+**What it is.** `execute_tools/workload_resolvers.py::resolve_training_workload`
+iterates `sample_set.items()` with no `None` guard. When `sample_set is None`
+it raises `AttributeError: 'NoneType' object has no attribute 'items'`, which
+surfaces as `Time check error: TimeEval error: ...` and aborts the round.
+
+**Exactly when it fires.** The tuner picks its mode as:
+
+```python
+if plan.is_trial:      mode = "trial"        # SampleSet built
+elif trial_allowed:    mode = "formal"       # SampleSet built
+else:                  mode = "single_file"  # sample_set = None  ← crash path
+```
+
+with `trial_allowed = agent_input.is_trial`. So the crash path is reached
+**iff `agent_input.is_trial == False`** — the deprecated single-file
+`--file_index` mode.
+
+**Why it does not affect C1 correctness or acceptance:**
+
+1. **C1 never touched it.** `workload_resolvers.py` is not in
+   `git diff origin/master...HEAD`, and the unguarded `sample_set.items()`
+   is present on `origin/master` at the same line. C1's only change to
+   `training_skill/estimator.py` was removing the legacy `k`, which sits
+   **downstream** of `_total_train_steps` — the diff touches neither
+   `_total_train_steps` nor `sample_set`. The crash was also observed during
+   Layer-3 run 2, *before* the `k` removal existed.
+2. **The production formal path is unaffected.** A forced formal round sets
+   `plan.is_trial = False` while `trial_allowed` stays `True`, so it resolves
+   to `mode = "formal"` and **does** build a SampleSet. Formal rounds do not
+   traverse the crash path.
+3. **The production chain does not reach it.** `run_one_iteration.py` defaults
+   `--is_trial` to `True` (`BooleanOptionalAction`); the documented standard
+   command in `CLAUDE.md` passes `--is_trial` explicitly.
+4. **It changes no C1 behaviour.** It is a missing input guard in a deprecated
+   mode — it cannot alter calibration identity, promotion, applicability,
+   reporting, or the live-only time authority C1 establishes.
+
+**How it is reachable.** An operator running `scripts/run_comparison.py`
+*without* `--is_trial` (that flag is `store_true`, so its default is `False`).
+That is the legacy single-file relic the project already treats as deprecated.
+
+**Follow-up scope and owner.** A separate small PR outside C1: either guard
+`resolve_training_workload` against `None` with an explicit typed error naming
+the mode, or refuse `single_file` mode at input validation. It belongs with
+whoever owns the deprecation of single-file mode, not with the calibration
+subsystem. **Not a hotfix** — it fails loudly and immediately at pre-flight,
+does not corrupt data, and cannot produce a wrong scientific result.
 
 ### Corrections made during this reconciliation
 
