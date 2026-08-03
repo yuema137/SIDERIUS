@@ -1765,7 +1765,46 @@ of this decision (k=2.0 → 3250 s). It is renamed
 than deleted — it is the one test that named the removed behaviour, so it is
 where a reader will look for the change.
 
-**Commit SHAs:** recorded below with the checkpoint map.
+**Commit SHAs:** `afc009e` (production), `bc14b97` (tests), `6700261` (docs).
+
+### Re-validation at the new head — production entry points
+
+The previous exact-head acceptance (`3f5fa23`) **no longer counts**: it
+validated code that still applied `k`. Re-run at `6700261`.
+
+**What is reused and why that is legitimate.** The Layer-3 O-4
+promotion/reporting evidence (§17b) stands: this change touches only
+`training_skill/estimator.py` and `evaluate_time_skill/wrapper.py`, and the
+calibration write/promotion/reporting path is byte-identical at this head. The
+**time-decision proof** is the part that had to be redone, and it was.
+
+**Bounded production validation — `verdict_invariance.py`.** Drives the REAL
+production functions (`estimate_wall_time_seconds`, the changed code, and
+`_gate_decision`, the verdict) against REAL on-disk registries — a legacy v1
+table carrying an extreme `k=50.0` **and** a v2 tree seeded from the Layer-3
+run-4 registry with its two `validated` buckets:
+
+| Case | Registries | live ms/step | seconds | verdict |
+|---|---|---|---|---|
+| **A** | v1 `k=50.0` + v2 validated buckets | 48.7 | **7.914** | `ALLOW` |
+| **B** | both empty | 48.7 | **7.914** | `ALLOW` |
+| **C** | v1 `k=50.0` + v2 validated buckets | 40 000 | 6500.000 | **`REJECT`** |
+
+* **INVARIANCE (A ≡ B): PASS.** Identical seconds, verdict and provenance. A
+  `k` of 50 would have made A fifty times B.
+* **POSITIVE CONTROL (C): PASS.** The verdict genuinely flips `ALLOW → REJECT`
+  when only the live measurement changes.
+
+*Control defect found and fixed during this run, recorded because it matters.*
+The control first used a 10× slower step (487 ms) and **reported FAIL** — the
+seconds moved 7.914 → 79.138, but 79 s still fits a 60-minute budget so the
+verdict correctly stayed `ALLOW`. The fault was in the control, not the code: a
+positive control for a *verdict* must make the verdict move, not merely the
+number feeding it. Re-run with a budget-breaking step time.
+
+**Registry integrity after re-validation:** v1 tree byte-identical
+(`c1065a8b612fb691…`); legacy `k` table mtime still 2026-07-20 — the validation
+wrote only into temporary trees.
 
 ---
 
