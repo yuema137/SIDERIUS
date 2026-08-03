@@ -6,6 +6,9 @@ on CPU and GPU because it reads tensor metadata, not GPU memory counters.
 
 from __future__ import annotations
 
+import gc
+import weakref
+
 import pytest
 import torch
 import torch.nn as nn
@@ -341,53 +344,66 @@ class SequentialModel(nn.Module):
         return state
 
 
-def test_pack_hook_returns_none_not_tensor():
+def test_pack_hook_does_not_retain_the_activation():
     """pack_hook must return None so autograd does NOT retain the actual
-    tensor data. This is the core of the v6 OOM fix."""
-    captured = []
+    tensor data. This is the core of the v6 OOM fix.
 
-    w = nn.Linear(4, 4)
-    x = torch.randn(2, 4, requires_grad=True)
+    Asserted through the only consequence that distinguishes the two
+    behaviours: whether the activation survives the probe. `seen` is
+    populated BEFORE pack_hook returns, so the reported byte counts are
+    byte-identical whether it returns None or the tensor -- an earlier
+    version of this test asserted only `total_saved_bytes > 0` and
+    `unique_storage_count > 0` and passed with the fix reverted.
 
-    def spy_pack(t):
-        captured.append(t)
-        return t
+    A weakref is the observation: if autograd retained the tensor, the
+    reference outlives the probe.
+    """
+    w = nn.Linear(64, 64)
+    x = torch.randn(8, 64, requires_grad=True)
+    holder: dict[str, weakref.ref] = {}
 
-    # First: baseline — how many tensors autograd saves
-    with torch.autograd.graph.saved_tensors_hooks(spy_pack, lambda t: t):
-        _ = w(x).sum()
-    baseline_count = len(captured)
-    assert baseline_count > 0
+    def forward():
+        activation = torch.relu(w(x))
+        holder["ref"] = weakref.ref(activation)
+        return activation.sum()
 
-    # Now verify our probe returns None
-    report = probe_autograd_tape(lambda: w(x).sum())
-    assert report.total_saved_bytes > 0
-    assert report.unique_storage_count > 0
+    report = probe_autograd_tape(forward)
+    gc.collect()
+
+    assert report.total_saved_bytes > 0, "fixture no longer saves anything"
+    assert holder["ref"]() is None, (
+        "autograd is still holding the activation after the probe -- pack_hook "
+        "returned the tensor instead of None, which is the v6 OOM regression"
+    )
 
 
 def test_probe_autograd_tape_unpack_raises_on_backward():
-    """If someone accidentally calls backward() on the loss after probing,
-    the unpack_hook should raise with a clear error."""
+    """If someone calls backward() on a loss produced under the probe, the
+    unpack_hook must raise with a clear error rather than silently
+    computing gradients from discarded tensors.
+
+    Drives PRODUCTION's hook. An earlier version of this test pasted a copy
+    of pack_hook/unpack_hook into the test body and asserted that its own
+    RuntimeError fired -- it exercised torch, not structural_probe, and no
+    edit to production could fail it.
+
+    `probe_autograd_tape` deletes the loss before returning, so reaching the
+    hook requires leaking it out through the forward callable. That is
+    exactly the future refactor the guard exists to catch.
+    """
     w = nn.Linear(4, 4)
     x = torch.randn(2, 4, requires_grad=True)
+    leaked: dict[str, torch.Tensor] = {}
 
-    seen = {}
-
-    def pack_hook(t):
-        storage = t.untyped_storage()
-        ptr = storage.data_ptr()
-        if ptr and ptr not in seen:
-            seen[ptr] = storage.nbytes()
-        return None
-
-    def unpack_hook(_):
-        raise RuntimeError("probe_autograd_tape: backward() must not be called")
-
-    with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+    def forward():
         loss = w(x).sum()
+        leaked["loss"] = loss
+        return loss
 
-    with pytest.raises(RuntimeError, match=r"backward.*must not be called"):
-        loss.backward()
+    probe_autograd_tape(forward)
+
+    with pytest.raises(RuntimeError, match=r"backward\(\) must not be called"):
+        leaked["loss"].backward()
 
 
 def test_sequential_model_probe_gc_called_between_phases():
