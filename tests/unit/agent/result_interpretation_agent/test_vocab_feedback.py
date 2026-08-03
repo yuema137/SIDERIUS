@@ -218,7 +218,14 @@ class TestGenerateDiscoveries:
         assert any("PARTIAL" in d.description for d in discoveries)
         assert any("N/A" in d.description for d in discoveries)
 
-    def test_no_prediction(self):
+    def test_no_prediction_and_no_sota_yields_nothing(self):
+        """With nothing to compare against, there is no finding to report.
+
+        This asserted `all(d.kind == "discovery" for d in discoveries)` over
+        a list that is EMPTY in this configuration -- Discovery 1 needs a
+        prediction and Discovery 2 needs a SOTA, so both are skipped. `all()`
+        over an empty list is True, so no production edit could fail it.
+        """
         discoveries = generate_discoveries(
             prediction_eval=None,
             model_type="test_model",
@@ -226,8 +233,7 @@ class TestGenerateDiscoveries:
             inherited_components=[],
             proposed_vocab_links=[],
         )
-        # No prediction = no prediction discovery, but might still have score comparison
-        assert all(d.kind == "discovery" for d in discoveries)
+        assert discoveries == []
 
     def test_score_vs_sota(self):
         eval_result = {
@@ -855,22 +861,12 @@ class TestComputeVocabDiversityRatio:
         ]
         assert compute_vocab_diversity_ratio(vocab) == 1.0
 
-    def test_half_candidates(self):
-        vocab = [
-            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
-            VocabEntry(name="b", kind="feature", description="y", tier="candidate"),
-        ]
-        assert abs(compute_vocab_diversity_ratio(vocab) - 0.5) < 1e-9
-
-    def test_discoveries_excluded_from_ratio(self):
-        """Discoveries are never counted — only feature/capability entries matter."""
-        vocab = [
-            VocabEntry(name="a", kind="feature", description="x", tier="canonical"),
-            VocabEntry(name="d1", kind="discovery", description="found X", tier="candidate"),
-            VocabEntry(name="d2", kind="discovery", description="found Y", tier="candidate"),
-        ]
-        # 1 feature/capability total, 0 candidates → 0.0
-        assert compute_vocab_diversity_ratio(vocab) == 0.0
+    # `test_half_candidates` (1 canonical + 1 candidate) and
+    # `test_discoveries_excluded_from_ratio` (1 feature + 2 discoveries)
+    # lived here. `test_mixed_vocab` below is both at once: its 1/3 is only
+    # reachable if canonical entries are in the denominator and discoveries
+    # are in NEITHER -- counting the three discoveries would give 4/6, and
+    # dropping canonical from the denominator would give 1/1.
 
     def test_mixed_vocab(self):
         """2 canonical features, 1 candidate feature, 3 discoveries → ratio = 1/3."""
