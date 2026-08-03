@@ -3016,6 +3016,34 @@ grind through five attempts.
 *Kept as evidence.* Run 3's registry is retained; it is the only artifact in
 which the contention-exclusion path was exercised on live hardware.
 
+### Registry-safety finding: one env var governs BOTH systems
+
+`SIDERIUS_CALIBRATION_DIR` is read by both evidence systems:
+
+* `evaluate_time_skill/calibration.py:50,57-62` — the **legacy v1** per-GPU
+  `time_calibration_<gpu>.json` table;
+* `calibration_registry.py::default_registry_root()` — the **v2** tree, as
+  `$SIDERIUS_CALIBRATION_DIR/runtime_calibration_v2`.
+
+Two consequences, both good, both previously unstated:
+
+1. The session isolation fixture in `tests/conftest.py` pins that one
+   variable and therefore protects **both** systems — the legacy table was
+   never at risk from the suite either.
+2. The Layer-3 harness isolates both for the same reason. Verified after the
+   runs: `~/.siderius/time_calibration_nvidia_geforce_rtx_5090.json` still has
+   its 2026-07-20 mtime, and no `time_calibration*` file was written into
+   either temporary tree (the Phase F post-flight only fires on
+   `real_dataset_warmup` evidence, and these rounds ran
+   `static_uncalibrated`).
+
+*Also note the shape of a mistake worth not repeating.* The variable is a
+**base** directory, not the registry root — the v2 tree is a child of it.
+Reporting against the base directory finds nothing and is indistinguishable
+from "the writer never ran", which is precisely the silent never-match this PR
+exists to remove. The first Layer-3 harness reproduced that bug in its own
+reporting; fixed by resolving through `default_registry_root()`.
+
 ### Run 4 — bounded formal parameters, 5 rounds
 
 `formal_portion=0.01`, `formal_train_portion=0.02`, `formal_eval_portion=0.01`
