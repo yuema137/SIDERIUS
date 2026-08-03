@@ -60,9 +60,9 @@ destroy evidence to satisfy a naming rule.
 
 | PR | Document | Status |
 |---|---|---|
-| **A** | [`pr_a_isolated_preflight_wiring.md`](pr_a_isolated_preflight_wiring.md) | **COMPLETE AND VALIDATED 2026-08-01 — ready to merge (PR #152, unmerged).** A5 PASS (contract regression found, repaired, revalidated 10/10); A6 PASS — parents 0 MiB, 125.9 s concurrent training, pair peak 15.52 GiB vs V19's 28.05 GiB. Verdict: `A6 PASS — PR A READY TO MERGE; PR B REQUIRED BEFORE V20 LAUNCH` |
-| **B** | [`pr_b_gpu_aggregation_attribution.md`](pr_b_gpu_aggregation_attribution.md) | **REQUIRED — no longer conditional. IN IMPLEMENTATION.** Design approved; D-B1..D-B5 all resolved (no decision blocks B-C1 any more). Landed: B-C1 accounting, B-C2a1/a2 execution seam, B-C2b bounded evidence, B-C3a attribution. Pending: B-C3b (record + task-layer gating), B-C4 (headroom guard, the only control-flow change), B-C5 (doc sync), and gates B-G1/B-G2 which require operator approval |
-| **C** | `pr_c_measured_evidence_admission.md` | Not started |
+| **A** | [`pr_a_isolated_preflight_wiring.md`](pr_a_isolated_preflight_wiring.md) | **MERGED 2026-08-01** — PR #152, merge commit `5c18946`. Validated before merge: A5 PASS (contract regression found, repaired, revalidated 10/10); A6 PASS — parents 0 MiB, 125.9 s concurrent training, pair peak 15.52 GiB vs V19's 28.05 GiB. The pre-merge verdict was `A6 PASS — PR A READY TO MERGE; PR B REQUIRED BEFORE V20 LAUNCH`, and both halves of it have since happened |
+| **B** | [`pr_b_gpu_aggregation_attribution.md`](pr_b_gpu_aggregation_attribution.md) | **MERGED 2026-08-02** — PR #153, merge commit `4472f15`. All checkpoints landed: B-C1 accounting, B-C2a1/a2 execution seam, B-C2b bounded evidence, B-C3a/B-C3b attribution, B-C4 headroom guard, B-C5 doc sync; gates B-G1/B-G2/B-G3 run under operator approval; D-B1..D-B5 resolved, D-B4 shipped fail-closed by default. The attribution vocabulary is production code, not a proposal — `core/runtime_control/failure_attribution.py:49-52`, with reduction authority frozen to `candidate_gpu_capacity` alone |
+| **C** | [`pr_c_measured_evidence_admission.md`](pr_c_measured_evidence_admission.md) | **DESIGN DRAFT — awaiting operator review.** No implementation has begun and none is authorized until the design is approved (§20.1). |
 | **D** | `pr_d_healthgate_formal_policy.md` | Not started — needs an operator policy decision first (§12A.4) |
 | **E** | `pr_e_campaign_scoped_control.md` | Not started |
 

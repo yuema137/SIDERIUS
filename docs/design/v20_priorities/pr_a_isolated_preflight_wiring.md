@@ -1,8 +1,13 @@
 # Design: V20 PR A — Wire Isolated Pre-flight into Production
 
-- **Status**: **PHASE 1 COMPLETE — awaiting bounded GPU validation**
-  2026-07-31. All five commits landed (§20.1); implementation record and
-  test evidence in §20. Branch `feat/v20-pr-a-isolated-preflight`.
+- **Status**: **MERGED 2026-08-01** — PR #152, merge commit `5c18946`.
+  A5 and A6 both PASS on real GPU (§21); the checkpoint markers in §20
+  below are the record of the implementation as it was written and are
+  superseded by the merge — see the note under "Checkpoint status" there.
+  Branch `feat/v20-pr-a-isolated-preflight`, now deleted.
+- **Superseded status line** (kept as the record of what was true at the
+  time): *PHASE 1 COMPLETE — awaiting bounded GPU validation, 2026-07-31.
+  All five commits landed (§20.1).*
 - **Parent plan**: `docs/design/v20_priorities.md` §6.6 (remediation),
   §13.1 requirement 1 (launch gate), §20.3 (PR scope)
 - **Audited against**: `master` @ `6fa5a83` (2026-07-31)
@@ -566,6 +571,20 @@ evidence** — never marked from intent.
 > and no loader. They are recorded as inapplicable rather than
 > reinterpreted, so that a later reader does not look for ordering
 > evidence that was never in scope.
+
+> **Checkpoint status — superseded by the merge (2026-08-02 audit).**
+> All five checkpoints A-C1..A-C5 landed and merged in PR #152
+> (`5c18946`). The per-checkpoint markers below were written as the work
+> progressed and are left unedited as the record of that sequence; they
+> are **not** current status. A-C3/A-C4/A-C5 in particular still read
+> "not started", which the A5/A6 GPU validation could not have passed
+> without: verified on `master` that
+> `agent/skills/evaluate_vram_skill/preflight_adapter.py` exists (A-C3),
+> that the tuner imports `run_production_preflight` at
+> `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:51`
+> (A-C4), and that
+> `tests/unit/guardrails/test_preflight_production_reachability.py` is
+> present (A-C5).
 
 ### A-C1 — Widen the IPC contract (`isolated_probe.py`)
 

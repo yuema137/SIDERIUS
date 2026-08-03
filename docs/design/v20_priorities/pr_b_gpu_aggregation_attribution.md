@@ -1,5 +1,26 @@
 # PR B — Runtime GPU aggregate accounting and OOM attribution
 
+**Status: MERGED 2026-08-02** — PR #153, merge commit `4472f15`.
+
+All checkpoints landed, including the three the table below still lists as
+pending or blocked: B-C4a0 (control boundary extraction), B-C4 (headroom
+guard) and B-C5 (doc sync). Gates B-G1, B-G2 and B-G3 ran under operator
+approval. D-B4 shipped with pair-cap oversubscription **fail-closed by
+default**, and `phase` (`trial`|`formal`) was separated from
+`gpu_admission_enforcement` (`observe_only`|`enforce`) so merging PR B could
+not halt formal training before PR C exists.
+
+The attribution vocabulary is production code, not a proposal:
+`core/runtime_control/failure_attribution.py:49-52` declares
+`candidate_gpu_capacity`, `gpu_contention`, `host_memory_pressure`,
+`external_termination` (plus `unknown`), with `_MAY_RECOMMEND_REDUCTION`
+frozen to `candidate_gpu_capacity` alone (`:57`) and a validator enforcing
+it (`:80`). That supersedes the provisional vocabulary and the
+process-identity plan sketched earlier in this document.
+
+**The table below is the record of the second operator review and is left
+unedited. It is not current status.**
+
 **Status after the second operator review (2026-08-01):**
 
 | Commit | State |
