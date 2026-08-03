@@ -3190,6 +3190,28 @@ evidence when a tool cannot run locally, nothing in this PR claims a passing
 pyright run from this machine. The blocking check runs on the exact PR head in
 CI, and that run — not this table — is the evidence.
 
+**And it immediately earned its keep.** The first CI run on the PR head failed
+on a blocking pyright error that had been latent since `f3ab878`:
+
+```
+calibration_policy.py:752:34 - error: Argument of type "str | None" cannot be
+assigned to parameter "concurrency_identity" of type "ConcurrencyIdentity | None"
+```
+
+A set comprehension over a `Literal`-typed expression widens the element type
+to `str`, so `regimes.pop()` could not populate the envelope's
+`ConcurrencyIdentity` field. Fixed by **annotating the set**, not by loosening
+the field or suppressing the rule — the Literal is the point: it is what stops
+an arbitrary string becoming a concurrency class. (`2fed791`)
+
+*Why nothing caught it earlier, worth knowing beyond this PR:* the workflow
+triggers on `pull_request` only. A long-lived branch therefore accumulates
+commits with **zero** CI coverage until a PR is opened — 34 commits, in this
+case. Every "green" claim made on this branch before 2026-08-03 was a local
+claim about a check the local machine could not run. That is a property of the
+CI configuration, not of this PR, and is worth an operator decision separate
+from C1.
+
 ---
 
 ## 18. Expected artifacts
