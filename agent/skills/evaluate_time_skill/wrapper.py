@@ -535,7 +535,6 @@ def _gate_decision(
     effective_budget_minutes: float,
     runtime_phase: str,
     probe_record_available: bool = False,
-    historical_calibration: object | None = None,
 ) -> dict:
     """Ask the shared runtime policy whether this projection may gate the
     round (C8c).
@@ -579,111 +578,13 @@ def _gate_decision(
         # quietly pricing the round from a prior.
         evidence_channel="ok" if probe_record_available else "probe_absent",
     )
-    out = {
+    return {
         "kind": decision.kind,
         "reasons": list(decision.reasons),
         "evidence_provenance": decision.evidence_provenance,
         "evidence_rank": decision.evidence_rank,
         "policy_identity": policy.identity,
     }
-
-    # C-C5b / O-6. Applicable measured history is recorded alongside the
-    # verdict and may SUPPORT allowing a candidate through. It can never
-    # produce a rejection: `decision.kind` is computed above, before this
-    # block, and nothing here writes it. An over-budget historical result
-    # stays advisory -- rejecting on evidence measured against a different
-    # run is how a subsystem starts refusing work nothing bounds, whereas
-    # allowing a slow candidate is already bounded by the budget and the
-    # watchdog.
-    if historical_calibration is not None:
-        from core.runtime_control.calibration_prelaunch import historical_support_only
-
-        seconds = getattr(historical_calibration, "expected_seconds", None)
-        supports, why = historical_support_only(
-            historical_calibration,
-            predicted_seconds=float(seconds) if seconds is not None else float("inf"),
-            budget_seconds=max(effective_budget_minutes, 1e-9) * 60.0,
-        )
-        out["historical_calibration_provenance"] = getattr(
-            historical_calibration, "provenance", None
-        )
-        out["historical_supports_allow"] = supports
-        out["reasons"] = [*out["reasons"], *why]
-    return out
-
-
-def _prelaunch_calibration(
-    sandbox,
-    *,
-    model_type: str,
-    model_config: dict,
-    train_config: dict,
-    loss_config: str | dict,
-    seg_size: int,
-    batch_size: int,
-    data_dir,
-):
-    """Applicable measured duration history for THIS candidate, or None.
-
-    C-C5b. Runs at the pre-launch time check -- before the training
-    subprocess exists -- because a time-budget decision made after launch
-    cannot gate the phase it is meant to gate.
-
-    The identity is built through the SHARED canonical context, so it is the
-    same value the training engine records. Nothing is defaulted: a missing
-    device UUID, task or data-shape class yields no evidence rather than an
-    identity that matches a record describing something else.
-
-    Never raises. Losing calibration must cost this decision its history and
-    nothing else -- the caller keeps its existing non-authoritative estimate.
-    """
-    try:
-        from core.runtime_control.calibration_context import (
-            CalibrationContextInputs,
-            model_precision,
-            trainable_param_count,
-        )
-        from core.runtime_control.calibration_prelaunch import lookup_applicable_duration
-        from execute_tools.data_paths import resolve_tidmad_measurement_capability
-        from ml_models.models_format_sandbox import get_config_class
-        from ml_models.models_sandbox import MODEL_REGISTRY
-
-        config_cls = get_config_class(model_type)
-        if config_cls is None:
-            return None
-        config_obj = config_cls(**model_config)
-        loss_type = (
-            loss_config.get("loss_type", "ce") if isinstance(loss_config, dict) else loss_config
-        )
-        model = (
-            MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
-            if model_type == "fcnet"
-            else MODEL_REGISTRY[model_type](config_obj)
-        )
-
-        capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
-        device_identity = getattr(sandbox, "device_identity", None)
-
-        result = lookup_applicable_duration(
-            context_inputs=CalibrationContextInputs(
-                precision=model_precision(model),
-                optimizer_type=str(train_config.get("optimizer_type", "adamw")),
-                model_family=model_type,
-                param_count=trainable_param_count(model),
-                seg_size=seg_size,
-                batch_size=batch_size,
-            ),
-            task_identity=capability.task_identity,
-            data_shape_class=capability.data_shape_class,
-            hardware_uuid=getattr(device_identity, "uuid", None),
-            phase="training",
-        )
-        if not result.found:
-            print(f"    [TimeEval] no applicable duration calibration: {'; '.join(result.reasons)}")
-        return result.estimate
-    except Exception as exc:
-        print(f"    [TimeEval] calibration lookup skipped (non-fatal): {exc}")
-        return None
 
 
 def run_skill(sandbox, **kwargs) -> dict:
@@ -949,16 +850,6 @@ def run_skill(sandbox, **kwargs) -> dict:
     # the authority rule the V19 wave-1 incident violated (§7.4 matrix
     # rows static_prior/historical_prior_only = cannot_block).
     runtime_decision = _gate_decision(
-        historical_calibration=_prelaunch_calibration(
-            sandbox,
-            model_type=model_type,
-            model_config=model_config,
-            train_config=train_config,
-            loss_config=loss_config,
-            seg_size=seg_size,
-            batch_size=batch_size,
-            data_dir=data_dir,
-        ),
         result_shape={
             "status": "success",
             "estimated_minutes": round(total_min, 2),
