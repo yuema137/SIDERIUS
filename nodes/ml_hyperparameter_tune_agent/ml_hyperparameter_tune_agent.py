@@ -2648,6 +2648,99 @@ def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -
         print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
 
 
+def _derive_calibration_from_observation(
+    sandbox,
+    *,
+    rv_block: dict | None,
+    device_identity,
+    data_dir: str | None,
+) -> None:
+    """Derive a v2 calibration record from a SUCCESSFUL attempt's observation.
+
+    V20 PR C1 / C-C3c. System A has already persisted the raw measurement by
+    the time this runs; this is the derived calibration view of that same
+    measurement, never a second one.
+
+    WHY THIS IS NOT INSIDE `_append_runtime_observation`. That helper has
+    four production call sites and three of them record failures -- a
+    subprocess rejection, an evidence-channel failure and a wall-clock
+    timeout. Deriving there would feed failure evidence into throughput
+    calibration, which `calibration_policy` forbids and explicitly
+    anticipates ("should another producer ever record failure evidence as an
+    observation"). This is called only from the success path.
+
+    Best-effort, like the System A append beside it: the scientific result
+    is already decided and persisted, and losing a calibration sample must
+    never cost an attempt. The loss is printed rather than swallowed, so a
+    missing sample is visible.
+    """
+    if not rv_block:
+        return
+    try:
+        from core.runtime_control.calibration_derivation import (
+            DERIVABLE_PHASES,
+            IdentityContext,
+            derive_duration_calibration_record,
+            persist_duration_calibration_record,
+        )
+        from core.runtime_control.calibration_policy import stack_identity
+        from core.runtime_control.calibration_registry import CalibrationRegistry
+        from core.runtime_control.probe_production import (
+            collect_execution_environment_profile,
+            collect_hardware_compatibility_profile,
+        )
+        from core.runtime_control.provenance import capture_software_stack
+        from core.runtime_control.records import RuntimeObservation
+        from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+        observation = RuntimeObservation.model_validate(rv_block)
+        capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+        uuid = getattr(device_identity, "uuid", None)
+        stack = capture_software_stack()
+
+        # A missing dimension drives QUARANTINE, never a fabricated default:
+        # `IdentityContext` refuses a blank, so an absent UUID or task yields
+        # `identity=None` and the derivation quarantines with the reason.
+        identity = None
+        if uuid and capability.task_identity and capability.data_shape_class:
+            identity = IdentityContext(
+                task_identity=capability.task_identity,
+                data_shape_class=capability.data_shape_class,
+                hardware_uuid=str(uuid),
+                runtime_stack_identity=stack_identity(stack),
+            )
+
+        registry = CalibrationRegistry()
+        hardware_id = registry.put_hardware_profile(collect_hardware_compatibility_profile())
+        environment_id = registry.put_environment_profile(
+            collect_execution_environment_profile(
+                installation_id=registry.installation_id(),
+                hardware_compatibility_id=hardware_id,
+                concurrency_regime="single_candidate_idle",
+            )
+        )
+
+        for phase in DERIVABLE_PHASES:
+            outcome = persist_duration_calibration_record(
+                derive_duration_calibration_record(observation, phase, identity=identity),
+                registry=registry,
+                hardware_compatibility_id=hardware_id,
+                execution_environment_id=environment_id,
+                concurrency_identity="single_candidate_idle",
+                producer_identity="derived_runtime_observation@1.0.0",
+                provenance=(
+                    "real_training_verification"
+                    if phase == "training"
+                    else "real_inference_verification"
+                ),
+                software_stack=stack,
+            )
+            if outcome.kind in ("failed", "quarantined"):
+                print(f"[runtime_control] calibration {phase}: {outcome.kind} — {outcome.detail}")
+    except Exception as exc:
+        print(f"[runtime_control] calibration derivation failed (non-fatal): {exc}")
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -4699,6 +4792,16 @@ class HyperparamTuningAgent:
                     _emit_record(sandbox, final_record)
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
+                    )
+                    # V20 PR C1 / C-C3c: the derived calibration view of the
+                    # SAME measurement System A just persisted. Success path
+                    # only -- see the helper's docstring for why not the
+                    # shared append helper.
+                    _derive_calibration_from_observation(
+                        sandbox,
+                        rv_block=final_record["runtime_verification"],
+                        device_identity=device_identity,
+                        data_dir=time_data_dir,
                     )
 
                     # Phase F post-flight: update per-GPU calibration from this

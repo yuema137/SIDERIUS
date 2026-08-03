@@ -1963,8 +1963,37 @@ constraint).
             instead of raising — System A is already durable, so a storage
             problem costs this run its calibration sample and nothing else.
             8 further cases, 4 mutation proofs.
-      - [ ] **part 3** — production wiring at the success seam, with
-            workflow-parity, failure-isolation and reachability tests.
+      - [x] **part 3** — production wiring at the success seam.
+            `_derive_calibration_from_observation` is a focused helper (not
+            branching inside `run()`), called once, immediately after the
+            System A append so the raw measurement is durable first.
+            Identity comes from what is already in scope: `device_identity`
+            (`:2883`), `time_data_dir` (`:2842`), the C-C3b capability and
+            C-C1's `capture_software_stack`. A missing UUID yields
+            `identity=None` and the derivation quarantines — no placeholder
+            is ever substituted, since a fabricated UUID would produce an
+            eligible record naming the wrong device.
+
+            The helper is **total**: it returns for any input and prints the
+            loss rather than raising, because the experiment result is
+            already decided and persisted by the time it runs.
+
+            14 guard tests. Mutation proofs: production hook deleted → 4
+            failures; derivation moved into the shared append helper → 2;
+            derivation reordered before the System A append → 1; placeholder
+            UUID fabricated → 1.
+
+            **Test defect found and fixed during validation.** A full core
+            run left a real `~/.siderius/runtime_calibration_v2` tree behind:
+            `test_the_helper_is_total` passes `{"timestamp": "t"}`, which
+            PARSES as a valid `RuntimeObservation`, so the helper reached a
+            real `CalibrationRegistry()` at the default root and created
+            profiles there. No observations or quarantined records were
+            written — the derivation correctly returned `NotDerivable` — but
+            the tree existed. Fixed with an autouse fixture pointing
+            `SIDERIUS_CALIBRATION_DIR` at `tmp_path`; re-verified that a full
+            core run now creates nothing, and v1 stays at digest
+            `df0351b59a5bd0bd`.
 - [ ] Proceed autonomously unless inspection reveals a material deviation.
 
 **4. Validation plan.**
