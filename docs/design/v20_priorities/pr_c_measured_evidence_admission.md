@@ -2950,6 +2950,62 @@ the v1 digest check. Recorded in §17b.
 
 ---
 
+## 17b. C1 Layer-3 execution record
+
+### Run 3 — 3 rounds on a SHARED GPU (superseded, but the findings stand)
+
+Device: RTX 5090, `GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef`. Real training,
+real inference, real scoring; `FixedPlanBridge`, zero LLM calls. Rounds 1 and
+2 completed with real scores (`-0.0776`, `+0.8962`).
+
+**Six observations, four buckets:**
+
+| bucket | n | level | ms | ratio | identity | eligibility |
+|---|---|---|---|---|---|---|
+| `training \| single_candidate_idle` | 2 | **provisional** | 41.574, 48.095 | 1.157 | full, real GPU UUID, `cfg:c23fbeb88652` | clean |
+| `inference \| single_candidate_idle` | 2 | **provisional** | 17.810, 24.604 | 1.381 | full, same `cfg` | clean |
+| `training \| foreign_contended` | 1 | unvalidated | 40.785 | — | **absent** | `concurrency_identity='foreign_contended' is not clean` |
+| `inference \| foreign_contended` | 1 | unvalidated | 6.826 | — | **absent** | same |
+
+**What this actually confirms — more than a clean 3/3 would have.** The box is
+shared, and a foreign process (`/home/wenyu/summer/.venv/bin/python`, 2.9 GiB)
+was resident during part of the run. The system therefore exercised its
+contamination paths on real hardware rather than in a fixture:
+
+* contention **separates buckets** — the contended measurements did not land
+  in, or pollute, the idle buckets (the §8 bucket-separation rule, live);
+* contended observations are **ineligible** and can never be promoted;
+* their identity is **absent, not fabricated** — `TestIdentityIsNotFabricated`
+  is not a hypothetical;
+* both clean buckets sit at exactly 2 → `provisional`, and C-C7 reports
+  `INACTIVE` **with the D4 reason** while holding 6 observations. That is the
+  precise failure mode this PR exists to remove: a registry that looks
+  populated and is not authoritative, now saying so out loud.
+* the same `candidate_config_hash` (`cfg:c23fbeb88652`) appears in every
+  bucket across rounds, confirming the fixed candidate hashes stably and that
+  the D-4 shared-identity fix holds end-to-end.
+
+**Why it was stopped rather than finished.** Round 3 was promoted to a
+**formal** round, which uses `formal_portion` / `formal_train_portion` —
+left at their defaults (0.1 / 1.0) these are *not* bounded by the trial caps.
+The estimate came out at **1801.9 min against a 25 min budget** and the
+attempt OOMed. That is a harness scoping error, not a production defect: the
+time gate correctly refused and requested a probe. Stopped under the §17a
+stop criterion ("wall time materially exceeds the bound") rather than left to
+grind through five attempts.
+
+*Kept as evidence.* Run 3's registry is retained; it is the only artifact in
+which the contention-exclusion path was exercised on live hardware.
+
+### Run 4 — bounded formal parameters, 5 rounds
+
+`formal_portion=0.01`, `formal_train_portion=0.02`, `formal_eval_portion=0.01`
+so a promoted formal round is bounded too, and 5 rounds so a
+contention-contaminated observation can be **replaced** rather than a
+threshold lowered. Results below.
+
+---
+
 ## 18. Expected artifacts
 
 Per PR, since the two are reviewed separately.
