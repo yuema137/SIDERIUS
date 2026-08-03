@@ -935,10 +935,23 @@ def _resolve_time_check_probe_request(
     )
     from core.runtime_control.provenance import capture_software_stack
 
-    available, detail = probe_runner_availability()
+    # V20 PR C1 / C-C3b. The capability is resolved by the TASK layer, which
+    # knows which dataset it needs; generic runtime-control used to import
+    # `TIDMAD_DATA_DIR` itself and so refused silently on any other task.
+    # `data_dir` is already this function's parameter, so the resolved root
+    # is the one the probe will actually use.
+    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+    capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
+    available, detail = probe_runner_availability(capability)
     if not available:
         breakdown["probe_resolution"] = "unavailable"
         breakdown["probe_resolution_detail"] = detail
+        # The reason is recorded, never a bare False: an unavailable
+        # measurement path that does not say why is what let the V19 posture
+        # persist unnoticed.
+        breakdown["probe_capability_task"] = capability.task_identity
+        breakdown["probe_capability_reason"] = capability.unavailability_reason
         print(
             f"  [PROBE] REQUEST_PROBE could not be resolved by measurement in this "
             f"environment ({detail}). Recorded as advisory — this is NOT a measured "

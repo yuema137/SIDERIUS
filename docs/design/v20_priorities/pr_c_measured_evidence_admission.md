@@ -1310,6 +1310,19 @@ Stop and report rather than proceeding if:
 - **FU-C-5**: `_build_resource_admission_record` emits a literal
   `"denoising_score": None` through `_build_skip_record` (`:424`) — a metric
   name inside a resource-admission record.
+- **FU-C-6**: `core/runtime_control/probe_production.py` is in practice a
+  **TIDMAD-specific probe runner**. It falls back to `TIDMAD_DATA_DIR` at
+  `:137` when no `data_dir` is supplied, and loads TIDMAD-shaped batches
+  through `execute_tools.probe_data.load_probe_batch` at `:148`. Supporting
+  a second task needs a **task/dataset adapter**, not more branching inside
+  generic runtime-control. Not blocking C-C3b, whose subject is the
+  capability gate; recorded so the next task port starts from the adapter
+  rather than from an `if task ==` inside `core/`.
+- **FU-C-7**: `core/runtime_control/bootstrap.py:439` imports
+  `TIDMAD_DATA_DIR` for its dataset readiness check. It is an **operator
+  CLI** for this task and sits outside the production decision path, so it
+  is not on the critical gate; it should move behind the same adapter as
+  FU-C-6 when that exists.
 
 ---
 
@@ -1861,9 +1874,32 @@ constraint).
       Callers already hold what they must pass: the tuner has `data_dir` as
       a parameter of `_resolve_time_check_probe_request`; `launch_guard`
       takes an optional root from its caller (C-C3b).
-- [ ] **C-C3b** — retire `probe_runner_availability`'s direct
-      `TIDMAD_DATA_DIR` import in favour of the boundary; thread the root
-      from the three callers.
+- [x] **C-C3b** — `probe_runner_availability` now takes a resolved
+      capability and imports no task module. The TIDMAD default lives in
+      `execute_tools.data_paths.resolve_tidmad_measurement_capability` —
+      the task-owned layer, where a default legitimately belongs. The tuner
+      resolves it from the `data_dir` it already holds, so the capability
+      describes the dataset the probe will actually use rather than a second
+      independently resolved path. `launch_guard` threads an optional
+      capability and fails closed without one.
+
+      Unavailability now reaches the record: the tuner stamps
+      `probe_capability_task` and `probe_capability_reason` into the
+      breakdown instead of a bare `unavailable`.
+
+      **Reachability gap found and closed.** Reverting the tuner to
+      `probe_runner_availability()` — the exact silent-disable regression —
+      left all 23 launch-guard tests green. Added
+      `test_measurement_capability_reachability.py` (9 cases), which now
+      fails on it. Mutation proofs: no-argument call → 2 failures; reason no
+      longer recorded → 1; generic wiring re-imports the task constant → 1.
+
+      **Deferred, filed:** `probe_production.py:137` still falls back to
+      `TIDMAD_DATA_DIR` when no `data_dir` is supplied, and loads
+      TIDMAD-shaped batches via `execute_tools.probe_data`. Making that
+      generic needs a dataset-adapter abstraction, which is beyond C-C3b's
+      bounded scope. `bootstrap.py:439` is an operator CLI for this task and
+      is outside the generic decision path.
 - [ ] **C-C3c** — the normal happy-path duration write, then O-3:
       idempotently evaluate only the affected bucket after a successful
       eligible write. Creation and trigger stay separate.

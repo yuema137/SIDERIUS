@@ -21,6 +21,9 @@ from typing import Any
 
 from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
 from core.runtime_control.estimator import shared_runtime_components
+from core.runtime_control.measurement_capability import (
+    ResolvedMeasurementCapability,
+)
 from core.runtime_control.probe import ProbeResult
 from core.runtime_control.probe_lifecycle import (
     ProbeInfrastructureError,
@@ -54,29 +57,34 @@ def resolve_request_probe(
     return resolver.resolve(request, budget=budget, mode=mode)
 
 
-def probe_runner_availability() -> tuple[bool, str]:
+def probe_runner_availability(
+    capability: ResolvedMeasurementCapability | None = None,
+) -> tuple[bool, str]:
     """Whether this environment can build a REAL bounded-probe runner.
 
     Returns ``(available, detail)``; the detail names the missing piece so
     a launch refusal explains itself. Never raises: the caller decides
     whether unavailability is fatal (a real formal launch) or expected (a
     CPU/pseudo run).
-    """
-    try:
-        import torch
-    except ImportError:
-        return False, "torch is not importable"
-    if not torch.cuda.is_available():
-        return False, "no CUDA device is visible"
-    try:
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-    except Exception as exc:  # pragma: no cover - import-shape guard
-        return False, f"dataset path helper unavailable: {exc!r}"
-    import os
 
-    if not TIDMAD_DATA_DIR or not os.path.isdir(TIDMAD_DATA_DIR):
-        return False, f"dataset directory not present at {TIDMAD_DATA_DIR!r}"
-    return True, f"CUDA + dataset at {TIDMAD_DATA_DIR}"
+    V20 PR C1 / C-C3b. This used to import `TIDMAD_DATA_DIR` and refuse
+    unless that directory was readable, which made the whole
+    measured-evidence path silently unavailable on any other task -- a task
+    assumption expressed by omission inside generic infrastructure.
+
+    The capability is now resolved by the caller, which knows its task:
+    `execute_tools.data_paths.resolve_tidmad_measurement_capability` is
+    TIDMAD's. Passing None means the caller did not resolve one, and that
+    is reported as an unavailability with a reason rather than defaulted to
+    a task's dataset -- generic code has no basis for choosing which task's
+    data to look for.
+    """
+    if capability is None:
+        return False, (
+            "no measurement capability was resolved by the caller; generic "
+            "runtime-control cannot choose a task's dataset for it"
+        )
+    return capability.probe_available, capability.detail
 
 
 def build_production_probe_runner(

@@ -32,6 +32,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.decision_policy import RuntimeBudget, RuntimeMode
 from core.runtime_control.estimator import shared_runtime_components
+from core.runtime_control.measurement_capability import (
+    ResolvedMeasurementCapability,
+)
 
 
 class LaunchGuardFailure(RuntimeError):
@@ -51,7 +54,11 @@ class LaunchGuardReport(BaseModel):
     elapsed_seconds: float = Field(default=0.0, ge=0.0)
 
 
-def run_launch_self_test(*, require_probe_runner: bool) -> LaunchGuardReport:
+def run_launch_self_test(
+    *,
+    require_probe_runner: bool,
+    capability: ResolvedMeasurementCapability | None = None,
+) -> LaunchGuardReport:
     """Exercise the runtime-control lifecycle; raise on any breakage.
 
     Args:
@@ -89,7 +96,7 @@ def run_launch_self_test(*, require_probe_runner: bool) -> LaunchGuardReport:
     _assert_infrastructure_failure_aborts()
     checks.append("probe infrastructure failure ABORTs (no static fallback)")
 
-    available, detail = _probe_runner_availability()
+    available, detail = _probe_runner_availability(capability)
     if require_probe_runner and not available:
         raise LaunchGuardFailure(
             "this launch requires a real bounded-probe runner and the "
@@ -288,8 +295,16 @@ def _assert_infrastructure_failure_aborts() -> None:
         )
 
 
-def _probe_runner_availability() -> tuple[bool, str]:
-    """Can this environment build a REAL bounded-probe runner?"""
+def _probe_runner_availability(
+    capability: ResolvedMeasurementCapability | None = None,
+) -> tuple[bool, str]:
+    """Can this environment build a REAL bounded-probe runner?
+
+    V20 PR C1 / C-C3b: the capability is resolved by the caller, which knows
+    its task. A launch that requires a real probe runner and supplies no
+    capability is refused with that as the reason -- fail closed, since
+    generic code has no basis for guessing which task's dataset to look for.
+    """
     from core.runtime_control.probe_wiring import probe_runner_availability
 
-    return probe_runner_availability()
+    return probe_runner_availability(capability)

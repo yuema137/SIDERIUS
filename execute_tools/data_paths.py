@@ -58,3 +58,41 @@ except ImportError:
 
 TIDMAD_DATA_DIR: str = _config["tidmad_data_dir"]
 SIDERIUS_DATA_DIR: str = _config["siderius_data_dir"]
+
+
+# ── V20 PR C1 / C-C3b: the task-owned measurement capability ────────────────
+
+
+def resolve_tidmad_measurement_capability(dataset_root: str | None = None):
+    """TIDMAD's answer to "can this environment measure, and measure what?".
+
+    The task-owned half of the §15.3 boundary. `core/runtime_control/` used
+    to import `TIDMAD_DATA_DIR` directly, which made the measured-evidence
+    path silently unavailable on any other task. The generic resolver now
+    takes the dataset root as an argument and refuses to default it; this
+    function is where the TIDMAD default legitimately lives, because this
+    module IS the TIDMAD data layer.
+
+    Args:
+        dataset_root: override, for tests and for a task pointed at another
+            copy of the data. Defaults to the configured `TIDMAD_DATA_DIR`.
+
+    Returns:
+        `ResolvedMeasurementCapability` -- available or not, always with a
+        reason when not.
+    """
+    from core.runtime_control.measurement_capability import (
+        resolve_measurement_capability,
+    )
+    from execute_tools.dataset_config import TIDMAD
+
+    return resolve_measurement_capability(
+        task_identity="tidmad_denoise",
+        dataset_adapter="tidmad_hdf5",
+        # Shape class, not a path: what makes two datasets interchangeable
+        # for resource purposes is the segment geometry, not where they live.
+        data_shape_class=(
+            f"psd{TIDMAD.psd_segment_length}_seg{TIDMAD.segments_per_file}_files{TIDMAD.num_files}"
+        ),
+        dataset_root=TIDMAD_DATA_DIR if dataset_root is None else dataset_root,
+    )
