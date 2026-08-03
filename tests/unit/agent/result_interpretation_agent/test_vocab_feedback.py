@@ -751,19 +751,17 @@ class TestPromoteCandidates:
 
 
 class TestSeenInRunsTracking:
-    def test_new_candidate_gets_proposed_by_run(self):
-        candidate = {
-            "name": "gated_fno",
-            "kind": "feature",
-            "description": "test",
-            "proposed_by_run": "wavenet_v2",
-        }
-        result = build_runtime_vocab([], [], [candidate])
-        entry = next(e for e in result if e.name == "gated_fno")
-        assert entry.seen_in_runs == ["wavenet_v2"]
+    # `test_new_candidate_gets_proposed_by_run` lived here. The test below
+    # opens with that exact case -- a first-appearance candidate whose
+    # seen_in_runs must be its proposing run -- and asserts it before going
+    # on to the second iteration.
 
     def test_existing_candidate_seen_in_runs_extended(self):
-        """Second iteration adds a new run to an existing candidate."""
+        """Second iteration adds a new run to an existing candidate.
+
+        Starts from first appearance, so the initial-population case is
+        asserted here too.
+        """
         # Iteration 1: candidate first appears
         vocab = build_runtime_vocab(
             [],
