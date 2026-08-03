@@ -3159,7 +3159,20 @@ a stylistic preference here — the numbers are simply different measurements.
 
 ## 17c. C1 final validation record
 
-At SHA `5a5e7b5d6d7059cf79a5cc38138225a5ee6dc007`, the PR head at open.
+> **C1 COMPLETE — PR #161 green at exact head
+> `3f5fa23238de19762f768bc5e89b446aa7218902`.**
+> https://github.com/Galileo-Sandbox/SIDERIUS/pull/161 · CI run
+> `30839502103` · `Lint + Type + Unit Tests: pass (8m12s)` · **not merged**.
+>
+> It took three CI runs, and both failures were things this machine
+> structurally could not catch — pyright cannot execute here at all, and the
+> local GPU made two tests pass for the wrong reason. Recorded because the
+> pattern outlives this PR: on this repository "green locally" is a weaker
+> claim than it sounds.
+
+The table below was recorded at `5a5e7b5`, the PR head at open; the local
+results are unchanged at the green head except for the added ordering test
+(6389, not 6388).
 
 | Check | Result |
 |---|---|
