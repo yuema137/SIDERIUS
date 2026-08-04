@@ -1,24 +1,35 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: DESIGN — direction and all five deviations APPROVED by the
-operator 2026-08-04; IMPLEMENTATION NOT YET AUTHORIZED.**
+**Status: DESIGN — direction and all five deviations APPROVED; the
+operator's second review (2026-08-04) closed every policy question and
+forced eight further corrections, now applied. IMPLEMENTATION AWAITS FINAL
+OPERATOR APPROVAL.**
 
-The three open questions are closed (§14). Two new ones (Q4 mixed config,
-Q5 LLM-facing exclusion count) are recorded and must be answered from code
-inspection before the commits they affect.
+```text
+Audited code baseline      dd8d66aa   (PR C2 merged, 40d17f69)
+Design head                58cbf5f9
+Policy dependencies        none — all resolved (§14)
+Implementation             pending final operator approval
+```
 
-Written against `master` at `dd8d66aa` (PR C2 merged, `40d17f69`). Per the
-folder rule in `README.md`, no implementation begins until the operator has
-reviewed and approved this document; §20.6 is scope-level and the audit
-below has already changed the design in five places (D-D-1 through D-D-5).
+Two questions remain, and neither is a policy decision: both are answered by
+**reading code** at the commit that needs them (§14).
+
+Per the folder rule in `README.md`, no implementation begins until the
+operator has approved this document. §20.6 is scope-level; the audit changed
+the design in five places (D-D-1 through D-D-5), and the second review
+corrected eight more — most consequentially the `gate_role` definition
+(§4.6), which as first drafted would have made the consistency check pass
+V19's own configuration.
 
 Parent scope: `docs/design/v20_priorities.md` §20.6.
 Governing genericization contract: `v20_priorities.md` §1.4 (§8 here).
 Predecessors: PR B (`4472f15`), PR C1 (`781e3e8a`), PR C2 (`40d17f69`).
 
-**Dependency**: one operator decision — the default HealthGate mode for a
-formal campaign (§12A.4 of the parent). Everything else is independent.
-PR D touches no GPU measurement, no admission path and no O-7 accounting.
+**Dependencies**: none outstanding. The §12A.4 default-mode decision is
+closed — a new formal campaign declares both dimensions or is refused
+(§4.1). PR D touches no GPU measurement, no admission path and no O-7
+accounting. One commit (D-C6) is LLM-facing and requires Gate 1.
 
 **What this PR is NOT.** It does not retune a threshold, does not remove
 observe-only mode, does not force a trial to succeed, and does not move any
@@ -280,65 +291,108 @@ evidence and reasons.
 
 The condition itself is already computed (§3.4).
 
-### 4.3 Authority is a typed verdict carrying ALL its reasons
+### 4.3 Authority is DERIVED from facts, never assembled by a caller
 
-**Corrected by the operator, 2026-08-04.** The draft's basis list —
-`valid_trial_supported` / `no_valid_trial` / `non_blocking_mode` — was
-missing the axis D-D-5 introduced: a run declared `result_authority:
-diagnostic` is non-authoritative **even with valid trials and blocking
-gates**. And the reasons are not mutually exclusive: a run can be
-`observe_only` **and** declared `diagnostic` **and** have zero valid trials
-at once. Recording only one and pushing the rest into free text loses the
-distinction an operator most needs — *why* a result was refused.
-
-Following the shape PR C settled on for `PrephaseDisposition` — a **typed
-value with computed consequences**, never a bare boolean and never an
-exception:
+**Corrected twice by the operator.** The draft first missed the axis D-D-5
+introduced — a run declared `result_authority: diagnostic` is
+non-authoritative even with valid trials and blocking gates. It then still
+allowed a caller to pass `authoritative`, `primary_basis` and `reasons`
+independently, which permits states that contradict themselves:
 
 ```text
-ScientificAuthority
-  authoritative: bool
-  primary_basis: AuthorityBasis                 the highest-precedence reason
-  reasons: tuple[AuthorityBasis, ...]           EVERY reason that applies
-  enters_incumbent_selection: bool              computed; False whenever authoritative is False
-  enters_scientific_aggregation: bool           computed; False whenever authoritative is False
-  detail: str                                   human-readable, never load-bearing
-
-AuthorityBasis
-  valid_trial_supported
-  declared_diagnostic        result_authority == diagnostic
-  non_blocking_mode          healthgate_mode == observe_only
-  no_valid_trial             zero HealthGate-valid trials
-  gate_invalidated           the formal result failed its own validity requirements
+authoritative = true
+reasons       = (no_valid_trial,)      <- cannot both be true
 ```
 
-**Precedence, fixed and tested** (the invalid combination is already
-refused at startup, so it cannot reach here):
+A verdict whose fields can disagree is not a verdict. **The only
+constructor takes facts**; every conclusion is derived:
 
 ```text
-declared_diagnostic   -> non-authoritative
-non_blocking_mode     -> non-authoritative
-no_valid_trial        -> non-authoritative
-gate_invalidated      -> non-authoritative
-otherwise             -> authoritative
+ScientificAuthority.from_context(
+    healthgate_mode,             blocking | observe_only
+    declared_result_authority,   scientific | diagnostic
+    valid_trial_count,           int  (iteration-level support context)
+    formal_validity,             this record's own gate validity
+)
 ```
 
-`primary_basis` is the first that applies; `reasons` carries **all** of
-them, so a diagnostic run that also had no valid trials reports both.
+Derived, and **not settable by any caller**:
+
+```text
+authoritative
+primary_basis
+enters_incumbent_selection
+enters_scientific_aggregation
+```
+
+**Support and refusal are separate vocabularies**, because they answer
+different questions and a run can carry several refusals at once:
+
+```text
+support_basis      valid_trial_supported | none
+
+blocking_reasons   declared_diagnostic          operator declared it diagnostic
+                   non_blocking_mode            healthgate_mode == observe_only
+                   no_valid_trial               zero HealthGate-valid trials
+                   gate_invalidated             this formal record failed its own gates
+                   legacy_authority_unknown     a record predating these fields
+```
+
+```text
+authoritative  <=>  blocking_reasons is empty  AND  support_basis is not none
+```
+
+`legacy_authority_unknown` closes a gap the draft had: §4.5 and the
+incumbent rule both require a legacy record to be non-authoritative, but the
+old basis list had no way to *say* so — it would have had to be squeezed
+into `no_valid_trial`, which asserts something the record does not tell us.
+
+`primary_basis` is the highest-precedence blocking reason, in the order
+listed above; `blocking_reasons` carries **all** that apply, so a diagnostic
+run that also had no valid trials reports both rather than losing one.
 
 Authority is granted **only** for:
 
 ```text
 healthgate_mode  == blocking
 result_authority == scientific
-valid trials     >= 1
-the formal result itself meets the existing validity requirements
+valid_trial_count >= 1
+the formal record itself meets the existing validity requirements
 ```
 
-The consequences are **computed properties of the verdict**, not separate
-flags each consumer must remember to check — PR C's O-7 boundary is the
+The consequences are computed properties — PR C's O-7 boundary is the
 precedent: six frozen consequences derived from one disposition, so a new
 consumer cannot forget one.
+
+#### 4.3.1 The verdict's scope: one formal RECORD, carrying iteration context
+
+The two inputs live at different levels, and the draft was inconsistent
+about which the verdict belongs to. Fixed:
+
+> **Every formal record carries its own `ScientificAuthority`**, which
+> *references* the iteration's valid-trial support context.
+
+```text
+valid_trial_count   iteration-level    shared by every record of that iteration
+formal_validity     record-level       this record's own gate outcome
+```
+
+Without this, the incumbent (which reads records) and the report (which may
+read iteration summaries) could consult authority computed at different
+levels and disagree.
+
+#### 4.3.2 What `would_invalidate_under_production_policy` is NOT
+
+Since `observe_only + scientific` is refused at startup (§4.1), the
+counterfactual no longer decides authority. It is **not a second authority
+gate**. Its uses are:
+
+* a diagnostic reason in the recorded evidence;
+* counterfactual reporting — "this round would have been invalidated";
+* the structured collapse feedback of D-C6.
+
+Stated because D-D-4 elevates it, and an elevated signal with no stated
+boundary is how a second authority path gets built by accident.
 
 ### 4.4 Two consumers, one predicate
 
@@ -380,10 +434,45 @@ already runs three blocking gates alongside recording-only ones
 
 The rule is therefore keyed on **gate role**, not on the config as a whole:
 
+**`gate_role` is a SCIENTIFIC property of the check, and is identical in
+every config.** It says what the gate *is for*, not what the current
+campaign does with it:
+
 ```text
-gate_role = blocking       on_fail MUST carry invalidation authority
+output_diversity      role: blocking        collapse detectors — a failure
+output_std            role: blocking        means the round's science is void
+amplitude_collapse    role: blocking
+
+pearson_dispersion    role: observational   metrics recorded for study;
+spectral_peak_ratio   role: observational   a failure is not a verdict
+per_file_output_std   role: observational
+```
+
+Both shipped configs declare **the same roles**. Only `on_fail` differs:
+
+```text
+gate_role = blocking       under `blocking` mode, on_fail MUST invalidate
 gate_role = observational  on_fail MAY be continue / record-only
 ```
+
+**This is the correction that makes the check work at all.** An earlier
+draft of this document had the observe-only config declare its three
+collapse detectors as `role: observational` — on the reasoning that the role
+should describe the effective behaviour. That is exactly backwards, and it
+would have destroyed the check:
+
+```text
+declare healthgate_mode = blocking
+load the observe-only YAML
+its three collapse gates are declared observational
+-> no `role: blocking` gate resolves `continue`
+-> THE CHECK PASSES
+```
+
+...on V19's configuration, which is the one case it exists to catch. A role
+that tracks behaviour makes every config self-consistent by construction —
+the same failure as inferring the mode from behaviour (§4.6.1). The role
+must be invariant for the check to have anything to compare against.
 
 | `healthgate_mode` | permitted | refused |
 |---|---|---|
@@ -741,8 +830,7 @@ construction (§4.6.1).
 It is *before* the check and separate from the presentation work (commit
 10) because only the metadata is a prerequisite; the display label is not.
 
-**2. Scope.** The gate entry model (`execute_tools/health_checks/config.py:82+`)
-gains a typed `role`; both shipped configs declare it.
+**2. Scope.** Presentation only. The typed `role` already landed in commit 2 — **this commit does not touch the gate entry model's schema again**.
 
 *Non-goals.* **No gate id is renamed** — ids are join keys in every archived
 artifact. No display change; that is commit 10. No enforcement; that is
@@ -752,8 +840,8 @@ commit 3.
 
 **3. Implementation plan.**
 - [ ] Read the gate entry model and `HealthChecksConfig` load path before choosing the field's shape.
-- [ ] Add `role: Literal["blocking", "observational"]` with a default that preserves current behaviour for configs omitting it.
-- [ ] Declare it on every gate in `configs/health_checks.yaml` and `configs/health_checks_baseline_observe_mode.yaml`.
+- [ ] Add `role: Literal["blocking", "observational"]`. **No behaviour-preserving default for new configs**: a role inferred by default puts the consistency check back on a guess. A historical config that omits it reads as `legacy_unknown` and is refused for a NEW formal launch while remaining loadable for replay.
+- [ ] Declare it on every gate in BOTH shipped configs, **with identical roles in each** — the three collapse detectors are `blocking` in both; only `on_fail` differs.
 - [ ] Verify whether adding the key changes `health_config_sha256` for the shipped configs; if it does, record the expected new values and confirm no invariant lock compares across the boundary.
 
 **4. Validation plan.**
@@ -765,16 +853,17 @@ commit 3.
 
 **5. Acceptance criteria.**
 - [ ] `git diff` shows **zero** changes to any gate id string.
-- [ ] In the observe-only config, all three `*_blocking`-named gates declare `role: observational` — the id and the role now disagree **in the data**, which is the fact commit 10 will surface in the label.
+- [ ] In BOTH configs the three collapse detectors declare `role: blocking`; the observe-only config still resolves them `on_fail: continue`. **That disagreement between role and effective action is the signal**, and it is what commit 3 refuses and commit 10 labels.
+- [ ] A config omitting `role` is `legacy_unknown`: loadable for replay, refused for a new formal launch.
 - [ ] A role-less config produces byte-identical gate behaviour.
 - [ ] Any `health_config_sha256` change is recorded here with both values.
 
 **6. Failure and edge cases.**
 | case | behaviour |
 |---|---|
-| config omits `role` | **fall back safely** to the behaviour-preserving default |
+| config omits `role` | `legacy_unknown` — loadable for replay, **refused** for a new formal launch |
 | unknown role literal | **stop** at load |
-| id says blocking, role says observational | **legal** — that is the point; the label is fixed in commit 10 |
+| id says blocking, role says blocking, effective action is `continue` | **legal in observe_only, refused under blocking** — this is the V19 signature |
 
 **7. Verification commands and evidence.**
 ```bash
@@ -875,10 +964,11 @@ proven to be *reached*, and a verdict computed but never consulted is
 exactly the defect class this PR exists to end.
 
 **2. Scope.** One new module under `core/` owning `ScientificAuthority`,
-its `basis` literal, and the derived `enters_incumbent_selection` /
-`enters_scientific_aggregation` **as computed properties, never settable
-fields** — the shape `prephase_admission.PrephaseAdmissionOutcome` already
-uses for O-7.
+its `from_context` constructor, the `support_basis` / `blocking_reasons`
+vocabularies (§4.3), and the derived `authoritative`, `primary_basis`,
+`enters_incumbent_selection` and `enters_scientific_aggregation` **as
+computed values, never settable fields** — the shape
+`prephase_admission.PrephaseAdmissionOutcome` already uses for O-7.
 
 *Non-goals.* Zero call sites. Nothing imports it yet.
 
@@ -886,8 +976,9 @@ uses for O-7.
 
 **3. Implementation plan.**
 - [ ] Read `core/runtime_control/prephase_admission.py` first and mirror its structure: frozen model, literal disposition, consequences as properties.
-- [ ] Define `AuthorityBasis` covering `valid_trial_supported`, `declared_diagnostic`, `non_blocking_mode`, `no_valid_trial`, `gate_invalidated` (§4.3).
-- [ ] Carry `reasons: tuple[AuthorityBasis, ...]` with **every** applicable reason, plus `primary_basis` as the highest-precedence one — a run can be `observe_only` AND `declared_diagnostic` AND have zero valid trials at once.
+- [ ] Define the two vocabularies of §4.3: `support_basis` (`valid_trial_supported` | none) and `blocking_reasons` (`declared_diagnostic`, `non_blocking_mode`, `no_valid_trial`, `gate_invalidated`, `legacy_authority_unknown`).
+- [ ] Carry `blocking_reasons: tuple[...]` with **every** applicable refusal, plus `primary_basis` as the highest-precedence one — a run can be `observe_only` AND `declared_diagnostic` AND have zero valid trials at once.
+- [ ] Make `from_context` the ONLY constructor; a caller must not be able to state a conclusion.
 - [ ] Implement the fixed precedence of §4.3 and test it directly.
 - [ ] Make both `enters_*` properties `False` whenever `authoritative` is `False` — no independent path to `True`.
 - [ ] Write the module docstring in the house style: what defect it prevents, and why the consequences are derived rather than flagged.
@@ -899,7 +990,8 @@ uses for O-7.
 - *Real Gate*: none.
 
 **5. Acceptance criteria.**
-- [ ] For every basis, the tuple `(authoritative, enters_incumbent_selection, enters_scientific_aggregation)` matches a table written in the test, hardcoded — never read back from the model.
+- [ ] For every input combination, the tuple `(authoritative, primary_basis, enters_incumbent_selection, enters_scientific_aggregation)` matches a table written in the test, hardcoded — never read back from the model.
+- [ ] A self-contradictory verdict is **unconstructible**: there is no public path to set `authoritative` alongside a non-empty `blocking_reasons`.
 - [ ] `blocking + scientific + >=1 valid trial + formal result valid` is the **only** combination yielding `authoritative: true`.
 - [ ] A case with three simultaneous reasons lists all three.
 - [ ] No production module imports the new one (`grep` evidence recorded).
@@ -933,7 +1025,7 @@ existing `best_valid_trial_score`.
 *Non-goals.* **No consumer changes.** Incumbent and reporting are untouched
 — commits 6 and 7.
 
-*Dependencies.* Commits 1 and 3.
+*Dependencies.* Commits 1, 3 **and 4** — the verdict module itself (D-C2a) is required, not only the declaration and the check.
 
 **3. Implementation plan.**
 - [ ] Re-read `:5255-5340` before editing; the region is dense and adjacent to `_build_gate_exhaustion`.
@@ -949,7 +1041,7 @@ existing `best_valid_trial_score`.
 - *Real Gate*: none.
 
 **5. Acceptance criteria.**
-- [ ] For a run with zero valid trials, the record carries `authoritative: false`, `basis: "no_valid_trial"`, and **the same `best_denoising_score` as before this commit** — the verdict annotates, it does not alter the score.
+- [ ] For a run with zero valid trials, the record carries `authoritative: false`, `primary_basis: "no_valid_trial"`, `blocking_reasons` containing it, and **the same `best_denoising_score` as before this commit** — the verdict annotates, it does not alter the score.
 - [ ] Deleting the verdict call from the production path fails a named test.
 - [ ] `observe_only` yields non-authoritative even when trials are valid.
 
@@ -992,7 +1084,7 @@ valid trials would themselves trigger a formal round. They do not.
 no-winner fallback keeps preserving the planner's plan and keeps logging its
 WARNING. Control flow is unchanged.
 
-*Dependencies.* Commit 4.
+*Dependencies.* Commit 5 (`D-C2b`) — the verdict must already be wired in production, not merely defined.
 
 **3. Implementation plan.**
 - [ ] Confirm by reading `:1480-1495` that the no-winner path is unchanged by commits 1–4.
@@ -1035,19 +1127,23 @@ predicate for `chain_best_valid_formal_*` (`:200-215`), do not replace it.
 *Non-goals.* The commit-time-validity rule and its "repo-current config is
 NEVER consulted" guarantee (`:306-310`) must survive untouched.
 
-*Dependencies.* Commit 4.
+*Dependencies.* Commit 5 (`D-C2b`) — the consumer needs a verdict that production actually attaches.
 
 **3. Implementation plan.**
 - [ ] Read `:196-320` fully before editing.
 - [ ] Add `enters_incumbent_selection` as an **additional** conjunct.
-- [ ] Handle records predating the field: **UNKNOWN ⇒ excluded**, matching the existing treatment of unestablishable commit-time validity.
+- [ ] Handle records predating the field by **deterministic reconstruction first**, not blanket exclusion. The draft said "legacy ⇒ UNKNOWN ⇒ excluded" while also promising replay parity — and since EVERY historical record lacks the fields, those two cannot both hold. Ladder:
+  1. reconstruct from what old records already persist — `best_valid_trial_*`, the formal record's own gate validity, and the config provenance (`health_checks_config`, `health_config_sha256`);
+  2. if reconstruction is complete, emit a `reconstructed_legacy` verdict — **without writing anything back to the artifact** (§4.5);
+  3. only if it cannot be reconstructed is it `legacy_authority_unknown`, and excluded.
+- [ ] This preserves history untouched and avoids emptying every historical incumbent at once.
 - [ ] Extend `validity_basis` provenance so an exclusion is auditable.
 
 **4. Validation plan.**
-- *Unit*: zero-valid-trial formal excluded; valid one still selected; legacy record without the field excluded as UNKNOWN.
+- *Unit*: zero-valid-trial formal excluded; valid one still selected; a legacy record with enough provenance reconstructs to `reconstructed_legacy`; one without it is `legacy_authority_unknown` and excluded.
 - *Integration*: a multi-iteration chain picks the same incumbent as before when all results are authoritative — **default parity**.
 - *Negative*: no record ⇒ `None`, never a fabricated incumbent.
-- *Backward-compatibility*: replaying an existing chain workspace yields the same incumbent unless a zero-valid-trial result was previously selected — and if it was, that difference is the fix, and must be recorded.
+- *Backward-compatibility*: replaying an existing chain workspace yields the **same incumbent** wherever reconstruction succeeds. A difference may arise only where a zero-valid-trial result was previously selected — that difference is the fix, and is recorded with the reconstruction basis.
 - *Real Gate*: none.
 
 **5. Acceptance criteria.**
@@ -1058,7 +1154,8 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 | case | behaviour |
 |---|---|
 | every candidate excluded | incumbent `None` — legitimate, not an error |
-| legacy records only | all UNKNOWN ⇒ `None`; **warn** so it is visible |
+| legacy records, reconstructable | `reconstructed_legacy`; artifact untouched |
+| legacy records, not reconstructable | `legacy_authority_unknown` ⇒ excluded; **warn** so it is visible |
 | verdict disagrees with commit-time validity | both must pass; neither overrides the other |
 
 **7. Verification commands and evidence.**
@@ -1086,7 +1183,7 @@ summary consumption (`:911`, `:924`, `:961`, `:1272`) and the report path.
 *Non-goals.* No change to the frozen TIDMAD score formula. No change to how
 a score is computed — only to which scores are aggregated.
 
-*Dependencies.* Commit 4.
+*Dependencies.* Commit 5 (`D-C2b`).
 
 **3. Implementation plan.**
 - [ ] Read each of the four `inp.summaries` loops before editing; they are not obviously equivalent and may need different handling.
@@ -1130,10 +1227,16 @@ than opening a second feedback channel (§3.8).
 **2. Scope.** `_build_gate_exhaustion` and its call site (`:5279-5290`), and
 the feedback schema it populates.
 
-*Non-goals.* No new feedback channel. No prompt-text change unless the
-schema demands it — if it does, it is LLM-facing and split out.
+**This commit IS an LLM-facing change, and Gate 1 applies** (operator,
+2026-08-04). Its acceptance criterion is that the feedback *reaches the next
+iteration's planner input* — that is a change to LLM-facing input whether or
+not any natural-language prompt text is edited. The draft's "no prompt-text
+change ⇒ no separate approval" was wrong.
 
-*Dependencies.* Commit 4.
+*Non-goals.* No new feedback channel; the existing gate-exhaustion block is
+extended.
+
+*Dependencies.* Commit 5 (`D-C2b`).
 
 **3. Implementation plan.**
 - [ ] Read `_build_gate_exhaustion` and its schema fully; confirm it is the right carrier before extending it.
@@ -1145,9 +1248,13 @@ schema demands it — if it does, it is LLM-facing and split out.
 - *Integration / pseudo*: it reaches the next iteration's planner input.
 - *Negative*: a run with valid trials is unchanged.
 - *Backward-compatibility*: the existing gate-exhaustion trigger behaviour is unaltered.
-- *Real Gate*: none.
+- *Real Gate*: **Gate 1 REQUIRED** — this commit changes LLM-facing input.
+  Listed separately and **not launched without operator approval**.
 
 **5. Acceptance criteria.**
+- [ ] The structured feedback is proven to reach the **real** planner path, not merely to be constructed.
+- [ ] A mutation removing the field **fails Gate 1**.
+- [ ] The agent/node/skill schema docs are updated in the same change.
 - [ ] With zero valid trials the feedback names the count, the gates that failed, and the mode.
 - [ ] With ≥1 valid trial the feedback is **byte-identical** to pre-commit.
 
@@ -1162,7 +1269,7 @@ respect the existing `health_feedback_policy`.
 - [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
-- [ ] Any prompt change is excluded from this commit by construction.
+- [ ] LLM-facing by nature: Gate 1 is required and its approval recorded before merge.
 
 ---
 
@@ -1216,7 +1323,7 @@ recorded; if any lock compares across it, **stop**.
 
 ---
 
-### Commit 11 — `D-C9`: the V19 retrospective closure annotation
+### Commit 11 — `D-C9`: the V19 closure annotation — schema and generator (code), sidecar (evidence step)
 
 **1. Goal.** Record what V19 actually ran under, **without touching a single
 V19 byte** (§4.5, operator decision 2026-08-04). Last because it is
@@ -1243,10 +1350,17 @@ No field is back-filled. Nothing in the archive is deleted or moved.
 *Dependencies.* Commit 1 (so the vocabulary the annotation uses exists).
 
 **3. Implementation plan.**
-- [ ] Locate the V19 artifacts and confirm which config each iteration actually loaded, from the recorded `health_checks_config` / `health_config_sha256` — not from memory.
-- [ ] Verify the observe-only classification from the recorded evidence: `on_fail: continue` in the effective config, and `would_invalidate_under_production_policy: true` on the rounds.
-- [ ] Write the annotation with: original config path + sha256; the verified classification; the date and basis (2026-08 retrospective); and hashes of the unchanged source artifacts.
-- [ ] Record the source hashes **before and after** writing the annotation, and show they are identical.
+**Git commit — code only:**
+- [ ] Define the annotation schema (original config path + sha256, classification, basis, retrospective date, source-artifact hashes).
+- [ ] Write the validator and the generator, taking an archive path as input.
+- [ ] Unit-test both against a synthetic archive fixture — no real V19 data in the repository.
+
+**Post-code evidence step — NOT a Git commit:**
+- [ ] Run the generator against the real V19 archive.
+- [ ] Locate which config each iteration actually loaded, from the recorded `health_checks_config` / `health_config_sha256` — not from memory.
+- [ ] Verify the observe-only classification from recorded evidence: `on_fail: continue` in the effective config, and `would_invalidate_under_production_policy: true` on the rounds.
+- [ ] Hash every source artifact **before and after**, and show the two transcripts are identical.
+- [ ] Record the sidecar's own hash.
 
 **4. Validation plan.**
 - *Unit*: the annotation schema round-trips; a missing source artifact is reported, never guessed.
@@ -1256,9 +1370,14 @@ No field is back-filled. Nothing in the archive is deleted or moved.
 - *Real Gate*: none.
 
 **5. Acceptance criteria.**
-- [ ] `sha256sum` of every V19 artifact is **identical** before and after the commit, and the transcript of both runs is recorded here.
-- [ ] The annotation states the classification, its basis, and its retrospective date, and does not claim the fields existed at run time.
-- [ ] No V19 file appears in `git diff --stat` as modified.
+*For the Git commit:*
+- [ ] Schema, validator and generator are unit-tested against a synthetic fixture; **no V19 data enters the repository**.
+- [ ] `git diff --stat` shows only the new modules and their tests.
+
+*For the evidence step:*
+- [ ] `sha256sum` of every V19 artifact is **identical** before and after, with both transcripts recorded.
+- [ ] The annotation states the classification, its basis and its retrospective date, and does not claim the fields existed at run time.
+- [ ] The sidecar's own hash is recorded.
 
 **6. Failure and edge cases.** Recorded sha256 mismatch → **stop**, classify
 nothing, report tampering. Config path no longer resolvable → record
@@ -1272,7 +1391,8 @@ find <v19_artifact_root> -type f -exec sha256sum {} + | sort > /tmp/v19_before.t
 - [ ] hashes identical: __   - [ ] annotation reviewed: __
 
 **8. Commit boundary.**
-- [ ] Touches the archive and its annotation only; no production code.
+- [ ] The Git commit adds the schema, validator and generator — it **does** add code, and the boundary statement must say so rather than claiming it "touches the archive only".
+- [ ] The archive is touched only by the evidence step, which is not a commit.
 - [ ] Before committing: show that `git diff --stat` contains no V19 artifact.
 
 ---
@@ -1317,8 +1437,11 @@ incumbent exclusion; reporting exclusion; manifest provenance. All nine are
 
 **Layer 3 — bounded real run.** §20.6 requires a small real run that
 **deliberately produces collapse** and proves the formal result cannot become
-authoritative. Reuse the V19 collapse signature rather than inventing one —
-the artifacts exist and the reproduction is the point.
+authoritative. Run it in a **fresh workspace** with a bounded
+collapse-inducing configuration of the same class as V19's. **V19's
+artifacts are a read-only reference for the expected signature — never a run
+input** (§4.5); feeding them in would both contaminate the run and put the
+immutable archive on a write path.
 
 **Reachability evidence is mandatory** (PR C's lesson, twice over): a test
 that fails when the production path bypasses the verdict. PR C shipped an
