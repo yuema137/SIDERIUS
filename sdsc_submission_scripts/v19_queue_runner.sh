@@ -131,6 +131,45 @@ ROSTER=(
   "${CAMPAIGN_ID}_loss_00_03:0-3:0,1,2,3:loss"
 )
 
+role_for_run() {  # RUN -> the role declared in the ROSTER, or fail
+  # The ROSTER is the single source of truth for a chain's role: field 4 of
+  # each entry. This looks it up instead of re-deriving it from the run
+  # name.
+  #
+  # WHY THIS EXISTS. The wave path used to recover the role by stripping a
+  # literal prefix:
+  #
+  #     FLAVOR="arch"; [ "${RUN#v19_loss_}" != "$RUN" ] && FLAVOR="loss"
+  #
+  # Run names are built from ${CAMPAIGN_ID}, so under any campaign id other
+  # than "v19" the loss chain did not match, silently fell through to
+  # "arch", and BOTH chains of every wave launched with
+  # advice/workflow/v18r_arch_explorer.json (:271). The queue still showed
+  # two chains, so the pair looked correct while both arms ran the same
+  # treatment — a difference that would surface only at analysis time.
+  # V20 launches with a new campaign id by definition, so it hit this on
+  # wave 1.
+  #
+  # Note the fix is NOT s/v19_/v20_/. That would defer the same defect to
+  # V21. The implicit name-encodes-role protocol is deleted: the role
+  # travels from the roster to launch_chain and is never inferred.
+  #
+  # Fails closed. An unknown run or an empty role returns non-zero rather
+  # than defaulting to "arch" — defaulting is exactly how the original
+  # defect stayed invisible.
+  local want="$1" spec name role
+  for spec in "${ROSTER[@]}"; do
+    IFS=: read -r name _ _ role <<< "$spec"
+    if [ "$name" = "$want" ]; then
+      [ -n "$role" ] || { echo "[role_for_run] roster entry for '$want' declares an empty role" >&2; return 1; }
+      printf '%s\n' "$role"
+      return 0
+    fi
+  done
+  echo "[role_for_run] no roster entry for run '$want'" >&2
+  return 1
+}
+
 band_tag() {  # 15-19 -> 15_19
   echo "${1//-/_}" | awk -F_ '{ printf "%02d_%02d", $1, $2 }'
 }
@@ -456,7 +495,12 @@ for wave_spec in "${WAVES[@]}"; do
   START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   LAUNCHED=()
   for RUN in "${NEEDED[@]}"; do
-    FLAVOR="arch"; [ "${RUN#v19_loss_}" != "$RUN" ] && FLAVOR="loss"
+    if ! FLAVOR="$(role_for_run "$RUN")"; then
+      log "WAVE $WAVE: $RUN has no resolvable role in the ROSTER — stopping the queue for operator review"
+      record_queue_stop "unresolvable_chain_role" "$WAVE" \
+        "role_for_run failed for $RUN; refusing to launch rather than defaulting to arch"
+      exit "$CHAIN_STOP_EXIT_CODE"
+    fi
     if launch_chain "$RUN" "$SCOPE" "$FILES" "$FLAVOR"; then
       LAUNCHED+=("$RUN")
       sleep 90   # stagger the pair (V18r posture: bounded startup contention)
