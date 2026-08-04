@@ -15,10 +15,9 @@ change the design, so a PR must not be implemented from §20 alone.
 Every document in this folder is bound by `v20_priorities.md` §1.4.
 Each PR design **must** carry a "Genericization impact and in-passing
 refactor" section answering the seven questions in §1.4.5, and each PR's
-checklists must include the shared items in §1.4.6. PR C, D and E do not
-have design documents yet; their genericization requirements are
-recorded in `v20_priorities.md` §20.5-20.7 and must be carried into
-those documents when they are written.
+checklists must include the shared items in §1.4.6. Every PR now has a design document. PR C, D and E carry the
+genericization requirements recorded in `v20_priorities.md` §20.5-20.7
+into their own documents.
 
 The standing review question:
 
@@ -62,9 +61,9 @@ destroy evidence to satisfy a naming rule.
 |---|---|---|
 | **A** | [`pr_a_isolated_preflight_wiring.md`](pr_a_isolated_preflight_wiring.md) | **MERGED 2026-08-01** — PR #152, merge commit `5c18946`. Validated before merge: A5 PASS (contract regression found, repaired, revalidated 10/10); A6 PASS — parents 0 MiB, 125.9 s concurrent training, pair peak 15.52 GiB vs V19's 28.05 GiB. The pre-merge verdict was `A6 PASS — PR A READY TO MERGE; PR B REQUIRED BEFORE V20 LAUNCH`, and both halves of it have since happened |
 | **B** | [`pr_b_gpu_aggregation_attribution.md`](pr_b_gpu_aggregation_attribution.md) | **MERGED 2026-08-02** — PR #153, merge commit `4472f15`. All checkpoints landed: B-C1 accounting, B-C2a1/a2 execution seam, B-C2b bounded evidence, B-C3a/B-C3b attribution, B-C4 headroom guard, B-C5 doc sync; gates B-G1/B-G2/B-G3 run under operator approval; D-B1..D-B5 resolved, D-B4 shipped fail-closed by default. The attribution vocabulary is production code, not a proposal — `core/runtime_control/failure_attribution.py:49-52`, with reduction authority frozen to `candidate_gpu_capacity` alone |
-| **C** | [`pr_c_measured_evidence_admission.md`](pr_c_measured_evidence_admission.md) | **DESIGN rev 4; C1 IMPLEMENTED, in review.** Umbrella architecture and the ten operator decisions **APPROVED 2026-08-03 UTC** (§8.C). Implementation is **two PRs** (§15). **C1** — calibration identity / reachability / promotion (milliseconds; explicitly does *not* feed PR B): branch `feature/v20-pr-c1-calibration-identity-promotion`; checkpoints C-C1..C-C5a, C-C7, C-C8 landed. **C-C5b (production consumption of historical duration) was CANCELLED by operator decision 2026-08-02** — historical duration is **observability-only**; the current live measurement is the sole production time-decision input, guarded by nine negative tests plus a positive control. **C2** — authoritative GPU requirement acquisition and delivery (mebibytes; feeds PR B's gate): **implementation NOT authorized** until the §15.2 read-only producer audit is approved. |
-| **D** | `pr_d_healthgate_formal_policy.md` | Not started — needs an operator policy decision first (§12A.4) |
-| **E** | `pr_e_campaign_scoped_control.md` | Not started |
+| **C** | [`pr_c_measured_evidence_admission.md`](pr_c_measured_evidence_admission.md) | **COMPLETE — both halves merged.** **C1** MERGED 2026-08-03 (PR #161, `781e3e8a`) — calibration identity / reachability / promotion; C-C5b (production consumption of historical duration) CANCELLED by operator decision 2026-08-02, historical duration is observability-only. **C2** MERGED 2026-08-04 (PR #164, `40d17f69`) — authoritative GPU requirement acquisition and delivery. Gate 1 N/A; Gate 2 Lite-A (RTX 5090) PASS; Gate 2 Lite-B (H100 80GB HBM3) PASS; Gate-tested SHA `7302c467`. The measured claim, on both machines: the allocator under-reports by 627–1827 MiB, so the authority is driver-visible, candidate-owned, ancestry-attributed process-tree memory. Peaks differ per card **by design** — nothing travels between machines. **D-B5 is therefore satisfied**: PR B's admission gate now has a production input. |
+| **D** | [`pr_d_formal_healthgate_and_valid_trial_policy.md`](pr_d_formal_healthgate_and_valid_trial_policy.md) | **DESIGN — awaiting operator review.** Audit complete against `dd8d66aa`. Four deviations proposed: D-D-1 (zero valid trials refuses AUTHORITY, not the round), D-D-2 (the declared mode is verified against the resolved config, not merely recorded), D-D-3 (gate ids that say `blocking` while resolving `continue`), D-D-4 (`would_invalidate_under_production_policy` becomes the counterfactual of record). Still needs the §12A.4 operator decision on the default mode for formal campaigns. |
+| **E** | [`pr_e_campaign_scoped_control_state.md`](pr_e_campaign_scoped_control_state.md) | **DESIGN — awaiting operator review.** |
 
 ## Why PR A's audit mattered
 
