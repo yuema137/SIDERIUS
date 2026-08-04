@@ -285,8 +285,37 @@ def main():
         # silent-crash root cause.
         _assert_training_sentinel(args.model_path, args.exp_id)
 
-        # Load weights from the agent's specific experiment run
-        model.load_state_dict(torch.load(args.model_path, map_location=DEVICE))
+        # Load weights from the agent's specific experiment run.
+        #
+        # HOST-SIDE, deliberately. `map_location=DEVICE` materialises a
+        # SECOND full set of parameter tensors on the GPU before
+        # `load_state_dict` copies them into the model. The temporary state
+        # dict is then freed — but the CUDA caching allocator keeps the
+        # freed segments RESERVED, and driver-visible memory counts
+        # reserved, not allocated. So the process carries a checkpoint's
+        # worth of dead pool for the rest of its life.
+        #
+        # Measured on a V20 PR C2 lifecycle trace (punet, 216.9 MiB
+        # checkpoint), immediately after this line:
+        #
+        #     allocator reserved   236 -> 464 MiB   (+228)
+        #     allocator allocated  218 -> 218 MiB   (unchanged)
+        #
+        # and the +228 MiB persisted through the forward, leaving formal
+        # inference 208 MiB above an otherwise byte-identical process that
+        # loads no checkpoint. Loading on the host and letting
+        # `load_state_dict` copy parameter-by-parameter into the already
+        # resident GPU model never allocates the second copy at all.
+        #
+        # `map_location="cpu"` is also the convention this repository
+        # already uses everywhere else it reads a state dict
+        # (`tests/integration/execute_tools/test_training_loop.py`).
+        # Strictness is untouched: `weights_only` keeps its default and
+        # `load_state_dict` keeps `strict=True`, so a mismatched or
+        # malicious checkpoint fails exactly as it did before.
+        state_dict = torch.load(args.model_path, map_location="cpu")
+        model.load_state_dict(state_dict)
+        del state_dict
         input_size = m_cfg.segmentation_size
 
     model.eval()
