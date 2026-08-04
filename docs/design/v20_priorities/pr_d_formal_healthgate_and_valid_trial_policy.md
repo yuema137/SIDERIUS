@@ -280,26 +280,65 @@ evidence and reasons.
 
 The condition itself is already computed (§3.4).
 
-### 4.3 Authority is a typed verdict carried on the record
+### 4.3 Authority is a typed verdict carrying ALL its reasons
 
-Following the shape PR C settled on for `PrephaseDisposition` and
-`FormalPhaseCompletion` — a **typed value with computed consequences**,
-never a bare boolean and never an exception:
+**Corrected by the operator, 2026-08-04.** The draft's basis list —
+`valid_trial_supported` / `no_valid_trial` / `non_blocking_mode` — was
+missing the axis D-D-5 introduced: a run declared `result_authority:
+diagnostic` is non-authoritative **even with valid trials and blocking
+gates**. And the reasons are not mutually exclusive: a run can be
+`observe_only` **and** declared `diagnostic` **and** have zero valid trials
+at once. Recording only one and pushing the rest into free text loses the
+distinction an operator most needs — *why* a result was refused.
+
+Following the shape PR C settled on for `PrephaseDisposition` — a **typed
+value with computed consequences**, never a bare boolean and never an
+exception:
 
 ```text
 ScientificAuthority
   authoritative: bool
-  basis: Literal["valid_trial_supported", "no_valid_trial",
-                 "non_blocking_mode", "gate_invalidated", ...]
-  enters_incumbent_selection: bool        # False whenever authoritative is False
-  enters_scientific_aggregation: bool     # False whenever authoritative is False
-  detail: str
+  primary_basis: AuthorityBasis                 the highest-precedence reason
+  reasons: tuple[AuthorityBasis, ...]           EVERY reason that applies
+  enters_incumbent_selection: bool              computed; False whenever authoritative is False
+  enters_scientific_aggregation: bool           computed; False whenever authoritative is False
+  detail: str                                   human-readable, never load-bearing
+
+AuthorityBasis
+  valid_trial_supported
+  declared_diagnostic        result_authority == diagnostic
+  non_blocking_mode          healthgate_mode == observe_only
+  no_valid_trial             zero HealthGate-valid trials
+  gate_invalidated           the formal result failed its own validity requirements
+```
+
+**Precedence, fixed and tested** (the invalid combination is already
+refused at startup, so it cannot reach here):
+
+```text
+declared_diagnostic   -> non-authoritative
+non_blocking_mode     -> non-authoritative
+no_valid_trial        -> non-authoritative
+gate_invalidated      -> non-authoritative
+otherwise             -> authoritative
+```
+
+`primary_basis` is the first that applies; `reasons` carries **all** of
+them, so a diagnostic run that also had no valid trials reports both.
+
+Authority is granted **only** for:
+
+```text
+healthgate_mode  == blocking
+result_authority == scientific
+valid trials     >= 1
+the formal result itself meets the existing validity requirements
 ```
 
 The consequences are **computed properties of the verdict**, not separate
-flags each consumer must remember to check. PR C's O-7 boundary
-(`prephase_admission.py`) is the precedent: six frozen consequences derived
-from one disposition, so a new consumer cannot forget one.
+flags each consumer must remember to check — PR C's O-7 boundary is the
+precedent: six frozen consequences derived from one disposition, so a new
+consumer cannot forget one.
 
 ### 4.4 Two consumers, one predicate
 
@@ -329,6 +368,91 @@ Instead a separate **closure annotation** is written alongside, recording:
 
 This is the same principle PR E applies to historical STOP evidence:
 preserve, annotate, never delete or rewrite.
+
+### 4.6 Mixed *roles* are legal; mixed *semantics within a role* are not
+
+**Operator decision 2026-08-04**, correcting this document's earlier
+framing. "Some gates invalidate, some continue" is not a contradiction — it
+is the shipped and correct configuration. `configs/health_checks.yaml`
+already runs three blocking gates alongside recording-only ones
+(`pearson_dispersion_recording`, `spectral_peak_ratio_recording`,
+`per_file_output_std_recording`), and that is exactly right.
+
+The rule is therefore keyed on **gate role**, not on the config as a whole:
+
+```text
+gate_role = blocking       on_fail MUST carry invalidation authority
+gate_role = observational  on_fail MAY be continue / record-only
+```
+
+| `healthgate_mode` | permitted | refused |
+|---|---|---|
+| `blocking` | blocking gates that invalidate **plus** observational gates that continue | **any** gate declared blocking whose `on_fail` resolves to `continue` |
+| `observe_only` | every gate continues / records only | **any** gate holding invalidation authority |
+
+So a mixed config passes under `blocking`; a *single* blocking-declared gate
+resolving `continue` refuses the launch. That single case is the V19
+configuration, and it is what the check exists to catch.
+
+**This changes the commit order — see §4.6.1.**
+
+#### 4.6.1 `gate_role` must land BEFORE the consistency check
+
+The check in §4.6 is only as good as its notion of "declared blocking".
+Without a typed `gate_role` the check has two options, and both are bad:
+
+* **trust the `_blocking` suffix in the id** — perpetuating exactly the
+  misleading label §3.2 documents; or
+* **infer "blocking" from any gate that invalidates** — which cannot detect
+  the one case that matters, a gate that *should* invalidate and does not.
+
+The second is worth stating plainly: an inference-based check would have
+passed V19's config, because inferring the mode from the behaviour makes
+every config self-consistent by construction.
+
+`D-C7` is therefore **split**, and its first half moves ahead of `D-C1b`:
+
+```text
+D-C7a  typed gate_role metadata          -> required BY the consistency check
+D-C1b  the consistency check             -> consumes it
+D-C7b  five-field output, display label  -> presentation, stays late
+```
+
+The presentation layer has no such dependency and remains near the end,
+where a labels-only change belongs.
+
+### 4.7 The exclusion reaches the report deterministically, not via the LLM
+
+**Operator decision 2026-08-04.** How many non-authoritative results were
+excluded, and why, **must** appear in the final report. It must **not**
+depend on a model choosing to mention it.
+
+Preferred, and the default:
+
+```text
+aggregation code filters deterministically
+  -> deterministically derives the exclusion count and reasons
+  -> the report renders a fixed provenance section
+```
+
+for example:
+
+```text
+Scientific aggregation used 3 authoritative results.
+2 diagnostic/non-authoritative results were excluded:
+  - 1 no_valid_trial
+  - 1 declared_diagnostic
+```
+
+Passing the exclusion into an LLM-facing input is the **fallback**, taken
+only if a code audit proves the final report is produced wholly by the
+interpretation agent with no deterministic layer able to append to it. That
+fallback is an LLM-facing behaviour change and requires separate operator
+approval.
+
+The reason for the preference is not only reliability: exclusion text inside
+a prompt can influence the scientific interpretation the model then writes,
+which is a contamination of a different kind.
 
 ## 5. Design deviations from §20.6
 
@@ -432,23 +556,27 @@ refusal in addition to the mode↔config check.
 | ID | Checkpoint | State |
 |---|---|---|
 | **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | `[ ]` not started |
-| **D-C2** | `ScientificAuthority` verdict with computed consequences; zero-valid-trial basis wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
-| **D-C3** | Diagnostic/observe-only formal runs, recorded, marked non-authoritative (D-D-1) | `[ ]` not started |
+| **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
+| **D-C3** | An **explicitly overridden** zero-valid-trial formal round still completes, recorded non-authoritative (D-D-1) | `[ ]` not started |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
-| **D-C5** | Aggregation/report exclusion, with the exclusion **stated** | `[ ]` not started |
+| **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
-| **D-C7** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
+| **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[ ]` not started |
+| **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
 | **D-C9** | V19 retrospective closure annotation, archive untouched (§4.5) | `[ ]` not started |
 | **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
 
 Mapping to §20.6: D1→D-C1, D2→D-C2, D3→D-C3, D4→D-C4, D5→D-C5, D6→D-C6.
-D-C7 and D-C8 are additions this audit forced.
+D-C7a/b and D-C8 are additions this audit forced; D-C9 was added by the
+operator's V19-immutability decision. Note the ordering constraint: **D-C7a
+precedes D-C1b**, because a consistency check without typed roles would
+have passed V19's own config (§4.6.1).
 
 ---
 
 ## 7. Commit plan
 
-Nine commits. Each is independently revertible and states its own Behavior
+Eleven commits. Each is independently revertible and states its own Behavior
 Delta. The ordering rule is PR C's: **the typed boundary lands before
 anything consumes it**, so no commit adds branching to a consumer that
 cannot yet be told the truth.
@@ -460,18 +588,51 @@ proved it, written back into this document at the checkpoint.
 | # | Commit | Behavior Delta |
 |---|---|---|
 | 1 | `D-C1a` mode declared and recorded | none |
-| 2 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
-| 3 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
-| 4 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
-| 5 | `D-C3` diagnostic/observe formal recorded non-authoritative | none — the round already ran |
-| 6 | `D-C4` incumbent exclusion | **zero-valid-trial formal stops entering the incumbent** |
-| 7 | `D-C5` aggregation/report exclusion | **non-authoritative results leave scientific aggregation** |
-| 8 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
-| 9 | `D-C7` five recorded fields; honest display label | none (labels only) |
-| 10 | `D-C9` V19 retrospective closure annotation | none — archive annotated, never modified |
+| 2 | `D-C7a` typed `gate_role` metadata (**prerequisite**, §4.6.1) | none — declared, not yet enforced |
+| 3 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
+| 4 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
+| 5 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
+| 6 | `D-C3` explicitly overridden zero-valid-trial formal recorded non-authoritative | none — the override already ran it |
+| 7 | `D-C4` incumbent exclusion | **non-authoritative results stop entering the incumbent** |
+| 8 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
+| 9 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
+| 10 | `D-C7b` five recorded fields; honest display label | none (labels only) |
+| 11 | `D-C9` V19 closure annotation (schema in Git; sidecar is an evidence step, §7) | none — archive annotated, never modified |
 
 `D-C8` (doc sync) is not a numbered commit here: per the repository rule it
 is the **last step before merge**, written against the merged code.
+
+### Every code-bearing checkpoint runs strict pyright locally
+
+**Operator requirement 2026-08-04.** PR C proved that a fully green pytest
+run is not evidence of green typing: 44 pyright-strict errors sat latent
+behind 2,416 passing tests, because CI had never run on the branch and
+pyright was believed unrunnable locally. PR D adds several schemas, a typed
+verdict and multiple consumers — the same exposure, larger.
+
+The system Node is v10.19.0 and too old, but **pyright-python caches its
+own Node v26.2.0**, which reproduces CI exactly:
+
+```bash
+PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
+```
+
+* after **every** schema or boundary checkpoint — focused pyright over the
+  touched modules;
+* before **every** push — the full CI-equivalent:
+
+```bash
+PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright   # strict, 0 errors
+./.venv/bin/ruff check .
+./.venv/bin/ruff format --check .
+./.venv/bin/python -m pytest tests/unit/ -m "not real_run" -q
+# plus the structural / reachability mutation proofs for that commit
+```
+
+A second lesson from the same PR: a locally-green suite is still not a green
+CI. The registry-fingerprint test passed on a dev box with `~/.siderius`
+present and raised `KeyError` on a runner without it. Where a commit's tests
+touch machine state, run them **both ways** before pushing.
 
 > **Template note.** The operator's checklist template names ordering
 > concerns (`file_order`, the `shuffle` path, visited sample sequence).
@@ -543,7 +704,7 @@ recorded and read by nothing.
 ./.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q
 ./.venv/bin/python -m pytest tests/unit/core/test_resume_incumbent.py -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 Any test that cannot be run is recorded as **not run**, with the reason. It
 is never reported as passed.
 
@@ -554,7 +715,68 @@ is never reported as passed.
 
 ---
 
-### Commit 2 — `D-C1b`: the declaration is mandatory, consistent, and never an invalid pair
+### Commit 2 — `D-C7a`: typed `gate_role` metadata (prerequisite for the check)
+
+**1. Goal.** Give the consistency check in commit 3 a reliable notion of
+"declared blocking". Without it the check must either trust the misleading
+`_blocking` suffix (§3.2) or infer the mode from behaviour — and an
+inference-based check **would have passed V19's config**, because inferring
+the mode from the behaviour makes every config self-consistent by
+construction (§4.6.1).
+
+It is *before* the check and separate from the presentation work (commit
+10) because only the metadata is a prerequisite; the display label is not.
+
+**2. Scope.** The gate entry model (`execute_tools/health_checks/config.py:82+`)
+gains a typed `role`; both shipped configs declare it.
+
+*Non-goals.* **No gate id is renamed** — ids are join keys in every archived
+artifact. No display change; that is commit 10. No enforcement; that is
+commit 3.
+
+*Dependencies.* None.
+
+**3. Implementation plan.**
+- [ ] Read the gate entry model and `HealthChecksConfig` load path before choosing the field's shape.
+- [ ] Add `role: Literal["blocking", "observational"]` with a default that preserves current behaviour for configs omitting it.
+- [ ] Declare it on every gate in `configs/health_checks.yaml` and `configs/health_checks_baseline_observe_mode.yaml`.
+- [ ] Verify whether adding the key changes `health_config_sha256` for the shipped configs; if it does, record the expected new values and confirm no invariant lock compares across the boundary.
+
+**4. Validation plan.**
+- *Unit*: a role-less config loads with behaviour identical to pre-commit; both shipped configs declare a role on every gate; an unknown role is rejected by Pydantic.
+- *Integration*: the materialized `health_checks_effective.yaml` carries the roles.
+- *Negative*: `role: nonsense` refused at load.
+- *Backward-compatibility*: a historical effective config without roles still loads.
+- *Real Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] `git diff` shows **zero** changes to any gate id string.
+- [ ] In the observe-only config, all three `*_blocking`-named gates declare `role: observational` — the id and the role now disagree **in the data**, which is the fact commit 10 will surface in the label.
+- [ ] A role-less config produces byte-identical gate behaviour.
+- [ ] Any `health_config_sha256` change is recorded here with both values.
+
+**6. Failure and edge cases.**
+| case | behaviour |
+|---|---|
+| config omits `role` | **fall back safely** to the behaviour-preserving default |
+| unknown role literal | **stop** at load |
+| id says blocking, role says observational | **legal** — that is the point; the label is fixed in commit 10 |
+
+**7. Verification commands and evidence.**
+```bash
+./.venv/bin/python -m pytest tests/unit/execute_tools/ -q -k health
+./.venv/bin/python -m pytest tests/unit/core/ -q -k "health or invariant"
+```
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
+- [ ] `health_config_sha256` before/after: __
+
+**8. Commit boundary.**
+- [ ] Metadata only — no enforcement, no display change.
+- [ ] Before committing: show that no gate id appears in the diff.
+
+---
+
+### Commit 3 — `D-C1b`: the declaration is mandatory, consistent, and never an invalid pair
 
 **1. Goal.** Close D-D-2 and the launch-refusal half of D-D-5. Three
 refusals, all before any LLM or GPU work:
@@ -580,11 +802,11 @@ fail a run**, and that blast radius deserves its own revert.
 *Non-goals.* Does not change what any gate does; does not rewrite a config
 to match a declaration. It refuses, it does not repair.
 
-*Dependencies.* Commit 1.
+*Dependencies.* Commits 1 **and 2** — the check is keyed on `gate_role`, and without it the check cannot detect the one case that matters (§4.6.1).
 
 **3. Implementation plan.**
 - [ ] Inspect `RunInvariants` and its lock/compare path end to end before choosing where the check lives; do not assume the constructor is the right seam.
-- [ ] Derive the *effective* mode from the materialized `health_checks_effective.yaml`: a gate whose `on_fail.action` is `invalidate_round` makes the config capable of blocking.
+- [ ] Apply the **role-keyed** rule (§4.6), not a whole-config one: under `blocking`, refuse if any gate with `role: blocking` resolves `on_fail: continue`; under `observe_only`, refuse if any gate holds invalidation authority. Mixed roles are legal and must pass.
 - [ ] Compare declared against effective; on mismatch raise with **both** values and the offending gate ids named.
 - [ ] Add both fields to the locked invariant set so a resume under a different declaration fails the way a changed scope already does.
 - [ ] Refuse `observe_only + scientific` explicitly, naming it as the V19 configuration in the message.
@@ -592,7 +814,7 @@ to match a declaration. It refuses, it does not repair.
 - [ ] Confirm the check runs **before** any GPU work.
 
 **4. Validation plan.**
-- *Unit*: declared `blocking` + all-`continue` config → refusal naming the gates; `observe_only` + blocking config → refusal; `observe_only + scientific` → refusal regardless of config; `blocking + diagnostic` → **accepted**; matching pairs → pass.
+- *Unit*: a **mixed-role** config under `blocking` → passes; a `role: blocking` gate resolving `continue` → refusal naming it; declared `blocking` + all-`continue` config → refusal naming the gates; `observe_only` + blocking config → refusal; `observe_only + scientific` → refusal regardless of config; `blocking + diagnostic` → **accepted**; matching pairs → pass.
 - *Integration*: startup refusal happens before the first round.
 - *Negative*: unreadable/absent effective config → refusal, never a silent pass.
 - *Backward-compatibility*: a workspace locked before this field exists resumes without refusal (see Stop Condition 4, §11).
@@ -612,7 +834,8 @@ to match a declaration. It refuses, it does not repair.
 | declared ≠ effective | **stop** at startup |
 | effective config unreadable | **stop** |
 | legacy lock without the field | **fall back safely** — no refusal |
-| mixed config (some gates block, some do not) | **OPEN** — needs a rule; see §14 |
+| mixed **roles** (blocking + observational gates together) | **allowed** — the shipped production config is exactly this (§4.6) |
+| a `role: blocking` gate resolving `continue` | **stop** — the V19 case |
 | `observe_only + scientific` | **stop** before any LLM or GPU work |
 | omission in a non-formal/diagnostic path | **allowed** — only the formal launcher demands both |
 
@@ -621,7 +844,7 @@ to match a declaration. It refuses, it does not repair.
 ./.venv/bin/python -m pytest tests/unit/core/test_run_invariants.py -q
 ./.venv/bin/python -m pytest tests/unit/core/ -q -k "health or invariant"
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Independently reviewable and independently revertible — reverting restores commit 1's record-only behaviour.
@@ -629,7 +852,7 @@ to match a declaration. It refuses, it does not repair.
 
 ---
 
-### Commit 3 — `D-C2a`: the `ScientificAuthority` verdict, with no call sites
+### Commit 4 — `D-C2a`: the `ScientificAuthority` verdict, with no call sites
 
 **1. Goal.** Introduce the typed verdict and its computed consequences as a
 pure unit. It is separate from its wiring for the reason PR C learned the
@@ -649,18 +872,22 @@ uses for O-7.
 
 **3. Implementation plan.**
 - [ ] Read `core/runtime_control/prephase_admission.py` first and mirror its structure: frozen model, literal disposition, consequences as properties.
-- [ ] Define the `basis` literal covering at minimum `valid_trial_supported`, `no_valid_trial`, `non_blocking_mode`.
+- [ ] Define `AuthorityBasis` covering `valid_trial_supported`, `declared_diagnostic`, `non_blocking_mode`, `no_valid_trial`, `gate_invalidated` (§4.3).
+- [ ] Carry `reasons: tuple[AuthorityBasis, ...]` with **every** applicable reason, plus `primary_basis` as the highest-precedence one — a run can be `observe_only` AND `declared_diagnostic` AND have zero valid trials at once.
+- [ ] Implement the fixed precedence of §4.3 and test it directly.
 - [ ] Make both `enters_*` properties `False` whenever `authoritative` is `False` — no independent path to `True`.
 - [ ] Write the module docstring in the house style: what defect it prevents, and why the consequences are derived rather than flagged.
 
 **4. Validation plan.**
-- *Unit*: every basis; `authoritative=False` ⇒ both consequences `False`; the consequences cannot be set directly (`extra="forbid"` + property).
+- *Unit*: every basis; `authoritative=False` ⇒ both consequences `False`; the consequences cannot be set directly; **`declared_diagnostic` is non-authoritative even with valid trials and blocking gates**; a multi-reason case reports all reasons and the correct `primary_basis`.
 - *Negative*: unknown basis rejected.
 - *Mutation*: making a consequence an independent field must fail a test.
 - *Real Gate*: none.
 
 **5. Acceptance criteria.**
 - [ ] For every basis, the tuple `(authoritative, enters_incumbent_selection, enters_scientific_aggregation)` matches a table written in the test, hardcoded — never read back from the model.
+- [ ] `blocking + scientific + >=1 valid trial + formal result valid` is the **only** combination yielding `authoritative: true`.
+- [ ] A case with three simultaneous reasons lists all three.
 - [ ] No production module imports the new one (`grep` evidence recorded).
 
 **6. Failure and edge cases.** Unknown basis → **stop** (schema). Ambiguous
@@ -670,7 +897,7 @@ combination → unrepresentable by construction.
 ```bash
 ./.venv/bin/python -m pytest tests/unit/core/test_scientific_authority.py -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Independently reviewable: a pure module plus tests.
@@ -678,7 +905,7 @@ combination → unrepresentable by construction.
 
 ---
 
-### Commit 4 — `D-C2b`: wire the verdict at the tuner exit
+### Commit 5 — `D-C2b`: wire the verdict at the tuner exit
 
 **1. Goal.** Compute the verdict from data that already exists (§3.4) and
 attach it to the record. Separate from commit 3 so that "the verdict is
@@ -724,7 +951,7 @@ existing `best_valid_trial_score`.
 ./.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/ -q
 ./.venv/bin/python -m pytest tests/integration/ -q -m "not real_run"
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Reviewable as "compute and record"; no consumer reads it yet.
@@ -732,11 +959,19 @@ existing `best_valid_trial_score`.
 
 ---
 
-### Commit 5 — `D-C3`: a non-blocking formal round runs, and is recorded non-authoritative
+### Commit 6 — `D-C3`: an explicitly overridden zero-valid-trial formal round remains runnable, and is recorded non-authoritative
 
-**1. Goal.** Land D-D-1 explicitly: the round is **not** cancelled. Its own
-commit so the "we did not break the resilience at `:1487-1489`" claim is
-reviewable in isolation.
+**1. Goal.** Land D-D-1 explicitly, in the direction the title now states.
+Zero valid trials **never causes** a formal execution — that requires an
+explicit diagnostic or `force_formal_round` override. What this commit
+proves is that when such an override *has* fired, the round is **not
+cancelled** and its result is **not certified**. Its own commit so the "we
+did not break the resilience at `:1487-1489`" claim is reviewable in
+isolation.
+
+The title was previously "a non-blocking formal round runs", which invited
+exactly the reading the operator rejected — that `observe_only` or zero
+valid trials would themselves trigger a formal round. They do not.
 
 **2. Scope.** Verification and recording around `force_formal_round`
 (`:1455-1492`). *Non-goals — and this is the point of the commit*: the
@@ -768,14 +1003,14 @@ WARNING. Control flow is unchanged.
 ```bash
 ./.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Mostly tests; any production change here is a red flag to surface, not to absorb.
 
 ---
 
-### Commit 6 — `D-C4`: incumbent exclusion
+### Commit 7 — `D-C4`: incumbent exclusion
 
 **1. Goal.** The first commit that changes a decision. Isolated so it can be
 reverted without touching reporting.
@@ -817,7 +1052,7 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 ./.venv/bin/python -m pytest tests/unit/core/test_resume_incumbent.py -q
 ./.venv/bin/python -m pytest tests/unit/core/ -q -k resume
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Reviewable as one predicate extension.
@@ -825,7 +1060,7 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 
 ---
 
-### Commit 7 — `D-C5`: aggregation and report exclusion, stated not silent
+### Commit 8 — `D-C5`: aggregation and report exclusion, stated not silent
 
 **1. Goal.** Non-authoritative results leave scientific aggregation, **and
 the exclusion is visible**. Separate from commit 6 because it changes what a
@@ -843,7 +1078,8 @@ a score is computed — only to which scores are aggregated.
 - [ ] Read each of the four `inp.summaries` loops before editing; they are not obviously equivalent and may need different handling.
 - [ ] Filter on `enters_scientific_aggregation`.
 - [ ] Emit an explicit "N results excluded as non-authoritative, because …" line — a silently smaller sample is the failure mode being prevented.
-- [ ] Check whether the excluded count needs to reach the LLM-facing interpretation input; if so it is an **LLM-facing change** and requires separate approval (§ Additional rules).
+- [ ] **Find the deterministic report layer first** (§4.7). The default is that aggregation code derives the count and reasons and the report renders a fixed provenance section — no model involvement.
+- [ ] Only if a code audit proves the final report is produced wholly by the interpretation agent with no layer able to append deterministically, fall back to an LLM-facing input — and **stop for separate approval** before doing so.
 
 **4. Validation plan.**
 - *Unit*: excluded results absent from aggregation; the count is reported.
@@ -854,7 +1090,7 @@ a score is computed — only to which scores are aggregated.
 
 **5. Acceptance criteria.**
 - [ ] For an all-authoritative fixture, the aggregate value is **bit-identical** to pre-commit.
-- [ ] For a mixed fixture, the aggregate excludes the non-authoritative records **and** the output contains the exclusion count and reason.
+- [ ] For a mixed fixture, the aggregate excludes the non-authoritative records **and** the report contains the count and per-reason breakdown, rendered deterministically — verified by asserting the exact text, not by a model producing it.
 - [ ] For an all-non-authoritative fixture, the output says so explicitly rather than rendering an empty aggregate.
 
 **6. Failure and edge cases.** Empty report → **stop for operator review**
@@ -865,14 +1101,14 @@ Field absent on legacy summaries → treat as UNKNOWN and **warn**.
 ```bash
 ./.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent/ -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] If the exclusion must appear in an LLM prompt, that part is **split out** and separately approved.
 
 ---
 
-### Commit 8 — `D-C6`: structured all-trials-invalid feedback
+### Commit 9 — `D-C6`: structured all-trials-invalid feedback
 
 **1. Goal.** Close D6 by extending the existing gate-exhaustion block rather
 than opening a second feedback channel (§3.8).
@@ -909,14 +1145,14 @@ respect the existing `health_feedback_policy`.
 ```bash
 ./.venv/bin/python -m pytest tests/unit/agent/schemas/test_health_feedback.py -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Any prompt change is excluded from this commit by construction.
 
 ---
 
-### Commit 9 — `D-C7`: five fields recorded per gate; the operator-facing label stops lying
+### Commit 10 — `D-C7b`: five fields recorded per gate; the operator-facing label stops lying
 
 **1. Goal.** Close D-D-3 and §3.2. Last among behavioural commits because it
 is cosmetic in effect and must not be confused with the authority work.
@@ -959,22 +1195,33 @@ recorded; if any lock compares across it, **stop**.
 ./.venv/bin/python -m pytest tests/unit/execute_tools/ -q -k health
 ./.venv/bin/python -m pytest tests/unit/core/test_campaign_artifacts.py -q
 ```
-- [ ] test count: __   - [ ] wall time: __
+- [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
 - [ ] Labels only; no authority logic in the diff.
 
 ---
 
-### Commit 10 — `D-C9`: the V19 retrospective closure annotation
+### Commit 11 — `D-C9`: the V19 retrospective closure annotation
 
 **1. Goal.** Record what V19 actually ran under, **without touching a single
 V19 byte** (§4.5, operator decision 2026-08-04). Last because it is
 historical bookkeeping, and separate because it writes to the incident
 archive rather than to production code.
 
-**2. Scope.** A new sidecar annotation beside the V19 artifacts, plus the
-script or documented procedure that produces it.
+**2. Scope — and this commit is deliberately only half of the work.**
+
+```text
+repository commit    the annotation schema + its validator/generator
+evidence step        running it beside the immutable V19 archive,
+                     and recording the before/after hashes
+```
+
+The V19 forensic archive is not in the Git repository, so the sidecar's
+*generation* is an acceptance-artifact operation, not a code commit
+(operator, 2026-08-04). Only the schema and generator are committed here;
+pretending the generation is an ordinary commit would misrepresent where
+the evidence lives.
 
 *Non-goals — and this is the whole point*: **no V19 manifest is modified.**
 No field is back-filled. Nothing in the archive is deleted or moved.
@@ -1130,10 +1377,16 @@ already reflected in §4 and §7.
 | 2 | Does `diagnostic` differ behaviourally from `observe_only`? | **The question was the symptom.** They are different axes, not values of one (D-D-5): `healthgate_mode` ∈ {blocking, observe_only} governs control flow; `result_authority` ∈ {scientific, diagnostic} governs eligibility. `observe_only + scientific` is refused; `blocking + diagnostic` is now expressible and legitimate. |
 | 3 | Retroactive labelling of V19 | **Do not rewrite.** V19 artifacts are immutable forensic evidence. A separate closure annotation records the classification, its basis and its retrospective date, with before/after hashes proving nothing was touched (§4.5, commit 10). |
 
+| 4 | Is a **mixed** effective config a refusal? | **No — the question was posed at the wrong level (operator, 2026-08-04).** Mixed *roles* are the correct and normal configuration; mixed *semantics within one role* are the defect. See §4.6. |
+| 5 | Must the exclusion count reach the **LLM-facing** interpretation input? | **Default: no (operator, 2026-08-04).** The exclusion must reach the final report, but deterministically. See §4.7. |
+
 ### Still open
 
-| # | Question | What would resolve it |
+Nothing blocks the commit plan. Two implementation-time questions remain and
+are answered by reading code, not by deciding policy:
+
+| # | Question | Answered by |
 |---|---|---|
-| 4 | A **mixed** effective config — some gates `invalidate_round`, some `continue` — has no declared-mode equivalent. Is it `blocking` (any gate can invalidate) or a refusal? | Inspect whether any shipped or historical config is actually mixed. The two shipped configs are uniform, so this may be unreachable — in which case refuse it and say so. |
-| 5 | Whether the exclusion count in §7 commit 7 must reach the **LLM-facing** interpretation input. If it must, that part is split out and separately approved. | Read the interpretation agent's prompt assembly before implementing commit 7. |
+| A | Does a deterministic report layer exist outside the interpretation agent (§4.7)? | Reading the report assembly before implementing commit 7. |
+| B | Are `configured_action` / `effective_action` already derivable from the existing gate-result structure (§7 commit 9)? | Reading the gate-result model before implementing commit 9. |
 
