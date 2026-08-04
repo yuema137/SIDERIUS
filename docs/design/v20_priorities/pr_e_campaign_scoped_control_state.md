@@ -1268,7 +1268,9 @@ the evidence named in its row.
       **not** stop the launch — E-C3, `legacy_global_stop_observed`
 - [x] No shipped code path deletes, moves or rewrites any legacy file —
       E-C3, proved by bytes and `st_mtime_ns` over a four-file tree
-- [ ] V18r layout untouched; `v18r_queue_runner.sh` not modified
+- [x] V18r layout untouched; `v18r_queue_runner.sh` not modified —
+      verified at the final head: it is absent from `git diff --name-only
+      origin/master...HEAD` (FU-E-3 keeps its self-exclusion pattern)
 - [x] **Evidence**: a test with a legacy tree on disk proves (a) an
       adopted campaign still skips a chain completed in legacy state,
       (b) **a campaign whose new state exists does NOT skip a chain
@@ -1309,15 +1311,15 @@ the evidence named in its row.
 
 ### E4 — Stop semantics preserved
 
-- [ ] `test_c13_stop_semantics.py` passes unchanged except for the two
+- [x] `test_c13_stop_semantics.py` passes unchanged except for the two
       path expressions it constructs
-- [ ] Chain stop: after current iteration, `chain_stopped.json`,
+- [x] Chain stop: after current iteration, `chain_stopped.json`,
       `respawn: false`, exit 99 — unchanged
-- [ ] Queue stop: current wave finishes, no further wave, `queue_stopped`
+- [x] Queue stop: current wave finishes, no further wave, `queue_stopped`
       record, exit 99 — unchanged
-- [ ] Signalled child (`>= 128`) still ends the loop; ordinary non-zero
+- [x] Signalled child (`>= 128`) still ends the loop; ordinary non-zero
       still continues
-- [ ] **Evidence**: a mutation proof — revert the path change alone and
+- [x] **Evidence**: a mutation proof — revert the path change alone and
       show the C13 suite still passes, i.e. the C13 guarantees are
       genuinely independent of where the file lives
 
@@ -1526,7 +1528,7 @@ subsections below are the implementation contract.
 | **E-C5** `[x]` | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
 | **E-C6** `[x]` | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
 | **E-C7** `[x]` | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
-| **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
+| **E-C8** `[x]` | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
 
 **Four structural rulings from the second operator review are baked
 into this table.**
@@ -4521,17 +4523,29 @@ change it.
 
 ### 16.5 Follow-ups
 
+**Every `FU-E-*` id this document mentions appears below.** A first
+version of this table listed only nine of the twelve and the completion
+summary reported "seven open", which was wrong twice over: FU-E-5 and
+FU-E-6 are open and were missing, and FU-E-9 is closed and was missing.
+Corrected here, and the count is now derived from the table rather than
+asserted beside it.
+
+**Nine open, two closed, one withdrawn.**
+
 | id | Status |
 |---|---|
-| **FU-E-11** | **withdrawn** — reclassified by operator review as an E-C2 implementation defect; fixed in E-C2b |
-| **FU-E-12** | **closed** — the Gate's identical self-exclusion, fixed in E-C6b rather than deferred |
-| FU-E-1 | open — remove the `arch`/`loss` compatibility mirror once the report tooling reads `chains` |
-| FU-E-2 | open — an N-chain *scheduler* (the state schema is already N-chain-capable) |
-| FU-E-3 | open — `v18r_queue_runner.sh:48` carries the same self-exclusion pattern; historical surface, protected by an existing test |
-| FU-E-4 | open — unify `_WRITER_ID_RE` with `validate_path_component` |
-| FU-E-7 | open — rebuild derived per-wave views for historical waves |
-| FU-E-8 | open — a Gate stop channel, deliberately not added here |
-| FU-E-10 | open — `band_tag` yields `00_00` for malformed input instead of refusing |
+| FU-E-1 | **open** — remove the `arch`/`loss` compatibility mirror once every report consumer reads `chains[]`. Deliberately not widened into PR E |
+| FU-E-2 | **open** — an N-chain *scheduler*; the state schema is already N-chain-capable, the launcher is not |
+| FU-E-3 | **open** — `v18r_queue_runner.sh:48` carries the same self-exclusion pattern; historical surface, protected from change by an existing test |
+| FU-E-4 | **open** — unify `_WRITER_ID_RE` (`observation_store.py:38`) with `validate_path_component` |
+| FU-E-5 | **open** — share one atomic-write helper instead of the local copy; reaching into a PR C module's private method is worse than one copy |
+| FU-E-6 | **open** — `pyrightconfig.json` excludes `tests` and runs `basic`, not `strict`. A type-checking policy change is not PR E's causal claim |
+| FU-E-7 | **open** — rebuild derived per-wave views for historical waves |
+| FU-E-8 | **open** — a Gate stop channel, deliberately not added here |
+| FU-E-10 | **open** — `band_tag` yields `00_00` for malformed input instead of refusing |
+| FU-E-9 | **closed** — the `campaign_spend` prefix-glob collision, fixed by a predecessor hotfix before this branch; `scripts/campaign_spend.py` now takes explicit `--run-name` values and the glob is gone |
+| FU-E-12 | **closed** — the Gate's identical self-exclusion, fixed in E-C6b rather than deferred (operator ruling) |
+| FU-E-11 | **withdrawn** — reclassified by operator review as an E-C2 implementation defect, not a follow-up; fixed in E-C2b |
 
 ### 16.6 Final Behavior Delta
 
