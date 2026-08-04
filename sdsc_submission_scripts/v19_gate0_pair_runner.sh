@@ -41,6 +41,10 @@
 # ---------------------------------------------------------------------------
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+#: This script's own filename, for the live-process guard's
+#: self-exclusion (E-C6b, the same correction E-C6 made in the queue
+#: runner). Parameter expansion, so no subshell.
+GATE_RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
 GATE_ROOT="${GATE_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19/gate0}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 STAGGER_SECONDS="${STAGGER_SECONDS:-90}"
@@ -206,7 +210,16 @@ launch_gate_chain() {  # flavor (arch|loss)
   if gate_screen_alive "$RUN"; then
     log "ERROR $RUN: screen $SESSION already exists — NOT launched"; return 1
   fi
-  if ps -eo args | grep -v grep | grep -v gate0_pair_runner | grep -qF "$GATE_ROOT/$RUN"; then
+  # The runner must not see ITSELF as a live process holding this
+  # workspace. The exclusion was the literal `gate0_pair_runner`, so a
+  # renamed or copied Gate runner stopped excluding itself and refused
+  # to launch anything (E-C6b; identical to E-C6 in the queue runner).
+  #
+  # `-F` on both sides: the basename contains `.`, which as a REGEX
+  # matches any character, so a plain `grep -v` would also exclude
+  # processes that are not this runner — the direction that silently
+  # skips the guard.
+  if ps -eo args | grep -v grep | grep -vF -- "$GATE_RUNNER_BASENAME" | grep -qF -- "$GATE_ROOT/$RUN"; then
     log "ERROR $RUN: live process referencing $WS — NOT launched"; return 1
   fi
 

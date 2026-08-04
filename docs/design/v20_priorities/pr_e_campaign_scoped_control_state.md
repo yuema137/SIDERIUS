@@ -3434,15 +3434,59 @@ campaign paths, no legacy adoption, no wave writer, no
    `sleep` inherited them), making the class take 120 s; redirecting its
    output brought that to 4.8 s.
 
-**New follow-up**
+**Follow-up filed and immediately closed**
 
-- **FU-E-12** — `v19_gate0_pair_runner.sh:209` carries the identical
+- **FU-E-12** — `v19_gate0_pair_runner.sh:209` carried the identical
   hardcoded self-exclusion (`grep -v gate0_pair_runner`, also without
-  `-F`). Out of E-C6's frozen scope, which names the queue runner only,
-  and recorded here because E-C5 just touched that file and a reviewer
-  will ask. `v18r_queue_runner.sh:48` remains FU-E-3.
+  `-F`). Filed as a follow-up because E-C6's frozen scope names the queue
+  runner only; the operator's review (2026-08-04) declined the deferral —
+  the Gate runner is a production surface PR E already touched in E-C5,
+  and the fix is the same two lines. **Closed by E-C6b below.**
+  `v18r_queue_runner.sh:48` remains FU-E-3: it is a historical launch
+  surface protected from change by an existing test.
 
-**Next authorized checkpoint**: E-C7 (multi-campaign isolation test).
+**Next authorized checkpoint**: E-C6b, then E-C7.
+
+#### IMPLEMENTATION RECORD — E-C6b `[x]` COMPLETE
+
+*Closes FU-E-12. Operator ruling, 2026-08-04: not deferred.*
+
+**Commit**: `<filled at commit>`, on top of E-C6 `6dc1fdb1`.
+
+**Behavior Delta**: a Gate runner running under any filename now excludes
+its own process from the live-process scan. Under the shipped filename,
+behaviour is unchanged.
+
+**Production diff — two lines**, the E-C6 change transposed:
+
+```diff
++GATE_RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
+-  if ps -eo args | grep -v grep | grep -v gate0_pair_runner | grep -qF "$GATE_ROOT/$RUN"; then
++  if ps -eo args | grep -v grep | grep -vF -- "$GATE_RUNNER_BASENAME" | grep -qF -- "$GATE_ROOT/$RUN"; then
+```
+
+**Tests** — 5 new, mirroring E-C6's class against
+`launch_gate_chain` and `$GATE_ROOT/$RUN`: the meaning is intact, the
+shipped filename is unchanged, an actually-renamed copy excludes itself,
+`v19_gate0_pair_runnerXsh` still blocks, and the literal is gone.
+`tests/unit/sdsc_submission_scripts/`: **430 passed** in 64 s.
+
+**Mutations**: the literal restored → **3 fail**; `-F` dropped →
+**2 fail**. Same discriminating pair as E-C6, including the
+actually-renamed-copy case.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean.
+
+**Scope held**: only `v19_gate0_pair_runner.sh` and its test file
+changed. No `v18r_queue_runner.sh` (`git diff --stat` empty), no Gate
+stop channel, no summary/wall-cap/trap/execution-parameter change, no
+queue-runner change.
+
+**Next authorized checkpoint**: E-C7 (multi-campaign isolation test),
+**test-only** — any production change required there is a stop-and-report
+condition, because it would mean the preceding implementation evidence
+was insufficient.
 
 ---
 ### E-C7 — Multi-campaign isolation test

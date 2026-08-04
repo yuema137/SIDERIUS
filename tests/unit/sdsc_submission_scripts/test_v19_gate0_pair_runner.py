@@ -465,3 +465,103 @@ class TestSourcingTheGateRunnerStillTouchesNothing:
         )
         assert "SOURCED_OK" in r.stdout
         assert not gate_root.exists()
+
+
+class TestTheGateLiveProcessGuardExcludesOnlyItself:
+    """E-C6b. The Gate carried the identical hardcoded self-exclusion the
+    queue runner had (`grep -v gate0_pair_runner`), so a renamed or
+    copied Gate runner saw its own process holding the workspace and
+    refused to launch anything.
+
+    Same shape as `TestTheLiveProcessGuardExcludesOnlyItself` in
+    `test_v19_queue_runner.py`, against this runner's `$GATE_ROOT/$RUN`.
+    """
+
+    RUN = "v19_c14_arch_15_19"
+    BLOCKED = "live process referencing"
+
+    def _guard_says(self, tmp_path: Path, fixture_comment: str, runner: Path | None = None) -> str:
+        gate_root = tmp_path / "gate0"
+        gate_root.mkdir(exist_ok=True)
+        shim = tmp_path / "shim"
+        shim.mkdir(exist_ok=True)
+        (shim / "screen").write_text('#!/bin/bash\nif [ "$1" = "-ls" ]; then exit 1; fi\nexit 0\n')
+        (shim / "screen").chmod(0o755)
+        marker = f"{gate_root}/{self.RUN}"
+        script = f"""
+        set +e
+        RUNNER_LOG="{tmp_path}/log"
+        EXIT_DIR="{tmp_path}/markers"; mkdir -p "$EXIT_DIR"
+        # `; true` keeps bash from EXEC-ing the simple command and
+        # replacing its own argv, which would drop the marker from `ps`.
+        # Output redirected so the orphaned sleep does not hold the
+        # captured pipes open.
+        bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
+        FIXTURE=$!
+        sleep 0.4
+        launch_gate_chain arch
+        kill "$FIXTURE" 2>/dev/null
+        """
+        subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"V19_GATE0_NO_MAIN=1 source '{runner or RUNNER}'; {script}",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(
+                os.environ,
+                GATE_ROOT=str(gate_root),
+                PATH=f"{shim}:{os.environ['PATH']}",
+                LAUNCH_SETTLE_SECONDS="0",
+            ),
+            timeout=60,
+        )
+        log = tmp_path / "log"
+        return log.read_text() if log.exists() else ""
+
+    def test_a_genuine_external_process_still_blocks_the_launch(self, tmp_path):
+        assert self.BLOCKED in self._guard_says(tmp_path, "some_other_program")
+
+    def test_the_runner_does_not_see_itself(self, tmp_path):
+        """Behaviour under the shipped filename is unchanged."""
+        log = self._guard_says(tmp_path, "v19_gate0_pair_runner.sh")
+        assert self.BLOCKED not in log
+
+    def test_a_renamed_gate_runner_still_excludes_itself(self, tmp_path):
+        """THE REGRESSION, with an actually-renamed copy — varying only
+        the fixture's name cannot distinguish the fix."""
+        import shutil
+
+        scripts = tmp_path / "sdsc_submission_scripts"
+        scripts.mkdir()
+        renamed = scripts / "renamed_gate_runner.sh"
+        shutil.copy(RUNNER, renamed)
+        shutil.copy(RUNNER.parent / "_chain_common.sh", scripts / "_chain_common.sh")
+
+        log = self._guard_says(tmp_path, "renamed_gate_runner.sh", runner=renamed)
+
+        assert self.BLOCKED not in log, (
+            "a renamed Gate runner saw its own process as a competing chain"
+        )
+
+    def test_the_exclusion_is_fixed_string_not_a_regex(self, tmp_path):
+        """MUTATION TARGET: dropping `-F`. The basename contains `.`, so
+        a regex would also exclude `v19_gate0_pair_runnerXsh`."""
+        log = self._guard_says(tmp_path, "v19_gate0_pair_runnerXsh")
+        assert self.BLOCKED in log
+
+    def test_the_exclusion_derives_from_the_script_name(self):
+        src = RUNNER.read_text(encoding="utf-8")
+        assert 'GATE_RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"' in src
+        live = [
+            line.strip()
+            for line in src.splitlines()
+            if "grep -v" in line and not line.strip().startswith("#")
+        ]
+        assert live == [
+            'if ps -eo args | grep -v grep | grep -vF -- "$GATE_RUNNER_BASENAME" '
+            '| grep -qF -- "$GATE_ROOT/$RUN"; then'
+        ], live
