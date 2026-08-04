@@ -1,0 +1,41 @@
+{
+ "label": "fcnet_test_run_002:training",
+ "request": {
+  "model_type": "fcnet",
+  "planned_identity": {
+   "model_type": "fcnet",
+   "model_family": "fcnet",
+   "optimizer_type": "adamw",
+   "seg_size": 40000,
+   "batch_size": 1,
+   "planned_config_hash": "cfg:5d0cc6af0eb0"
+  },
+  "request_id": "05d73bfde3d44ccebbbb5718dcd811ff",
+  "device_uuid": "<MagicMock name='TidmadSandbox().device_identity.uuid' id='140515950159312'>",
+  "phase": "training",
+  "deadline_seconds": 600.0,
+  "sampling_interval_seconds": 0.25
+ },
+ "model_config_payload": {
+  "depth": 4,
+  "segmentation_size": 40000,
+  "batch_size": 1,
+  "model_type": "fcnet"
+ },
+ "train_config": {
+  "epochs": 5,
+  "lr": 0.0001
+ },
+ "loss_config": {
+  "loss_type": "focal",
+  "gamma": 2.0
+ },
+ "device": "cuda",
+ "data_dir": null,
+ "training_steps": 4,
+ "inference_batches": 3,
+ "result_path": "MagicMock/TidmadSandbox().base_dir/140515951882608/prephase_measurement/fcnet_test_run_002_training.json",
+ "journal_path": "MagicMock/TidmadSandbox().base_dir/140515951882608/prephase_measurement/fcnet_test_run_002_training.phases.ndjson",
+ "worker_memory_limit_bytes": 25769803776,
+ "soft_deadline_seconds": 480.0
+}

@@ -50,6 +50,12 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.runtime_control.process_group import (
+    process_group_alive,
+    signal_group,
+    tree_rss_bytes,
+)
+
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
 #: can be derived rather than guessed.
@@ -379,43 +385,15 @@ class IsolatedProbeResult(BaseModel):
         )
 
 
-def _worker_tree_rss_bytes(pgid: int) -> int:
-    """Resident memory of the worker and its descendants.
-
-    Read from /proc rather than a library so the monitor has no import
-    cost and cannot itself become the memory problem.
-    """
-    total = 0
-    try:
-        for entry in os.listdir("/proc"):
-            if not entry.isdigit():
-                continue
-            try:
-                if os.getpgid(int(entry)) != pgid:
-                    continue
-                with open(f"/proc/{entry}/statm") as handle:
-                    total += int(handle.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
-            except (OSError, ProcessLookupError, PermissionError, IndexError, ValueError):
-                continue
-    except OSError:
-        return total
-    return total
-
-
-def _process_group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    return True
-
-
-def _signal_group(pgid: int, sig: int) -> bool:
-    try:
-        os.killpg(pgid, sig)
-    except (ProcessLookupError, PermissionError):
-        return False
-    return True
+# Supervision primitives moved to `core.runtime_control.process_group`
+# (V20 PR C2): this module and `probe_subprocess.py` had grown identical
+# copies, and C2's measurement runner needed the same three. Four places to
+# fix one kill-path bug in is worse than one import. Behaviour unchanged --
+# the bodies moved verbatim. The local names are kept because they are what
+# this module's own tests and readers refer to.
+_worker_tree_rss_bytes = tree_rss_bytes
+_process_group_alive = process_group_alive
+_signal_group = signal_group
 
 
 def run_isolated_preflight(

@@ -349,9 +349,15 @@ class TestResourceAdmissionSurface:
         """Replaces B-C4a0's "no emitter yet" guard, which fired as
         designed when B-C4c added the caller.
 
-        The surviving invariant is stronger: exactly one function may
-        build this record, so its wording, its reason vocabulary and its
-        budget accounting cannot drift into a second copy.
+        The surviving invariant is that its wording, its reason vocabulary
+        and its budget accounting cannot drift into a second copy -- so
+        every caller must go through THIS builder rather than assembling
+        an equivalent.
+
+        V20 PR C2 / C2-8 added the pre-phase measurement handler as a
+        second approved caller. It uses the builder unchanged, which is
+        the builder doing its job; what would break the invariant is a
+        hand-rolled record, and that still fails here.
         """
         callers = {
             fn.name
@@ -364,7 +370,7 @@ class TestResourceAdmissionSurface:
                 for n in ast.walk(fn)
             )
         }
-        assert callers == {"_handle_admission_refusal"}
+        assert callers == {"_handle_admission_refusal", "_handle_prephase_gpu_measurement"}
 
     def test_both_phases_consume_the_refusal(self):
         phases = sorted(

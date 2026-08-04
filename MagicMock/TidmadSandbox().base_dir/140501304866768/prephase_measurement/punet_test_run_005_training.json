@@ -1,0 +1,39 @@
+{
+ "label": "punet_test_run_005:training",
+ "request": {
+  "model_type": "punet",
+  "planned_identity": {
+   "model_type": "punet",
+   "model_family": "punet",
+   "optimizer_type": "adamw",
+   "seg_size": 40000,
+   "batch_size": 1,
+   "planned_config_hash": "cfg:fe356c30961a"
+  },
+  "request_id": "04817743e851424c99e1fb63ac059963",
+  "device_uuid": "<MagicMock name='TidmadSandbox().device_identity.uuid' id='140515951754704'>",
+  "phase": "training",
+  "deadline_seconds": 600.0,
+  "sampling_interval_seconds": 0.25
+ },
+ "status": "DEVICE_MISMATCH",
+ "device": "cuda",
+ "observed_device_uuid": "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef",
+ "device_name": "NVIDIA GeForce RTX 5090",
+ "worker_pid": 4173246,
+ "phases": [],
+ "realism": {
+  "forward_calls": 0,
+  "backward_calls": 0,
+  "optimizer_steps": 0,
+  "inference_batches": 0,
+  "parameter_update_max_abs_delta": null,
+  "parameter_update_verified": false,
+  "inference_grad_free": null,
+  "trainable_parameter_count": null,
+  "parameter_count": null
+ },
+ "realized_identity": null,
+ "request_id": "04817743e851424c99e1fb63ac059963",
+ "detail": "measured on GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef but the request names <MagicMock name='TidmadSandbox().device_identity.uuid' id='140515951754704'>"
+}

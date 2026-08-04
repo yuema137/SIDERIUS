@@ -312,7 +312,12 @@ class TestProduceAndConsumeStaySeparate:
                 for n in ast.walk(fn)
             )
         }
-        assert handlers == {"_handle_admission_refusal"}
+        # V20 PR C2 / C2-8 added the second approved caller. The invariant
+        # is that nobody HAND-ASSEMBLES this record, not that only one
+        # function may ask for one -- a shared builder with two callers is
+        # the builder doing its job. A third caller, or any hand-rolled
+        # equivalent, still fails here.
+        assert handlers == {"_handle_admission_refusal", "_handle_prephase_gpu_measurement"}
 
     def test_the_executor_owns_the_status_constant_it_emits(self):
         """The executor writes the status; the tuner reads it through

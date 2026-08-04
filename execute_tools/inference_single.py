@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
@@ -155,7 +156,16 @@ def get_parser():
 
 
 def process_batch(
-    index, inputarr, targetarr, model, args, current_loss_type, current_loss_name=None
+    index,
+    inputarr,
+    targetarr,
+    model,
+    args,
+    current_loss_type,
+    current_loss_name=None,
+    *,
+    trace=None,
+    batch_index=None,
 ):
     """
     Refactored batch processor to ensure dimension alignment across all models.
@@ -166,6 +176,13 @@ def process_batch(
     output-type contract via ``get_output_type`` plus the loss's declared
     target dtype, rather than the hardcoded ``loss_type == "smooth_l1"``
     check that broke for classifier-style custom losses.
+
+    ``trace`` / ``batch_index`` (V20 PR C2, validation only) — when a
+    milestone trace is active, three points of this batch's GPU lifecycle
+    are recorded: input on device, the synchronized post-forward state with
+    ``output`` still resident, and the state after the transfer to host.
+    Both default to ``None`` and production passes neither, so the body is
+    byte-for-byte the same sequence of operations it was before.
     """
     # 1. Base Pre-processing (ADC Offset)
     inputarr = inputarr.astype(np.int16) + 128
@@ -186,8 +203,35 @@ def process_batch(
     else:
         input_seq = input_seq.long().to(DEVICE)
 
+    if trace is not None:
+        trace.record(
+            "after_input_to_device",
+            batch_index=batch_index,
+            synchronize=True,
+            model=model,
+            model_input=input_seq,
+        )
+
     with torch.no_grad():
         output = model(input_seq)
+
+        # V20 PR C2, validation only. THE load-bearing milestone: the
+        # forward has completed and synchronized, ``output`` is still bound
+        # and still on the GPU, and nothing has been transferred, argmaxed
+        # or released yet. Taken after ``.cpu()`` it would describe a
+        # different state while looking identical, which is exactly the
+        # comparison error this trace exists to rule out. It allocates
+        # nothing and extends no lifetime — ``output`` is live here anyway,
+        # because the decode below reads it.
+        if trace is not None:
+            trace.record(
+                "after_forward_output_resident",
+                batch_index=batch_index,
+                synchronize=True,
+                model=model,
+                model_input=input_seq,
+                output=output,
+            )
 
         # 4. Decoding Output based on Task Type
         # I15 — output decoding is driven by the MODEL's output contract,
@@ -211,6 +255,16 @@ def process_batch(
             # Convert logits to discrete ADC values via Argmax
             output_seq = output.argmax(dim=1).detach().cpu().numpy()
 
+        if trace is not None:
+            trace.record(
+                "after_output_to_cpu",
+                batch_index=batch_index,
+                synchronize=True,
+                model=model,
+                model_input=input_seq,
+                output=output,
+            )
+
     # Return flattened results for H5 assembly
     return index, (output_seq - 128).flatten(), (targetarr - 128).flatten()
 
@@ -220,6 +274,40 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
     t_process_start = time.perf_counter()
+
+    # V20 PR C2, validation only. ``None`` — and therefore completely
+    # inert — unless SIDERIUS_C2_INFERENCE_MILESTONE_TRACE names a channel,
+    # which production never does. There is no CLI flag and no config key:
+    # the absence of the tracer IS the disabled state.
+    #
+    # ``process_start`` and ``after_imports`` are both taken here, and that
+    # is a real limitation rather than an oversight: this module imports
+    # torch at module scope, so by the time any statement in ``main`` can
+    # run, the import block has already executed. Recording them at module
+    # scope would require a statement above the imports (E402) and a
+    # first-party import ordered above the third-party ones (I001), and
+    # this repository does not disable lint rules to make code fit. Both
+    # sides therefore agree on what these two milestones MEAN — process
+    # entry, torch available, CUDA not yet initialized — which is what the
+    # comparison needs. The already-completed direct measurement puts both
+    # at 0 MiB on both sides, so nothing load-bearing rests here.
+    trace = tracer_from_environment(side="formal_inference")
+    if trace is not None:
+        trace.set_candidate(
+            {"model_type": args.denoising_model, "mode": args.mode, "exp_id": args.exp_id},
+            inference_batch_size=args.inference_batch_size,
+        )
+        trace.record(
+            "process_start",
+            detail="entry to main(); torch was imported at module scope",
+        )
+        trace.record("after_imports")
+        # torch resolves DEVICE at module scope but creates no context: the
+        # CUDA context is allocated lazily at the first device operation,
+        # which on this path is the model transfer below. The record's
+        # ``cuda_initialized`` field states which it is rather than the
+        # milestone name implying it.
+        trace.record("after_cuda_init", detail=f"DEVICE={DEVICE}")
 
     if args.data_dir is None:
         from execute_tools.data_paths import TIDMAD_DATA_DIR
@@ -275,10 +363,29 @@ def main():
         m_cfg = config_class(**m_data)
 
         # Special handling for AE (loss_type injection), others use standard config init
+        #
+        # Construction and transfer are two statements rather than one
+        # chained expression so a milestone can sit between them (V20 PR
+        # C2, validation only). This is not a behaviour change:
+        # ``nn.Module.to()`` moves parameters in place and returns ``self``,
+        # so both forms perform the identical sequence of operations on the
+        # identical object — the split only binds a name in between.
         if args.denoising_model == "fcnet":
-            model = model_class(m_cfg, loss_type=current_loss_type).to(DEVICE)
+            model = model_class(m_cfg, loss_type=current_loss_type)
         else:
-            model = model_class(m_cfg).to(DEVICE)
+            model = model_class(m_cfg)
+
+        if trace is not None:
+            trace.record(
+                "after_model_construction",
+                model=model,
+                detail="constructed on host; not yet transferred to the device",
+            )
+
+        model = model.to(DEVICE)
+
+        if trace is not None:
+            trace.record("after_model_to_device", synchronize=True, model=model)
 
         # Phase 6.7 Fix 3 — preflight the trainer sentinel. No retry loop:
         # the spec explicitly drops it because it would mask, not fix, the
@@ -316,6 +423,22 @@ def main():
         state_dict = torch.load(args.model_path, map_location="cpu")
         model.load_state_dict(state_dict)
         del state_dict
+
+        # The one step the pre-phase worker has no equivalent for — it
+        # builds from the live MODEL_REGISTRY and loads no checkpoint —
+        # which is why the milestone comparison isolated it (V20 PR C2,
+        # validation only).
+        #
+        # Recorded AFTER the host copy is released, so it captures the
+        # settled post-load state rather than a transient. Its job is now
+        # the opposite of what found the defect: with the host-side load
+        # above, allocator reserved must stay at the model-only baseline
+        # here instead of rising by a checkpoint. A future regression that
+        # put the load back on the device would show up at exactly this
+        # milestone.
+        if trace is not None:
+            trace.record("after_checkpoint_load", synchronize=True, model=model)
+
         input_size = m_cfg.segmentation_size
 
     model.eval()
@@ -363,6 +486,10 @@ def main():
         total_psd_planned = sum(len(v) for v in sample_set.values())
         total_files_planned = len(sample_set)
         verification_completed = False
+        # V20 PR C2, validation only: a GLOBAL batch ordinal, so the trace
+        # bound counts forward passes rather than restarting at each file
+        # and re-tracing the first batch of every one of them.
+        traced_batch_ordinal = 0
         if runtime_session is not None:
             runtime_session.record_phase_workload(
                 "inference",
@@ -503,8 +630,25 @@ def main():
                 batch_in = train_loader[i : i + bs]
                 batch_tgt = target_loader[i : i + bs]
                 _, dn, ij = process_batch(
-                    i, batch_in, batch_tgt, model, args, current_loss_type, current_loss_name
+                    i,
+                    batch_in,
+                    batch_tgt,
+                    model,
+                    args,
+                    current_loss_type,
+                    current_loss_name,
+                    trace=trace,
+                    batch_index=traced_batch_ordinal,
                 )
+                # Recorded HERE and not inside ``process_batch``: the point
+                # of interest is after that call's locals — ``output``,
+                # ``input_seq`` — have gone out of scope. Adding a ``del``
+                # inside it would release them earlier than production does,
+                # which is a change to cleanup semantics, not an observation
+                # of them.
+                if trace is not None:
+                    trace.record("after_output_cleanup", batch_index=traced_batch_ordinal)
+                traced_batch_ordinal += 1
                 actual_n = batch_in.shape[0]
                 denoised[i : i + actual_n] = dn.reshape(actual_n, input_size)
                 injected[i : i + actual_n] = ij.reshape(actual_n, input_size)
@@ -669,6 +813,11 @@ def main():
             indexed=False,
         )
         print(f"Inference complete. Saved to: {out_name}")
+
+    # V20 PR C2, validation only. The last thing this process records: what
+    # the driver still attributes to it once all inference work is done.
+    if trace is not None:
+        trace.record("before_exit", synchronize=True)
 
 
 if __name__ == "__main__":

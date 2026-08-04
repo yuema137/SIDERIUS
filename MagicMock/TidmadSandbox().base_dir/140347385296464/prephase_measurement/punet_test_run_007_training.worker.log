@@ -1,0 +1,2 @@
+[gpu-measure] punet_test_run_007:training: punet phase=training device=cuda
+[gpu-measure] punet_test_run_007:training: DEVICE_MISMATCH

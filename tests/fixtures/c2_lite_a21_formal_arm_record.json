@@ -1,0 +1,2006 @@
+{
+ "arms": {
+  "with_probe": {
+   "arm": "p1_with_probe",
+   "boundaries": [
+    "TidmadSandbox.execute_training",
+    "TidmadSandbox.execute_inference"
+   ],
+   "ended_at": 1785819280.7286396,
+   "gpu_processes_after": [
+    {
+     "gpu_uuid": "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef",
+     "pid": 2110124,
+     "used_mib": "710"
+    }
+   ],
+   "inference_memory": {
+    "covered_whole_phase": true,
+    "driver_source": "gpu_accounting.sample(nvidia-smi):own_tree_mib",
+    "driver_tree_peak_mib": 3434,
+    "ended_at": 1785819280.7286396,
+    "max_concurrent_own_processes": 1,
+    "max_gap_seconds": 0.264816,
+    "own_pids": [
+     2370865
+    ],
+    "peak_sample": {
+     "at": 1785819274.1217494,
+     "device_used_mib": 4428,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2370865,
+       "used_mib": 3434
+      }
+     ],
+     "own_tree_mib": 3434,
+     "telemetry_available": true
+    },
+    "samples_missed": 0,
+    "samples_taken": 31,
+    "sampling_complete": true,
+    "started_at": 1785819272.7193046
+   },
+   "inference_status": {
+    "message": "Inference finished.",
+    "per_file_timings_ms": [
+     {
+      "elapsed_ms": 929.2031209915876,
+      "file_index": 0,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 812.8283870173618,
+      "file_index": 1,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 797.9372829431668,
+      "file_index": 2,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 784.4903689110652,
+      "file_index": 3,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 815.5669600237161,
+      "file_index": 4,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 808.8701929664239,
+      "file_index": 5,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 793.9544429536909,
+      "file_index": 6,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 781.5906319301575,
+      "file_index": 7,
+      "n_psd_segs": 2
+     }
+    ],
+    "process_startup_ms": 1448.3582822140306,
+    "runtime_verification": {
+     "admission": {
+      "avoided_predicted_runtime_seconds": null,
+      "decision": "admitted",
+      "failure_class": null,
+      "reason": "record-only: no operator budget in force",
+      "setup_cost_seconds": 2.662449252908118,
+      "stage": "post_training_verification",
+      "verification_cost_seconds": 0.8151379504706711
+     },
+     "attempt_id": "c2lite_c12a_p1_with_probe",
+     "calibration_context": {
+      "batch_size": 1,
+      "model_family": "punet",
+      "optimizer_type": "adamw",
+      "param_count": 6762568,
+      "precision": "float32",
+      "runtime_flags": {
+       "grad_accumulation": false,
+       "num_workers": 0,
+       "pin_memory": false,
+       "torch_compile": false
+      },
+      "seg_size": 40000
+     },
+     "calibration_eligible": false,
+     "chain_id": null,
+     "components": {
+      "inference": {
+       "actual_seconds": 6.819602538947947,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          29.633344034664333,
+          29.633344034664333,
+          29.040740570053458,
+          29.23076052684337,
+          29.6818710048683,
+          29.6818710048683,
+          29.51616747304797,
+          29.51616747304797,
+          29.530138475820422,
+          29.506368504371494,
+          29.530138475820422,
+          29.530138475820422
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 18,
+        "n_stabilization_units": 1,
+        "raw_timings_ms": [
+         143.14805599860847,
+         29.90795497316867,
+         29.443324077874422,
+         27.196845039725304,
+         27.8128229547292,
+         29.823363991454244,
+         30.012544011697173,
+         24.276567972265184,
+         30.164601979777217,
+         28.638157062232494,
+         30.208735959604383,
+         29.540378018282354,
+         29.49195692781359,
+         24.455906939692795,
+         29.90709408186376,
+         29.51989893335849,
+         29.492838075384498,
+         29.94343196041882,
+         29.834315995685756
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.6628187949536368,
+        "unit": "inference_batch",
+        "unit_time_ms_mad": 0.3955549909733236,
+        "unit_time_ms_median": 29.530138475820422
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "extra_predicted_seconds": 2.2069994108751416,
+         "inference_setup_seconds": 0.2922395309433341,
+         "input_read_seconds_per_psd": 0.05605019046925008,
+         "io_files_measured": 1,
+         "measured_unit_ms": 29.530138475820422,
+         "output_write_seconds_per_psd": 0.024430088524241,
+         "per_file_residual_seconds": 0.07838442700449377,
+         "prior_agreement": "new_configuration",
+         "total_files_planned": 8,
+         "total_psd_planned": 16,
+         "unit_count": 160,
+         "verification_seconds": 0.6628187949536368
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 29.530138475820422,
+        "n_steady_units": 18,
+        "predicted_seconds": 6.931821567006409,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_inference_verification",
+        "steady_state": true,
+        "unit_count": 160,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 6.819602538947947,
+        "log_error": 0.016321439633590906,
+        "predicted_seconds": 6.931821567006409,
+        "ratio": 0.9838110333663818
+       },
+       "workload": {
+        "detail": {
+         "inference_batch_size": 25,
+         "ml_segments_per_psd": 250,
+         "n_files": 8,
+         "n_psd": 16,
+         "output_bytes": 320000000,
+         "output_files": 8,
+         "per_file_batches": {
+          "0": 20,
+          "1": 20,
+          "2": 20,
+          "3": 20,
+          "4": 20,
+          "5": 20,
+          "6": 20,
+          "7": 20
+         },
+         "per_file_ml_segments": {
+          "0": 500,
+          "1": 500,
+          "2": 500,
+          "3": 500,
+          "4": 500,
+          "5": 500,
+          "6": 500,
+          "7": 500
+         },
+         "seg_size": 40000,
+         "total_ml_segments": 4000
+        },
+        "phase": "inference",
+        "unit": "inference_batch",
+        "unit_count": 160
+       }
+      },
+      "setup": {
+       "actual_seconds": 2.662449252908118,
+       "measurement": {
+        "detail": {
+         "dataset_construction_seconds": 2.029019594890997
+        },
+        "n_measured_units": 1,
+        "n_stabilization_units": 0,
+        "raw_timings_ms": [
+         2662.449252908118
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 2.662449252908118,
+        "unit": "setup_pass",
+        "unit_time_ms_mad": null,
+        "unit_time_ms_median": 2662.449252908118
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {},
+        "formal_execution_eligible": true,
+        "ms_per_unit": 2662.449252908118,
+        "n_steady_units": 1,
+        "predicted_seconds": 2.662449252908118,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_dataset_setup",
+        "steady_state": true,
+        "unit_count": 1,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 2.662449252908118,
+        "log_error": 0.0,
+        "predicted_seconds": 2.662449252908118,
+        "ratio": 1.0
+       },
+       "workload": null
+      },
+      "training": {
+       "actual_seconds": 5.413906538975425,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          10.369816038291901,
+          8.525699027813971,
+          8.525699027813971,
+          9.287648543249816,
+          9.287648543249816,
+          8.498637995216995,
+          9.287648543249816,
+          8.498637995216995,
+          8.300543006043881,
+          8.300543006043881,
+          8.13461805228144,
+          8.093860524240881,
+          8.134202507790178,
+          8.134202507790178,
+          8.088656002655625,
+          8.088656002655625,
+          8.159400022123009,
+          8.161348989233375,
+          8.295819046907127,
+          8.400066988542676,
+          8.329603006131947,
+          8.237373025622219,
+          8.341620967257768,
+          8.341620967257768,
+          8.341620967257768,
+          8.477037481497973,
+          8.384807500988245,
+          8.220580988563597,
+          8.384807500988245,
+          8.355997502803802,
+          8.15459102159366,
+          8.138495497405529,
+          8.082935528364033,
+          8.082935528364033,
+          8.138495497405529,
+          8.083195483777672,
+          8.083195483777672,
+          8.176221454050392,
+          8.242983487434685,
+          8.364307985175401,
+          8.467238512821496,
+          8.467238512821496,
+          8.362760534510016,
+          8.467238512821496,
+          8.362760534510016,
+          8.362760534510016,
+          8.794734021648765,
+          8.700150530785322,
+          8.239897550083697
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 54,
+        "n_stabilization_units": 2,
+        "raw_timings_ms": [
+         294.9457800714299,
+         13.322348007932305,
+         8.232439053244889,
+         8.480248041450977,
+         12.268481077626348,
+         8.066712995059788,
+         12.168482062406838,
+         8.571150014176965,
+         8.086691959761083,
+         10.004147072322667,
+         10.845162090845406,
+         8.094276068732142,
+         8.426125976257026,
+         12.136750970967114,
+         8.174960035830736,
+         8.081682026386261,
+         8.08386702556163,
+         8.09344497974962,
+         8.049080963246524,
+         8.366283029317856,
+         12.370334006845951,
+         8.07095190975815,
+         8.225355064496398,
+         12.861956027336419,
+         8.097342913970351,
+         8.433850947767496,
+         12.274712906219065,
+         8.102242019958794,
+         8.24939098674804,
+         12.462388025596738,
+         8.117411052808166,
+         8.52022401522845,
+         12.438463047146797,
+         7.976713008247316,
+         8.191770990379155,
+         12.505099992267787,
+         8.085220004431903,
+         8.047717972658575,
+         8.06574197486043,
+         8.080651052296162,
+         8.271271944977343,
+         12.784078950062394,
+         8.08117096312344,
+         8.477133000269532,
+         11.980282957665622,
+         8.214695029892027,
+         8.457344025373459,
+         12.253553024493158,
+         8.093365002423525,
+         8.268177043646574,
+         12.513663969002664,
+         8.09799402486533,
+         9.13212401792407,
+         12.485331972129643,
+         8.21161805652082,
+         8.140495046973228
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.8151379504706711,
+        "unit": "optimizer_step",
+        "unit_time_ms_mad": 0.18995156278833747,
+        "unit_time_ms_median": 8.258784015197307
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "epoch0_dataset_seconds": 2.029019594890997,
+         "extra_predicted_seconds": 0.0,
+         "measured_unit_ms": 8.258784015197307,
+         "prior_agreement": "new_configuration",
+         "unit_count": 6000,
+         "verification_seconds": 0.8151379504706711
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 8.258784015197307,
+        "n_steady_units": 54,
+        "predicted_seconds": 49.55270409118384,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_training_verification",
+        "steady_state": true,
+        "unit_count": 6000,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 5.413906538975425,
+        "log_error": 2.2140659040659707,
+        "predicted_seconds": 49.55270409118384,
+        "ratio": 0.10925552173728172
+       },
+       "workload": {
+        "detail": {
+         "batch_size": 1,
+         "epoch0_samples": 6000,
+         "epochs": 1,
+         "resolved_order_strategy": "shuffle",
+         "source": "materialized_epoch0_loader",
+         "steps_per_epoch": 6000,
+         "train_portion": 1.0
+        },
+        "phase": "training",
+        "unit": "optimizer_step",
+        "unit_count": 6000
+       }
+      }
+     },
+     "final_status": "inference_complete",
+     "hardware": {
+      "cuda_version": "12.8",
+      "gpu_name": "NVIDIA GeForce RTX 5090",
+      "hostname": "ligroup"
+     },
+     "historical_prior": null,
+     "prior_agreement": null,
+     "runtime_policy": {
+      "formal_safety_factor": null,
+      "historical_phase_share_limit": 0.1,
+      "observation_store_root": null,
+      "operator_budget_seconds": null,
+      "safety_factor": 1.0,
+      "trial_safety_factor": null,
+      "verification": {
+       "drift_extra_factor": 2.0,
+       "max_steps": 200,
+       "max_unit_ms": null,
+       "max_wall_ms": 60000.0,
+       "min_timed_ms": 500.0,
+       "min_timed_steps": 5,
+       "pathological_factor": 10.0,
+       "prior_match_tol": 0.25,
+       "steady": {
+        "max_steps": 200,
+        "rel_spread_tol": 0.1,
+        "stable_windows": 4,
+        "window": 8
+       }
+      },
+      "watchdog": {
+       "enabled": false,
+       "floor_seconds": 60.0,
+       "grace_seconds": 10.0,
+       "poll_seconds": 1.0,
+       "safety_factor": null
+      }
+     },
+     "schema_version": 1,
+     "software": {
+      "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+      "python_version": "3.12.13",
+      "torch_version": "2.10.0+cu128"
+     },
+     "storage": {
+      "bytes_read_from_storage": 0,
+      "cache_state": "warm_page_cache",
+      "dataset_root": "/home/klz/Data/TIDMAD",
+      "expected_raw_bytes": 720000000,
+      "file_count": 8,
+      "files_present": 8,
+      "filesystem_type": "ext4",
+      "rss_bytes_after_setup": 1328402432,
+      "rss_bytes_before_setup": 557084672,
+      "total_file_bytes": 17047208466
+     },
+     "timestamp": "2026-08-03T21:54:40-0700",
+     "total": null,
+     "watchdog_status": null
+    },
+    "status": "success",
+    "subprocess_wall_ms": 7972.7996699512005
+   },
+   "inference_wall_seconds": 8.009,
+   "raw_samples": [
+    {
+     "at": 1785819262.815513,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819263.0827217,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819263.3349168,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819263.5879269,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819263.84394,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819264.104466,
+     "device_used_mib": 1726,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2369182,
+       "used_mib": 732
+      }
+     ],
+     "own_tree_mib": 732,
+     "telemetry_available": true
+    }
+   ],
+   "stability": {
+    "completed_steps": 522,
+    "cumulative_peak_mib": 1476,
+    "decision": {
+     "completed_steps": 522,
+     "cumulative_peak_mib": 1476,
+     "detail": "peak 1476 MiB unchanged for 507 completed steps with 22 readings since the last increase",
+     "elapsed_seconds": 9.90061,
+     "last_peak_increase_at": 1785819266.9493227,
+     "last_peak_increase_step": 15,
+     "max_completed_steps": 5000,
+     "required_samples": 3,
+     "required_stable_steps": 500,
+     "samples_after_last_increase": 22,
+     "should_stop": true,
+     "stable_steps": 507,
+     "status": "STABLE"
+    },
+    "elapsed_seconds": 9.90061,
+    "last_peak_increase_at": 1785819266.9493227,
+    "last_peak_increase_step": 15,
+    "poll_errors": 0,
+    "polls": 21,
+    "required_samples": 3,
+    "required_stable_steps": 500,
+    "samples_after_last_increase": 22,
+    "samples_missed": 0,
+    "samples_observed": 39,
+    "sampling_complete": true,
+    "signalled_at": 1785819271.8275251,
+    "stable_steps": 507,
+    "status": "STABLE",
+    "stop_reason": "peak 1476 MiB unchanged for 507 completed steps with 22 readings since the last increase",
+    "stop_signalled": true,
+    "succeeded": true
+   },
+   "started_at": 1785819262.8153977,
+   "training_memory": {
+    "covered_whole_phase": true,
+    "driver_source": "gpu_accounting.sample(nvidia-smi):own_tree_mib",
+    "driver_tree_peak_mib": 1476,
+    "ended_at": 1785819272.719304,
+    "max_concurrent_own_processes": 1,
+    "max_gap_seconds": 0.267153,
+    "own_pids": [
+     2369182
+    ],
+    "peak_sample": {
+     "at": 1785819266.9493227,
+     "device_used_mib": 2470,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2369182,
+       "used_mib": 1476
+      }
+     ],
+     "own_tree_mib": 1476,
+     "telemetry_available": true
+    },
+    "samples_missed": 0,
+    "samples_taken": 38,
+    "sampling_complete": true,
+    "started_at": 1785819262.8155692
+   },
+   "training_status": {
+    "message": "Training finished.",
+    "results": {
+     "final_loss": 1.9384018171336002,
+     "loss_history": [
+      1.9384018171336002
+     ],
+     "model_params": 6762568
+    },
+    "runtime_verification": {
+     "admission": {
+      "avoided_predicted_runtime_seconds": null,
+      "decision": "admitted",
+      "failure_class": null,
+      "reason": "record-only: no operator budget in force",
+      "setup_cost_seconds": 2.662449252908118,
+      "stage": "post_training_verification",
+      "verification_cost_seconds": 0.8151379504706711
+     },
+     "attempt_id": "c2lite_c12a_p1_with_probe",
+     "calibration_context": {
+      "batch_size": 1,
+      "model_family": "punet",
+      "optimizer_type": "adamw",
+      "param_count": 6762568,
+      "precision": "float32",
+      "runtime_flags": {
+       "grad_accumulation": false,
+       "num_workers": 0,
+       "pin_memory": false,
+       "torch_compile": false
+      },
+      "seg_size": 40000
+     },
+     "calibration_eligible": false,
+     "chain_id": null,
+     "components": {
+      "setup": {
+       "actual_seconds": 2.662449252908118,
+       "measurement": {
+        "detail": {
+         "dataset_construction_seconds": 2.029019594890997
+        },
+        "n_measured_units": 1,
+        "n_stabilization_units": 0,
+        "raw_timings_ms": [
+         2662.449252908118
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 2.662449252908118,
+        "unit": "setup_pass",
+        "unit_time_ms_mad": null,
+        "unit_time_ms_median": 2662.449252908118
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {},
+        "formal_execution_eligible": true,
+        "ms_per_unit": 2662.449252908118,
+        "n_steady_units": 1,
+        "predicted_seconds": 2.662449252908118,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_dataset_setup",
+        "steady_state": true,
+        "unit_count": 1,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 2.662449252908118,
+        "log_error": 0.0,
+        "predicted_seconds": 2.662449252908118,
+        "ratio": 1.0
+       },
+       "workload": null
+      },
+      "training": {
+       "actual_seconds": 5.413906538975425,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          10.369816038291901,
+          8.525699027813971,
+          8.525699027813971,
+          9.287648543249816,
+          9.287648543249816,
+          8.498637995216995,
+          9.287648543249816,
+          8.498637995216995,
+          8.300543006043881,
+          8.300543006043881,
+          8.13461805228144,
+          8.093860524240881,
+          8.134202507790178,
+          8.134202507790178,
+          8.088656002655625,
+          8.088656002655625,
+          8.159400022123009,
+          8.161348989233375,
+          8.295819046907127,
+          8.400066988542676,
+          8.329603006131947,
+          8.237373025622219,
+          8.341620967257768,
+          8.341620967257768,
+          8.341620967257768,
+          8.477037481497973,
+          8.384807500988245,
+          8.220580988563597,
+          8.384807500988245,
+          8.355997502803802,
+          8.15459102159366,
+          8.138495497405529,
+          8.082935528364033,
+          8.082935528364033,
+          8.138495497405529,
+          8.083195483777672,
+          8.083195483777672,
+          8.176221454050392,
+          8.242983487434685,
+          8.364307985175401,
+          8.467238512821496,
+          8.467238512821496,
+          8.362760534510016,
+          8.467238512821496,
+          8.362760534510016,
+          8.362760534510016,
+          8.794734021648765,
+          8.700150530785322,
+          8.239897550083697
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 54,
+        "n_stabilization_units": 2,
+        "raw_timings_ms": [
+         294.9457800714299,
+         13.322348007932305,
+         8.232439053244889,
+         8.480248041450977,
+         12.268481077626348,
+         8.066712995059788,
+         12.168482062406838,
+         8.571150014176965,
+         8.086691959761083,
+         10.004147072322667,
+         10.845162090845406,
+         8.094276068732142,
+         8.426125976257026,
+         12.136750970967114,
+         8.174960035830736,
+         8.081682026386261,
+         8.08386702556163,
+         8.09344497974962,
+         8.049080963246524,
+         8.366283029317856,
+         12.370334006845951,
+         8.07095190975815,
+         8.225355064496398,
+         12.861956027336419,
+         8.097342913970351,
+         8.433850947767496,
+         12.274712906219065,
+         8.102242019958794,
+         8.24939098674804,
+         12.462388025596738,
+         8.117411052808166,
+         8.52022401522845,
+         12.438463047146797,
+         7.976713008247316,
+         8.191770990379155,
+         12.505099992267787,
+         8.085220004431903,
+         8.047717972658575,
+         8.06574197486043,
+         8.080651052296162,
+         8.271271944977343,
+         12.784078950062394,
+         8.08117096312344,
+         8.477133000269532,
+         11.980282957665622,
+         8.214695029892027,
+         8.457344025373459,
+         12.253553024493158,
+         8.093365002423525,
+         8.268177043646574,
+         12.513663969002664,
+         8.09799402486533,
+         9.13212401792407,
+         12.485331972129643,
+         8.21161805652082,
+         8.140495046973228
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.8151379504706711,
+        "unit": "optimizer_step",
+        "unit_time_ms_mad": 0.18995156278833747,
+        "unit_time_ms_median": 8.258784015197307
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "epoch0_dataset_seconds": 2.029019594890997,
+         "extra_predicted_seconds": 0.0,
+         "measured_unit_ms": 8.258784015197307,
+         "prior_agreement": "new_configuration",
+         "unit_count": 6000,
+         "verification_seconds": 0.8151379504706711
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 8.258784015197307,
+        "n_steady_units": 54,
+        "predicted_seconds": 49.55270409118384,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_training_verification",
+        "steady_state": true,
+        "unit_count": 6000,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 5.413906538975425,
+        "log_error": 2.2140659040659707,
+        "predicted_seconds": 49.55270409118384,
+        "ratio": 0.10925552173728172
+       },
+       "workload": {
+        "detail": {
+         "batch_size": 1,
+         "epoch0_samples": 6000,
+         "epochs": 1,
+         "resolved_order_strategy": "shuffle",
+         "source": "materialized_epoch0_loader",
+         "steps_per_epoch": 6000,
+         "train_portion": 1.0
+        },
+        "phase": "training",
+        "unit": "optimizer_step",
+        "unit_count": 6000
+       }
+      }
+     },
+     "final_status": "completed",
+     "hardware": {
+      "cuda_version": "12.8",
+      "gpu_name": "NVIDIA GeForce RTX 5090",
+      "hostname": "ligroup"
+     },
+     "historical_prior": null,
+     "prior_agreement": null,
+     "runtime_policy": {
+      "formal_safety_factor": null,
+      "historical_phase_share_limit": 0.1,
+      "observation_store_root": null,
+      "operator_budget_seconds": null,
+      "safety_factor": 1.0,
+      "trial_safety_factor": null,
+      "verification": {
+       "drift_extra_factor": 2.0,
+       "max_steps": 200,
+       "max_unit_ms": null,
+       "max_wall_ms": 60000.0,
+       "min_timed_ms": 500.0,
+       "min_timed_steps": 5,
+       "pathological_factor": 10.0,
+       "prior_match_tol": 0.25,
+       "steady": {
+        "max_steps": 200,
+        "rel_spread_tol": 0.1,
+        "stable_windows": 4,
+        "window": 8
+       }
+      },
+      "watchdog": {
+       "enabled": false,
+       "floor_seconds": 60.0,
+       "grace_seconds": 10.0,
+       "poll_seconds": 1.0,
+       "safety_factor": null
+      }
+     },
+     "schema_version": 1,
+     "software": {
+      "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+      "python_version": "3.12.13",
+      "torch_version": "2.10.0+cu128"
+     },
+     "storage": {
+      "bytes_read_from_storage": 0,
+      "cache_state": "warm_page_cache",
+      "dataset_root": "/home/klz/Data/TIDMAD",
+      "expected_raw_bytes": 720000000,
+      "file_count": 8,
+      "files_present": 8,
+      "filesystem_type": "ext4",
+      "rss_bytes_after_setup": 1328402432,
+      "rss_bytes_before_setup": 557084672,
+      "total_file_bytes": 17047208466
+     },
+     "timestamp": "2026-08-03T21:54:32-0700",
+     "total": null,
+     "watchdog_status": null
+    },
+    "status": "success"
+   },
+   "training_wall_seconds": 9.904,
+   "wall_seconds": 17.913
+  },
+  "without_probe": {
+   "arm": "p1_without_probe",
+   "boundaries": [
+    "TidmadSandbox.execute_training",
+    "TidmadSandbox.execute_inference"
+   ],
+   "ended_at": 1785819298.5489411,
+   "gpu_processes_after": [
+    {
+     "gpu_uuid": "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef",
+     "pid": 2110124,
+     "used_mib": "710"
+    }
+   ],
+   "inference_memory": {
+    "covered_whole_phase": true,
+    "driver_source": "gpu_accounting.sample(nvidia-smi):own_tree_mib",
+    "driver_tree_peak_mib": 3434,
+    "ended_at": 1785819298.5489411,
+    "max_concurrent_own_processes": 1,
+    "max_gap_seconds": 0.269824,
+    "own_pids": [
+     2373951
+    ],
+    "peak_sample": {
+     "at": 1785819292.0647998,
+     "device_used_mib": 4428,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2373951,
+       "used_mib": 3434
+      }
+     ],
+     "own_tree_mib": 3434,
+     "telemetry_available": true
+    },
+    "samples_missed": 0,
+    "samples_taken": 31,
+    "sampling_complete": true,
+    "started_at": 1785819290.6260574
+   },
+   "inference_status": {
+    "message": "Inference finished.",
+    "per_file_timings_ms": [
+     {
+      "elapsed_ms": 906.2849150504917,
+      "file_index": 0,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 785.5574769200757,
+      "file_index": 1,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 779.5639840187505,
+      "file_index": 2,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 801.2507420498878,
+      "file_index": 3,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 782.0369229884818,
+      "file_index": 4,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 801.3710409868509,
+      "file_index": 5,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 809.7827900201082,
+      "file_index": 6,
+      "n_psd_segs": 2
+     },
+     {
+      "elapsed_ms": 788.8780740322545,
+      "file_index": 7,
+      "n_psd_segs": 2
+     }
+    ],
+    "process_startup_ms": 1429.8263208474964,
+    "runtime_verification": {
+     "admission": {
+      "avoided_predicted_runtime_seconds": null,
+      "decision": "admitted",
+      "failure_class": null,
+      "reason": "record-only: no operator budget in force",
+      "setup_cost_seconds": 2.7696276999777183,
+      "stage": "post_training_verification",
+      "verification_cost_seconds": 0.8419935230631381
+     },
+     "attempt_id": "c2lite_c12a_p1_without_probe",
+     "calibration_context": {
+      "batch_size": 1,
+      "model_family": "punet",
+      "optimizer_type": "adamw",
+      "param_count": 6762568,
+      "precision": "float32",
+      "runtime_flags": {
+       "grad_accumulation": false,
+       "num_workers": 0,
+       "pin_memory": false,
+       "torch_compile": false
+      },
+      "seg_size": 40000
+     },
+     "calibration_eligible": false,
+     "chain_id": null,
+     "components": {
+      "inference": {
+       "actual_seconds": 6.755468368995935,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          29.46078300010413,
+          29.35806248569861,
+          29.46078300010413,
+          29.46078300010413,
+          29.46078300010413,
+          29.293019557371736,
+          28.418455563951284,
+          28.418455563951284,
+          28.418455563951284,
+          28.469903045333922,
+          28.469903045333922,
+          29.31680402252823
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 18,
+        "n_stabilization_units": 1,
+        "raw_timings_ms": [
+         143.21890205610543,
+         29.303557937964797,
+         24.062172044068575,
+         29.278461006470025,
+         29.57634604535997,
+         29.508998966775835,
+         29.95643694885075,
+         29.412567033432424,
+         29.173472081311047,
+         29.741639969870448,
+         23.91511294990778,
+         25.965710054151714,
+         26.714651030488312,
+         27.66343904659152,
+         29.732353053987026,
+         29.767288942821324,
+         29.276367044076324,
+         29.395392979495227,
+         29.35724100098014
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.6550201101927087,
+        "unit": "inference_batch",
+        "unit_time_ms_mad": 0.3239500802010298,
+        "unit_time_ms_median": 29.330399469472468
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "extra_predicted_seconds": 2.0997047920245677,
+         "inference_setup_seconds": 0.29793673497624695,
+         "input_read_seconds_per_psd": 0.05299850454321131,
+         "io_files_measured": 1,
+         "measured_unit_ms": 29.330399469472468,
+         "output_write_seconds_per_psd": 0.026267733017448336,
+         "per_file_residual_seconds": 0.0666885320097208,
+         "prior_agreement": "new_configuration",
+         "total_files_planned": 8,
+         "total_psd_planned": 16,
+         "unit_count": 160,
+         "verification_seconds": 0.6550201101927087
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 29.330399469472468,
+        "n_steady_units": 18,
+        "predicted_seconds": 6.792568707140163,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_inference_verification",
+        "steady_state": true,
+        "unit_count": 160,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 6.755468368995935,
+        "log_error": 0.005476871767408165,
+        "predicted_seconds": 6.792568707140163,
+        "ratio": 0.9945380989513983
+       },
+       "workload": {
+        "detail": {
+         "inference_batch_size": 25,
+         "ml_segments_per_psd": 250,
+         "n_files": 8,
+         "n_psd": 16,
+         "output_bytes": 320000000,
+         "output_files": 8,
+         "per_file_batches": {
+          "0": 20,
+          "1": 20,
+          "2": 20,
+          "3": 20,
+          "4": 20,
+          "5": 20,
+          "6": 20,
+          "7": 20
+         },
+         "per_file_ml_segments": {
+          "0": 500,
+          "1": 500,
+          "2": 500,
+          "3": 500,
+          "4": 500,
+          "5": 500,
+          "6": 500,
+          "7": 500
+         },
+         "seg_size": 40000,
+         "total_ml_segments": 4000
+        },
+        "phase": "inference",
+        "unit": "inference_batch",
+        "unit_count": 160
+       }
+      },
+      "setup": {
+       "actual_seconds": 2.7696276999777183,
+       "measurement": {
+        "detail": {
+         "dataset_construction_seconds": 2.1166082450654358
+        },
+        "n_measured_units": 1,
+        "n_stabilization_units": 0,
+        "raw_timings_ms": [
+         2769.6276999777183
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 2.7696276999777183,
+        "unit": "setup_pass",
+        "unit_time_ms_mad": null,
+        "unit_time_ms_median": 2769.6276999777183
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {},
+        "formal_execution_eligible": true,
+        "ms_per_unit": 2769.6276999777183,
+        "n_steady_units": 1,
+        "predicted_seconds": 2.7696276999777183,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_dataset_setup",
+        "steady_state": true,
+        "unit_count": 1,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 2.7696276999777183,
+        "log_error": 0.0,
+        "predicted_seconds": 2.7696276999777183,
+        "ratio": 1.0
+       },
+       "workload": null
+      },
+      "training": {
+       "actual_seconds": 5.41220861801412,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          10.164347011595964,
+          9.269665461033583,
+          9.232108946889639,
+          9.96604049578309,
+          9.232108946889639,
+          9.19982249615714,
+          9.96604049578309,
+          9.19982249615714,
+          8.305386989377439,
+          8.347255527041852,
+          8.18148150574416,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.129713998641819,
+          8.129713998641819,
+          8.119379519484937,
+          8.107642992399633,
+          8.307781477924436,
+          8.121708990074694,
+          8.121708990074694,
+          8.279437490273267,
+          8.287557458970696,
+          8.287557458970696,
+          8.443648926913738,
+          8.443648926913738,
+          8.430524496361613,
+          8.447206462733448,
+          8.447206462733448,
+          8.3195689949207,
+          8.447206462733448,
+          8.3195689949207,
+          8.241841511335224,
+          8.356354548595846,
+          8.253834559582174,
+          8.253834559582174,
+          8.290033554658294,
+          8.290033554658294,
+          8.290033554658294,
+          8.408287481870502,
+          8.408287481870502,
+          8.265241049230099,
+          8.211784472223371,
+          8.11816193163395,
+          8.11100349528715,
+          8.11100349528715,
+          8.11100349528715
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 54,
+        "n_stabilization_units": 2,
+        "raw_timings_ms": [
+         325.64051903318614,
+         10.325097013264894,
+         8.09197302442044,
+         12.507623992860317,
+         8.535733912140131,
+         8.059579995460808,
+         10.003597009927034,
+         10.971422074362636,
+         8.064931025728583,
+         9.928483981639147,
+         11.439049034379423,
+         8.06035299319774,
+         8.471161010675132,
+         12.450476991944015,
+         8.100308012217283,
+         8.139612968079746,
+         8.223350043408573,
+         8.132178918458521,
+         8.127249078825116,
+         8.103776024654508,
+         8.504052995704114,
+         12.330689001828432,
+         8.101469953544438,
+         8.111509960144758,
+         12.914746068418026,
+         8.063769084401429,
+         8.064609952270985,
+         12.832731008529663,
+         8.13190802000463,
+         8.426966960541904,
+         12.123937020078301,
+         8.148147957399487,
+         8.460330893285573,
+         12.215540977194905,
+         8.205055957660079,
+         8.434082032181323,
+         12.491884059272707,
+         8.180561009794474,
+         8.119484060443938,
+         12.84116692841053,
+         8.073066012002528,
+         8.278627065010369,
+         12.681773980148137,
+         8.229042054153979,
+         8.301440044306219,
+         12.732260045595467,
+         8.105108048766851,
+         8.515134919434786,
+         12.284169904887676,
+         8.114194963127375,
+         8.122128900140524,
+         8.08867602609098,
+         8.107812027446926,
+         8.103415020741522,
+         8.092683041468263,
+         10.084870969876647
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.8419935230631381,
+        "unit": "optimizer_step",
+        "unit_time_ms_mad": 0.16200653044506907,
+        "unit_time_ms_median": 8.226196048781276
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "epoch0_dataset_seconds": 2.1166082450654358,
+         "extra_predicted_seconds": 0.0,
+         "measured_unit_ms": 8.226196048781276,
+         "prior_agreement": "new_configuration",
+         "unit_count": 6000,
+         "verification_seconds": 0.8419935230631381
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 8.226196048781276,
+        "n_steady_units": 54,
+        "predicted_seconds": 49.357176292687654,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_training_verification",
+        "steady_state": true,
+        "unit_count": 6000,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 5.41220861801412,
+        "log_error": 2.2104259147022574,
+        "predicted_seconds": 49.357176292687654,
+        "ratio": 0.10965393534508065
+       },
+       "workload": {
+        "detail": {
+         "batch_size": 1,
+         "epoch0_samples": 6000,
+         "epochs": 1,
+         "resolved_order_strategy": "shuffle",
+         "source": "materialized_epoch0_loader",
+         "steps_per_epoch": 6000,
+         "train_portion": 1.0
+        },
+        "phase": "training",
+        "unit": "optimizer_step",
+        "unit_count": 6000
+       }
+      }
+     },
+     "final_status": "inference_complete",
+     "hardware": {
+      "cuda_version": "12.8",
+      "gpu_name": "NVIDIA GeForce RTX 5090",
+      "hostname": "ligroup"
+     },
+     "historical_prior": null,
+     "prior_agreement": null,
+     "runtime_policy": {
+      "formal_safety_factor": null,
+      "historical_phase_share_limit": 0.1,
+      "observation_store_root": null,
+      "operator_budget_seconds": null,
+      "safety_factor": 1.0,
+      "trial_safety_factor": null,
+      "verification": {
+       "drift_extra_factor": 2.0,
+       "max_steps": 200,
+       "max_unit_ms": null,
+       "max_wall_ms": 60000.0,
+       "min_timed_ms": 500.0,
+       "min_timed_steps": 5,
+       "pathological_factor": 10.0,
+       "prior_match_tol": 0.25,
+       "steady": {
+        "max_steps": 200,
+        "rel_spread_tol": 0.1,
+        "stable_windows": 4,
+        "window": 8
+       }
+      },
+      "watchdog": {
+       "enabled": false,
+       "floor_seconds": 60.0,
+       "grace_seconds": 10.0,
+       "poll_seconds": 1.0,
+       "safety_factor": null
+      }
+     },
+     "schema_version": 1,
+     "software": {
+      "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+      "python_version": "3.12.13",
+      "torch_version": "2.10.0+cu128"
+     },
+     "storage": {
+      "bytes_read_from_storage": 0,
+      "cache_state": "warm_page_cache",
+      "dataset_root": "/home/klz/Data/TIDMAD",
+      "expected_raw_bytes": 720000000,
+      "file_count": 8,
+      "files_present": 8,
+      "filesystem_type": "ext4",
+      "rss_bytes_after_setup": 1330204672,
+      "rss_bytes_before_setup": 558452736,
+      "total_file_bytes": 17047208466
+     },
+     "timestamp": "2026-08-03T21:54:58-0700",
+     "total": null,
+     "watchdog_status": null
+    },
+    "status": "success",
+    "subprocess_wall_ms": 7884.5522669143975
+   },
+   "inference_wall_seconds": 7.923,
+   "raw_samples": [
+    {
+     "at": 1785819280.7848277,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819281.0473268,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819281.3046799,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819281.5583498,
+     "device_used_mib": 988,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [],
+     "own_tree_mib": 0,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819281.8147228,
+     "device_used_mib": 1005,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2372259,
+       "used_mib": 14
+      }
+     ],
+     "own_tree_mib": 14,
+     "telemetry_available": true
+    },
+    {
+     "at": 1785819282.06531,
+     "device_used_mib": 1726,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2372259,
+       "used_mib": 732
+      }
+     ],
+     "own_tree_mib": 732,
+     "telemetry_available": true
+    }
+   ],
+   "stability": {
+    "completed_steps": 518,
+    "cumulative_peak_mib": 1476,
+    "decision": {
+     "completed_steps": 518,
+     "cumulative_peak_mib": 1476,
+     "detail": "peak 1476 MiB unchanged for 510 completed steps with 22 readings since the last increase",
+     "elapsed_seconds": 9.838132,
+     "last_peak_increase_at": 1785819284.8740592,
+     "last_peak_increase_step": 8,
+     "max_completed_steps": 5000,
+     "required_samples": 3,
+     "required_stable_steps": 500,
+     "samples_after_last_increase": 22,
+     "should_stop": true,
+     "stable_steps": 510,
+     "status": "STABLE"
+    },
+    "elapsed_seconds": 9.838132,
+    "last_peak_increase_at": 1785819284.8740592,
+    "last_peak_increase_step": 8,
+    "poll_errors": 0,
+    "polls": 21,
+    "required_samples": 3,
+    "required_stable_steps": 500,
+    "samples_after_last_increase": 22,
+    "samples_missed": 0,
+    "samples_observed": 39,
+    "sampling_complete": true,
+    "signalled_at": 1785819289.7986264,
+    "stable_steps": 510,
+    "status": "STABLE",
+    "stop_reason": "peak 1476 MiB unchanged for 510 completed steps with 22 readings since the last increase",
+    "stop_signalled": true,
+    "succeeded": true
+   },
+   "started_at": 1785819280.7847233,
+   "training_memory": {
+    "covered_whole_phase": true,
+    "driver_source": "gpu_accounting.sample(nvidia-smi):own_tree_mib",
+    "driver_tree_peak_mib": 1476,
+    "ended_at": 1785819290.6260574,
+    "max_concurrent_own_processes": 1,
+    "max_gap_seconds": 0.262403,
+    "own_pids": [
+     2372259
+    ],
+    "peak_sample": {
+     "at": 1785819284.8740592,
+     "device_used_mib": 2470,
+     "other_mib": 710,
+     "other_processes": [
+      {
+       "pid": 2110124,
+       "used_mib": 710
+      }
+     ],
+     "own_processes": [
+      {
+       "pid": 2372259,
+       "used_mib": 1476
+      }
+     ],
+     "own_tree_mib": 1476,
+     "telemetry_available": true
+    },
+    "samples_missed": 0,
+    "samples_taken": 38,
+    "sampling_complete": true,
+    "started_at": 1785819280.7849233
+   },
+   "training_status": {
+    "message": "Training finished.",
+    "results": {
+     "final_loss": 1.7554744958417297,
+     "loss_history": [
+      1.7554744958417297
+     ],
+     "model_params": 6762568
+    },
+    "runtime_verification": {
+     "admission": {
+      "avoided_predicted_runtime_seconds": null,
+      "decision": "admitted",
+      "failure_class": null,
+      "reason": "record-only: no operator budget in force",
+      "setup_cost_seconds": 2.7696276999777183,
+      "stage": "post_training_verification",
+      "verification_cost_seconds": 0.8419935230631381
+     },
+     "attempt_id": "c2lite_c12a_p1_without_probe",
+     "calibration_context": {
+      "batch_size": 1,
+      "model_family": "punet",
+      "optimizer_type": "adamw",
+      "param_count": 6762568,
+      "precision": "float32",
+      "runtime_flags": {
+       "grad_accumulation": false,
+       "num_workers": 0,
+       "pin_memory": false,
+       "torch_compile": false
+      },
+      "seg_size": 40000
+     },
+     "calibration_eligible": false,
+     "chain_id": null,
+     "components": {
+      "setup": {
+       "actual_seconds": 2.7696276999777183,
+       "measurement": {
+        "detail": {
+         "dataset_construction_seconds": 2.1166082450654358
+        },
+        "n_measured_units": 1,
+        "n_stabilization_units": 0,
+        "raw_timings_ms": [
+         2769.6276999777183
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 2.7696276999777183,
+        "unit": "setup_pass",
+        "unit_time_ms_mad": null,
+        "unit_time_ms_median": 2769.6276999777183
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {},
+        "formal_execution_eligible": true,
+        "ms_per_unit": 2769.6276999777183,
+        "n_steady_units": 1,
+        "predicted_seconds": 2.7696276999777183,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_dataset_setup",
+        "steady_state": true,
+        "unit_count": 1,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 2.7696276999777183,
+        "log_error": 0.0,
+        "predicted_seconds": 2.7696276999777183,
+        "ratio": 1.0
+       },
+       "workload": null
+      },
+      "training": {
+       "actual_seconds": 5.41220861801412,
+       "measurement": {
+        "detail": {
+         "failure_reason": null,
+         "prior_agreement": "new_configuration",
+         "prior_expected_unit_ms": null,
+         "rolling_medians_ms": [
+          10.164347011595964,
+          9.269665461033583,
+          9.232108946889639,
+          9.96604049578309,
+          9.232108946889639,
+          9.19982249615714,
+          9.96604049578309,
+          9.19982249615714,
+          8.305386989377439,
+          8.347255527041852,
+          8.18148150574416,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.135895943269134,
+          8.129713998641819,
+          8.129713998641819,
+          8.119379519484937,
+          8.107642992399633,
+          8.307781477924436,
+          8.121708990074694,
+          8.121708990074694,
+          8.279437490273267,
+          8.287557458970696,
+          8.287557458970696,
+          8.443648926913738,
+          8.443648926913738,
+          8.430524496361613,
+          8.447206462733448,
+          8.447206462733448,
+          8.3195689949207,
+          8.447206462733448,
+          8.3195689949207,
+          8.241841511335224,
+          8.356354548595846,
+          8.253834559582174,
+          8.253834559582174,
+          8.290033554658294,
+          8.290033554658294,
+          8.290033554658294,
+          8.408287481870502,
+          8.408287481870502,
+          8.265241049230099,
+          8.211784472223371,
+          8.11816193163395,
+          8.11100349528715,
+          8.11100349528715,
+          8.11100349528715
+         ],
+         "state": "verified"
+        },
+        "n_measured_units": 54,
+        "n_stabilization_units": 2,
+        "raw_timings_ms": [
+         325.64051903318614,
+         10.325097013264894,
+         8.09197302442044,
+         12.507623992860317,
+         8.535733912140131,
+         8.059579995460808,
+         10.003597009927034,
+         10.971422074362636,
+         8.064931025728583,
+         9.928483981639147,
+         11.439049034379423,
+         8.06035299319774,
+         8.471161010675132,
+         12.450476991944015,
+         8.100308012217283,
+         8.139612968079746,
+         8.223350043408573,
+         8.132178918458521,
+         8.127249078825116,
+         8.103776024654508,
+         8.504052995704114,
+         12.330689001828432,
+         8.101469953544438,
+         8.111509960144758,
+         12.914746068418026,
+         8.063769084401429,
+         8.064609952270985,
+         12.832731008529663,
+         8.13190802000463,
+         8.426966960541904,
+         12.123937020078301,
+         8.148147957399487,
+         8.460330893285573,
+         12.215540977194905,
+         8.205055957660079,
+         8.434082032181323,
+         12.491884059272707,
+         8.180561009794474,
+         8.119484060443938,
+         12.84116692841053,
+         8.073066012002528,
+         8.278627065010369,
+         12.681773980148137,
+         8.229042054153979,
+         8.301440044306219,
+         12.732260045595467,
+         8.105108048766851,
+         8.515134919434786,
+         12.284169904887676,
+         8.114194963127375,
+         8.122128900140524,
+         8.08867602609098,
+         8.107812027446926,
+         8.103415020741522,
+         8.092683041468263,
+         10.084870969876647
+        ],
+        "steady_state_reached": true,
+        "total_measurement_seconds": 0.8419935230631381,
+        "unit": "optimizer_step",
+        "unit_time_ms_mad": 0.16200653044506907,
+        "unit_time_ms_median": 8.226196048781276
+       },
+       "prediction": {
+        "confidence": "high",
+        "detail": {
+         "epoch0_dataset_seconds": 2.1166082450654358,
+         "extra_predicted_seconds": 0.0,
+         "measured_unit_ms": 8.226196048781276,
+         "prior_agreement": "new_configuration",
+         "unit_count": 6000,
+         "verification_seconds": 0.8419935230631381
+        },
+        "formal_execution_eligible": true,
+        "ms_per_unit": 8.226196048781276,
+        "n_steady_units": 54,
+        "predicted_seconds": 49.357176292687654,
+        "prior_agreement_ratio": null,
+        "prior_expected_seconds": null,
+        "safety_factor": 1.0,
+        "source": "real_training_verification",
+        "steady_state": true,
+        "unit_count": 6000,
+        "verification": "passed"
+       },
+       "prediction_error": {
+        "actual_seconds": 5.41220861801412,
+        "log_error": 2.2104259147022574,
+        "predicted_seconds": 49.357176292687654,
+        "ratio": 0.10965393534508065
+       },
+       "workload": {
+        "detail": {
+         "batch_size": 1,
+         "epoch0_samples": 6000,
+         "epochs": 1,
+         "resolved_order_strategy": "shuffle",
+         "source": "materialized_epoch0_loader",
+         "steps_per_epoch": 6000,
+         "train_portion": 1.0
+        },
+        "phase": "training",
+        "unit": "optimizer_step",
+        "unit_count": 6000
+       }
+      }
+     },
+     "final_status": "completed",
+     "hardware": {
+      "cuda_version": "12.8",
+      "gpu_name": "NVIDIA GeForce RTX 5090",
+      "hostname": "ligroup"
+     },
+     "historical_prior": null,
+     "prior_agreement": null,
+     "runtime_policy": {
+      "formal_safety_factor": null,
+      "historical_phase_share_limit": 0.1,
+      "observation_store_root": null,
+      "operator_budget_seconds": null,
+      "safety_factor": 1.0,
+      "trial_safety_factor": null,
+      "verification": {
+       "drift_extra_factor": 2.0,
+       "max_steps": 200,
+       "max_unit_ms": null,
+       "max_wall_ms": 60000.0,
+       "min_timed_ms": 500.0,
+       "min_timed_steps": 5,
+       "pathological_factor": 10.0,
+       "prior_match_tol": 0.25,
+       "steady": {
+        "max_steps": 200,
+        "rel_spread_tol": 0.1,
+        "stable_windows": 4,
+        "window": 8
+       }
+      },
+      "watchdog": {
+       "enabled": false,
+       "floor_seconds": 60.0,
+       "grace_seconds": 10.0,
+       "poll_seconds": 1.0,
+       "safety_factor": null
+      }
+     },
+     "schema_version": 1,
+     "software": {
+      "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+      "python_version": "3.12.13",
+      "torch_version": "2.10.0+cu128"
+     },
+     "storage": {
+      "bytes_read_from_storage": 0,
+      "cache_state": "warm_page_cache",
+      "dataset_root": "/home/klz/Data/TIDMAD",
+      "expected_raw_bytes": 720000000,
+      "file_count": 8,
+      "files_present": 8,
+      "filesystem_type": "ext4",
+      "rss_bytes_after_setup": 1330204672,
+      "rss_bytes_before_setup": 558452736,
+      "total_file_bytes": 17047208466
+     },
+     "timestamp": "2026-08-03T21:54:50-0700",
+     "total": null,
+     "watchdog_status": null
+    },
+    "status": "success"
+   },
+   "training_wall_seconds": 9.841,
+   "wall_seconds": 17.764
+  }
+ },
+ "order": [
+  "with_probe",
+  "without_probe"
+ ],
+ "provenance": {
+  "artifact": "c2_lite_a21_adabf4fbb948_c12a__sub1.json",
+  "artifact_sha256": "f74edebb024d4e8e3d883558fe1d72ac4a8c77951c47cc58f63fd50b89ceec1b",
+  "gate": "Gate 2 Lite-A attempt 21 (one live pair)",
+  "note": "A REAL formal-arm record, kept whole. The adapter under test must build an ArmEnvironment from THIS shape -- reading keys that do not exist blocked every live pair while a hand-fed replay passed.",
+  "sha": "adabf4fbb94813c79c3a213a25c45a24659520bc"
+ }
+}

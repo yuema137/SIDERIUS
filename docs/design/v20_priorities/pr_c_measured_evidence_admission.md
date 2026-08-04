@@ -1,16 +1,23 @@
 # Design: V20 PR C — Measured evidence and formal admission
 
-- **Status**: **DESIGN — revision 4.**
+- **Status**: **IMPLEMENTED — both gates PASSED, PR open as Draft.**
   - Umbrella architecture and the ten §8.C operator decisions:
     **APPROVED 2026-08-03 UTC**.
-  - **PR C1 design: READY FOR IMPLEMENTATION** on approval, from a fresh
-    branch off current `master`.
-  - **PR C2 implementation: NOT AUTHORIZED.** C2 must first complete and
-    have approved the read-only producer audit in §15.2 — the pre-phase
-    GPU measurement is the most safety-critical measurement in the system,
-    and its architecture must not be decided while writing it.
-  - No implementation has begun; neither branch exists
-    (`v20_priorities.md` §20.1).
+  - **PR C1: MERGED** — PR #161, `781e3e8a`.
+  - **PR C2: IMPLEMENTED**, Draft PR
+    [#164](https://github.com/Galileo-Sandbox/SIDERIUS/pull/164) on
+    `feature/v20-pr-c2-authoritative-gpu-requirement`.
+  - **Gate 1: N/A** — C2 changes no LLM-facing prompt, schema or decision
+    surface.
+  - **Gate 2 Lite-A (RTX 5090): PASSED.**
+  - **Gate 2 Lite-B (H100): PASSED.**
+  - **Gate-tested SHA**: `7302c467d81a575e3e35a8f81821eb5dbd63e451`.
+  - **NOT MERGEABLE YET** — exact-head CI is red on 44 pyright-strict
+    errors (see *Gate results* below). No runtime behaviour is affected;
+    the errors are type annotations in C2 modules.
+  - Historical note: this header previously read "PR C2 implementation:
+    NOT AUTHORIZED … no implementation has begun; neither branch exists".
+    Both branches exist, C1 is merged, and both gates have run.
 - **Implementation shape**: this document is the umbrella design and
   launch-blocker record. Implementation is **two PRs** — C1 (calibration
   identity, reachability, promotion) and C2 (authoritative GPU requirement
@@ -2086,6 +2093,3235 @@ rediscovered as a bug.
 | FU-C-9 | `is_trial=False` (legacy single-file mode) builds no SampleSet; `resolve_training_workload` raises `AttributeError: 'NoneType' object has no attribute 'items'` | Pre-existing defect in a deprecated path; not touched by C1 |
 | ~~FU-C-10~~ | Legacy v1 per-GPU `k` let history scale the production time estimate | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator decided the rule extends to the legacy mechanism, and it was removed inside C1. See Behavior Delta §16a-BD. Not deferred. |
 | ~~FU-C-11~~ | The tuner's Phase F post-flight still *wrote* the legacy k table, though nothing read it into a verdict | **CLOSED BY IMPLEMENTATION 2026-08-03.** The operator's policy is read-only preservation, which is stronger than "does not decide": a legacy store that keeps growing still looks like a live production system, and that is what invites reconnection. Phase F removed; v2 is the only producer. See the Behavior Delta above |
+
+---
+
+## 16-RECON. C2 design reconciliation onto merged master
+
+**Source.** C2 sections were ported from `audit/v20-pr-c2-producer-audit`
+@ `2bd2953` onto `master` @ `781e3e8` (the PR #161 merge commit).
+
+**Why a port and not a merge or rebase.** The audit branch was cut from
+**pre-C1 master**. `git diff master audit/…` on this file reported
+**510 insertions / 1576 deletions** — merging it would have *deleted* 1576
+lines of merged C1 content, resurrecting the cancelled C-C5b wiring and the
+superseded "legacy v1 is out of C1 scope" text. The whole file was therefore
+never taken; only the C2-only region was.
+
+**Carried forward** (audit-branch lines 1544-1958, verified to contain no C1
+text): §16c audit findings · D-C2-1 decision packet and its approval · the
+frozen measurement-authority rules · the O-7 implementation boundary · the
+two-stage Gate 2 Lite plan · the case matrix · the 5090-vs-H100 split · the
+remaining Q11-Q16 answers · the branch-handling procedure.
+
+**Deliberately NOT carried forward:**
+
+* the **superseded single-stage "Gate 2 Lite — plan (NOT executed)" table** —
+  replaced by the two-stage Lite-A / Lite-B plan the operator approved on
+  2026-08-03. Carrying both would have left two conflicting gate definitions
+  in one document.
+* **everything else in the file** — all C1 content comes from merged master,
+  not from the audit branch.
+
+**Post-port verification.** The reconciled document still states, from the
+merged-C1 side: live timing is the sole production runtime evidence
+(§C-C5b, §16a-BD); v1 is preserved read-only (§16-STATUS); v2 duration history
+is observability-only; C-C5b production consumption is `CANCELLED BY OPERATOR
+DECISION`; C1 is complete and merged; and C2's GPU authority is separate from
+C1's duration calibration ("C1 delivers no evidence to PR B by design —
+duration is milliseconds").
+
+---
+
+## 16c. C2 producer/consumer audit — READ-ONLY findings (2026-08-03)
+
+Branch `audit/v20-pr-c2-producer-audit`, cut from `origin/master` `169899e`.
+**No production code changed.** Every finding below is quoted from source, not
+inferred from names.
+
+### The headline: there are TWO probe systems, and neither is C2-ready
+
+| | `agent/skills/evaluate_vram_skill/` (PR A) | `core/runtime_control/probe_production.py` |
+|---|---|---|
+| purpose | VRAM sizing pre-flight | runtime (duration) probe, C10 bootstrap |
+| isolation | **yes** — separate process group, RSS-capped worker | in-process executors |
+| real forward | yes | yes |
+| **real backward** | **NO** | **yes** (`loss.backward()`, `:198`) |
+| **real optimizer step** | **NO** | **yes** (`optimizer.step()`, `:199`) |
+| memory reported | structural estimate + `cuda_peak_allocated/reserved_gb` | `torch.cuda.max_memory_allocated()` |
+
+**Q4 — does the isolated probe perform a real forward/backward/optimizer
+step? NO.** `structural_probe.py:177` says so in its own words — *"because we
+never call `backward()` — the probe only measures"* — and `:201` **raises** if
+`backward()` is ever invoked. It intercepts `save_for_backward` pack/unpack
+hooks to compute what the autograd tape *would* retain.
+
+That is a legitimate design for sizing, and it is **not** an authoritative
+requirement: gradients, optimizer state (Adam's two moments), and cuDNN
+workspace allocations during backward are estimated, never observed.
+
+**Q2 — can the existing probe subprocess be reused? Partially, and not as-is.**
+PR A supplies the *isolation* C2 needs (process group, RSS cap, timeout,
+typed outcomes). `probe_production.py` supplies the *real training step*.
+Neither supplies both, and the memory figure each reports is the wrong kind
+(below).
+
+### The measurement-kind gap — the load-bearing finding
+
+**Q5 — where are CUDA peak stats reset?** Exactly once, in
+`probe_production.py:123`, inside `_setup()` **before the model is
+constructed**.
+
+**Q6/Q7 — which phases are in the reported peak? All of them, cumulatively.**
+`_peak_vram_gb()` (`:221-223`) returns `max_memory_allocated()` whenever
+called; with a single reset in setup, the value is the maximum over
+setup **+ every training step + every inference batch** since. Training and
+inference **cannot** be separated from it. This directly contradicts the
+requirement that `sandbox_executor.py:478-487` encodes — a table **keyed by
+phase**, with *"deliberately no fallback — not to the other phase, not to the
+larger of the two"*, because PR B measured the two 1.8× apart.
+
+**Q9 — do driver-visible and allocator-visible disagree? Yes, structurally.**
+`torch.cuda.max_memory_allocated()` is **allocator-visible, single-process**.
+It excludes the CUDA context (~300-600 MiB), workspaces outside the caching
+allocator, and reserved-but-unallocated blocks. `gpu_accounting.py` samples
+**driver-visible** memory via `nvidia-smi` and splits *ours* vs *other* by
+**process ancestry from `root_pid`** (`:292-302`) — which is what PR B's
+admission actually reasons about.
+
+**Q8 — process-tree coverage.** `max_memory_allocated()` is per-process and
+**cannot see a child**. Only `gpu_accounting.sample()` covers the tree. Any C2
+requirement built on the torch allocator figure would under-report exactly the
+chain/pair topology PR B exists to constrain.
+
+**Q10 — can sampling miss short peaks? Yes.** `gpu_accounting.sample()` is a
+polled `nvidia-smi` query; a transient allocation between two samples is
+invisible. Sampling **completeness must therefore be recorded and carried**,
+not assumed — it is already modelled in PR A's result shape and must survive
+into the C2 requirement.
+
+**Q14 — how the result reaches PR B.** Through
+`sandbox_executor.py:489` — `getattr(sandbox, "measured_requirements", None)`,
+a **duck-typed read**, with a phase-keyed mapping of
+`{"requirement_mib", "provenance"}`. A missing phase yields `(None, None)` and
+is refused in formal mode. §8.A already flags this untyped read as the gap
+that *"survived PR B and its whole test suite"*; C2 must replace it with a
+typed boundary rather than populate it.
+
+### DECISION REQUIRED — D-C2-1: what produces the authoritative figure
+
+**Decision.** Build C2's pre-phase measurement as (a) a new isolated worker
+combining PR A's process isolation with a real forward/backward/optimizer
+step, measured by driver-visible process-tree sampling; or (b) extend PR A's
+existing worker to run a real training step; or (c) extend
+`probe_production.py` with isolation and driver-visible sampling.
+
+**Why material.** It determines what "authoritative GPU requirement" means,
+which process owns it, whether attempt accounting changes (O-7), and the GPU
+cost of every formal launch.
+
+**Verified code facts.** PR A never runs backward (`structural_probe.py:177,201`).
+`probe_production.py` runs a real step but reports an allocator-visible,
+phase-conflated, single-process peak (`:123, :185-202, :221-223`). PR B
+consumes a phase-keyed driver-visible requirement (`sandbox_executor.py:478-499`).
+
+**APPROVED: (a)** (operator, 2026-08-03). (b) would put a real optimizer step inside a worker whose
+documented contract forbids backward, invalidating its structural
+measurements. (c) would add isolation to an in-process runtime probe whose
+peak is already phase-conflated — two changes to a component whose duration
+role is in production use, risking C1's calibration path.
+
+**Impacts.** Production behaviour: new pre-phase execution before formal GPU
+launch. Authority: creates a new authoritative measurement kind. Retry/attempt:
+O-7 must define whether a failed pre-phase consumes an attempt. GPU cost: one
+extra bounded execution per formal candidate. **Gate 1: N/A** — no LLM-facing
+surface. **Gate 2 Lite: required.**
+
+**Work that continues without this decision:** the remaining call-graph
+verification, test inventory, mutation design and the Gate 2 Lite command plan.
+
+### D-C2-1 full decision packet — three options, side by side
+
+> ## ✅ APPROVED — operator decision, 2026-08-03
+>
+> **Option (a) is approved**: a new dedicated isolated pre-phase GPU
+> measurement worker, combining PR A's process isolation with a real
+> production-equivalent model/data/optimizer path, real forward/backward/
+> optimizer execution, phase-specific measurement, and parent-side
+> driver-visible candidate-process-tree sampling.
+>
+> **Neither existing probe may be reused as the final C2 producer**, for the
+> reasons the audit established from code:
+>
+> * PR A's isolated worker — **does not execute a real backward/optimizer
+>   step** (`structural_probe.py:177`, and `:201` raises if backward runs).
+> * `probe_production.py` — **in-process**, resets the peak **once** in
+>   `_setup()`, therefore **conflates setup / training / inference**, and
+>   reports **allocator-visible single-process** memory.
+>
+> The new worker **may reuse bounded components from both** (PR A's launcher,
+> RSS cap, timeout and typed outcome vocabulary; the real-step shape from
+> `probe_production`) but must carry a **new explicit C2 contract** rather than
+> inheriting either component's existing one.
+
+### Measurement authority — frozen by this decision
+
+The authoritative GPU requirement **must** be:
+
+| Property | Rule |
+|---|---|
+| freshness | measured **live** |
+| device | on the **current physical GPU** |
+| subject | the **exact candidate and configuration** |
+| granularity | **phase-specific** (training and inference never merged) |
+| timing | produced **before** formal execution |
+| basis | **candidate-owned driver-visible process-tree** memory |
+
+* PyTorch **allocator peak is supplemental diagnostic evidence**, never the
+  sole authority.
+* Normal-phase `observed_peak` **remains telemetry only** and may not be
+  promoted to admission authority (O-10).
+* **Historical GPU measurements, and measurements from another GPU, are never
+  production admission authority.** This is the C1 principle carried into C2:
+  the current live measurement of this candidate on this device decides.
+
+Every result must be bound to the current GPU UUID, the current candidate, the
+current configuration and the specific phase.
+
+| Dimension | **(a) NEW isolated pre-phase worker** *(recommended)* | **(b) EXTEND PR A's worker** | **(c) EXTEND `probe_production.py`** |
+|---|---|---|---|
+| Description | new worker combining PR A's isolation with a real training step, measured by parent-side driver-visible tree sampling | teach the structural pre-flight worker to run a real fwd/bwd/step | add isolation + driver sampling to the in-process runtime probe |
+| Production call graph | candidate → new pre-phase worker → classification → phase-keyed requirement → PR B admission → launch/stop | candidate → existing preflight worker (extended) → … | candidate → probe_production (extended) → … |
+| Worker/process isolation | **new process group, RSS-capped** (reuses PR A's launcher) | already isolated | **must be added** — currently in-process |
+| Real model construction | yes | yes | yes |
+| Real optimizer construction | **yes (new)** | **must be added** | yes |
+| Real data path | production loader, bounded | production loader, bounded | production loader (`F-1a`) |
+| Forward | yes | yes | yes |
+| **Backward** | **yes (new)** | **must be added — `structural_probe.py:201` currently RAISES if backward runs** | yes (`:198`) |
+| **Optimizer step** | **yes (new)** | **must be added** | yes (`:199`) |
+| Phase separation | **per-phase reset + per-phase peak, by construction** | must be added | **must be fixed** — one reset in `_setup()` conflates setup+train+infer |
+| Allocator-visible memory | recorded as secondary | already recorded | already recorded (primary today) |
+| **Driver-visible tree memory** | **primary authority** via `gpu_accounting.sample()` | must be added | must be added |
+| Peak-sampling completeness | recorded and carried into the requirement | PR A already models it | must be added |
+| Short-peak under-read | mitigated by sampling cadence + completeness flag; **cannot be eliminated** | same | same |
+| Probe perturbation risk | **unknown — measured in Gate 2 Lite, not assumed** | same | higher: shares the process that later trains |
+| Distributed/process-group | out of scope; single-device asserted | same | same |
+| Timeout / crash / unavailable / incomplete / OOM / above-cap | **reuse PR A's typed vocabulary unchanged** | native | must be added |
+| O-7 attempt consumption | new typed boundary owns it | same | same |
+| Production authority change | **creates a new authoritative measurement kind** | same | same |
+| Retry/attempt/round change | only via O-7 boundary | same | same |
+| Implementation size | medium — new worker + boundary, reuses launcher & vocabulary | medium-large | large |
+| Touched boundaries | new module + PR B seam | **mutates a component in production use for VRAM sizing** | **mutates a component in production use for C1 duration** |
+| Required tests | isolation, real-step reachability, phase separation, tree coverage, classification, O-7 | same + regression on existing VRAM sizing | same + regression on C1 duration calibration |
+| Gate 1 | N/A | N/A | N/A |
+| Gate 2 Lite | required | required | required |
+| Advantages | no existing production behaviour mutated; PR A and C1 paths untouched | least new code | reuses a real training step |
+| **Risks** | one more component to own | **invalidates PR A's structural measurements** — its contract forbids backward, and its tape accounting assumes it never ran | **risks C1's just-validated duration path**, and inherits a phase-conflated peak |
+
+**Why (a) is recommended.** (b) and (c) each mutate a component that is
+currently in production use and just validated — PR A's sizing pre-flight and
+C1's duration probe respectively. (b) is worse than it looks: the worker's
+autograd-tape accounting is *premised* on backward never running, so adding a
+real step does not extend it, it invalidates it.
+
+**APPROVED 2026-08-03** — see the decision block at the head of this packet.
+
+### Control-flow rule: exceptions are not the O-7 protocol
+
+**Operator refinement, 2026-08-03.** C2-1's `as_admission_entry()` raises when
+asked to extract an untrustworthy requirement. That is correct **as a
+fail-closed accessor** — it stops a caller from reading a figure that must not
+be read.
+
+It is **not** the production control-flow mechanism. Normal outcomes travel as
+**typed values**, not exceptions:
+
+```text
+worker      → typed measurement result   (never raises for a measured failure)
+classifier  → typed outcome + evidence   (never raises for a classified failure)
+O-7 boundary→ typed disposition          (PROCEED / STOP_*)
+tuner       → consumes the disposition
+```
+
+A measured CUDA OOM, an above-cap requirement, a hard timeout and an
+unavailable GPU are all **expected results** of a measurement, not errors in
+taking one. Raising for them would collapse six operator-distinguishable
+outcomes into one `except` block — the exact "generic failure" collapse §6
+forbids — and would put O-7's accounting inside exception handling, where the
+frozen rules (consume the attempt, no completed round, no blame, no shrink, no
+same-attempt retry) are hardest to see and easiest to get wrong.
+
+**Rule.** An exception may only signal a *programming* error or a genuinely
+unexpected condition. Every measurement outcome that O-7 has a rule for must
+arrive as a typed value.
+
+### O-7 implementation boundary — required decomposition
+
+**Do not add another large inline branch to the tuner's `run()`.** That method
+is the giant orchestrator the decomposition rule governs; adding pre-phase
+measurement, classification, admission and disposition to it inline would be
+four more responsibilities in a scope that already has too many.
+
+**Extract a focused typed boundary** that owns, end to end:
+
+```text
+run isolated pre-phase measurement
+  → classify the typed result
+  → validate that an authoritative requirement exists
+  → call PR B admission
+  → return ONE disposition
+```
+
+The tuner consumes only the disposition:
+
+| Disposition | Meaning |
+|---|---|
+| `PROCEED` | authoritative requirement obtained and admitted |
+| `STOP_MEASUREMENT_UNAVAILABLE` | no measurement could be produced |
+| `STOP_OVER_CAP` | measured requirement exceeds the configured cap |
+| `STOP_MEASURED_OOM` | the candidate OOMed during measurement |
+| `STOP_TIMEOUT` | measurement exceeded its bounded deadline |
+| `STOP_INFRASTRUCTURE_FAILURE` | the measurement system itself failed |
+
+**O-7, preserved exactly.** On any `STOP_*`:
+
+* stop **before** formal GPU work;
+* **consume the attempt**;
+* record **no completed round**;
+* assign **no scientific blame** to the candidate;
+* perform **no proposal shrinking**;
+* perform **no same-attempt retry** — only the existing outer loop advances.
+
+The boundary needs explicit inputs, a typed result, bounded side effects,
+focused tests, and **reachability evidence** — a test that fails when the
+production path bypasses it.
+
+### Gate 2 Lite — TWO REQUIRED STAGES (operator decision, 2026-08-03)
+
+**Both stages must pass before C2 merges.** The split exists because the two
+answer different questions, and one cannot substitute for the other.
+
+#### Gate 2 Lite-A — RTX 5090 mechanism validation
+
+*Purpose: prove the machinery is correct, cheaply and locally.*
+
+Validates: process isolation · real forward/backward/optimizer step · training
+vs inference phase separation · typed outcome classification · parent-side
+candidate-process-tree sampling · allocator **and** driver-visible reporting ·
+timeout / crash / unavailable / measured-OOM behaviour · PR B consumer
+reachability · O-7 attempt accounting · no completed round, no blame, no
+shrinking on a failed pre-phase measurement · **deleting any critical
+producer→consumer link makes a test fail**.
+
+**Explicitly does NOT establish an H100 requirement.**
+
+#### Gate 2 Lite-B — H100 production validation
+
+*Purpose: prove the real chain on the hardware that will run it.*
+
+Repeats the production-critical cases on the **target H100**, with a fixed
+candidate and fixed configuration: successful measurement and admission ·
+measured requirement above cap → refusal · unavailable/inconclusive · bounded
+timeout or controlled failure · phase-specific requirement · process-tree
+coverage · authoritative PR B consumption · formal launch **only** after
+successful admission · the authoritative result demonstrably comes from **this
+H100 live measurement**.
+
+> **A 5090 result is never H100-authoritative.** Lite-A finds almost all code
+> and semantic defects at low cost; Lite-B confirms the real chain on the
+> target production hardware. Neither replaces the other.
+
+Each stage records **separately**: exact command · workspace and temporary
+registry · candidate/config · hardware · expected runtime and GPU cost ·
+expected typed result and admission outcome per case · attempt accounting ·
+pass criteria · stop criteria · retained artifacts · **exact Git SHA**.
+
+~~**Neither stage runs until its exact commands and bounded resource
+estimates are prepared and operator-approved.**~~ Both stages were prepared,
+approved and **executed**; see *Gate results* for outcomes.
+
+**Gate 1 remains N/A** unless C2 changes an LLM-facing prompt, schema or LLM
+decision surface — in which case that specific commit requires Gate 1 before
+merge.
+
+### Case matrix (applies to Lite-A; the production-critical subset repeats in Lite-B)
+
+Every case records: entry point, candidate/config, hardware, exact command,
+expected runtime, expected GPU use, expected typed result, expected admission
+result, attempt accounting, pass criteria, stop criteria, artifacts, exact SHA.
+The template is fixed; per-case values are filled when the architecture is
+chosen, because the entry point differs per option.
+
+| # | Case | Expected typed result | Expected admission | Attempt |
+|---|---|---|---|---|
+| 1 | successful measurement | `COMPLETED_MEASUREMENT` | ALLOW | not consumed |
+| 2 | requirement above configured cap | `MEASURED_PEAK_ABOVE_VRAM_CAP` | REFUSE | consumed |
+| 3 | unavailable / inconclusive | `PROBE_INFRASTRUCTURE_FAILURE` | REFUSE (formal) | consumed (O-7) |
+| 4 | hard timeout | `MEASURED_HARD_TIMEOUT` | REFUSE | consumed |
+| 5 | measured CUDA OOM | `MEASURED_CUDA_OOM` | REFUSE | consumed |
+| 6 | process crash / infra failure | `PROBE_INFRASTRUCTURE_FAILURE` | REFUSE | consumed |
+| 7 | training vs inference separation | two distinct requirements | per-phase | n/a |
+| 8 | parent + child both resident | tree total > single-process | per-phase | n/a |
+| 9 | candidate-owned tree coverage | ours/other split correct | n/a | n/a |
+| 10 | allocator vs driver-visible | driver ≥ allocator, gap recorded | n/a | n/a |
+| 11 | short-peak / sampling completeness | completeness flag carried | n/a | n/a |
+| 12 | probe perturbation | peak with vs without probe, delta bounded | n/a | n/a |
+| 13 | O-7 attempt consumption | — | — | **consumed exactly once** |
+| 14 | failed pre-phase | — | — | **no completed round recorded** |
+| 15 | failed pre-phase | — | — | **no scientific blame, no shrink advice** |
+| 16 | formal launch | — | only after authoritative ALLOW | n/a |
+
+**Stop criteria (all cases):** any write outside a temporary registry; any
+observed change to attempt accounting beyond O-7; wall time beyond the agreed
+bound; any live v1/v2 registry mutation.
+
+### Hardware: what a 5090 can and cannot establish
+
+**RTX 5090 CAN validate (mechanism):** worker isolation; real
+forward/backward/optimizer execution; phase separation; typed classification;
+process-tree sampling mechanics; the allocator-vs-driver relationship;
+timeout/crash/unavailable handling; O-7 behaviour; PR B consumer reachability.
+
+**RTX 5090 CANNOT establish:** an authoritative **H100** GPU requirement;
+H100 memory availability; H100 contention behaviour; H100 production admission
+outcomes.
+
+**Therefore, proposed split — requires operator confirmation:**
+
+1. **Gate 2 Lite (mechanism)** on the 5090 — cases 1-16, validating that the
+   machinery is correct.
+2. **H100 production-authority validation** — a later, separate run on the
+   target H100 before any H100 formal campaign relies on it.
+
+A 5090 measurement is **never** transferred to an H100 requirement (§11
+hardware rule, frozen). If the operator prefers a single gate, Gate 2 Lite
+itself must run on the H100 — but then it cannot be run until H100 time is
+available, which is why the split is proposed.
+
+### Branch handling after C1 merges — operator-specified procedure
+
+`audit/v20-pr-c2-producer-audit` was cut from **pre-C1 master** and therefore
+does **not** contain C1's sections of this document. A blind merge would
+resurrect stale C1 text — including the cancelled C-C5b wiring and the
+superseded "legacy v1 is out of scope" claims.
+
+**Required order, after PR #161 merges:**
+
+1. **Do not merge this audit branch.**
+2. Start the **C2 implementation branch from updated master**.
+3. **Selectively carry forward** the C2-only audit/design content from
+   `5745eb2` (and the decisions recorded here) — not the whole file.
+4. **Verify the reconciled design document** contains the final C1 text:
+   legacy v1 read-only, C-C5b `CANCELLED`, live-only time authority,
+   FU-C-10/FU-C-11 closed, FU-C-9 deferred.
+5. Only then begin C2 production edits.
+
+Concretely, the C2-only regions are: the §16c audit findings, the D-C2-1
+packet, the measurement-authority rules, the O-7 boundary, and the two-stage
+Gate 2 Lite plan. Everything else in this file belongs to C1 and must come
+from merged master.
+
+### Remaining answers
+
+**Q13 — failure classification already exists and is good.** PR A defines a
+typed outcome vocabulary (`isolated_probe.py:58-85`):
+`COMPLETED_MEASUREMENT`, `MEASURED_CUDA_OOM`, `MEASURED_PEAK_ABOVE_VRAM_CAP`,
+`MEASURED_HARD_TIMEOUT`, `PROBE_INFRASTRUCTURE_FAILURE`, with authority
+predicates (`has_capacity_authority`, `may_recommend_vram_downsizing`) and a
+validator that **refuses** a `MEASURED_HARD_TIMEOUT` whose elapsed time did not
+reach the deadline — added after a 65.6 s inspection was mis-filed as a timeout
+on 2026-07-31 (`:282-296`). **C2 should reuse this vocabulary, not invent one.**
+
+**Q11 — does the probe perturb memory?** Not established by the code, and it
+cannot be answered by reading. It needs a measurement: same candidate, peak
+with and without a preceding pre-phase probe in the same process tree. Added to
+the Gate 2 Lite plan rather than asserted.
+
+**Q12 — distributed/process-group setup.** No `torch.distributed` /
+`init_process_group` call appears in either probe path. Single-device is the
+current reality; C2 should state that as a scope boundary rather than silently
+assume it.
+
+**Q15 — does any production path already treat a cumulative peak as
+authoritative?** `probe_production.py::_peak_vram_gb` is the only producer of a
+CUDA peak in `core/runtime_control/`, and it is consumed by the **duration**
+probe path, not by admission. `sandbox_executor.py:489` — admission's only
+input — reads `measured_requirements`, which **nothing populates**. So the
+answer is *no*: no production path currently supplies an authoritative GPU
+requirement at all. That is the gap C2 exists to close, and it is why formal
+admission reports `policy_unavailable` today.
+
+**Q16 — O-7 attempt accounting is NOT implemented.** `admission.py:152` says
+the policy is *"resolved once per attempt"*, but no code consumes a
+pre-phase failure to decide whether an attempt is consumed. Enforcement would
+have to live in the tuner's attempt loop, which is the giant orchestrator the
+decomposition rule governs — so C2 must **extract a typed boundary first**
+rather than add another branch there. Flagged as a design constraint on C2's
+decomposition, not a defect.
+
+---
+
+## 16d. C2 implementation record
+
+Updated as each checkpoint lands, not at the end. `[x]` means implemented
+**and** evidenced here.
+
+### Module layout — one responsibility each
+
+The O-7 boundary must not become another giant orchestrator, so the
+producer chain is split before it is written rather than after:
+
+| Module | Responsibility | Checkpoint |
+|---|---|---|
+| `gpu_requirement.py` | the typed authority contract | C2-1 `[x]` |
+| `gpu_measurement_spec.py` | the parent↔worker IPC contract | C2-2 `[x]` |
+| `gpu_measurement_phases.py` | executing the real phases, in-process | C2-2 `[x]` |
+| `gpu_measurement_worker_main.py` | the isolated process that hosts them | C2-2 `[x]` |
+| `gpu_measurement_sampler.py` | parent-side driver-visible tree sampling | C2-3 `[x]` |
+| `gpu_measurement_runner.py` | launch + sample + join into phase measurements | C2-4 `[x]` |
+| `process_group.py` | shared supervision primitives | C2-4 `[x]` |
+| `gpu_measurement_classifier.py` | typed outcome with evidence validation | C2-5 `[x]` |
+| `gpu_requirement.MeasuredRequirementTable` | typed delivery to PR B | C2-6 `[x]` |
+| `prephase_admission.py` | typed pre-phase disposition (O-7) | C2-7 `[x]` |
+| `gpu_measurement_identity.py` | planned + realized identity | D-C2-7 `[x]` |
+| tuner `_handle_prephase_gpu_measurement` | the production call site | C2-8 `[x]` |
+
+### C2-1 — typed authoritative GPU requirement contract  `[x]`  `7864f83`
+
+`core/runtime_control/gpu_requirement.py` (+22 tests). `authoritative` is a
+computed property over the six frozen conditions; `as_admission_entry()`
+raises rather than emitting a placeholder. `PreflightOutcome` and
+`VRAM_CAPACITY_OUTCOMES` are imported from PR A, not re-declared.
+
+### C2-2 — the isolated pre-phase measurement worker  `[x]`
+
+**Files.**
+
+| File | What it owns |
+|---|---|
+| `core/runtime_control/gpu_measurement_spec.py` | `GpuMeasurementSpec`, `PhaseExecutionReport`, `RealismEvidence`, `WorkerMeasurementReport`, `WorkerStatus`, `PhaseStatus` |
+| `core/runtime_control/gpu_measurement_phases.py` | `CandidateComponents`, `PhaseJournal`, `run_measured_phases`, `_run_training`, `_run_inference` |
+| `core/runtime_control/gpu_measurement_worker_main.py` | `resolve_device`, `validate_candidate_configs`, `build_production_components`, `measure`, `main` |
+| `execute_tools/train_engine_sandbox.py` | `build_training_optimizer` (extracted — see D-C2-4) |
+
+**Verified call graph** (worker side; the parent half arrives in C2-3):
+
+```text
+main(spec.json)
+  → GpuMeasurementSpec           validate the IPC payload
+  → measure(spec)
+      → resolve_device           CUDA present? UUID == request.device_uuid?
+      → validate_candidate_configs   schema rejection BEFORE the timed window
+      → run_measured_phases(build_components=build_production_components(spec))
+          → [setup]      reset peaks → build → read peaks → journal
+          → [training]   reset peaks → zero_grad/forward/loss/backward/step ×N
+            or [inference]         reset peaks → no_grad forward ×M
+          → read peaks → journal
+      → WorkerMeasurementReport  (atomic write to result_path)
+```
+
+**Behaviour.** A real forward, a model-connected loss, a real
+`loss.backward()`, a real `optimizer.step()`, and a proof that a trainable
+parameter moved. Inference runs under `torch.no_grad()` with the grad-free
+property read off the OUTPUT tensor rather than from the fact that the
+context was entered. The model, the optimizer, the input/target dtypes and
+the fcnet `loss_type` argument all mirror `train_engine_sandbox`.
+
+**Authority.** None is claimed here. The worker produces evidence; the
+authority decision stays in `MeasuredGpuRequirement`. A CPU run cannot
+become authoritative structurally — `observed_device_uuid` stays `None` and
+the contract's UUID match cannot succeed.
+
+**Failure semantics.** Every measurable outcome is a typed `WorkerStatus`
+value: `COMPLETED`, `CUDA_OOM`, `DEADLINE_EXCEEDED`, `DEVICE_UNAVAILABLE`,
+`DEVICE_MISMATCH`, `CONFIG_REJECTED`, `WORKER_FAILURE`. `run_measured_phases`
+raises for nothing it can measure. Two Pydantic validators close
+silent-success shapes: a `COMPLETED` worker whose target phase is absent or
+unreached is refused, and a phase window may not run backwards.
+
+**Attempt / retry / round impact.** None yet. C2-2 adds no call site; the
+worker is not reachable from the chain until C2-6/C2-7 wire it.
+
+**Tests.** `tests/unit/core/test_gpu_measurement_phases.py` (22),
+`tests/unit/core/test_gpu_measurement_worker.py` (25),
+`tests/unit/execute_tools/test_training_optimizer.py` (5). All use a real
+`nn.Module` on the CPU: a mock would let a detached loss, a missing
+backward or a no-op step pass, which are the exact failures being ruled
+out.
+
+**Mutation proofs — five load-bearing edges, each killed by a named test.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| M1 | delete `loss.backward()` | `test_gradients_reach_the_parameters` (+2) |
+| M2 | build the optimizer locally instead of via `build_training_optimizer` | `test_the_optimizer_is_productions_own[adamw/adam]` |
+| M3 | drop the fcnet `loss_type` branch | `test_fcnet_receives_the_loss_type_the_trainer_passes` |
+| M4 | `parameter_update_verified = True` | `test_an_optimizer_over_the_wrong_module_is_caught` |
+| M5 | skip device verification | `test_an_unreadable_uuid_fails_closed` (+4) |
+
+Restored from backups (never `git checkout --`), `__pycache__` cleared
+before each run, baseline re-run green afterwards: 52 passed.
+
+**Regression.** `tests/unit/execute_tools/`, `tests/unit/guardrails/`,
+`test_calibration_context.py`, `test_rt1_step_resolver.py`,
+`test_silent_train_crash_routing.py` — 607 passed, 4 xfailed, covering the
+`build_training_optimizer` extraction.
+
+**Remaining work.** C2-3 through C2-7, then the two gate packets.
+
+### C2-3 — parent-side candidate-tree driver sampler  `[x]`
+
+**File.** `core/runtime_control/gpu_measurement_sampler.py` —
+`TreeMemorySample`, `WindowMeasurement`, `GpuTreeSampler`, `measure_window`,
+`_largest_gap`. Plus one field added to C2-1's `SamplingCoverage`:
+`max_gap_seconds`.
+
+**NVIDIA query mechanism — audited before choosing.**
+
+| Mechanism | Verdict |
+|---|---|
+| `nvidia-smi` via `gpu_accounting.sample` | **selected** |
+| NVML / `pynvml` | rejected |
+
+`gpu_accounting.sample` already splits *ours* from *everyone else's* by
+**process ancestry** from a root PID — the only test that claims a child
+started with `start_new_session=True`, which is exactly what the C2-2
+worker is. It already refuses to substitute a device whose UUID is absent,
+and already keeps `telemetry_available=False` distinct from zero.
+**Measured cost on this deployment: ~72 ms per sample** (two bounded
+queries — device totals and per-process rows, audit finding F4).
+
+`pynvml` is **not installed** (`No module named 'pynvml'`), so it would be
+a new dependency, and it would create a *second* definition of
+"driver-visible" beside the primitive PR B's admission already reasons
+about. Two answers to that question is how a measurement and a gate come
+to disagree invisibly.
+
+**Behaviour.** `poll()` samples at a cadence; `poll(force=True)` takes the
+boundary samples the caller wants right after spawn and just before
+reaping. `measure_window(started_at, ended_at)` reduces the raw series to
+one phase's peak plus its `SamplingCoverage`. The peak is the **sum over
+every own process alive at one instant, maximized across samples** —
+taking one process's maximum would under-read a tree, and summing each
+process's own maximum across different instants would over-read a state
+the machine was never in.
+
+**Three distinctions it refuses to collapse.** No observation ≠ 0 MiB (a
+failed query stays `None` and counts as *missed*); sampled zero ≠ no
+observation (the driver was asked and answered); one PID ≠ the candidate.
+
+**Authority.** None. It produces the driver-visible figure and its
+coverage; `MeasuredGpuRequirement` decides whether that may be admitted.
+
+**Failure semantics.** A raising device sampler is a missed sample, not an
+exception out of `poll()`. Zero samples in a window yields
+`driver_tree_peak_mib=None` and `coverage.complete=False` — an unwatched
+phase has an *unknown* requirement, not a smaller one.
+
+**Attempt / retry / round impact.** None. Still no call site.
+
+**Tests.** `tests/unit/core/test_gpu_measurement_sampler.py` (22), on a
+fake clock and an injected device sampler — no GPU, no sleeps, no threads.
+
+**Mutation proofs — five edges, each killed by a named test.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| S1 | peak from the largest single process | `test_the_peak_sums_every_own_process_alive_at_that_instant` |
+| S2 | a failed query becomes 0 MiB | `test_a_failed_query_carries_no_figure` (+2) |
+| S3 | ignore the window boundaries | `test_a_sample_outside_the_window_is_not_consulted` |
+| S4 | `covered_whole_phase` always True | `test_a_watch_that_started_late_is_not_complete` (+1) |
+| S5 | gaps measured between samples only | `test_the_largest_gap_includes_the_window_edges` (+2) |
+
+Restored from backups, `__pycache__` cleared before each run, baseline
+re-run green (22 passed). Regression: `test_gpu_accounting.py`,
+`test_gpu_requirement_contract.py`, `test_gpu_admission_wiring.py` — 156
+passed with the new `max_gap_seconds` field.
+
+**Design note — `max_gap_seconds` is risk, not incompleteness.** It is
+recorded on `SamplingCoverage` but deliberately excluded from `complete`.
+Every polled watch is blind between polls; treating that as disqualifying
+would mean no measurement could ever be authoritative. Quantifying the
+largest unwatched stretch — **including the window edges**, since a window
+whose only sample sits at its start was unwatched for the rest of it —
+keeps the exposure travelling with the number instead of living in a
+caveat somebody has to remember.
+
+**Design note — a sampler, not a thread.** The parent already runs a
+supervision loop (deadline, host-RSS bound, reaping) and `poll()` slots
+into it. That makes the whole component deterministic under test, so the
+tests exercise the real attribution logic rather than a timing
+approximation of it. The cost is honest: a stalled parent loop misses
+samples, and that shows up as a larger `max_gap_seconds`.
+
+**Remaining work.** C2-4 through C2-7, then the two gate packets.
+
+### C2-4 — phase-specific measurement, joined from two observers  `[x]`
+
+**Files.** `core/runtime_control/gpu_measurement_runner.py` —
+`run_prephase_measurement`, `PhaseMeasurement`, `PrephaseMeasurementRun`,
+`ProcessEvidence`, `HostMemoryBound`, `_in_flight_phase`, `_load_report`.
+Plus `core/runtime_control/process_group.py` (see below).
+
+**Why a join and not one instrument.** Neither observer is sufficient:
+
+| Observer | Knows | Blind to |
+|---|---|---|
+| worker | where its phases began/ended; its own allocator peaks | children, the CUDA context, non-allocator workspaces |
+| parent | driver-visible memory for the whole candidate tree | which phase is running |
+
+The parent samples continuously; the worker marks the boundaries; this
+module joins them **by wall-clock window**. That join is what makes a
+requirement phase-specific instead of cumulative.
+
+**Each `PhaseMeasurement` records** phase boundaries, elapsed time, the
+driver-visible tree peak **and its source**, the allocator peak and
+reserved peak **and their source**, the full `SamplingCoverage`, the own
+PIDs, `max_concurrent_own_processes`, units executed vs requested, status
+and detail. The two memory figures live in separate fields with separate
+`*_source` strings; there is no fallback from one to the other, and a
+mutation adding one fails a named test.
+
+**Failure semantics.** Never raises for anything it can observe: a launch
+failure, a hung worker (TERM → grace → KILL on the process group), a crash,
+and a malformed report are all recorded outcomes. A malformed report is
+**no** report — half a measurement must never read as a whole one. When
+there is no report there are no windows, so samples are retained raw and
+unattributed, and `in_flight_phase` comes from the journal — the difference
+between "the candidate OOMed during training" and "something failed".
+
+**Authority.** None. It records; C2-5 classifies and C2-1 decides.
+
+**Attempt / retry / round impact.** None. Still no call site.
+
+**Tests.** `tests/unit/core/test_gpu_measurement_runner.py` (24). Each
+drives a **real subprocess** — a fake worker that reports, or hangs, or
+dies mid-phase — with an injected device sampler, so the actual `Popen`,
+deadline and reap paths are under test rather than a simulation.
+
+**Mutation proofs.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| R1 | join over all samples, ignoring the window | `test_a_spike_during_setup_does_not_become_the_training_requirement` |
+| R2 | driver peak falls back to the allocator figure | `test_the_allocator_figure_never_becomes_the_driver_figure` |
+| R3 | remove the closing forced sample | `test_the_watch_takes_a_final_look_after_the_process_ends` |
+| R4 | journal never names the in-flight phase | `test_the_journal_names_the_phase_that_was_in_flight` |
+| R5 | a report *file* counts as a report | `test_a_malformed_report_is_no_report` |
+
+**Regression.** Full `tests/unit/core/` — **1630 passed, 2 skipped**.
+
+**Two corrections the mutation and guardrail work forced.**
+
+*A redundant forced sample was deleted rather than kept.* The first
+mutation of the OPENING `poll(force=True)` killed no test, because `poll()`
+already samples unconditionally on its first call. Rather than write a test
+to justify code that does nothing, the line was removed. The CLOSING forced
+sample is load-bearing and now has a test that proves it — but only after
+the test was rewritten with a cadence slower than the run: at a 10 ms
+interval the assertion held whether or not the final sample existed, so the
+first version of that test was decoration.
+
+*A rival `DeviceIdentity` constructor was written and removed.*
+`gpu_measurement_sampler.device_identity_for(uuid)` failed
+`test_it_is_the_only_translation_point`, a PR B guardrail asserting that
+`gpu_accounting.device_identity_from_hardware` is the sole translation
+point. **The guardrail was right.** The helper had to guess
+`physical_index=0`, which is precisely what that module warns against —
+*"filling in device 0 ... would silently conflate two cards of the same
+model, and every measurement attributed to the wrong one would look
+perfectly valid."* `run_prephase_measurement` now **requires** a
+`DeviceIdentity` from discovery; the deliberate absence is documented at
+the former call site so it is not re-added.
+
+**D-C2-5 — supervision primitives extracted to `core/runtime_control/process_group.py`.**
+*Behaviour Delta: none* — the bodies moved verbatim.
+`isolated_probe.py` and `probe_subprocess.py` had each grown identical
+`_process_group_alive` / `_signal_group`, and C2-4 needed those plus the
+tree-RSS read. A third and fourth copy of a kill path is four places where
+one supervision bug can be fixed in one and survive in the others.
+`isolated_probe` now delegates (its private names kept as aliases, since
+its own tests and readers use them). **`probe_subprocess` deliberately does
+not**: it sits on C1's just-validated duration path.
+
+**Remaining work.** C2-5 through C2-7, then the two gate packets.
+
+### C2-5 — classification with evidence validation  `[x]`
+
+**File.** `core/runtime_control/gpu_measurement_classifier.py` —
+`classify_measurement`, `_outcome_for`, `_no_report_outcome`,
+`_deadline_evidence`, `_no_coverage`.
+
+**Vocabulary reused, not invented.** `PreflightOutcome`,
+`VRAM_CAPACITY_OUTCOMES` and `NO_DOWNSIZING_AUTHORITY` are PR A's, imported.
+A second outcome system would be a second policy about what a failed
+measurement means.
+
+**Routing** — most specific established fact first.
+
+| Evidence | Outcome |
+|---|---|
+| parent's host-RSS bound exceeded | `MEASURED_HOST_MEMORY_EXCEEDED` |
+| no report, deadline reached | `MEASURED_HARD_TIMEOUT` |
+| no report, deadline not reached | `PROBE_INFRASTRUCTURE_FAILURE` |
+| worker `CONFIG_REJECTED` | `SCHEMA_REJECTED` |
+| worker `DEVICE_UNAVAILABLE` / `DEVICE_MISMATCH` | `PROBE_INFRASTRUCTURE_FAILURE` |
+| worker `CUDA_OOM` | `MEASURED_CUDA_OOM` |
+| worker `DEADLINE_EXCEEDED` | `MEASURED_HARD_TIMEOUT` (soft budget as evidence) |
+| worker `WORKER_FAILURE` | `PROBE_INFRASTRUCTURE_FAILURE` |
+| phase absent / not completed | `INCONCLUSIVE_MEASUREMENT` |
+| no driver figure | `INCONCLUSIVE_MEASUREMENT` |
+| sampling incomplete | `INCONCLUSIVE_MEASUREMENT` |
+| complete, over the configured cap | `MEASURED_PEAK_ABOVE_VRAM_CAP` |
+| complete, within the cap | `COMPLETED_MEASUREMENT` |
+
+**Four claims checked before they are made.**
+
+*A timeout must have reached a deadline.* Two deadlines exist — the
+parent's hard one and the worker's soft budget — and the reported evidence
+is **whichever actually fired**. The soft budget sits below the hard one by
+construction, so reporting the parent's for a clean worker-side stop would
+produce a timeout whose elapsed time never reached it, which is the
+2026-07-31 mislabelling exactly. `PrephaseMeasurementRun` therefore carries
+`soft_deadline_seconds` for this purpose alone.
+
+*A CUDA OOM is never inferred.* Only the worker can observe one, because
+only it holds the exception. `_no_report_outcome` cannot return
+`MEASURED_CUDA_OOM` at all — "died while holding a lot of memory" is the
+inference that would blame a candidate for the machinery. The parallel
+host-memory inference is safe only because the parent measured that bound
+itself.
+
+*Infrastructure is not candidate blame.* Device faults, worker crashes,
+schema rejections and inconclusive results all land inside PR A's frozen
+`NO_DOWNSIZING_AUTHORITY`.
+
+*Incomplete sampling yields an unknown requirement, not a smaller one.*
+
+**Deliberate conservatism, with its cost stated.** An incomplete watch that
+observed a peak ABOVE the cap is classified `INCONCLUSIVE_MEASUREMENT`, not
+`MEASURED_PEAK_ABOVE_VRAM_CAP` — per the frozen rule that above-cap
+requires an otherwise-authoritative measurement. The observed peak is a
+genuine lower bound, so this is strictly more conservative than the
+evidence allows. The reason is that above-cap carries authority to tell an
+agent to **shrink its model**, and a gappy watch is not a safe basis for
+that instruction. **The cost:** the run stops either way (neither outcome
+carries authority), so what is lost is only the shrink advice. The observed
+figure is preserved verbatim in `detail`.
+
+**A note on the two ways this can end.** `classify_measurement` returns a
+value for every input — the control-flow rule. It CAN raise, but only
+through `MeasuredGpuRequirement`'s own validators, and only if the
+classifier were to build an incoherent claim (a timeout against an
+unreached deadline, a `COMPLETED_MEASUREMENT` with no figure). That is an
+invariant violation — a programming error — and it fails **closed**. Two of
+the six mutations below were killed exactly that way.
+
+**Attempt / retry / round impact.** None. Still no call site.
+
+**Tests.** `tests/unit/core/test_gpu_measurement_classifier.py` (28). Every
+classification is asserted together with its authority consequence: naming
+the outcome is half of it, and the other half is that the wrong ones cannot
+reach admission.
+
+**Mutation proofs.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| C1 | every missing report becomes a timeout | `test_a_worker_that_died_early_is_not_a_timeout` (+1) |
+| C2 | a killed worker inferred as a CUDA OOM | `test_a_killed_worker_holding_memory_is_not_an_oom` |
+| C3 | incomplete sampling still yields above-cap | `test_an_incomplete_watch_over_the_cap_is_inconclusive_not_above_cap` |
+| C4 | incomplete sampling admitted as a measurement | `test_each_incompleteness_yields_an_unknown_requirement` (all 3 ids) |
+| C5 | the soft budget is not reported as the deadline that fired | `test_a_worker_side_budget_reports_the_budget_that_actually_fired` (+1) |
+| C6 | the host bound is outranked by the worker report | `test_the_parent_bound_produces_a_host_outcome` (+1) |
+
+**Remaining work.** C2-6 and C2-7, then the two gate packets.
+
+### C2-6 — typed delivery to PR B's gate  `[x]`
+
+**Files.** `core/runtime_control/gpu_requirement.py`
+(`MEASURED_PROVENANCE`, `MeasuredRequirementTable`, corrected
+`as_admission_entry`), `core/sandbox_executor.py` (`_phase_requirement`).
+
+#### The defect this checkpoint found in C2-1 — `7864f83` was wrong
+
+`as_admission_entry()` emitted a **descriptive** provenance string:
+
+```text
+isolated_prephase_measurement:training:punet:cfg:…:GPU-…
+```
+
+`evaluate_gpu_admission` does not read provenance as a description. It
+tests **membership**:
+
+```python
+requirement_provenance in AUTHORITATIVE_PROVENANCE   # admission.py:429
+AUTHORITATIVE_PROVENANCE = frozenset({"measured", "promoted_measurement"})
+```
+
+So every C2 requirement would have been delivered, judged
+non-authoritative, and refused as **`policy_unavailable`** — the exact
+failure C2 exists to remove, one layer deeper and considerably harder to
+see, because the requirement would be *present* and still not count. Every
+C2-1 test passed, because they asserted on the string C2-1 itself produced.
+
+**Fixed:** `provenance` is now `MEASURED_PROVENANCE`, defined **from**
+`AUTHORITATIVE_PROVENANCE` with an import-time guard (a `raise`, not an
+`assert` — `python -O` strips asserts). The description travels beside it
+as `measurement_detail`, a key `_phase_requirement` ignores. Two C2-1 tests
+were rewritten to assert the category rather than the string.
+
+**Behavior Delta — `_phase_requirement` gains a typed channel.**
+*Before:* one duck-typed `getattr(sandbox, "measured_requirements", None)`,
+which **no production code set**, so it returned `(None, None)` on every
+run and formal admission always reported `policy_unavailable`.
+*After:* a typed `measured_requirement_table` is read first; the duck-typed
+dict remains for the B-G validation harness, whose runs are evidence about
+this gate's behaviour. Same shape as the existing
+`admission_policy` / `admission_mode` pair — typed first and authoritative
+when present, so the requirement can never be read from two disagreeing
+places.
+*Production behaviour today is unchanged:* nothing sets the typed
+attribute yet (see the wiring note under C2-7).
+
+**Only an authoritative measurement can be assembled.**
+`MeasuredRequirementTable.from_measurements` calls `as_admission_entry()`,
+which **raises** on a refused measurement. It deliberately does not skip:
+skipping would produce a table missing a phase, which `_phase_requirement`
+reads as `(None, None)` — indistinguishable from never having measured, and
+in trial mode that proceeds.
+
+### C2-7 — the O-7 disposition boundary  `[x]`
+
+**File.** `core/runtime_control/prephase_admission.py` —
+`PrephaseDisposition`, `PrephaseAdmissionOutcome`,
+`decide_prephase_admission`, `attach_measured_requirements`.
+
+**O-7 is expressed as computed properties, not prose.** `attempt_consumed`,
+`records_completed_round`, `carries_candidate_blame`,
+`permits_shrink_advice`, `permits_same_attempt_retry`,
+`may_launch_formal_phase` are derived from the disposition, so the tuner
+cannot get them wrong by reading the wrong field — there is no field to
+read. Tested per disposition rather than for a representative one, plus a
+`PROCEED` positive control so the table cannot pass on a boundary that
+stops for everything.
+
+**Disposition mapping** is a table, not a chain of `if`s, so a new outcome
+cannot fall through a gap into an accidental `PROCEED`. PR B refusals split
+by reason: `policy_unavailable` / `measurement_unavailable` →
+`STOP_MEASUREMENT_UNAVAILABLE`; anything else → `STOP_OVER_CAP`.
+
+**A measured OOM records insufficiency without issuing advice.**
+`requirement.establishes_insufficient_capacity` stays True and
+`permits_shrink_advice` stays False: the fact is preserved for whoever is
+allowed to act on it, and O-7 freezes this boundary as no proposal
+shrinking.
+
+**Tests.** `tests/unit/core/test_prephase_admission.py` (33), including the
+reachability cuts: removing the attach step, or the executor's typed read,
+each fails a named test.
+
+**Mutation proofs.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| P1 | descriptive provenance instead of the accepted category | `test_the_provenance_is_the_category_admission_accepts` (+8) |
+| P2 | executor stops reading the typed table | `test_the_requirement_reaches_the_executors_read` (+1) |
+| P3 | the attach step never delivers | `test_the_requirement_reaches_the_executors_read` (+1) |
+| P4 | a non-authoritative measurement is skipped, not refused | `test_a_refused_measurement_cannot_be_assembled` |
+| P5 | a stop still permits a formal launch | `test_the_frozen_accounting` (all 6 stops) |
+| P6 | a stop no longer consumes the attempt | `test_the_frozen_accounting` (all 6 stops) |
+
+**D-C2-6 — one disposition added: `STOP_PROBE_HOST_MEMORY_EXCEEDED`**
+`[x] APPROVED (operator, 2026-08-03)`, with the clearer name adopted.
+Named for the PROBE, not the run, so it cannot be read as a host-memory
+policy about formal training. Its frozen contract:
+
+```text
+consume the attempt · no completed round · no scientific blame
+no proposal shrinking · no same-attempt retry · no formal GPU launch
+no authoritative GPU requirement
+NEVER call PR B capacity admission with the host-memory figure
+```
+
+**Behavior Delta.** A host-memory excess previously had no disposition at
+all (C2 had no call site). It now stops the attempt and files a
+`measurement_unavailable` record — and structurally cannot deliver a
+figure: `MEASURED_HOST_MEMORY_EXCEEDED` is not `COMPLETED_MEASUREMENT`, so
+`authoritative` is False, so no table is built and `evaluate_gpu_admission`
+is never called. A test monkeypatches PR B's gate to raise and proves the
+host path never reaches it; another proves `_phase_requirement` sees
+nothing. Host RSS is never VRAM demand — on 2026-07-31 a candidate reached
+60.5 GB of host RSS with the GPU at 273 MiB.
+
+**Superseded record of the original proposal:**
+*Plan:* six dispositions (`PROCEED` plus five `STOP_*`), introduced as
+"expected dispositions **include**".
+*Implemented:* a seventh, for `MEASURED_HOST_MEMORY_EXCEEDED` and
+`HOST_MEMORY_ALLOCATION_FAILURE`.
+*Why:* the alternative was `STOP_OVER_CAP`, and PR A is emphatic that a
+HOST-memory result must **never** be phrased as a VRAM verdict — on
+2026-07-31 a candidate reached 60.5 GB of host RSS with the GPU at 273 MiB.
+Inside a GPU-admission boundary, `STOP_OVER_CAP` reads as a VRAM cap.
+*Impact on O-7: none.* Every accounting property is identical across all
+stops, and the per-disposition test table asserts that. This changes only
+the operator-facing name.
+*Operator note:* collapsing it into `STOP_OVER_CAP` is a one-line change if
+preferred — flagged for review rather than assumed.
+
+**Also mapped without a dedicated disposition:** `SCHEMA_REJECTED` →
+`STOP_INFRASTRUCTURE_FAILURE`. A configuration the validator already
+accepted being rejected at measurement time is an inconsistency in our own
+pipeline, not a fact about the candidate — and O-7 forbids candidate blame
+regardless.
+
+**Remaining work.** The tuner call site — blocked on D-C2-7 below.
+
+### D-C2-7 — dual identity  `[x] APPROVED and implemented (operator, 2026-08-03)`
+
+**Option C approved.** The parent sends and preserves a **planned**
+identity; the isolated worker constructs the real candidate and returns a
+**realized** identity; both stay in the measurement record.
+
+| | Role | Authority |
+|---|---|---|
+| planned identity | binds the request the parent issued | request-binding + audit evidence, **never** capacity authority |
+| realized identity | identifies what was actually constructed and measured | **THE** authoritative measurement identity |
+
+**File.** `core/runtime_control/gpu_measurement_identity.py` —
+`PlannedCandidateIdentity`, `RealizedCandidateIdentity`,
+`build_planned_identity`, `build_realized_identity`, `compare_identities`,
+`COMPARABLE_FIELDS`.
+
+**The realized hash uses C1's builder, called not restated.**
+`build_realized_identity` invokes `build_calibration_context` +
+`candidate_config_hash`, so a C2 requirement and a C1 duration observation
+describe "same realized configuration" identically — the D-4 divergence
+avoided rather than repeated. A test asserts the hash equals what C1's
+builder produces for the same inputs.
+
+**The planned hash is a different key set under a different name**, over
+only what the parent can know before construction. It is never offered as
+the measurement's identity. `param_count` and `precision` are deliberately
+absent from it: demanding that the parent predict them is exactly what
+would weaken the realized identity to fit the parent's blindness.
+
+**Verified before authority is granted** — `compare_identities`, ordered
+most-fundamental first:
+
+1. `request_id` nonce matches (else the result is not this request's at
+   all, and a field diff would describe the wrong pair of objects);
+2. realized identity is present;
+3. realized hash is non-empty;
+4. every `COMPARABLE_FIELDS` entry matches — `model_type`, `model_family`,
+   `optimizer_type`, `seg_size`, `batch_size`.
+
+Plus, on `MeasuredGpuRequirement`: device UUID matches, phase is
+admissible, sampling is complete, outcome qualifies.
+
+**A mismatch fails closed** as `PROBE_INFRASTRUCTURE_FAILURE` →
+`STOP_INFRASTRUCTURE_FAILURE`, checked **before** any outcome that could
+carry authority. Two new `AuthorityRefusal` members —
+`candidate_identity_mismatch` (previously declared and never returned) and
+`realized_identity_absent`. It is never candidate blame, never GPU capacity
+evidence, never a scientific failure.
+
+### Historical: the question as it stood before approval
+
+**What was being built.** The last edge: the tuner runs the pre-phase
+measurement before a formal launch, consumes the disposition, and attaches
+the requirement. The helper follows the existing `_handle_admission_refusal`
+shape exactly — one call and one `if … continue`, no inline block — and
+sits behind an off-by-default `prephase_gpu_measurement_enabled`, like
+`runtime_watchdog_enabled`, so a merge cannot turn a new bounded GPU
+execution on everywhere. That flag was written and then **reverted**: an
+input that promises behaviour and delivers none is the "built and never
+called" shape this PR exists to remove. It lands with the wiring.
+
+**Where it stopped.** `GpuMeasurementSpec` embeds
+`CandidateMeasurementRequest`, whose `candidate_config_hash` C2-1 documents
+as *"Reuses C1's `candidate_config_hash` shape so one definition of 'same
+configuration' serves both subsystems — see C1 deviation D-4, where two
+definitions silently diverged."* But C1's
+`candidate_config_hash(build_calibration_context(...))` requires
+**realized** values — `param_count` from the instantiated module and
+`precision` from its parameter dtype (`calibration_context.py:99-105`).
+
+The tuner does not have those before launching, and **cannot** get them:
+PR A's isolation rule is that *"the parent must not instantiate the
+candidate model — once the model is in the parent, a child limit is already
+too late."* Only the worker can compute a C1-shaped hash, and the spec that
+launches the worker needs the hash first.
+
+The design does not resolve this, and picking silently would produce the
+exact D-4 divergence C2-1's own docstring cites.
+
+**Options.**
+
+| | Approach | Cost |
+|---|---|---|
+| **A** | Compute C1's hash in the parent | **Rejected on inspection** — requires instantiating the candidate in the parent, which the isolation rule forbids and PR A exists because of. |
+| **B** | Hash the PLANNED config (`model_type` + the three config payloads) with the same `config_hash12` primitive | Simple; one field, one meaning. But two `cfg:`-shaped hashes then exist meaning different things, which is D-4's shape even if the values never meet. |
+| **C** *(recommended)* | The spec carries a **planned-config** hash; the WORKER computes the C1-shaped realized hash and echoes it back on the report; the requirement records both | Correct and traceable — a requirement can be matched against a C1 duration bucket for the same realized candidate. Costs one extra field on the worker report and one on `MeasuredGpuRequirement`, and the identity check against the request uses the planned hash. |
+
+**Recommendation: C.** It is the only option that keeps one definition of
+"same realized configuration" while respecting the isolation rule, and it
+makes the two subsystems comparable rather than merely similarly shaped.
+
+**Impacts.** No change to O-7 accounting, retry, round or phase semantics —
+this is an identity field. It does change `MeasuredGpuRequirement` (a new
+recorded field under C), and it decides whether C2's identity can ever be
+joined to C1's.
+
+**Work that continued without this decision:** everything through C2-7, the
+mutation proofs, and the two gate packets below.
+
+### C2 deviations from the plan
+
+**D-C2-2 — one worker measures ONE phase, not all three.**
+*Plan:* "phase-specific measurement" inside a single worker.
+*Implemented:* `GpuMeasurementSpec` carries exactly one target phase and the
+parent launches one worker per phase it needs.
+*Why:* production runs training and inference as separate subprocesses,
+each of which constructs the model and then does its own work. Measuring
+both in one process would run inference with the gradients and Adam's two
+moment buffers still resident — a process production never launches — and
+would leave open the cumulative-peak trap (`probe_production.py` resets
+once in `_setup()`, audit finding F2). One phase per process makes
+separation a property of the topology rather than of bookkeeping.
+*Cost:* one extra bounded worker per candidate when both phases are needed.
+
+**D-C2-3 — the hard deadline is the PARENT's; the worker holds a soft budget.**
+*Plan:* "obey a hard deadline" listed under the worker.
+*Implemented:* the worker checks `soft_deadline_seconds` between steps and
+stops cleanly with partial evidence; the parent owns TERM→grace→KILL.
+*Why:* a worker wedged inside a CUDA call runs no Python, so it can enforce
+nothing on itself — which is the case a deadline exists for. Enforcement
+has to live on the side that can act. A validator refuses a soft budget at
+or above the parent's deadline, because such a budget never fires and the
+partial evidence would be lost every time with nothing saying so.
+
+**D-C2-4 — `build_training_optimizer` extracted from the trainer.**
+*Behaviour Delta: none.* Two byte-identical blocks in `run_experiment` and
+`run_experiment_streaming` became one function, same branches, same
+arguments, same order. `optimizer_type` is a `Literal["adam","adamw","sgd"]`,
+so the final branch is SGD in both the old and the new form.
+*Why it is in this PR:* the measurement must build the optimizer the phase
+will really use, and the optimizer is a first-order term in the memory
+being measured — AdamW and Adam each keep two full-size moment buffers,
+SGD without momentum keeps none. Measuring SGD for a run that trains with
+AdamW under-states by two parameter tensors, the OOM direction. A fifth
+hand-written copy of that switch is how the divergence would arrive.
+*Scope held:* `probe_production.py` and `evaluate_time_skill/wrapper.py`
+keep their own copies. Both are on C1's just-validated duration path and
+retrofitting them is a separate in-passing change, not C2's.
+
+### C2-8 — the production call site  `[x]`
+
+**Files.** `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
+— `_handle_prephase_gpu_measurement`, `_prephase_worker_memory_limit_bytes`,
+`_prephase_device_snapshot`, `_PREPHASE_REASON_CODE`, and one call in
+`run()`.
+
+**No feature flag.** An input that promises behaviour and delivers none is
+the built-and-never-called shape this PR exists to remove. The measurement
+is on the production path.
+
+**The call site is one call and one `continue`**, in the shape
+`_handle_admission_refusal` already uses. The helper delegates: identity
+comparison, classification, authority validation and PR B admission all
+live in `prephase_admission`, which returns ONE disposition. `run()` is the
+giant orchestrator the decomposition rule governs, and none of that logic
+is reimplemented there.
+
+**Two applicability rules, neither a feature flag.**
+
+*Trial rounds are not measured.* O-7 governs formal execution, and trial
+admission already proceeds while recording what it could not prove.
+
+*A run with no real device is untouched.* The same conclusion
+`_admission_refusal` reaches — no card means nothing to measure and nothing
+for admission to decide.
+
+**Behavior Delta.** A formal attempt on a real GPU now runs a bounded
+isolated pre-phase measurement before any formal GPU work, and stops the
+attempt on any `STOP_*` with the frozen O-7 accounting
+(`counts_toward_attempt_budget=True`, `counts_toward_completed_rounds=False`,
+no blame, no shrink, no same-attempt retry). Formal admission receives a
+real requirement instead of `policy_unavailable`. Trial rounds, CPU runs and
+pseudo runs are unchanged. `gpu_admission_enforcement` is untouched —
+flipping `observe_only` to `enforce` remains a separate decision.
+
+**Dispositions are filed under PR B's existing three lanes**
+(`_PREPHASE_REASON_CODE`); the disposition itself survives in
+`admission_evidence`, so the narrowing loses nothing and the lanes stay
+distinct.
+
+**A defect this found, worth recording.** The first applicability check was
+`if device_identity is None: return False`. `getattr` on a `MagicMock`
+returns a truthy **mock**, so the gate silently activated in **53** mocked
+formal tests — and in production would have accepted any object at all as a
+device. Fixed by type-checking against `DeviceIdentity`, which is the
+principle the whole PR rests on: a typed boundary, never a duck-typed read.
+Three tests now cover it, including a positive control.
+
+**Tests.**
+`tests/unit/agent/tune_ml_hyperparam_agent/test_prephase_measurement_reachability.py`
+(21). They cut the production edges rather than testing the component
+again: deleting the call from `run()` fails; calling the boundary and
+discarding its disposition fails; the call must precede
+`_run_skill("training_skill", …)`.
+
+**Mutation proofs.**
+
+| # | Mutation | Test that fails |
+|---|---|---|
+| W1 | delete the call from `run()` | `test_run_consumes_the_disposition` (+2) |
+| W2 | call the boundary, discard the disposition | `test_run_consumes_the_disposition` |
+| W3 | identity mismatch no longer blocks authority | `test_a_missing_realized_identity_is_refused` (+3) |
+
+**No LLM-facing change.** The measurement makes no model calls (proved in
+C2-2), and no prompt, schema or LLM decision surface is touched. **Gate 1
+remains N/A.**
+
+**D-C2-8 — the gate had no runnable entry point; a thin harness was added.**
+*Original plan:* gate commands would invoke an existing production entry
+point.
+*Observed in code (static validation, 2026-08-03):*
+
+* `python -m core.runtime_control.gpu_measurement_worker_main <spec>` runs
+  the **child alone** — no parent sampling, therefore no driver-visible
+  peak and no coverage. That is the allocator half, which is never the
+  authority.
+* `run_prephase_measurement` and `decide_prephase_admission` are
+  **library-only**; their sole production caller is the tuner.
+* `scripts/run_comparison.py` has **zero** `add_argument` entries matching
+  gpu/ceiling/admission, so the chain cannot set the cap, deadline or
+  sampling interval that cases 2, 4 and 11 require.
+
+*Chosen correction:* `scripts/c2_prephase_validation.py`, a thin acceptance
+entry point calling the exact production boundary — the same three
+functions the tuner calls, asserted by a structural test against the tuner
+itself. PR B set this precedent with `bg_admission_validation.py`.
+*Behavior Delta:* **none in production.** No production module changed; this
+adds an explicit acceptance entry point and nothing else.
+
+**D-C2-9 — cases 12a/12b: a harness-only formal control path**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+*Validation-infrastructure extension. **Behavior Delta for normal
+production: none.*** No production module changed and no feature flag was
+added; the ordinary production path is untouched.
+
+Both arms call `TidmadSandbox.execute_training` — exactly what
+`agent.skills.training_skill.wrapper.run_skill` calls — with the sample set
+built by the production `build_sample_set`. The harness supplies inputs and
+runs none of the training itself. A test asserts the control path is
+**unreachable from `core/` and `nodes/`**, so the no-probe arm cannot become
+something production can take.
+
+```text
+A: prephase measurement -> worker/process cleanup -> bounded formal execution
+B: bounded formal execution, no preceding prephase measurement
+```
+
+**Three paired repetitions with alternating order** (A/B, B/A, A/B), each
+arm in a fresh process and workspace, so a warmed driver or a cached
+dataset page cannot masquerade as a perturbation.
+
+**Superseded, 2026-08-04 — see D-C2-19.** This deviation originally read
+"a pair with any foreign process is marked `contaminated: true` and
+excluded from evidence". That rule is withdrawn. **The presence of another
+GPU process is not contamination**; only a *change* in the external
+environment that could alter this case's conclusion is. A steady neighbour
+affects both arms alike and is valid production context, recorded as
+headroom evidence. Environment is now assessed over the whole timestamped
+sample series rather than from two endpoint snapshots.
+
+**The formal workload is bounded by live stability, not by an operator
+portion — see D-C2-20.** The training arm ends when the driver-visible peak
+has demonstrably settled on the machine under test. `--formal_seed` remains
+required; the portion flags are no longer Case 12's workload definition.
+
+**No correction factor exists anywhere.** The manifest records
+`correction_factor_applied: false`, and a test forbids the tokens that would
+introduce one. The repeatability envelope comes from the three repetitions,
+not from an invented percentage.
+
+**Lite-A is `INCONCLUSIVE` and stops for review if:** formal execution is
+systematically higher than the probe by more than the observed
+within-condition repeatability · the difference changes PR B admission under
+the configured ceiling · sampling is incomplete · identity or GPU UUID
+differs · the external environment **changed materially between the arms of
+a pair** (D-C2-19 — not merely that a neighbour was present) · a formal
+training arm did not reach live stability (D-C2-20) · the result is not
+reproducible.
+
+An affected pair reruns as a new immutable sub-attempt. **The Gate as a
+whole is not invalidated**, and the contaminated artifact is preserved
+rather than deleted.
+
+**D-C2-10 — case 5's oversized configuration, resolved statically.**
+`batch_size=512` was **not** safe to assume. The audit (arithmetic and an
+HDF5 read, no GPU work):
+
+| Fact | Value |
+|---|---|
+| probe batch host cost | `B x 40000 x 8` bytes — **312.5 MiB at B=1024** |
+| host RSS cap | 24 GiB (`default_worker_memory_limit_bytes`) |
+| forward output alone | `B x 256 x 40000 x 4` bytes = **39.06 GiB at B=1024** |
+| RTX 5090 capacity | 32087 MiB = **31.33 GiB** |
+| segments per training file | **50,250** (2,010,000,000 samples / 40,000) |
+
+Three things follow. **Host memory can never pre-empt the CUDA OOM**: at
+B=1024 the host batch is 312.5 MiB against a 24 GiB cap, a factor of ~78,
+so `STOP_PROBE_HOST_MEMORY_EXCEEDED` cannot fire first for any B below
+roughly 78,000. **B=1024 provably OOMs on the device** from the single
+forward output tensor alone — 39.06 GiB against a 31.33 GiB card —
+*independently* of PUNet's activation structure, which is why it is chosen.
+**The dataset cannot turn c5 into an infrastructure failure**: `load_probe_batch`
+raises when `len(dataset) < batch_size`, and one file holds 50,250 segments
+against a request for 1,024.
+
+**B=1024 is not the smallest such configuration**, and that is deliberate.
+B=512 gives 19.53 GiB of output against 31.33 GiB and would very likely OOM
+once activations, gradients and Adam's moments are added — but "very likely"
+rests on PUNet's activation multiplier, which this audit did **not**
+establish. Trialling configurations to find the smallest would be running
+the gate under another name. B=1024 is the smallest value provable from
+arithmetic alone.
+
+**D-C2-11 — the first Lite-A packet named a flag that did not exist, and
+its formal arm ran only half the comparison.** Found while wiring the
+approved parameters in, before any gate case ran.
+
+*Original packet:* `--formal_eval_portion` (which the harness did not
+implement — it had `--formal_trial_portion`, a different quantity: SampleSet
+coverage, with no eval slice at all), and `run_formal_execution` calling
+only `execute_training`.
+
+*Why both were blockers.* The first would have made the executed command
+differ from the approved one, with a silent substitution standing in for an
+operator decision. The second is worse: case 12b compares the probe's
+**inference** peak against a formal inference peak, and with
+`execute_inference` never called, 12b would have reported the training half
+and read as complete — the silent partial answer this PR exists to remove.
+
+*Corrected:* distinct required `--formal_train_portion` /
+`--formal_eval_portion` / `--formal_seed`; separate production train and
+eval sample sets, exactly as production carries `sample_set` and
+`eval_sample_set`; the formal arm calls **both** `execute_training` and
+`execute_inference`; and each portion is applied **once** — at sample-set
+construction, with `execute_training(train_portion=1.0)` so the approved 1%
+slice is not reduced a second time per epoch, which would have shrunk the
+formal run below what was approved and quietly favoured the probe.
+
+*Completeness is enforced on the result, not the source:* `formal_phases_complete`
+requires both phase results to be present in **both** arms of **every**
+pair, and a comparison missing either is reported `INCONCLUSIVE` rather
+than as a case that ran. A call that exists and silently returns nothing
+would pass a source scan; this does not.
+
+*Behavior Delta for normal production: none.* Validation infrastructure
+only.
+
+*Mutation-proved, five edges:* removing the `execute_inference` call ·
+reducing the slice a second time · one flag feeding both sample sets ·
+completeness ignoring the inference phase · the seed not reaching training.
+Each is killed by a named test.
+
+### Gate 2 Lite-A attempt 1 — FAILED at c1, `b7a59ce6`
+
+The gate found what no unit test could: the tests inject a batch, so the
+real data path was only reachable with the real dataset.
+
+| | |
+|---|---|
+| Expected | `COMPLETED_MEASUREMENT` → `PROCEED` |
+| Observed | `MEASURED_HOST_MEMORY_EXCEEDED` → `STOP_PROBE_HOST_MEMORY_EXCEEDED` |
+| Worker | TERMed at **24.10 GiB** tree RSS against the 24.00 GiB cap, `exit_code -15` |
+| Phases | **none** — killed during setup, before model construction |
+| Realism | 0 forward, 0 backward, 0 optimizer steps |
+| Wall | 22 s · 76 driver samples retained · no orphans |
+| Registry | `live_registry_unchanged: true` |
+
+Artifacts preserved at `/tmp/c2_lite_a/artifacts/c2_lite_c1_manifest.json`
+(+ `.sha256`). Cases c2-c12 were never started.
+
+**D-C2-12 — bounded data access for the C2 worker**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+*Root cause.* `load_probe_batch` → `TIDMADDataset.pull_event_from_dir` reads
+the WHOLE channel before `max_segments` is applied
+(`train_engine_sandbox.py:110-132`): `np.array(channel0001).astype(np.int8)`,
+`np.array(channel0002).astype(np.int16)`, two reshaped index copies and a
+`bincount` temporary — ~13 GiB live at once for one 2,010,000,000-sample
+file. `max_segments` truncates the *event list* at line 131, after all of
+it, so it bounds nothing. To build a batch occupying **0.31 MiB** on the GPU.
+
+*Rejected: raising the cap.* It would conceal a real probe defect and impose
+~24 GiB of host cost on every formal attempt — and two concurrent chains
+each holding a worker is the arithmetic PR A's cap exists to prevent.
+
+*Chosen: `core/runtime_control/gpu_measurement_data.py`.* Reads exactly the
+`batch_size × segment_length` samples by HDF5 slicing. With `sample_size=1`
+the production path reduces to contiguous slicing
+(`alltrain[i*seg : (i+1)*seg]`, `random_offset` always 0), so the bounded
+read reproduces it exactly, including the int8 → int16 → `+128` cast chain
+and the `channel0001` input role.
+
+*Where equivalence is required, and where it is not.* The tensor delivered
+to the device, the model, the optimizer, dtype, shape, channel order, the
+loss and forward/backward/step are all production-equivalent. Reproducing an
+**avoidable host-side full-file copy** is not: the same device tensor is
+constructible from bounded reads, and the trainer's host cost is not the GPU
+requirement.
+
+*Measured against the real dataset:*
+
+| | before | after |
+|---|---|---|
+| host peak RSS, batch 1 | 24.10 GiB (killed) | **0.52 GiB** |
+| host peak RSS, batch 1024 (c5) | — | **0.92 GiB** |
+| bytes read | whole channel | 40 KiB (**0.00199 %** of the file) |
+| wall | 22 s to failure | 0.72 s |
+
+*No fallback.* Bounded access failing raises and is reported as an
+infrastructure condition. Silently reaching for `load_probe_batch` would
+restore the failure this removes — guarded by
+`test_it_never_calls_the_unbounded_loader`.
+
+*Equivalence proved*, not asserted: `test_gpu_measurement_data.py` (15) runs
+BOTH loaders against a miniature HDF5 fixture with the production structure
+and compares tensors, shape, dtype, channel role, segment boundaries, the
+class-index offset and three geometries. The fixture's two channels hold
+different values, so a channel swap fails. Bounded-ness is checked over the
+**AST** — this module documents the forbidden `np.array(channel)` in a
+comment, and a substring scan cannot tell an explanation from an
+instruction.
+
+*Behavior Delta:* production trainer **none**; C2 pre-phase worker host
+loading becomes bounded; GPU measurement authority **unchanged**; O-7
+**unchanged**. `STOP_PROBE_HOST_MEMORY_EXCEEDED` still exists for a genuine
+bounded-loader host failure, still calls no PR B admission, still carries no
+candidate blame.
+
+*Follow-up, deliberately not fixed here:* `probe_production.py` (C1's
+duration probe) calls the same `load_probe_batch` — in-process and
+**uncapped**, so the same ~13 GiB host cost exists today and has simply
+never been bounded. Its own finding; C2 does not touch C1's validated path.
+
+### Gate 2 Lite-A attempt 2 — INCONCLUSIVE at `1fa95d87`
+
+D-C2-12 confirmed: c1 host RSS **24.10 GiB (killed) → 1.515 GiB**, model
+built (6,762,568 params), forward/backward/steps 4/4/4, parameter moved
+1.98e-3, driver 1388 MiB > allocator 807 MiB, PR B admitted on
+`source=measured`, `PROCEED`. B-G0 measured the same candidate at 1,476 MiB.
+
+| Case | Outcome | Disposition | |
+|---|---|---|---|
+| c1 | `COMPLETED_MEASUREMENT` | `PROCEED` | PASS |
+| c2 | `MEASURED_PEAK_ABOVE_VRAM_CAP` | `STOP_OVER_CAP` | PASS |
+| c4 | `COMPLETED_MEASUREMENT` | `PROCEED` | **FAIL** — deadline not reached |
+| c6 | `PROBE_INFRASTRUCTURE_FAILURE` | `STOP_INFRASTRUCTURE_FAILURE` | PASS |
+| c7 | `INCONCLUSIVE_MEASUREMENT` | `STOP_MEASUREMENT_UNAVAILABLE` | **FAIL** — zero in-phase samples |
+| c11 | `INCONCLUSIVE_MEASUREMENT` | `STOP_MEASUREMENT_UNAVAILABLE` | PASS |
+
+Registry `62540aab…` unchanged; GPU back to 273 MiB; no orphans. Artifacts
+at `/tmp/c2_lite_a/artifacts/`; attempt 1 preserved read-only at
+`/tmp/c2_lite_a_failed_b7a59ce6/`.
+
+**c4 — Gate-parameter correction, not a production change.** The bounded
+loader made the whole measurement ~10x faster (2.39 s total), so a 3 s
+deadline is never reached. **Corrected to `--deadline_seconds 1`.**
+
+**D-C2-13 — short phases must be observable**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+*What c7 exposed.* Inference ran in **0.138 s** against a 0.25 s cadence, so
+**zero** driver samples fell inside the window. `driver_tree_peak_mib` was
+`None` and the classifier refused — correctly, *"an unobserved requirement
+is unknown, not zero"*. But it means a fast candidate's phase is
+structurally unmeasurable, and every such formal attempt would be stopped
+and consumed.
+
+*Rejected:* accepting it · raising the Gate's batch count so c7 alone passes
+· merely polling faster, which still misses short peaks.
+
+*Implemented.* An authoritative phase requires
+`MINIMUM_AUTHORITATIVE_SAMPLES = 3` valid in-phase readings —
+enforced on the **observation** side, because the worker can lengthen a
+phase but only the parent knows how many samples actually landed. Zero, one
+or two now fail closed.
+
+```text
+worker announces phase readiness
+  -> parent confirms sampling is ACTIVE (a real driver sample succeeded)
+  -> worker executes the exact phase workload
+  -> repeats that exact workload until the window can hold the readings
+  -> phase ends
+```
+
+*Preserved across repetitions:* candidate, configuration, batch shape,
+dtype, precision, data construction, model behaviour, and training vs
+inference semantics. **Repetition count is measurement protocol, not
+candidate identity**, and it never leaves the disposable worker.
+
+*Bounded:* `max_phase_repetitions` (40), `max_phase_seconds` (60) and the
+existing deadline. Reaching a bound without enough samples yields
+`INCONCLUSIVE_MEASUREMENT`. A failing phase is never repeated — that would
+multiply the failure and hide when it first occurred.
+
+*Recorded per phase:* required and observed sample counts, repetitions,
+elapsed time, sample timestamps, phase boundaries, driver peaks, allocator
+diagnostics, `observation_bound_reached` and `sampler_ready`.
+
+*The handshake is evidence, not a promise.* The parent touches the ready
+marker only after a **successful** driver sample; a failing query proves
+nothing is being observed. A stale marker from an earlier run is removed at
+launch, or a phase could open on a previous run's signal.
+
+*Behavior Delta:* formal execution **unchanged** — repetition is confined to
+the measurement worker. The pre-phase measurement takes marginally longer
+for short phases and now refuses thin evidence it previously would have
+admitted on one sample. O-7 **unchanged**.
+
+*Mutation-proved:* dropping the minimum-sample requirement · never extending
+a short phase · removing the handshake · signalling readiness without a
+successful sample · keeping a stale marker. Each killed by a named test.
+
+### Gate 2 Lite-A attempt 3 — INCONCLUSIVE at `4b2e430f`
+
+**c1 PASSED, and the 3-sample rule paid for itself immediately:**
+
+| | attempt 2 (1 sample) | attempt 3 (4 samples) |
+|---|---|---|
+| driver peak | 1388 MiB | **1474 MiB** |
+
+The single-sample measurement **under-read the candidate by ~6 %**, and the
+4-sample figure lands on B-G0's independent 1,476 MiB. 22 repetitions,
+handshake confirmed before the phase opened.
+
+**c7 FAILED, and showed the remaining defect was mine:** 40 repetitions ran
+120 inference batches in **0.344 s** and captured **one** sample — the fixed
+repetition ceiling terminated the phase long before the meaningful duration
+bound (60 s) was anywhere near. ~8.6 ms per repetition means ~120
+repetitions were needed; the ceiling was 3.4x too low.
+
+Also found: `PhaseMeasurement` did not carry `repetitions`,
+`observation_bound_reached` or the handshake state at all — they existed
+only on the worker's report, so the evidence could be recovered only by
+reading the private journal after the fact. The artifact was incomplete.
+
+**D-C2-14 — the parent ends the phase**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+*Rejected: replacing 40 with a larger guess.* A repetition COUNT cannot
+express a duration target when the per-repetition cost is unknown. Any fixed
+number is wrong for some candidate; it only moves where it breaks.
+
+```text
+worker announces phase readiness
+  -> parent obtains a successful driver sample, marks the sampler ready
+  -> worker repeatedly executes the exact bounded phase workload
+  -> parent COUNTS valid in-phase samples
+  -> at the required count the parent signals completion
+  -> worker leaves the phase cleanly
+```
+
+`max_phase_repetitions` is **removed**, not raised. The normal bounds are
+`max_phase_seconds` (60) and the global deadline; repetitions are recorded
+as an outcome, never a stop condition. Verified on the real GPU: the same
+inference phase that died at 40 now completes at **135 repetitions**, 3
+observed samples, `sample_target_reached`, `COMPLETED_MEASUREMENT` →
+`PROCEED`.
+
+*Only samples inside the OPEN window count.* The parent learns the boundary
+from the journal the worker flushes; a closed phase returns none, so
+completion can never be signalled after the fact.
+
+*Observation evidence now travels through the TYPED result* —
+`repetitions`, `required_samples`, `observed_in_phase_samples`,
+`completion_reason`, `max_phase_seconds`, `observation_bound_reached`,
+`sampler_ready`, `sampler_ready_at`. The harness reconstructs nothing from
+private journals; a missing field means the artifact is incomplete and the
+result carries no authority.
+
+*A budget that trips inside a step is a deadline, not a failure* — found by
+a test that labelled one as the other.
+
+*Behavior Delta:* formal execution **unchanged**; repetition stays inside
+the disposable worker. Repetition count is measurement metadata, not
+candidate identity. O-7 **unchanged**.
+
+*Mutation-proved:* removing the parent signal · restoring a fixed
+40-repetition stop · authority with two samples · dropping metadata in the
+runner join · counting samples from before the phase opened.
+
+### Gate 2 Lite-A attempt 4 — INCONCLUSIVE at `09f4d3fe` (cases 1-11 PASSED)
+
+**Every case through c11 passed**, in ~3 min wall, ~9 bounded GPU
+executions.
+
+| Case | Outcome | Disposition | Evidence |
+|---|---|---|---|
+| c1 | `COMPLETED_MEASUREMENT` | `PROCEED` | 13 reps · 3/3 samples · driver **1474** MiB |
+| c2 | `MEASURED_PEAK_ABOVE_VRAM_CAP` | `STOP_OVER_CAP` | 10 reps · 3/3 |
+| c3 | `INCONCLUSIVE_MEASUREMENT` | `STOP_MEASUREMENT_UNAVAILABLE` | 360 samples, **0** with telemetry · `duration_bound` |
+| c4 | `MEASURED_HARD_TIMEOUT` | `STOP_TIMEOUT` | budget 1.0 s, **elapsed 1.168 s**, TERM sent, no KILL, no orphans |
+| c5 | `MEASURED_CUDA_OOM` | `STOP_MEASURED_OOM` | *"Tried to allocate 6.10 GiB"* · driver **31314** MiB · host only **1.09 GiB** |
+| c6 | `PROBE_INFRASTRUCTURE_FAILURE` | `STOP_INFRASTRUCTURE_FAILURE` | injected crash |
+| c7 | `COMPLETED_MEASUREMENT` | `PROCEED` | **124 reps** · 3/3 · driver 1050 MiB |
+| c9 | `COMPLETED_MEASUREMENT` | `PROCEED` | own **1474** vs other **2026** MiB on a 3784 MiB device |
+| c11 | `INCONCLUSIVE_MEASUREMENT` | `STOP_MEASUREMENT_UNAVAILABLE` | 0 in-phase samples at a 120 s cadence |
+
+c8 — single-PID tree at `batch_size=1`; the reported figure is the tree SUM,
+and multi-process residency is proved by unit test rather than fabricated.
+c10 — driver ≥ allocator in **every** phase, gap 611-1877 MiB
+(1.06x-3.79x), which is why the allocator figure is never the authority.
+O-7 correct in all nine. Registry `62540aab…` unchanged; no orphans.
+
+**c5 confirms D-C2-10's static audit:** host peaked at **1.09 GiB** against
+the 24 GiB cap while the GPU reached 31314 MiB — host memory cannot
+pre-empt the CUDA OOM, exactly as the arithmetic predicted.
+
+**Stopped before c12: the harness could not honour its own safeguard.**
+`run_formal_comparison` ran all three pairs in one invocation, so there was
+no point at which pair 1's timing could be measured and the 90-minute
+projection applied. Running it anyway would have bypassed an approved
+control.
+
+**Two procedural findings, recorded honestly.**
+
+*c3's first induction was invalid.* `PATH=…/nosmi:/usr/bin:/bin` still
+reached `/usr/bin/nvidia-smi`, so nothing was injected and c3 ran as an
+ordinary successful measurement. Re-induced with a failing `nvidia-smi`
+shim — the documented "driver query cannot be taken", through the real
+subprocess seam.
+
+*And the corrected rerun OVERWROTE the invalid artifact.* **That artifact is
+unrecoverable.** It is not preserved anywhere, and this section is the only
+record that it existed. The record of a mistake is often the most useful
+part of a Gate, and it was destroyed by a predictable filename.
+
+**D-C2-15 — execution control and artifact immutability**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+*Case 12 budget checkpoint.* One invocation now runs pair 1, flushes and
+hashes it, computes the projection, and continues only within budget:
+
+```text
+T_formal = max(pair-1 formal WITH probe, pair-1 formal WITHOUT probe)
+T_probe  = pair-1 prephase wall time
+projected_case12 = 6 x T_formal + 3 x T_probe
+projected_total  = prior_cases_wall + projected_case12
+```
+
+`T_formal` is the **slower** arm, not the mean: an optimistic projection
+would authorise a run that then overruns, which is what the checkpoint
+exists to prevent. Exceeding the budget yields `STOPPED_BY_TIME_BOUND` — a
+budget decision, **not a failure**, and nothing is shrunk to fit.
+
+*Artifact immutability.* Every artifact is
+`c2_lite_a<attempt>_<sha12>_<case>__sub<N>.json`; an existing path produces
+the next sub-attempt rather than a replacement. This covers an invalid
+setup, a contaminated run, a corrected injection and a rerun after failure.
+`--gate_attempt` is required.
+
+*Synthetic-injection provenance* is recorded with the result: method, the
+harness command, the shim path, its **sha256**, its content and whether it
+is executable. A synthetic result is only interpretable alongside what was
+injected — and attempt 4 proved an injection can silently fail to happen at
+all.
+
+*Behavior Delta for normal production: **none**.* Validation infrastructure
+only; no production skill, node or agent behaviour changes.
+
+*Mutation-proved:* overwriting instead of sub-attempting · `T_formal` as the
+mean · running pairs 2-3 regardless of the projection · not recording
+provenance. The last two initially SURVIVED — the projection was computed
+but nothing proved it controlled the loop, and provenance was built but
+never asserted — and tests were added for both.
+
+### Gate 2 Lite-A attempts 20-22 — PASSED at `7302c467`
+
+Attempts 6-19 were superseded before execution by the corrections recorded
+in D-C2-16 through D-C2-21; no GPU time was spent on them.
+
+| attempt | SHA | scope | outcome |
+|---|---|---|---|
+| 20 | `7f8e9ffa` | c1-c11 + full 3-pair Case 12 | c1-c11 **PASS**; Case 12 measurements valid but **false-negative comparability** |
+| 21 | `adabf4fb` | one Case 12 pair | **DISAGREED** with replay -- identity adapter read two non-existent keys |
+| 22 | `7302c467` | one Case 12 pair | **PASS**, all acceptance conditions |
+
+**Attempt 20 is the incident that produced D-C2-21.** Every case passed and
+Case 12's six arms measured an identical 1476 MiB, yet all three pairs were
+refused because a neighbour oscillated 132-150 MiB against a 64 MiB pooled
+threshold. The artifacts refuted the refusal they were subjected to. Total
+harness execution: ~295 s; Case 12 alone 120 s for three pairs.
+
+**Attempt 21 is why the one-pair live check exists.** After the
+comparability fix, the replay of attempt 20's sealed series passed while the
+first LIVE pair failed -- `summarize_formal_arm` read
+`formal["realized_identity"]` and `stability["candidate_id"]`, neither of
+which is ever written to a formal-arm record. The replay only passed because
+it hand-fed the value. **Two constructions of one mapping, drifting exactly
+as the adapter's own docstring warned**, and invisible because no test built
+an `ArmEnvironment` from a real formal-arm record.
+
+Both defects were found by running the real call chain. Neither was
+reachable by testing components, and both were in validation-only code that
+would have silently voided a Gate rather than a production run.
+
+**Attempt 22** (41 s wall, two bounded executions): `pair_comparable: true`,
+no blocking reasons, both arms `STABLE` at 554/569 steps, 1476 MiB training
+and 3434 MiB inference on both, identity sourced from
+`training_status.runtime_verification.calibration_context`, registry
+unchanged, no orphans. `STOPPED_BY_TIME_BOUND` after pair 1 is the budget
+checkpoint bounding the run to the single authorized pair, not a failure.
+
+### Gate 2 Lite-A attempt 5 — STOPPED_BY_TIME_BOUND at `2de114ef`
+
+**Cases c1-c11 reproduced in 194 s**, immutable artifact names working
+(`c2_lite_a5_2de114efb3c8_<case>__sub1.json`), c3's shim recorded with
+sha256 `275239824e00e61b…`.
+
+**The budget checkpoint fired, and was right.** Pair 1 completed; the
+projection then stopped the run:
+
+| | |
+|---|---|
+| `T_formal` (slower arm) | **886.7 s** — 870.4 s training, 16.3 s inference |
+| `T_probe` | 3.0 s |
+| projected Case 12 | 5329.1 s |
+| + cases 1-11 (194 s) | **5523.1 s** vs a 5400 s budget |
+| decision | stop after pair 1; nothing shrunk |
+
+It missed by **123 s — 2 %**. Run blind, it would have overrun.
+
+**D-C2-16 — the formal arms were never measured**
+`[x] APPROVED (operator, 2026-08-03)`.
+
+Attempt 5's pair-1 artifact contains **no formal GPU peak at all**:
+`own_tree_mib`, `observed_peak`, `driver`, `peak_vram` and `allocator` are
+all absent. `training_status` and `inference_status` carry timing,
+admission and loss history — not memory.
+
+Three defects, one root cause:
+
+1. **the formal arms were unsampled.** `GpuTreeSampler` ran only inside
+   `run_prephase_measurement`; nothing watched the process tree during
+   `execute_training` / `execute_inference`.
+2. **`formal_phases_complete` accepted a non-empty status as complete.** So
+   pair 1 reported `formal_phases_complete: true` after 886 s of GPU work
+   that produced no admissible comparison data.
+3. **the summary crashed** with `KeyError: 'requirement'` after the
+   manifest was written — it rendered a comparison result as a measurement
+   one. No evidence was lost, but a run ending in a traceback is not a
+   clean Gate execution.
+
+**Case 12B could therefore never have been answered by what was built.** It
+compares probe peaks against formal peaks, and the formal peaks did not
+exist. This is the silent-half-answer shape one level up from c7: "did both
+phases run?" was fixed, and "did we measure them?" was never asked.
+
+*Corrected.* `BackgroundTreeSampler` polls the production `GpuTreeSampler`
+on a thread while the blocking production boundary runs — the ownership
+rule, the gap-is-not-a-zero rule and the window reduction all stay
+production's. Training and inference get **separate** windows; a cumulative
+peak would answer neither. The full timestamped series is retained, so a
+peak-versus-time curve can be reconstructed.
+
+`formal_phases_complete` now requires, for **both** phases: the phase
+executed, valid boundaries, sampling occurred, sampling is complete, and a
+driver-visible peak exists. Rendering dispatches on result **shape**, and an
+unrecognised shape says so rather than raising.
+
+*The sampler guardrail is narrowed, not dropped.* The harness may construct
+`GpuTreeSampler` **only** inside `BackgroundTreeSampler` — the formal arms
+have no production runner to sample them — and a test enforces that scope
+plus the absence of any sampler of its own.
+
+*Behavior Delta for normal production: **none**.* Validation infrastructure
+only.
+
+*Mutation-proved:* restoring the status-only completeness condition ·
+unsampled training · unsampled inference · the comparison-shape crash ·
+discarding the raw series. Three initially SURVIVED — the assertions
+checked that keys existed, not that they carried sampler output — and were
+strengthened to require `driver_source`, `samples_taken`,
+`sampling_complete`, `max_gap_seconds` and a non-empty timestamped series.
+
+**Case 12 cannot be shortened yet.** The saturation analysis needs a
+peak-versus-step curve that does not exist in any preserved artifact. A
+bounded characterization run must produce it first.
+
+### Single-arm characterization — `c12char`, NOT a Gate case
+
+Case 12 cannot be shortened without a peak-versus-time curve, and no
+preserved artifact contains one (D-C2-16). This mode produces it at the cost
+of **one arm** rather than a pair.
+
+```text
+prephase measurement -> bounded formal training -> formal inference
+```
+
+**Only the production-order arm runs.** The no-probe arm answers the
+*perturbation* question, not the saturation one, and would double the cost
+for no distinct evidence here. It stays in Case 12.
+
+*Same boundaries as the Gate* — `run_case_measurement` then
+`run_formal_execution`. Nothing is a second implementation, and
+`gate_pass: false` is recorded in the result.
+
+**What it reports**, separately for training and inference: final peak,
+first time that peak was seen, **last time the cumulative peak increased**,
+the stable tail in seconds and as a fraction of the phase, sample count, and
+the monotone cumulative-peak curve.
+
+**Resolution is seconds, not steps.** The production training loop emits no
+per-step marker the sampler can key on, so a step figure would be invented.
+Whether seconds suffice to choose a safe shorter workload is exactly what
+this run establishes; if they do not, the smallest instrumentation change
+is proposed separately rather than assumed now.
+
+**Cost justification.** From attempt 5's measured timings: formal training
+~870 s, formal inference ~16 s, prephase probe ~3 s — **~15 min**, against
+~30 min for a full pair. Stop if the projection materially exceeds 20 min.
+
+### D-C2-17 / D-C2-18 — the inference measurement, corrected twice
+
+**D-C2-17, inference batch.** The probe took its batch from
+`train_config["batch_size"]` while `execute_inference` resolves
+`inference_batch_for(model_type)` = 25 for punet. Attempt 6 measured
+**1050 MiB** for a phase that really held **3642 MiB** — a 3.47x under-read
+that would have reached admission. Fixed by resolving the batch from the
+canonical production source, with `inference_batch_size` added to the
+phase-aware identity so a batch-1 measurement can never answer for batch 25.
+Training's identity and its validated 1474/1476 MiB result are untouched.
+
+**D-C2-18, observation timing.** With batch 25 the probe then reported
+**4870 MiB** against formal's 3642 — a 1.34x OVER-read, which is not
+"safe": at a 4 GiB ceiling it refuses a candidate formal inference would
+run.
+
+*A hypothesis this document previously carried was wrong.* The gap was
+attributed to allocator-pool growth across the 14 measurement-only
+repetitions. **The artifact does not support that**: `allocator_reserved` is
+**4266 MiB in both** the 14-repetition run and a 3-batch run. Repetition did
+not grow the pool.
+
+The verified cause is **observation timing**. The driver was sampled at
+moments when cached blocks inflated its view. The correction holds the real
+post-forward state open instead:
+
+```text
+parent confirms sampling is active
+  -> worker executes the EXACT configured inference workload
+  -> after the forward completes and synchronizes, while the output is still
+     GPU-resident and before any CPU transfer or cleanup, the worker HOLDS
+  -> parent obtains its three valid samples
+  -> worker releases and continues
+```
+
+Holding allocates nothing. Only the configured batches execute — no
+measurement-only forwards. Training is unchanged and still repeats.
+
+*A defect in the first attempt at it:* the hold was wired to the
+**non-blocking** marker probe, so it released instantly — 3 holds, 1 sample,
+`INCONCLUSIVE`. Training *polls*; inference must *block*. That single
+distinction is the difference between 4870 and 3434 MiB.
+
+**Result:** probe **3434 MiB** vs formal **3642 MiB** (0.943x), 3/3 samples,
+1 repetition, exactly 3 batches, 0.80 s. The two now agree on admission at
+24 GiB, 4 GiB and 2 GiB.
+
+**Not yet settled.** The probe sits **208 MiB (5.7 %) BELOW** formal — an
+under-read, small but on the wrong side, and a systematic one would open a
+false-admission band near a ~3.5 GiB ceiling. A short repeatability
+characterization decides whether it is sampling noise or a real difference.
+No correction factor is applied either way.
+
+### Lifecycle audit of the 208 MiB gap — RESOLVED, cause verified
+
+**The question.** The corrected inference probe reads **3434 MiB**; formal
+inference holds **3642 MiB**. Three alternating runs produced **zero
+spread** on both sides (probe 3434/3434/3434, formal 3642/3642/3642), so
+the **208 MiB (5.7 %)** is deterministic, not sampling noise. An under-read
+is on the wrong side: near a ~3.5 GiB ceiling it opens a false-admission
+band, admitting a candidate the real phase cannot fit.
+
+**No correction factor and no safety multiplier is authorised**, and none
+has been applied. Comparing final peaks again cannot locate the cause;
+comparing the two processes *at the same lifecycle points* can.
+
+**Milestones 1-3, measured directly — EQUAL, hypothesis falsified.**
+
+| milestone | probe | formal | delta |
+|---|---|---|---|
+| 1 process start | 0 MiB | 0 MiB | 0 |
+| 2 after imports | 0 MiB | 0 MiB | 0 |
+| 3 after CUDA initialization | **596 MiB** | **596 MiB** | **0** |
+
+The probe's heavier import surface (`build_training_optimizer`,
+`get_criterion`, the full `MODEL_REGISTRY`) costs **nothing** on the device
+against formal inference's leaner one, and the CUDA context is identical.
+**The leading hypothesis — that the gap originates in context or library
+residency — is dead**, and acting on it would have been wrong. The
+divergence lies at or after model construction.
+
+**Arithmetic that constrains the remaining candidates.** punet is 6,762,568
+parameters x 4 B = **25.8 MB**, so checkpoint-load transients cannot account
+for 208 MiB *on their own*. The output tensor is far larger: at the
+production inference batch of 25, `[25, 256, 40000]` float32 = **976 MiB**.
+
+**Suspects at the time**, in the order they were considered plausible:
+checkpoint loading (the one step the two paths do not share), the
+argmax/`.cpu()` output lifecycle, and loop composition across many batches.
+
+### Milestone audit result — attempt 17 at `7344a726`, EXECUTED
+
+Two runs, no training: one prephase inference (`c7 --phase inference`,
+4.4 s) and one reused-checkpoint formal inference (`c12inf`, 17.0 s), each
+writing its own immutable trace. **22.6 s total**, inside the authorised
+2-4 min envelope. Both baselines reproduced exactly — probe **3434 MiB**,
+formal **3642 MiB** — a third independent confirmation. Live registry
+fingerprint unchanged on both.
+
+| milestone | b | probe tree | formal tree | Δ | probe alloc/resv | formal alloc/resv |
+|---|---|---|---|---|---|---|
+| process_start | | 0 | 0 | 0 | –/– | –/– |
+| after_imports | | 0 | 0 | 0 | 0/0 | –/– |
+| after_cuda_init | | 0 | 0 | 0 | 0/0 | –/– |
+| after_model_construction | | 496 | 0 | +496 | 0/0 | –/– |
+| **after_model_to_device** | | **732** | **732** | **0** | 218/236 | 218/236 |
+| **after_checkpoint_load** | | — | **960** | **+228** | — | **218/464** |
+| after_input_to_device | 0 | 850 | 960 | −110 | 230/256 | 226/464 |
+| **post-forward, output resident** | 0 | **3434** | **3642** | **−208** | 1206/2830 | 1202/3038 |
+| after_output_to_cpu | 0 | — | 3642 | — | — | 1202/3038 |
+| after_output_cleanup | 0 | — | 3642 | — | — | 218/3038 |
+| post-forward | 1 | **4870** | 3642 | +1228 | 1206/**4266** | 1202/3038 |
+| before_exit | | 4870 | 3642 | | 0/4266 | 218/3038 |
+
+**FINDING 1 — the 208 MiB first appears at `after_checkpoint_load`, and
+the cause is verified.**
+
+The two paths are **identical at `after_model_to_device`**: 732 MiB tree,
+allocator 218/236 on both sides. Nothing before that point differs by a
+single MiB. Then formal runs
+`model.load_state_dict(torch.load(model_path, map_location=DEVICE))` and
+the allocator columns say exactly what happened:
+
+```text
+reserved   236 -> 464   (+228 MiB)
+allocated  218 -> 218   (unchanged)
+```
+
+`map_location=DEVICE` materialises a **second full parameter set on the
+device**; `load_state_dict` copies it into the model; the temporary state
+dict is then freed — which is why *allocated* returns to 218 — but the
+caching allocator **retains the freed segments as reserved**, and
+driver-visible memory counts reserved, not allocated. The checkpoint is
+216.9 MiB (227,442,408 B); +228 MiB reserved is that plus segment
+alignment.
+
+The arithmetic closes with no residual:
+
+```text
+pre-forward reserved   formal 464 - probe 256          = 208
+the forward adds       2830-256 = 3038-464 = +2574     identical both sides
+post-forward overhead  tree - reserved = 604           identical both sides
+final gap              3038 - 2830                     = 208 MiB
+```
+
+So the entire gap is allocator-pool residue created by the device-side
+checkpoint load and carried unchanged through a forward that costs the two
+sides *exactly* the same. It is **not** context size, not library
+residency, not the output tensor, not sampling noise, and not any property
+of the candidate.
+
+**FINDING 2 — the probe has a separate, independent output-lifetime
+defect.** The probe reaches **4870 MiB at batch 1** but reports 3434. Its
+parent stops sampling once the hold satisfies the sample target, so
+batches 1-2 run unobserved. The 4870 comes from the probe's own loop
+shape: `output = model(input)` computes the new output while the previous
+one is **still bound**, so two 976 MiB tensors coexist and reserved grows
+2830 -> 4266. Formal never does this — `process_batch` returns between
+batches and its reserved stays flat at 3038.
+
+The reported 3434 is the formal-equivalent state and is the right number,
+**but it is right by accident**: it depends on the parent stopping
+observation before the artifact appears. An authoritative measurement must
+not rest on sampling stopping early. Fixed separately, under "probe output
+lifetime" below.
+
+**CORRECTION to D-C2-18's recorded explanation.** That entry attributed
+the 4870 MiB over-read to "observation timing" — the driver being sampled
+at moments when cached blocks inflated its view. **The milestone evidence
+does not support that phrasing and it is superseded.** The cause is
+specific and structural: two live outputs during the loop's rebinding.
+This also supersedes the *earlier* hypothesis, already retracted once,
+that repetition grew the allocator pool — repetition is not the mechanism;
+simultaneous residency is. Recorded here rather than quietly edited above,
+because a hypothesis that was wrong twice is worth leaving visible.
+
+**No correction factor and no safety multiplier is applied, proposed or
+implied by any of this.**
+
+**Resolution, operator decision 2026-08-03 (Option A).** The gap is closed
+by removing the waste, not by adjusting the measurement:
+
+* **formal inference** loads the checkpoint on the **host**
+  (`map_location="cpu"`, then `load_state_dict`, then release), so no
+  second parameter set is ever materialised on the device. Real GPU usage
+  falls ~228 MiB and predictions are unchanged. This is a production
+  behaviour change to inference, **explicitly separated into its own
+  hotfix PR off master** rather than folded into C2 — C2 must not carry a
+  standalone production optimisation's responsibility.
+* **the probe** releases each output before the next forward begins, so no
+  two outputs are ever resident and the measurement cannot depend on
+  observation stopping early.
+
+Option B — having the probe reproduce formal's pool residue — was rejected.
+The pre-phase measurement runs *before* training, so no checkpoint exists
+to load, and allocating-then-freeing a parameter-sized block purely to
+inflate a reading is manufacturing a number.
+
+Both corrections are pending; **neither is implemented in this commit**.
+
+### Reconciliation onto master after the hotfix — 2026-08-04
+
+PR #163 (`fix(inference): load the checkpoint on the host, not the device`)
+merged to master as `9533c65d`. This branch took it by **merge, not
+rebase**: C2 is already published with 28 commits, and rewriting that
+history would force every reader to re-fetch a different one for no
+benefit. No force-push was used.
+
+**One conflict**, exactly where both sides edited the same region of
+`execute_tools/inference_single.py` — the hotfix at the checkpoint load,
+C2 at the milestone call site. Resolved by keeping master's host-side load
+verbatim and retaining C2's `after_checkpoint_load` milestone, **moved to
+after the host copy is released** so it captures the settled post-load
+state rather than a transient.
+
+That milestone's purpose inverts with the fix. It was written to expose a
+defect; it now guards against the defect returning: with the host-side
+load, allocator reserved must stay at the model-only baseline there
+instead of rising by a checkpoint, so a regression that moved the load
+back onto the device would surface at exactly this point. The comment was
+rewritten to say so rather than left describing behaviour that no longer
+exists.
+
+**Verified preserved after the merge**, each present exactly once: the
+final merged C1 text (`16-STATUS`), both C1 Behavior Deltas (`16a-BD`,
+`16a-BD-2`), the complete C2 audit history including `Milestone audit
+result — attempt 17`, `FINDING 1`, `FINDING 2` and the `CORRECTION to
+D-C2-18`, and the host-side checkpoint Behavior Delta in
+`docs/optimize_inference_and_scoring.md`. **C-C5b remains recorded as
+CANCELLED** in all six places that reference it, with no stale pre-C1 text
+restored anywhere.
+
+### Parity validation — attempt 18 at `bc71fbb5`, PASSED
+
+Two runs, no training, 22.2 s total. **Probe 3434 MiB, formal 3434 MiB —
+exact parity, zero gap.** Post-forward allocator reserved 2830 MiB on both.
+
+| milestone | probe | formal | Δ |
+|---|---|---|---|
+| after_model_to_device | 732 | 732 | 0 |
+| **after_checkpoint_load** | — | **732** (resv 236→**236**) | — |
+| post-forward b0 | **3434** | **3434** | **0** |
+| post-forward b1 | **3434** | **3434** | **0** |
+| post-forward b2 | **3434** | **3434** | **0** |
+
+Both corrections confirmed at their own milestones: the checkpoint load
+strands nothing (was 236 → 464), and the probe holds one output per batch
+across all three (batch 1 was 4870 MiB with reserved 4266).
+
+**Admission agrees at every ceiling** — ADMIT at 24 / 4 / 3.5 GiB, REFUSE at
+2 GiB. 3434 MiB = 3.354 GiB, leaving **150 MiB** below the 3.5 GiB ceiling.
+No correction factor.
+
+*The omitted CPU transfer is not a defect.* Formal's `after_output_to_cpu`
+reads 3434 / 1202 / 2830 — identical to its own post-forward — so the
+argmax and `.cpu()` allocate nothing beyond the pool and the probe's
+omission of the decode is **measurably invisible**. Measured rather than
+assumed, which is why no speculative fix was added.
+
+Integrity: 3/3 and 64/0 samples with `covered_whole_phase`,
+`outputs_released == inference_batches == 3`, identity/UUID/batch matched,
+registry `b5f7c5a5…` unchanged, no orphans.
+
+**Standing regression evidence** (operator, 2026-08-04) — these must keep
+holding, and are cheap to check in any future artifact:
+
+* `after_checkpoint_load` stays at the model-only allocator baseline;
+* `outputs_released == inference_batches`;
+* every configured inference batch reports the same peak;
+* sampling does not stop early and conceal a later peak.
+
+### WITHDRAWN — the fixed-integer Case 12 packet (2000 / 160)
+
+**Operator decision 2026-08-04.** The section below is retained as the
+derivation record; its integers are **RTX 5090 observations and are not a
+portable workload definition**. They must never become H100 Gate constants.
+
+Two things were wrong with using them as the definition:
+
+1. **They encode one machine's speed.** 2000 steps and 160 batches came
+   from 8.0762 ms/step and 0.705 s/file measured on a 5090. On an H100 the
+   same integers buy a different amount of execution and nothing in the
+   design would notice.
+2. **They were partly measuring storage.** Of the 14.45 s inference phase
+   they were derived from, **4.25 s (29 %) was filesystem** — input read
+   2.27 s, output write 0.72 s, per-file residual 1.27 s. A duration target
+   for a GPU property was partly a disk benchmark.
+
+Replaced by the live stability rule below. See *Live stability completion*.
+
+### Live stability completion — implemented `[x]`
+
+Completion is decided from execution on the machine under test, never from
+another card's clock:
+
+```text
+prepare the bounded input        (outside the measured window, timed separately)
+-> open the measured GPU phase
+-> real forward / backward / optimizer step
+-> every COMPLETED step recorded, device synchronized first
+-> parent watches the driver-visible cumulative peak
+-> peak increases -> stable-step counter AND post-peak reading count reset
+-> peak unchanged for 500 completed steps with >= 3 readings since
+   -> parent signals stop
+-> trainer stops BETWEEN steps, never mid-update
+```
+
+**Criterion** (all required): the first optimizer step has completed; an
+authoritative driver-visible peak exists; the cumulative peak has not risen
+for **500** subsequent completed steps; at least **3** valid readings after
+the last increase; sampling complete; identity and GPU UUID match.
+
+500 is a margin expressed in *real work*, not converted from a duration —
+a faster card simply reaches it sooner.
+
+**Backstops**: 5000 completed steps and a configurable wall-clock cap, each
+per-Gate. Reaching either returns `INCONCLUSIVE` — the peak was still
+moving, so no requirement is claimed and no limit is raised mid-Gate.
+Stability is checked *before* the backstops, so a phase that settles on its
+last allowed step still passes.
+
+**The parent owns the decision**, for D-C2-13's reason: the trainer cannot
+see its own process tree's driver-visible memory. It emits evidence and
+obeys a signal; it never concludes.
+
+**Inference completion is unchanged and already correct**: resolve the
+machine's own `inference_batch_for(model_type)`, run the configured real
+batches, hold each output until the samples land, release before the next
+forward, require complete observation. No inherited duration.
+
+**Validation-only, disabled by default.** `SIDERIUS_C2_FORMAL_STABILITY`, a
+Pydantic-validated JSON channel; no production CLI, no config key, no
+default changed. The trainer never names the variable — it goes through
+`channel_from_environment`, the one place the channel is parsed.
+
+**Tests** — `tests/unit/core/test_formal_stability.py` (33). They fail
+when: the control is reachable without a channel or by a production flag; a
+partial step can be recorded; events from another run are counted; the log
+acquires a decision method; 499 stable steps pass; 500 steps with too few
+readings pass; enough readings without enough steps pass; a later peak
+increase fails to reset; a repeated peak is treated as an increase; a
+failed reading is read as a fallen peak; the first step becomes optional; a
+backstop reports `STABLE`; the event precedes the optimizer update; the
+stop is checked before the event; the event is unsynchronized; a phase or
+inference concept leaks into the training rule; or a 5090 timing constant
+appears in the portable rule.
+
+**Behavior Delta (production): none.** Every flag, default, config key and
+scientific output is unchanged, and with no channel the loop is identical.
+
+### D-C2-19 — external activity: change, not presence `[x]` APPROVED (operator, 2026-08-04)
+
+**Decision.** No case requires an idle GPU. The rule that voided a pair
+whenever any foreign CUDA process existed is withdrawn.
+
+**Why the old rule was wrong in three independent ways.**
+
+1. **It flagged presence, not effect.** The candidate's requirement is
+   `own_tree_mib`, attributed by process **ancestry** — a neighbour's memory
+   is excluded by construction. Case c9 exists precisely to prove that split
+   holds with an unrelated CUDA process resident, so a rule voiding every
+   case with a neighbour contradicted the case demonstrating neighbours are
+   handled. Attempt 4's c9 evidence was itself taken on a busy card (own
+   1474 MiB vs other 2026 MiB) and was valid.
+2. **`own = {os.getpid()}` was a single PID.** It excluded our *own*
+   descendants — the measurement worker, the training subprocess, the
+   inference subprocess. It survived only because the two snapshots were
+   taken between arms, when the children had exited; any overlap and a
+   Case 12 pair would have declared itself contaminated by its own work.
+3. **Two snapshots cannot see a transient** (operator amendment). A
+   neighbour starting after the "before" shot and exiting before the
+   "after" shot leaves both endpoints identical while having perturbed the
+   entire run.
+
+**Three questions, kept apart.**
+
+```text
+what does the candidate need?   own_tree_mib, by ancestry
+                                -> external processes NEVER added
+can this device fit it now?     device used / free / external occupancy
+                                -> external processes ALWAYS considered
+did the environment shift?      external PID membership and MiB over time
+                                -> THIS is what "contaminated" may mean
+```
+
+**What is recorded for every real case**: the candidate-owned process tree;
+external PID membership over time; external memory over time; total device
+used and free; whether external conditions changed materially; and whether
+that change affected the result.
+
+**A case is invalid only when** external activity materially affects
+process attribution · sampling completeness · OOM or timeout causality ·
+current-capacity evaluation · paired-comparison comparability. Then the
+affected case or pair is marked contaminated, its artifact is **preserved**,
+and **only that pair reruns** under a new immutable sub-attempt. The Gate is
+never invalidated as a whole.
+
+**Per-case requirement** (`requirement_for_case`, one place so the matrix
+cannot drift from the rule enforcing it):
+
+| requirement | cases | meaning |
+|---|---|---|
+| `stable` | default (c1, c2, c7, c10, c11, c4, c5, …) | a neighbour is allowed; movement is not |
+| `comparable` | c12a, c12b, c12char | the arms met comparable conditions — a steady neighbour satisfies this |
+| `controlled_neighbour` | c9 | a neighbour is **required**; it is the evidence |
+
+There is deliberately **no `quiet` requirement.** An earlier draft demanded
+an empty card for c4, c5 and Case 12. That was wrong on each: c4 verifies a
+deadline stops the work and cleans up, not how fast anything runs; c5's
+configuration exceeds the whole card by construction, so what must be
+established is that the OOM came from the candidate's own allocation path —
+a statement about **causality**, checked on the RESULT rather than on the
+surroundings; and Case 12 compares paired arms, so it needs the arms
+*comparable*, which a steady neighbour provides.
+
+For OOM and timeout cases the typed result states the causality explicitly:
+whether refusal came from **requirement-exceeds-cap** or from
+**insufficient current free capacity**. Those are different facts about the
+device and must not be reported as one.
+
+**Implementation**: `core/runtime_control/environment_stability.py`
+(`assess_environment`, `summarize_environment`, `requirement_for_case`).
+`GpuAccountingSnapshot` and `TreeMemorySample` now retain *which* processes
+were external, not only how many — a count cannot distinguish "the same
+neighbour throughout" from "one left and another arrived".
+
+**Tests**: `tests/unit/core/test_environment_stability.py` (22). Failing
+cases include: a steady neighbour voiding an attribution case; our own
+descendants counted as foreign; a transient hiding behind equal endpoints;
+a same-PID memory move going unseen; driver jitter read as a change; a
+failed sample read as an empty device; c9 passing with no neighbour.
+
+**Behavior Delta (production): none.** Environment assessment runs only in
+the validation harness.
+
+### D-C2-20 — the parent-side live-stability controller `[x]` implemented
+
+**The gap.** D-C2-13 established that only the parent can see the tree's
+driver-visible memory, and the live-stability rule was written on that
+basis — but nothing polled, nothing signalled, and nothing collected a
+result. Two further defects made the gap invisible:
+
+1. **The trainer wiring was in the wrong engine.** `_stability_log()` and
+   the step emission sat in `run_experiment`, the legacy single-file path
+   reached only when `sample_set is None`. Every Gate arm and every chain
+   round runs `run_experiment_streaming`. **No formal arm would have
+   emitted a single step event**, and every phase would have run to its
+   backstop with the stop rule silently inert.
+2. **The guard test named the right function and checked the whole file.**
+   `_training_loop_calls()` documented itself as "inside the streaming
+   training loop"; its body was `ast.walk(tree)` over the module. Three
+   assertions passed on wiring that existed only in the other function. It
+   is now scoped by function name and parameterized over both engines.
+
+**The boundary.** `core/runtime_control/formal_stability_controller.py` —
+not inline in the harness, because correlating step progress with driver
+samples, deciding, signalling and reporting is a responsibility, and
+`HyperparamTuningAgent.run()` reached 2,487 lines by absorbing one more of
+those at a time.
+
+```text
+trainer                              parent (the controller)
+completed optimizer step
+  -> append StepEvent          --->  read events (run_id AND candidate_id)
+                                     read the driver sample series
+                                     -> evaluate_stability
+                                     -> peak rose?  both counters reset
+                                     -> settled?    touch stop_path
+  <- read stop_path (between steps)
+break, save the checkpoint
+                                     -> completion() -- typed result
+```
+
+**Four separations.**
+
+* **Stopping is not certifying.** The signal ends the phase;
+  `FormalPhaseCompletion.succeeded` decides whether the peak may be quoted.
+  A backstop stops and certifies nothing.
+* **An incomplete watch cannot certify.** A peak that rose inside an
+  unwatched stretch is invisible to the arithmetic, so `succeeded` also
+  requires `sampling_complete`. The honest outcome is a rerun of that arm.
+* **Steps come from steps.** Never inferred from elapsed time or sample
+  count — a stalled trainer emits samples at full cadence and no steps, and
+  a rule counting readings would call that stability.
+* **Identity before arithmetic.** Events are matched on **both** `run_id`
+  and `candidate_id`. Case 12 runs six formal arms under one Gate; an arm
+  counting a sibling's steps would reach the threshold without executing it.
+
+**Misuse raises, outcomes are values.** A pre-existing `stop_path` would
+stop the trainer at step 1 and report a single step's peak as settled; a
+pre-existing events log carries this run's identity by construction and
+would be counted as this phase's work. Both raise
+`FormalStabilityMisuse`. The guard caught its first defect immediately —
+the first draft of the new tests built the controller *after* writing
+events, and every case errored. The tests were fixed, not the guard.
+
+**Races proved**: a step event and a peak sample at the same instant (the
+tie resolves conservatively — the step is not credited to the stable tail,
+so simultaneity delays stability rather than manufacturing it); the signal
+written while the trainer is between steps; the trainer finishing before
+stability; a stale event from another run or another arm; a torn trailing
+line; an incomplete sample stream; a crash before any evaluation.
+
+**Reachability**, structurally over the harness AST: the formal arm
+constructs the controller; the watcher **spans** the blocking
+`execute_training` call (polling after it returns is not watching); the
+completion reaches the returned record under a `stability` key; the channel
+is set in `os.environ` and **restored in a `finally`**, so one arm's channel
+cannot follow the next five.
+
+**Tests**: `tests/unit/core/test_formal_stability_controller.py` (33),
+`tests/unit/core/test_formal_stability.py` (41). Mutation-proved: removing
+the streaming wiring fails 2 tests **on the streaming parameter only**;
+deleting the watcher fails the reachability tests; suppressing the
+stop-path touch fails 4; discarding the completion fails 1.
+
+**Behavior Delta (production): none.** Without
+`SIDERIUS_C2_FORMAL_STABILITY` no file is opened, no event is written, no
+signal is read, and both training loops are byte-for-byte the loops they
+were.
+
+### D-C2-21 — comparability is effect-based `[x]` APPROVED (operator, 2026-08-05)
+
+**Decision.** External occupancy drift is not, by itself, contamination.
+`environment_shift_observed` and `pair_comparable` are separate facts, and a
+shift may be observed while the pair remains perfectly comparable.
+
+**What forced it.** Gate 2 Lite-A **attempt 20** produced valid measurements
+and a **false-negative comparability result**. Six formal arms ran with a
+live neighbour (`/home/wenyu/summer/.venv/bin/python`) oscillating
+692–844 MiB. All three pairs were refused. The same artifacts refute the
+refusal:
+
+| arm | external MiB | range | candidate peak |
+|---|---|---|---|
+| p1 with_probe | 824–824 | 0 | 1476 |
+| p1 without_probe | 694–844 | 150 | 1476 |
+| p2 with_probe | 704–704 | 0 | 1476 |
+| p2 without_probe | 692–824 | 132 | 1476 |
+| p3 with_probe | 704–824 | 120 | 1476 |
+| p3 without_probe | 694–844 | 150 | 1476 |
+
+Every arm measured **1476 MiB** training and **3434 MiB** inference, with
+`admitted` on all six. Six arms cannot agree to the megabyte if the drift
+had moved the thing being compared.
+
+**Two errors produced it.**
+
+1. **Concatenation.** The rule pooled both arms' series and took one
+   min/max. That cannot distinguish *oscillation within an arm* — which
+   affects both alike and leaves them comparable — from *a shift between
+   arms*, the only thing that breaks a paired comparison. In pair 1 the
+   with-probe arm was **flat at 824 MiB**; the "150 MiB shift between arms"
+   was entirely its partner's internal wobble.
+2. **An absolute threshold.** 64 MiB means nothing without reference to
+   what is measured. Against a 1476 MiB candidate with ~21 GiB headroom and
+   ancestry-based attribution, 150 MiB of neighbour drift cannot change
+   attribution, capacity, causality or the peak. **The threshold is removed
+   and not replaced by a larger one.**
+
+**Per-arm analysis, never pooled.** Each arm records, from its own series:
+external PID membership · min / median / max external MiB · external range ·
+minimum free device memory · candidate-owned peak · admission result ·
+sampling completeness. The two arms are then compared.
+
+**A pair is comparable when** candidate-owned attribution is complete ·
+sampling is complete · candidate/configuration/GPU identity matches · both
+arms completed without external-capacity-induced OOM or termination ·
+sufficient device headroom existed for each arm · and external activity did
+not change the candidate peak, the admission verdict, or the acceptance
+property being compared.
+
+**For Case 12 the acceptance property is GPU-memory peak and admission
+equivalence** — not wall-clock performance under compute contention. A
+neighbour that slows both arms equally does not touch the claim.
+
+**A pair is never refused merely because** the same external process
+oscillates · a within-arm range exceeds some fixed number · external
+occupancy is nonzero · a process appears in only one arm (recorded, and
+invalidating only when it affected the result).
+
+**The rule keeps its power.** Different peaks under *matched* conditions
+remain comparable and are reported as a genuine probe effect — otherwise
+Case 12 could never detect the thing it exists to detect. A difference is
+unattributable only when the arms' external bands do not overlap at all.
+
+**Implementation**: `core/runtime_control/environment_stability.py` —
+`ArmEnvironment`, `summarize_arm`, `assess_pair_comparability`. The harness
+translates once, in `summarize_formal_arm`, so a replay from a sealed
+artifact and a live arm reach the assessor through the same code.
+
+*Also fixed here*: the artifact's `environment_samples` key held the series
+as Pydantic objects, which the manifest writer's `default=str` turned into
+repr strings — recorded but not machine-readable, so no replay could
+re-derive the assessment from the artifact. It is removed; `raw_samples`
+was already proper JSON and is now the single copy.
+
+**Tests**: `tests/unit/core/test_environment_stability.py` (43), with
+`tests/fixtures/c2_lite_a20_case12_environment.json` — the **real** six-arm
+series from attempt 20 — as the regression fixture. Mutation-proved:
+reintroducing a 64 MiB refusal fails 4; pooling the arms fails the
+structural guard; dropping sampling completeness fails its own case.
+
+**Behavior Delta (production): none.** Environment assessment exists only in
+the validation harness.
+
+### Historical derivation — the withdrawn fixed-integer bound
+
+The long arm ran **863.8 s of training** whose peak stopped moving after
+**5.883 s** (99.32 % stable tail) and **15.6 s of inference** whose peak
+stopped moving after **1.342 s** (91.4 % stable tail). Everything after
+those points is cost with no acceptance value.
+
+**Derived from integers, not from a percentage.** A slice cannot say how
+many steps will run — `--formal_train_portion 0.01` produced ~107,000
+steps. The bound comes from the measured per-unit costs in the `c12char`
+artifact (`d48c7b34`):
+
+```text
+training   8.0762 ms/step  (steady state, 62 steady units)
+inference  0.705 s/file    (20 files x 2 PSD segments, 14.1 s total)
+geometry   10,000,000 / 40,000 = 250 model segments per PSD segment
+           = 250 training steps per PSD segment at batch_size 1
+```
+
+| target | smallest integer exceeding it | realized |
+|---|---|---|
+| 15 s training | 1858 steps → **8 PSD segments** (7 gives 1750 steps = 14.13 s) | **2000 steps = 16.15 s** |
+| 5 s inference | **8 files** (7 gives 4.94 s) | **160 batches = 5.64 s** |
+
+Realized as **8 files × 1 PSD segment** (training) and **8 files × 2 PSD
+segments** (inference), so the per-file path is exercised eight times
+rather than collapsed into one file.
+
+**Margins over saturation**: training 16.15 s against 5.883 s (2.7×);
+inference 5.64 s against 1.342 s (4.2×). Both peaks are established with
+room to spare, and neither window ends while the peak is still rising —
+which the Gate checks rather than assumes.
+
+**Harness-only bounded control.** `execute_training` has no step cap and
+the trainer has no `--max_steps`, so four validation-only flags were added
+to the harness — `--formal_train_files`, `--formal_train_psd_per_file`,
+`--formal_eval_files`, `--formal_eval_psd_per_file`. **No production CLI
+was added and no formal default changed.** The sample sets are still built
+by the production `build_sample_set` under a real `DataScope`, so DataScope
+enforcement is byte-identical; only the *selection* is stated as integers.
+
+**The realized counts are verified, not assumed.** `trial_portion` is a
+fraction of `segments_per_file` and rounding could yield one segment more
+or fewer than requested; a Case 12 that silently ran a different workload
+than the one derived from the saturation evidence would invalidate the
+margin it exists to provide. A mismatch raises **before any GPU work**, and
+half a bound (files without segments, or the reverse) is refused outright.
+The executed integers are recorded in the artifact as `workload_bound`,
+together with the per-unit costs they were derived from — carried for
+audit, never used to scale or correct a measured peak.
+
+**All three alternating pairs are kept**, and every formal arm still
+performs production model and checkpoint loading, real data construction, a
+real forward, a model-connected backward, the first optimizer step and its
+state allocation, enough further training to clear the margin, real formal
+inference, and complete process-tree sampling.
+
+**Expected cost**: ~29 s per formal arm (4.5 s setup + 16.15 s training +
+5.64 s inference + startup), ~62 s per pair, **~3.1 min for Case 12**;
+c1-c11 ~3 min; **~6.2 min total Lite-A**. Inside the 6-10 min target and
+below the 15 min threshold, so no new Cost Justification is required.
+
+**Normal production Behavior Delta: none.**
+
+### Probe output lifetime — FINDING 2 fixed `[x]`
+
+The inference loop now releases each output before the next forward:
+
+```text
+forward -> synchronize -> hold while the parent samples -> parent confirms
+        -> release the output -> only then the next forward
+```
+
+`del output` at the end of each iteration, plus an `outputs_released`
+counter on `RealismEvidence` so the property is checkable from a persisted
+artifact rather than only by rerunning.
+
+**The release is unconditional** — it does not depend on the parent
+confirming. The batches that leaked were precisely the ones the parent had
+stopped watching, so making cleanup conditional on the parent's answer
+would leave the exact case that concealed the defect still leaking.
+
+**No production-equivalent CPU transfer was added.** Formal's decode
+(`output.argmax(dim=1).detach().cpu()`) dispatches on the model's
+output-type contract and the loss's target dtype, and reproducing it inside
+the measurement worker would put a second copy of `process_batch`'s
+dispatch logic where it could drift. Its transient is ~8 MiB at batch 25
+against a ~3.4 GiB phase. Whether that omission is visible at all is what
+the parity check measures rather than assumes; if it is, the decode is
+added then and not speculatively.
+
+**Tests** — `test_gpu_measurement_phases.py`. They fail when: an earlier
+output survives into a later forward (checked at the START of each forward,
+over weak references, so a strong reference in the test cannot mask a
+missing release); fewer than the configured batches execute; the release
+becomes conditional on the parent; `outputs_released` disagrees with the
+batches executed; or training's repetition behaviour changes.
+
+**Mutation proof**: removing `del output` — restoring the rebinding without
+cleanup — fails `test_the_output_is_released_before_the_next_forward`.
+Applied to a file backup with `__pycache__` cleared and a `count == 1`
+assertion on the edit site, then restored and re-baselined at 1827 passing.
+
+### Validation-only milestone tracing — implemented `[x]`
+
+Approved to locate milestones 4-7. It may touch the formal inference path,
+and does, under strict conditions: **disabled by default, unreachable
+without an explicit validation environment variable, behaviour-preserving
+when disabled, no LLM call, no production configuration change, and no
+ordinary production CLI flag.**
+
+**The channel.** `SIDERIUS_C2_INFERENCE_MILESTONE_TRACE`, whose value is a
+Pydantic-validated JSON channel — an explicitly writable artifact path, the
+device UUID, a run id, and an optional `max_traced_batches` — never a bare
+boolean. With it absent, `tracer_from_environment` returns `None`: no
+channel parsed, no file created, no driver query taken, and no tracer for
+any call site to hold. **The absence of the tracer IS the disabled state**,
+which is why there is no "enabled" flag anywhere to get wrong. Production
+never sets it, and a test scans the production sources to keep that true.
+
+**One memory policy, not two.** Every figure comes from
+`gpu_accounting.sample` — the same primitive `gpu_measurement_sampler`
+polls, the same ancestry-based ownership rule, the same refusal to read a
+failed query as zero. No pynvml, no private `nvidia-smi`, no second
+definition of "driver-visible".
+
+**Milestones.** Six once-per-process (`process_start`, `after_imports`,
+`after_cuda_init`, `after_model_construction`, `after_model_to_device`,
+`after_checkpoint_load`, plus `before_exit`) and four per-batch
+(`after_input_to_device`, `after_forward_output_resident`,
+`after_output_to_cpu`, `after_output_cleanup`), each recording timestamp,
+side, phase, milestone, batch index, candidate-owned PIDs and their
+per-PID MiB, the process-tree total, allocator allocated/reserved,
+`cuda_initialized`, `cuda_synchronized`, live input shape/dtype, model
+dtype/mode, output residency/shape/dtype, GPU UUID, candidate identity,
+inference batch size, run id and the exact Git SHA.
+
+**`after_checkpoint_load` is an addition to the plan's ten**, deliberately.
+The plan's milestone 4 reads "after model construction **or** checkpoint
+loading", but formal inference does BOTH while the probe does neither —
+folding them into one name would hide precisely the step the two paths do
+not share. The probe never records it, and that absence is evidence.
+
+**Milestone 7 placement is the load-bearing decision.**
+
+```text
+forward completes -> CUDA synchronize -> output STILL GPU-resident
+  -> record -> only then argmax / .cpu() / release
+```
+
+Taken after the transfer it would describe a different state while looking
+identical. It allocates nothing, extends no lifetime (`output` is live
+there anyway, because the decode reads it), adds no forward, and changes no
+batch count, model loading, output handling or cleanup semantics.
+
+**Where the two sides are honestly not equivalent**, recorded rather than
+smoothed over:
+
+* `inference_single.py` imports torch at module scope, so `process_start`
+  and `after_imports` are both taken at `main()` entry. Recording them
+  earlier would need a statement above the imports (E402) and a first-party
+  import ordered above the third-party ones (I001), and this repository does
+  not disable lint rules to make code fit. Both sides agree on what the two
+  milestones MEAN — process entry, torch available, CUDA not yet initialized
+  — and milestones 1-3 are already closed by direct measurement, so nothing
+  load-bearing rests here.
+* CUDA context creation is lazy. On the probe it happens inside
+  `resolve_device`'s `get_device_properties`; on the formal path at the
+  first device allocation. Each record's `cuda_initialized` field states
+  which is true rather than the milestone name implying it.
+* The probe emits no `after_output_to_cpu` / `after_output_cleanup` and no
+  `after_checkpoint_load`, because it performs none of them. Missing
+  milestones are a first-class outcome the comparison reports.
+
+**One behaviour-preserving refactor**, in both files and the same way:
+`model_class(cfg).to(DEVICE)` split into two statements so a milestone can
+sit between construction and transfer. `nn.Module.to()` moves parameters in
+place and returns `self`, so both forms perform an identical sequence on an
+identical object; a test asserts exactly one device transfer survives.
+
+**Tests** — `tests/unit/core/test_gpu_milestone_trace.py` (44). They fail
+when: the variable is absent and anything is written · a malformed or
+unwritable channel does not raise `MilestoneTraceUnavailable` **before** any
+measurement · a failed driver query is recorded as 0 MiB · a sampler
+exception escapes instead of becoming a value · a milestone is recorded
+twice or out of order · the per-batch bound is applied without recording it
+· the default sampler is not `gpu_accounting.sample` · a rival telemetry
+backend appears · milestone 7 is missing, is before the forward, is after
+the `.cpu()` transfer, does not synchronize, or is not passed the live
+output · the probe's milestone 7 leaves the observation hold · a
+`trace.record()` argument becomes a call that could allocate · the record
+retains the output tensor · `process_batch` returns different arrays or
+runs a different number of forwards with the tracer attached · the worker
+launcher starts curating `env=` and would drop the trace.
+
+**Mutation proofs**, each applied to a file backup, with `__pycache__`
+cleared, a `count == 1` assertion on the edit site, then restored and
+re-baselined at 44 passing:
+
+| mutation | tests that failed |
+|---|---|
+| delete milestone 7 from `process_batch` | 6 |
+| move milestone 7 after the CPU transfer | 4 (incl. the runtime order guard raising `MilestoneTraceMisuse`) |
+| swap the default sampler for a rival memory policy | 1 |
+
+**No harness change was needed.** Neither launcher passes `env=` —
+`gpu_measurement_runner.py:271` and `sandbox_executor.py:300` — so the
+variable reaches both the probe worker and the formal inference subprocess
+by inheritance. A test asserts that stays true.
+
+### Cost justification — the minimal inference-only GPU audit (NOT YET RUN)
+
+| | |
+|---|---|
+| **Acceptance property** | the first lifecycle milestone at which the probe and formal inference diverge, and by how much |
+| **Why existing artifacts are insufficient** | every preserved artifact records phase *peaks*, not per-milestone occupancy. No artifact at any SHA contains a milestone series, so the first point of divergence cannot be read out of one. Milestones 1-3 ARE already closed and are not re-run. |
+| **Minimum workload** | one corrected pre-phase inference measurement + one formal inference. **No training.** Fresh processes, milestone trace enabled, `max_traced_batches=2`. |
+| **Expected wall time** | ~2-4 min total (probe ~3 s; formal inference ~16 s at the established timings; the remainder is process startup and CUDA init on each side) |
+| **Expected GPU time** | < 30 s of actual device work |
+| **Expected storage** | one NDJSON trace, ~20-30 records, < 100 KB, plus the existing immutable case artifacts |
+| **Early-stop conditions** | stop if the trace is empty or missing milestone 7 on either side (infrastructure failure, not a result); stop if projected wall time exceeds 10 min; stop if the formal figure is not 3642 MiB, since the gap would no longer be the one under audit |
+| **Evidence reused** | training probe/formal equivalence (1474 vs 1476 MiB) · training peak saturation at 5.88 s of 870.008 s · the three alternating probe/formal repeats · milestones 1-3 (0/0/596 both sides). **None of these is re-measured.** |
+
+**Not executed.** The exact command, expected cost and artifact paths are
+ready; the run itself awaits operator authorization.
+
+### Documentation synchronization — C2
+
+**Production behavior changed.** A formal attempt on a real device now runs
+a bounded isolated GPU measurement before any formal GPU work and consumes
+one typed disposition; a stop consumes the attempt and starts no GPU work.
+Formal admission receives a real requirement instead of `policy_unavailable`.
+
+| | |
+|---|---|
+| **Affected nodes** | `ml_hyperparameter_tune_agent` — its formal call path gained a phase |
+| **Affected agents** | none — no agent-facing prompt, schema or decision surface changed |
+| **Affected skills** | none *behaviourally* (see inspected-unchanged below) |
+| **Affected CLI surfaces** | none in production (**no flag was added**); one validation-only surface, `scripts/c2_prephase_validation.py` |
+
+**Files updated**
+
+* `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md` — new
+  *Pre-phase GPU measurement (V20 PR C2)* section: the call sequence, the two
+  applicability rules, all seven dispositions and their PR B lanes, the O-7
+  accounting, the resource cost, the deadline/soft-budget values, and the
+  explicit statement that **there is no flag**. The round-loop list gained
+  step 2b so the documented phase order matches execution order.
+* this document — D-C2-11 and the corrected Gate packet.
+
+**Files inspected and NOT changed, with the reason**
+
+| File | Why unchanged |
+|---|---|
+| `agent/skills/training_skill/training_skill.md` | `execute_training`'s signature, inputs and behaviour are untouched; C2 runs *before* it and the harness calls it exactly as production does |
+| `agent/skills/evaluate_vram_skill/evaluate_vram_skill.md` | `isolated_probe`'s only change is delegating three private helpers to `core.runtime_control.process_group`; bodies moved verbatim, names preserved, behaviour identical |
+| `nodes/ml_hyperparameter_tune_agent.md` (top-level) | describes the node's I/O contract, which did not change — no new input, no new output field |
+| `docs/running_chain_test.md` | documents launcher flags; no production flag was added or renamed |
+| `docs/gates/gate_testing_standard.md` | C2's gates follow the existing standard rather than amending it |
+
+**Command parsing evidence.** `--dry_run` executed against the real
+environment. *Historical record of what was run at the time* — the
+parameters below were the packet's then-current ones and were **superseded**
+for Case 12 by the live-stability block (D-C2-20); the portion flags still
+exist and still parse (`--formal_train_portion 0.01 --formal_eval_portion
+0.01 --formal_seed 137`): `device_uuid_matches: true`,
+`spec_constructs: true`, `candidate_registered: true`. Every flag in every
+documented command block is checked against the harness's real `argparse`
+actions by `test_c2_documentation_sync.py`.
+
+**Structural documentation tests** — `tests/unit/scripts/test_c2_documentation_sync.py`
+(22). They fail when: a documented CLI flag does not exist · the approved
+gate parameters are not real flags · the renamed `--formal_trial_portion`
+appears in active text · a validation-only flag appears in the production
+node doc · the node doc omits any `PrephaseDisposition` that exists in code
+· the node doc omits an O-7 statement · documented deadline/soft-budget
+values diverge from the code constants.
+
+**Remaining documentation gaps.** None known for C2. `docs/running_chain_test.md`
+will need the Lite-A/Lite-B procedure once the gates have actually run —
+tracked with the gate results, not written ahead of them.
+
+### Documentation synchronization — validation-only milestone tracing
+
+**Production behavior changed:** *no*, in the sense that matters — with the
+environment variable absent (always, in production) the traced processes
+create no file, take no driver query and hold no tracer, and
+`process_batch` returns bit-identical arrays after the same number of
+forwards. Three production **files** are touched, and one
+behaviour-preserving refactor lands in two of them (the
+construct/transfer split, proved to leave exactly one device transfer).
+Admission authority, dispositions, O-7 accounting, retry, phase order,
+timeout and signal semantics are all unchanged.
+
+| | |
+|---|---|
+| **Affected skills** | none behaviourally — `inference_skill/wrapper.py` is untouched and invokes `inference_single.py` exactly as before |
+| **Affected nodes** | `ml_hyperparameter_tune_agent` — its measurement worker is one of the two traceable processes |
+| **Affected agents** | none — no prompt, schema or decision surface changed |
+| **Affected CLI surfaces** | **none.** No production flag was added. The only control is the `SIDERIUS_C2_INFERENCE_MILESTONE_TRACE` environment variable, and it is validation infrastructure |
+
+**Files updated**
+
+* `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md` — new
+  *Validation-only lifecycle trace* block in the pre-phase section: what a
+  milestone records, the channel's JSON shape, that it is off unless
+  explicitly switched on, that there is **no CLI flag**, that it does not
+  alter admission authority, and that an unwritable path fails as
+  infrastructure rather than as a measurement outcome.
+* this document — the lifecycle audit record above, the implementation
+  record, the mutation table and the cost justification.
+
+**Files inspected but unchanged, with the reason**
+
+**Complete inspection.** Every skill, node and agent `.md` in the
+repository was enumerated and inspected, not sampled: the three skill docs
+that exist (`evaluate_time_skill`, `evaluate_vram_skill`,
+`training_skill`), all seven node/agent docs under `nodes/`, and every
+`.md` naming `process_batch`, `model_class(`, `.to(DEVICE)`,
+`load_state_dict` or `inference_single`.
+
+| File | Why unchanged |
+|---|---|
+| `agent/skills/inference_skill/` (no `.md`) | the skill's `wrapper.py` and `skill_config.json` are untouched; it invokes `inference_single.py` with the same argv and the same behaviour. A new doc file is not minted for a change that does not reach the skill's surface |
+| `agent/skills/training_skill/training_skill.md` | training is not traced and `execute_training` is untouched |
+| `agent/skills/evaluate_vram_skill/evaluate_vram_skill.md` | PR A's probe is not involved in this trace |
+| `agent/skills/evaluate_time_skill/evaluate_time_skill.md` | describes the time-estimate composition, not the GPU memory lifecycle; no timing term changed |
+| `nodes/ml_hyperparameter_tune_agent.md` (top-level) | its `inference_single.py --mode agent` command block stays verbatim correct **because no CLI flag was added**, and the node's I/O contract gained no field. The environment channel is documented once, in the sub-node doc, rather than duplicated into an operator-facing command listing |
+| `nodes/ml_code_validator_agent`, `ml_literature_review`, `ml_model_implementor`, `ml_model_proposal_agent`, `result_interpretation_agent`, `NODE_TEMPLATE` | none participates in the inference call path or in GPU admission |
+| `docs/running_chain_test.md` | documents launcher flags; no production flag was added or renamed, and the trace is not an operator control |
+| `docs/refine_inference_time_estimator.md` | names `process_batch` only as a timing component of `per_file_elapsed_ms`; the two added parameters are keyword-only, default `None`, and change no timing term |
+| `docs/design/enable_loss_inventory.md` | records that `current_loss_name` was plumbed through `process_batch`; still true |
+| `scripts/c2_prephase_validation.py` and its packet | needs **no** change: neither launcher passes `env=`, so the variable reaches both subprocesses by inheritance |
+| `docs/gates/gate_testing_standard.md` | the audit follows the existing standard rather than amending it |
+
+**Finding recorded, not fixed: `docs/optimize_inference_and_scoring.md`
+carries stale line references.** Its Fix 3 entry cites the normal-mode
+per-file loop at `inference_single.py:215-234` and the trial-mode loop at
+`:151-205`. Both were **already wrong at `14290710`, before this change**:
+at that commit line 151 is the argparse tail and line 215 is the end of
+`process_batch`. The doc's substance — the `del` + `gc.collect()` pattern
+and its measured 9.43 GB -> 5.68 GB effect — remains accurate, and this
+change does not touch that pattern. Re-deriving which historical revision
+the ranges were correct for is out of scope here; widening a milestone-trace
+PR into a line-number sweep of a Phase 6.7 record is exactly the silent
+scope growth the regression rule forbids. Tracked separately.
+
+**Command parsing evidence.** No command changed, so there is nothing new
+to parse. The existing `test_c2_documentation_sync.py` checks continue to
+hold every documented harness flag against the harness's real `argparse`
+actions, and `VALIDATION_ONLY_FLAGS` is unaffected because the trace adds no
+flag. The environment variable's contract is enforced instead by
+`test_gpu_milestone_trace.py`, which exercises the real `os.environ` path
+end to end rather than only the injected one.
+
+**Remaining documentation gaps.** The milestone comparison table itself,
+which does not exist until the audit runs. `docs/running_chain_test.md`
+still needs the Lite-A/Lite-B procedure once those gates have actually run —
+tracked with the gate results, not written ahead of them.
+
+**Static checking limitation, recorded rather than claimed.** `ruff check`
+and `ruff format --check` pass locally on every touched file. **pyright
+could not be run locally**: the vendored binary aborts under this host's
+Node v10.19.0, which is below its minimum. CI is the only environment that
+can run it, and no claim of local type validation is made here.
+
+### Gate results — BOTH PASSED at `7302c467d81a575e3e35a8f81821eb5dbd63e451`
+
+| gate | hardware | result | attempt |
+|---|---|---|---|
+| Gate 1 | — | **N/A** (no LLM-facing surface) | — |
+| Gate 2 Lite-A | RTX 5090 `GPU-c30b6678-…f8b4-d378-af9681c6ceef` | **PASS** | 20 + 22 |
+| Gate 2 Lite-B | H100 80GB HBM3 `GPU-8c96cde6-…6413-4a14-c9125500102d` | **PASS** | 01 |
+
+#### The headline numbers, per machine
+
+|  | RTX 5090 | H100 80GB |
+|---|---|---|
+| device total | 32,607 MiB | 81,079 MiB |
+| training driver peak | 1476 MiB | **1496 MiB** |
+| inference driver peak | 3434 MiB | **3384 MiB** |
+| training allocator peak | 807 MiB | 808 MiB |
+| inference allocator peak | 1612 MiB | 1557 MiB |
+| **driver − allocator, inference** | **1822 MiB** | **1827 MiB** |
+
+**The peaks differ between machines, and that is the design working.** No
+requirement, duration, step count or cap travels between cards; each is
+measured live. A Gate that reproduced the 5090's numbers on an H100 would
+be reporting a constant, not a measurement.
+
+The allocator under-reports by 627–1827 MiB. That gap is the whole reason
+the authority is driver-visible, candidate-owned, ancestry-attributed
+process-tree memory.
+
+#### Lite-A — evidence assembled across two SHAs
+
+| # | evidence | SHA |
+|---|---|---|
+| 1 | c1–c11 immutable artifacts | `7f8e9ffa` (attempt 20) |
+| 2 | corrected replay of all three Case 12 pairs | `7302c467` |
+| 3 | live one-pair Case 12 | `7302c467` (attempt 22) |
+
+Reuse across SHAs was operator-approved after an **AST-hash comparison of
+every function** between the two commits: the only changed units are
+`run_formal_comparison`, `run_formal_execution` and the new
+`summarize_formal_arm`, all Case 12 only. The isolated worker, process-tree
+sampler, measurement runner, classifier, requirement authority, PR B
+admission, O-7 disposition and every c1–c11 execution function are
+byte-identical.
+
+Case 12: **probe perturbation 0 MiB** across six arms — 1476 MiB training
+and 3434 MiB inference with and without a preceding probe, spread zero.
+Arms stopped on live stability at 518–569 completed steps against a
+5000-step backstop and a 6000-step data ceiling.
+
+Two sub-attempts, both preserved:
+
+* **c5 sub1** — the worker was SIGTERM'd by the machine's
+  `/usr/local/bin/vram_watchdog.py`, 64 MB over a 30,000 MB per-user quota,
+  one allocation short of the natural OOM. `term_sent: false` proves the
+  kill was external, and C2 refused to call it a CUDA OOM. sub2 won the
+  race and produced `MEASURED_CUDA_OOM`. **This is a per-machine hazard: c5
+  deliberately allocates ~30 GiB and therefore races any quota watchdog.
+  Inspect the watchdog before running c5 on new hardware, and never label
+  an externally terminated process as a measured OOM.**
+* **c3 sub1** — an ineffective PATH injection. `/bin` is a symlink to
+  `usr/bin` on merged-`/usr` systems, so `PATH=shim:/bin` left `nvidia-smi`
+  reachable. sub2 used a shim directory containing only `git`.
+
+#### Lite-B — target hardware
+
+Artifacts at
+`.gate_artifacts/C2_LITE_B/7302c467…/attempt-01/`, verified
+`sha256sum -c SHA256SUMS` → **62/62 OK**, audited from the raw manifests
+rather than the run's own summary.
+
+Eight cases: c1, c2, c3, c4, c7, c9 executed; c10 and c16 derived from those
+manifests per the approved packet. Every authoritative result carries the
+H100 UUID; c1 delivered a real 1.461 GiB `measured` requirement to PR B
+against a 72 GiB ceiling; c2 refused from the measured peak against the cap
+(1496 MiB vs 512 MiB); c7 measured inference alone; c9 excluded a **2658 MiB**
+controlled neighbour from a 1496 MiB candidate; O-7 held on every stop;
+`live_registry_unchanged: true` on all twelve manifests; no orphans.
+
+**c2's `pr_b_admission: null` is the designed short-circuit**, not a gap: an
+over-cap measurement is refused by the classifier and never reaches PR B's
+capacity gate. Identical on both machines.
+
+Non-blocking H100 environment notes: `/dev/md0` was unavailable so the
+temporary workspace used the local overlay filesystem; final evidence was
+persisted under `/workspace`; the inherited `c2_lite_a…` artifact-name
+prefix is cosmetic, since identity is carried by the embedded SHA, attempt
+and case; no code, docs, Git history or PR state was changed on the H100.
+
+#### Open blocker — exact-head CI is RED
+
+[Run 30879511952](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/30879511952):
+**44 pyright-strict errors**, all in C2 files changed on this branch. Master
+is green at the merge-base `9533c65d`, so none are inherited.
+
+| file | errors | cause |
+|---|---|---|
+| `core/runtime_control/formal_stability.py` | 33 | an unannotated `common = dict(...)` collapses to a float-valued dict; `**common` then fails every `int` field |
+| `core/runtime_control/gpu_measurement_data.py` | 12 | h5py stub unions (`Dataset \| Group \| Datatype`) not narrowed |
+| `core/runtime_control/gpu_measurement_worker_main.py` | 1 | `str` passed where `WorkerStatus` is required |
+
+No runtime behaviour is affected — 2416 unit tests and both Gates pass at
+this SHA. They stayed latent because CI had not run on this branch, and
+because pyright was believed unrunnable on the dev box's Node v10.19.0.
+**That belief was wrong**: `/usr/bin/node` exists and pyright can be run
+locally. Recorded here so the next author does not repeat the assumption.
+
+Fixing moves the head off the Gate-tested SHA. The changes are
+annotation-only and touch no measurement path, so the Gate evidence carries
+by the same reasoning that approved the c1–c11 reuse — but that is an
+operator decision, not an automatic one.
+
+### C2 gate packets — the executable commands
+
+Retained as the record of what was run. Both gates have now PASSED at
+`7302c467d81a575e3e35a8f81821eb5dbd63e451`; the "NOT AUTHORIZED" labels
+below are historical.
+
+**The call site exists and is unconditional on a real GPU**, so both gates
+drive the ordinary formal path -- there is no flag to turn on.
+
+#### Gate 2 Lite-A — RTX 5090, mechanism only  (EXECUTED — PASSED, attempts 20 + 22)
+
+*Establishes that the machinery is correct. Establishes NOTHING about an
+H100 requirement.*
+
+**Fixed for every case.** Verified live 2026-08-03.
+
+```text
+SHA          `git rev-parse HEAD` at authorization — record it, do not guess
+             (a SHA written here can never be current: the commit that
+              writes it changes the head)
+cwd          /home/yuema137/SIDERIUS
+python       ./.venv/bin/python          (never system python3 — it is 3.8)
+GPU          index 0 · RTX 5090 · 32607 MiB
+GPU UUID     GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef
+driver       575.64 · CUDA 12.8 · torch 2.10.0+cu128
+data_dir     /home/klz/Data/TIDMAD/                     (verified present)
+workspace    /tmp/c2_lite_a/ws
+artifacts    /tmp/c2_lite_a/artifacts
+candidate    punet, paper-spec baseline
+  model_config  {"segmentation_size": 40000}
+  train_config  {"batch_size": 1, "optimizer_type": "adamw", "lr": 0.0005}
+  loss_config   {"loss_type": "focal", "alpha": 0.5, "gamma": 2.0}
+```
+
+**Command shape.** Every case is one invocation of the same harness; only
+the marked arguments change.
+
+```bash
+./.venv/bin/python scripts/c2_prephase_validation.py \
+    --case <CASE> \
+    --device_uuid GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef \
+    --model_type punet \
+    --model_config '{"segmentation_size": 40000}' \
+    --train_config '{"batch_size": 1, "optimizer_type": "adamw", "lr": 0.0005}' \
+    --loss_config  '{"loss_type": "focal", "alpha": 0.5, "gamma": 2.0}' \
+    --data_dir /home/klz/Data/TIDMAD/ \
+    --workspace /tmp/c2_lite_a/ws \
+    --artifact_dir /tmp/c2_lite_a/artifacts \
+    --ceiling_gib 24 --deadline_seconds 600 \
+    --sampling_interval_seconds 0.25 \
+    --training_steps 4 --inference_batches 3 \
+    --gate_attempt <N>
+```
+
+`--gate_attempt` is required and forms part of the immutable artifact
+identity `c2_lite_a<N>_<sha12>_<case>__sub<K>.json` (D-C2-15). For a
+synthetic case induced by a shim, add `--injection_shim <path>` so the
+manifest records its sha256 and content.
+
+For `--case c12a` (and `c12b`), **training length is decided by live
+stability on this machine** (D-C2-20), not by a step count, a duration or a
+portion. `--train_config` pins `epochs: 1`. The data bound below is a
+*ceiling on available work*, generous enough that the stop comes from the
+peak settling rather than from the data running out — if an arm ends
+because it exhausted its data, `stability.succeeded` is `false` and the
+arm is `INCONCLUSIVE`.
+
+```bash
+    --train_config '{"batch_size": 1, "optimizer_type": "adamw", "lr": 0.0005, "epochs": 1}' \
+    --formal_train_files 8 --formal_train_psd_per_file 3 \
+    --formal_eval_files 8 --formal_eval_psd_per_file 2 \
+    --formal_seed 137 \
+    --formal_stable_steps 500 --formal_min_samples 3 \
+    --formal_max_steps 5000 --formal_max_phase_seconds 120 \
+    --prior_cases_wall_seconds <measured 1-11 wall> --max_total_wall_seconds 5400
+```
+
+**Inference is unchanged and already correct**: the machine's own
+`inference_batch_for(model_type)`, a configured number of real batches, the
+post-forward observation hold, and each output released before the next
+forward. No inherited duration.
+
+**`--formal_max_steps` and `--formal_max_phase_seconds` are SAFETY
+BACKSTOPS, never success criteria.** Reaching either yields
+`INCONCLUSIVE_MAX_STEPS` or `INCONCLUSIVE_DEADLINE` — the peak was still
+moving when the measurement stopped, so no requirement is claimed. Stability
+is evaluated **before** the backstops, so an arm that settles on its last
+allowed step still passes rather than being failed for arriving late. Each
+Gate sets its own caps for the card it runs on; **no cap, step count,
+duration or measured requirement travels between machines.**
+
+**The training ceiling is derived, not chosen.** It must be impossible for
+the data to run out *before* the max-step backstop — otherwise the arm ends
+in data exhaustion, which is `INCONCLUSIVE` for a reason unrelated to the
+peak, and the backstop that exists to bound the run would never be the
+thing that bounds it. From the verified geometry:
+
+```text
+completed training steps per PSD segment   250   (10,000,000 / 40,000, batch_size 1)
+selected files                               8
+formal_max_steps                          5000
+
+ceil(5000 / (8 x 250)) = ceil(2.5) = 3 PSD segments per file
+                                     -> 8 x 3 x 250 = 6000 available steps
+```
+
+**3 is the smallest integer that cannot exhaust first** (1 gives 2000
+steps, 2 gives 4000 — both below the 5000 backstop). 6000 available steps
+is a **ceiling on capacity, not a required workload**: live stability
+remains the success criterion and a typical arm stops far earlier. An
+earlier draft used 4 on judgment rather than derivation; it also worked,
+but 8000 steps of capacity buys nothing the backstop does not already
+bound.
+
+Changing `--formal_max_steps` or `--formal_train_files` therefore requires
+re-deriving this integer. A test asserts the documented triple satisfies
+`files x psd_per_file x 250 >= formal_max_steps`.
+
+*Withdrawn, 2026-08-04*: the previous packet read `--formal_train_files 8
+--formal_train_psd_per_file 1`, described as "2000 training steps
+(~16.15 s) and 160 inference batches (~5.64 s)". Those integers encoded one
+5090's speed (8.0762 ms/step, 0.705 s/file), and 29 % of the inference
+phase they came from was filesystem. They are **derivation evidence, never
+portable Gate parameters**, and must not become H100 constants. Note that
+the withdrawn value of 1 is also *arithmetically* unusable under the live
+rule: 2000 available steps cannot reach a 5000-step backstop.
+
+Case 12 runs pair 1, computes `6 x T_formal + 3 x T_probe` from its real
+timings, and continues into pairs 2 and 3 only within the budget;
+otherwise it stops with `STOPPED_BY_TIME_BOUND`. **The workload is never
+increased during the Gate** — a shortfall is reported, not fixed by running
+more.
+
+**Every arm records separately**: data-preparation time · measured GPU-phase
+time · completed steps · the step at the last peak increase · stable steps
+since · readings since · the exact stop reason · the driver-visible peak ·
+allocator diagnostics · the external environment series · current free
+capacity.
+
+**Execution order and per-case deltas.**
+
+| # | Case | Argument delta | Expected outcome | Expected admission | O-7 attempt | est. wall |
+|---|---|---|---|---|---|---|
+| 1 | success | — | `COMPLETED_MEASUREMENT` | ALLOW | not consumed | ~90 s |
+| 2 | above cap | `--ceiling_gib 0.5` | `MEASURED_PEAK_ABOVE_VRAM_CAP` | REFUSE | consumed | ~90 s |
+| 3 | telemetry unavailable † | run with `PATH` lacking `nvidia-smi` | `INCONCLUSIVE_MEASUREMENT` | REFUSE | consumed | ~90 s |
+| 4 | hard timeout | `--deadline_seconds 1` (was 3 — attempt 2 ran in 2.39 s) | `MEASURED_HARD_TIMEOUT` | REFUSE | consumed | ~5 s |
+| 5 | measured CUDA OOM | `--train_config '{"batch_size": 1024, …}'` (D-C2-10) | `MEASURED_CUDA_OOM` | REFUSE | consumed | ~120 s |
+| 6 | crash † | (harness injects `sys.exit(3)`) | `PROBE_INFRASTRUCTURE_FAILURE` | REFUSE | consumed | ~5 s |
+| 7 | phase separation | `--case c7 --phase inference` | `COMPLETED_MEASUREMENT` | ALLOW | not consumed | ~90 s |
+| 8 | parent+child residency | — (read from c1/c7 artifacts) | `max_concurrent_own_processes` recorded | n/a | n/a | 0 |
+| 9 | ours/other split | second CUDA process held externally | `own_tree_mib` excludes it | n/a | n/a | ~90 s |
+| 10 | allocator vs driver | — (read from c1 artifact) | driver ≥ allocator, gap recorded | n/a | n/a | 0 |
+| 11 | sampling completeness | `--sampling_interval_seconds 120` | `INCONCLUSIVE_MEASUREMENT` | REFUSE | consumed | ~90 s |
+| 12a | perturbation | `+` the live-stability block above (`--formal_train_files 8 --formal_train_psd_per_file 3 --formal_eval_files 8 --formal_eval_psd_per_file 2 --formal_seed 137 --formal_stable_steps 500 --formal_min_samples 3 --formal_max_steps 5000 --formal_max_phase_seconds 120`) | characterization — no expected value | n/a | n/a | 6F + 3P |
+| 12b | representativeness | same invocation as 12a | characterization — no expected value | n/a | n/a | shares 12a's runs |
+
+`F` = one bounded production formal execution, `P` = one prephase
+measurement (~90 s). 12a runs **3 pairs x 2 arms = 6 formal executions plus
+3 probes**; 12b reads the same artifacts, so it costs nothing extra.
+
+† synthetic injection through an existing seam, labelled
+`synthetic_injection: true` in the manifest. Neither can carry capacity
+authority — neither yields `COMPLETED_MEASUREMENT`, so the authority
+contract refuses independently of the label.
+
+**Cases 1-11: ~11 min wall, ~9 bounded GPU executions** (< 8 GiB peak
+each, except c5 which is expected to exhaust the card by design).
+
+**Case 12 adds `6 x T_formal + ~4.5 min`.** `T_formal` is **not known in
+advance and is not fixed by the packet** — the training arm ends when this
+machine's driver-visible peak has settled (D-C2-20), so its length is a
+property of the card under test. It is bounded above by
+`--formal_max_phase_seconds 120` per training phase, which caps Case 12's
+training contribution at `6 x 120 s = 12 min` in the worst case; the 5090
+evidence (peak saturating at 5.883 s) suggests the real figure is far
+below that, but **the projection uses the measured pair-1 timing, never an
+assumed one**. Pair 1's real `T_formal` drives the budget checkpoint, as
+it always has.
+
+**The formula, stated before the number:**
+
+```text
+c12 cost = 6 x (formal training + formal inference) + 3 x prephase measurement
+```
+
+Six arms (3 pairs x 2), each now running **both** production phases — the
+training-only estimate is superseded by D-C2-11. `T_formal` at a 1% slice is
+not yet measured, so the total is deliberately left to be restated from the
+first pair's observed wall time rather than guessed a second time.
+
+**Cases 13-16 — EVIDENCE FROM EXACT-HEAD TEST, not a GPU run.** Named in
+the harness's `TEST_EVIDENCE_CASES`, and a test resolves each citation
+against the filesystem so it cannot rot.
+
+| # | Evidence | Why no GPU run adds anything |
+|---|---|---|
+| 13 | `test_prephase_measurement_reachability.py::TestTheDispositionDrivesTheAttempt::test_each_stop_is_filed_under_its_lane` | asserts the record's lane and `counts_toward_attempt_budget` for all six stops; a GPU run exercises one |
+| 14 | `test_prephase_admission.py::TestOSevenHoldsForEveryStop::test_the_frozen_accounting` | asserts all six O-7 properties across all six stops |
+| 15 | `test_prephase_admission.py::TestOSevenHoldsForEveryStop::test_a_measured_oom_records_insufficiency_without_issuing_advice` | proves the fact is kept and the instruction withheld |
+| 16 | `test_prephase_measurement_reachability.py::TestTheCallSiteExists::test_it_runs_before_training_starts` **plus** case 1's artifact | ordering is a source property; case 1 shows the real launch after ALLOW |
+
+**Every real stop case still serializes its own O-7 state** — the manifest's
+`o7` block records attempt consumption, completed round, blame, shrink,
+same-attempt retry and formal launch for every case including the stops. So
+13-15 are cited, not skipped.
+
+**Pass criteria.** Each case produces its expected outcome AND disposition ·
+case 1 admits with a driver-visible figure and `authoritative: true` ·
+cases 2-6 and 11 stop with `may_launch_formal_phase: false` · case 7's
+inference peak is recorded independently of case 1's training peak ·
+case 10 shows driver ≥ allocator · every manifest carries
+`live_registry_unchanged: true` · the three PR B refusal lanes stay
+distinct (`test_refusal_lane_distinctness.py` green at the same SHA).
+
+**Stop criteria.** Any write outside `/tmp/c2_lite_a` · any
+`live_registry_unchanged: false` · any observed attempt-accounting change
+beyond O-7 · total wall beyond 30 min · any case whose manifest reports
+`git.dirty: true`.
+
+**Cleanup.** `rm -rf /tmp/c2_lite_a/ws` after archiving; the artifact
+directory is retained. The harness's calibration redirect lives under the
+workspace and goes with it. No process outlives a case — the parent reaps
+its worker's process group and records `orphans_remaining`.
+
+**Retained artifacts**, per case, at
+`/tmp/c2_lite_a/artifacts/c2_lite_<case>_manifest.json` (+ `.sha256`):
+exact SHA and dirty state · full command and resolved config · hostname,
+GPU model/UUID, driver, CUDA, torch · start/end timestamps · sampling
+interval · **raw driver-visible samples** · allocator diagnostics ·
+process-tree membership over time · phase boundaries · typed measurement
+result · authority decision and refusal reason · PR B verdict · O-7
+disposition and accounting · exit status · manifest hash.
+
+**No LLM is possible.** Zero LLM tokens in the harness (asserted by
+`test_it_makes_no_llm_call`); zero in the eight C2 modules (every
+occurrence is a comment); and `test_no_llm_is_constructed_during_a_measurement`
+poisons `LLMBridge.__init__` and runs a real measurement.
+
+**No live registry is modified.** C2 references no registry at all — no
+`CalibrationRegistry`, `runtime_calibration`, `SIDERIUS_CALIBRATION_DIR`,
+`record_observation` or `observation_store` in any C2 module. The harness
+additionally redirects `SIDERIUS_CALIBRATION_DIR` into the workspace before
+anything runs (one env var governs BOTH the legacy v1 table and the v2
+root) and fingerprints the live tree before and after.
+
+**Static validation performed 2026-08-03, no GPU work:** command parses ·
+`--dry_run` green against the real environment (`data_dir_present`,
+`workspace_writable`, `artifact_dir_writable`, `spec_constructs`,
+`candidate_registered`, `config_class_registered`, `device_uuid_matches`
+all true) · worker module resolves (`usage:`, exit 2) · 31 harness tests
+green.
+
+#### Gate 2 Lite-B — target H100, production authority  (EXECUTED — PASSED, attempt 01)
+
+*Repeats the production-critical subset on the hardware that will run it.*
+
+```bash
+git fetch origin && git checkout <EXACT_LITE_A_SHA>   # by hash, never by branch
+git rev-parse HEAD    # must equal <EXACT_LITE_A_SHA>
+nvidia-smi --query-gpu=index,uuid,name --format=csv,noheader   # record the H100 UUID
+```
+
+Then the same harness with `--device_uuid <H100 UUID>`, the H100's
+`--data_dir`, `--workspace /tmp/c2_lite_b/ws`, `--artifact_dir
+/tmp/c2_lite_b/artifacts`, and `--ceiling_gib` set from the H100's capacity.
+
+**Cases repeated:** 1 (success + admission), 2 (above cap), 3 (unavailable),
+4 (bounded timeout), 7 (phase separation), 9 (tree coverage), 10 (allocator
+vs driver), 16 (formal launch only after ALLOW). Estimated **~10 min wall,
+~6 bounded GPU executions**.
+
+**Live stability is re-derived on the H100, never inherited.** If Case 12 is
+added to Lite-B, its training arms use the same rule and the same flags with
+**H100-local safety caps**:
+
+```bash
+    --formal_stable_steps 500 --formal_min_samples 3 \
+    --formal_max_steps 5000 --formal_max_phase_seconds <H100 cap, set locally>
+```
+
+`--formal_stable_steps` and `--formal_min_samples` are portable **because
+they are counts of real work, not durations** — a faster card simply reaches
+them sooner, which is the entire reason the rule is expressed this way.
+`--formal_max_phase_seconds` is **not** portable and must be chosen from an
+H100 observation, never from the 5090's. Likewise `--formal_train_files` /
+`--formal_train_psd_per_file` are a data ceiling, and if an H100 arm ends
+`INCONCLUSIVE` because it exhausted its data before the peak settled, the
+ceiling is raised **on the H100** and the arm rerun — the 5090's value is
+not evidence about the H100's.
+
+**Nothing measured on the 5090 is reused, and most of it cannot be.** A
+requirement is refused unless `observed_device_uuid == request.device_uuid`,
+so a 5090 figure cannot be assembled into a table on the H100 at all —
+enforced by the authority contract, verified here end to end. Beyond that
+contract, the following are **forbidden by protocol** and must be
+re-established locally: wall-clock caps · final step counts · measured
+GPU requirements · per-step or per-file unit times · any duration-derived
+workload bound.
+
+**Additionally required.** Formal admission reports a real requirement
+rather than `policy_unavailable`; the recorded `observed_device_uuid` is
+the H100's; every stop shows the O-7 accounting; every recorded arm carries
+its own `stability` block naming the H100's own stop reason.
+
+### Gate Behavior Delta — the consolidated statement
+
+*Everything C2 changes about how a Gate behaves, in one place, so an
+acceptance reader does not have to reassemble it from eighteen deviations.*
+
+| # | What changed | Cases affected | Delta for a NORMAL production run |
+|---|---|---|---|
+| 1 | The presence of a foreign GPU process no longer contaminates a case (D-C2-19) | all | none — validation harness only |
+| 2 | Environment is judged over the whole sample series, not two endpoint snapshots (D-C2-19) | all | none |
+| 3 | A contaminated pair reruns as a sub-attempt; the Gate is not invalidated (D-C2-19) | c12a/b/char | none |
+| 4 | c9 now *requires* its controlled neighbour rather than tolerating it (D-C2-19) | c9 | none |
+| 5 | Formal training length comes from live peak stability, not a portion or a step count (D-C2-20) | c12a/b/char | none — no channel, no change |
+| 6 | Backstops return `INCONCLUSIVE`; they are not passes (D-C2-20) | c12a/b/char | none |
+| 7 | An incomplete watch cannot certify a peak even when the arithmetic says STABLE (D-C2-20) | c12a/b/char | none |
+| 8 | Fixed 5090 constants (2000 steps / 160 batches / 15 s / 5 s) are **withdrawn** as acceptance criteria | c12a/b | none |
+| 9 | External occupancy *drift* is no longer contamination; `environment_shift_observed` and `pair_comparable` are separate facts (D-C2-21) | c12a/b/char | none |
+| 10 | Arms are summarized individually and compared; their sample series are never pooled (D-C2-21) | c12a/b/char | none |
+| 11 | The 64 MiB absolute refusal threshold is removed and not replaced (D-C2-21) | all | none |
+| 12 | `environment_samples` (repr strings) removed; `raw_samples` is the single machine-readable series (D-C2-21) | all | none |
+
+**The single production-facing statement**: with
+`SIDERIUS_C2_FORMAL_STABILITY` unset — which is every production run, and
+which no CLI flag or config key can change — no file is opened, no step
+event is written, no stop signal is read, and both training engines execute
+the loop they executed before C2. Environment assessment and the stability
+controller exist only inside `scripts/c2_prephase_validation.py`.
+
+**No idle-GPU requirement exists anywhere in this Gate**, and no
+still-GPU requirement either. Dynamic measurement exists so a candidate can
+be measured on the card **as it actually is**; a Gate that only runs on a
+quiet GPU validates a laboratory rather than production, and in practice the
+GPU is sometimes busy. **Presence and ordinary occupancy oscillation are not
+contamination — effect on the acceptance claim is the criterion.**
+
+### Finding recorded, not fixed: `probe_production.py` omits fcnet's `loss_type`
+
+`train_engine_sandbox` constructs fcnet as
+`model_class(model_cfg, loss_type=loss_cfg.loss_type)`;
+`probe_production.py:128` constructs every model as `model_class(cfg)`.
+A candidate needing that argument fails to construct in the duration probe.
+Classified as a **duration-probe limitation, not an admission defect** —
+`probe_production` feeds C1's calibration path, not `measured_requirements`
+— and left alone for the same reason D-C2-4 leaves its optimizer copy
+alone. The C2 worker mirrors the trainer, with a test that fails if the
+branch is dropped (M3).
 
 ---
 

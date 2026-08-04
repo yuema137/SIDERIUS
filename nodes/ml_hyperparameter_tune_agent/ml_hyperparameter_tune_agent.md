@@ -296,6 +296,189 @@ no score, no negative planner evidence, no incumbent update, no retry.
 If every attempt in a round is refused, the round produces no
 authoritative result and no candidate is blamed.
 
+### Pre-phase GPU measurement (V20 PR C2)
+
+**PR B's gate could refuse, but had nothing to refuse on.** It read the
+requirement through `getattr(sandbox, "measured_requirements", None)`, and
+no production code set it — so formal admission reported
+`policy_unavailable` on every run. C2 produces that requirement.
+
+**On every FORMAL attempt, before any formal GPU work**, the tuner runs a
+bounded, isolated measurement of the exact candidate on the current card
+and consumes a single typed disposition:
+
+```text
+formal attempt
+  -> planned identity + request nonce
+  -> isolated worker (real model, optimizer, forward, backward, step)
+  -> parent-side driver-visible process-tree sampling
+  -> realized identity returned and checked against the planned one
+  -> typed classification
+  -> authoritative requirement, or refusal with a named reason
+  -> PR B admission
+  -> ONE disposition
+```
+
+The tuner calls `_handle_prephase_gpu_measurement` and reads only the
+disposition; identity comparison, classification, authority validation and
+admission all live in `core/runtime_control/prephase_admission.py`.
+
+**When it does NOT run**, and these are the only two cases:
+
+| Condition | Behaviour |
+|---|---|
+| trial round | not measured — O-7 governs formal execution, and trial admission already proceeds while recording what it could not prove |
+| `sandbox.device_identity` is not a `DeviceIdentity` | not measured — no card means nothing to measure and nothing for admission to decide, the same conclusion `_admission_refusal` reaches. CPU and pseudo runs are unaffected. |
+
+There is **no flag**. It is not optional on a formal attempt with a real
+device.
+
+**Dispositions**, each filed under one of PR B's three existing refusal
+lanes, with the disposition itself preserved in `memory.admission_evidence`:
+
+| Disposition | Lane |
+|---|---|
+| `PROCEED` | — the requirement is attached and training starts |
+| `STOP_OVER_CAP` | `insufficient_headroom` |
+| `STOP_MEASURED_OOM` | `insufficient_headroom` |
+| `STOP_TIMEOUT` | `measurement_unavailable` |
+| `STOP_MEASUREMENT_UNAVAILABLE` | `measurement_unavailable` |
+| `STOP_PROBE_HOST_MEMORY_EXCEEDED` | `measurement_unavailable` |
+| `STOP_INFRASTRUCTURE_FAILURE` | `measurement_unavailable` |
+
+`STOP_PROBE_HOST_MEMORY_EXCEEDED` is named for the **probe**, not the run.
+It means the measurement process exceeded its host-RSS allowance, which is a
+CPU fact and never a VRAM verdict — it produces no GPU requirement and PR B's
+capacity gate is not called at all.
+
+**Accounting on every stop** — identical across all six, and the same rules
+the PR B refusal already follows: the attempt is consumed, no completed
+round is recorded, no scientific blame attaches to the candidate, no
+proposal shrinking is advised, and there is no same-attempt retry. Only the
+existing outer attempt budget may produce another attempt.
+
+**Data access is bounded (V20 PR C2 / D-C2-12).** The worker reads exactly
+the `batch_size x segmentation_size` samples its batch needs, by HDF5
+slicing — **not** through `load_probe_batch`, which materializes the whole
+2,010,000,000-sample channel before `max_segments` applies and cost 24.10
+GiB of host RSS in the first gate attempt. The tensor delivered to the
+device is byte-identical to the production loader's; only the host-side
+path differs, and the host path is not the GPU requirement. There is no
+fallback: bounded access failing is reported as an infrastructure condition.
+
+**Formal training has no stop rule, and none can be configured.** A Gate's
+formal arm stops when its driver-visible peak has settled (V20 PR C2 /
+D-C2-20), but that control lives entirely in the validation harness. A
+production round trains for its planned epochs over its planned sample set,
+exactly as before: no step event is written, no stop signal is read, and no
+CLI flag or config key exposes the mechanism. If you are looking for a way
+to bound a production round's training, it is `--max_epochs` and the sample
+set — not anything in C2.
+
+**Short phases are made observable (V20 PR C2 / D-C2-13).** A phase shorter
+than the driver-sampling cadence yields **zero** in-phase samples and is
+unmeasurable at any candidate speed — Gate 2 Lite-A c7 ran an inference
+phase in 0.138 s against a 0.25 s cadence. Two rules close that:
+
+* the worker waits for the parent to confirm sampling is **active** — proved
+  by a real driver sample having succeeded — before opening a timed phase;
+* the phase repeats its **exact** workload (same model, batch, dtype and
+  semantics) until the **parent** signals that enough readings have landed.
+
+**The parent owns the stop condition**, because it is the only component
+that knows how many valid in-phase samples were actually captured. There is
+deliberately **no** maximum-repetition setting: a repetition count cannot
+express a duration target when the per-repetition cost is unknown, and a
+40-repetition ceiling once ended an inference phase after 0.344 s still
+holding one sample. The same phase now needs ~135 repetitions and gets
+them. The bounds are `max_phase_seconds` (60) and the global deadline.
+
+Repetition is measurement protocol, not candidate identity, and it happens
+only inside the disposable measurement worker — formal execution is
+untouched. An authoritative phase now requires at least **3** valid in-phase
+samples (`MINIMUM_AUTHORITATIVE_SAMPLES`); zero, one or two fail closed as
+`INCONCLUSIVE_MEASUREMENT`. Reaching a bound without enough samples is also
+`INCONCLUSIVE` — never a manufactured result, and never zero MiB.
+
+Every phase record carries the observation evidence through the typed
+result: `repetitions`, `required_samples`, `observed_in_phase_samples`,
+`completion_reason` (`sample_target_reached` | `duration_bound` |
+`deadline` | `single_pass` | `failed`), `max_phase_seconds`,
+`observation_bound_reached`, `sampler_ready` and `sampler_ready_at`. An
+artifact missing them is incomplete and its result carries no authority.
+
+**One inference output is resident at a time (V20 PR C2).** The inference
+loop releases each output **before** the next forward begins:
+
+```text
+forward -> synchronize -> hold the output while the parent samples
+        -> parent confirms -> release the output
+        -> only then the next forward
+```
+
+Without the release, `output = model(input)` on the next iteration computed
+a second full output while the previous one was still bound. At the
+production batch of 25 each is 976 MiB; the measured effect was the
+allocator pool growing 2830 → 4266 MiB and the driver figure reaching
+**4870 MiB against a real 3434**.
+
+That peak was **invisible**, not absent: the parent stops sampling once its
+hold is satisfied, so batches after the first ran unobserved and the
+reported figure happened to be the correct one. **An authoritative
+measurement must not depend on observation stopping early**, so the
+two-resident state is removed rather than left to be missed. The release is
+unconditional — it does not wait on the parent's answer, because the
+batches that leaked were exactly the ones the parent had stopped watching.
+
+`outputs_released` on the phase record equals `inference_batches` when the
+lifecycle is correct; a shortfall in a persisted artifact means an output
+survived into a later forward. Formal inference has no such state —
+`process_batch` returns between batches and its locals die with the frame —
+so this makes the probe's loop match production rather than invent a
+heavier lifecycle.
+
+**Validation-only lifecycle trace (V20 PR C2).** The measurement worker and
+the formal inference process can each record a set of named lifecycle
+milestones — process start, imports, CUDA initialization, model
+construction, model transfer, checkpoint load, per-batch input transfer,
+the synchronized post-forward state with the output still GPU-resident, the
+transfer to host, cleanup, and exit. Each milestone records the
+driver-visible candidate-owned process-tree total through the **same**
+`gpu_accounting.sample` primitive the production sampler uses, alongside
+the allocator figures, the live input/output shapes and dtypes, the GPU
+UUID, the candidate identity, the inference batch size and the exact Git
+SHA.
+
+It exists to locate a fixed **208 MiB (5.7 %)** difference between the
+pre-phase inference measurement (3434 MiB) and formal inference (3642 MiB),
+reproduced with zero spread across three alternating runs.
+
+**It is off unless explicitly switched on, and production never switches it
+on.** There is **no CLI flag** and no config key. The only way to enable it
+is the environment variable `SIDERIUS_C2_INFERENCE_MILESTONE_TRACE`, whose
+value must be a JSON channel naming an explicitly writable artifact path,
+the device UUID and a run id — never a bare boolean:
+
+```text
+SIDERIUS_C2_INFERENCE_MILESTONE_TRACE='{"path": "/tmp/.../trace.ndjson",
+                                        "device_uuid": "GPU-...",
+                                        "run_id": "...",
+                                        "max_traced_batches": 2}'
+```
+
+With the variable absent no channel is parsed, no file is created, no
+driver query is made, and neither process holds a tracer at all — the
+absence of the tracer **is** the disabled state, so there is no "enabled"
+flag to get wrong. Tracing **does not alter admission authority**: it
+produces no requirement, feeds no gate, and changes no disposition. An
+unwritable path fails as validation infrastructure
+(`MilestoneTraceUnavailable`), never as a measurement outcome and never as
+a property of the candidate.
+
+**Resource cost.** One extra bounded GPU execution per formal attempt:
+setup plus 4 training steps, deadline 600 s (`PREPHASE_MEASUREMENT_DEADLINE_SECONDS`),
+worker soft budget 480 s, host-RSS ceiling shared with PR A's pre-flight.
+
 **Failure attribution.** When a phase *does* fail on device memory, the
 record may carry `failure_attribution` — one of
 `candidate_gpu_capacity`, `gpu_contention`, `host_memory_pressure`,
@@ -471,6 +654,7 @@ for the full design rationale.
 - **Round-loop structure**: each round runs **plan → resource check → train → infer → score → reflect**:
   1. **Plan** — `bridge.plan(...)` produces an `ExperimentPlan` (hyperparameters + `is_trial` choice). Subject to `plan_overrides`.
   2. **Resource check** — `evaluate_vram_skill` + `evaluate_time_skill` pre-flight gates. A failure here counts as an *attempt* (not a *round*); the round retries up to its budget.
+  2b. **Pre-phase GPU measurement** (V20 PR C2, **formal attempts with a real device only**) — a bounded isolated measurement of the exact candidate on the current card, feeding PR B's admission gate. A stop consumes the attempt and starts no GPU work. See *Pre-phase GPU measurement* above.
   3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs.
   4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
   5. **Score** — `scoring_skill` computes `denoising_score`. Cleanup runs after if `cleanup_denoised=True`.

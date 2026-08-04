@@ -171,6 +171,12 @@ class GpuAccountingSnapshot(BaseModel):
     #: decision; ``accounting_skew_mib`` is where the clamp is visible.
     other_mib: int | None = Field(default=None, ge=0)
     other_process_count: int | None = Field(default=None, ge=0)
+    #: WHICH processes are not ours, with their memory. A count alone
+    #: cannot tell "the same neighbour, still there" from "one left and
+    #: another arrived" — and a Gate that compares only totals would call
+    #: those identical. Retained so environmental *change* is detectable
+    #: over a series of samples rather than inferred from two endpoints.
+    other_processes: tuple[ProcessOccupancy, ...] = ()
 
     #: Sum over every compute process the driver listed for this device.
     per_pid_total_mib: int | None = Field(default=None, ge=0)
@@ -337,9 +343,9 @@ def sample(
         return _unavailable(device)
 
     own: list[ProcessOccupancy] = []
+    other: list[ProcessOccupancy] = []
     per_pid_total = 0
     other_total = 0
-    other_count = 0
     for row in app_rows:
         if len(row) < 3 or row[2] != device.uuid:
             continue
@@ -354,8 +360,8 @@ def sample(
         if is_descendant_of(pid, root_pid, proc_reader=proc_reader):
             own.append(ProcessOccupancy(pid=pid, used_mib=used))
         else:
+            other.append(ProcessOccupancy(pid=pid, used_mib=used))
             other_total += used
-            other_count += 1
 
     own_total = sum(p.used_mib for p in own)
     skew = device_used_mib - per_pid_total
@@ -368,7 +374,8 @@ def sample(
         own_tree_mib=own_total,
         own_processes=tuple(own),
         other_mib=other_total,
-        other_process_count=other_count,
+        other_process_count=len(other),
+        other_processes=tuple(other),
         per_pid_total_mib=per_pid_total,
         unattributed_mib=max(0, skew),
         accounting_skew_mib=skew,

@@ -587,6 +587,206 @@ def _handle_admission_refusal(
     return True
 
 
+#: Wall-clock bound for one pre-phase GPU measurement (V20 PR C2 / C2-7).
+#: Setup plus four training steps on a bounded batch; PR A's isolated
+#: pre-flight allows 900 s for a heavier structural trace, so this sits well
+#: inside a comparable envelope. The ONE place to change it.
+PREPHASE_MEASUREMENT_DEADLINE_SECONDS = 600.0
+#: The worker stops itself here so it can report partial evidence; the
+#: parent's kill is the hard bound (D-C2-3).
+PREPHASE_MEASUREMENT_SOFT_BUDGET_SECONDS = 480.0
+
+#: Disposition -> the refusal lane the record is filed under. PR B's three
+#: lanes are unchanged; the disposition itself is preserved in the evidence,
+#: so nothing is lost by the narrowing.
+_PREPHASE_REASON_CODE = {
+    "STOP_OVER_CAP": "insufficient_headroom",
+    "STOP_MEASURED_OOM": "insufficient_headroom",
+    "STOP_MEASUREMENT_UNAVAILABLE": "measurement_unavailable",
+    "STOP_TIMEOUT": "measurement_unavailable",
+    "STOP_PROBE_HOST_MEMORY_EXCEEDED": "measurement_unavailable",
+    "STOP_INFRASTRUCTURE_FAILURE": "measurement_unavailable",
+}
+
+
+def _handle_prephase_gpu_measurement(
+    *,
+    agent_input,
+    sandbox,
+    is_trial: bool,
+    active_params: dict,
+    exp_id: str,
+    model_type: str,
+    file_index: Any,
+    record_params: dict,
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> bool:
+    """Measure this candidate on this card before a formal GPU launch.
+
+    Returns True when the attempt must stop (O-7).
+
+    **This function delegates; it does not decide.** Identity comparison,
+    classification, authority validation and PR B admission all live in
+    `core.runtime_control.prephase_admission`, which returns ONE
+    disposition. `run()` is the giant orchestrator the decomposition rule
+    governs, and reimplementing any of that here would put O-7's accounting
+    in the one scope where it is hardest to see.
+
+    **Two applicability rules, neither of them a feature flag.**
+
+    *Trial rounds are not measured.* O-7 governs formal execution, and a
+    trial round's admission posture already proceeds while recording what it
+    could not prove. Measuring every trial round would double the GPU cost
+    of the cheap screen.
+
+    *No device identity means nothing to measure.* This is the same rule
+    `_admission_refusal` already applies -- a CPU or pseudo run has no card
+    to take a driver-visible reading from, and admission has nothing to
+    decide. Unchanged behaviour there, not a refusal.
+    """
+    if is_trial:
+        return False
+
+    # TYPE-checked, not merely present. `getattr(sandbox, "device_identity",
+    # None)` on a `MagicMock` returns a truthy mock, so a presence test
+    # silently activates this gate in every mocked test — and, worse, would
+    # accept any object at all as a device in production. A measurement
+    # needs a real `DeviceIdentity`; anything else is "no device to decide
+    # about", which is the same conclusion `_admission_refusal` reaches.
+    from core.runtime_control.gpu_accounting import DeviceIdentity
+
+    device_identity = getattr(sandbox, "device_identity", None)
+    if not isinstance(device_identity, DeviceIdentity):
+        return False
+
+    import uuid as _uuid
+
+    from core.runtime_control.gpu_measurement_identity import (
+        build_planned_identity,
+        resolve_inference_batch,
+    )
+    from core.runtime_control.gpu_measurement_runner import run_prephase_measurement
+    from core.runtime_control.gpu_measurement_spec import GpuMeasurementSpec
+    from core.runtime_control.gpu_requirement import CandidateMeasurementRequest
+    from core.runtime_control.prephase_admission import (
+        attach_measured_requirements,
+        decide_prephase_admission,
+    )
+
+    model_config = dict(active_params.get("model_config") or {})
+    train_config = dict(active_params.get("train_config") or {})
+    ceiling_gib = getattr(agent_input, "gpu_pair_ceiling_gib", None)
+    workspace = Path(sandbox.base_dir) / "prephase_measurement"
+    request_id = _uuid.uuid4().hex
+    # Resolved from the canonical production source so the probe cannot
+    # drift from what `execute_inference` will really run.
+    _inference_batch = resolve_inference_batch(model_type)
+
+    spec = GpuMeasurementSpec(
+        label=f"{exp_id}:training",
+        request=CandidateMeasurementRequest(
+            model_type=model_type,
+            planned_identity=build_planned_identity(
+                model_type=model_type,
+                model_config=model_config,
+                train_config=train_config,
+                inference_batch_size=_inference_batch,
+            ),
+            request_id=request_id,
+            device_uuid=str(getattr(device_identity, "uuid", "")),
+            phase="training",
+            deadline_seconds=PREPHASE_MEASUREMENT_DEADLINE_SECONDS,
+        ),
+        model_config_payload=model_config,
+        train_config=train_config,
+        loss_config=dict(active_params.get("loss_config") or {}),
+        inference_batch_size=_inference_batch,
+        data_dir=getattr(agent_input, "data_dir", None),
+        result_path=str(workspace / f"{exp_id}_training.json"),
+        journal_path=str(workspace / f"{exp_id}_training.phases.ndjson"),
+        sampler_ready_path=str(workspace / f"{exp_id}_training.sampler_ready"),
+        phase_complete_path=str(workspace / f"{exp_id}_training.phase_complete"),
+        worker_memory_limit_bytes=_prephase_worker_memory_limit_bytes(),
+        soft_deadline_seconds=PREPHASE_MEASUREMENT_SOFT_BUDGET_SECONDS,
+    )
+
+    run = run_prephase_measurement(spec, device=device_identity)
+    snapshot, sampling_error = _prephase_device_snapshot(device_identity)
+    outcome = decide_prephase_admission(
+        run,
+        snapshot=snapshot,
+        mode="formal",
+        vram_cap_mib=int(ceiling_gib * 1024) if ceiling_gib else None,
+        ceiling_gib=ceiling_gib,
+        run_name=str(active_params.get("run_name") or exp_id),
+        sampling_error=sampling_error,
+    )
+
+    if outcome.proceeds:
+        attach_measured_requirements(sandbox, outcome)
+        print(
+            f"  Pre-phase GPU measurement: "
+            f"{outcome.requirement.driver_tree_peak_mib} MiB (training), admitted"
+        )
+        return False
+
+    record = _build_resource_admission_record(
+        resource_type="gpu_memory",
+        reason_code=_PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable"),
+        detail=f"pre-phase GPU measurement: {outcome.disposition} — {outcome.detail}",
+        exp_id=exp_id,
+        model_type=model_type,
+        file_index=file_index,
+        record_params=record_params,
+        expert_advice_str=expert_advice_str,
+        hypothesis=hypothesis,
+        round_index=round_index,
+        attempt_in_round=attempt_in_round,
+        admission_evidence={
+            "prephase_disposition": outcome.disposition,
+            "measurement_outcome": outcome.requirement.outcome,
+            "authority_refusal": outcome.requirement.authority_refusal,
+            "identity_mismatch": outcome.requirement.identity_mismatch,
+            "request_id": request_id,
+        },
+    )
+    _emit_record(sandbox, record)
+    print(f"  Pre-phase GPU measurement stopped the attempt: {outcome.disposition}")
+    return True
+
+
+def _prephase_worker_memory_limit_bytes() -> int:
+    """Reuse PR A's host-memory ceiling rather than choosing a second one.
+
+    The two workers construct the same candidates, so a pathological host
+    footprint is pathological for both, and two independent ceilings would
+    disagree about what "pathological" means.
+    """
+    from agent.skills.evaluate_vram_skill.isolated_probe import (
+        default_worker_memory_limit_bytes,
+    )
+
+    return default_worker_memory_limit_bytes()
+
+
+def _prephase_device_snapshot(device_identity) -> tuple[Any, str | None]:
+    """The pre-spawn occupancy PR B admits against, or a named gap.
+
+    Never raises: a sampler that failed must reach the admission policy as
+    "no reading was obtained" rather than as an exception the caller
+    swallows into a proceed, which is the fail-open posture PR B removed.
+    """
+    try:
+        from core.runtime_control.gpu_accounting import sample
+
+        return sample(os.getpid(), device_identity), None
+    except Exception as exc:  # pragma: no cover - driver-shape guard
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 def _oom_memory_wording(status: dict, *, phase: str) -> tuple[str, str]:
     """``(discovery, memory_update)`` for a MEASURED out-of-memory.
 
@@ -4016,6 +4216,28 @@ class HyperparamTuningAgent:
                         is_trial=plan.is_trial,
                         device_identity=getattr(sandbox, "device_identity", None),
                     )
+
+                    # V20 PR C2 / C2-7. Measure this exact candidate on this
+                    # card BEFORE any formal GPU work, and consume the
+                    # disposition. The whole chain — planned/realized
+                    # identity check, classification, authority validation,
+                    # PR B admission — lives behind one call; nothing about
+                    # it is reimplemented here.
+                    if _handle_prephase_gpu_measurement(
+                        agent_input=agent_input,
+                        sandbox=sandbox,
+                        is_trial=plan.is_trial,
+                        active_params=active_params,
+                        exp_id=exp_id,
+                        model_type=model_type,
+                        file_index=file_index,
+                        record_params=record_params,
+                        expert_advice_str=expert_advice_str,
+                        hypothesis=hypothesis,
+                        round_index=round_index,
+                        attempt_in_round=attempt_in_round,
+                    ):
+                        continue
 
                     failure_stage = "training"
                     print("\n[Step 1/3] Training...")

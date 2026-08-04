@@ -1,0 +1,8114 @@
+{
+ "pairs": [
+  {
+   "arms": {
+    "with_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2251629
+     ],
+     "samples": [
+      {
+       "at": 1785818238.3537145,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818238.6189475,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818238.8747494,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818239.12779,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818239.3853278,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 12
+        }
+       ],
+       "own_tree_mib": 12,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818239.6504185,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818239.9101675,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818240.1696568,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818240.429993,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818240.6833553,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818240.9434364,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818241.202022,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818241.4598415,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818241.719545,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818241.9786417,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818242.236995,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 856
+        }
+       ],
+       "own_tree_mib": 856,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818242.492812,
+       "device_used_mib": 2496,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1388
+        }
+       ],
+       "own_tree_mib": 1388,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818242.75121,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818243.002999,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818243.2557945,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818243.512325,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818243.7656364,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818244.0240707,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818244.2783601,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818244.5326874,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818244.7920063,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818245.048632,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818245.302617,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818245.562159,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818245.8182335,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818246.070319,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818246.3242662,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818246.5782657,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818246.833192,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818247.0893214,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818247.3457532,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818247.6019802,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818247.8635106,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818248.1187944,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818248.375975,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818248.6406693,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2251629,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818248.8988218,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818249.1568482,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818249.4140809,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818249.6670837,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818249.9277666,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818250.1902616,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818250.4501498,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818250.7140806,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818250.9739647,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818251.230428,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818251.4897237,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818251.748307,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818252.0047472,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818252.2657745,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818252.5263026,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818252.786157,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818253.042553,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818253.2993314,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818253.5586996,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818253.8152604,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818254.0744004,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818254.3342676,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818254.5935974,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818254.8562727,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818255.1145742,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818255.3718138,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818255.62702,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818255.884651,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818256.1462526,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818256.4092777,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818256.6689467,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2253400,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818256.9301145,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818257.0013788,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    },
+    "without_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2254789
+     ],
+     "samples": [
+      {
+       "at": 1785818257.0517025,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818257.3123884,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818257.5702186,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818257.8291879,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818258.0889118,
+       "device_used_mib": 1126,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 96
+        }
+       ],
+       "own_tree_mib": 96,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818258.3534405,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818258.6090875,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818258.874345,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818259.131751,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818259.3910458,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818259.6502438,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818259.910127,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818260.1663992,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818260.4194624,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818260.6749518,
+       "device_used_mib": 1958,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 850
+        }
+       ],
+       "own_tree_mib": 850,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818260.936114,
+       "device_used_mib": 2516,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1388
+        }
+       ],
+       "own_tree_mib": 1388,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818261.1890683,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818261.441789,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818261.6954975,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818261.9522886,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818262.2059102,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818262.4624178,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818262.716959,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818262.9711235,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818263.2236652,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818263.4818714,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818263.7377517,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818263.99235,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818264.2504795,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818264.5110886,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818264.7704215,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818265.0250452,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818265.2835753,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818265.5415094,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818265.7945702,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818266.0509653,
+       "device_used_mib": 2604,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818266.3089213,
+       "device_used_mib": 2454,
+       "other_mib": 694,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 694
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818266.563074,
+       "device_used_mib": 2460,
+       "other_mib": 700,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 700
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818266.818114,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818267.0725167,
+       "device_used_mib": 1796,
+       "other_mib": 710,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 710
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818267.3298602,
+       "device_used_mib": 1800,
+       "other_mib": 714,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 714
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2254789,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818267.5868027,
+       "device_used_mib": 1011,
+       "other_mib": 762,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 762
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818267.8411386,
+       "device_used_mib": 1101,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818268.1016278,
+       "device_used_mib": 1101,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818268.358258,
+       "device_used_mib": 1101,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 12
+        }
+       ],
+       "own_tree_mib": 12,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818268.6259043,
+       "device_used_mib": 1838,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818268.880837,
+       "device_used_mib": 4540,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818269.1372898,
+       "device_used_mib": 4540,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818269.3979468,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818269.658367,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818269.9152749,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818270.1784086,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818270.438734,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818270.6991527,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818270.9618137,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818271.220792,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818271.4772613,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818271.739742,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818271.9961112,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818272.2574344,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818272.5113246,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818272.7737443,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818273.0363312,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818273.2950253,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818273.558409,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818273.8149586,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818274.077286,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818274.3368704,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818274.5967438,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818274.855997,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818275.1194072,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818275.3766654,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2256517,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818275.540111,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    }
+   },
+   "order": [
+    "with_probe",
+    "without_probe"
+   ],
+   "pair": 1
+  },
+  {
+   "arms": {
+    "with_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2261358
+     ],
+     "samples": [
+      {
+       "at": 1785818296.2774465,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818296.5342677,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818296.793261,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818297.0505779,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818297.3024914,
+       "device_used_mib": 999,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 12
+        }
+       ],
+       "own_tree_mib": 12,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818297.559818,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818297.812135,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818298.0636249,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818298.3223069,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818298.5750678,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818298.8320696,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818299.087264,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818299.3407223,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818299.5915399,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818299.8487518,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818300.1026194,
+       "device_used_mib": 2246,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1298
+        }
+       ],
+       "own_tree_mib": 1298,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818300.364469,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818300.6268516,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818300.8859584,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818301.1434476,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818301.3979585,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818301.649531,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818301.9060855,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818302.1655087,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818302.422656,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818302.6797154,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818302.9349153,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818303.1941478,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818303.4543793,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818303.7081625,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818303.9598541,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818304.2155013,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818304.4772847,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818304.7339842,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818304.9928167,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818305.2437425,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818305.5015063,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818305.754681,
+       "device_used_mib": 1790,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818306.0067577,
+       "device_used_mib": 1790,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2261358,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818306.2651734,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818306.5232105,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818306.7785697,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818307.0378013,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818307.2959383,
+       "device_used_mib": 1700,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818307.553854,
+       "device_used_mib": 2250,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 1844
+        }
+       ],
+       "own_tree_mib": 1844,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818307.8115275,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818308.065117,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818308.3243256,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818308.5744994,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818308.828188,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818309.0824728,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818309.3353612,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818309.591118,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818309.8498929,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818310.1104622,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818310.3668067,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818310.6276968,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818310.886998,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818311.13985,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818311.3974183,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818311.6529007,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818311.9125829,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818312.1682568,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818312.424424,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818312.6868691,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818312.9471858,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818313.201348,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818313.460904,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818313.717297,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818313.9798672,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2263051,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818314.2360654,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818314.2790048,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    },
+    "without_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2257941
+     ],
+     "samples": [
+      {
+       "at": 1785818275.6343963,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818275.8946044,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818276.1514666,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818276.4074478,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818276.6618054,
+       "device_used_mib": 1120,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 24
+        }
+       ],
+       "own_tree_mib": 24,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818276.91818,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818277.1773188,
+       "device_used_mib": 1708,
+       "other_mib": 692,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 692
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818277.4369922,
+       "device_used_mib": 1708,
+       "other_mib": 692,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 692
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818277.6880124,
+       "device_used_mib": 1708,
+       "other_mib": 692,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 692
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818277.946658,
+       "device_used_mib": 1708,
+       "other_mib": 692,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 692
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818278.203446,
+       "device_used_mib": 1708,
+       "other_mib": 692,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 692
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818278.461339,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818278.7216969,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818278.9752774,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818279.2302995,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818279.4881718,
+       "device_used_mib": 2166,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1298
+        }
+       ],
+       "own_tree_mib": 1298,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818279.7479732,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818280.0024514,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818280.259024,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818280.5110724,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818280.768498,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818281.023181,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818281.2770514,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818281.5335145,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818281.7957356,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818282.0534413,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818282.3099241,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818282.5660894,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818282.8236299,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818283.0799665,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818283.3335454,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818283.590062,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818283.8448763,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818284.1016984,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818284.3579292,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818284.612128,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818284.8717303,
+       "device_used_mib": 2464,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818285.1303759,
+       "device_used_mib": 1790,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818285.383742,
+       "device_used_mib": 1790,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2257941,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818285.6467462,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818285.9165273,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818286.1697817,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818286.421854,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818286.6894646,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818286.950127,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818287.2094464,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818287.4684665,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818287.7277713,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818287.987946,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818288.2467654,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818288.504702,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818288.761688,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818289.019615,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818289.2785103,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818289.5373096,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818289.7941399,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818290.051986,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818290.316764,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818290.5713003,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818290.8303473,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818291.0890849,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818291.3549483,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818291.6121433,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818291.8747633,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818292.1341655,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818292.391849,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818292.6529863,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818292.9132032,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818293.1715806,
+       "device_used_mib": 4422,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2259563,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818293.3769686,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    }
+   },
+   "order": [
+    "without_probe",
+    "with_probe"
+   ],
+   "pair": 2
+  },
+  {
+   "arms": {
+    "with_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2264907
+     ],
+     "samples": [
+      {
+       "at": 1785818317.440996,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818317.7025535,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818317.9616616,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818318.219377,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818318.4713414,
+       "device_used_mib": 983,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818318.7371771,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818318.9916863,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818319.2489424,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818319.4997776,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818319.7537153,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818320.0106583,
+       "device_used_mib": 1720,
+       "other_mib": 704,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 704
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818320.2687716,
+       "device_used_mib": 1720,
+       "other_mib": 762,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 762
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818320.521842,
+       "device_used_mib": 1838,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818320.7782013,
+       "device_used_mib": 1838,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818321.0288184,
+       "device_used_mib": 1838,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818321.284277,
+       "device_used_mib": 1966,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 860
+        }
+       ],
+       "own_tree_mib": 860,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818321.539628,
+       "device_used_mib": 2582,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818321.7915044,
+       "device_used_mib": 2582,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818322.043049,
+       "device_used_mib": 2582,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818322.2952926,
+       "device_used_mib": 2582,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818322.5489855,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818322.8060572,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818323.0579746,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818323.3137174,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818323.5668204,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818323.824185,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818324.0841627,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818324.341772,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818324.5978546,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818324.8526242,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818325.104702,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818325.361556,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818325.6142695,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818325.872657,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818326.1276946,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818326.3815184,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818326.6398668,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818326.896282,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818327.1544614,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818327.407497,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818327.6599126,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2264907,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818327.921544,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818328.1821847,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818328.43984,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818328.6953306,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818328.954019,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818329.2091928,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818329.4692311,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818329.727496,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818329.9855165,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818330.2435503,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818330.5009863,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818330.7634313,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818331.0211375,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818331.280056,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818331.5356638,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818331.7899427,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818332.0478556,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818332.3078792,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818332.566757,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818332.8269248,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818333.0883093,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818333.3426404,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818333.6008246,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818333.8540008,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818334.1103115,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818334.3713927,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818334.6332517,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818334.889989,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818335.1489227,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818335.4056482,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818335.6622646,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2266700,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818335.9224675,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818335.962562,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    },
+    "without_probe": {
+     "admission": "admitted",
+     "inference_peak_mib": 3434,
+     "inference_samples_missed": 0,
+     "inference_sampling_complete": true,
+     "own_pids": [
+      2268112
+     ],
+     "samples": [
+      {
+       "at": 1785818336.017732,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818336.2755342,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818336.5290532,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818336.7880995,
+       "device_used_mib": 1103,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818337.04803,
+       "device_used_mib": 1120,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 20
+        }
+       ],
+       "own_tree_mib": 20,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818337.3033526,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818337.5619817,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818337.8179493,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818338.0776353,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818338.3359065,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818338.592569,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818338.8518338,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818339.1146805,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818339.3723118,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818339.626427,
+       "device_used_mib": 1968,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 860
+        }
+       ],
+       "own_tree_mib": 860,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818339.8907561,
+       "device_used_mib": 2496,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1388
+        }
+       ],
+       "own_tree_mib": 1388,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818340.1487284,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818340.404948,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818340.6606076,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818340.9179678,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818341.174681,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818341.4276102,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818341.681461,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818341.9371865,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818342.192052,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818342.4501553,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818342.7052917,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818342.9627495,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818343.2163217,
+       "device_used_mib": 2584,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818343.474642,
+       "device_used_mib": 2454,
+       "other_mib": 694,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 694
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818343.7301128,
+       "device_used_mib": 2458,
+       "other_mib": 698,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 698
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818343.9908998,
+       "device_used_mib": 2462,
+       "other_mib": 702,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 702
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818344.245537,
+       "device_used_mib": 2466,
+       "other_mib": 706,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 706
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818344.5031595,
+       "device_used_mib": 2472,
+       "other_mib": 712,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 712
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818344.7574317,
+       "device_used_mib": 2504,
+       "other_mib": 740,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 740
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818345.0099487,
+       "device_used_mib": 2532,
+       "other_mib": 772,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 772
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818345.263968,
+       "device_used_mib": 2582,
+       "other_mib": 822,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 822
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 1476
+        }
+       ],
+       "own_tree_mib": 1476,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818345.522644,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818345.776736,
+       "device_used_mib": 1910,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2268112,
+         "used_mib": 802
+        }
+       ],
+       "own_tree_mib": 802,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818346.037987,
+       "device_used_mib": 1102,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818346.3029969,
+       "device_used_mib": 1102,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818346.5591118,
+       "device_used_mib": 1102,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818346.8144965,
+       "device_used_mib": 1102,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818347.079904,
+       "device_used_mib": 1840,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 732
+        }
+       ],
+       "own_tree_mib": 732,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818347.3348093,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818347.5953815,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818347.854261,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818348.1130388,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818348.3706067,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818348.6328244,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818348.8884127,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818349.145422,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818349.4009516,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818349.6549528,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818349.907612,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818350.169465,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818350.4283564,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818350.681132,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818350.9362733,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818351.1980574,
+       "device_used_mib": 4542,
+       "other_mib": 824,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 824
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818351.4532425,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818351.7125964,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818351.9699829,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818352.226328,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818352.4811912,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818352.745386,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818353.000157,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818353.2540555,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818353.513085,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818353.775274,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818354.0330622,
+       "device_used_mib": 4562,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [
+        {
+         "pid": 2269804,
+         "used_mib": 3434
+        }
+       ],
+       "own_tree_mib": 3434,
+       "telemetry_available": true
+      },
+      {
+       "at": 1785818354.2384262,
+       "device_used_mib": 1122,
+       "other_mib": 844,
+       "other_processes": [
+        {
+         "pid": 2110124,
+         "used_mib": 844
+        }
+       ],
+       "own_processes": [],
+       "own_tree_mib": 0,
+       "telemetry_available": true
+      }
+     ],
+     "stability_status": "STABLE",
+     "stability_succeeded": true,
+     "training_peak_mib": 1476,
+     "training_samples_missed": 0,
+     "training_sampling_complete": true
+    }
+   },
+   "order": [
+    "with_probe",
+    "without_probe"
+   ],
+   "pair": 3
+  }
+ ],
+ "provenance": {
+  "artifact": "c2_lite_a20_7f8e9ffabdef_c12a__sub1.json",
+  "artifact_sha256": "e9084a927daa0710ae51a5c6a7fed7442ef6ca55b1e6a5c16eb966a451e70516",
+  "gate": "Gate 2 Lite-A attempt 20",
+  "note": "Real driver series from six formal arms run with a live external neighbour (PID 2110124) oscillating 692-844 MiB. Attempt 20 flagged all three pairs contaminated on a 64 MiB global range while every arm measured an identical 1476 MiB. This IS the false negative.",
+  "sha": "7f8e9ffabdef87512e8ac991f9ae89a62934c0a4"
+ }
+}

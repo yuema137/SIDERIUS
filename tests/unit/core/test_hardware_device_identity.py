@@ -199,13 +199,28 @@ class TestAdapter:
 
     def test_it_is_the_only_translation_point(self):
         """A second identity schema is what this adapter exists to
-        prevent; assert no rival constructor appeared."""
+        prevent; assert no rival constructor appeared.
+
+        Checked over the AST rather than the text. The substring form
+        flagged a module whose only mention of the constructor was a
+        docstring explaining why it does NOT call it -- a scan cannot tell
+        an explanation from an instruction, and a guardrail that cries wolf
+        on prose is one somebody eventually exempts. The AST sees calls
+        only, so the property enforced is exactly the one stated.
+        """
+        import ast
         import pathlib
 
         root = pathlib.Path(__file__).resolve().parents[3]
-        rivals = [
-            p.relative_to(root).as_posix()
-            for p in (root / "core").rglob("*.py")
-            if "DeviceIdentity(" in p.read_text(encoding="utf-8") and p.name != "gpu_accounting.py"
-        ]
+        rivals = []
+        for path in (root / "core").rglob("*.py"):
+            if path.name == "gpu_accounting.py":
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                called = isinstance(node, ast.Call) and (
+                    (isinstance(node.func, ast.Name) and node.func.id == "DeviceIdentity")
+                    or (isinstance(node.func, ast.Attribute) and node.func.attr == "DeviceIdentity")
+                )
+                if called:
+                    rivals.append(f"{path.relative_to(root).as_posix()}:{node.lineno}")
         assert not rivals, f"DeviceIdentity constructed outside the adapter: {rivals}"

@@ -486,6 +486,24 @@ def _phase_requirement(sandbox: Any, phase: str) -> tuple[float | None, str | No
     substituted figure would be an assumption wearing a measurement's
     provenance.
     """
+    # V20 PR C2 / C2-6. The TYPED table is the production channel. §8.A
+    # names the duck-typed read below as the gap that "survived PR B and
+    # its whole test suite" — a read no production code satisfied — so a
+    # typed object now carries the requirement, and only an authoritative
+    # measurement can be assembled into one.
+    #
+    # The `getattr` path is kept for the B-G validation harness, which
+    # injects a plain dict and whose runs are evidence about this gate's
+    # behaviour. Same shape as `admission_policy` / `admission_mode`
+    # above: typed first, and when a typed table is present it is
+    # authoritative, so the requirement cannot be read from two
+    # disagreeing places.
+    from core.runtime_control.gpu_requirement import MeasuredRequirementTable
+
+    typed = getattr(sandbox, "measured_requirement_table", None)
+    if isinstance(typed, MeasuredRequirementTable):
+        return typed.for_phase(phase)
+
     table = getattr(sandbox, "measured_requirements", None)
     if not isinstance(table, Mapping):
         return None, None

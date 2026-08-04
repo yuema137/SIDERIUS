@@ -1,0 +1,2 @@
+[gpu-measure] punet_formal_ordering_test_001:training: punet phase=training device=cuda
+[gpu-measure] punet_formal_ordering_test_001:training: DEVICE_MISMATCH
