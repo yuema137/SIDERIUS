@@ -250,9 +250,20 @@ campaign_spend() {
     IFS=: read -r name _ _ _ <<< "$spec"
     args+=(--run-name "$name")
   done
+  #
+  # FAIL-CLOSED. This used to end `2>/dev/null || echo "0 0.00"`, so ANY
+  # failure of the accounting helper -- a missing interpreter, an unreadable
+  # root, a refused membership list -- became "zero spent". Zero does not
+  # read as "unknown": it reads as budget available, and it silently
+  # disarms both the token and the cost cap. The queue would then launch
+  # more work with no authoritative accounting behind it.
+  #
+  # The exit status and stderr are now preserved for the caller to act on.
+  # Deciding what to do about a failure is the caller's job, not this
+  # function's.
   "$REPO/.venv/bin/python" "$REPO/scripts/campaign_spend.py" \
       --root "$WS_ROOT" --campaign-id "$CAMPAIGN_ID" "${args[@]}" \
-      --cost-per-mtok "$COST_PER_MTOK_USD" 2>/dev/null || echo "0 0.00"
+      --cost-per-mtok "$COST_PER_MTOK_USD"
 }
 
 # Launch one chain in its own screen; marker carries the exit code.
@@ -440,7 +451,36 @@ for wave_spec in "${WAVES[@]}"; do
 
   # Token / cost caps. Counted from the per-chain ledgers rather than a
   # running total the queue keeps, so a restart cannot lose the spend.
-  read -r SPENT_TOKENS SPENT_COST <<< "$(campaign_spend)"
+  # Budget accounting is a PRECONDITION for launching more work, so an
+  # unreadable answer refuses the wave. It is deliberately NOT reported as
+  # `token_cap_reached`: that would blame the campaign's own spend for an
+  # infrastructure failure, and would tell an operator to raise a cap that
+  # was never reached. The shape follows
+  # `pair_infeasible_under_host_quota` -- a precondition the queue could
+  # not satisfy, recorded and exited 1. Exit 99 would be wrong: it means
+  # "stopped on request", which this is not.
+  # `set -e` is in effect here -- `_chain_common.sh:40` sets it and this
+  # runner sources it at :61. A bare `VAR="$(cmd)"` whose command fails
+  # therefore terminates the shell IMMEDIATELY, before any check runs. An
+  # earlier draft of this fix did exactly that: the queue still refused to
+  # launch, but it died with no diagnostic, no `record_queue_stop` and no
+  # recorded reason -- fail-closed by accident rather than by design, and
+  # indistinguishable in the artifacts from a crash.
+  #
+  # `|| SPEND_RC=$?` makes the assignment part of a compound command, which
+  # `set -e` does not act on, so the refusal below is reachable.
+  SPEND_OUT=""
+  SPEND_RC=0
+  SPEND_OUT="$(campaign_spend)" || SPEND_RC=$?
+  if [ "$SPEND_RC" -ne 0 ] || ! [[ "$SPEND_OUT" =~ ^[0-9]+[[:space:]]+[0-9]+\.[0-9]{2}$ ]]; then
+    log "WAVE $WAVE: budget accounting UNAVAILABLE (rc=$SPEND_RC, output='${SPEND_OUT}')"
+    log "  command: scripts/campaign_spend.py --root $WS_ROOT --campaign-id $CAMPAIGN_ID ..."
+    log "  refusing to launch further work without authoritative spend"
+    record_queue_stop "budget_accounting_unavailable" "$WAVE" \
+      "campaign_spend exited $SPEND_RC with output '${SPEND_OUT}'; no chain launched"
+    exit 1
+  fi
+  read -r SPENT_TOKENS SPENT_COST <<< "$SPEND_OUT"
   log "WAVE $WAVE budget: ${SPENT_TOKENS} tokens (cap ${CAMPAIGN_TOKEN_CAP}), \$${SPENT_COST} (cap \$${CAMPAIGN_COST_CAP_USD}), elapsed ${ELAPSED}s of ${CAMPAIGN_WALL_SECONDS}s"
   if [ "$SPENT_TOKENS" -ge "$CAMPAIGN_TOKEN_CAP" ]; then
     record_queue_stop "token_cap_reached" "$WAVE" \

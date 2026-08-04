@@ -343,3 +343,131 @@ class TestSpendMembershipIsExplicitInProduction:
             _sourced("campaign_spend", CAMPAIGN_ID="v20a", WS_ROOT=str(tmp_path)).split()[0]
             == "700"
         )
+
+
+def _sourced_full(snippet: str, **env) -> subprocess.CompletedProcess[str]:
+    """Like `_sourced`, but keeps rc and stderr — which is the point here."""
+    return subprocess.run(
+        ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{RUNNER}'; {snippet}"],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        env=dict(os.environ, **{k: str(v) for k, v in env.items()}),
+    )
+
+
+class TestBudgetAccountingFailsClosed:
+    """Unreadable spend must refuse the wave, never read as zero.
+
+    `campaign_spend()` used to end `2>/dev/null || echo "0 0.00"`. Any
+    failure of the helper — missing interpreter, unreadable root, refused
+    membership — became "zero spent". Zero does not read as *unknown*: it
+    reads as *budget available*, disarming both the token and cost caps at
+    `v19_queue_runner.sh:446-453` and letting the queue launch more work
+    with no authoritative accounting behind it.
+    """
+
+    def test_the_zero_fallback_is_gone_from_the_helper(self):
+        """MUTATION TARGET: restoring `|| echo "0 0.00"`.
+
+        Scanned over CODE lines only. The fix's own comment quotes the
+        removed fallback verbatim, and a bare substring scan trips on the
+        explanation — the same false positive that has now caught three
+        guardrails in this work.
+        """
+        body = RUNNER.read_text(encoding="utf-8")
+        fn = body[body.index("campaign_spend() {") : body.index("# Launch one chain")]
+        code = [ln for ln in fn.splitlines() if not ln.strip().startswith("#")]
+        joined = "\n".join(code)
+        assert "0 0.00" not in joined, "the helper still substitutes zero for a failure"
+        assert "2>/dev/null" not in joined, "the helper still discards stderr"
+
+    def test_the_helper_propagates_a_nonzero_exit(self, tmp_path):
+        """An unusable membership list must surface, not become zero.
+
+        Injected with a duplicated ROSTER entry — a genuine refusal that
+        keeps the array non-empty. Two earlier injections were inert or
+        wrong: `REPO` cannot be overridden (the runner computes it at
+        `:59`), and emptying the ROSTER trips `set -u` instead, killing the
+        shell for an unrelated reason.
+        """
+        r = _sourced_full(
+            'ROSTER+=("${ROSTER[0]}"); SPEND_OUT=""; SPEND_RC=0; '
+            'SPEND_OUT="$(campaign_spend)" || SPEND_RC=$?; '
+            'echo "rc=$SPEND_RC out=[$SPEND_OUT]"',
+            WS_ROOT=str(tmp_path),
+            CAMPAIGN_ID="camp1",
+        )
+        assert "rc=0 " not in r.stdout, f"a failed helper reported success: {r.stdout!r}"
+        assert "out=[]" in r.stdout, "a failed helper still produced a spend total"
+        assert "duplicate run name" in r.stderr, "stderr was discarded"
+
+    def test_the_guard_survives_set_e(self):
+        """MUTATION TARGET: `SPEND_OUT="$(campaign_spend)"; SPEND_RC=$?`.
+
+        `set -e` is active — `_chain_common.sh:40` sets it and the runner
+        sources it at `:61`. A bare assignment from a failing command
+        substitution terminates the shell BEFORE the refusal runs, so the
+        queue would stop with no diagnostic, no `record_queue_stop` and no
+        recorded reason: fail-closed by accident, and indistinguishable in
+        the artifacts from a crash. The first draft of this fix did exactly
+        that, and this test is why it was found.
+        """
+        body = RUNNER.read_text(encoding="utf-8")
+        block = body[body.index('SPEND_OUT=""') : body.index("WAVE $WAVE budget:")]
+        assert 'SPEND_OUT="$(campaign_spend)" || SPEND_RC=$?' in block, (
+            "the spend capture is not guarded against set -e"
+        )
+        # And prove set -e really is on, so the guard is not decoration.
+        r = _sourced_full("case $- in *e*) echo ACTIVE;; *) echo OFF;; esac")
+        assert r.stdout.strip() == "ACTIVE", "set -e is no longer active; re-check this guard"
+
+    def test_the_caller_refuses_and_records_budget_accounting_unavailable(self):
+        """The wave loop must stop on unreadable accounting, with a reason
+        that is not a cap breach."""
+        body = RUNNER.read_text(encoding="utf-8")
+        block = body[body.index('SPEND_OUT="$(campaign_spend)"') : body.index("WAVE $WAVE budget:")]
+        assert "budget_accounting_unavailable" in block
+        assert "record_queue_stop" in block
+        assert "exit 1" in block
+
+    def test_the_failure_is_not_labelled_a_cap_breach(self):
+        """MUTATION TARGET: relabelling it `token_cap_reached`.
+
+        That would blame the campaign's own spend for an infrastructure
+        failure and tell an operator to raise a cap that was never reached.
+        """
+        body = RUNNER.read_text(encoding="utf-8")
+        block = body[body.index('SPEND_OUT="$(campaign_spend)"') : body.index("WAVE $WAVE budget:")]
+        for wrong in ("token_cap_reached", "cost_cap_reached", "operator_stop_requested"):
+            assert wrong not in block, f"accounting failure is being reported as {wrong}"
+
+    def test_it_does_not_use_the_operator_stop_exit_code(self):
+        """99 means 'stopped on request — not a fault to restart from'
+        (`:376-378`). An accounting failure is a fault."""
+        body = RUNNER.read_text(encoding="utf-8")
+        block = body[body.index('SPEND_OUT="$(campaign_spend)"') : body.index("WAVE $WAVE budget:")]
+        assert "CHAIN_STOP_EXIT_CODE" not in block
+
+    @pytest.mark.parametrize("bad", ["", "not a number", "123", "12 abc", "0 0.0"])
+    def test_malformed_output_does_not_satisfy_the_guard(self, bad):
+        """The guard's own regex, exercised directly: only `<int> <n.nn>`
+        may pass, so a truncated or garbled line cannot become a total."""
+        r = _sourced_full(
+            f'if [[ "{bad}" =~ ^[0-9]+[[:space:]]+[0-9]+\\.[0-9]{{2}}$ ]]; '
+            "then echo ACCEPTED; else echo REFUSED; fi"
+        )
+        assert r.stdout.strip() == "REFUSED", f"{bad!r} would have been read as a spend total"
+
+    def test_a_well_formed_total_still_passes(self):
+        r = _sourced_full(
+            'if [[ "4477 13.43" =~ ^[0-9]+[[:space:]]+[0-9]+\\.[0-9]{2}$ ]]; '
+            "then echo ACCEPTED; else echo REFUSED; fi"
+        )
+        assert r.stdout.strip() == "ACCEPTED"
+
+    def test_the_membership_arguments_are_still_passed(self):
+        """The Phase-0 fix must survive this one."""
+        body = RUNNER.read_text(encoding="utf-8")
+        fn = body[body.index("campaign_spend() {") : body.index("# Launch one chain")]
+        assert "--run-name" in fn and 'for spec in "${ROSTER[@]}"' in fn
