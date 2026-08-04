@@ -78,6 +78,41 @@ CAMPAIGN_ITERATIONS="${CAMPAIGN_ITERATIONS:-10}"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 MAX_CONC=2
+# --- campaign path resolution (V20 PR E, E-C1) -----------------------------
+# THIS BLOCK IS DELIBERATELY INERT. Every default below resolves to the
+# path in use TODAY, so this commit moves nothing and no consumer reads a
+# new variable yet. E-C2 flips the defaults and repoints the consumers in
+# one reviewed diff; landing the shape first makes the model reviewable
+# while a parity test proves nothing moved.
+#
+# Scoping exists because campaign identity currently lives in a FILENAME
+# PREFIX (`${CAMPAIGN_ID}_wave_state.jsonl`) under a shared root, and a
+# prefix is easy to forget: QUEUE_STOP_FILE omits it entirely, so one
+# campaign's STOP halts every campaign sharing that root.
+#
+# CAMPAIGN_HOME is the ONE overridable root. The three directories below
+# derive from it and are deliberately NOT independently overridable:
+# separate overrides would let two campaigns be pointed at a single state
+# directory, recreating the cross-campaign authority defect this PR exists
+# to remove.
+#
+#   E-C1 (this commit)       E-C2 (next)
+#   CAMPAIGN_HOME=$WS_ROOT   CAMPAIGN_HOME=$WS_ROOT/$CAMPAIGN_ID
+#   ...DIR=$CAMPAIGN_HOME    ...DIR=$CAMPAIGN_HOME/{control,queue_state,pair_summaries}
+#
+# No mkdir here, and nothing at definition scope touches the filesystem:
+# test_source_safe_entry.py asserts that merely sourcing this file creates
+# nothing, and that guard must keep holding.
+#
+# CAMPAIGN_ID is not yet validated as a path component because it is not
+# yet one. The D-E-9 guard lands in E-C2, in the same commit that makes it
+# a directory name.
+CAMPAIGN_HOME="${CAMPAIGN_HOME:-$WS_ROOT}"
+CAMPAIGN_CONTROL_DIR="$CAMPAIGN_HOME"
+QUEUE_STATE_DIR="$CAMPAIGN_HOME"
+PAIR_SUMMARY_DIR="$CAMPAIGN_HOME"
+CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/${CAMPAIGN_ID}_campaign.json"
+
 LOGF="$WS_ROOT/${CAMPAIGN_ID}_queue_runner.log"
 WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
 # C13: a wave cannot wait forever. On breach the queue STOPS and reports;

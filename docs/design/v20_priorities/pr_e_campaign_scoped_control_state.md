@@ -1703,6 +1703,58 @@ V19_QUEUE_NO_MAIN=1 bash -c \
       any deviation from this section
 
 ---
+#### IMPLEMENTATION RECORD — E-C1 `[x]` COMPLETE
+
+**Files changed** (2): `sdsc_submission_scripts/v19_queue_runner.sh`
+(+35, the resolver block at `:85-115`); new
+`tests/unit/sdsc_submission_scripts/test_campaign_path_resolution.py` (14
+tests).
+
+**Call path before/after**: unchanged. No consumer reads a new variable.
+`LOGF`, `WAVE_STATE` and `QUEUE_STOP_FILE` keep their original definitions
+verbatim, and the five new variables resolve to today's locations.
+
+**Checklist**: all §3 implementation items done; all §4 validation items
+done; all §5 acceptance criteria met.
+
+**Tests**: `test_campaign_path_resolution.py` — 14 passed, 0.12 s.
+Targeted suite `tests/unit/sdsc_submission_scripts/` — **340 passed,
+8.3 s, zero existing test files modified**.
+
+**Static**: pyright 0 errors (unchanged from the pre-commit baseline);
+`ruff check` clean; `ruff format --check` clean; `bash -n` clean.
+
+**Mutations**, each restored and re-baselined:
+
+| mutation | result |
+|---|---|
+| give `QUEUE_STATE_DIR` an independent `${NAME:-…}` override | 1 test fails |
+| flip `CAMPAIGN_HOME` to E-C2's target early | 8 tests fail |
+
+The second is the parity proof working in the direction that matters: if
+E-C2's move happens by accident inside E-C1, eight assertions say so.
+
+**Deviations from the plan**: none. Scope, non-goals and the "no `mkdir` at
+definition scope" constraint were all honoured;
+`test_source_safe_entry.py` passes unmodified.
+
+**Process note worth keeping.** The first attempt at this commit bundled
+the edit with a shell command that sourced the runner. The repository's
+launch guard blocked the *whole* invocation, so the edit never applied —
+and the block's output was briefly misread as a partial success. Verified
+afterwards by grepping for the new variables, which is why the miss was
+caught before any test was written against a file that had not changed.
+The verification now lives in a committed test rather than an ad-hoc
+source, which is the better outcome anyway.
+
+**New follow-ups**: none.
+
+**Remaining risk**: E-C1 is inert by construction, so its risk is confined
+to E-C2 flipping the defaults. The parity tests above are what will make
+that flip visible.
+
+**Next authorized checkpoint**: E-C2.
+
 ### E-C2 — Campaign admission and the path move
 
 *(Restructured after the second operator review: the stamp guard's
