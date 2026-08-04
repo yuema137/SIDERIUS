@@ -1315,18 +1315,23 @@ the evidence named in its row.
 
 ### E5 — Recovery validation
 
-- [ ] Two synthetic campaigns under one root, launched and stopped
-      independently, with `launch_chain` stubbed — no GPU, no API
-- [ ] Campaign A stopped → campaign B launches
-- [ ] Wrong-campaign STOP ignored; correct-campaign STOP honoured
-- [ ] Both campaigns' state files coexist and neither is written by the
-      other's runner
-- [ ] A legacy global STOP present throughout, and never honoured
-- [ ] **Evidence**: one test module,
+- [x] Two synthetic campaigns under one root, launched and stopped
+      independently, with `screen` shimmed — no GPU, no API — E-C7
+- [x] Campaign A stopped → campaign B launches — E-C7; proved by B
+      reaching the shim, not by the absence of a stop record
+- [x] Wrong-campaign STOP ignored; correct-campaign STOP honoured
+      (exit 99 + `operator_stop_requested`) — E-C7
+- [x] Both campaigns' state files coexist and neither is written by the
+      other's runner — E-C7, asserted by bytes **and** `st_mtime_ns`
+      over each neighbouring tree
+- [x] A legacy global STOP present throughout, and never honoured — E-C7;
+      it also survives byte- and mtime-identical
+- [x] **Evidence**: one test module,
       `test_multi_campaign_isolation.py`, **fully green in the committed
-      suite**, plus a **separate documented mutation run** showing it
-      fails when `QUEUE_STOP_FILE`'s default is temporarily reverted to
-      `$WS_ROOT/STOP` in the source, and green again after restoring
+      suite** (11 tests), plus **two separate documented mutation runs**:
+      reverting `QUEUE_STOP_FILE`'s default to `$WS_ROOT/STOP` fails 3,
+      and reverting `CAMPAIGN_HOME` to `$WS_ROOT` fails 6; both restored
+      and re-run green
 
 ---
 
@@ -1512,7 +1517,7 @@ subsections below are the implementation contract.
 | **E-C4** `[x]` | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** `[x]` | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
 | **E-C6** `[x]` | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
-| **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
+| **E-C7** `[x]` | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
 | **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
 
 **Four structural rulings from the second operator review are baked
@@ -3632,6 +3637,66 @@ all, it is a broken test with an alibi.
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the module output (fully green), the CI result, and the separate
       mutation-run evidence
+
+#### IMPLEMENTATION RECORD — E-C7 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C6b `f3c7cf5b`.
+
+**Behavior Delta: none. Zero production lines.**
+`git diff --stat -- sdsc_submission_scripts/ core/ scripts/` is **empty**
+— one new file,
+`tests/unit/sdsc_submission_scripts/test_multi_campaign_isolation.py`.
+
+That is the checkpoint's acceptance condition and it held: nothing in
+E-C2..E-C6b needed correcting to make the isolation observable, so the
+preceding implementation evidence was sufficient.
+
+**The fixture** — §9 Layer 2, built once and reused:
+
+```text
+<root>/STOP                  legacy global — no authority over anything
+<root>/alpha/control/STOP    alpha is stopped
+<root>/alpha/{control,queue_state,pair_summaries}/
+<root>/beta/{control,queue_state,pair_summaries}/
+```
+
+Every test runs the **real launcher** against that tree and then looks at
+the filesystem. A PATH `screen` shim records each invocation, so
+"nothing launched" *and* "something launched" are both assertions —
+`beta` proving it is unaffected by reaching its launch, not merely by
+lacking a stop record.
+
+**Tests** — 11, all green in 50.7 s.
+`tests/unit/sdsc_submission_scripts/`: **441 passed**.
+
+| Class | Count | Property |
+|---|---|---|
+| `TestOneCampaignsStopDoesNotStopTheOther` | 3 | **the 08:17 incident**: `alpha` exits 99 with `operator_stop_requested` and launches nothing; `beta` reaches its launch shim; neither honours `$WS_ROOT/STOP`, which survives byte- and mtime-identical |
+| `TestNeitherCampaignWritesIntoTheOther` | 4 | each run leaves the neighbour's whole tree byte- and mtime-identical; each stamps only its own home; canonical **and** derived records stay in their own home and never name the other campaign |
+| `TestTheCampaignsCannotBeConfusedForEachOther` | 3 | disjoint run names, screen sessions and `EXIT_DIR` markers; `record_id`s prefixed by their own campaign with an empty intersection; pointing `beta` at `alpha`'s home is refused by the stamp with `alpha`'s tree untouched |
+| `TestLegacyAdoptionIsPerCampaign` | 1 | `alpha` adopts its pre-PR-E file and skips; `beta` adopts nothing and launches; the legacy file is not written to |
+
+**Negative controls — executed against the implementation, and NOT left
+in the suite.** An `xfail`-shaped test that passes by failing is
+indistinguishable from a broken test six months later, so the module
+asserts correct behaviour only and the controls are run as mutations:
+
+| Mutation | Result |
+|---|---|
+| `QUEUE_STOP_FILE` default back to `$WS_ROOT/STOP` — the literal 08:17 defect | **3 fail**: `beta` stops on `alpha`'s file; both honour the legacy STOP; the launch sets collide |
+| `CAMPAIGN_HOME` back to `$WS_ROOT` — both campaigns share one home | **6 fail**: cross-tree writes, a shared stamp, colliding markers, and legacy adoption leaking across campaigns |
+
+Both restored and the module re-run green, verified by `grep -cF`.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean.
+
+**Deviations**: none. One harness adjustment during writing — `_run`
+gained `**env` so the foreign-stamp case could pass `CAMPAIGN_HOME`;
+test-side only.
+
+**Next authorized checkpoint**: E-C8 (doc sync, last), then the full
+suite and one Draft PR.
 
 ---
 
