@@ -158,10 +158,16 @@ class TestCampaignIdentity:
         ]
 
     def test_queue_state_and_log_carry_the_campaign_id(self, tmp_path):
+        """E-C2 changed the MECHANISM, not the property: identity used to
+        be a filename prefix (`camp1_wave_state.jsonl`) and is now a
+        directory segment (`camp1/queue_state/wave_state.jsonl`). The
+        defect guarded is the same one — a queue-state path two campaigns
+        can both resolve to — and the directory form is what fixed it, so
+        the assertion asks for a path SEGMENT rather than a prefix."""
         out = _sourced(
             'echo "$WAVE_STATE"; echo "$LOGF"', CAMPAIGN_ID="camp1", WS_ROOT=str(tmp_path)
         )
-        assert all("camp1_" in line for line in out.splitlines())
+        assert all("/camp1/" in line for line in out.splitlines()), out
 
     def test_a_fresh_campaign_cannot_collide_with_a_previous_one(self):
         """Distinct ids must produce entirely disjoint run names."""

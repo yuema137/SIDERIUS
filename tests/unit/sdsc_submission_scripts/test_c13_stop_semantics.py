@@ -172,8 +172,15 @@ class TestQueueRunnerStopSemantics:
 
     def test_the_queue_stop_record_is_valid_json(self, tmp_path):
         state = tmp_path / "wave_state.jsonl"
+        # LOGF is pinned for the same reason WAVE_STATE always was: this
+        # test calls the helper directly, bypassing main(), so nothing has
+        # created the directory the default resolves into. In production
+        # `log()` is unreachable before campaign admission creates
+        # `queue_state/` — asserted by
+        # test_campaign_admission.py::test_no_log_call_precedes_admission.
         result = self._sourced(
-            f"WAVE_STATE='{state}'; record_queue_stop operator_stop_requested 2 'because'",
+            f"WAVE_STATE='{state}'; LOGF='{tmp_path}/queue_runner.log'; "
+            "record_queue_stop operator_stop_requested 2 'because'",
             WS_ROOT=str(tmp_path),
         )
         assert result.returncode == 0
@@ -194,6 +201,7 @@ class TestQueueRunnerStopSemantics:
             f"""
             set +e   # _chain_common.sh sets errexit; we want the return code
             WAVE_STATE='{state}'
+            LOGF='{tmp_path}/queue_runner.log'   # see the note above
             chain_screen_alive() {{ return 0; }}   # a chain that never finishes
             sleep() {{ return 0; }}                 # make the bounded wait instant
             wait_and_record 1 start never_finishes; echo "rc=$?"

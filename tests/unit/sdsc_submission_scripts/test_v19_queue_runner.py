@@ -102,7 +102,12 @@ class TestWaveStateMachine:
     persisted status, not log text)."""
 
     def _state_env(self, tmp_path: Path, records: list[dict]) -> dict:
-        state = tmp_path / "v19_wave_state.jsonl"
+        # E-C2: the queue state moved from a campaign-PREFIXED file under
+        # the shared root to a campaign-scoped DIRECTORY. The defect class
+        # here is unchanged — a completed chain must be recognised as
+        # completed — only the path it is recognised from.
+        state = tmp_path / "v19" / "queue_state" / "wave_state.jsonl"
+        state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(
             "".join(
                 f'{{"run": "{r["run"]}", "wave": {r["wave"]}, "exit": {r["exit"]}, '
@@ -274,7 +279,7 @@ class TestOnlySelection:
         assert r.returncode == 1
         assert "unknown name" in r.stderr
         assert "v19_arch_15_19" in r.stderr
-        assert not (tmp_path / "v19_wave_state.jsonl").exists()
+        assert not (tmp_path / "v19" / "queue_state" / "wave_state.jsonl").exists()
 
     def test_duplicate_fails(self, tmp_path):
         r = _run(tmp_path, "--only", "v19_arch_15_19,v19_arch_15_19")
@@ -293,13 +298,22 @@ class TestOnlySelection:
 
     def test_completed_only_selection_skips_and_exits_clean(self, tmp_path):
         """A targeted run of an already-completed chain skips it (never
-        relaunched) and exits 0 without touching screens."""
-        state = tmp_path / "v19_wave_state.jsonl"
+        relaunched) and exits 0 without touching screens.
+
+        That is the defect this test catches, and E-C2 did not change it:
+        relaunching a completed chain clobbers its finished workspace.
+        Only the state and log LOCATIONS moved — from campaign-prefixed
+        files under the shared root into the campaign's own directory.
+        The legacy-filename variant of this scenario arrives in E-C3,
+        where adoption exists to read it.
+        """
+        state = tmp_path / "v19" / "queue_state" / "wave_state.jsonl"
+        state.parent.mkdir(parents=True)
         state.write_text(
             '{"run": "v19_arch_15_19", "wave": 1, "exit": 0, "start": "s", "end": "e"}\n'
         )
         r = _run(tmp_path, "--only", "v19_arch_15_19")
         assert r.returncode == 0, r.stderr
-        log = (tmp_path / "v19_queue_runner.log").read_text()
+        log = (tmp_path / "v19" / "queue_state" / "queue_runner.log").read_text()
         assert "SKIP v19_arch_15_19: already completed" in log
         assert "LAUNCHED" not in log

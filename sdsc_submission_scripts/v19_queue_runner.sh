@@ -78,43 +78,45 @@ CAMPAIGN_ITERATIONS="${CAMPAIGN_ITERATIONS:-10}"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
 MAX_CONC=2
-# --- campaign path resolution (V20 PR E, E-C1) -----------------------------
-# THIS BLOCK IS DELIBERATELY INERT. Every default below resolves to the
-# path in use TODAY, so this commit moves nothing and no consumer reads a
-# new variable yet. E-C2 flips the defaults and repoints the consumers in
-# one reviewed diff; landing the shape first makes the model reviewable
-# while a parity test proves nothing moved.
+# --- campaign path resolution (V20 PR E, E-C2) -----------------------------
+# Campaign identity used to live in a FILENAME PREFIX
+# (`${CAMPAIGN_ID}_wave_state.jsonl`) under a shared root, and a prefix is
+# easy to forget: QUEUE_STOP_FILE omitted it entirely, so ONE campaign's
+# STOP halted every campaign sharing that root. That is the 08:17 incident.
+# A directory cannot be forgotten the way a prefix can.
 #
-# Scoping exists because campaign identity currently lives in a FILENAME
-# PREFIX (`${CAMPAIGN_ID}_wave_state.jsonl`) under a shared root, and a
-# prefix is easy to forget: QUEUE_STOP_FILE omits it entirely, so one
-# campaign's STOP halts every campaign sharing that root.
+# WS_ROOT is a campaign COLLECTION root — its default value happens to be
+# named `v19`, which looks like a campaign but is not one. Two campaigns
+# under one collection root is the normal case and the case that broke.
 #
-# CAMPAIGN_HOME is the ONE overridable root. The three directories below
-# derive from it and are deliberately NOT independently overridable:
-# separate overrides would let two campaigns be pointed at a single state
-# directory, recreating the cross-campaign authority defect this PR exists
-# to remove.
-#
-#   E-C1 (this commit)       E-C2 (next)
-#   CAMPAIGN_HOME=$WS_ROOT   CAMPAIGN_HOME=$WS_ROOT/$CAMPAIGN_ID
-#   ...DIR=$CAMPAIGN_HOME    ...DIR=$CAMPAIGN_HOME/{control,queue_state,pair_summaries}
+# CAMPAIGN_HOME is the ONE overridable root; it moves a campaign
+# coherently. The three directories below derive from it and are
+# deliberately NOT independently overridable: separate overrides would let
+# two campaigns be pointed at a single state directory, recreating the
+# cross-campaign authority defect this PR exists to remove. A
+# configuration surface that can reconstruct the defect is not a
+# configuration surface.
 #
 # No mkdir here, and nothing at definition scope touches the filesystem:
 # test_source_safe_entry.py asserts that merely sourcing this file creates
-# nothing, and that guard must keep holding.
+# nothing, and that guard must keep holding. The directories are created
+# by the admission guard in main(), which validates CAMPAIGN_ID FIRST —
+# these expansions are just strings until then, so a `..` id resolves a
+# path here but can never reach a `mkdir`.
 #
-# CAMPAIGN_ID is not yet validated as a path component because it is not
-# yet one. The D-E-9 guard lands in E-C2, in the same commit that makes it
-# a directory name.
-CAMPAIGN_HOME="${CAMPAIGN_HOME:-$WS_ROOT}"
-CAMPAIGN_CONTROL_DIR="$CAMPAIGN_HOME"
-QUEUE_STATE_DIR="$CAMPAIGN_HOME"
-PAIR_SUMMARY_DIR="$CAMPAIGN_HOME"
-CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/${CAMPAIGN_ID}_campaign.json"
+# The three subdirectory names are also declared in
+# `core/campaign_identity.py` (CAMPAIGN_SUBDIRS), which is what actually
+# creates them. The duplication is unavoidable — LOGF must resolve before
+# the runner may call Python — so a parity test pins the two lists
+# together instead.
+CAMPAIGN_HOME="${CAMPAIGN_HOME:-$WS_ROOT/$CAMPAIGN_ID}"
+CAMPAIGN_CONTROL_DIR="$CAMPAIGN_HOME/control"
+QUEUE_STATE_DIR="$CAMPAIGN_HOME/queue_state"
+PAIR_SUMMARY_DIR="$CAMPAIGN_HOME/pair_summaries"
+CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/campaign.json"
 
-LOGF="$WS_ROOT/${CAMPAIGN_ID}_queue_runner.log"
-WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
+LOGF="$QUEUE_STATE_DIR/queue_runner.log"
+WAVE_STATE="$QUEUE_STATE_DIR/wave_state.jsonl"
 # C13: a wave cannot wait forever. On breach the queue STOPS and reports;
 # it never kills a running chain on its own — that stays an operator act.
 # 72 h per wave (operator 2026-07-31). The former 24 h was sized for a
@@ -136,7 +138,15 @@ COST_PER_MTOK_USD="${COST_PER_MTOK_USD:-3.00}"
 CAMPAIGN_START_EPOCH="$(date -u +%s)"
 # C13: operator stop. Either touch this file or signal the runner; the
 # queue then finishes what is already running and starts nothing new.
-QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$WS_ROOT/STOP}"
+#
+# BD-1: the DEFAULT moved into the campaign's own control directory
+# (E-C2). It used to be `$WS_ROOT/STOP`, shared by every campaign under
+# the root — stopping one stopped all of them. The explicit override
+# survives for compatibility only: the docs table and
+# test_c13_stop_semantics.py both pass it, and operator muscle memory
+# expects it to work. It is NOT a general-purpose relocation knob, and a
+# legacy `$WS_ROOT/STOP` is no longer consulted at all.
+QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$CAMPAIGN_CONTROL_DIR/STOP}"
 #: Exit code a chain uses when it stopped on request (run_chain.sh).
 CHAIN_STOP_EXIT_CODE=99
 QUEUE_STOP_SIGNAL=""
@@ -301,6 +311,26 @@ campaign_spend() {
       --cost-per-mtok "$COST_PER_MTOK_USD"
 }
 
+# Admit this campaign to its home, or refuse. Prints "<outcome> <stamp>".
+#
+# Delegated to Python because the ORDER is the guarantee and one function
+# has to own it: validate the id -> inspect the home -> validate any
+# existing stamp -> create the directories -> publish the stamp. Two of
+# those steps are refusals that must happen before a specific side effect
+# (an invalid id before ANY mkdir; a foreign stamp before ANY write), and
+# an order split between a shell script and a helper is not checkable.
+#
+# It also needs the `os.link` publish that makes "first writer wins" true
+# under concurrency, which shell has no clean equivalent for.
+admit_campaign() {
+  "$REPO/.venv/bin/python" "$REPO/scripts/campaign_admission.py" \
+      --campaign-id "$CAMPAIGN_ID" \
+      --ws-root "$WS_ROOT" \
+      --campaign-home "$CAMPAIGN_HOME" \
+      --runner "${BASH_SOURCE[0]##*/}" \
+      --runner-pid "$$"
+}
+
 # Launch one chain in its own screen; marker carries the exit code.
 launch_chain() {
   local RUN="$1" SCOPE="$2" FILES="$3" FLAVOR="$4"
@@ -446,7 +476,55 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- campaign admission (V20 PR E, E-C2) -----------------------------------
+# The first thing main() does after parsing arguments, and BEFORE any
+# state write, any STOP read, any log line and any launch. Nothing above
+# this point touches the filesystem: argument parsing reports with
+# `echo … >&2`, never `log`, because LOGF now lives in a directory this
+# guard is what creates.
+#
+# FAIL-CLOSED, deliberately, and recorded as such (E-C2 §3). The sibling
+# helper `campaign_spend` once ended `|| echo "0 0.00"`, and a swallowed
+# failure there produced a zero spend that read as "budget available".
+# Swallowing a failure HERE would be worse: it would skip the guard
+# entirely and launch a campaign into a directory whose owner was never
+# proven. There is no safe default identity, so an unusable answer refuses.
+#
+# `set -e` is in effect (`_chain_common.sh:40`, sourced at :61), so a bare
+# `VAR="$(admit_campaign)"` would terminate the shell at the failure —
+# before the diagnostic below could run. `|| ADMIT_RC=$?` makes the
+# assignment part of a compound command, which `set -e` does not act on,
+# so the refusal is reachable. (§3a.4)
+#
+# The reason is reported to STDERR and is deliberately NOT appended to the
+# wave state: writing a record about campaign A's refused launch into
+# whatever state lives at campaign B's home is exactly the cross-campaign
+# write this PR removes — and on a refusal the state directory may not
+# exist at all.
+ADMIT_OUT=""
+ADMIT_RC=0
+ADMIT_OUT="$(admit_campaign)" || ADMIT_RC=$?
+if [ "$ADMIT_RC" -ne 0 ]; then
+  echo "[v19-queue] campaign admission REFUSED (rc=$ADMIT_RC)" >&2
+  echo "[v19-queue]   campaign_id=$CAMPAIGN_ID" >&2
+  echo "[v19-queue]   campaign_home=$CAMPAIGN_HOME" >&2
+  echo "[v19-queue]   command: scripts/campaign_admission.py (reason above)" >&2
+  echo "[v19-queue]   no directory created by this run, no chain launched" >&2
+  exit 1
+fi
+
+# WS_ROOT holds the chain workspaces, which stay flat and are NOT scoped
+# by campaign (§4.4 — run names already carry the id, and moving them
+# would break campaign_spend.py and every historical report path).
 mkdir -p "$WS_ROOT"
+
+# BD-1 is operator-visible, so the resolved paths are logged at startup:
+# an operator who touches the old shared STOP must be able to see, from
+# the log alone, which file this campaign actually reads.
+log "campaign admission: $ADMIT_OUT"
+log "  campaign_home=$CAMPAIGN_HOME"
+log "  stop file=$QUEUE_STOP_FILE"
+log "  wave state=$WAVE_STATE"
 
 if [ -n "$ONLY" ]; then
   # Targeted SERIAL recovery: validate against the roster, then run the

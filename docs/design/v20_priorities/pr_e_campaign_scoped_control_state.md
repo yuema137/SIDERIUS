@@ -1211,24 +1211,26 @@ the evidence named in its row.
 
 ### E1 — Path model
 
-- [ ] All campaign paths resolved in exactly one block, derived from
+- [x] All campaign paths resolved in exactly one block, derived from
       `CAMPAIGN_HOME`; **only** `WS_ROOT`, `CAMPAIGN_HOME` and the
       compatibility-only `QUEUE_STOP_FILE` are overridable (§4.2)
-- [ ] Setting `QUEUE_STATE_DIR` / `CAMPAIGN_CONTROL_DIR` /
+      — E-C2
+- [x] Setting `QUEUE_STATE_DIR` / `CAMPAIGN_CONTROL_DIR` /
       `PAIR_SUMMARY_DIR` in the environment has **no effect** — proved by
       test, because an override that split them could point two
-      campaigns at one state directory
-- [ ] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
-      compatibility override still works
-- [ ] `WAVE_STATE` and `LOGF` under `queue_state/`
+      campaigns at one state directory — E-C1, re-proved at E-C2
+- [x] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
+      compatibility override still works — E-C2
+- [x] `WAVE_STATE` and `LOGF` under `queue_state/` — E-C2
 - [ ] Wave summaries written **canonical-first**: append + `fsync` the
       JSONL, then atomically write
       `pair_summaries/wave_<n>_<band>.json`, both carrying the same
       `record_id` (D-E-3a)
 - [ ] Gate pair summary and runner log derive from `GATE_RUN_PREFIX`
-- [ ] **Evidence**: a test enumerates every authority-bearing path the
+- [x] **Evidence**: a test enumerates every authority-bearing path the
       runner resolves and asserts each contains the campaign id; it
-      fails if a new path is added without it
+      fails if a new path is added without it — E-C2,
+      `test_campaign_path_resolution.py::test_every_authority_bearing_path_contains_the_campaign_id`
 - [ ] **Evidence**: the wave/pair record is produced by the typed
       atomic writer (D-E-3) and parses as JSON in the two-chain,
       three-chain and aborted-launch cases
@@ -1254,24 +1256,28 @@ the evidence named in its row.
 
 ### E3 — Campaign mismatch protection
 
-- [ ] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
+- [x] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
       `\`, control characters, over-length, and an id **equal to** `.`
       or `..` are refused; an id merely *containing* `..` is **accepted**
-      (D-E-9)
+      (D-E-9) — E-C2. NOTE: an *empty* id cannot reach the validator
+      through the shell (`${CAMPAIGN_ID:-v19}`); see FU-E-11
 - [ ] The same validator guards `GATE_RUN_PREFIX` (D-E-4)
-- [ ] One guard owns the whole ordered admission sequence — validate id →
+- [x] One guard owns the whole ordered admission sequence — validate id →
       inspect home → validate stamp → create dirs → atomically create
-      stamp (§4.2a)
-- [ ] `control/campaign.json` created atomically, first writer wins
-      (`os.link` semantics, per `core/run_invariants.py:190-222`)
-- [ ] A stamp naming a different `campaign_id` aborts **before any new
+      stamp (§4.2a) — E-C2, `core.campaign_identity.admit_campaign`
+- [x] `control/campaign.json` created atomically, first writer wins
+      (`os.link` semantics, per `core/run_invariants.py:190-222`) — E-C2
+- [x] A stamp naming a different `campaign_id` aborts **before any new
       state write, any STOP read and any chain launch**. Pre-existing
       directories are not this run's side effect and are not a violation
-- [ ] The refusal names both ids and the stamp path
-- [ ] **Evidence**: a test that pre-writes a foreign stamp and asserts
+      — E-C2
+- [x] The refusal names both ids and the stamp path — E-C2
+- [x] **Evidence**: a test that pre-writes a foreign stamp and asserts
       non-zero exit, the diagnostic text, that no chain was launched and
       no state file was written; plus a positive control that
-      `alpha..beta` is accepted
+      `alpha..beta` is accepted — E-C2,
+      `test_campaign_admission.py::TestAForeignStampRefusesBeforeAnyWrite`
+      and `::test_an_id_containing_two_dots_is_accepted`
 
 ### E4 — Stop semantics preserved
 
@@ -1480,8 +1486,8 @@ subsections below are the implementation contract.
 
 | # | Commit | Content | Checkpoint evidence |
 |---|---|---|---|
-| **E-C1** | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
-| **E-C2** | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
+| **E-C1** `[x]` | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
+| **E-C2** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
 | **E-C3** | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
 | **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
@@ -2012,6 +2018,142 @@ git diff --stat -- tests/unit/sdsc_submission_scripts/test_c13_stop_semantics.py
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the observed directory tree,
       both refusal listings, and any deviation from this section
+
+#### IMPLEMENTATION RECORD — E-C2 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>` on
+`feature/v20-pr-e-campaign-scoped-control`, on top of E-C1 `ded153d0`.
+
+**Behavior Delta: BD-1, BD-3 (partial), BD-5.** This is the commit that
+closes the §1 defect. Every campaign path moved; an invalid campaign id
+is now refused; a foreign stamp now stops a run.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `sdsc_submission_scripts/v19_queue_runner.sh` | defaults flipped to §4.2's targets; `QUEUE_STOP_FILE` default moved into `control/`; new `admit_campaign()` helper; admission call + startup path log in `main()` |
+| `core/campaign_identity.py` (**new**, 302 lines) | `validate_campaign_id`, `CampaignStamp`, `read_campaign_stamp`, `write_campaign_stamp`, `admit_campaign`, `CAMPAIGN_SUBDIRS` |
+| `scripts/campaign_admission.py` (**new**, 71 lines) | the CLI the shell calls; exit 0 admitted / 2 refused, modelled on `campaign_spend.py` |
+
+**Resolved paths, before → after** (`WS_ROOT=<R>`, `CAMPAIGN_ID=v19`):
+
+```text
+QUEUE_STOP_FILE  <R>/STOP                      -> <R>/v19/control/STOP
+WAVE_STATE       <R>/v19_wave_state.jsonl      -> <R>/v19/queue_state/wave_state.jsonl
+LOGF             <R>/v19_queue_runner.log      -> <R>/v19/queue_state/queue_runner.log
+CAMPAIGN_STAMP   <R>/v19_campaign.json         -> <R>/v19/control/campaign.json
+PAIR_SUMMARY_DIR <R>                           -> <R>/v19/pair_summaries
+```
+
+**Observed tree after a real `--only` run** (asserted, not echoed):
+
+```text
+<R>/v19/control/campaign.json
+<R>/v19/queue_state/queue_runner.log
+<R>/v19/queue_state/wave_state.jsonl
+<R>/v19/pair_summaries/
+```
+
+**Refusal listings.** `CAMPAIGN_ID=..` → rc≠0, `<R>` listing identical
+before and after, and no `control/`, `queue_state/` or `pair_summaries/`
+appears in `<R>`'s **parent** (the directory a `..` id resolves into).
+`CAMPAIGN_ID=alpha..beta` → **accepted**, produced
+`<R>/alpha..beta/control/`.
+
+**Tests** — 404 passed in 10.8 s
+(`tests/unit/sdsc_submission_scripts/` + `tests/unit/core/test_campaign_identity.py`);
+baseline before this commit was 340.
+
+| File | Count | Covers |
+|---|---|---|
+| `tests/unit/core/test_campaign_identity.py` (**new**) | 32 | D-E-9 refusal set + positive control; both ordering guarantees; stamp read/validate/adopt; first-writer-wins; unwritable root |
+| `tests/unit/sdsc_submission_scripts/test_campaign_admission.py` (**new**) | 23 | real-launcher runs: directory creation, stamp contents, startup log, both refusal classes, campaign STOP → exit 99, legacy STOP ignored, reachability + `errexit` |
+| `test_campaign_path_resolution.py` (rewritten) | 23 (was 14) | E-C1's parity assertions inverted into E-C2's move; E1 path enumeration; shell↔Python layout parity |
+
+**Static**: pyright **0 errors, 4 warnings** (baseline 0/4 — unchanged;
+the two new modules are inside `"include"`). `ruff check` clean.
+`ruff format --check` clean. `bash -n` clean.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| Admission call deleted from `main()` | **16 fail** (design predicted "exactly one"; the real figure is reported) |
+| Path defaults reverted to pre-E-C2 (7 lines) | **C13: 14/14 still pass** — the E4 proof; 32 of the E-C2 path/admission tests fail |
+| `\|\| ADMIT_RC=$?` → bare assignment + `RC=$?` (§3a.4 hazard) | **6 fail** — the 5 refusal cases lose their diagnostic entirely, confirming `errexit` kills the shell before it |
+| `value in {".",".."}` → `".." in value` | **2 fail** — both positive controls, in Python and through the shell |
+
+Hygiene: file backups, `__pycache__` cleared, each substitution asserted
+`count == 1`, restore verified by `grep -cF`, baseline re-run green after
+every restore.
+
+**Decisions recorded**
+
+*Interpreter unavailable → **fail closed*** (the design asked for this to
+be decided explicitly). A swallowed failure in `campaign_spend` produced
+a zero spend; a swallowed failure here would skip the guard entirely and
+launch into a directory whose owner was never proven. There is no safe
+default identity.
+
+*Directory creation lives in Python, inside the one guard*, not in the
+shell. §2 reads as though the shell's `mkdir` line becomes the campaign
+directories, but a shell `mkdir` would necessarily precede the Python
+validator and break guarantee 1 — `CAMPAIGN_ID=..` would create state
+outside the collection root before anything could refuse it. The whole
+ordered sequence is therefore one Python entry point, which is what §4.2a
+requires anyway. `mkdir -p "$WS_ROOT"` is **retained**, moved to just
+after admission: `WS_ROOT` holds the flat chain workspaces (§4.4) and an
+overridden `CAMPAIGN_HOME` would otherwise leave it uncreated.
+
+**Deviations from the frozen plan**
+
+1. **`test_c13_stop_semantics.py` is NOT diff-empty** — 2 lines added,
+   pinning `LOGF` beside the `WAVE_STATE` the tests already pinned.
+   §4 required this to be reported rather than absorbed, so: it is a
+   **test-harness assumption, not a semantics change**. Both tests call
+   `record_queue_stop` / `wait_and_record` directly, bypassing `main()`;
+   `record_queue_stop` ends in `log()`, and `LOGF`'s directory is now
+   created by admission. In production `log()` is unreachable before
+   admission — asserted by
+   `test_campaign_admission.py::test_no_log_call_precedes_admission`.
+   Stop timing, exit code 99, the record's fields and the trap channel
+   are untouched, and all 14 C13 assertions pass **unmodified** under
+   the E4 mutation.
+   *Second-order finding*: `test_the_wall_cap_is_configurable…` runs
+   under `set +e`, so its `log()` failure was silent — it passed while
+   half-broken. The same one-line pin fixes it.
+
+2. **Two more tests needed re-pointing than §2 named.** §2 named only
+   `test_v19_queue_runner.py:294-304`. Also required:
+   `TestWaveStateMachine._state_env` (the shared helper — one line, fixes
+   6 tests) and `test_v19_campaign_pinning.py::test_queue_state_and_log_carry_the_campaign_id`,
+   whose assertion was `"camp1_" in path` (a **prefix**). E-C2 replaces
+   the prefix mechanism with a directory, so the assertion now asks for
+   the segment `/camp1/`. The concept it guards — a queue-state path two
+   campaigns can both resolve to — is unchanged and now stronger.
+
+3. **The admission-removal mutation fails 16 tests, not one.** §5
+   predicted "exactly one". Reported as measured; the suite is not
+   weakened to match the estimate.
+
+**New follow-up**
+
+- **FU-E-11** — an **empty** `CAMPAIGN_ID` never reaches the validator.
+  The runner resolves `CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"`, and `:-`
+  treats empty exactly like unset, so `CAMPAIGN_ID= bash …` silently
+  becomes `v19` — i.e. it adopts another campaign's identity rather than
+  refusing. Pre-existing, outside E-C2's causal scope, and changing it is
+  a behaviour change needing operator approval. The shell-level
+  parametrize records the omission and its reason; the validator's own
+  rejection of `""` is tested directly in Python.
+
+**Remaining risk.** Between E-C2 and E-C3 a campaign that already has a
+legacy `<R>/<id>_wave_state.jsonl` will not see its completion history —
+adoption is E-C3 by design. No shipped operator command runs on that
+intermediate commit.
+
+**Next authorized checkpoint**: E-C3 (legacy campaign adoption).
 
 ---
 ### E-C3 — Legacy campaign adoption
