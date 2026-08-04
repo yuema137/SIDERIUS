@@ -29,6 +29,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNER = REPO_ROOT / "sdsc_submission_scripts" / "v19_gate0_pair_runner.sh"
 CHAIN_LIB = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
@@ -186,13 +188,15 @@ def _write_screen_shim(shim_dir: Path, exits: dict[str, str]) -> None:
     shim.chmod(shim.stat().st_mode | stat.S_IEXEC)
 
 
-def _run_main(tmp_path: Path, exits: dict[str, str]) -> tuple[subprocess.CompletedProcess, dict]:
+def _run_main(
+    tmp_path: Path, exits: dict[str, str], prefix: str = "v19_c14"
+) -> tuple[subprocess.CompletedProcess, dict]:
     shim_dir = tmp_path / "shim"
-    shim_dir.mkdir()
+    shim_dir.mkdir(exist_ok=True)
     _write_screen_shim(shim_dir, exits)
     gate_root = tmp_path / "gate0"
     exit_dir = tmp_path / "markers"
-    exit_dir.mkdir()
+    exit_dir.mkdir(exist_ok=True)
     env = dict(
         os.environ,
         PATH=f"{shim_dir}:{os.environ['PATH']}",
@@ -202,6 +206,7 @@ def _run_main(tmp_path: Path, exits: dict[str, str]) -> tuple[subprocess.Complet
         POLL_SECONDS="1",
         LAUNCH_SETTLE_SECONDS="0",
         WALL_CAP_SECONDS="60",
+        GATE_RUN_PREFIX=prefix,
     )
     r = subprocess.run(
         ["bash", str(RUNNER)],
@@ -211,7 +216,10 @@ def _run_main(tmp_path: Path, exits: dict[str, str]) -> tuple[subprocess.Complet
         env=env,
         timeout=60,
     )
-    summary_path = gate_root / "gate0_pair_summary.json"
+    # E-C5: the summary is prefix-scoped, so two Gate runs under one
+    # GATE_ROOT no longer overwrite each other. Derived from the prefix
+    # this harness passed, so the test cannot drift from the runner.
+    summary_path = gate_root / f"{prefix}_pair_summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else {}
     return r, summary
 
@@ -271,3 +279,189 @@ class TestHelpers:
     def test_wrapper_pid_unknown_when_absent(self, tmp_path):
         r = _sourced('EXIT_DIR="$TD"; wrapper_pid nope', env={"TD": str(tmp_path)})
         assert r.stdout.strip() == "unknown"
+
+
+class TestGateArtifactsAreScopedByPrefix:
+    """V20 PR E, E-C5 / D-E-4.
+
+    The summary and runner log used to be the fixed names
+    `gate0_pair_summary.json` and `gate0_runner.log`, so two Gate runs
+    under one GATE_ROOT overwrote each other's summary and interleaved
+    their logs — the queue runner's defect one level down. A PREFIX, not
+    a directory: the Gate has no directory model and this commit does not
+    invent one.
+    """
+
+    def test_two_prefixes_produce_four_separate_artifacts(self, tmp_path):
+        """The isolation property, observed on disk rather than inferred
+        from the variable's value."""
+        exits = {}
+        for prefix in ("probe1", "probe2"):
+            exits = {f"{prefix}_arch_15_19": "0", f"{prefix}_loss_15_19": "0"}
+            _run_main(tmp_path, exits, prefix=prefix)
+
+        gate_root = tmp_path / "gate0"
+        for prefix in ("probe1", "probe2"):
+            assert (gate_root / f"{prefix}_pair_summary.json").is_file(), prefix
+            assert (gate_root / f"{prefix}_runner.log").is_file(), prefix
+
+    def test_each_summary_names_its_own_gate_run(self, tmp_path):
+        """`"gate"` used to be the literal "v19_gate0" whatever produced
+        the file, so two summaries were indistinguishable by their own
+        contents."""
+        summaries = {}
+        for prefix in ("probe1", "probe2"):
+            _, summary = _run_main(
+                tmp_path,
+                {f"{prefix}_arch_15_19": "0", f"{prefix}_loss_15_19": "0"},
+                prefix=prefix,
+            )
+            summaries[prefix] = summary
+
+        assert summaries["probe1"]["gate"] == "probe1"
+        assert summaries["probe2"]["gate"] == "probe2"
+        assert summaries["probe1"]["arch_run"] == "probe1_arch_15_19"
+        assert summaries["probe2"]["arch_run"] == "probe2_arch_15_19"
+
+    def test_a_second_run_does_not_overwrite_the_first_summary(self, tmp_path):
+        """THE DEFECT. Before E-C5 the second run replaced the first
+        run's summary at the same path, and the first Gate's evidence was
+        gone."""
+        _run_main(
+            tmp_path,
+            {"probe1_arch_15_19": "0", "probe1_loss_15_19": "0"},
+            prefix="probe1",
+        )
+        first = (tmp_path / "gate0" / "probe1_pair_summary.json").read_text()
+
+        _run_main(
+            tmp_path,
+            {"probe2_arch_15_19": "1", "probe2_loss_15_19": "1"},
+            prefix="probe2",
+        )
+
+        assert (tmp_path / "gate0" / "probe1_pair_summary.json").read_text() == first
+
+    def test_a_historical_gate0_summary_is_untouched(self, tmp_path):
+        """BC-1. The pre-E-C5 files keep their names, their bytes and
+        their mtime; nothing reads, moves or deletes them."""
+        gate_root = tmp_path / "gate0"
+        gate_root.mkdir()
+        historical = gate_root / "gate0_pair_summary.json"
+        historical.write_text('{"gate": "v19_gate0", "disposition": "archived"}\n')
+        old_log = gate_root / "gate0_runner.log"
+        old_log.write_text("2026-07-30 08:00:00 the archived Gate-0 attempt\n")
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (historical, old_log)}
+
+        _run_main(
+            tmp_path,
+            {"probe1_arch_15_19": "0", "probe1_loss_15_19": "0"},
+            prefix="probe1",
+        )
+
+        after = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in (historical, old_log)}
+        assert after == before
+
+
+class TestAnUnsafeGatePrefixIsRefused:
+    """E-C5. `GATE_RUN_PREFIX` becomes a filename, so it goes through the
+    SAME rule the campaign id uses — not a second shell `case` that would
+    drift from it.
+
+    This runner has NO `errexit` (only `set -u`), unlike the queue
+    runner, so the guard checks the exit status explicitly rather than
+    relying on the shell to abort.
+    """
+
+    def _refuse(self, tmp_path: Path, prefix: str) -> subprocess.CompletedProcess:
+        shim_dir = tmp_path / "shim"
+        shim_dir.mkdir(exist_ok=True)
+        _write_screen_shim(shim_dir, {})
+        record = tmp_path / "launches.txt"
+        (shim_dir / "screen").write_text(
+            f'#!/bin/bash\nif [ "$1" = "-ls" ]; then exit 1; fi\necho "$@" >> {record}\nexit 0\n'
+        )
+        (shim_dir / "screen").chmod(0o755)
+        r = subprocess.run(
+            ["bash", str(RUNNER)],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(
+                os.environ,
+                PATH=f"{shim_dir}:{os.environ['PATH']}",
+                GATE_ROOT=str(tmp_path / "gate0"),
+                EXIT_DIR=str(tmp_path / "markers"),
+                GATE_RUN_PREFIX=prefix,
+            ),
+            timeout=60,
+        )
+        r.launches = record.read_text() if record.exists() else ""  # type: ignore[attr-defined]
+        return r
+
+    @pytest.mark.parametrize("prefix", ["", ".", "..", "a/b", "/abs", "a b", "x" * 129])
+    def test_it_refuses_and_launches_nothing(self, tmp_path, prefix):
+        r = self._refuse(tmp_path, prefix)
+        assert r.returncode != 0, f"{prefix!r} was accepted"
+        assert "REFUSED" in r.stderr
+        assert r.launches == ""  # type: ignore[attr-defined]
+
+    def test_the_refusal_leaves_no_artifacts(self, tmp_path):
+        """The refusal happens before `mkdir` and before the EXIT trap,
+        so `write_summary` never runs — which is correct, because
+        `$SUMMARY`'s own path is built from the value being refused. A
+        startup refusal leaves nothing, and that is the accurate
+        representation: nothing ran."""
+        self._refuse(tmp_path, "../escape")
+        assert not (tmp_path / "gate0").exists()
+        assert not (tmp_path / "escape").exists()
+
+    def test_the_diagnostic_names_the_variable_and_the_value(self, tmp_path):
+        r = self._refuse(tmp_path, "bad/prefix")
+        assert "GATE_RUN_PREFIX" in r.stderr
+        assert "bad/prefix" in r.stderr
+
+    @pytest.mark.parametrize("prefix", ["v19_c14", "probe1", "alpha..beta", "a.b_c-d"])
+    def test_a_safe_prefix_including_the_historical_default_is_accepted(self, tmp_path, prefix):
+        """POSITIVE CONTROL, and a compatibility check: the shipped
+        default `v19_c14` must still be legal, and `alpha..beta` must not
+        be refused merely for containing two dots."""
+        _, summary = _run_main(
+            tmp_path,
+            {f"{prefix}_arch_15_19": "0", f"{prefix}_loss_15_19": "0"},
+            prefix=prefix,
+        )
+        assert summary["gate"] == prefix
+
+    def test_removing_the_guard_is_caught(self):
+        """MUTATION TARGET / reachability: the validator must be CALLED
+        from main, above the mkdir and the trap."""
+        src = RUNNER.read_text(encoding="utf-8")
+        body = src[src.index("main() {") :]
+        call = body.index("scripts/validate_path_component.py")
+        assert call < body.index('mkdir -p "$GATE_ROOT"')
+        assert call < body.index("trap write_summary EXIT")
+
+    def test_the_prefix_rule_is_not_a_second_copy(self):
+        """A shell `case` here would drift from the campaign rule. The
+        Gate must reach the shared validator."""
+        src = RUNNER.read_text(encoding="utf-8")
+        assert "validate_path_component.py" in src
+
+
+class TestSourcingTheGateRunnerStillTouchesNothing:
+    def test_sourcing_validates_nothing_and_creates_nothing(self, tmp_path):
+        """The guard lives in main(), so sourcing must neither refuse nor
+        create — `test_source_safe_entry.py` covers the general rule; this
+        pins it for an INVALID prefix, the case that now has a guard."""
+        gate_root = tmp_path / "gate0"
+        r = subprocess.run(
+            ["bash", "-c", f"V19_GATE0_NO_MAIN=1 source '{RUNNER}'; echo SOURCED_OK"],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(os.environ, GATE_ROOT=str(gate_root), GATE_RUN_PREFIX="../escape"),
+            timeout=60,
+        )
+        assert "SOURCED_OK" in r.stdout
+        assert not gate_root.exists()

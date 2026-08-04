@@ -1230,7 +1230,8 @@ the evidence named in its row.
       `pair_summaries/wave_<n>_<band>.json`, both carrying the same
       `record_id` (D-E-3a) — E-C4; the fsync-before-replace ordering is
       asserted by a spy, not inferred
-- [ ] Gate pair summary and runner log derive from `GATE_RUN_PREFIX`
+- [x] Gate pair summary and runner log derive from `GATE_RUN_PREFIX` —
+      E-C5; the `"gate"` field too
 - [x] **Evidence**: a test enumerates every authority-bearing path the
       runner resolves and asserts each contains the campaign id; it
       fails if a new path is added without it — E-C2,
@@ -1274,7 +1275,10 @@ the evidence named in its row.
       (D-E-9) — E-C2, and E-C2b for the empty case: the shell uses
       `${CAMPAIGN_ID-v19}` so an explicitly empty id reaches the
       validator, while an unset one still defaults
-- [ ] The same validator guards `GATE_RUN_PREFIX` (D-E-4)
+- [x] The same validator guards `GATE_RUN_PREFIX` (D-E-4) — E-C5,
+      `core.campaign_identity.validate_path_component`, reached through
+      `scripts/validate_path_component.py`; asserted to be one rule, not
+      a second copy
 - [x] One guard owns the whole ordered admission sequence — validate id →
       inspect home → validate stamp → create dirs → atomically create
       stamp (§4.2a) — E-C2, `core.campaign_identity.admit_campaign`
@@ -1503,7 +1507,7 @@ subsections below are the implementation contract.
 | **E-C2** `[x]` + **E-C2b** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
 | **E-C3** `[x]` | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
 | **E-C4** `[x]` | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
-| **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
+| **E-C5** `[x]` | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
 | **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
 | **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
 | **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
@@ -3111,6 +3115,121 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the two-prefix listing, and
       both validator control results
+
+#### IMPLEMENTATION RECORD — E-C5 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C4b `061bccfb`.
+
+**Behavior Delta**: the Gate summary and runner log move from fixed
+`gate0_*` names to `${GATE_RUN_PREFIX}_*`; the summary's `"gate"` field
+becomes the resolved prefix instead of the literal `"v19_gate0"`; an
+unsafe or explicitly empty `GATE_RUN_PREFIX` is refused at startup.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/campaign_identity.py` | `validate_path_component(value, kind=)` extracted; `PathComponentError`; `validate_campaign_id` delegates to it and re-raises `CampaignIdError` so E-C2's callers and tests are untouched |
+| `scripts/validate_path_component.py` (**new**, 43 lines) | the CLI a shell caller reaches the shared rule through; exit 0 / 2 |
+| `sdsc_submission_scripts/v19_gate0_pair_runner.sh` | `SUMMARY`, `RUNNER_LOG`, the `"gate"` field; the startup guard; `${GATE_RUN_PREFIX-v19_c14}` |
+
+**A prefix, not a directory.** `$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json`,
+never `$GATE_ROOT/$GATE_RUN_PREFIX/…`. The Gate has no directory model and
+this commit does not invent one.
+
+**One rule, not a second copy.** The Gate reaches
+`validate_path_component` — the same function `validate_campaign_id` now
+delegates to. A shell `case` here would have been a second copy of a
+security rule, and a second copy is how two rules drift: one of them
+eventually learns about `..` and the other does not. Asserted
+structurally.
+
+**Written for THIS shell.** The Gate runner has `set -u` only, **no
+`errexit`** (`:42`) — unlike the queue runner, which inherits `-e` from
+`_chain_common.sh:40`. A failing command here does not abort, so the
+guard checks the status explicitly with `if ! cmd`, which is correct
+under either setting. The E-C2 pattern was **not** copied mechanically.
+
+**Guard placement, and why a refusal writes no summary.** The guard runs
+before `mkdir -p "$GATE_ROOT"` and before `trap write_summary EXIT`. It
+has to: `$SUMMARY`'s own path is built from the value being refused, so
+running `write_summary` would write to a path derived from a rejected
+prefix. A startup refusal therefore leaves **no artifacts at all**, which
+is the accurate representation — nothing ran. The diagnostic names the
+variable and the value on stderr, and the exit code is 2.
+
+> ### A second `:-` defect, found by the empty-prefix test
+>
+> `GATE_RUN_PREFIX="${GATE_RUN_PREFIX:-v19_c14}"` made
+> `GATE_RUN_PREFIX= bash …` run silently as `v19_c14` — so the operator's
+> refusal set could not include "empty", because an empty value never
+> reached the validator. Identical to FU-E-11 in the queue runner, in a
+> different file, and found the same way: by testing the case rather than
+> reading the line.
+>
+> Fixed with the same one-character change, `${GATE_RUN_PREFIX-v19_c14}`.
+> Unset still defaults to `v19_c14`; explicitly empty now reaches the
+> validator and is refused. An operator who **clears** the variable to
+> avoid reusing a Gate label would otherwise have been handed that label
+> and overwritten its summary.
+
+**Tests** — 494 pass in 54.4 s (E-C4b baseline 474); 20 new, all in
+`test_v19_gate0_pair_runner.py`.
+
+| Class | Count | Covers |
+|---|---|---|
+| `TestGateArtifactsAreScopedByPrefix` | 4 | two prefixes → four separate artifacts; each summary names its own run; a second run does not overwrite the first; a historical `gate0_*` pair is byte- and mtime-identical |
+| `TestAnUnsafeGatePrefixIsRefused` | 14 | seven refusals (incl. empty) with zero launches; no artifacts left; the diagnostic; four positive controls incl. the shipped default `v19_c14` and `alpha..beta`; guard reachability above `mkdir`/`trap`; the no-second-copy assertion |
+| `TestSourcingTheGateRunnerStillTouchesNothing` | 1 | sourcing with an invalid prefix neither refuses nor creates |
+| harness | repointed | `_run_main` takes a prefix and derives the summary path from it, so the test cannot drift from the runner |
+
+**Two-prefix listing observed** under one `GATE_ROOT`:
+
+```text
+probe1_pair_summary.json   probe1_runner.log
+probe2_pair_summary.json   probe2_runner.log
+gate0_pair_summary.json    gate0_runner.log     <- pre-existing, unchanged
+```
+
+`probe1`'s summary reports `"gate": "probe1"`, `probe2`'s reports
+`"gate": "probe2"`, and the historical pair is identical in bytes and
+`st_mtime_ns` after the runs.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| validator call removed from `main()` | **11 fail** |
+| `SUMMARY` / `RUNNER_LOG` back to fixed `gate0_*` | **12 fail** |
+| `${GATE_RUN_PREFIX:-v19_c14}` restored | **1 fail** — the empty-prefix case, precisely |
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean on both runners. Full `tests/unit/` run:
+2439 passed, 2 skipped.
+
+**Deviations from the frozen plan**
+
+1. **`${GATE_RUN_PREFIX-v19_c14}`** — the second `:-` defect above. §4's
+   refusal set names "empty", and without this the case was unreachable.
+2. **A startup refusal writes no summary**, rather than a summary
+   recording the refusal. §4 asked that the refusal be accurately
+   represented; a summary cannot be, because its path derives from the
+   rejected value. Stated here so the absence is a decision, not a gap.
+3. **The shared rule was extracted rather than imported as
+   `validate_campaign_id`.** Calling a function named for campaigns from
+   the Gate would have made the Gate a campaign. `validate_campaign_id`
+   is now a thin caller-specific face over
+   `validate_path_component`, so E-C2's error type and tests are
+   unchanged — verified by the campaign suite passing untouched.
+
+**Not done, deliberately**: no Gate stop channel (FU-E-8), no
+`GATE_ROOT` restructuring, no conversion of the Gate's `printf` to
+E-C4's typed writer, no new Gate schema, no queue-runner change, no
+`bg_gpu_sampler.sh` change, no Gate execution parameters touched, no
+real Gate run.
+
+**Next authorized checkpoint**: E-C6 (process-guard self-exclusion,
+D-E-7).
 
 ---
 

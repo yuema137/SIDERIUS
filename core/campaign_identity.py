@@ -79,11 +79,15 @@ _CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _TRAVERSING_IDS = frozenset({".", ".."})
 
 
+class PathComponentError(ValueError):
+    """A value is not safe to use as a single path component."""
+
+
 class CampaignAdmissionError(Exception):
     """A campaign may not be admitted. Refusal, never a warning."""
 
 
-class CampaignIdError(CampaignAdmissionError):
+class CampaignIdError(CampaignAdmissionError, PathComponentError):
     """The campaign id is not safe to use as a path component."""
 
 
@@ -92,8 +96,49 @@ class CampaignStampError(CampaignAdmissionError):
     different campaign."""
 
 
+def validate_path_component(value: str, *, kind: str = "identifier") -> str:
+    """One operator-supplied value, proven safe as a single path segment.
+
+    The rule stated once, for every caller that turns an operator's value
+    into a filename or a directory name. E-C5 gave it a second caller
+    (the Gate runner's ``GATE_RUN_PREFIX``), and a second **copy** of a
+    security rule is how the two drift: one of them would eventually
+    learn about ``..`` and the other would not.
+
+    Args:
+        value: the operator-supplied value.
+        kind: what it is, used only in the refusal message so the
+            operator is told which knob to fix.
+
+    Returns:
+        The same value.
+
+    Raises:
+        PathComponentError: empty, over-length, containing a path
+            separator or control character, or exactly ``.`` or ``..``.
+    """
+    if not isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise PathComponentError(f"{kind} must be a string, got {type(value).__name__}")
+    if value in _TRAVERSING_IDS:
+        raise PathComponentError(
+            f"{kind} {value!r} is a path-traversal segment; it would "
+            f"resolve outside the directory it is meant to name"
+        )
+    if not _CAMPAIGN_ID_RE.match(value):
+        raise PathComponentError(
+            f"{kind} {value!r} is not a safe path component: it must "
+            f"be 1-128 characters from [A-Za-z0-9._-]. The value becomes "
+            f"a file or directory name, so separators, control characters "
+            f"and empty values are refused."
+        )
+    return value
+
+
 def validate_campaign_id(value: str) -> str:
     """The campaign id, or refuse.
+
+    The campaign-scoped face of :func:`validate_path_component` — same
+    rule, a caller-specific error type so admission can catch it.
 
     Args:
         value: the requested campaign id.
@@ -105,21 +150,10 @@ def validate_campaign_id(value: str) -> str:
         CampaignIdError: the id is empty, over-length, contains a path
             separator or control character, or is exactly ``.`` or ``..``.
     """
-    if not isinstance(value, str):  # pyright: ignore[reportUnnecessaryIsInstance]
-        raise CampaignIdError(f"campaign id must be a string, got {type(value).__name__}")
-    if value in _TRAVERSING_IDS:
-        raise CampaignIdError(
-            f"campaign id {value!r} is a path-traversal segment; it would "
-            f"resolve the campaign home outside its collection root"
-        )
-    if not _CAMPAIGN_ID_RE.match(value):
-        raise CampaignIdError(
-            f"campaign id {value!r} is not a safe path component: it must "
-            f"be 1-128 characters from [A-Za-z0-9._-]. The id becomes a "
-            f"directory name, so separators, control characters and empty "
-            f"values are refused."
-        )
-    return value
+    try:
+        return validate_path_component(value, kind="campaign id")
+    except PathComponentError as exc:
+        raise CampaignIdError(str(exc)) from exc
 
 
 class CampaignStamp(BaseModel):

@@ -53,14 +53,35 @@ LAUNCH_SETTLE_SECONDS="${LAUNCH_SETTLE_SECONDS:-3}"
 # (now archived) or with formal V19. Overridable for a re-run under a
 # different label; the launcher derives EVERY name from it, so the
 # summary, the markers and the chain argv cannot disagree.
-GATE_RUN_PREFIX="${GATE_RUN_PREFIX:-v19_c14}"
+# `${VAR-default}`, NOT `${VAR:-default}` (E-C5, the same correction
+# E-C2b made for CAMPAIGN_ID). `:-` treats an explicitly EMPTY value
+# like an unset one, so `GATE_RUN_PREFIX= bash …` would silently run
+# as `v19_c14` — an operator who cleared the variable to avoid reusing
+# a Gate label would get exactly the label they were avoiding, and
+# would overwrite that run's summary. An empty prefix must reach the
+# validator to be refused, and with `:-` it never could.
+GATE_RUN_PREFIX="${GATE_RUN_PREFIX-v19_c14}"
 ARCH_RUN="${GATE_RUN_PREFIX}_arch_15_19"
 LOSS_RUN="${GATE_RUN_PREFIX}_loss_15_19"
-SUMMARY="$GATE_ROOT/gate0_pair_summary.json"
+# --- Gate artifact scoping (V20 PR E, E-C5) --------------------------------
+# These used to be the fixed names `gate0_pair_summary.json` and
+# `gate0_runner.log`, so two Gate runs under one GATE_ROOT overwrote each
+# other's summary and interleaved their logs — the same defect class the
+# queue runner had, one level down. The prefix already names every
+# workspace, marker and screen session; it now names these too.
+#
+# A PREFIX, not a directory (D-E-4): `$GATE_ROOT/$GATE_RUN_PREFIX/...`
+# would be a new directory model for the Gate, and the Gate does not have
+# one. Historical `gate0_*` files keep their names and their bytes;
+# nothing reads, moves or deletes them.
+#
+# GATE_RUN_PREFIX becomes a FILENAME here, so main() validates it through
+# the shared path-component rule before any of these paths is used.
+SUMMARY="$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json"
 #: Per-chain admission cap, mirrored from gate_chain_args() so the
 #: aggregate check and the launched command can never disagree.
 PAIR_CAP_GIB="${PAIR_CAP_GIB:-12}"
-RUNNER_LOG="$GATE_ROOT/gate0_runner.log"
+RUNNER_LOG="$GATE_ROOT/${GATE_RUN_PREFIX}_runner.log"
 
 log() { echo "$(date -u '+%Y-%m-%d %H:%M:%S') $*" >> "$RUNNER_LOG"; }
 
@@ -287,8 +308,11 @@ write_summary() {
   else
     LE=null; LL=false
   fi
-  printf '{"gate": "v19_gate0", "band": "15-19", "arch_run": "%s", "loss_run": "%s", "arch_wrapper_pid": "%s", "loss_wrapper_pid": "%s", "arch_screen_session": "%s", "loss_screen_session": "%s", "loss_launched": %s, "arch_exit": %s, "loss_exit": %s, "start": "%s", "end": "%s", "disposition": "%s"}\n' \
-    "$ARCH_RUN" "$LOSS_RUN" \
+  # `"gate"` was the literal "v19_gate0" regardless of which Gate run
+  # produced the file, so two summaries were indistinguishable by their
+  # own contents. It is the resolved prefix (D-E-4).
+  printf '{"gate": "%s", "band": "15-19", "arch_run": "%s", "loss_run": "%s", "arch_wrapper_pid": "%s", "loss_wrapper_pid": "%s", "arch_screen_session": "%s", "loss_screen_session": "%s", "loss_launched": %s, "arch_exit": %s, "loss_exit": %s, "start": "%s", "end": "%s", "disposition": "%s"}\n' \
+    "$GATE_RUN_PREFIX" "$ARCH_RUN" "$LOSS_RUN" \
     "$(wrapper_pid "$ARCH_RUN")" "$(wrapper_pid "$LOSS_RUN")" \
     "${ARCH_SESSION_ID:-unknown}" "${LOSS_SESSION_ID:-unknown}" \
     "$LL" "$AE" "$LE" "${START_TS:-unknown}" "$END_TS" "$DISPOSITION" > "$SUMMARY"
@@ -300,6 +324,32 @@ write_summary() {
 # touches the filesystem or launches a chain, and it runs only on direct
 # execution (see the source-safe guard at the bottom of this file).
 main() {
+# --- GATE_RUN_PREFIX validation (V20 PR E, E-C5) ---------------------------
+# The prefix names this Gate's workspaces, markers, screen sessions, log
+# and summary, so an unsafe value would put a Gate artifact outside
+# GATE_ROOT. Validated through the SAME rule the campaign id uses
+# (`core.campaign_identity.validate_path_component`) — reached via a
+# helper rather than re-spelled as a shell `case`, because a second copy
+# of a security rule is how the two drift.
+#
+# THIS RUNNER HAS NO `errexit` (only `set -u`, :42 — unlike the queue
+# runner, which inherits `-e` from _chain_common.sh). A failing command
+# here does NOT terminate the shell, so the status must be checked
+# explicitly. `if ! cmd` does that under either setting.
+#
+# Placed before `mkdir` and before the EXIT trap, deliberately. A refusal
+# must not run `write_summary`, because `$SUMMARY`'s own path is built
+# from the value being refused. A startup refusal therefore leaves no
+# artifacts at all, which is the accurate representation: nothing ran.
+if ! "$REPO/.venv/bin/python" "$REPO/scripts/validate_path_component.py" \
+      --value "$GATE_RUN_PREFIX" --kind "GATE_RUN_PREFIX"; then
+  echo "[v19-gate0] REFUSED: GATE_RUN_PREFIX is not a safe path component" >&2
+  echo "[v19-gate0]   value: '$GATE_RUN_PREFIX'" >&2
+  echo "[v19-gate0]   it names this Gate's workspaces, log and summary" >&2
+  echo "[v19-gate0]   nothing was created and no chain was launched" >&2
+  exit 2
+fi
+
 mkdir -p "$GATE_ROOT"
 trap write_summary EXIT
 
