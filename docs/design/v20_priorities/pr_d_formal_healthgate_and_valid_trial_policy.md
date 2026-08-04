@@ -602,13 +602,27 @@ proved it, written back into this document at the checkpoint.
 `D-C8` (doc sync) is not a numbered commit here: per the repository rule it
 is the **last step before merge**, written against the merged code.
 
-### Every code-bearing checkpoint runs strict pyright locally
+### Every code-bearing checkpoint runs the blocking CI pyright locally
 
 **Operator requirement 2026-08-04.** PR C proved that a fully green pytest
-run is not evidence of green typing: 44 pyright-strict errors sat latent
-behind 2,416 passing tests, because CI had never run on the branch and
-pyright was believed unrunnable locally. PR D adds several schemas, a typed
-verdict and multiple consumers — the same exposure, larger.
+run is not evidence of green typing: 44 pyright errors sat latent behind
+2,416 passing tests, because CI had never run on the branch and pyright was
+believed unrunnable locally. PR D adds several schemas, a typed verdict and
+multiple consumers — the same exposure, larger.
+
+> **A label defect in our own CI, found 2026-08-04 while writing this.**
+> The workflow step is named *"Type check — pyright (strict, blocking)"*
+> (`.github/workflows/ci.yml:43`), but `pyrightconfig.json` sets
+> `"typeCheckingMode": "basic"`. The check is blocking and real; it is **not
+> strict**. This document, PR A and PR B all repeated "strict" from the step
+> name rather than the configuration.
+>
+> This is D-D-3's defect in our own toolchain — an operator-facing label
+> asserting behaviour the effective configuration does not implement — and
+> it is recorded here rather than fixed in passing, because changing either
+> the name or the mode is a separate decision with different consequences.
+> Filed as **FU-D-5**. Below, "the blocking CI pyright" means exactly what
+> `uv run pyright` does today.
 
 The system Node is v10.19.0 and too old, but **pyright-python caches its
 own Node v26.2.0**, which reproduces CI exactly:
@@ -622,7 +636,7 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 * before **every** push — the full CI-equivalent:
 
 ```bash
-PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright   # strict, 0 errors
+PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright   # 0 errors
 ./.venv/bin/ruff check .
 ./.venv/bin/ruff format --check .
 ./.venv/bin/python -m pytest tests/unit/ -m "not real_run" -q
@@ -1354,6 +1368,7 @@ Stop for operator review if:
 | **FU-D-2** | `best_valid_trial_*` (`:5332-5336`) persisted since V19 and consumed by nothing. D-C2b gives them a consumer; if it does not, they should be removed rather than left as decoration. |
 | **FU-D-3** | Two notions of trial validity coexist (`:5266-5269` bookkeeping vs `_best_trial_winner`'s predicate requiring `memory.time_mode == "trial"`). PR D uses the bookkeeping one; the divergence should be resolved or documented as intentional. |
 | **FU-D-4** | `Best score: None` reporting clarity (§3.8). |
+| **FU-D-5** | `ci.yml:43` names the step "pyright (strict, blocking)" while `pyrightconfig.json` sets `typeCheckingMode: "basic"`. Either the name or the mode should change — a decision, not a passing fix. Also: `pyrightconfig.json` does not include `sdsc_submission_scripts` and excludes `tests`, so code in those trees is invisible to the blocking check. |
 
 ---
 
