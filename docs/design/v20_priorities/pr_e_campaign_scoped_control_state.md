@@ -1,9 +1,18 @@
 # Design: V20 PR E — Campaign-scoped control state
 
-- **Status**: **DESIGN — awaiting operator review. No implementation is
-  authorized.** Per §20.1's per-PR design-doc rule, nothing in this
-  document may be built until the operator approves it, and the
-  deviations in §5 are approved or rejected individually.
+- **Status**: **DESIGN rev 3 — architecture direction APPROVED (operator,
+  second review 2026-08-04); the nine required corrections are applied
+  here. Implementation is not yet authorized**: the pending deviations in
+  §5 (D-E-1, D-E-2, D-E-3, D-E-5, D-E-7, D-E-8) still need individual
+  sign-off, and the predecessor docs hotfix in §12 must merge first.
+  Rev 3 changed the design in six substantive ways, not just the prose:
+  legacy compatibility became a campaign-level adoption mode rather than
+  a per-record fallback (BC-2); the override surface narrowed to three
+  values (§4.2); the admission sequence became one ordered guard
+  (§4.2a); the identifier rule was corrected to *equal to* `.`/`..`
+  rather than *contains* (D-E-9); the wave record gained a defined
+  canonical/derived contract with `record_id` (D-E-3a); and the
+  commit plan grew to eight independently green commits (§8).
 - **Parent plan**: `docs/design/v20_priorities.md` §20.7 (PR scope),
   §9 (P2-1, the confirmed defect), §1.4 (genericization contract),
   §20.11 (review template).
@@ -545,55 +554,141 @@ $WS_ROOT/                                 campaign COLLECTION root (unchanged)
 ├── <run_name>/                            chain workspace  (UNCHANGED, flat)
 │   ├── STOP                               chain stop  (UNCHANGED)
 │   └── chain_stopped.json                 (UNCHANGED)
-├── <campaign_id>_wave_state.jsonl         LEGACY — read-only, never written again
-├── <campaign_id>_queue_runner.log         LEGACY — read-only
-└── STOP                                   LEGACY GLOBAL — archived on sight, no authority
+├── <campaign_id>_wave_state.jsonl         LEGACY — readable ONLY under adoption (BC-2)
+├── <campaign_id>_queue_runner.log         LEGACY — never read, never written
+└── STOP                                   LEGACY GLOBAL — observed and recorded, no authority
 ```
 
-Resolution, in one place, with every value overridable:
+Resolution, in one place. **Exactly three values are overridable, and
+the subdirectories are not among them** (operator ruling, 2026-08-04):
 
 ```bash
+# --- overridable -----------------------------------------------------
+WS_ROOT="${WS_ROOT:-…}"                          # campaign COLLECTION root
 CAMPAIGN_HOME="${CAMPAIGN_HOME:-$WS_ROOT/$CAMPAIGN_ID}"
-CAMPAIGN_CONTROL_DIR="${CAMPAIGN_CONTROL_DIR:-$CAMPAIGN_HOME/control}"
-QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$CAMPAIGN_CONTROL_DIR/STOP}"
+QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$CAMPAIGN_HOME/control/STOP}"   # compat only
+
+# --- derived, NOT independently overridable --------------------------
+CAMPAIGN_CONTROL_DIR="$CAMPAIGN_HOME/control"
 CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/campaign.json"
-QUEUE_STATE_DIR="${QUEUE_STATE_DIR:-$CAMPAIGN_HOME/queue_state}"
+QUEUE_STATE_DIR="$CAMPAIGN_HOME/queue_state"
 WAVE_STATE="$QUEUE_STATE_DIR/wave_state.jsonl"
 LOGF="$QUEUE_STATE_DIR/queue_runner.log"
-PAIR_SUMMARY_DIR="${PAIR_SUMMARY_DIR:-$CAMPAIGN_HOME/pair_summaries}"
+PAIR_SUMMARY_DIR="$CAMPAIGN_HOME/pair_summaries"
 ```
 
-`QUEUE_STOP_FILE` keeps its name and its override so existing operator
-muscle memory, the docs table at `docs/running_chain_test.md:141`, and
-`test_c13_stop_semantics.py:161-171` all keep working. Only its
-**default** moves.
+**Why the subdirectory overrides are removed.** An earlier draft made
+`CAMPAIGN_CONTROL_DIR`, `QUEUE_STATE_DIR` and `PAIR_SUMMARY_DIR`
+independently overridable, on the general principle that machine-specific
+paths should be configurable. That principle is right and the application
+was wrong: independent overrides let two campaigns be pointed at one
+`QUEUE_STATE_DIR`, which **recreates the exact cross-campaign authority
+defect this PR exists to remove** — campaign B's runner would then read
+completion records written by campaign A. A configuration surface that
+can reconstruct the defect is not a configuration surface; it is the
+defect with a flag on it. One override (`CAMPAIGN_HOME`) moves the whole
+campaign coherently; three overrides let its parts drift apart.
+
+`QUEUE_STOP_FILE` survives as a **compatibility override only**, because
+existing operator muscle memory, the docs table at
+`docs/running_chain_test.md:141` and `test_c13_stop_semantics.py:161-171`
+all pass it explicitly. Only its **default** moves. It is not a
+general-purpose relocation knob and the docs must not present it as one.
 
 **The campaign stamp** (`control/campaign.json`) is what makes E3
 enforceable given §3.2's finding that nothing writes a STOP file:
 
 ```json
 {"campaign_id": "v20a", "created_at": "…Z", "ws_root": "…",
- "campaign_home": "…", "runner": "v19_queue_runner.sh", "runner_pid": 12345}
+ "campaign_home": "…", "runner": "v19_queue_runner.sh", "runner_pid": 12345,
+ "legacy_adopted_from": null}
 ```
 
-Written once at launcher startup if absent. If present and its
-`campaign_id` differs from the resolved `CAMPAIGN_ID`, the launcher
-**refuses to start, before any directory is created and before any
-chain launches** — the same posture as the existing workspace-exists
-guard (`:255`) and screen-alive guard (`:258`).
+#### 4.2a The campaign admission sequence — one ordered guard
+
+An earlier draft required the stamp mismatch to be refused "before any
+directory is created", while a different commit created those
+directories. **That ordering was impossible**, and the operator's review
+caught it. The two guarantees are different and are now stated
+separately:
+
+```text
+invalid campaign_id      -> refuse before ANY mkdir
+foreign/malformed stamp  -> refuse before any new state write, any STOP
+                            read, and any chain launch
+                            (pre-existing directories are not this run's
+                             side effect, so their existence is not a
+                             violation)
+```
+
+Both are satisfied by giving **one guard the whole sequence**, in this
+order:
+
+```text
+1. validate campaign_id                     -> refuse: nothing created
+2. inspect the existing campaign home       -> read-only
+3. validate an existing stamp               -> refuse: nothing written
+4. create the directories                   -> first side effect
+5. atomically create the stamp if absent    -> first writer wins
+```
+
+Step 5 follows an existing precedent exactly:
+`write_run_invariants()` (`core/run_invariants.py:190-222`) publishes
+with `os.link`, which **fails when the target exists** instead of
+overwriting, and `ensure_run_invariants()` falls through to validation on
+`FileExistsError`. That is the semantics the stamp needs — first writer
+wins, a concurrent loser validates instead of clobbering — and it is
+already written, tested and in production. PR E reuses the pattern.
+
+Steps 1-5 are one responsibility with one entry point, which is what
+makes the ordering guarantee checkable rather than distributed across
+commits. E-C2 owns the whole sequence.
 
 ### 4.3 Backward-compatibility rules
 
 **BC-1 — nothing on disk is moved, rewritten or deleted by shipped
 code.** Historical layouts (§3.10) stay exactly where they are.
 
-**BC-2 — legacy state is readable, never authoritative.** The
-completion check `chain_completed()` is the one place a legacy file
-still has to be *read*, so that a campaign interrupted before PR E can
-resume without relaunching completed chains. It reads
-`$WAVE_STATE`, and if the new file does not exist, falls back to
-`$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl` — **read-only, and only for
-the matching campaign id.** All writes go to the new path.
+**BC-2 — legacy compatibility is a campaign-level MODE, not a
+per-lookup retry.**
+
+An earlier draft specified a per-record fallback: if the new wave state
+has no completion record for a run, consult the legacy file, and if that
+shows `exit: 0`, skip the launch. **The operator's review rejected this,
+correctly.** It is stated as "readable, never authoritative" but it *is*
+authority — its worst case is that both states exist, a run is recorded
+complete only in the legacy file, and the launch is skipped on the
+strength of a file the new campaign was never supposed to obey. That is
+the §1 defect in a different costume: cross-*state* authority instead of
+cross-*campaign* authority.
+
+The replacement is an **adoption decision made once, at first start,
+and recorded**:
+
+```text
+FIRST START ONLY
+  the campaign's new state does not exist
+  AND a legacy state file for the SAME campaign_id exists
+    -> the stamp records  legacy_adopted_from = <legacy path>
+    -> this campaign may read legacy completion evidence, READ-ONLY
+
+ONCE THE NEW wave_state EXISTS
+    -> the legacy file is NEVER consulted again, for any record
+```
+
+Three properties follow, and each is a test in §9:
+
+- the decision is **auditable** — it is a field in the stamp, not an
+  implicit behaviour of a lookup;
+- it is **monotonic** — adoption can only be granted at first start, so
+  a legacy file appearing later (restored from a backup, copied by an
+  operator) cannot acquire authority over a running campaign;
+- it is **scoped** — adoption names one path for one campaign id, so a
+  legacy file belonging to a different campaign is never in range.
+
+A campaign that starts fresh after PR E has `legacy_adopted_from: null`
+and no legacy read path at all. All writes go to the new location in
+every case.
 
 **BC-3 — a legacy global STOP has no authority, and is not deleted.**
 At startup, if `$WS_ROOT/STOP` exists, the launcher:
@@ -755,11 +850,74 @@ pair ceiling, PR B), and §20.7 puts it out of scope. Recorded as
 > wave record fails at the schema rather than producing unparseable
 > JSON on disk.
 
+#### D-E-3a — Dual-write consistency: one canonical source, one derived view
+
+One record goes to two places, so which one is true has to be stated
+before it is written, not discovered after the two disagree.
+
+```text
+canonical source :  <campaign_home>/queue_state/wave_state.jsonl   (append-only)
+derived view     :  <campaign_home>/pair_summaries/wave_<n>_<band>.json
+
+write order:
+  1. append the record to the canonical JSONL, then flush + fsync
+  2. only then, atomically write the derived per-wave file
+```
+
+**Why this order.** The JSONL is append-only history; the per-wave file
+is a single mutable snapshot. Writing the durable, append-only fact
+first means a failure between the steps loses the *convenience*, never
+the *evidence*.
+
+**If step 2 fails**: the fact is already preserved canonically, the run
+**fails explicitly** rather than continuing quietly, and the derived
+file is rebuildable from the JSONL. A silently missing summary is the
+failure mode the launcher's own comment warns against — an aborted wave
+must not be the one case that leaves no summary (`:513-514`).
+
+**If step 1 fails**: nothing is written anywhere and the run fails. The
+derived file is never written ahead of its canonical record, so a
+per-wave file that exists without a matching JSONL line is a detectable
+inconsistency rather than a normal state.
+
+**`record_id` — required, because the two views age differently.** The
+JSONL *appends* and the per-wave file *overwrites*. A retried wave under
+the same campaign therefore produces two JSONL records and one file, and
+without an identifier there is no way to say which record the file
+corresponds to. Every wave record carries:
+
+```text
+record_id = <campaign_id>:<wave>:<band_tag>:<attempt>
+```
+
+`attempt` is the count of existing canonical records already matching
+the first three fields, resolved by the writer from the JSONL at write
+time — so it is derived from persisted evidence, not from launcher
+state that a restart would lose.
+
+The derived file is defined to hold **the latest attempt**, and carries
+its own `record_id`, so:
+
+- "which attempt is this file?" is answered by reading the file;
+- "how many attempts were there?" is answered by the canonical JSONL;
+- a duplicate is identified as *the same `record_id`* — which must never
+  occur, and a test asserts a retried wave produces a **different**
+  `record_id` rather than a silent second copy of the first.
+
+**Not in scope**: reconciling or rebuilding the derived files for
+historical waves. Nothing on disk is rewritten (BC-1), and the rebuild
+path is documented rather than implemented — **FU-E-7**.
+
 ### D-E-4 — The Gate pair summary is scoped and stamped; the Gate gains no stop channel
 
-- [ ] Approved  [ ] Rejected  [ ] Modified
+- [x] **Approved with all three sub-decisions closed — operator ruling,
+      2026-08-04.** Prefixed filenames only, **no** new subdirectory
+      (closes OPEN-E-7); **no** new Gate stop channel (OPEN-E-3 becomes a
+      follow-up, not PR E); and `GATE_RUN_PREFIX` must pass the **same**
+      safe-path-component validator as `campaign_id`. Historical
+      `gate0_pair_summary.json` is untouched.
 
-Two halves.
+Three parts.
 
 **Do:** `SUMMARY` (`v19_gate0_pair_runner.sh:59`) derives from
 `GATE_RUN_PREFIX` like every other name the file builds
@@ -768,11 +926,27 @@ hardcoded `"gate": "v19_gate0"` (`:290`) becomes the resolved prefix.
 This closes the verified overwrite hazard the file documents against
 itself at `:379-382`. The runner log (`:63`) gets the same treatment.
 
-**Do not:** add a stop file channel to the Gate runner. It has none
-today — its only trap is `trap write_summary EXIT` (`:304`) and its only
-bound is `WALL_CAP_SECONDS` (`:48`). Adding one would be a *stop
-semantics change*, explicitly out of scope per §20.7. Flagged as
-OPEN-E-3 rather than silently either done or dropped.
+**Also do:** validate `GATE_RUN_PREFIX` with the **same** typed
+safe-path-component validator as `campaign_id` (D-E-9). It is written
+into filenames (`:59`, `:63`) and into the record's `"gate"` field
+(`:290`) — the identical hazard for the identical reason. An empty
+prefix yields `_pair_summary.json`; a separator, or a segment equal to
+`.` or `..`, escapes `GATE_ROOT`. Reusing one validator rather than
+writing a second is what keeps the two rules from drifting apart.
+
+This creates a dependency from E-C5 on E-C2's typed identity that E-C5
+would not otherwise have. Accepted deliberately: one shared rule beats
+two rules that happen to agree today.
+
+**Do not:** add a stop file channel to the Gate runner, and **do not**
+give `GATE_ROOT` a `$GATE_RUN_PREFIX` subdirectory. The Gate has no stop
+channel today — its only trap is `trap write_summary EXIT` (`:304`) and
+its only bound is `WALL_CAP_SECONDS` (`:48`). Adding one is a *stop
+semantics change*, out of §20.7's scope; it becomes a follow-up
+(**FU-E-8**), not a PR E commit. A prefix subdirectory would strand the
+existing Gate evidence under a now-unused layout for no additional
+isolation, since prefixed filenames already remove the overwrite
+collision.
 
 ### D-E-5 — A legacy global STOP is logged and recorded, never honoured and never deleted
 
@@ -869,19 +1043,31 @@ to `ObservationStore`, so PR E **reuses the pattern, not the symbol**.
 (`agent/schemas/literature_review.py:56-68`) has the right checks
 (`/`-prefix, `..` segments) attached to the wrong type.
 
-**What is taken.** A narrow typed identifier in `core/`, validated as:
+**What is taken.** A narrow typed identifier in `core/`, validated as
+exactly two rules:
 
 ```text
 re.fullmatch(r"[A-Za-z0-9._-]{1,128}", campaign_id)   # from _WRITER_ID_RE
 and campaign_id not in {".", ".."}                    # the gap it leaves
 ```
 
-The second line is not decoration. `^[A-Za-z0-9._-]{1,128}$` **accepts
-`..`** — both characters are in the class — so the borrowed pattern
-alone would admit `$WS_ROOT/../control/STOP`, an escape from the
-campaign root and exactly what the ruling forbids. Every other
-prohibited form (empty, `/`, `\`, control characters, absolute paths,
-NUL) is already rejected by the character class and the length bound.
+**The second rule rejects the id *equal to* `.` or `..`. It does not
+reject an id that merely *contains* `..`.** An earlier draft was
+inconsistent about this and the operator's review corrected it:
+`alpha..beta` is a legal directory name, cannot traverse anywhere,
+and must be allowed. The only traversal risk is a path *segment* that
+is exactly `.` or `..`, and since `/` and `\` are already rejected by
+the character class, the id is always exactly one segment — so
+comparing the whole string against `{".", ".."}` is complete.
+
+The first rule carries the rest: empty is rejected by `{1,128}`; `/`,
+`\`, control characters, NUL and every absolute-path form are rejected
+by the character class; over-length is rejected by the bound.
+
+**One rule, stated once, three places.** The validator, its tests
+(§9 Layer 1) and BD-5 all say *equal to* `.` or `..`, never *contains*.
+A test asserts `alpha..beta` is **accepted**, so the stricter reading
+cannot creep back in unnoticed.
 
 **Where it is enforced.** At launcher startup, **before** the resolved
 campaign directory is created — i.e. in E-C2, at the first moment the id
@@ -908,14 +1094,20 @@ the evidence named in its row.
 
 ### E1 — Path model
 
-- [ ] `CAMPAIGN_HOME` / `CAMPAIGN_CONTROL_DIR` / `QUEUE_STATE_DIR` /
-      `PAIR_SUMMARY_DIR` resolved in exactly one block, each overridable
-- [ ] `QUEUE_STOP_FILE` default is `$CAMPAIGN_CONTROL_DIR/STOP`; the
-      `QUEUE_STOP_FILE` env override still works
+- [ ] All campaign paths resolved in exactly one block, derived from
+      `CAMPAIGN_HOME`; **only** `WS_ROOT`, `CAMPAIGN_HOME` and the
+      compatibility-only `QUEUE_STOP_FILE` are overridable (§4.2)
+- [ ] Setting `QUEUE_STATE_DIR` / `CAMPAIGN_CONTROL_DIR` /
+      `PAIR_SUMMARY_DIR` in the environment has **no effect** — proved by
+      test, because an override that split them could point two
+      campaigns at one state directory
+- [ ] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
+      compatibility override still works
 - [ ] `WAVE_STATE` and `LOGF` under `queue_state/`
-- [ ] Wave summaries written to `pair_summaries/wave_<n>_<band>.json`
-      **and** appended to the queue state (both, so no existing
-      operator query loses its source)
+- [ ] Wave summaries written **canonical-first**: append + `fsync` the
+      JSONL, then atomically write
+      `pair_summaries/wave_<n>_<band>.json`, both carrying the same
+      `record_id` (D-E-3a)
 - [ ] Gate pair summary and runner log derive from `GATE_RUN_PREFIX`
 - [ ] **Evidence**: a test enumerates every authority-bearing path the
       runner resolves and asserts each contains the campaign id; it
@@ -926,29 +1118,43 @@ the evidence named in its row.
 
 ### E2 — Backward compatibility
 
-- [ ] `chain_completed()` falls back to the legacy flat-prefix wave
-      state, read-only, matching campaign id only
+- [ ] Legacy compatibility is a **campaign-level adoption mode** decided
+      once at first start and recorded as `legacy_adopted_from` in the
+      stamp — **not** a per-record fallback (BC-2)
+- [ ] `chain_completed()` consults the legacy file **only** under
+      adoption, read-only, for the recorded path only
+- [ ] Adoption cannot be granted after first start
 - [ ] Legacy `$WS_ROOT/STOP` is observed, logged, recorded, and does
       **not** stop the launch
 - [ ] No shipped code path deletes, moves or rewrites any legacy file
 - [ ] V18r layout untouched; `v18r_queue_runner.sh` not modified
-- [ ] **Evidence**: a test with a legacy tree on disk proves (a) a
-      completed chain in the legacy state is still skipped, (b) the
-      legacy global STOP does not block, (c) every legacy file is
+- [ ] **Evidence**: a test with a legacy tree on disk proves (a) an
+      adopted campaign still skips a chain completed in legacy state,
+      (b) **a campaign whose new state exists does NOT skip a chain
+      recorded complete only in legacy** — the blocker case, (c) the
+      legacy global STOP does not block, (d) every legacy file is
       byte-identical and mtime-identical after the run
 
 ### E3 — Campaign mismatch protection
 
-- [ ] `campaign_id` is validated before it becomes a path component —
-      empty, `/`, `\`, `..`, `.`, absolute and control-character forms
-      all refused (D-E-9)
-- [ ] `control/campaign.json` written at startup when absent
-- [ ] A stamp naming a different `campaign_id` aborts **before** any
-      directory is created and before any chain launches
+- [ ] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
+      `\`, control characters, over-length, and an id **equal to** `.`
+      or `..` are refused; an id merely *containing* `..` is **accepted**
+      (D-E-9)
+- [ ] The same validator guards `GATE_RUN_PREFIX` (D-E-4)
+- [ ] One guard owns the whole ordered admission sequence — validate id →
+      inspect home → validate stamp → create dirs → atomically create
+      stamp (§4.2a)
+- [ ] `control/campaign.json` created atomically, first writer wins
+      (`os.link` semantics, per `core/run_invariants.py:190-222`)
+- [ ] A stamp naming a different `campaign_id` aborts **before any new
+      state write, any STOP read and any chain launch**. Pre-existing
+      directories are not this run's side effect and are not a violation
 - [ ] The refusal names both ids and the stamp path
 - [ ] **Evidence**: a test that pre-writes a foreign stamp and asserts
-      non-zero exit, the diagnostic text, and that no chain was launched
-      and no state file was written
+      non-zero exit, the diagnostic text, that no chain was launched and
+      no state file was written; plus a positive control that
+      `alpha..beta` is accepted
 
 ### E4 — Stop semantics preserved
 
@@ -973,9 +1179,11 @@ the evidence named in its row.
 - [ ] Both campaigns' state files coexist and neither is written by the
       other's runner
 - [ ] A legacy global STOP present throughout, and never honoured
-- [ ] **Evidence**: one test module, `test_multi_campaign_isolation.py`,
-      that fails if `QUEUE_STOP_FILE`'s default is reverted to
-      `$WS_ROOT/STOP`
+- [ ] **Evidence**: one test module,
+      `test_multi_campaign_isolation.py`, **fully green in the committed
+      suite**, plus a **separate documented mutation run** showing it
+      fails when `QUEUE_STOP_FILE`'s default is temporarily reverted to
+      `$WS_ROOT/STOP` in the source, and green again after restoring
 
 ---
 
@@ -1097,7 +1305,11 @@ Implementation
 - [ ] No new TIDMAD-specific constant enters generic infrastructure
 - [ ] No task-specific prompt, metric, file layout, model family or
       hardware ceiling embedded in the generic path layer
-- [ ] New policy values enter through documented, overridable variables
+- [ ] New policy values enter through documented variables, with the
+      override surface **deliberately narrow** — `WS_ROOT`,
+      `CAMPAIGN_HOME` and the compatibility-only `QUEUE_STOP_FILE`; the
+      subdirectories are derived, because independent overrides could
+      reconstruct the cross-campaign defect (§4.2)
 - [ ] Task-specific assumptions in touched code move behind the ROSTER
       boundary where bounded (roles), stay put where not (bands)
 - [ ] Backward compatibility for the current TIDMAD workflow explicit
@@ -1118,9 +1330,11 @@ Validation
 Merge criteria
 - [ ] Genericization section completed (this section)
 - [ ] No unexplained new hardcoded assumption
-- [ ] New policy is overridable and its resolved value is logged
+- [ ] New policy is configurable at the campaign level and its resolved
+      value is logged; no override can point two campaigns at one state
+      directory
 - [ ] TIDMAD behaviour preserved through defaults, not special cases
-- [ ] FU-E-1..FU-E-6 filed
+- [ ] FU-E-1..FU-E-8 filed
 
 Decomposition (§1.5)
 - [ ] `main()` in `v19_queue_runner.sh` gains no new responsibility —
@@ -1144,20 +1358,22 @@ Decomposition (§1.5)
 ## 8. Commit plan
 
 Each commit is independently revertible, **independently green**, and
-lands with its own tests. The table is the index; the E-C1..E-C7
+lands with its own tests. The table is the index; the E-C1..E-C8
 subsections below are the implementation contract.
 
 | # | Commit | Content | Checkpoint evidence |
 |---|---|---|---|
 | **E-C1** | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
-| **E-C2** | Queue runner consumes the resolver, **with the legacy read-back** | `QUEUE_STOP_FILE`, `WAVE_STATE`, `LOGF` move; directory creation; id validation; `chain_completed()` fallback; legacy-global-STOP observation; D-E-7 | E1 + E2 |
-| **E-C3** | Campaign stamp and mismatch guard | `control/campaign.json`; refusal before any side effect | E3 |
-| **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; per-wave files; `MAX_CONC` deleted | E1 |
-| **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"` | E1 |
-| **E-C6** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
-| **E-C7** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
+| **E-C2** | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
+| **E-C3** | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
+| **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
+| **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
+| **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
+| **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
+| **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
 
-**Two structural rulings are baked into this table.**
+**Four structural rulings from the second operator review are baked
+into this table.**
 
 *E-C0 is gone.* The role-derivation fix landed ahead of PR E as its own
 hotfix — `fe51377c`, PR #165 (D-E-6). It is no longer PR E's work. Its
@@ -1165,20 +1381,40 @@ audit and its history stay in §3.7 and D-E-6 because they are the reason
 the fail-closed posture exists, but no commit here reimplements it. PR E
 inherits it and must not regress it.
 
-*E-C2 and the old E-C4 are one commit.* **Operator ruling, 2026-08-04:
-do not knowingly commit a red intermediate.** Moving the wave-state path
-and updating its read-back and its legacy test are one behavioural unit
-— the read-back is the *reason* the move is safe, and splitting them
-separated a change from its justification while leaving
-`test_completed_only_selection_skips_and_exits_clean`
-(`test_v19_queue_runner.py:294-304`) red across two commits. They now
-land together, and E-C2's acceptance criteria require the full suite to
-be green **at that commit**, not at a later one. This resolves OPEN-E-9
-as option (b). Everything after renumbers down by one.
+*No commit is knowingly red.* **Operator ruling, 2026-08-04.** Every
+commit below is independently green, and each one's acceptance criteria
+require the suite to pass **at that commit**, not at a later one. Where
+a commit changes a path that an existing test pins, that test is
+re-pointed in the same commit with its defect class preserved and
+restated — never left red for a successor to repair. This is the
+standing resolution of OPEN-E-9.
+
+*E-C2 owns the whole admission sequence.* The second operator review
+found that an earlier split made the stamp guard's ordering
+**impossible**: it required refusing a foreign stamp "before any
+directory is created" while a *different* commit created those
+directories. §4.2a re-states the two guarantees separately — an invalid
+id is refused before any `mkdir`; a foreign or malformed stamp is
+refused before any new state write, STOP read or chain launch — and
+gives one guard the ordered sequence that satisfies both. That sequence
+is one responsibility with one entry point, so it is one commit.
+
+*Legacy adoption is its own commit.* It was previously folded into
+E-C2, which the review flagged as overloaded. It is now E-C3: the
+adoption decision, its consumption, and the legacy-global-STOP
+observation — one coherent "what do we do about the past" unit. E-C2
+stays green without it because E-C2 re-points the one test that pins the
+legacy filename; E-C3 then adds the adoption tests on top.
+
+*D-E-7 leaves E-C2 entirely.* The process guard's self-exclusion has no
+causal dependency on the path move, and E-C2 was carrying too much. It
+is now E-C6, a small independent commit (operator ruling, 2026-08-04).
+It could equally be a follow-up; it stays in PR E only because it is two
+lines and the same campaign-identity defect class.
 
 **A note on E4.** No single commit "does" E4 (stop semantics preserved).
 It is a property every commit must not break, and it is discharged by
-E-C2's and E-C6's parity evidence plus the E4 mutation proof (§6). It is
+E-C2's and E-C7's parity evidence plus the E4 mutation proof (§9). It is
 listed in each commit's acceptance criteria rather than owning a commit.
 
 ### Standing verification rules — every commit
@@ -1350,160 +1586,178 @@ V19_QUEUE_NO_MAIN=1 bash -c \
       any deviation from this section
 
 ---
-### E-C2 — The queue runner consumes the resolver, with the legacy read-back
+### E-C2 — Campaign admission and the path move
 
-*(Merged from the previously separate E-C2 and E-C4 by operator ruling,
-2026-08-04 — OPEN-E-9 resolved as option (b). See §8's structural
-rulings for why.)*
+*(Restructured after the second operator review: the stamp guard's
+ordering was impossible as previously split, and D-E-7 and legacy
+adoption have both left this commit. See §8's structural rulings.)*
 
 #### 1. Goal
 
-Move `QUEUE_STOP_FILE`, `WAVE_STATE` and `LOGF` to the campaign-scoped
-defaults, validate the campaign id before it becomes a directory,
-create the directories, keep legacy state readable, strip the legacy
-global STOP of its authority without deleting it, and fix D-E-7's
-process-guard literal.
+Make `CAMPAIGN_HOME` real and bind this run to it through **one ordered
+admission sequence**: validate the id, inspect any existing campaign
+home, validate any existing stamp, create the directories, atomically
+create the stamp if absent.
 
-**This is the commit that closes the §1 defect**, and it is one commit
-because the path move and the read-back are one behavioural unit: the
-read-back is what makes the move safe. Splitting them would leave
-`test_completed_only_selection_skips_and_exits_clean`
-(`test_v19_queue_runner.py:294-304`) red in between, and would present a
-change to review without its justification.
+**This is the commit that closes the §1 defect**, and the sequence is
+one commit because its ordering guarantee is only checkable if one guard
+owns the whole order. §4.2a states the two guarantees it must satisfy:
+an invalid id is refused before **any** `mkdir`; a foreign or malformed
+stamp is refused before any new state write, any STOP read and any chain
+launch. Splitting those across commits is what made the earlier draft's
+ordering unsatisfiable.
 
 #### 2. Scope
 
 **Changes**: `sdsc_submission_scripts/v19_queue_runner.sh` —
-`:81`, `:82`, `:104` (defaults), `:259` (D-E-7), `:390`
-(`mkdir -p "$WS_ROOT"` becomes the three campaign directories),
-`chain_completed()` (`:215-219`, legacy fallback), a startup validation
-call and a legacy-global-STOP observation in `main()`, and the startup
-log line so the operator can read the resolved stop path.
+`:81`, `:82`, `:104` (defaults flip to §4.2's targets), `:390`
+(`mkdir -p "$WS_ROOT"` becomes the campaign directories), one new
+admission guard called once from `main()` before the `--only` branch
+(`:392`), and the startup log line so the operator can read the resolved
+stop path.
 
-**New Python** (D-E-9, placement forced by §3.13): a typed campaign
-identity in `core/`, plus the thin CLI entry in `scripts/` the shell
-calls. Both inside `pyrightconfig.json`'s `"include"`.
+**New Python** (D-E-9, placement forced by §3.13): the typed campaign
+identity and the stamp model in `core/`, plus the thin CLI entry in
+`scripts/` the shell calls. Both inside `pyrightconfig.json`'s
+`"include"`.
 
-**Tests updated**: `test_v19_queue_runner.py:294-304` — its fixture
-already writes the legacy filename, so it becomes the legacy-fallback
-test with its log-path assertion repointed.
-`test_c13_stop_semantics.py:161-171` passes `QUEUE_STOP_FILE`
-explicitly and should keep passing untouched — **verify, do not assume.**
+**Tests updated**: `test_v19_queue_runner.py:294-304`
+(`test_completed_only_selection_skips_and_exits_clean`) is re-pointed at
+the new state location **in this commit**, so nothing is left red. Its
+defect class is unchanged and must be restated in its docstring: *a
+targeted run of an already-completed chain must skip it, never relaunch
+it and clobber its workspace.* The legacy-filename variant of that
+scenario is added in E-C3, where adoption exists.
+`test_c13_stop_semantics.py:161-171` passes `QUEUE_STOP_FILE` explicitly
+and should keep passing untouched — **verify, do not assume.**
 
-**Non-goals.** The chain-level STOP (`_chain_common.sh:694-696`) is not
-touched. The wave record shape is E-C4. The Gate runner is E-C5. No
-migration, archiving, deletion or rewriting of any legacy file. No
-support for reading a *different* campaign's legacy state.
+**Non-goals.** No legacy read path of any kind — E-C3. No
+legacy-global-STOP observation — E-C3. No D-E-7 process-guard change —
+E-C6. No wave-record change — E-C4. No Gate runner — E-C5. The
+chain-level STOP (`_chain_common.sh:694-696`) is not touched.
 
 **Must stay unchanged**: stop check points (before each wave `:444`,
 after each wave `:535`); `record_queue_stop`'s fields (`:206-211`); exit
 code 99 (`:106`, `:447`, `:538`); the trap channel (`:190-196`);
 `chain_completed()`'s contract — complete iff a record with `"exit": 0`
-exists for that run name (`:213-219`); the workspace-exists guard
-(`:255`); `V19_RESUME` semantics; `role_for_run()` (`:134-170`); the
-`--only` path; the source-safe guard.
+exists for that run name (`:213-219`) — which this commit re-points but
+does not redefine; the workspace-exists guard (`:255`); `V19_RESUME`
+semantics; `role_for_run()` (`:134-170`); the `--only` path; the
+source-safe guard; the three existing launch guards' order.
 
 **Dependencies**: E-C1.
 
 #### 3. Implementation plan
 
-*Path move*
-- [ ] Flip the five E-C1 defaults from the compatibility values to the
-      §4.2 target values, in one hunk
-- [ ] Replace `mkdir -p "$WS_ROOT"` (`:390`) with creation of
-      `$CAMPAIGN_CONTROL_DIR`, `$QUEUE_STATE_DIR`, `$PAIR_SUMMARY_DIR`
-      (each `mkdir -p` creates `$CAMPAIGN_HOME` implicitly). Keep it
-      inside `main()` — `:375-377` states main is the only thing that
-      touches the filesystem, and `test_source_safe_entry.py` enforces it
-- [ ] Confirm `log()` (`:188`) is not called before the directory
-      exists: it appends to `$LOGF`, now under `queue_state/`. Inspect
-      every call site reachable before `:390` — the argument parser at
-      `:381-388` uses `echo … >&2`, not `log`, but verify
-- [ ] Add a startup line logging the resolved `CAMPAIGN_HOME`,
-      `QUEUE_STOP_FILE` and `WAVE_STATE`, so BD-1's operator-visible
-      change is discoverable from the log
-- [ ] Replace `:259`'s `grep -v v19_queue_runner` with the basename of
-      `${BASH_SOURCE[0]}`
-
-*Identity validation (D-E-9)*
-- [ ] Add the typed identity in `core/`: the `_WRITER_ID_RE` pattern
-      (`observation_store.py:38`) **plus** explicit rejection of `.` and
-      `..`, which that pattern accepts (§3.13)
+*The typed identity (D-E-9)*
+- [ ] Add the identity in `core/`: `re.fullmatch(r"[A-Za-z0-9._-]{1,128}")`
+      — the `_WRITER_ID_RE` pattern (`observation_store.py:38`) — **plus**
+      rejection of an id **equal to** `.` or `..`
+- [ ] Do **not** reject an id merely containing `..`: `/` and `\` are
+      already excluded by the class, so the id is always one path
+      segment and `alpha..beta` cannot traverse. A test asserts it is
+      **accepted**
 - [ ] Add the `scripts/` CLI entry; model it on `campaign_spend.py`,
       which the launcher already calls at `:236-243`
-- [ ] Call it in `main()` **before** the `mkdir` block — the id must be
-      refused before it is used to create anything
+
+*The stamp*
+- [ ] Model the stamp on `core/run_invariants.py:190-222`
+      (`write_run_invariants`): write to a same-directory `mkstemp`, then
+      publish with `os.link`, which **fails when the target exists**
+      rather than overwriting. That is what makes "first writer wins"
+      true under concurrency, and `ensure_run_invariants` (`:303`) is the
+      existing example of a loser falling through to validation
+- [ ] Fields per §4.2, with `legacy_adopted_from` present and `null` —
+      E-C3 populates it, and declaring it here avoids a schema change in
+      the next commit
+
+*The sequence, in this order*
+- [ ] 1. validate `campaign_id` → refuse with nothing created
+- [ ] 2. inspect the existing campaign home → read-only
+- [ ] 3. validate an existing stamp → refuse with nothing written
+- [ ] 4. create `control/`, `queue_state/`, `pair_summaries/`
+- [ ] 5. atomically create the stamp if absent
+- [ ] Call the guard from `main()` before the `--only` branch (`:392`);
+      confirm by reading `:378-392` that no launch or state write can
+      precede it
+- [ ] On a step-3 refusal: message naming the stamp path, the stamped id
+      and the requested id; non-zero exit; **no wave state written**.
+      Recommendation: do **not** append a refusal record to the wave
+      state — writing into campaign B's state on a failed launch of
+      campaign A is the cross-campaign write this PR forbids. Log to
+      stderr
+
+*The path move*
+- [ ] Flip the E-C1 defaults from the compatibility values to §4.2's
+      targets, in one hunk, and delete the three subdirectory override
+      hooks — `control/`, `queue_state/` and `pair_summaries/` are
+      derived from `CAMPAIGN_HOME`, never independently set (§4.2)
+- [ ] Keep the `mkdir` inside `main()` — `:375-377` states main is the
+      only thing that touches the filesystem, and
+      `test_source_safe_entry.py` enforces it
+- [ ] Confirm `log()` (`:188`) is not called before `queue_state/`
+      exists. Inspect every call site reachable before `:390` — the
+      argument parser at `:381-388` uses `echo … >&2`, not `log`, but
+      verify
+- [ ] Add a startup line logging the resolved `CAMPAIGN_HOME`,
+      `QUEUE_STOP_FILE` and `WAVE_STATE`, so BD-1's operator-visible
+      change is discoverable
 - [ ] Inspect what `campaign_spend()` does when the interpreter is
       missing (`:236-243` ends `|| echo "0 0.00"`), then decide the
-      validator's posture deliberately: a swallowed failure there yields
-      a zero spend, but a swallowed failure here would skip the guard.
-      **Recommendation: fail closed** — record the decision either way
-
-*Legacy compatibility*
-- [ ] Extend `chain_completed()`: if `$WAVE_STATE` does not exist or has
-      no matching record, additionally check
-      `$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl` — **read only**
-- [ ] Keep the existing `grep … | grep -q` form so the completion
-      predicate is provably identical on both files
-- [ ] Confirm the fallback cannot match another campaign: it
-      interpolates `${CAMPAIGN_ID}` into the filename, and the record
-      match is on the exact run name
-- [ ] Add the legacy-global-STOP observation: if `$WS_ROOT/STOP` exists,
-      log it with path and mtime and append a
-      `legacy_global_stop_observed` record to the **new** wave state,
-      matching `record_queue_stop`'s shape (`:206-211`). **Do not remove
-      the file, and do not stop**
-- [ ] Verify no write path targets a legacy filename: grep for
-      `${CAMPAIGN_ID}_wave_state` and confirm every occurrence is a read
-- [ ] Re-run the `test_c13_stop_semantics.py` queue class and confirm it
-      is genuinely unaffected
+      admission guard's posture deliberately: a swallowed failure there
+      yields a zero spend, but a swallowed failure here would skip the
+      guard entirely. **Recommendation: fail closed** — record the
+      decision either way
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] `QUEUE_STOP_FILE` resolves to `$WS_ROOT/$CAMPAIGN_ID/control/STOP`
+- [ ] `QUEUE_STOP_FILE` resolves to `$CAMPAIGN_HOME/control/STOP`
 - [ ] `WAVE_STATE` and `LOGF` resolve under `$CAMPAIGN_HOME/queue_state/`
-- [ ] The `QUEUE_STOP_FILE` override still wins over the new default
+- [ ] `CAMPAIGN_HOME` override moves all four derived paths together
+- [ ] Setting `QUEUE_STATE_DIR` in the environment has **no effect** —
+      the override was removed deliberately (§4.2)
+- [ ] The `QUEUE_STOP_FILE` compatibility override still wins
 - [ ] The E1 path-enumeration test: every authority-bearing path
       contains the campaign id
-- [ ] D-E-7: a copy of the runner under a different filename does not
-      self-match the process guard
-- [ ] Legacy state present, new state absent → a completed chain is
-      still skipped
-- [ ] Legacy and new state both present → the new state is
-      authoritative; a chain completed only in legacy is still skipped
-- [ ] Legacy state naming a **different** campaign id is not consulted
-- [ ] `legacy_global_stop_observed` is recorded and the run proceeds
+- [ ] Absent stamp → created once, with the resolved id and
+      `legacy_adopted_from: null`
+- [ ] Matching stamp → accepted, contents not rewritten (compare mtime)
+- [ ] Mismatched stamp → non-zero exit, message names both ids
 
 **Integration / pseudo**
 - [ ] `test_source_safe_entry.py` still green — sourcing creates no
       directory
 - [ ] A `--only` run against a temp root creates the three directories
       and writes its log to the new location
-- [ ] A full `--only` run over a legacy fixture tree exits 0, skips the
-      completed chain, and launches nothing
+- [ ] A full `--only` run with a foreign stamp: exits non-zero, launches
+      nothing (no screen shim invocation), writes no wave state
 
 **Negative / invalid input**
-- [ ] D-E-9's full refusal set, each its own case: empty; `/`; a path
-      containing `/`; `..`; `.`; an absolute path; a backslash; a
-      control character; a 129-character id
-- [ ] Each refusal happens **before** any directory is created
+- [ ] D-E-9's refusal set, each its own case: empty; `/`; a path
+      containing `/`; an id equal to `.`; an id equal to `..`; an
+      absolute path; a backslash; a control character; a 129-character id
+- [ ] **Positive control on the same rule**: `alpha..beta` and
+      `a.b_c-d` are **accepted**. Without this the validator can silently
+      tighten to "contains `..`" and no test would notice
+- [ ] Every refusal happens **before** any directory is created —
+      asserted by listing the root before and after
+- [ ] Malformed, truncated or empty stamp JSON → **STOP**
+- [ ] Stamp present but `campaign_id` key absent → **STOP**
+- [ ] Stamp whose recorded id fails validation → **STOP**; a stamp
+      written before the validator existed must not grandfather in an
+      unsafe id
+- [ ] Concurrent creation: two writers, one stamp, the loser validates
+      instead of overwriting (the `os.link` property)
 - [ ] `WS_ROOT` unwritable → reported before any chain launches
-- [ ] Legacy file present but unparseable or unreadable → **warn and
-      continue**, treated as "no completion evidence". Blocking here
-      would restore a legacy file's authority over a new campaign
-- [ ] A stop file at the **old** global location does not stop the queue
 
 **Backward compatibility / default parity**
 - [ ] C13 parity: `test_c13_stop_semantics.py` green with **zero
       modifications** — if it needs edits, that is a semantics change
       and must be reported, not absorbed
 - [ ] `test_v19_chain_role_resolution.py` green, unmodified
-- [ ] The E4 mutation proof: revert only the three defaults and confirm
+- [ ] The E4 mutation proof: revert only the path defaults and confirm
       every C13 assertion still passes
-- [ ] Byte-and-mtime identity over every file in a legacy fixture tree
-      before and after a full run — the E2 evidence
-- [ ] The legacy global STOP is unchanged and still present afterwards
 
 **Real Gate**
 - [ ] None. **No real-training run is authorized by this commit.**
@@ -1512,45 +1766,47 @@ exists for that run name (`:213-219`); the workspace-exists guard
 
 - [ ] After a `--only` run against a temp `WS_ROOT` with
       `CAMPAIGN_ID=alpha`, the filesystem contains
-      `<tmp>/alpha/control/`, `<tmp>/alpha/queue_state/queue_runner.log`
-      and `<tmp>/alpha/pair_summaries/` — asserted by listing the tree,
-      not by echoing a variable
-- [ ] `touch <tmp>/STOP` before that run does **not** stop it; the run
-      launches, the log names the resolved stop path, and a
-      `legacy_global_stop_observed` record naming the legacy path exists
-      in the **new** wave state
+      `<tmp>/alpha/control/campaign.json`,
+      `<tmp>/alpha/queue_state/queue_runner.log` and
+      `<tmp>/alpha/pair_summaries/` — asserted by listing the tree, not
+      by echoing a variable
+- [ ] `touch <tmp>/STOP` before that run does **not** stop it, and the
+      log names the resolved stop path. (The observation *record* is
+      E-C3; this commit only proves the legacy path is not consulted.)
 - [ ] `touch <tmp>/alpha/control/STOP` **does** stop it, with a
       `queue_stopped` record whose `reason` is `operator_stop_requested`
       and exit code 99
 - [ ] `CAMPAIGN_ID=..` exits non-zero and `<tmp>` gains **no** new
       directory — verified by listing `<tmp>` before and after
-- [ ] Given `<tmp>/alpha_wave_state.jsonl` with an `"exit": 0` record
-      for `alpha_arch_15_19` and no new-location state, `--only
-      alpha_arch_15_19` logs `SKIP … already completed` and the screen
-      shim records zero invocations
-- [ ] Every pre-existing file under `<tmp>` has identical bytes and
-      identical `st_mtime_ns` after the run
+- [ ] `CAMPAIGN_ID=alpha..beta` is **accepted** and produces
+      `<tmp>/alpha..beta/control/`
+- [ ] With a stamp naming `beta` under `<tmp>/alpha/control/`, the run
+      exits non-zero, the screen shim records zero invocations, and
+      `<tmp>/alpha/queue_state/` gains no record from this attempt
+- [ ] Removing the admission call makes exactly one test fail (the E3
+      reachability mutation proof)
 - [ ] `test_c13_stop_semantics.py` diff is empty
-- [ ] A renamed copy of the runner launches (D-E-7)
-- [ ] **The full test suite is green at this commit**, not at a later one
-- [ ] Pyright is clean over the new `core/` and `scripts/` modules
+- [ ] **The full test suite is green at this commit**
+- [ ] Pyright clean over the new `core/` and `scripts/` modules
 
 #### 6. Failure and edge cases
 
 | Case | Behaviour |
 |---|---|
-| Campaign id empty, `/`, `\`, `..`, `.`, absolute, control chars, over-length | **STOP** before any directory is created (D-E-9) |
-| Legacy `$WS_ROOT/STOP` present | **Warn + record, continue.** Never honoured, never deleted |
-| Legacy wave state present | Read-only fallback, same campaign id only |
-| Legacy state unreadable or malformed | **Warn and continue** — treated as no evidence |
-| Both legacy and new state present | New state authoritative; legacy consulted only when the new one lacks the record |
-| `$CAMPAIGN_HOME` missing | **Created** by `main()`; a fresh campaign is the normal case |
+| Campaign id empty, `/`, `\`, control chars, over-length, or equal to `.` / `..` | **STOP** before any directory is created |
+| Campaign id *containing* `..` (e.g. `alpha..beta`) | **ACCEPT** — one path segment, cannot traverse (D-E-9) |
+| Campaign-id mismatch against an existing stamp | **STOP** before any state write, STOP read or launch |
+| Missing campaign dir | **Created** in step 4; a fresh campaign is the normal case |
+| Missing stamp in an existing campaign dir | **Adopt** — write it, proceed. This is every pre-PR-E campaign |
+| Unreadable or malformed stamp | **STOP** — cannot prove a match |
+| Stamp write loses a race | **Fall through to validation**, per `os.link` semantics; never overwrite |
+| Stamp write fails for any other reason | **STOP** — an unstampable campaign cannot be guarded |
 | `mkdir` fails (permissions, read-only mount) | **STOP** before any launch, with the path named |
-| Campaign directory exists from a prior run of the same id | Normal resume; not an error. The workspace-exists guard (`:255`) and `chain_completed()` still decide what relaunches |
-| Two campaigns running concurrently under one root | Each writes only under its own `CAMPAIGN_HOME`; proven in E-C6 |
-| Partial migration (new dirs and legacy files both present) | Supported by construction — that is what the fallback is for |
-| Historical V18r layout (`v18r_queue_state`, a plain text index, §3.10) | **Not consulted.** It belongs to a runner PR E does not modify; recorded in E-C7's README table so an operator is not surprised |
-| Validator interpreter unavailable | See the implementation step; **recommendation: fail closed**, and the decision is recorded either way |
+| Legacy `$WS_ROOT/STOP` present | **Not consulted.** Its observation record is E-C3 |
+| Legacy wave state present | **Not consulted at all in this commit** — adoption is E-C3 |
+| Campaign directory exists from a prior run of the same id | Normal resume; the stamp validates, the workspace-exists guard (`:255`) and `chain_completed()` still decide what relaunches |
+| Two campaigns concurrently under one root | Each writes only under its own `CAMPAIGN_HOME`; proven in E-C7 |
+| Validator interpreter unavailable | See the implementation step; **recommendation: fail closed**, decision recorded either way |
 | Cleanup-script assumptions | None exist (§3.11); nothing to update |
 
 #### 7. Verification commands and evidence
@@ -1561,7 +1817,6 @@ exists for that run name (`:213-219`); the workspace-exists guard
 bash -n sdsc_submission_scripts/v19_queue_runner.sh
 PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 git diff --stat -- tests/unit/sdsc_submission_scripts/test_c13_stop_semantics.py
-grep -n '_wave_state' sdsc_submission_scripts/v19_queue_runner.sh
 ```
 
 - [ ] test count: __
@@ -1571,147 +1826,180 @@ grep -n '_wave_state' sdsc_submission_scripts/v19_queue_runner.sh
 - [ ] C13 diff empty: __
 - [ ] observed directory tree after a `--only` run: __
 - [ ] `<tmp>` listing before/after the `CAMPAIGN_ID=..` refusal: __
-- [ ] byte/mtime identity result over the legacy fixture tree: __
-- [ ] `legacy_global_stop_observed` record contents: __
+- [ ] `alpha..beta` positive-control result: __
+- [ ] admission mutation proof (guard removed → exactly 1 failure): __
 - [ ] E4 mutation proof result: __
 - [ ] validator-interpreter-unavailable decision recorded: __
 
 #### 8. Commit boundary
 
-- [ ] Independently reviewable: one behavioural unit — the path move and
-      the compatibility that makes it safe — plus two named in-passing
-      items the design approved (D-E-7, D-E-9)
-- [ ] Independently green: no red intermediate, by ruling
-- [ ] No stamp, no wave-record change, no Gate runner, no docs, no
-      deletion, no archiving, no migration, no unrelated cleanup
+- [ ] Independently reviewable: one responsibility — admit this campaign
+      and bind it to its state — with one entry point and one stated
+      order
+- [ ] Independently green: the one test that pinned the old path is
+      re-pointed here, not left for a successor
+- [ ] No legacy read, no global-STOP record, no D-E-7, no wave-record
+      change, no Gate runner, no docs, no unrelated cleanup
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the observed directory tree,
-      the identity-assertion result, and any deviation from this section
+      both refusal listings, and any deviation from this section
 
 ---
-### E-C3 — Campaign stamp and mismatch guard
+### E-C3 — Legacy campaign adoption
+
+*(Split out of E-C2 by the second operator review, and redesigned: the
+previous per-record fallback was authority in disguise. See BC-2.)*
 
 #### 1. Goal
 
-Give checkpoint E3 something to enforce. §3.2 found that **nothing in
-the repository writes a STOP file**, so a mismatch cannot be caught at
-write time. The stamp is the identity artifact; the guard is the
-refusal.
+Let a campaign that was interrupted **before** PR E resume without
+relaunching chains it already completed — **without** giving a legacy
+file standing authority over a new campaign.
 
-**Why after E-C2.** The stamp lives in `control/`, which E-C2 creates,
-and it records an id that E-C2's validator has already proven safe. A
-stamp written earlier would land in the old flat root and then need
-moving — the migration this PR promises not to perform.
+BC-2 states the model: adoption is a **campaign-level mode decided once
+at first start and recorded in the stamp**, not a per-lookup retry. The
+earlier per-record fallback would have skipped a launch on the strength
+of a legacy record whenever the new state happened to lack one, which is
+the §1 defect wearing a different hat.
+
+**Why after E-C2.** The decision is a stamp field, and E-C2 owns the
+stamp. E-C2 declares `legacy_adopted_from: null`; this commit is the
+only thing that ever sets it non-null.
 
 #### 2. Scope
 
-**Changes**: `v19_queue_runner.sh` — one new guard function beside the
-existing guards, called once from `main()` after directory creation and
-**before** the `--only` branch (`:392`) so both paths are covered.
-**Reuses**: E-C2's typed campaign identity — the stamp records an
-already-validated id and never re-derives its own rules.
-**New artifact**: `control/campaign.json` (§4.2 shape).
-**New test**: a mismatch class in `test_v19_campaign_pinning.py`
-(`TestCampaignIdentity` already owns campaign identity).
+**Changes**: `v19_queue_runner.sh` — `chain_completed()` (`:213-219`)
+gains an adoption-gated read; the legacy-global-STOP observation in
+`main()`. **Python**: the stamp's `legacy_adopted_from` is populated at
+creation time by the admission sequence's step 5.
 
-**Non-goals.** No stamping of chain workspaces. No stamp validation in
-`core/run_invariants.py` — that lock is per-chain and has no campaign
-field (§3.8); adding one is a schema change §20.7 does not ask for. No
-cross-checking against run names.
+**New tests**: an adoption class in `test_v19_queue_runner.py` covering
+the legacy-filename scenario that E-C2 re-pointed away from the new
+location, plus byte-and-mtime identity over a legacy fixture tree.
 
-**Must stay unchanged**: the order and behaviour of the three existing
-launch guards (`:255`, `:258`, `:259`); `filter_roster` validation
-(`_chain_common.sh:209-255`), which must still be what rejects an
-unknown `--only` name; `role_for_run()`'s fail-closed refusal
-(`:498-503`), which is a *different* guard and must not be folded in.
+**Non-goals.** No migration, archiving, deletion or rewriting of any
+legacy file. No adoption of another campaign's legacy state. No
+adoption decision after first start. No reading of the legacy
+`queue_runner.log` — only the wave state is ever adopted. No reading of
+the V18r `v18r_queue_state` index (§3.10), which belongs to a runner PR
+E does not modify.
+
+**Must stay unchanged**: `chain_completed()`'s predicate — complete iff
+a record with `"exit": 0` exists for that run name — which must be
+provably identical on both files; the workspace-exists guard (`:255`);
+`V19_RESUME` semantics; every stop check point.
 
 **Dependencies**: E-C2.
 
 #### 3. Implementation plan
 
-- [ ] Write the guard as a function with one responsibility: given
-      `$CAMPAIGN_STAMP` and `$CAMPAIGN_ID`, either write the stamp,
-      accept it, or refuse — no other side effect
-- [ ] Emit and read the stamp through E-C2's Python entry rather than a
-      shell `printf`. The stamp is JSON that is later *read back and
-      compared*, which is the case that motivated the D-E-3 ruling; a
-      `printf` producer with a `grep` consumer is the shape that failed
-      in `campaign_spend`
-- [ ] Write it atomically, per §3.13's registry form
-- [ ] Call it from `main()` after the `mkdir` block and before the
-      `--only` branch; confirm by reading `:378-392` that no launch or
-      state write can precede it
-- [ ] On mismatch: message naming the stamp path, the stamped id and the
-      requested id; non-zero exit; **no wave state written**
-- [ ] Decide whether the refusal appends a record to the wave state.
-      Recommendation: **no** — writing into campaign B's state on a
-      failed launch of campaign A is precisely the cross-campaign write
-      this PR forbids. Log to stderr instead
+*The adoption decision — once, at first start*
+- [ ] In the admission sequence's step 5 (stamp creation only), set
+      `legacy_adopted_from` to the legacy path **iff** the new wave state
+      does not exist **and** `$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl`
+      does exist
+- [ ] Never set it when the stamp already exists — adoption is decided
+      at first start and is thereafter immutable. This is what makes a
+      legacy file restored from a backup mid-campaign harmless
+- [ ] Confirm the path recorded interpolates `${CAMPAIGN_ID}`, so
+      adoption can never name another campaign's file
+
+*The consumption — gated, read-only*
+- [ ] Extend `chain_completed()`: consult the legacy file **only** when
+      the stamp records `legacy_adopted_from`, and then only for the
+      recorded path
+- [ ] Keep the existing `grep … | grep -q` form so the completion
+      predicate is provably identical on both files
+- [ ] Verify no write path targets a legacy filename: grep for
+      `${CAMPAIGN_ID}_wave_state` and confirm every occurrence is a read
+
+*The legacy global STOP (BC-3)*
+- [ ] If `$WS_ROOT/STOP` exists, log it with path and mtime and append a
+      `legacy_global_stop_observed` record to the **new** wave state,
+      matching `record_queue_stop`'s shape (`:206-211`). **Do not remove
+      the file, and do not stop**
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Absent stamp → written once, containing the resolved
-      `campaign_id`, `campaign_home` and a UTC `created_at`
-- [ ] Matching stamp → accepted, contents not rewritten (compare mtime)
-- [ ] Mismatched stamp → non-zero exit, message names both ids
+- [ ] First start, new state absent, legacy present → stamp records
+      `legacy_adopted_from` and a completed chain is skipped
+- [ ] First start, new state absent, **no** legacy → `null`, no legacy
+      read attempted
+- [ ] **The blocker case**: new state exists *and* legacy exists, run
+      completed **only** in legacy → the chain is **launched**, not
+      skipped. This is the defect the earlier design would have shipped
+- [ ] Adoption is not granted on a later run: stamp already exists,
+      legacy file appears afterwards → still `null`, never consulted
+- [ ] A legacy file for a **different** campaign id is never in range
+- [ ] `legacy_global_stop_observed` is recorded and the run proceeds
 
 **Integration / pseudo**
-- [ ] A full `--only` run with a foreign stamp: exits non-zero, launches
-      nothing (no screen shim invocation), writes no wave state
+- [ ] A full `--only` run over a legacy fixture tree exits 0, skips the
+      completed chain, and launches nothing
 
 **Negative / invalid input**
-- [ ] Malformed or truncated stamp JSON → **STOP**. A stamp that cannot
-      be read cannot be shown to match, and proceeding would be the §1
-      defect with extra steps
-- [ ] Empty stamp file → same
-- [ ] Stamp present but `campaign_id` key absent → same
-- [ ] Stamp whose recorded id fails D-E-9's validation → **STOP**; a
-      stamp written before the validator existed must not grandfather in
-      an unsafe id
+- [ ] Adopted legacy file unparseable, truncated or unreadable → **warn
+      and continue**, treated as "no completion evidence". Blocking here
+      would restore a legacy file's authority over a new campaign
+- [ ] Stamp records a `legacy_adopted_from` path that no longer exists →
+      **warn and continue**, same reasoning
+- [ ] Stamp records a path outside `$WS_ROOT` → **STOP**; adoption names
+      one file, and a stamp is not a general file-read capability
 
 **Backward compatibility / default parity**
-- [ ] A campaign directory created by E-C2 (no stamp yet) is adopted:
-      the stamp is written and the run proceeds. An existing campaign
-      must not need a manual stamp
+- [ ] Byte-and-mtime identity over every file in a legacy fixture tree
+      before and after a full run — the E2 evidence
+- [ ] The legacy global STOP is unchanged and still present afterwards
+- [ ] A campaign created fresh after PR E has `legacy_adopted_from: null`
+      and never opens a legacy path at all
 
 **Real Gate**
 - [ ] None.
 
 #### 5. Acceptance criteria
 
-- [ ] With `CAMPAIGN_ID=alpha` and a stamp naming `beta` at
-      `<tmp>/alpha/control/campaign.json`, the runner exits non-zero,
-      stderr names both ids and the stamp path, and
-      `<tmp>/alpha/queue_state/` contains **no** `wave_state.jsonl`
-      entry from this attempt
-- [ ] The screen shim recorded zero invocations
-- [ ] Removing the guard call makes exactly one test fail (the E3
-      reachability mutation proof)
-- [ ] A second run with the matching id succeeds and leaves the stamp
-      byte-identical
+- [ ] Given `<tmp>/alpha_wave_state.jsonl` with an `"exit": 0` record for
+      `alpha_arch_15_19` and **no** `<tmp>/alpha/queue_state/`, a first
+      `--only alpha_arch_15_19` run writes a stamp whose
+      `legacy_adopted_from` is that path, logs `SKIP … already
+      completed`, and the screen shim records zero invocations
+- [ ] Given the **same** legacy file but a pre-existing
+      `<tmp>/alpha/queue_state/wave_state.jsonl` that lacks the record,
+      the chain **is launched** — the shim records one invocation
+- [ ] A stamp created without adoption, followed by a legacy file being
+      created, followed by another run → the chain is launched; the
+      stamp is byte-identical
+- [ ] `<tmp>/STOP` present: the run completes and a
+      `legacy_global_stop_observed` record naming the legacy path and its
+      mtime exists in the **new** wave state
+- [ ] Every pre-existing file under `<tmp>` has identical bytes and
+      identical `st_mtime_ns` after every run above
+- [ ] `grep -n '_wave_state' v19_queue_runner.sh` shows the legacy
+      filename only in a read position, inside the adoption branch
 - [ ] Full suite green at this commit; pyright clean
 
 #### 6. Failure and edge cases
 
 | Case | Behaviour |
 |---|---|
-| Campaign-id mismatch | **STOP** — non-zero, before any launch or state write |
-| Missing campaign dir | Created by E-C2; stamp then written. Not an error |
-| Missing stamp in an existing campaign dir | **Adopt** — write it, proceed. This is every pre-PR-E campaign |
-| Unreadable or malformed stamp | **STOP** — cannot prove a match |
-| Stamp records an id that fails validation | **STOP** — no grandfathering |
-| Stamp write fails | **STOP** — an unstampable campaign cannot be guarded |
-| Concurrent campaigns | Each guards its own stamp; no shared file is read |
-| Legacy global STOP | Unrelated to the stamp; handled in E-C2 |
-| Cleanup scripts | None exist (§3.11). Nothing to update |
+| Legacy global STOP present | **Warn + record, continue.** Never honoured, never deleted |
+| First start with legacy state present | **Adopt**, record the path in the stamp, read-only |
+| New state exists and legacy also exists | **Never consult legacy** — the blocker case |
+| Legacy file appears after first start | **Never consulted** — adoption is decided once |
+| Adopted legacy file unreadable or malformed | **Warn and continue** — treated as no evidence |
+| Adopted path missing at read time | **Warn and continue** |
+| Adopted path outside `$WS_ROOT` | **STOP** — a tampered stamp is not a read capability |
+| Legacy file of another campaign | Out of range by construction; a test asserts it |
+| V18r `v18r_queue_state` index | **Never consulted**; recorded in E-C8's README table so an operator is not surprised |
+| Partial migration | Supported by construction — the adoption mode is exactly this case |
+| Cleanup-script assumptions | None exist (§3.11); nothing to update |
 
 #### 7. Verification commands and evidence
 
 ```bash
-.venv/bin/python -m pytest \
-  tests/unit/sdsc_submission_scripts/test_v19_campaign_pinning.py -q
-.venv/bin/python -m pytest tests/unit/sdsc_submission_scripts/ -q
+.venv/bin/python -m pytest tests/unit/sdsc_submission_scripts/ tests/unit/core/ -q
+grep -n '_wave_state' sdsc_submission_scripts/v19_queue_runner.sh
 PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 ```
 
@@ -1719,18 +2007,21 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] wall time: __
 - [ ] pyright errors (baseline → after): __ → __
 - [ ] local run: __      - [ ] CI run on pushed head: __
-- [ ] mutation proof (guard call removed → exactly 1 failure): __
-- [ ] observed stderr on mismatch: __
+- [ ] blocker-case result (legacy-only record → chain LAUNCHED): __
+- [ ] byte/mtime identity result over the legacy fixture tree: __
+- [ ] `legacy_global_stop_observed` record contents: __
 
 #### 8. Commit boundary
 
-- [ ] Independently reviewable: one guard, one artifact, one test class
+- [ ] Independently reviewable: one coherent unit — what this campaign
+      does about the past
 - [ ] Independently green at this commit
-- [ ] No path changes, no record-shape changes, no docs, no unrelated
-      cleanup, no future work
+- [ ] No path changes, no stamp-schema change (E-C2 declared the field),
+      no deletion, no archiving, no migration, no docs, no unrelated
+      cleanup
 - [ ] Before committing, show `git diff --stat`, the staged file list,
-      the test output, the pyright count, the mutation-proof result, and
-      any deviation from this section
+      the test output, the pyright count, the blocker-case result, the
+      identity-assertion result, and any deviation from this section
 
 ---
 ### E-C4 — Wave record and pair summaries
@@ -1776,7 +2067,7 @@ append order; `record_queue_stop` and `record_chain`, which keep their
 `printf` form because they emit flat records.
 
 **Dependencies**: E-C2 (needs `PAIR_SUMMARY_DIR` and the typed
-identity), E-C3.
+identity). Independent of E-C3.
 
 **Test-deletion justification (CLAUDE.md rule).**
 `test_exactly_two_chains_per_wave_max_conc` asserts `MAX_CONC == 2`.
@@ -1803,9 +2094,21 @@ launches a chain from another band, which the original never could.
       arguments; the shell passes run/role/pid/exit per chain
 - [ ] Emit the six `arch_*`/`loss_*` keys as a labelled compatibility
       mirror when the wave has exactly two chains with those roles
-- [ ] Write the record to `$PAIR_SUMMARY_DIR/wave_<n>_<band>.json`
-      **and** append it to the wave state — both, so no existing
-      operator query loses its source
+- [ ] Implement the dual write in D-E-3a's fixed order: **append to the
+      canonical `wave_state.jsonl`, flush, `fsync` — then** atomically
+      write the derived `$PAIR_SUMMARY_DIR/wave_<n>_<band>.json`. Never
+      the reverse: a derived file that exists without its canonical
+      record is an inconsistency, and writing it second makes that state
+      unreachable
+- [ ] If the derived write fails, **fail the run explicitly**. The fact
+      is already canonical, so nothing is lost, but a silently missing
+      summary is the failure mode `:513-514` exists to prevent
+- [ ] Compute `record_id = <campaign_id>:<wave>:<band_tag>:<attempt>`,
+      resolving `attempt` from the count of matching canonical records
+      already in the JSONL — derived from persisted evidence, so a
+      restart cannot lose it
+- [ ] Write `record_id` into **both** views, so the derived file states
+      which attempt it represents
 - [ ] Reuse `band_tag()` (`:173-175`) for the filename rather than
       embedding `$SCOPE`, which contains a `-`
 - [ ] Change `:416` to report the measured chain count instead of
@@ -1826,6 +2129,14 @@ launches a chain from another band, which the original never could.
 - [ ] The atomic write leaves no `.tmp` residue on success
 - [ ] An exception mid-write leaves the previous file intact and no
       partial file behind
+- [ ] `record_id` is present in both views and identical between them
+- [ ] **A retried wave produces a different `record_id`** — two
+      canonical records, one derived file holding the later attempt.
+      Without this the two views diverge silently, which is the whole
+      reason `record_id` exists
+- [ ] The canonical append happens before the derived write: with the
+      derived write forced to fail, the canonical record is still
+      present and the run exits non-zero
 
 **Integration / pseudo**
 - [ ] A `--only` run and an aborted-launch path each produce a summary
@@ -1861,6 +2172,11 @@ launches a chain from another band, which the original never could.
 - [ ] The startup log line reports the measured chain count
 - [ ] A synthetic three-chain record parses and carries no mirror keys
 - [ ] No `.tmp` or `mkstemp` residue remains in `pair_summaries/`
+- [ ] After two attempts at one wave, `wave_state.jsonl` holds two
+      records with distinct `record_id`s and `pair_summaries/` holds one
+      file whose `record_id` equals the later of the two
+- [ ] With the derived write forced to fail, the canonical record exists
+      and the run exits non-zero — verified by reading the JSONL
 - [ ] Full suite green at this commit; **pyright clean over the new
       `core/` and `scripts/` modules — this commit is where pyright is
       most load-bearing**
@@ -1869,7 +2185,10 @@ launches a chain from another band, which the original never could.
 
 | Case | Behaviour |
 |---|---|
-| Summary file already exists for the same wave | **Overwrite** is acceptable within a campaign (a wave is retried under one id); the wave-state append preserves history. Confirm this matches operator expectation in review |
+| Summary file already exists for the same wave | **Overwrite** — the derived view holds the latest attempt, and its `record_id` says which. History lives in the canonical JSONL (D-E-3a) |
+| Derived write fails after the canonical append | **STOP** — the run fails explicitly. Evidence is preserved canonically and the file is rebuildable from the JSONL |
+| Canonical append fails | **STOP** — nothing is written anywhere; the derived file is never written ahead of its record |
+| A derived file with no matching canonical record | Unreachable by construction; if observed, it indicates a manual edit and is a detectable inconsistency, not a normal state |
 | `PAIR_SUMMARY_DIR` missing | Created by E-C2; if absent, **STOP** rather than lose a summary silently — `:513-514` says an aborted wave must not be the one case with no summary |
 | Writer raises | **STOP** and surface it. A silently skipped summary is the failure mode `:513-514` exists to prevent |
 | Crash mid-write | Atomic replace means the previous file survives intact; no torn file is ever visible |
@@ -1947,7 +2266,10 @@ and converting it would widen the PR for no defect.
 summary-on-every-exit-path guarantee; the stagger logic; the
 source-safe guard (`:385-387`).
 
-**Dependencies**: none on E-C1..E-C4. May be reordered freely.
+**Dependencies**: **E-C2**, for the shared safe-path-component
+validator (D-E-4, operator ruling 2026-08-04). This dependency did not
+exist in the earlier draft and is accepted deliberately: one shared rule
+beats two rules that happen to agree today.
 
 #### 3. Implementation plan
 
@@ -1959,11 +2281,15 @@ source-safe guard (`:385-387`).
       earlier caller exists
 - [ ] Update `_run_main` (`test_…:188-214`) to read the derived filename
 - [ ] Update the pre-written filename in `test_source_safe_entry.py`
-- [ ] **OPEN-E-7 — decide and record**: whether the Gate root should
-      also carry the prefix (`$GATE_ROOT/$GATE_RUN_PREFIX/`). §20.7 does
-      not ask for it, the two-file rename removes the collision, and a
-      directory move would strand the existing Gate evidence. Author's
-      recommendation: **no** — files only
+- [ ] Validate `GATE_RUN_PREFIX` with **E-C2's validator**, not a
+      second copy: reject empty, `.`, `..`, separators and control
+      characters, and **accept** an id merely containing `..`, exactly as
+      for `campaign_id` (D-E-9). Refuse before `SUMMARY` or `RUNNER_LOG`
+      is used
+- [ ] Do **not** add a `$GATE_ROOT/$GATE_RUN_PREFIX/` subdirectory —
+      closed by operator ruling, prefixed filenames only (D-E-4)
+- [ ] Do **not** add a Gate stop channel — closed by the same ruling;
+      it becomes FU-E-8
 
 #### 4. Validation plan
 
@@ -1981,17 +2307,17 @@ source-safe guard (`:385-387`).
       overwritten
 
 **Negative / invalid input**
-- [ ] Empty `GATE_RUN_PREFIX` → inspect current behaviour first. If it
-      produces `_pair_summary.json`, decide whether to refuse. Do not
-      assume a guard exists
-- [ ] `GATE_RUN_PREFIX` containing `/` or `..` → the same hazard D-E-9
-      addresses for `CAMPAIGN_ID`. **Inspect, then decide**: reusing the
-      typed identity here is a two-line change, but it makes E-C5 depend
-      on E-C2, which it otherwise does not. Record the decision
+- [ ] Empty `GATE_RUN_PREFIX` → **refused**, rather than producing
+      `_pair_summary.json`
+- [ ] `GATE_RUN_PREFIX` equal to `.` or `..`, containing `/`, `\`, a
+      control character, or over-length → **refused**
+- [ ] `GATE_RUN_PREFIX` containing `..` (e.g. `c14..b`) → **accepted**,
+      the same positive control as for `campaign_id`
+- [ ] Every refusal happens before `SUMMARY` or `RUNNER_LOG` is written
 
 **Backward compatibility / default parity**
 - [ ] An existing `gate0_pair_summary.json` on disk is **not** read,
-      renamed or deleted — it stays as historical evidence, and E-C7's
+      renamed or deleted — it stays as historical evidence, and E-C8's
       README table records that the old filename belongs to the
       pre-PR-E Gate
 
@@ -2013,7 +2339,11 @@ source-safe guard (`:385-387`).
 - [ ] `grep -n 'gate0_pair_summary\|v19_gate0' v19_gate0_pair_runner.sh`
       shows the literals only in comments
 - [ ] The Gate runner still has no stop-file reader (`grep` for `STOP`
-      returns only unrelated matches)
+      returns only unrelated matches) — the ruling says none is added
+- [ ] `GATE_ROOT` gained no `$GATE_RUN_PREFIX` subdirectory — prefixed
+      filenames only
+- [ ] An empty `GATE_RUN_PREFIX` is refused and no file named
+      `_pair_summary.json` is ever created
 - [ ] Full suite green at this commit; pyright count unchanged
 
 #### 6. Failure and edge cases
@@ -2021,9 +2351,10 @@ source-safe guard (`:385-387`).
 | Case | Behaviour |
 |---|---|
 | Two Gate runs under one root | Both summaries survive — the defect being fixed |
-| Historical `gate0_pair_summary.json` | Left untouched; documented in E-C7 |
-| Empty `GATE_RUN_PREFIX` | See the implementation step; decide from observed behaviour, do not assume |
-| `GATE_RUN_PREFIX` containing `/` or `..` | See the negative-input step; decision recorded either way |
+| Historical `gate0_pair_summary.json` | Left untouched; documented in E-C8 |
+| Empty `GATE_RUN_PREFIX` | **STOP** — refused by the shared validator |
+| `GATE_RUN_PREFIX` equal to `.` or `..`, or containing a separator or control character | **STOP** — refused |
+| `GATE_RUN_PREFIX` merely containing `..` | **ACCEPT** — one path segment, cannot traverse |
 | `GATE_ROOT` unwritable | **STOP** — unchanged from today |
 | Sourcing the runner | Must still modify nothing; `test_source_safe_entry.py` enforces it, and its fixture filename changes with this commit |
 
@@ -2043,22 +2374,141 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] pyright errors (baseline → after): __ → __
 - [ ] local run: __      - [ ] CI run on pushed head: __
 - [ ] two-prefix directory listing: __
-- [ ] OPEN-E-7 decision recorded: __
-- [ ] `GATE_RUN_PREFIX` validation decision recorded: __
+- [ ] empty-prefix refusal observed: __
+- [ ] `c14..b` positive-control result: __
 
 #### 8. Commit boundary
 
 - [ ] Independently reviewable: three literals and two test fixtures
 - [ ] Independently green at this commit
-- [ ] No stop channel added; no `GATE_ROOT` restructuring; no conversion
-      of the Gate's own printf; no docs; no unrelated cleanup
+- [ ] No stop channel added (FU-E-8); no `GATE_ROOT` restructuring; no
+      conversion of the Gate's own printf; no second copy of the
+      validator; no docs; no unrelated cleanup
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the two-prefix listing, and
-      the recorded decisions
+      both validator control results
 
 ---
 
-### E-C6 — Multi-campaign isolation test
+### E-C6 — Process-guard self-exclusion (D-E-7)
+
+*(Split out of E-C2 by the second operator review: it has no causal
+dependency on the path move, and E-C2 was carrying too much.)*
+
+#### 1. Goal
+
+`:259`'s live-process guard excludes the runner from its own `ps` scan
+by a hardcoded script name:
+
+```bash
+if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
+```
+
+A renamed or copied runner self-matches — its own argv contains
+`$WS_ROOT/$RUN` once it is inside `launch_chain`'s screen command — and
+refuses to launch anything. The exclusion must derive from the script's
+own basename.
+
+**Why its own commit.** It is the same *class* of defect as the rest of
+PR E — the current campaign's name baked into generic logic — but it
+shares no cause with the path move, no file region, and no test. Landing
+it inside E-C2 made a large commit larger for no reviewability gain. It
+could equally be a follow-up; it stays in PR E because it is two lines.
+
+#### 2. Scope
+
+**Changes**: `sdsc_submission_scripts/v19_queue_runner.sh:259` only.
+**New test**: a rename case in `test_v19_queue_runner.py`.
+
+**Non-goals.** `v18r_queue_runner.sh:48` carries the identical pattern
+and is **not** touched — it is a historical launch surface protected
+from change by `test_v19_queue_runner.py:261-269` (FU-E-3).
+
+**Must stay unchanged**: the guard's meaning — a live process already
+referencing this run's workspace blocks the launch — and its position
+among the three launch guards (`:255`, `:258`, `:259`).
+
+**Dependencies**: none. May land at any point in the sequence, or as a
+follow-up, without affecting any other commit.
+
+#### 3. Implementation plan
+
+- [ ] Replace the literal with
+      `grep -v "$(basename "${BASH_SOURCE[0]}")"`
+- [ ] Confirm `BASH_SOURCE[0]` is the runner and not `_chain_common.sh`
+      at that point — `:59` already uses `${BASH_SOURCE[0]}` for `REPO`,
+      so the idiom is established in this file, but verify at `:259`
+      specifically, inside `launch_chain`
+- [ ] Confirm the guard still matches a genuine live process: the
+      exclusion must remove only the runner's own argv line
+
+#### 4. Validation plan
+
+**Unit**
+- [ ] A copy of the runner under a different filename does not
+      self-match, and launches
+- [ ] Under the current filename, behaviour is byte-identical
+
+**Integration / pseudo**
+- [ ] A `--only` run with a stubbed `ps` that reports a genuine live
+      process still refuses, with the existing message
+
+**Negative / invalid input**
+- [ ] A `ps` scan returning nothing does not falsely refuse
+- [ ] A filename containing regex metacharacters does not break the
+      `grep` — **inspect** whether `grep -v` needs `-F` here, then decide
+
+**Backward compatibility / default parity**
+- [ ] `v18r_queue_runner.sh` untouched; its own test still green
+
+**Real Gate**
+- [ ] None.
+
+#### 5. Acceptance criteria
+
+- [ ] A byte-copy of the runner at `v20_queue_runner.sh` launches
+      successfully against a temp root, where the pre-change version
+      refuses — observed from the log, not from a variable
+- [ ] Under the original filename the log output is identical to the
+      pre-change run
+- [ ] `grep -n 'v19_queue_runner' v19_queue_runner.sh` shows the literal
+      only in comments and `--only` usage strings
+- [ ] Full suite green at this commit; pyright count unchanged
+
+#### 6. Failure and edge cases
+
+| Case | Behaviour |
+|---|---|
+| Runner renamed or copied | **Launches** — the defect being fixed |
+| Genuine live process on this workspace | **STOP** — unchanged |
+| Filename with regex metacharacters | See the implementation step; decide from observed behaviour |
+| `v18r_queue_runner.sh` | Untouched (FU-E-3) |
+
+#### 7. Verification commands and evidence
+
+```bash
+.venv/bin/python -m pytest tests/unit/sdsc_submission_scripts/ -q
+bash -n sdsc_submission_scripts/v19_queue_runner.sh
+PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
+```
+
+- [ ] test count: __
+- [ ] wall time: __
+- [ ] pyright errors (baseline → after): __ → __
+- [ ] local run: __      - [ ] CI run on pushed head: __
+- [ ] renamed-copy launch result: __
+
+#### 8. Commit boundary
+
+- [ ] Independently reviewable: one line and one test
+- [ ] Independently green at this commit
+- [ ] No path work, no campaign identity, no docs, no v18r change, no
+      unrelated cleanup
+- [ ] Before committing, show `git diff --stat`, the staged file list,
+      the test output, the pyright count, and the renamed-copy result
+
+---
+### E-C7 — Multi-campaign isolation test
 
 #### 1. Goal
 
@@ -2095,10 +2545,11 @@ invocation with real training, no `screen` outside the shim.
 - [ ] Build the §9 fixture tree: a legacy global `STOP`, two campaign
       homes `alpha` and `beta`, `alpha`'s `control/STOP` armed
 - [ ] Assert the four properties of §9 Layer 2, each as its own test
-- [ ] Add the negative control: force `QUEUE_STOP_FILE` to
-      `$WS_ROOT/STOP` and assert the isolation property **fails**. Use
-      the environment override rather than editing the script, so the
-      control is a runtime condition and not a source mutation
+- [ ] Do **not** put the negative control in the module as an expected
+      failure. The formal suite stays green; an `xfail`-shaped test that
+      passes by failing is indistinguishable from a broken test six
+      months later. The isolation tests here assert the **correct**
+      behaviour only
 - [ ] Include a byte-and-mtime cross-check: after `beta`'s run, every
       file under `alpha/` is unchanged, and vice versa
 - [ ] State each test's defect in its docstring, per the CLAUDE.md rule
@@ -2113,9 +2564,19 @@ invocation with real training, no `screen` outside the shim.
       shim — no reimplementation of the wave loop in Python
 
 **Negative / invalid input**
-- [ ] The negative control: with the old default restored, the
-      "campaign beta launches" assertion fails. **This must be observed,
-      not assumed** — run it and record the failure output
+- [ ] The module's own negative cases assert correct refusals (wrong
+      campaign's STOP ignored, legacy STOP ignored) — all **passing**
+      assertions
+
+**Mutation evidence — a separate documented run, not a suite member**
+- [ ] Temporarily restore the old `QUEUE_STOP_FILE` default in the
+      source, run this module, observe the isolation test **fail**,
+      record the failure output, restore the source, re-run and observe
+      green. Per the mutation-proof hygiene rule: clear `.pyc` caches,
+      assert the edit hit exactly one site, and re-run the baseline
+      afterwards
+- [ ] The evidence is attached to the PR; **nothing in the committed
+      suite is expected to fail**
 
 **Backward compatibility / default parity**
 - [ ] The legacy global STOP is present for every test in the module and
@@ -2136,7 +2597,10 @@ invocation with real training, no `screen` outside the shim.
 - [ ] After both runs, no file under `alpha/` was written by `beta`'s
       run and no file under `beta/` was written by `alpha`'s
 - [ ] `<tmp>/STOP` is byte- and mtime-identical at the end
-- [ ] The negative control's recorded failure output is attached
+- [ ] The committed module is **fully green** — no expected failures,
+      no `xfail`, no skips
+- [ ] The mutation run's recorded failure output is attached to the PR,
+      together with the restored-source green re-run
 - [ ] Total module wall time is bounded and recorded
 - [ ] **Run both locally and on CI.** This module touches `/tmp`,
       `screen`, `ps` and absolute paths — the exact profile of the PR C
@@ -2171,10 +2635,13 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] pyright errors (baseline → after): __ → __ *(module itself is not
       covered — `tests` is excluded)*
 - [ ] local run: __      - [ ] CI run on pushed head: __
-- [ ] negative-control failure output: __
+- [ ] mutation-run failure output (source temporarily reverted): __
+- [ ] restored-source green re-run: __
 - [ ] cross-write check result: __
 
-A negative control that was not executed is not a negative control.
+A negative control that was not executed is not a negative control — and
+one that lives in the suite as an expected failure is not a control at
+all, it is a broken test with an alibi.
 
 #### 8. Commit boundary
 
@@ -2182,12 +2649,12 @@ A negative control that was not executed is not a negative control.
 - [ ] Independently green at this commit
 - [ ] No production change; if one is needed, stop and report
 - [ ] Before committing, show `git diff --stat`, the staged file list,
-      the module output, the CI result, and the negative-control failure
-      output
+      the module output (fully green), the CI result, and the separate
+      mutation-run evidence
 
 ---
 
-### E-C7 — Doc sync
+### E-C8 — Doc sync
 
 #### 1. Goal
 
@@ -2226,19 +2693,27 @@ earlier would describe a design rather than a result.
 
 **Non-goals.** No restructuring of `running_chain_test.md`. No new
 design document. No edits to V19 protocol documents, which are
-historical record. **No `WAVE_WALL_SECONDS` correction — see below.**
+historical record. **No `WAVE_WALL_SECONDS` change — see below.**
 
-> **DEFERRED BY OPERATOR RULING, 2026-08-04 — OPEN-E-10 stays open and
-> leaves PR E.** `docs/running_chain_test.md:142` and
+> **SEQUENCED OUT OF PR E — operator ruling, second review.**
+> `docs/running_chain_test.md:142` and
 > `docs/design/runtime_estimation_and_calibration.md:3841-3842` state
 > `WAVE_WALL_SECONDS` defaults to `86400`; the code is `259200`
-> (`v19_queue_runner.sh:89`), and
-> `test_v19_campaign_pinning.py:190` asserts the cap exceeds 86400, so
-> the code is right and both docs are stale. It is a **separate docs
-> follow-up** and must **not** be folded into PR E, even though this
-> commit opens both files. The finding stays recorded in §14; fixing it
-> here would mix an unrelated correction into a doc-sync commit whose
-> job is to describe *this* PR's merged behaviour.
+> (`v19_queue_runner.sh:89`), and `test_v19_campaign_pinning.py:190`
+> asserts the cap exceeds 86400 — so the code is right and both docs
+> are stale.
+>
+> **The correct sequencing is a separate docs-only hotfix that fixes
+> 86400 → 259200 BEFORE PR E.** PR E's doc sync then simply does not
+> touch those lines, because by then they are already correct.
+>
+> An earlier draft of this commit carried an acceptance criterion that
+> `WAVE_WALL_SECONDS` must *still read 86400* after doc sync — i.e. it
+> asserted a known-wrong operator-facing default as a passing condition.
+> That directly contradicts V20's rule that operator-facing labels must
+> reflect actual behaviour, and it has been **removed**. A deferral is
+> permission not to fix something in this PR; it is never permission to
+> pin the error in place.
 
 **Must stay unchanged**: every doc statement about chain-level stop
 semantics, which this PR does not alter; every doc statement about
@@ -2264,9 +2739,9 @@ semantics, which this PR does not alter; every doc statement about
       claim to name the stamp
 - [ ] Update this document's checkpoint boxes with evidence, not
       assertions
-- [ ] **Leave `WAVE_WALL_SECONDS` alone** in both files, per the ruling
-      above. If the temptation to fix it in passing arises, that is the
-      rule working
+- [ ] Confirm the predecessor docs hotfix has landed and both files
+      already read `259200`. If it has not, **stop and report** rather
+      than either fixing it here or documenting around it
 
 #### 4. Validation plan
 
@@ -2300,8 +2775,9 @@ semantics, which this PR does not alter; every doc statement about
       or explicitly-labelled-legacy references
 - [ ] `sdsc_submission_scripts/README.md` names all three campaign
       launchers and carries the historical-layout table
-- [ ] `WAVE_WALL_SECONDS` still reads `86400` in both docs — the
-      deferral is verified, not assumed
+- [ ] `WAVE_WALL_SECONDS` reads `259200` in both docs, corrected by the
+      **predecessor docs hotfix**, and this commit's diff does not touch
+      those lines
 - [ ] Every checkpoint box in §6 of this document is either `[x]` with
       evidence or `[ ]` with a stated reason
 
@@ -2310,7 +2786,7 @@ semantics, which this PR does not alter; every doc statement about
 | Case | Behaviour |
 |---|---|
 | A doc statement contradicts the merged code | **STOP** and report — it means an earlier commit deviated from the design |
-| The stale `WAVE_WALL_SECONDS` default | **Leave.** Deferred by ruling to its own change; recorded in §14 |
+| `WAVE_WALL_SECONDS` not yet corrected by the predecessor hotfix | **STOP and report.** Do not fix it here, and do not merge a doc sync that leaves a known-wrong default standing |
 | Another stale default found in passing | Record it in §14 as a follow-up. Do not fix it here — the same reasoning that deferred OPEN-E-10 |
 | An existing doc-sync test covers these files | Must be updated in this commit |
 | A V19 protocol document describes the old paths | **Leave** — historical record, explicitly out of scope |
@@ -2320,7 +2796,7 @@ semantics, which this PR does not alter; every doc statement about
 ```bash
 grep -rn 'WS_ROOT/STOP\|v19_wave_state.jsonl\|gate0_pair_summary' docs/ \
      sdsc_submission_scripts/
-grep -rn 'WAVE_WALL_SECONDS' docs/          # must still show 86400
+grep -rn 'WAVE_WALL_SECONDS' docs/          # must show 259200 (predecessor hotfix)
 .venv/bin/python -m pytest tests/unit/sdsc_submission_scripts/ \
      tests/unit/scripts/ -q
 PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
@@ -2332,7 +2808,7 @@ ruff check . && ruff format --check .
 - [ ] pyright errors (baseline → after): __ → __
 - [ ] local run: __      - [ ] CI run on pushed head: __
 - [ ] quoted-default audit table (doc line → source line): __
-- [ ] `WAVE_WALL_SECONDS` deferral verified untouched: __
+- [ ] predecessor docs hotfix confirmed landed (`259200` in both files): __
 
 #### 8. Commit boundary
 
@@ -2408,9 +2884,14 @@ Assertions:
 3. after both, every file under `alpha/` is byte- and mtime-identical
    from `beta`'s run, and vice versa;
 4. the legacy `tmp/STOP` blocked neither, and is unchanged;
-5. **negative control**: with `QUEUE_STOP_FILE` forced back to
-   `$WS_ROOT/STOP`, assertion 1 fails. This is what makes the module
-   a regression test rather than a description.
+5. `alpha` carries a legacy wave-state file and `beta` does not, so the
+   adoption mode (BC-2) is exercised end to end alongside isolation.
+
+**All five assertions pass in the committed suite.** The mutation
+evidence that makes them a regression test rather than a description is
+a **separate documented run** (Layer 4), not a suite member: an
+expected-failure test is indistinguishable from a broken one after a few
+months.
 
 ### Layer 3 — bounded real shell queue run
 
@@ -2429,19 +2910,43 @@ guards work together on the new paths, end to end, in seconds.
 - **Mutation proof for E4**: revert only the path default and confirm
   every C13 assertion still passes — proving the stop *semantics* are
   independent of the stop *location*, which is the claim E4 makes.
-- **Mutation proof for E3**: remove the stamp-validation call and
+- **Mutation proof for E3**: remove the admission-guard call and
   confirm exactly one test fails — proving the guard is reached from the
   production path, not just unit-tested in isolation.
+- **Mutation proof for E5 (the isolation control)**: temporarily restore
+  the old `QUEUE_STOP_FILE` default **in the source**, run the isolation
+  module, observe the failure, record it, restore, re-run green. This is
+  the evidence that Layer 2 is a regression test. It is run and
+  documented, never committed as an expected failure.
 - **Reachability for E1**: add a deliberately unscoped path to the
   resolver in a scratch commit and confirm the enumeration test fails.
+- **Hygiene for all of the above**: clear `.pyc` caches, assert each
+  mutation hit exactly one site, and re-run the baseline afterwards —
+  mutation proofs have lied before via stale bytecode and via a
+  git-checkout silently restoring the target.
 
 ### Not required, and why
 
-No Gate 1 (no LLM-facing prompt, schema or decision surface changes).
-No Gate 2 (no training, inference, scoring, admission or estimator code
-is touched; zero Python production modules are in scope, §3.8). If
-review finds any of that untrue, PR E stops and the gate question
-reopens.
+No Gate 1: PR E changes no LLM-facing prompt, schema or decision
+surface.
+
+No Gate 2 — **but not for the reason an earlier draft gave.** That draft
+said "zero Python production modules are in scope", which is **false**:
+PR E adds a typed campaign identity and a stamp model in `core/`, and a
+wave-record writer in `scripts/`. The accurate statement is:
+
+> **No existing scientific, GPU or agent Python production module is
+> modified.** Two small campaign-control Python modules are added. None
+> of the added code runs during training, inference, scoring, admission
+> or estimation; none of it is imported by any node, by
+> `sandbox_executor`, or by `core/runtime_control/`.
+
+Gate 2 is therefore still N/A, on the ground that **nothing PR E adds
+executes inside a scientific phase** — not on the ground that no Python
+was added. The distinction matters: the first is checkable by an import
+audit, and §7's genericization tests provide exactly that. If review
+finds any added module reachable from a scientific phase, PR E stops and
+the gate question reopens.
 
 ---
 
@@ -2454,6 +2959,15 @@ reopens.
       expressions changed; the E4 mutation proof recorded.
 - [ ] **Historical evidence preserved.** A byte- and mtime-identity
       assertion over a legacy fixture tree after a full run.
+- [ ] **Legacy state never re-acquires authority.** Adoption is a
+      campaign-level mode decided once at first start and recorded in the
+      stamp (BC-2), proved by the blocker case: new state present, legacy
+      present, run completed **only** in legacy → the chain is
+      **launched**.
+- [ ] **The override surface cannot reconstruct the defect.** Only
+      `WS_ROOT`, `CAMPAIGN_HOME` and the compatibility-only
+      `QUEUE_STOP_FILE` are settable; no override can point two campaigns
+      at one state directory (§4.2).
 - [ ] **No manual cleanup before a new launch.** Demonstrated by the
       Layer-2 test starting `beta` with `alpha`'s STOP and the legacy
       global STOP both armed.
@@ -2461,16 +2975,27 @@ reopens.
       (`fe51377c`, PR #165 — D-E-6); PR E must not regress it, proved by
       `test_v19_chain_role_resolution.py` green and unmodified.
 - [ ] **The campaign id cannot escape the campaign root** (D-E-9),
-      proved by refusal tests for `..`, `.`, `/`, empty, absolute,
-      control characters and over-length — each showing **no directory
-      was created**.
+      proved by refusal tests for an id **equal to** `.` or `..`, and for
+      `/`, empty, absolute, control characters and over-length — each
+      showing **no directory was created** — plus a **positive control**
+      that `alpha..beta` is accepted, so the rule cannot silently tighten.
+- [ ] **The same validator guards `GATE_RUN_PREFIX`** (D-E-4), not a
+      second copy of the rule.
+- [ ] **The two views of a wave record cannot diverge**: canonical JSONL
+      written first with `fsync`, derived file second, both carrying the
+      same `record_id`, and a retried wave producing a distinct one
+      (D-E-3a).
 - [ ] **Every commit was independently green**, with no knowingly-red
       intermediate (operator ruling, OPEN-E-9).
-- [ ] Genericization section complete; FU-E-1..FU-E-6 filed.
-- [ ] Doc sync commit (E-C7) verified by quoting each documented
+- [ ] Genericization section complete; FU-E-1..FU-E-8 filed.
+- [ ] Doc sync commit (E-C8) verified by quoting each documented
       variable and default against the merged source.
-- [ ] `WAVE_WALL_SECONDS` left untouched in both docs — OPEN-E-10 is
-      deferred to its own change, verified rather than assumed.
+- [ ] The predecessor docs hotfix has corrected `WAVE_WALL_SECONDS` to
+      `259200`, and PR E's doc sync does not touch those lines. **No
+      merge criterion asserts a known-wrong default.**
+- [ ] The committed suite is **fully green** — every mutation and
+      negative-control proof is a separate documented run, never an
+      expected failure in the suite.
 - [ ] **Pyright clean on the exact head**, run with the CI-reproducing
       invocation, with the before/after error counts recorded per
       commit.
@@ -2527,20 +3052,29 @@ Stop and return to the operator if:
    side effect.
 3. **The multi-campaign isolation test** —
    `tests/unit/sdsc_submission_scripts/test_multi_campaign_isolation.py`,
-   with the negative control that fails on revert.
+   fully green in the suite, with its mutation evidence recorded as a
+   separate documented run.
 4. **A record of which historical layouts remain readable** — §3.10
    promoted into `sdsc_submission_scripts/README.md`, naming each
    layout, its producer, and whether it is read, written, or read-only.
 5. **The typed campaign identity** (D-E-9) — one validated identifier in
-   `core/`, refusing empty, `/`, `\`, `.`, `..`, absolute, control-char
-   and over-length ids, with the `..` case explicitly covered because
-   the borrowed `_WRITER_ID_RE` pattern admits it.
-6. **The typed atomic wave-record writer** (D-E-3) — Pydantic record
-   models plus a `mkstemp`/`fsync`/`os.replace` write in `core/`, and
-   the `scripts/` CLI the launcher calls.
+   `core/`, shared with `GATE_RUN_PREFIX` (D-E-4), refusing empty, `/`,
+   `\`, control characters, over-length, and an id **equal to** `.` or
+   `..` — while **accepting** an id that merely contains `..`.
+6. **The typed atomic wave-record writer** (D-E-3, D-E-3a) — Pydantic
+   record models plus a `mkstemp`/`fsync`/`os.replace` write in `core/`,
+   the `scripts/` CLI the launcher calls, and the canonical-then-derived
+   write order with a `record_id` in both views.
+6a. **The campaign stamp with `legacy_adopted_from`** — the auditable
+   record of whether this campaign may read legacy completion evidence
+   at all (BC-2), created with `os.link` first-writer-wins semantics.
 7. **The Behavior Delta statements** — §13, carried into the PR
    description.
-8. **FU-E-1 … FU-E-6** — filed follow-ups.
+8. **FU-E-1 … FU-E-8** — filed follow-ups.
+8a. **The predecessor docs hotfix** — `WAVE_WALL_SECONDS` 86400 → 259200
+   in `docs/running_chain_test.md:142` and
+   `docs/design/runtime_estimation_and_calibration.md:3841-3842`, merged
+   **before** PR E so PR E's doc sync need not touch it.
 9. **Per-commit pyright and CI evidence** — the before/after error
    counts and the local-vs-CI result recorded in each commit's §7 slots,
    so "green" is a number and a runner, not an adjective.
@@ -2586,10 +3120,20 @@ persisted record, not a log line.
 **After**: `$WS_ROOT/<id>/queue_state/wave_state.jsonl` and
 `queue_runner.log`, plus per-wave files under `pair_summaries/`.
 
-Completion detection reads the new file, then falls back to the legacy
-file for the **same** campaign id, read-only. **No existing file is
-written to again.** An operator inspecting an old campaign finds
-everything where it was.
+Completion detection reads the new file. It consults the legacy file
+**only** when the campaign's stamp records `legacy_adopted_from` — a
+decision made once, at first start, when the new state did not yet exist
+and a legacy file for the same campaign id did (BC-2). Once new state
+exists, the legacy file is never consulted again for any record.
+
+**This is stricter than the earlier draft**, which fell back per record
+whenever the new state lacked one. That would have skipped a launch on
+the strength of a legacy record even while new state existed — authority,
+not compatibility. A campaign started fresh after PR E has
+`legacy_adopted_from: null` and no legacy read path at all.
+
+**No existing file is written to again.** An operator inspecting an old
+campaign finds everything where it was.
 
 ### BD-4 — The wave summary record gains a chain list, moves to a typed writer, and `MAX_CONC` disappears
 
@@ -2614,17 +3158,29 @@ now reports the measured chain count. `v18r_queue_runner.sh`'s
 ### BD-5 — An invalid campaign id is now refused
 
 **Before**: `CAMPAIGN_ID` is interpolated into filenames with no
-validation anywhere in the launcher. **After**: an id that is empty, or
-contains `/`, `\`, a control character, or is `.`, `..`, an absolute
-path, or longer than 128 characters, is **refused at startup, before
-any directory is created** (D-E-9).
+validation anywhere in the launcher. **After**: an id is **refused at
+startup, before any directory is created** (D-E-9) if it is
+
+- empty, or longer than 128 characters;
+- contains `/`, `\`, a control character, or any other character outside
+  `[A-Za-z0-9._-]` — which also excludes every absolute-path form;
+- **or is equal to** `.` **or** `..`.
+
+**It is NOT refused for merely containing `..`.** `alpha..beta` is a
+legal one-segment directory name, cannot traverse anywhere, and is
+accepted. The validator, its tests and this statement say *equal to*,
+never *contains* — an earlier draft was inconsistent on exactly this
+point.
 
 This is a new refusal path that did not exist before, and it is the one
 place PR E can reject a launch that previously proceeded. It is
 deliberate: the id becomes a *directory* component for the first time,
-and `..` would resolve `$WS_ROOT/../control/STOP` — an escape from the
-campaign root. Every id any real campaign has used (`v19`, `v19r2…`,
-`v19_c14`, `camp1`) passes unchanged.
+and an id of `..` would resolve `$WS_ROOT/../control/STOP` — an escape
+from the campaign root. Every id any real campaign has used (`v19`,
+`v19r2…`, `v19_c14`, `camp1`) passes unchanged.
+
+The **same** validator guards `GATE_RUN_PREFIX` (D-E-4), so an empty
+prefix no longer yields `_pair_summary.json`.
 
 ### BD-6 — The live-process guard no longer hardcodes the script name
 
@@ -2651,121 +3207,72 @@ Marked OPEN. Each names the evidence that would close it. Resolved items
 are kept with their decision, because a resolution is only auditable
 next to the question it answered.
 
-### Resolved — operator rulings, 2026-08-04
+### Closed — second operator review, 2026-08-04
 
-**RESOLVED-E-8 — `campaign_id` must be validated before it becomes a
-path component.** Rejected if empty, containing `/`, containing `..`, an
-absolute path, or containing control characters or any path separator —
-anything that could escape the campaign root. The audit was run first,
-as instructed: the only precedent is `_WRITER_ID_RE`
-(`core/runtime_control/observation_store.py:38`), which is
-module-private and guards the identical hazard, so PR E **reuses the
-pattern and not the symbol**, and adds the `.`/`..` rejection the
-pattern alone does not provide (§3.13). Implemented as a narrow typed
-identifier — D-E-9, enforced in E-C2 before the directory is created.
+**Architecture direction APPROVED.** Nine corrections were required
+before implementation; all nine are applied in this revision. The
+questions they closed:
 
-**RESOLVED-E-9 — no knowingly-red intermediate.** The old E-C2 and E-C4
-are one commit. The wave-state path move and its read-back are one
-behavioural unit, and splitting them left
-`test_completed_only_selection_skips_and_exits_clean` red across two
-commits while separating a change from its justification. Resolved as
-option (b). Every commit's acceptance criteria now require the suite to
-be green **at that commit**. §8's commit list renumbers accordingly.
+| # | Decision |
+|---|---|
+| **OPEN-E-1** | **Directory model APPROVED.** The prefix-only alternative is off the table; §4.2 is the model, with the override surface narrowed (correction 2) |
+| **OPEN-E-2** | **Do NOT move chain workspaces.** They stay flat at `$WS_ROOT/<run_name>` (§4.4) |
+| **OPEN-E-3** | **Gate stop channel is NOT in PR E** — follow-up **FU-E-8**. The Gate keeps `trap write_summary EXIT` (`:304`) and `WALL_CAP_SECONDS` (`:48`) as its only bounds |
+| **OPEN-E-4** | **V20 advice files are NOT PR E**, but **must be resolved before the V20 launch packet.** PR E leaves `advice/workflow/v18r_${FLAVOR}_explorer.json` (`:310`) exactly as it is; the *role* is already correct after `fe51377c` |
+| **OPEN-E-5** | **Separate test + follow-up.** The `campaign_spend.py:58` prefix-glob collision (`v20` vs `v20a`) gets its own test and its own change — **FU-E-9** — not a PR E commit |
+| **OPEN-E-6** | **The README campaign-control section IS PR E doc sync.** E-C8 creates it; §12 artifact 4 lives there |
+| **OPEN-E-7** | **Prefixed filenames only.** No `$GATE_ROOT/$GATE_RUN_PREFIX/` subdirectory (D-E-4) |
+| **OPEN-E-8** | **Validate the campaign id** — D-E-9, enforced in E-C2 before any `mkdir`. Rule corrected: reject *equal to* `.`/`..`, not *contains* (correction 4) |
+| **OPEN-E-9** | **No knowingly-red intermediate**, as a standing rule for every commit, not a one-off merge (§8) |
+| **OPEN-E-10** | **Separate docs hotfix, sequenced BEFORE PR E**, fixing 86400 → 259200. It is **not** a preserved error, and no PR E criterion asserts the wrong value (correction 8) |
 
-**RESOLVED — the wave-record emission mechanism** (raised inside the old
-E-C5 implementation plan, not as a numbered OPEN). Do not extend the
-eleven-positional `printf`. A variable-length chain roster goes to a
-small typed Python writer that writes atomically — following the
-precedent this file already set when `campaign_spend()` was delegated
-because a shell scan misread a nested JSON field. One responsibility
-moves; this is not a shell rewrite. See D-E-3's resolution block.
+Also closed, and not previously numbered:
 
-**Note on numbering.** The ruling that resolved the emission mechanism
-was labelled "OPEN-E-5". OPEN-E-5 in this document is a *different*
-item — the `campaign_spend.py` prefix-glob question — and it remains
-open below.
+- **The wave-record emission mechanism** → a typed atomic Python writer
+  (D-E-3), with canonical/derived write order and `record_id`
+  (D-E-3a, correction 5).
+- **D-E-3's typed writer stays in PR E**, and **Gate summary scoping
+  stays in PR E** — the Gate summary is the same campaign-identity
+  overwrite defect class, not a separable concern.
+- **BC-2's legacy model** → campaign-level adoption, not a per-lookup
+  fallback (BLOCKER 1, correction 1).
+- **The stamp guard's ordering** → one guard owns the whole admission
+  sequence; the two guarantees are stated separately (§4.2a,
+  correction 3).
+- **D-E-7 leaves E-C2** → its own commit, E-C6 (correction 6).
+- **The Gate 2 rationale** → "nothing added executes inside a scientific
+  phase", replacing a false "zero Python production modules" claim
+  (correction 9).
+- **The isolation negative control** → a separate documented mutation
+  run; the committed suite stays fully green (correction 9).
 
 ### Still open
 
-**OPEN-E-1 — Is the directory model worth its diff?**
-D-E-1 argues yes; the two-character prefix fix would also close the §1
-incident. *Resolved by*: an operator decision on whether campaign
-control state is expected to grow (more control files, more summary
-kinds, a campaign manifest). If it is not, the prefix fix is the correct
-minimal change and this PR shrinks by roughly two thirds.
+**OPEN-E-4a — which advice files does the V20 campaign use?**
+Closed *for PR E* (above) but **not closed for the launch.** The formal
+queue still points at `advice/workflow/v18r_${FLAVOR}_explorer.json`
+(`:310`) while `v19_gate0_arch.json` / `v19_gate0_loss.json` exist and
+are unused. This is a scientific decision the code cannot answer.
+*Resolved by*: the operator naming the V20 advice files **in the V20
+launch packet**. Tracked here so it is not lost between PR E and launch.
 
-**OPEN-E-2 — Should chain workspaces move under the campaign home?**
-§4.4 says no. *Resolved by*: whether any future campaign is expected to
-reuse a run name across campaign ids. If run names remain
-campaign-prefixed, the move buys nothing and costs
-`campaign_spend.py:58`, every report path, and the resume guard.
+**OPEN-E-11 — does the derived pair-summary view need a rebuild path?**
+D-E-3a defines `pair_summaries/` as a derived view of the canonical
+JSONL and states that historical waves are not backfilled (BC-1). If an
+operator later wants the derived files for pre-PR-E waves, something has
+to rebuild them. *Resolved by*: whether any operator report reads the
+per-wave files directly rather than the JSONL. Filed as **FU-E-7**;
+raised here because the answer also decides whether FU-E-1's mirror-key
+removal is safe.
 
-**OPEN-E-3 — Should the Gate pair runner gain a stop channel?**
-It has none today (§3.5, D-E-4). Adding one is a *stop semantics*
-change, out of §20.7's scope, but a 6-hour Gate with no graceful stop is
-a real operator gap. *Resolved by*: an operator decision; if yes, it is
-its own PR, not PR E.
-
-**OPEN-E-4 — Is `advice/workflow/v18r_${FLAVOR}_explorer.json` (`:310`)
-the intended advice for a V20 campaign?**
-`v19_gate0_arch.json` / `v19_gate0_loss.json` exist and are not used by
-the formal queue. This is a scientific decision the code cannot answer,
-and D-E-6's fix makes the *role* correct without touching *which file*.
-*Resolved by*: the operator naming the V20 advice files. **Until then,
-D-E-6 fixes the role only, and the `v18r_` prefix stays.**
-
-**OPEN-E-5 — Does `campaign_spend.py:58`'s
-`glob(f"{campaign_id}_*/token_usage.jsonl")` mis-attribute spend when
-one campaign id is a prefix of another** (e.g. `v20` and `v20a`)?
-Not exercised by any current pair of ids, and not in PR E's scope, but
-it is the same defect class. *Resolved by*: a test with two such ids.
-If confirmed, file it separately rather than widening this PR.
-
-The five below were raised by the deeper per-commit audit (§8) and did
-not exist in the first draft.
-
-**OPEN-E-6 — Does `sdsc_submission_scripts/README.md` gaining a
-campaign-control section count as in-scope doc sync, or as new
-documentation work?**
-A grep for `v19`, `v18r`, `queue` and `gate0` in that README matches
-**nothing**: the folder map covers `run_chain.sh`, `_chain_common.sh`,
-`run_one_iteration.py`, `submit_one_iteration.slurm`, the Tier-3 runner
-and the auxiliary scripts, and has never listed any campaign launcher.
-§12's artifact 4 (a record of which historical layouts remain readable)
-has nowhere to live without creating that section. *Resolved by*: an
-operator ruling that the section is in scope for E-C7 — the author's
-reading, since the doc-sync rule requires creating a minimal doc where
-none exists — or a decision to file it separately, in which case
-artifact 4 needs a different home.
-
-**OPEN-E-7 — Should the Gate runner's `GATE_ROOT` gain a
-`$GATE_RUN_PREFIX` subdirectory, or only prefixed filenames?**
-D-E-4 proposes filenames only (`${GATE_RUN_PREFIX}_pair_summary.json`),
-which removes the verified overwrite hazard with two literal changes. A
-directory would be tidier and would match the queue's new model, but it
-strands the existing Gate evidence under a now-unused layout. *Resolved
-by*: an operator preference. Author's recommendation: filenames only.
-
-*(OPEN-E-8 and OPEN-E-9 were resolved on 2026-08-04 — see "Resolved"
-above.)*
-
-**OPEN-E-10 — the stale `WAVE_WALL_SECONDS` default in the docs.
-DEFERRED, still open, and deliberately NOT part of PR E.**
-`docs/running_chain_test.md:142` and
-`docs/design/runtime_estimation_and_calibration.md:3841-3842` both state
-the default is `86400`. The code is `259200`
-(`v19_queue_runner.sh:89`), and
-`test_v19_campaign_pinning.py:190` asserts the cap exceeds 86400 — so
-the code is correct and both docs are stale.
-
-**Operator ruling, 2026-08-04: this is a separate docs follow-up. Do not
-fold it into PR E**, even though E-C7 opens both files. The finding is
-recorded here so it is not lost, and E-C7 carries an explicit acceptance
-criterion that `WAVE_WALL_SECONDS` still reads `86400` after the doc-sync
-commit — the deferral is verified rather than assumed. *Closed by*: its
-own doc-only change.
-
----
+**OPEN-E-12 — should `$EXIT_DIR` markers move under the campaign home?**
+They stay in `/tmp` (§3.4, §4.4) and do not collide, because run names
+carry the campaign id. But `/tmp` is shared, survives across campaigns,
+and is the one authority-adjacent path the E1 enumeration test cannot
+assert campaign identity over. *Resolved by*: whether a stale
+`${RUN}.exit` from an aborted identically-named run has ever been
+misread. `:263` removes the marker before each launch, so the exposure
+is narrow; recorded rather than acted on.
 
 ## 15. §20.11 review template
 
@@ -2779,39 +3286,54 @@ Confirmed evidence:     v19_queue_runner.sh:104 (the defect, still on master);
                         two neighbouring paths; :80 MAX_CONC=2 is read only
                         by :416; the Gate pair summary at gate runner :59 is
                         not derived from GATE_RUN_PREFIX and has already been
-                        overwritten once (:379-382). Zero Python readers of
-                        campaign state. The role-derivation defect is FIXED
-                        and merged ahead of PR E (fe51377c, PR #165).
-Scope:                  Campaign path model; validated typed campaign identity;
-                        campaign stamp + mismatch guard; legacy compatibility;
-                        typed atomic wave/pair summary writer; Gate summary
-                        scoping; one remaining campaign-identity defect
-                        (D-E-7); a shell isolation test.
+                        overwritten once (:379-382). No Python reads campaign
+                        state. The role-derivation defect is FIXED and merged
+                        ahead of PR E (fe51377c, PR #165).
+Scope:                  Campaign path model with a narrow override surface;
+                        one ordered campaign-admission guard (typed identity,
+                        stamp, directories); campaign-level legacy adoption;
+                        typed atomic wave/pair summary writer with a defined
+                        canonical/derived contract; Gate summary scoping under
+                        the same validator; the process-guard basename fix;
+                        a shell isolation test.
 Out of scope:           Stop semantics; no-respawn; deleting legacy evidence;
                         workspace relocation; an N-chain scheduler; wave
                         ordering; bands; advice content; any node; any
-                        EXISTING core/ module; the WAVE_WALL_SECONDS doc fix
-                        (OPEN-E-10, deferred by ruling).
+                        EXISTING core/ module; a Gate stop channel (FU-E-8);
+                        the WAVE_WALL_SECONDS doc fix (predecessor hotfix);
+                        the campaign_spend prefix-glob (FU-E-9).
 Production callers:     sdsc_submission_scripts/v19_queue_runner.sh (queue),
                         v19_gate0_pair_runner.sh (Gate). _chain_common.sh is
                         read but not changed. Two NEW Python modules under
                         core/ and scripts/, called by the launcher exactly as
                         campaign_spend.py (:236-243) already is. No existing
                         Python module is modified.
-Persistent schema impact: Wave summary record gains `chains` + `campaign_id`
-                        and moves to a typed atomic writer; arch_*/loss_*
-                        retained as a labelled mirror (FU-E-1). New
-                        control/campaign.json stamp. Legacy files read,
-                        never rewritten.
+Persistent schema impact: New control/campaign.json stamp, including
+                        legacy_adopted_from. Wave summary record gains
+                        `chains`, `campaign_id` and `record_id`, and moves to
+                        a typed atomic writer; arch_*/loss_* retained as a
+                        labelled mirror (FU-E-1). New derived per-wave files
+                        under pair_summaries/, canonical source stays the
+                        JSONL. Legacy files read only under adoption, never
+                        rewritten.
 Backward compatibility: BC-1..BC-5 (§4.3). No file moved, rewritten or deleted.
+                        Legacy compatibility is a campaign-level MODE decided
+                        once at first start (BC-2), not a per-lookup fallback.
                         One new refusal path: an invalid campaign id (BD-5).
 Implementation checkpoints: E1 path model, E2 backward compat, E3 mismatch
                         guard, E4 stop semantics, E5 recovery validation.
-                        Commits E-C1..E-C7 (§8), each independently green.
+                        Commits E-C1..E-C8 (§8), each independently green.
 Deterministic tests:    Layer 1 (§9) — eleven named defects, each with the
-                        statement of how it fails.
+                        statement of how it fails, plus positive controls on
+                        the identifier rule.
 Layer-2 evaluation:     Multi-campaign isolation, two synthetic campaigns,
-                        with a negative control that fails on revert.
+                        five assertions, all PASSING in the committed suite.
+Mutation evidence:      Separate documented runs, never suite members: E3
+                        guard reachability, E4 stop-semantics independence,
+                        E5 isolation control (old QUEUE_STOP_FILE default
+                        temporarily restored in source), E1 unscoped-path
+                        reachability. Cache-cleared, single-site-asserted,
+                        baseline re-run.
 Bounded real validation: Layer 3 — the real runner executed against a temp
                         WS_ROOT with a screen shim. No GPU, no API.
 Type checking:          Pyright run per commit with the CI-reproducing
@@ -2825,39 +3347,42 @@ CI vs local:            Every layer touches machine state, so every layer is
                         run both locally and on CI. Local-only results are
                         reported as "locally green, CI pending".
 Failure classification: Not applicable — PR E introduces no runtime failure
-                        class. A campaign-ID mismatch and an invalid campaign
-                        id are startup refusals with named diagnostics, not
-                        classified failures.
+                        class. An invalid campaign id, a foreign stamp and an
+                        unresolvable Gate prefix are startup refusals with
+                        named diagnostics, not classified failures.
 Attribution:            Not applicable — no OOM, no resource decision.
 Genericization impact:  §7 — seven questions answered; closes FU-B-7.
-Hardcoding introduced:  None. Four new path values and one identifier pattern,
-                        all configured policy with environment overrides and
-                        documented defaults.
+Hardcoding introduced:  None. Two path values, one identifier pattern and one
+                        record_id format, all configured policy or derived
+                        structure with documented behaviour.
 Hardcoding removed:     v19_queue_runner process-guard literal (:259);
                         MAX_CONC=2 (:80, closes FU-B-7); the two-role state
-                        schema (:226-229); an unvalidated campaign id used as
-                        a path component; "gate": "v19_gate0" (gate :290);
+                        schema (:226-229); an unvalidated campaign id and an
+                        unvalidated GATE_RUN_PREFIX used as path components;
+                        "gate": "v19_gate0" (gate :290);
                         gate0_pair_summary.json (gate :59). The v19_loss_
                         role literal was removed ahead of PR E by #165.
 Hardcoding deferred:    FU-E-1 arch/loss mirror keys; FU-E-2 N-chain launcher;
                         FU-E-3 v18r historical surface; FU-E-4 shared
                         identifier extraction from observation_store;
                         FU-E-5 shared atomic-write helper; FU-E-6 pyright
-                        coverage and mode.
-Artifacts:              §12 — nine.
+                        coverage and mode; FU-E-7 derived-view rebuild path;
+                        FU-E-8 Gate stop channel; FU-E-9 campaign_spend
+                        prefix-glob collision.
+Artifacts:              §12 — eleven.
 Stop conditions:        §11 — seven.
-Merge criteria:         §10 — twelve.
-Dependencies:           None. fe51377c (PR #165) is already on master.
-Operator decisions:     D-E-1..D-E-5, D-E-7, D-E-8 pending (§5).
-                        D-E-6 APPROVED and DONE — merged fe51377c.
-                        D-E-9 APPROVED 2026-08-04.
-                        Resolved 2026-08-04: E-8 (id validation -> D-E-9,
-                        enforced in E-C2), E-9 (no red intermediate -> E-C2
-                        and E-C4 merged, list renumbered), and the wave-record
-                        emission mechanism (-> typed atomic Python writer).
-                        Deferred 2026-08-04: OPEN-E-10 leaves PR E entirely.
-                        Still open and gating commits: OPEN-E-1 (the whole
-                        path-model mechanism), OPEN-E-2, OPEN-E-3,
-                        OPEN-E-4, OPEN-E-5, OPEN-E-6 gates E-C7,
-                        OPEN-E-7 gates E-C5.
+Merge criteria:         §10 — seventeen.
+Dependencies:           fe51377c (PR #165) already on master. One predecessor
+                        docs hotfix (WAVE_WALL_SECONDS 86400 -> 259200) must
+                        merge BEFORE PR E's doc sync.
+Operator decisions:     Architecture direction APPROVED, second review
+                        2026-08-04, with nine corrections — all applied.
+                        APPROVED: D-E-4 (all three Gate sub-decisions),
+                        D-E-6 (DONE, merged fe51377c), D-E-9.
+                        CLOSED: OPEN-E-1..E-3, E-5..E-10 (§14 table).
+                        PENDING: D-E-1, D-E-2, D-E-3, D-E-5, D-E-7, D-E-8.
+                        STILL OPEN: OPEN-E-4a (V20 advice files — required
+                        before the launch packet, not before PR E),
+                        OPEN-E-11 (derived-view rebuild), OPEN-E-12
+                        (EXIT_DIR markers).
 ```
