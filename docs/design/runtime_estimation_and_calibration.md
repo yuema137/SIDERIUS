@@ -3839,7 +3839,7 @@ wave completes; a `queue_stopped` record appended to
 `v19_wave_state.jsonl`; exit 99. A chain that exited 99 is logged as
 stopped-on-request and suppresses the targeted-restart suggestion.
 `wait_and_record` gained a bounded wall cap (`WAVE_WALL_SECONDS`,
-default 86400): on breach the QUEUE stops and records
+default 259200 — 72 h): on breach the QUEUE stops and records
 `wave_wall_cap_exceeded`, and the running chains are deliberately left
 alone — killing them stays an operator act, and a queue that kills its
 own chains on a timer would destroy exactly the evidence a stalled wave

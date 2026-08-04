@@ -247,3 +247,45 @@ class TestWaveOrderUnchanged:
             _, scope, files = line.split(":")
             low, high = (int(x) for x in scope.split("-"))
             assert [int(x) for x in files.split(",")] == list(range(low, high + 1))
+
+
+class TestTheDocumentedDefaultsMatchTheCode:
+    """A documented default that disagrees with the code is worse than an
+    undocumented one: an operator plans around it.
+
+    `WAVE_WALL_SECONDS` sat at `86400` in two operator-facing documents
+    while the code shipped `259200` — a 3x difference in how long a stalled
+    wave is tolerated. The existing cap test asserts only `> 86400`, which
+    passes for any value above a day and so could not catch the drift.
+    """
+
+    #: Docs that state the default, and must therefore state the real one.
+    DOCS = (
+        "docs/running_chain_test.md",
+        "docs/design/runtime_estimation_and_calibration.md",
+    )
+
+    def _code_default(self) -> int:
+        return int(_sourced("echo $WAVE_WALL_SECONDS"))
+
+    def test_no_doc_states_a_wave_cap_the_code_does_not_use(self):
+        from pathlib import Path
+
+        repo = Path(__file__).resolve().parents[3]
+        actual = self._code_default()
+        for rel in self.DOCS:
+            text = (repo / rel).read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if "WAVE_WALL_SECONDS" not in line:
+                    continue
+                # Any bare seconds-magnitude number on the line must be the
+                # real default. Anything else is a claim about a value the
+                # code does not use.
+                for token in re.findall(r"\b\d{4,7}\b", line):
+                    assert int(token) == actual, (
+                        f"{rel} states {token} for WAVE_WALL_SECONDS; the code default is {actual}"
+                    )
+
+    def test_the_code_default_is_the_72h_cap(self):
+        """Hardcoded, not read back from the thing under test."""
+        assert self._code_default() == 259200

@@ -139,7 +139,7 @@ targeted-restart suggestion.
 | Env | Default | Purpose |
 |---|---|---|
 | `QUEUE_STOP_FILE` | `$WS_ROOT/STOP` | Where the queue looks for a stop request. |
-| `WAVE_WALL_SECONDS` | `86400` | Bound on how long one wave may be waited on. On breach the QUEUE stops and records `wave_wall_cap_exceeded`; running chains are left alone — killing them stays an operator act. |
+| `WAVE_WALL_SECONDS` | `259200` (72 h) | Bound on how long one wave may be waited on. On breach the QUEUE stops and records `wave_wall_cap_exceeded`; running chains are left alone — killing them stays an operator act. |
 
 Reasons: `operator_stop_requested`, `iteration_terminated_by_signal`,
 `wave_wall_cap_exceeded`. A wave summary is written on every exit path,
