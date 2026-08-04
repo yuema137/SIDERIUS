@@ -3,8 +3,16 @@
 
     python scripts/campaign_admission.py --campaign-id <id> \
         --ws-root <path> --campaign-home <path> \
-        --runner <filename> --runner-pid <pid>
-    -> "<created|validated> <stamp path>"
+        --runner <filename> --runner-pid <pid> \
+        [--wave-state <path> --legacy-wave-state <path>]
+    -> line 1: "<created|validated> <stamp path>"
+       line 2: the adopted legacy state path, or "-"
+
+Two lines rather than three fields, because a path may contain a space
+and the launcher parses this with shell word splitting. Line 2 is always
+present — an empty line would be indistinguishable from a missing one
+after command substitution strips trailing newlines, so "none" is spelled
+`-`.
 
 The launcher calls this once, from ``main()``, before it may launch
 anything or write any state. It owns the whole ordered sequence described
@@ -45,6 +53,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--runner", required=True, help="launcher filename, for provenance")
     parser.add_argument("--runner-pid", required=True, type=int)
+    parser.add_argument(
+        "--wave-state",
+        default=None,
+        help="this campaign's own state file; with --legacy-wave-state, enables the BC-2 adoption decision",
+    )
+    parser.add_argument(
+        "--legacy-wave-state",
+        default=None,
+        help="the pre-PR-E state file for this campaign id",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -54,6 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             campaign_home=args.campaign_home,
             runner=args.runner,
             runner_pid=args.runner_pid,
+            wave_state=args.wave_state,
+            legacy_wave_state=args.legacy_wave_state,
         )
     except CampaignAdmissionError as exc:
         print(f"campaign_admission: {exc}", file=sys.stderr)
@@ -65,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"{admission.outcome} {admission.stamp_path}")
+    print(admission.stamp.legacy_adopted_from or "-")
     return 0
 
 

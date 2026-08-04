@@ -38,9 +38,13 @@
 #   never queue events. A watchdog/API failure that makes the chain
 #   process terminal follows the chain-failure rule above.
 #
-# Authoritative per-chain status: $WS_ROOT/v19_wave_state.jsonl (one JSON
-# line per finished chain attempt: run, wave, exit, start, end) — NOT log
-# text. Exit codes come from per-chain markers ($EXIT_DIR/<run>.exit,
+# Authoritative per-chain status:
+# $WS_ROOT/$CAMPAIGN_ID/queue_state/wave_state.jsonl (one JSON line per
+# finished chain attempt: run, wave, exit, start, end) — NOT log text.
+# A campaign interrupted BEFORE the V20 PR E move may additionally read
+# its own pre-move $WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl, read-only
+# and only when its stamp recorded that adoption at first start (BC-2).
+# Exit codes come from per-chain markers ($EXIT_DIR/<run>.exit,
 # EXIT=<n>) written inside each chain screen exactly as in V18r.
 #
 # Selective/targeted runs (V19 O2):
@@ -129,6 +133,20 @@ CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/campaign.json"
 
 LOGF="$QUEUE_STATE_DIR/queue_runner.log"
 WAVE_STATE="$QUEUE_STATE_DIR/wave_state.jsonl"
+# --- pre-PR-E state, read only under adoption (E-C3, BC-2) -----------------
+# Where this campaign's history lived before the move. It is READ-ONLY and
+# only ever consulted when the campaign stamp records it as adopted; the
+# interpolated ${CAMPAIGN_ID} is what keeps another campaign's file out of
+# range. Nothing writes here, ever — BC-1.
+LEGACY_WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
+# The legacy SHARED stop file. Observed and recorded at startup, never
+# honoured and never deleted (BC-3): silently ignoring it would destroy
+# the operator's ability to reconstruct the 08:17 incident, and honouring
+# it would reproduce the defect.
+LEGACY_GLOBAL_STOP="$WS_ROOT/STOP"
+# Set from the admission decision in main(); empty means "no adoption",
+# which is every campaign created after PR E.
+ADOPTED_LEGACY_STATE=""
 # C13: a wave cannot wait forever. On breach the queue STOPS and reports;
 # it never kills a running chain on its own — that stays an operator act.
 # 72 h per wave (operator 2026-07-31). The former 24 h was sized for a
@@ -267,12 +285,37 @@ record_queue_stop() {  # reason wave detail
   log "QUEUE STOPPED ($1) at wave $2: $3"
 }
 
-# Authoritative completion check: a v19_wave_state.jsonl record with
+# Authoritative completion check: a wave_state.jsonl record with
 # "exit": 0 for this run name (persisted status, never log text).
+#
+# The predicate is byte-identical on both files (E-C3): the same
+# `grep | grep -q` decides completion whether the evidence comes from
+# this campaign's own state or from an adopted legacy file. Adoption may
+# change WHICH file is readable; it must never change what "complete"
+# means.
+#
+# The legacy read is gated on ADOPTED_LEGACY_STATE, which is set from the
+# stamp at admission and is empty unless this campaign adopted a
+# pre-PR-E file at its FIRST start (BC-2). It is deliberately NOT
+# "consult legacy when the new state lacks a record": that per-record
+# fallback would skip a launch on the strength of a file the campaign was
+# never meant to obey, which is the §1 defect in a different costume.
+# A campaign that was not granted adoption never opens a legacy path at
+# all, however many records its own state is missing.
+#
+# An adopted file that is missing, unreadable or malformed yields no
+# match and therefore no evidence — the chain is launched. Refusing here
+# instead would hand a legacy file veto power over a new campaign.
+_completed_in() {  # state_file run
+  [ -f "$1" ] || return 1
+  grep "\"run\": \"$2\"" "$1" | grep -q "\"exit\": 0"
+}
+
 chain_completed() {
   local RUN="$1"
-  [ -f "$WAVE_STATE" ] || return 1
-  grep "\"run\": \"$RUN\"" "$WAVE_STATE" | grep -q "\"exit\": 0"
+  _completed_in "$WAVE_STATE" "$RUN" && return 0
+  [ -n "$ADOPTED_LEGACY_STATE" ] || return 1
+  _completed_in "$ADOPTED_LEGACY_STATE" "$RUN"
 }
 
 record_chain() {  # run wave exit start end [pid]
@@ -340,7 +383,9 @@ admit_campaign() {
       --ws-root "$WS_ROOT" \
       --campaign-home "$CAMPAIGN_HOME" \
       --runner "${BASH_SOURCE[0]##*/}" \
-      --runner-pid "$$"
+      --runner-pid "$$" \
+      --wave-state "$WAVE_STATE" \
+      --legacy-wave-state "$LEGACY_WAVE_STATE"
 }
 
 # Launch one chain in its own screen; marker carries the exit code.
@@ -525,6 +570,16 @@ if [ "$ADMIT_RC" -ne 0 ]; then
   exit 1
 fi
 
+# Line 1 is "<outcome> <stamp path>"; line 2 is the adopted legacy state
+# or "-". Two lines, not three fields, because a path may contain a space.
+# Pure parameter expansion — no subshell, so no `set -e` surface. The
+# helper always prints both lines, and spells "none" as `-`, because
+# command substitution strips trailing newlines and an empty line 2 would
+# be indistinguishable from a missing one.
+ADMIT_SUMMARY="${ADMIT_OUT%%$'\n'*}"
+ADOPTED_LEGACY_STATE="${ADMIT_OUT#*$'\n'}"
+if [ "$ADOPTED_LEGACY_STATE" = "-" ]; then ADOPTED_LEGACY_STATE=""; fi
+
 # WS_ROOT holds the chain workspaces, which stay flat and are NOT scoped
 # by campaign (§4.4 — run names already carry the id, and moving them
 # would break campaign_spend.py and every historical report path).
@@ -533,10 +588,36 @@ mkdir -p "$WS_ROOT"
 # BD-1 is operator-visible, so the resolved paths are logged at startup:
 # an operator who touches the old shared STOP must be able to see, from
 # the log alone, which file this campaign actually reads.
-log "campaign admission: $ADMIT_OUT"
+log "campaign admission: $ADMIT_SUMMARY"
 log "  campaign_home=$CAMPAIGN_HOME"
 log "  stop file=$QUEUE_STOP_FILE"
 log "  wave state=$WAVE_STATE"
+if [ -n "$ADOPTED_LEGACY_STATE" ]; then
+  log "  legacy state ADOPTED (read-only, completion evidence only): $ADOPTED_LEGACY_STATE"
+else
+  log "  legacy state: not adopted — no pre-PR-E file is consulted"
+fi
+
+# BC-3: a legacy SHARED stop file is observed and recorded, never
+# honoured and never deleted.
+#
+# It is the file that halted an unrelated campaign in the 08:17 incident.
+# Silently ignoring it would destroy the operator's ability to
+# reconstruct that; honouring it would reproduce the defect. Recording it
+# is the only option that does neither, and archiving it stays a manual
+# operator act (D-E-5).
+#
+# The record goes into the NEW wave state, so the observation belongs to
+# the campaign that made it rather than to the shared root.
+if [ -e "$LEGACY_GLOBAL_STOP" ]; then
+  LEGACY_STOP_MTIME="$(stat -c %Y "$LEGACY_GLOBAL_STOP" 2>/dev/null || echo unknown)"
+  log "LEGACY GLOBAL STOP observed: $LEGACY_GLOBAL_STOP (mtime=$LEGACY_STOP_MTIME)"
+  log "  it has NO authority over this campaign and has NOT been removed;"
+  log "  this campaign stops only on $QUEUE_STOP_FILE"
+  printf '{"legacy_global_stop_observed": true, "path": "%s", "mtime": "%s", "observed_at": "%s", "runner_pid": %s, "honoured": false, "removed": false}\n' \
+    "$LEGACY_GLOBAL_STOP" "$LEGACY_STOP_MTIME" \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$$" >> "$WAVE_STATE"
+fi
 
 if [ -n "$ONLY" ]; then
   # Targeted SERIAL recovery: validate against the roster, then run the

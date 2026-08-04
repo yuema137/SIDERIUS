@@ -1,16 +1,20 @@
 """Campaign admission: the guard that binds a run to its state directory.
 
-V20 PR E, checkpoint E-C2, §4.2a.
+V20 PR E, checkpoints E-C2 (§4.2a), E-C2b and E-C3 (BC-2, BC-3).
 
 These tests run the **real launcher** against a temporary root and then
 look at the filesystem. That is deliberate: every claim admission makes is
 about a side effect and its ORDER, and neither can be checked by reading a
 variable back out of the script.
 
-Nothing here launches a chain. Wave-1's two workspaces are pre-created so
-the launcher's own workspace-exists guard refuses before `screen` is ever
-reached, and a PATH `screen` shim records any invocation so "nothing was
-launched" is an assertion rather than an assumption.
+A PATH `screen` shim records every invocation, so **both** directions are
+assertions rather than assumptions: "no chain was launched" is an empty
+record, and E-C3's blocker case — a run recorded complete only in a
+legacy file must still be LAUNCHED — is a non-empty one. No real chain
+starts: the shim's `-ls` reports nothing alive, so the launcher records a
+missing marker and stops. Where a wave run must not reach `screen` at
+all, `block_launches=True` pre-creates the workspaces so the launcher's
+own workspace-exists guard refuses first.
 """
 
 from __future__ import annotations
@@ -453,3 +457,247 @@ class TestAdmissionIsReachedBeforeAnythingElse:
             timeout=60,
         )
         assert "ERREXIT" in probe.stdout
+
+
+class TestLegacyAdoption:
+    """E-C3, BC-2. A campaign interrupted before the PR E move resumes
+    without relaunching what it finished — and a legacy file never
+    acquires standing authority over a campaign that did not adopt it.
+
+    Every test here runs the real launcher, so "the chain is launched" is
+    an observation of the `screen` shim, not an inference.
+    """
+
+    def _legacy(self, root: Path, campaign_id: str, run: str) -> Path:
+        path = root / f"{campaign_id}_wave_state.jsonl"
+        path.write_text(f'{{"run": "{run}", "wave": 1, "exit": 0, "start": "s", "end": "e"}}\n')
+        return path
+
+    def _canonical(self, root: Path, campaign_id: str, body: str = "") -> Path:
+        path = root / campaign_id / "queue_state" / "wave_state.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+        return path
+
+    def test_a_pre_move_campaign_resumes_without_relaunching(self, tmp_path):
+        """First start, no canonical state, legacy present → adopt, and
+        the completed chain is skipped."""
+        root = tmp_path / "root"
+        root.mkdir()
+        legacy = self._legacy(root, "v19", "v19_arch_15_19")
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert r.returncode == 0, r.stderr
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["legacy_adopted_from"] == str(legacy)
+        log = (root / "v19" / "queue_state" / "queue_runner.log").read_text()
+        assert "SKIP v19_arch_15_19: already completed" in log
+        assert r.screen_invocations == ""  # type: ignore[attr-defined]
+
+    def test_a_run_complete_only_in_legacy_is_launched_when_state_exists(self, tmp_path):
+        """**THE BLOCKER CASE.**
+
+        Canonical state exists and lacks the record; the legacy file has
+        it. The chain MUST launch. The rejected per-record fallback would
+        have skipped it — letting a file this campaign never adopted
+        decide that work was already done.
+        """
+        root = tmp_path / "root"
+        root.mkdir()
+        self._canonical(root, "v19", '{"run": "v19_loss_10_14", "wave": 2, "exit": 0}\n')
+        self._legacy(root, "v19", "v19_arch_15_19")
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["legacy_adopted_from"] is None, "adoption was granted after first start"
+        log = (root / "v19" / "queue_state" / "queue_runner.log").read_text()
+        assert "SKIP v19_arch_15_19" not in log, (
+            "a run recorded complete ONLY in the legacy file was skipped"
+        )
+        assert "siderius-v19_arch_15_19" in r.screen_invocations, (  # type: ignore[attr-defined]
+            "the chain was not launched"
+        )
+
+    def test_a_legacy_file_appearing_later_never_gains_authority(self, tmp_path):
+        """Monotonicity, end to end: adoption is decided at first start,
+        so a file restored from a backup afterwards changes nothing."""
+        root = tmp_path / "root"
+        root.mkdir()
+        self._canonical(root, "v19", "")
+
+        # A first run with no legacy file present, purely to create the
+        # stamp. Its launch outcome is not the subject and is not asserted.
+        _run(tmp_path, "--only", "v19_loss_00_03")
+        stamp_file = root / "v19" / "control" / "campaign.json"
+        before = (stamp_file.read_text(), stamp_file.stat().st_mtime_ns)
+
+        self._legacy(root, "v19", "v19_arch_15_19")
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert (stamp_file.read_text(), stamp_file.stat().st_mtime_ns) == before
+        assert json.loads(stamp_file.read_text())["legacy_adopted_from"] is None
+        log = (root / "v19" / "queue_state" / "queue_runner.log").read_text()
+        assert "SKIP v19_arch_15_19" not in log
+        assert "siderius-v19_arch_15_19" in r.screen_invocations  # type: ignore[attr-defined]
+
+    def test_another_campaigns_legacy_file_is_never_adopted(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        self._legacy(root, "beta", "v19_arch_15_19")
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["legacy_adopted_from"] is None
+        assert "siderius-v19_arch_15_19" in r.screen_invocations  # type: ignore[attr-defined]
+
+    def test_a_fresh_post_pr_e_campaign_adopts_nothing(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        _completed(root, "v19", "v19_arch_15_19")
+
+        _run(tmp_path, "--only", "v19_arch_15_19")
+
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["legacy_adopted_from"] is None
+        log = (root / "v19" / "queue_state" / "queue_runner.log").read_text()
+        assert "legacy state: not adopted" in log
+
+    @pytest.mark.parametrize("content", ["", "not json at all\n", "\x00\x01binary"])
+    def test_an_unusable_adopted_file_yields_no_evidence(self, tmp_path, content):
+        """Warn and continue, never block. Refusing here would hand a
+        legacy file veto power over a new campaign — the opposite of what
+        adoption is for. No evidence means the chain launches."""
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "v19_wave_state.jsonl").write_text(content)
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["legacy_adopted_from"] == str(root / "v19_wave_state.jsonl")
+        assert "siderius-v19_arch_15_19" in r.screen_invocations  # type: ignore[attr-defined]
+
+    def test_an_adopted_file_deleted_afterwards_yields_no_evidence(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        legacy = self._legacy(root, "v19", "v19_arch_15_19")
+
+        _run(tmp_path, "--only", "v19_arch_15_19")  # adopts, skips
+        legacy.unlink()
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert "siderius-v19_arch_15_19" in r.screen_invocations  # type: ignore[attr-defined]
+
+    def test_a_tampered_adoption_path_stops_the_run(self, tmp_path):
+        """A stamp records one decision; it is not a read capability."""
+        root = tmp_path / "root"
+        root.mkdir()
+        control = root / "v19" / "control"
+        control.mkdir(parents=True)
+        (control / "campaign.json").write_text(
+            json.dumps(
+                {
+                    "campaign_id": "v19",
+                    "created_at": "2026-08-04T00:00:00Z",
+                    "ws_root": str(root),
+                    "campaign_home": str(root / "v19"),
+                    "runner": "v19_queue_runner.sh",
+                    "runner_pid": 1,
+                    "legacy_adopted_from": "/etc/passwd",
+                }
+            )
+        )
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert r.returncode != 0
+        assert r.screen_invocations == ""  # type: ignore[attr-defined]
+
+    def test_the_legacy_filename_appears_only_in_a_read_position(self):
+        """MUTATION TARGET: a write that targets the legacy filename.
+
+        BC-1: nothing on disk is moved, rewritten or deleted by shipped
+        code.
+        """
+        live = [
+            line.strip()
+            for line in RUNNER.read_text(encoding="utf-8").splitlines()
+            if "_wave_state" in line and not line.strip().startswith("#")
+        ]
+        assert live == ['LEGACY_WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"'], live
+
+
+class TestTheLegacyGlobalStopIsObservedNotHonoured:
+    """BC-3. The file that halted an unrelated campaign in the 08:17
+    incident. Ignoring it silently would destroy the operator's ability to
+    reconstruct that; honouring it would reproduce the defect."""
+
+    def test_it_is_recorded_and_the_run_continues(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        legacy_stop = root / "STOP"
+        legacy_stop.touch()
+        _completed(root, "v19", "v19_arch_15_19")
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert r.returncode == 0, r.stderr
+        records = [
+            json.loads(line)
+            for line in (root / "v19" / "queue_state" / "wave_state.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        observed = [rec for rec in records if rec.get("legacy_global_stop_observed")]
+        assert len(observed) == 1, records
+        assert observed[0]["path"] == str(legacy_stop)
+        assert observed[0]["mtime"] != "unknown"
+        assert observed[0]["honoured"] is False
+        assert observed[0]["removed"] is False
+
+    def test_it_is_not_deleted(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        legacy_stop = root / "STOP"
+        legacy_stop.touch()
+        before = (legacy_stop.stat().st_mtime_ns, legacy_stop.stat().st_size)
+        _completed(root, "v19", "v19_arch_15_19")
+
+        _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert legacy_stop.exists(), "the legacy global STOP was deleted"
+        assert (legacy_stop.stat().st_mtime_ns, legacy_stop.stat().st_size) == before
+
+    def test_no_record_is_written_when_it_is_absent(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        _completed(root, "v19", "v19_arch_15_19")
+
+        _run(tmp_path, "--only", "v19_arch_15_19")
+
+        text = (root / "v19" / "queue_state" / "wave_state.jsonl").read_text()
+        assert "legacy_global_stop_observed" not in text
+
+
+class TestLegacyBytesAreNeverTouched:
+    """E2 evidence: BC-1 asserted over a whole fixture tree, by bytes and
+    mtime, rather than by reading the code for writes."""
+
+    def test_a_legacy_tree_is_byte_and_mtime_identical_after_a_run(self, tmp_path):
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "v19_wave_state.jsonl").write_text(
+            '{"run": "v19_arch_15_19", "wave": 1, "exit": 0, "start": "s", "end": "e"}\n'
+        )
+        (root / "v19_queue_runner.log").write_text("2026-07-31 08:17:00 legacy log line\n")
+        (root / "STOP").write_text("")
+        (root / "v19_campaign.json").write_text('{"legacy": "stamp"}\n')
+        before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir() if p.is_file()}
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19")
+
+        assert r.returncode == 0, r.stderr
+        after = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir() if p.is_file()}
+        assert after == before, "a pre-existing legacy file was modified"

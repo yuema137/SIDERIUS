@@ -230,6 +230,100 @@ def write_campaign_stamp(stamp: CampaignStamp, path: str) -> None:
             os.unlink(tmp_path)
 
 
+def legacy_wave_state_name(campaign_id: str) -> str:
+    """The pre-PR-E wave-state filename for this campaign.
+
+    Declared here, beside the layout constants, so "another campaign's
+    legacy file" is a comparison rather than a convention.
+    """
+    return f"{campaign_id}_wave_state.jsonl"
+
+
+def _validate_adoption_source(path: str, *, campaign_id: str, ws_root: str) -> str:
+    """The adopted legacy path, or refuse.
+
+    Adoption names **one file for one campaign**. A stamp is a record of
+    that decision, not a general file-read capability: a stamp that has
+    been hand-edited to point somewhere else must stop the run rather
+    than be honoured. Two things are therefore checked on every read, not
+    just at the moment of adoption —
+
+    - the file sits directly in ``ws_root``;
+    - its name is exactly this campaign's legacy filename.
+
+    Raises:
+        CampaignStampError: the recorded path is not this campaign's
+            legacy state file under this root.
+    """
+    expected = os.path.join(os.path.realpath(ws_root), legacy_wave_state_name(campaign_id))
+    if os.path.realpath(path) != expected:
+        raise CampaignStampError(
+            f"the campaign stamp records legacy_adopted_from={path!r}, which "
+            f"is not this campaign's legacy state file. Adoption names "
+            f"exactly {expected!r}. Refusing: a stamp records one adoption "
+            f"decision, it is not a capability to read arbitrary files."
+        )
+    return path
+
+
+def resolve_adoption(
+    *,
+    campaign_id: str,
+    ws_root: str,
+    wave_state: str,
+    legacy_wave_state: str,
+) -> str | None:
+    """Whether this campaign adopts a pre-PR-E state file, decided once.
+
+    BC-2. Adoption is a **campaign-level mode granted at first start**,
+    never a per-record fallback. The caller must only invoke this on the
+    path that creates the stamp — once a stamp exists the decision is
+    already made and immutable, which is what stops a legacy file
+    restored from a backup mid-campaign from acquiring authority over a
+    running campaign.
+
+    The rule is one conjunction:
+
+        the campaign's own wave state does NOT exist yet
+        AND a legacy wave state for THIS campaign id does
+
+    Returns:
+        The legacy path to adopt, or ``None``.
+
+    Raises:
+        CampaignStampError: ``legacy_wave_state`` does not name this
+            campaign's legacy file under ``ws_root``.
+    """
+    if os.path.exists(wave_state):
+        # The campaign already has its own canonical history. Consulting
+        # a legacy file now would let a record that exists ONLY there
+        # skip a launch — the §1 defect in a different costume.
+        return None
+    if not os.path.exists(legacy_wave_state):
+        return None
+    return _validate_adoption_source(legacy_wave_state, campaign_id=campaign_id, ws_root=ws_root)
+
+
+def adopted_legacy_state(stamp: CampaignStamp) -> str | None:
+    """The legacy file this campaign may read, re-validated.
+
+    Every consumer goes through here rather than reading the field, so
+    the "one file for one campaign" rule is enforced at use time and not
+    only at the moment it was written.
+
+    Raises:
+        CampaignStampError: the recorded path is not this campaign's
+            legacy state file under its recorded root.
+    """
+    if stamp.legacy_adopted_from is None:
+        return None
+    return _validate_adoption_source(
+        stamp.legacy_adopted_from,
+        campaign_id=stamp.campaign_id,
+        ws_root=stamp.ws_root,
+    )
+
+
 def admit_campaign(
     *,
     campaign_id: str,
@@ -237,6 +331,8 @@ def admit_campaign(
     campaign_home: str,
     runner: str,
     runner_pid: int,
+    wave_state: str | None = None,
+    legacy_wave_state: str | None = None,
 ) -> CampaignAdmission:
     """Admit this campaign to this home, in the one order that is safe.
 
@@ -253,13 +349,21 @@ def admit_campaign(
             whole campaign coherently.
         runner: the launcher's filename, recorded for provenance.
         runner_pid: the launcher's pid, recorded for provenance.
+        wave_state: this campaign's own state file. With
+            ``legacy_wave_state``, enables the BC-2 adoption decision —
+            which is evaluated **only** on the branch that creates the
+            stamp, so it happens exactly once per campaign.
+        legacy_wave_state: the pre-PR-E state file for this campaign id.
 
     Returns:
         What was decided, including whether this call created the stamp.
+        ``stamp.legacy_adopted_from`` carries the adoption decision, and
+        for a pre-existing stamp it has been re-validated.
 
     Raises:
         CampaignIdError: step 1 — nothing was created.
-        CampaignStampError: step 3 — nothing was written.
+        CampaignStampError: step 3 — nothing was written; or the adoption
+            source does not name this campaign's legacy file.
         OSError: a directory or the stamp could not be created. An
             unstampable campaign cannot be guarded, so this is fatal
             rather than a downgrade to "unbound".
@@ -289,6 +393,12 @@ def admit_campaign(
             raise OSError(f"cannot create campaign directory {directory!r}: {exc}") from exc
 
     if existing is not None:
+        # Adoption is NOT re-evaluated here. The decision was made when
+        # this stamp was created; re-deciding would let a legacy file
+        # restored from a backup acquire authority over a running
+        # campaign. The recorded path is re-VALIDATED, which is a
+        # different thing.
+        adopted_legacy_state(existing)
         return CampaignAdmission(
             campaign_id=validated,
             campaign_home=campaign_home,
@@ -297,11 +407,22 @@ def admit_campaign(
             outcome="validated",
         )
 
-    # 5. Publish, first writer wins.
+    # 5. Publish, first writer wins. This is the ONLY branch that decides
+    #    adoption, which is what makes the decision once-per-campaign.
+    adopted: str | None = None
+    if wave_state is not None and legacy_wave_state is not None:
+        adopted = resolve_adoption(
+            campaign_id=validated,
+            ws_root=ws_root,
+            wave_state=wave_state,
+            legacy_wave_state=legacy_wave_state,
+        )
+
     stamp = CampaignStamp(
         campaign_id=validated,
         created_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         ws_root=ws_root,
+        legacy_adopted_from=adopted,
         campaign_home=campaign_home,
         runner=runner,
         runner_pid=runner_pid,

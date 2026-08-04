@@ -1237,22 +1237,30 @@ the evidence named in its row.
 
 ### E2 — Backward compatibility
 
-- [ ] Legacy compatibility is a **campaign-level adoption mode** decided
+- [x] Legacy compatibility is a **campaign-level adoption mode** decided
       once at first start and recorded as `legacy_adopted_from` in the
-      stamp — **not** a per-record fallback (BC-2)
-- [ ] `chain_completed()` consults the legacy file **only** under
-      adoption, read-only, for the recorded path only
-- [ ] Adoption cannot be granted after first start
-- [ ] Legacy `$WS_ROOT/STOP` is observed, logged, recorded, and does
-      **not** stop the launch
-- [ ] No shipped code path deletes, moves or rewrites any legacy file
+      stamp — **not** a per-record fallback (BC-2) — E-C3,
+      `core.campaign_identity.resolve_adoption`, called only on the
+      stamp-creating branch
+- [x] `chain_completed()` consults the legacy file **only** under
+      adoption, read-only, for the recorded path only — E-C3; the
+      predicate is shared via `_completed_in`, so it is provably
+      identical on both files
+- [x] Adoption cannot be granted after first start — E-C3; the
+      `existing is not None` branch re-validates but never re-decides
+- [x] Legacy `$WS_ROOT/STOP` is observed, logged, recorded, and does
+      **not** stop the launch — E-C3, `legacy_global_stop_observed`
+- [x] No shipped code path deletes, moves or rewrites any legacy file —
+      E-C3, proved by bytes and `st_mtime_ns` over a four-file tree
 - [ ] V18r layout untouched; `v18r_queue_runner.sh` not modified
-- [ ] **Evidence**: a test with a legacy tree on disk proves (a) an
+- [x] **Evidence**: a test with a legacy tree on disk proves (a) an
       adopted campaign still skips a chain completed in legacy state,
       (b) **a campaign whose new state exists does NOT skip a chain
       recorded complete only in legacy** — the blocker case, (c) the
       legacy global STOP does not block, (d) every legacy file is
-      byte-identical and mtime-identical after the run
+      byte-identical and mtime-identical after the run — E-C3, all four
+      in `test_campaign_admission.py`; (b) additionally asserts the
+      `screen` shim recorded the launch
 
 ### E3 — Campaign mismatch protection
 
@@ -1489,7 +1497,7 @@ subsections below are the implementation contract.
 |---|---|---|---|
 | **E-C1** `[x]` | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
 | **E-C2** `[x]` + **E-C2b** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
-| **E-C3** | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
+| **E-C3** `[x]` | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
 | **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
 | **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
@@ -2407,6 +2415,148 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the blocker-case result, the
       identity-assertion result, and any deviation from this section
+
+#### IMPLEMENTATION RECORD — E-C3 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C2b `9060b13f`.
+
+**Behavior Delta: BD-2, BD-3 (completes it).** This commit closes the
+E-C2 gap: a campaign interrupted before the move can resume again.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/campaign_identity.py` | `legacy_wave_state_name`, `resolve_adoption`, `adopted_legacy_state`, `_validate_adoption_source`; `admit_campaign` gains `wave_state` / `legacy_wave_state` and populates `legacy_adopted_from` **only on the stamp-creating branch** |
+| `scripts/campaign_admission.py` | the two new arguments; a second output line carrying the adopted path or `-` |
+| `sdsc_submission_scripts/v19_queue_runner.sh` | `LEGACY_WAVE_STATE`, `LEGACY_GLOBAL_STOP`, `ADOPTED_LEGACY_STATE`; `chain_completed` split into `_completed_in` + an adoption-gated caller; the BC-3 observation record; the stale header comment naming the pre-move authoritative path |
+
+**The decision, and where it lives.** Adoption is evaluated in exactly
+one place — the branch of `admit_campaign` that *creates* the stamp:
+
+```text
+the campaign's own wave state does NOT exist yet
+AND a legacy wave state for THIS campaign id does
+  -> legacy_adopted_from = <that path>
+```
+
+The `existing is not None` branch **re-validates** the recorded path but
+never re-decides. That single structural fact is what makes adoption
+monotonic: a legacy file restored from a backup mid-campaign cannot
+acquire authority, because nothing after first start can grant it.
+
+**The predicate is provably identical on both files.** `_completed_in`
+holds the original `grep … | grep -q "\"exit\": 0"` and both call sites
+use it. Adoption may change *which* file is readable; it cannot change
+what "complete" means.
+
+```bash
+chain_completed() {
+  local RUN="$1"
+  _completed_in "$WAVE_STATE" "$RUN" && return 0
+  [ -n "$ADOPTED_LEGACY_STATE" ] || return 1
+  _completed_in "$ADOPTED_LEGACY_STATE" "$RUN"
+}
+```
+
+Note what this is **not**: "consult legacy when the new state lacks a
+record". That per-record fallback is the rejected design, and the gate is
+on the adoption *decision*, not on a missing record.
+
+**Adoption is not a read capability.** `_validate_adoption_source`
+re-checks, on every use including a pre-existing stamp, that the
+recorded path resolves to exactly `<ws_root>/<campaign_id>_wave_state.jsonl`.
+A hand-edited stamp stops the run rather than widening what it may read.
+This was not in the frozen plan's implementation steps; §4's
+"stamp records a path outside `$WS_ROOT` → STOP" required it, and the
+narrow form (exact name, exact directory) is stricter than "inside
+`$WS_ROOT`" for the same cost.
+
+**Tests** — 438 pass in 37.2 s (E-C2b baseline 408); 30 new.
+
+| Class | Count | Covers |
+|---|---|---|
+| `TestAdoptionIsDecidedOnce` | 6 | the conjunction; canonical-state-blocks-adoption; monotonicity with a byte-identical stamp; another campaign out of range |
+| `TestAdoptionIsNotAReadCapability` | 8 | four tampered paths refused, a positive control accepted, `None` is a value, reachability through `admit_campaign`, and a vanished-but-legitimate path still reported as adopted |
+| `TestLegacyAdoption` (shell) | 10 | the real launcher: pre-move resume, **the blocker case**, monotonicity, foreign campaign, fresh campaign, unusable/deleted adopted files, tampered stamp, and the legacy filename in a read position only |
+| `TestTheLegacyGlobalStopIsObservedNotHonoured` | 3 | the record's contents, the file's survival, and no record when absent |
+| `TestLegacyBytesAreNeverTouched` | 1 | E2: bytes **and** `st_mtime_ns` over a four-file legacy tree |
+| `TestResolveAdoptionDirectly` | 1 | refusal at the decision layer |
+
+**Blocker-case result.** `<R>/v19/queue_state/wave_state.jsonl` exists
+without the record, `<R>/v19_wave_state.jsonl` has it with `"exit": 0`:
+the stamp records `legacy_adopted_from: null`, the log contains no
+`SKIP`, and the `screen` shim records
+`-dmS siderius-v19_arch_15_19` — **the chain is launched.**
+
+**Byte/mtime identity result.** A four-file legacy tree
+(`v19_wave_state.jsonl`, `v19_queue_runner.log`, `STOP`,
+`v19_campaign.json`) is identical in both `read_bytes()` and
+`st_mtime_ns` after a full `--only` run that adopts and skips.
+
+**`legacy_global_stop_observed` record**
+
+```json
+{"legacy_global_stop_observed": true, "path": "<R>/STOP",
+ "mtime": "1754...", "observed_at": "…Z", "runner_pid": 1234,
+ "honoured": false, "removed": false}
+```
+
+Written to the **new** wave state, so the observation belongs to the
+campaign that made it. A failed `stat` yields `"unknown"`, never `0` — a
+gap is never a zero.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| `legacy_adopted_from=None` — the decision is computed but never persisted | **6 fail** |
+| `chain_completed` restored to the per-record fallback | **2 fail** — the blocker case and monotonicity, exactly the two the rejected design would have broken |
+| `QUEUE_STOP_FILE` default back to `$WS_ROOT/STOP` (honouring the legacy STOP) | **3 fail** |
+| `adopted_legacy_state(existing)` re-validation removed from `admit_campaign` | **2 fail** — proves the check is on the production path, not in an unused helper |
+
+Hygiene: backups, `__pycache__` cleared, every substitution asserted
+`count == 1`, restores verified by `grep -cF`, baseline re-run green.
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean.
+`grep -n '_wave_state' v19_queue_runner.sh` → three hits, two comments
+and one definition; **no write position**, asserted by a test.
+
+**Deviations from the frozen plan**
+
+1. **The adoption decision is computed in Python, not in the shell.** §3
+   places it "in the admission sequence's step 5", which is Python; the
+   shell supplies the two paths and consumes the answer. This keeps the
+   filename rule (`{campaign_id}_wave_state.jsonl`) in one place, where
+   "another campaign's file" is a comparison rather than a convention.
+2. **The helper's output gained a second line** rather than a third
+   field, because a path may contain a space and the launcher parses with
+   word splitting. "None" is spelled `-`: command substitution strips
+   trailing newlines, so an empty line 2 would be indistinguishable from
+   a missing one.
+3. **`chain_completed` was split into `_completed_in` + a caller.** The
+   plan said "keep the existing `grep … | grep -q` form so the predicate
+   is provably identical on both files"; extracting it makes that
+   *structurally* true rather than a matter of two copies staying in
+   sync.
+4. **The stale header comment at `:41` was corrected.** It named
+   `$WS_ROOT/v19_wave_state.jsonl` as the authoritative status file,
+   which E-C2 made false and this commit makes actively misleading. One
+   comment, describing exactly what this commit changes.
+
+**Self-corrected during implementation.** A first draft of
+`test_a_legacy_file_appearing_later_never_gains_authority` contained
+`assert first.returncode != 0 or True` — a vacuously true assertion, the
+exact anti-pattern CLAUDE.md records from 2026-08-02. Removed; the first
+run's launch outcome is not that test's subject and is now simply not
+asserted.
+
+**Remaining risk.** None specific to adoption. The E-C2 gap is closed:
+`<R>/<id>_wave_state.jsonl` is read again, under an auditable, recorded,
+once-only decision.
+
+**Next authorized checkpoint**: E-C4 (wave record and pair summaries).
 
 ---
 ### E-C4 — Wave record and pair summaries

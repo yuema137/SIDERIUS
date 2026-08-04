@@ -32,19 +32,38 @@ from core.campaign_identity import (
     CampaignStamp,
     CampaignStampError,
     admit_campaign,
+    adopted_legacy_state,
+    legacy_wave_state_name,
     read_campaign_stamp,
+    resolve_adoption,
     stamp_path_for,
     validate_campaign_id,
 )
 
 
-def _admit(home: Path, campaign_id: str = "alpha", ws_root: Path | None = None):
+def _admit(
+    home: Path,
+    campaign_id: str = "alpha",
+    ws_root: Path | None = None,
+    *,
+    adoption: bool = False,
+):
+    """Admit a campaign. `adoption=True` supplies the two paths that
+    enable the BC-2 decision, which the launcher always passes."""
+    root = ws_root or home.parent
+    extra = {}
+    if adoption:
+        extra = {
+            "wave_state": str(home / "queue_state" / "wave_state.jsonl"),
+            "legacy_wave_state": str(root / legacy_wave_state_name(campaign_id)),
+        }
     return admit_campaign(
         campaign_id=campaign_id,
-        ws_root=str(ws_root or home.parent),
+        ws_root=str(root),
         campaign_home=str(home),
         runner="v19_queue_runner.sh",
         runner_pid=4242,
+        **extra,
     )
 
 
@@ -250,3 +269,151 @@ class TestUnwritableRoot:
             assert "alpha" in str(exc.value)
         finally:
             os.chmod(root, 0o700)
+
+
+class TestAdoptionIsDecidedOnce:
+    """BC-2. Adoption is a campaign-level MODE granted at first start,
+    never a per-record fallback.
+
+    The rejected design consulted the legacy file whenever the new state
+    happened to lack a record. Its worst case is that a run recorded
+    complete ONLY in legacy gets skipped on the strength of a file the
+    new campaign was never meant to obey — cross-STATE authority instead
+    of cross-CAMPAIGN authority, which is the same defect wearing a
+    different hat.
+    """
+
+    def _legacy(self, root: Path, campaign_id: str = "alpha") -> Path:
+        path = root / legacy_wave_state_name(campaign_id)
+        path.write_text('{"run": "alpha_arch_15_19", "wave": 1, "exit": 0}\n')
+        return path
+
+    def test_first_start_with_legacy_present_adopts_it(self, tmp_path):
+        legacy = self._legacy(tmp_path)
+        result = _admit(tmp_path / "alpha", adoption=True)
+        assert result.stamp.legacy_adopted_from == str(legacy)
+
+    def test_first_start_without_legacy_adopts_nothing(self, tmp_path):
+        result = _admit(tmp_path / "alpha", adoption=True)
+        assert result.stamp.legacy_adopted_from is None
+
+    def test_an_existing_canonical_state_blocks_adoption(self, tmp_path):
+        """THE BLOCKER CASE, at the decision layer.
+
+        The campaign already has its own history, so the legacy file is
+        never in range — however many records the new state is missing.
+        """
+        self._legacy(tmp_path)
+        home = tmp_path / "alpha"
+        (home / "queue_state").mkdir(parents=True)
+        (home / "queue_state" / "wave_state.jsonl").write_text("")
+
+        result = _admit(home, adoption=True)
+
+        assert result.stamp.legacy_adopted_from is None
+
+    def test_a_legacy_file_appearing_later_is_never_adopted(self, tmp_path):
+        """Monotonicity: adoption can only be granted at first start, so a
+        file restored from a backup cannot acquire authority over a
+        campaign that is already running."""
+        home = tmp_path / "alpha"
+        first = _admit(home, adoption=True)
+        assert first.stamp.legacy_adopted_from is None
+        stamp_file = Path(first.stamp_path)
+        before = (stamp_file.read_text(), stamp_file.stat().st_mtime_ns)
+
+        self._legacy(tmp_path)
+        second = _admit(home, adoption=True)
+
+        assert second.stamp.legacy_adopted_from is None
+        assert (stamp_file.read_text(), stamp_file.stat().st_mtime_ns) == before
+
+    def test_another_campaigns_legacy_file_is_out_of_range(self, tmp_path):
+        """Scoping. `beta`'s legacy file is not `alpha`'s to adopt, and
+        the check is a comparison rather than a naming convention."""
+        (tmp_path / legacy_wave_state_name("beta")).write_text("{}\n")
+        result = _admit(tmp_path / "alpha", adoption=True)
+        assert result.stamp.legacy_adopted_from is None
+
+    def test_the_decision_needs_both_paths(self, tmp_path):
+        """A caller that supplies neither gets no adoption rather than a
+        guess — the launcher always supplies both."""
+        self._legacy(tmp_path)
+        result = _admit(tmp_path / "alpha", adoption=False)
+        assert result.stamp.legacy_adopted_from is None
+
+
+class TestAdoptionIsNotAReadCapability:
+    """A stamp records ONE adoption decision. It is not a licence to read
+    an arbitrary file, so the recorded path is re-validated at every use
+    and not only when it was written."""
+
+    def _stamp(self, tmp_path: Path, adopted: str) -> CampaignStamp:
+        return CampaignStamp(
+            campaign_id="alpha",
+            created_at="2026-08-04T00:00:00Z",
+            ws_root=str(tmp_path),
+            campaign_home=str(tmp_path / "alpha"),
+            runner="v19_queue_runner.sh",
+            runner_pid=1,
+            legacy_adopted_from=adopted,
+        )
+
+    @pytest.mark.parametrize(
+        "adopted",
+        [
+            "/etc/passwd",
+            "beta_wave_state.jsonl",
+            "sub/alpha_wave_state.jsonl",
+            "alpha_wave_state.jsonl.bak",
+        ],
+    )
+    def test_a_tampered_adoption_path_is_refused(self, tmp_path, adopted):
+        """MUTATION TARGET: honouring the field as written.
+
+        A hand-edited stamp must stop the run, not widen what it may
+        read.
+        """
+        path = adopted if adopted.startswith("/") else str(tmp_path / adopted)
+        with pytest.raises(CampaignStampError):
+            adopted_legacy_state(self._stamp(tmp_path, path))
+
+    def test_the_campaigns_own_legacy_path_is_accepted(self, tmp_path):
+        """POSITIVE CONTROL — without it the validator could tighten to
+        "refuse everything" and every test above would still pass."""
+        good = str(tmp_path / legacy_wave_state_name("alpha"))
+        assert adopted_legacy_state(self._stamp(tmp_path, good)) == good
+
+    def test_no_adoption_is_a_value_not_an_error(self, tmp_path):
+        stamp = self._stamp(tmp_path, str(tmp_path / legacy_wave_state_name("alpha")))
+        assert adopted_legacy_state(stamp.model_copy(update={"legacy_adopted_from": None})) is None
+
+    def test_a_stamp_with_a_tampered_path_stops_admission(self, tmp_path):
+        """Reachability: the re-validation must be on the production
+        admission path, not only in a helper nobody calls."""
+        home = tmp_path / "alpha"
+        (home / "control").mkdir(parents=True)
+        Path(stamp_path_for(str(home))).write_text(
+            self._stamp(tmp_path, "/etc/passwd").model_dump_json()
+        )
+        with pytest.raises(CampaignStampError):
+            _admit(home, adoption=True)
+
+    def test_an_adopted_path_that_vanished_is_still_reported_as_adopted(self, tmp_path):
+        """Absence is not tampering. A missing file yields no completion
+        evidence at read time — the chain is launched — but it must not
+        be mistaken for a stamp that names the wrong file."""
+        good = str(tmp_path / legacy_wave_state_name("alpha"))
+        assert not os.path.exists(good)
+        assert adopted_legacy_state(self._stamp(tmp_path, good)) == good
+
+
+class TestResolveAdoptionDirectly:
+    def test_it_refuses_a_legacy_path_outside_the_root(self, tmp_path):
+        with pytest.raises(CampaignStampError):
+            resolve_adoption(
+                campaign_id="alpha",
+                ws_root=str(tmp_path),
+                wave_state=str(tmp_path / "alpha" / "queue_state" / "wave_state.jsonl"),
+                legacy_wave_state="/etc/passwd",
+            )
