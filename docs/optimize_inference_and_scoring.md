@@ -237,4 +237,118 @@ All five commits have landed. The criteria split cleanly into *code-level* (veri
 
 ---
 
+## 7. Addendum (2026-08-03) — Fix 6: host-side checkpoint loading
+
+*Added after this branch closed. Same file and same concern as Fix 3
+(inference memory hygiene), but a different resource: Fix 3 reduced HOST
+RSS, this reduces DRIVER-VISIBLE GPU memory. §6 anticipated that host RAM
+and GPU VRAM would eventually be treated symmetrically; this is one step of
+that.*
+
+### How it was found
+
+Not by looking for it. A V20 PR C2 lifecycle audit was comparing the
+pre-phase GPU measurement worker against formal inference milestone by
+milestone, chasing a fixed **208 MiB (5.7 %)** discrepancy — probe
+3434 MiB, formal 3642 MiB, reproduced with **zero spread** across three
+alternating runs.
+
+The two processes were **identical to the MiB at every milestone up to and
+including model transfer** (732 MiB tree, allocator 218/236 on both). The
+divergence appeared at exactly one step: the one the probe does not have.
+
+### Root cause
+
+```python
+model.load_state_dict(torch.load(args.model_path, map_location=DEVICE))
+```
+
+`map_location=DEVICE` materialises a **second full set of parameter
+tensors on the GPU**. `load_state_dict` copies them into the model, the
+temporary state dict is freed — and the CUDA caching allocator **keeps the
+freed segments reserved**. Driver-visible memory counts reserved, not
+allocated, so the process carries a checkpoint's worth of dead pool for the
+rest of its life.
+
+Measured directly on the real punet checkpoint (216.9 MiB), across the
+load and nothing else:
+
+| | reserved | allocated |
+|---|---|---|
+| device-side (before) | 236 -> **464 MiB** (+228) | 218 -> 218 (unchanged) |
+| host-side (after) | 236 -> **236 MiB** (+0) | 218 -> 218 (unchanged) |
+
+**`allocated` cannot see this defect and `reserved` can** — which is why it
+survived until something compared driver-visible memory milestone by
+milestone.
+
+### The fix
+
+```python
+state_dict = torch.load(args.model_path, map_location="cpu")
+model.load_state_dict(state_dict)
+del state_dict
+```
+
+The model is already on the device, so `load_state_dict` copies
+parameter-by-parameter from host into the resident GPU tensors and the
+second device copy is never allocated. `map_location="cpu"` is also the
+convention this repository already uses everywhere else it reads a state
+dict (`tests/integration/execute_tools/test_training_loop.py`, 5 sites).
+
+**Strictness is untouched**: `weights_only` keeps its default and
+`load_state_dict` keeps `strict=True`, so a mismatched or malicious
+checkpoint fails exactly as before. No correction factor, no
+`empty_cache()` workaround, no admission-policy change.
+
+### Behavior Delta
+
+| | Before | After |
+|---|---|---|
+| Checkpoint location during load | materialised directly on the GPU | read on the host, copied into the existing GPU model |
+| Freed checkpoint storage | remained **reserved** by the CUDA allocator for the process lifetime | never allocated on the device at all |
+| Formal inference driver-visible peak | 3642 MiB | **3434 MiB** (−208 MiB, −5.7 %) |
+| Host peak RSS | — | +38 MiB measured back-to-back; worst case one checkpoint (216.9 MiB) transiently, against a 60 GiB inference `RLIMIT_AS` |
+| Predictions / artifacts | — | **bit-identical**, verified over all 20 denoised HDF5 files |
+| CLI, flags, config, scientific outputs | — | unchanged |
+
+The change is a strict improvement: less real GPU memory, identical
+numbers. It does **not** alter admission authority, dispositions, retry,
+phase order, or timeout and signal semantics.
+
+### Validation
+
+* 17 unit tests (`tests/unit/execute_tools/test_inference_checkpoint_loading.py`)
+  — structural proof that the load is host-side and released, that the
+  model reaches the device *before* the weights load, that the sentinel
+  preflight still precedes it, that strictness is not weakened, plus
+  runtime proofs of parameter equality, identical fixed-input predictions,
+  dtype/device/eval-mode preservation, unchanged failure semantics, and
+  that the host copy is genuinely collectable.
+* 5 CUDA integration tests
+  (`tests/integration/execute_tools/test_inference_checkpoint_memory.py`)
+  — the allocator proof. Both routes run **in the same process on the same
+  checkpoint**, and the device-side one is *required to be the expensive
+  one*, so the comparison is the evidence rather than a threshold.
+* One bounded formal inference on an RTX 5090 (20 files x 2 PSD segments,
+  16.1 s, 181 driver samples, 0 missed): **driver peak 3434 MiB**, and all
+  20 denoised outputs **bit-identical** to the pre-fix run.
+* 584 + 863 unit tests pass across `execute_tools`, `sandbox_executor`, the
+  tuner and the guardrails. `ruff check` and `ruff format --check` pass.
+  **pyright could not be run locally** — the vendored binary aborts under
+  this host's Node v10.19.0 — so no claim of local type validation is made;
+  CI is the only environment that can run it.
+
+### Known stale references in this document, not fixed here
+
+§3's Fix 3 entry cites `inference_single.py:215-234` (normal-mode loop) and
+`:151-205` (trial-mode loop). Both were already wrong before this change —
+at the pre-fix commit, line 151 is the argparse tail and 215 is the end of
+`process_batch`. The substance of Fix 3 (the `del` + `gc.collect()` pattern
+and its measured 9.43 GB -> 5.68 GB effect) remains accurate and is
+untouched here. Re-deriving which revision the ranges were correct for is
+tracked separately rather than folded into a memory hotfix.
+
+---
+
 *End of document.*
