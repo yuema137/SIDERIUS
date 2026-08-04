@@ -2113,7 +2113,7 @@ semantics, which this PR does not alter.
       absorb silently**: `docs/running_chain_test.md:142` and
       `docs/design/runtime_estimation_and_calibration.md:3841-3842` both
       state `WAVE_WALL_SECONDS` defaults to `86400`. The code is
-      `259200` (`v19_queue_runner.sh:88`), and
+      `259200` (`v19_queue_runner.sh:89`), and
       `test_v19_campaign_pinning.py` asserts the cap is **greater than**
       86400, so the code is right and both docs are stale. This is
       unrelated to PR E's causal claim. Options: (a) fix in this
