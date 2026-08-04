@@ -1125,7 +1125,10 @@ ROSTER field 4 (`:402`) and is unchanged.
 
 ### D-E-7 — The self-exclusion in the live-process guard derives from the script name
 
-- [ ] Approved  [ ] Rejected  [ ] Modified
+- [x] **Approved with one addition — operator ruling, 2026-08-04**: the
+  exclusion must be FIXED-STRING (`grep -vF`). The basename contains a
+  `.`, which as a regex would widen the exclusion to processes that are
+  not this runner. See E-C6's implementation record.
 
 `:259`'s `grep -v v19_queue_runner` becomes
 `grep -v "$(basename "${BASH_SOURCE[0]}")"`. Small, in-passing, and
@@ -1508,7 +1511,7 @@ subsections below are the implementation contract.
 | **E-C3** `[x]` | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
 | **E-C4** `[x]` | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** `[x]` | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
-| **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
+| **E-C6** `[x]` | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
 | **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
 | **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
 
@@ -3349,6 +3352,97 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
       unrelated cleanup
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, and the renamed-copy result
+
+#### IMPLEMENTATION RECORD — E-C6 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C5 `240d7ac1`.
+
+**Behavior Delta**: a runner running under any filename now excludes its
+own process from the live-process scan. Under the shipped filename,
+behaviour is unchanged.
+
+**Production diff — two lines**
+
+```diff
++RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
+-  if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
++  if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -qF -- "$WS_ROOT/$RUN"; then
+```
+
+`${BASH_SOURCE[0]##*/}` rather than `$(basename …)`: pure parameter
+expansion, so no subshell and no `set -e` surface, and it matches the
+form E-C2 already uses for the admission helper's `--runner` argument.
+
+**`-F` is not cosmetic — operator instruction, and it is load-bearing.**
+The basename is `v19_queue_runner.sh` and `.` is a regex wildcard, so a
+plain `grep -v` would also exclude a process named
+`v19_queue_runnerXsh`. That widens the exclusion to processes that are
+**not** this runner, which is the direction that silently skips the
+guard. Both sides of the pipeline are now fixed-string, and `--` guards
+a value that begins with `-`.
+
+**Unchanged**: the guard's meaning (a live process already referencing
+this run's workspace blocks the launch), its position among the three
+launch guards, the `grep -v grep` stage, and `pipefail`/return-code
+behaviour — the guard is inside `launch_chain`, which every call site
+invokes as a condition, so `errexit` stays suspended there exactly as
+before.
+
+**Tests** — 6 new in `test_v19_queue_runner.py`; full `tests/unit`:
+**2445 passed, 2 skipped** in 103 s.
+
+| Test | Proves |
+|---|---|
+| `test_a_genuine_external_process_still_blocks_the_launch` | the meaning is intact |
+| `test_the_runner_does_not_see_itself` | unchanged under the shipped filename |
+| `test_a_process_that_is_not_this_runner_is_not_excluded` | the exclusion stays narrow |
+| `test_a_renamed_runner_still_excludes_itself` | **the regression**, with an actually-renamed copy |
+| `test_the_exclusion_is_fixed_string_not_a_regex` | `v19_queue_runnerXsh` still blocks |
+| `test_the_exclusion_derives_from_the_script_name` | structural, no literal anywhere |
+
+Each behavioural case runs the **real `launch_chain`** against a real
+background process whose argv contains this run's workspace path, and
+reads the guard's own message out of the log — so what is asserted is the
+guard's decision, not the shape of a pipeline.
+
+**Mutations**
+
+| Mutation | Result |
+|---|---|
+| `grep -v v19_queue_runner` restored | **3 fail** |
+| `-F` dropped from the self-exclusion | **2 fail** |
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean. `git diff --stat` confirms only
+`v19_queue_runner.sh` and its test file changed: no `role_for_run`, no
+campaign paths, no legacy adoption, no wave writer, no
+`v18r_queue_runner.sh`, no Gate runner.
+
+**Two defects found in my own tests, both fixed before commit**
+
+1. **The rename test did not discriminate.** As first written it varied
+   the *fixture's* name, not the script's — and passed under the
+   hardcoded literal too, which the mutation exposed. It now copies the
+   runner and `_chain_common.sh` into a temp tree and runs the copy under
+   a different filename, which is the only form that reproduces the
+   defect. The mutation went from 2 failures to 3.
+2. **The fixture process was invisible to `ps`.** `bash -c "sleep 30 # <marker>"`
+   is a lone simple command, so bash **execs** it and replaces its own
+   argv — the marker vanished and three "should block" cases silently
+   didn't. Fixed with `; true`, verified by injection. Separately, the
+   fixture held the captured pipes open after being killed (its orphaned
+   `sleep` inherited them), making the class take 120 s; redirecting its
+   output brought that to 4.8 s.
+
+**New follow-up**
+
+- **FU-E-12** — `v19_gate0_pair_runner.sh:209` carries the identical
+  hardcoded self-exclusion (`grep -v gate0_pair_runner`, also without
+  `-F`). Out of E-C6's frozen scope, which names the queue runner only,
+  and recorded here because E-C5 just touched that file and a reviewer
+  will ask. `v18r_queue_runner.sh:48` remains FU-E-3.
+
+**Next authorized checkpoint**: E-C7 (multi-campaign isolation test).
 
 ---
 ### E-C7 — Multi-campaign isolation test

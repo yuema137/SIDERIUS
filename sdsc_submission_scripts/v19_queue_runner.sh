@@ -61,6 +61,12 @@
 # ---------------------------------------------------------------------------
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+#: This script's own filename, for the live-process guard's
+#: self-exclusion (D-E-7). Parameter expansion rather than
+#: `$(basename …)`: no subshell, so no `set -e` surface, and it
+#: matches the form already used for the admission helper's
+#: `--runner` argument.
+RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
 # shellcheck source=_chain_common.sh
 source "$REPO/sdsc_submission_scripts/_chain_common.sh"
 # Campaign identity (operator 2026-07-31). Every name the campaign
@@ -465,7 +471,19 @@ launch_chain() {
     log "ERROR $RUN: workspace exists — NOT launched (set V19_RESUME=1 for an intentional resume; completed chains are skipped automatically)"; return 1
   fi
   if chain_screen_alive "$RUN"; then log "ERROR $RUN: screen $SESSION already exists — NOT launched"; return 1; fi
-  if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
+  # The runner must not see ITSELF as a live process holding this
+  # workspace. The exclusion used to be the literal string
+  # `v19_queue_runner`, so a renamed or copied runner stopped excluding
+  # itself and refused to launch anything — the same "the current
+  # campaign's name is baked into generic logic" defect as D-E-6, one
+  # level down (D-E-7).
+  #
+  # `-F` is not cosmetic. The basename contains a `.`, which as a REGEX
+  # matches any character, so a plain `grep -v` would also exclude a
+  # process named `v19_queue_runnerXsh` — widening the exclusion to
+  # processes that are not this runner, which is the direction that
+  # silently skips the guard. Fixed-string on both sides.
+  if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -qF -- "$WS_ROOT/$RUN"; then
     log "ERROR $RUN: live process referencing $WS_ROOT/$RUN — NOT launched"; return 1
   fi
 

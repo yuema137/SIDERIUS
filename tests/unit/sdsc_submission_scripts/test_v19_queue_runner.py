@@ -399,3 +399,134 @@ class TestOnlySelection:
         log = (tmp_path / "v19" / "queue_state" / "queue_runner.log").read_text()
         assert "SKIP v19_arch_15_19: already completed" in log
         assert "LAUNCHED" not in log
+
+
+class TestTheLiveProcessGuardExcludesOnlyItself:
+    """D-E-7 / E-C6. The guard's self-exclusion was the literal string
+    `v19_queue_runner`, so a renamed or copied runner stopped excluding
+    itself and refused to launch anything.
+
+    Each case runs the real `launch_chain` against a fixture process
+    whose argv contains this run's workspace path, and reads the guard's
+    own message out of the log — so what is asserted is the guard's
+    decision, not the shape of a pipeline.
+    """
+
+    RUN = "v19_arch_15_19"
+    BLOCKED = "live process referencing"
+
+    def _guard_says(self, tmp_path: Path, fixture_comment: str, runner: Path | None = None) -> str:
+        """Run `launch_chain` with one background process on the system
+        whose argv contains `$WS_ROOT/$RUN`, and return the log."""
+        import os
+
+        ws_root = tmp_path / "root"
+        ws_root.mkdir()
+        shim = tmp_path / "shim"
+        shim.mkdir()
+        # `screen -ls` lists nothing; anything else succeeds silently, so
+        # a launch that gets past the guard does not start a real chain.
+        (shim / "screen").write_text('#!/bin/bash\nif [ "$1" = "-ls" ]; then exit 1; fi\nexit 0\n')
+        (shim / "screen").chmod(0o755)
+        marker = f"{ws_root}/{self.RUN}"
+        script = f"""
+        set +e
+        LOGF="{tmp_path}/log"
+        EXIT_DIR="{tmp_path}/markers"; mkdir -p "$EXIT_DIR"
+        # A process whose argv contains this run's workspace path.
+        # `; true` matters: bash EXECs a lone simple command, replacing
+        # its own argv, and the marker would vanish from `ps` — the
+        # fixture would then prove nothing while passing.
+        # Output redirected: killing the wrapper orphans its `sleep`,
+        # which would otherwise hold the captured pipes open and make
+        # every case wait out the full sleep.
+        bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
+        FIXTURE=$!
+        sleep 0.4
+        launch_chain {self.RUN} 15-19 15,16,17,18,19 arch
+        kill "$FIXTURE" 2>/dev/null
+        wait "$FIXTURE" 2>/dev/null
+        """
+        subprocess.run(
+            ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{runner or RUNNER}'; {script}"],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(os.environ, WS_ROOT=str(ws_root), PATH=f"{shim}:{os.environ['PATH']}"),
+            timeout=60,
+        )
+        log = tmp_path / "log"
+        return log.read_text() if log.exists() else ""
+
+    def test_a_genuine_external_process_still_blocks_the_launch(self, tmp_path):
+        """The guard's MEANING, unchanged: something else is already
+        holding this workspace, so do not launch on top of it."""
+        log = self._guard_says(tmp_path, "some_other_program")
+        assert self.BLOCKED in log
+
+    def test_the_runner_does_not_see_itself(self, tmp_path):
+        """Behaviour under the CURRENT filename is unchanged: a process
+        whose argv carries this script's name is this runner."""
+        log = self._guard_says(tmp_path, "v19_queue_runner.sh")
+        assert self.BLOCKED not in log, "the runner treated its own process as a competing chain"
+
+    def test_a_process_that_is_not_this_runner_is_not_excluded(self, tmp_path):
+        """The exclusion must be narrow: only THIS script's name."""
+        log = self._guard_says(tmp_path, "renamed_queue_runner.sh")
+        assert self.BLOCKED in log, "a process that is NOT this runner was excluded from the scan"
+
+    def test_a_renamed_runner_still_excludes_itself(self, tmp_path):
+        """THE REGRESSION, and it requires an actually-renamed runner.
+
+        Under `grep -v v19_queue_runner` a copy running as
+        `renamed_queue_runner.sh` no longer matched its own exclusion, so
+        it saw its own process holding the workspace and refused to
+        launch anything. Varying only the FIXTURE's name cannot
+        distinguish the fix — that variant passes under both — so this
+        copies the runner and `_chain_common.sh` into a temp tree and
+        runs the copy under a different filename.
+        """
+        import shutil
+
+        scripts = tmp_path / "sdsc_submission_scripts"
+        scripts.mkdir()
+        renamed = scripts / "renamed_queue_runner.sh"
+        shutil.copy(RUNNER, renamed)
+        shutil.copy(RUNNER.parent / "_chain_common.sh", scripts / "_chain_common.sh")
+
+        log = self._guard_says(tmp_path, "renamed_queue_runner.sh", runner=renamed)
+
+        assert self.BLOCKED not in log, (
+            "a renamed runner saw its own process as a competing chain — "
+            "the hardcoded self-exclusion is back"
+        )
+
+    def test_the_exclusion_is_fixed_string_not_a_regex(self, tmp_path):
+        """MUTATION TARGET: dropping `-F`.
+
+        The basename is `v19_queue_runner.sh` and `.` is a regex
+        wildcard, so a plain `grep -v` also excludes
+        `v19_queue_runnerXsh` — widening the exclusion to processes that
+        are not this runner, which is the direction that silently skips
+        the guard.
+        """
+        log = self._guard_says(tmp_path, "v19_queue_runnerXsh")
+        assert self.BLOCKED in log, (
+            "a regex wildcard in the script's own name excluded an "
+            "unrelated process from the live-process scan"
+        )
+
+    def test_the_exclusion_derives_from_the_script_name(self):
+        """MUTATION TARGET: restoring the literal, in any campaign's
+        spelling."""
+        src = RUNNER.read_text(encoding="utf-8")
+        assert 'RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"' in src
+        live = [
+            line.strip()
+            for line in src.splitlines()
+            if "grep -v" in line and not line.strip().startswith("#")
+        ]
+        assert live == [
+            'if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
+            '| grep -qF -- "$WS_ROOT/$RUN"; then'
+        ], live
