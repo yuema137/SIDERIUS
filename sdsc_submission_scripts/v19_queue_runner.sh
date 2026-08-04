@@ -237,8 +237,21 @@ campaign_spend() {
   # Delegated to Python: a ledger record nests BOTH a token total and a
   # character total, so a shell scan for "total" silently inflates the
   # number the cost cap depends on.
+  #
+  # MEMBERSHIP COMES FROM THE ROSTER, explicitly. It used to be inferred
+  # inside the Python from a `${CAMPAIGN_ID}_*` glob, which absorbed any
+  # campaign whose id extended this one with an underscore -- `v20` counted
+  # `v20_extra_*` as its own, and that total is what `token_cap_reached`
+  # acts on. The ROSTER already declares exactly which runs a campaign has;
+  # passing them removes the guess, exactly as `role_for_run` did for the
+  # chain role.
+  local args=() spec name
+  for spec in "${ROSTER[@]}"; do
+    IFS=: read -r name _ _ _ <<< "$spec"
+    args+=(--run-name "$name")
+  done
   "$REPO/.venv/bin/python" "$REPO/scripts/campaign_spend.py" \
-      --root "$WS_ROOT" --campaign-id "$CAMPAIGN_ID" \
+      --root "$WS_ROOT" --campaign-id "$CAMPAIGN_ID" "${args[@]}" \
       --cost-per-mtok "$COST_PER_MTOK_USD" 2>/dev/null || echo "0 0.00"
 }
 

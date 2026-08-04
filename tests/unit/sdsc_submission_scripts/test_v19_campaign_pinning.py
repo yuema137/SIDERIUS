@@ -289,3 +289,57 @@ class TestTheDocumentedDefaultsMatchTheCode:
     def test_the_code_default_is_the_72h_cap(self):
         """Hardcoded, not read back from the thing under test."""
         assert self._code_default() == 259200
+
+
+class TestSpendMembershipIsExplicitInProduction:
+    """The queue's budget authority must read exactly the campaign's runs.
+
+    `campaign_spend.py` used to infer membership from a
+    `{campaign_id}_*` glob, so a campaign whose id extended another's with
+    an underscore absorbed it — `v20` counted `v20_extra_*` as its own, and
+    that total is what `token_cap_reached` acts on at
+    `v19_queue_runner.sh:432`. One campaign could be stopped by another's
+    spend.
+    """
+
+    def _ledger(self, root, name: str, total: int) -> None:
+        ws = root / name
+        ws.mkdir(parents=True, exist_ok=True)
+        (ws / "token_usage.jsonl").write_text(
+            json.dumps({"tokens": {"total": total}}) + "\n", encoding="utf-8"
+        )
+
+    def test_the_production_caller_passes_roster_members(self):
+        """REACHABILITY. The shell must supply the names, not rely on the
+        Python to guess them — otherwise the fix is unreached."""
+        from pathlib import Path
+
+        runner = (
+            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "v19_queue_runner.sh"
+        )
+        text = runner.read_text(encoding="utf-8")
+        body = text[text.index("campaign_spend() {") : text.index("# Launch one chain")]
+        assert "--run-name" in body, "the caller does not pass explicit membership"
+        assert 'for spec in "${ROSTER[@]}"' in body, "membership does not come from the ROSTER"
+        assert "--campaign-id" in body, "campaign id is still passed, for provenance"
+
+    def test_v20_does_not_absorb_v20_extra_through_the_real_caller(self, tmp_path):
+        """THE DEFECT, at the production boundary rather than in the helper."""
+        self._ledger(tmp_path, "v20_arch_15_19", 100)
+        self._ledger(tmp_path, "v20_extra_arch_15_19", 500)
+        out = _sourced("campaign_spend", CAMPAIGN_ID="v20", WS_ROOT=str(tmp_path))
+        assert out.split()[0] == "100", (
+            f"v20 reported {out.split()[0]} tokens; it owns 100 and must not absorb v20_extra's 500"
+        )
+
+    def test_v20a_stays_independent_through_the_real_caller(self, tmp_path):
+        """Disproved first hypothesis, kept as a regression boundary."""
+        self._ledger(tmp_path, "v20_arch_15_19", 100)
+        self._ledger(tmp_path, "v20a_arch_15_19", 700)
+        assert (
+            _sourced("campaign_spend", CAMPAIGN_ID="v20", WS_ROOT=str(tmp_path)).split()[0] == "100"
+        )
+        assert (
+            _sourced("campaign_spend", CAMPAIGN_ID="v20a", WS_ROOT=str(tmp_path)).split()[0]
+            == "700"
+        )
