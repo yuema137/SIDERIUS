@@ -2902,6 +2902,51 @@ deferred — `WAVES` still pairs two names), no rebuild of historical
 derived summaries (FU-E-7), no Gate runner change, no other shell record
 converted, no stop or exit-code semantics touched, no E-C3 change.
 
+#### IMPLEMENTATION RECORD — E-C4b `[x]` COMPLETE
+
+*An E-C4 correction, landed as its own commit. `25a95556` is not amended.*
+
+**Commit**: `<filled at commit>`.
+
+**The gap.** E-C4 recorded an unresolvable role as `"role": null` and
+emitted no compatibility mirror — correct, but **silent**. A reader
+seeing a null role and no mirror cannot tell a wave with unusual roles
+*by design* from a ROSTER lookup that *failed*, and those two call for
+opposite operator responses: the first is normal, the second means the
+ROSTER and the launched set have diverged. The operator's acceptance of
+E-C4 stated the gap explicitly ("disposition/reason must record the
+resolution failure").
+
+**The fix.** Two additive fields, present **only** when at least one role
+is unresolved:
+
+```json
+{"role_resolution_failed": true, "unresolved_roles": ["not_in_the_roster"]}
+```
+
+**`disposition` is deliberately NOT overloaded.** Its vocabulary
+(`complete` / `failed` / `launch_failed`) describes what happened to the
+**chains**; a recording gap is not a chain outcome. Overloading it would
+also break an operator filtering on `disposition == "complete"`, who
+would lose the wave entirely. A test asserts the disposition is unchanged
+when the marker fires.
+
+**Behavior Delta**: none for a fully-resolved wave — the record is
+byte-identical to E-C4's, because the fields are absent rather than
+`false`. A wave with an unresolved role gains two keys.
+
+**Tests** — 474 pass (E-C4 baseline 471); 4 new: the marker fires, a
+normal record carries neither key, the disposition is not overloaded, and
+the end-to-end launcher path emits both fields.
+
+**Mutation**: dropping the marker → **2 fail**, one at the model and one
+through the real launcher.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean.
+
+**Deviations**: none.
+
 **Next authorized checkpoint**: E-C5 (Gate pair summary scoping).
 
 ---

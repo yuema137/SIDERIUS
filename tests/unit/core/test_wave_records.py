@@ -256,6 +256,29 @@ class TestTheCompatibilityMirror:
         record = self._record([ChainRecord(run_name="x", exit=0)])
         assert record["chains"][0]["role"] is None
 
+    def test_an_unresolved_role_is_stated_not_merely_left_null(self):
+        """E-C4b. `"role": null` with no mirror is ambiguous: it could be
+        a wave with unusual roles by design, or a ROSTER lookup that
+        failed. Those call for opposite operator responses, so the record
+        says which."""
+        record = self._record([ARCH, ChainRecord(run_name="mystery", exit=0)])
+        assert record["role_resolution_failed"] is True
+        assert record["unresolved_roles"] == ["mystery"]
+
+    def test_a_fully_resolved_record_carries_no_failure_marker(self):
+        """Absent, not `false` — a normal record stays byte-identical to
+        the pre-E-C4b shape."""
+        record = self._record([ARCH, LOSS])
+        assert "role_resolution_failed" not in record
+        assert "unresolved_roles" not in record
+
+    def test_the_marker_does_not_overload_disposition(self):
+        """`disposition` describes what happened to the CHAINS. A
+        recording gap is not a chain outcome, and an operator filtering
+        on `disposition == "complete"` must not lose the wave."""
+        record = self._record([ARCH, ChainRecord(run_name="mystery", exit=0)])
+        assert record["disposition"] == "complete"
+
 
 class TestTheChainsArrayCannotForgeCompletion:
     def test_the_field_is_run_name_not_run(self, tmp_path):

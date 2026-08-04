@@ -821,3 +821,8 @@ class TestTheWaveSummaryWriterFailsExplicitly:
             {"run_name": "not_in_the_roster", "role": None, "pid": "unknown", "exit": -1}
         ]
         assert "arch_run" not in records[0]
+        # E-C4b: the gap is STATED, not merely left null. A reader must be
+        # able to tell "unusual roles by design" from "the ROSTER lookup
+        # failed" — those call for opposite operator responses.
+        assert records[0]["role_resolution_failed"] is True
+        assert records[0]["unresolved_roles"] == ["not_in_the_roster"]

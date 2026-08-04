@@ -142,6 +142,10 @@ class WaveSummaryRecord(BaseModel):
             out[f"{role}_exit"] = chain.exit
         return out
 
+    def unresolved_roles(self) -> list[str]:
+        """The chains whose role the ROSTER could not supply."""
+        return [c.run_name for c in self.chains if c.role is None]
+
     def to_record(self) -> dict[str, Any]:
         """The JSON object written to both destinations."""
         record: dict[str, Any] = {
@@ -153,6 +157,19 @@ class WaveSummaryRecord(BaseModel):
             "chains": [c.model_dump() for c in self.chains],
         }
         record.update(self.mirror())
+        # An unresolved role is stated, not merely left null (E-C4b). A
+        # reader seeing `"role": null` and no mirror cannot tell whether
+        # the wave had unusual roles by design or whether the ROSTER
+        # lookup failed — and those call for opposite operator responses.
+        # `disposition` is deliberately NOT overloaded to carry this: its
+        # vocabulary (complete / failed / launch_failed) describes what
+        # happened to the CHAINS, and a recording gap is not a chain
+        # outcome. Absent when every role resolved, so a normal record is
+        # byte-identical to before.
+        unresolved = self.unresolved_roles()
+        if unresolved:
+            record["unresolved_roles"] = unresolved
+            record["role_resolution_failed"] = True
         record.update({"start": self.start, "end": self.end, "disposition": self.disposition})
         return record
 
