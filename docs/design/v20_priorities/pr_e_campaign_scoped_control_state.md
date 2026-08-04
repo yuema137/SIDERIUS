@@ -281,11 +281,11 @@ else catches only if `MAX_CONC` is load-bearing. It is not. See D-E-3.
 The role name reaches production behaviour through the advice file:
 
 ```bash
-# v19_queue_runner.sh:310
+# v19_queue_runner.sh:334
 --advice 'advice/workflow/v18r_${FLAVOR}_explorer.json' \
 ```
 
-`FLAVOR` is supplied by `launch_chain()`'s fourth parameter (`:247`).
+`FLAVOR` is supplied by `launch_chain()`'s fourth parameter (`:270`).
 **At the time of this audit it was resolved in two different ways, and
 they did not agree:**
 
@@ -333,7 +333,7 @@ the ROSTER rather than reconstructing it.
 > posture exists.
 
 Secondary, and deliberately *not* asserted as a defect: the advice
-prefix is `v18r_` (`:310`) while `advice/workflow/v19_gate0_arch.json`
+prefix is `v18r_` (`:334`) while `advice/workflow/v19_gate0_arch.json`
 and `v19_gate0_loss.json` exist. Whether the V19 formal campaign
 intentionally reused the V18r explorer advice is a scientific decision
 this audit cannot read off the code. See OPEN-E-4.
@@ -507,6 +507,123 @@ a `scripts/` CLI invoked from the launcher (`:236-243`). The
 test-coverage gap is recorded, not claimed away — see §9.
 
 ---
+
+## 3a. Strict-shell failure semantics — read-only audit, `master@59dff189`
+
+Commissioned after the fail-closed hotfix (#168) found that a bare
+`VAR="$(cmd)"` under `set -e` terminates the shell *before* any
+classification, record or cleanup runs. PR E adds several shell→Python
+helper calls on exactly that path, so this is execution semantics the
+freeze must own, not tidying.
+
+**No production code was modified by this audit.** Load-bearing cases were
+confirmed by controlled failure injection, never by reading alone.
+
+### 3a.1 The measured strict-shell state
+
+```text
+v19_queue_runner.sh        errexit ON   nounset ON   pipefail ON
+v19_gate0_pair_runner.sh   errexit OFF  nounset ON
+```
+
+Both measured by sourcing and inspecting `$-`, not read from `set` lines.
+`errexit` reaches the queue runner from `_chain_common.sh:40`, which it
+sources at `:61` — it is **not** set in the runner itself, which is why a
+reader looking only at the runner would conclude it is absent.
+
+**The Gate runner has no `errexit` at all.** The same construct therefore
+behaves differently in the two files, and a pattern proven safe in the Gate
+runner proves nothing about the queue runner.
+
+### 3a.2 The finding that scopes everything else
+
+Bash **suspends `errexit` inside a function invoked as a condition**.
+Verified by injection:
+
+```text
+set -e; f() { false; echo AFTER; }
+if f; then ... fi     -> AFTER runs, shell survives
+f                     -> shell dies at `false`
+```
+
+So the hazard is **not** a property of the construct. It is a property of
+the construct's *invocation context*:
+
+```text
+inside `if fn`, `fn ||`, `while fn`   -> errexit suspended, failures return
+top-level / inside a bare-called fn   -> errexit terminates immediately
+```
+
+`launch_chain` and `wait_and_record` are both condition-invoked, so their
+internals are suspended. `main` is called bare (`:611`), so **its top level
+is the exposed surface** — which is exactly where `campaign_spend` sat, and
+exactly where PR E adds its new calls.
+
+### 3a.3 Inventory — 26 occurrences, classified
+
+| class | meaning | count |
+|---|---|---|
+| **A** | explicitly guarded (`\|\|`, `&&`, condition) | 6 |
+| **B** | errexit suspended by condition-invocation | 2 |
+| **B** | intentionally fatal, or cannot fail | 7 |
+| **B** | Gate runner — no errexit, hazard cannot arise | 9 |
+| **C** | strict-shell termination bypasses classification | **0 remaining** |
+
+Load-bearing classifications, with their evidence:
+
+| site | verdict | evidence |
+|---|---|---|
+| `:344` `SPID="$(screen -ls \| grep …)"` | **B** | `grep` returns 1 on no match and `pipefail` would propagate it — but it is inside `launch_chain`, which every call site invokes as `if launch_chain …`. Suspended. |
+| `:380` `WAITED=$(( … ))` | **B** | inside `wait_and_record`, invoked with `\|\|`. Suspended. |
+| `:101 :428 :445 :548 :582` `date` | **B, intentionally fatal** | a failing `date` means the host is broken; there is no useful classified refusal, and continuing with a wrong timestamp is worse. Retained deliberately. |
+| `:502 TAG="$(band_tag …)"` | **B** | injected with `"not-a-band"` and `""`: returns **rc=0** both times. It cannot terminate the shell. *Separate observation, not strict-shell*: it silently yields `00_00` for malformed input rather than refusing — recorded as **FU-E-10**, outside PR E. |
+| `:474` `campaign_spend` | **A** | guarded by #168; the regression test also asserts `errexit` is still on, so the guard cannot become decoration. |
+| `_chain_common.sh:228` | **B** | inside `filter_roster`, whose only call site (`:421`) is a `while … done < <(…)` process substitution — a subshell whose failure does not terminate the parent. |
+
+**The only class-C defect ever found on this path was `campaign_spend`, and
+it is fixed.** The sweep did not turn up a second one.
+
+### 3a.4 The invocation pattern PR E freezes
+
+Every new shell→Python helper call PR E adds **must** enter an explicit
+failure-handling context:
+
+```bash
+if OUT="$(helper …)"; then
+    :
+else
+    RC=$?
+    log "…"                      # diagnostic, naming the command
+    record_queue_stop "<reason>" "$WAVE" "…"   # persisted classification
+    exit 1                       # the queue-refusal convention
+fi
+```
+
+Equivalently `OUT="$(helper)" || RC=$?` followed by an explicit check.
+
+**Forbidden**, because the second line may be unreachable:
+
+```bash
+OUT="$(helper)"
+RC=$?
+```
+
+Each such call site's tests must assert **all** of: the expected reason is
+recorded; the expected exit code is used; the diagnostic and stderr are
+visible; cleanup ran; `errexit` is still enabled; and the dangerous form
+fails a mutation.
+
+### 3a.5 Disposition
+
+* **Nothing is added to PR E's commits from this audit** — there is no
+  class-C defect left to fix.
+* **No predecessor hotfix is required**; the one that existed became #168.
+* **No blanket rewrite.** The class-B intentionally-fatal `date` calls stay
+  exactly as they are: wrapping them would convert a broken-host signal
+  into a silently-continuing run, which is the opposite of the correction
+  #168 made.
+* **FU-E-10** — `band_tag` yields `00_00` for malformed input instead of
+  refusing. Not strict-shell, not PR E, recorded so it is not lost.
 
 ## 4. The path model
 
@@ -1213,7 +1330,7 @@ also what puts them inside the blocking type check.
 
 Task/experiment-shaped, and correctly so: the `WAVES` band definitions
 (`:115-120`), `file_order_for_scope()` (`:178-186`), the advice file
-name (`:310`), the `arch`/`loss` role vocabulary, and every pinned
+name (`:334`), the `arch`/`loss` role vocabulary, and every pinned
 scientific flag in the launch block (`:270-311`), which
 `test_v19_campaign_pinning.py:37-67` deliberately freezes. **PR E moves
 none of these.** They describe what this campaign measures; per §1.4.4
@@ -3218,7 +3335,7 @@ questions they closed:
 | **OPEN-E-1** | **Directory model APPROVED.** The prefix-only alternative is off the table; §4.2 is the model, with the override surface narrowed (correction 2) |
 | **OPEN-E-2** | **Do NOT move chain workspaces.** They stay flat at `$WS_ROOT/<run_name>` (§4.4) |
 | **OPEN-E-3** | **Gate stop channel is NOT in PR E** — follow-up **FU-E-8**. The Gate keeps `trap write_summary EXIT` (`:304`) and `WALL_CAP_SECONDS` (`:48`) as its only bounds |
-| **OPEN-E-4** | **V20 advice files are NOT PR E**, but **must be resolved before the V20 launch packet.** PR E leaves `advice/workflow/v18r_${FLAVOR}_explorer.json` (`:310`) exactly as it is; the *role* is already correct after `fe51377c` |
+| **OPEN-E-4** | **V20 advice files are NOT PR E**, but **must be resolved before the V20 launch packet.** PR E leaves `advice/workflow/v18r_${FLAVOR}_explorer.json` (`:334`) exactly as it is; the *role* is already correct after `fe51377c` |
 | **OPEN-E-5** | **RESOLVED AND FIXED** in a predecessor hotfix, before PR E. The collision is **real but not the pairing first proposed**: `v20` vs `v20a` does NOT collide — the glob's underscore delimiter separates them, and `v20a` was correctly independent. The defect is the **underscore-prefix** case: `{campaign_id}_*` matched `v20_extra_*`, so `v20` reported 600 tokens where it owned 100. That total feeds `SPENT_TOKENS` and `token_cap_reached`, so one campaign could be stopped by another's spend. **Fix: membership comes from the ROSTER, passed explicitly as repeated `--run-name`** — the same principle as E-C0's `role_for_run`: identity comes from the declared roster, never decoded from a string. Rejected alternatives: forbidding `_` in campaign ids (narrows the validator PR E specifies), parsing `{campaign_id}_{role}_{band}` (re-creates the implicit protocol E-C0 deleted), and any more elaborate glob. |
 | **Budget fail-open** | **RESOLVED AND FIXED** in a second predecessor hotfix. `campaign_spend()` ended `2>/dev/null \|\| echo "0 0.00"`, so ANY helper failure became "zero spent" — which does not read as *unknown*, it reads as *budget available*, disarming both caps. Now **fail-closed**: an unreadable answer records `budget_accounting_unavailable` and exits 1, reusing the `pair_infeasible_under_host_quota` convention (a precondition the queue could not satisfy). Deliberately NOT `token_cap_reached` — that would blame the campaign's own spend for an infrastructure failure — and NOT exit 99, which means "stopped on request". **A `set -e` hazard was found while fixing it**: `_chain_common.sh:40` sets `-e` and the runner sources it at `:61`, so a bare `VAR="$(cmd)"` from a failing substitution kills the shell before any check runs; the first draft refused to launch but left no record. Guarded with `\|\| SPEND_RC=$?`, with a regression test that also asserts `set -e` is still active so the guard cannot become decoration. |
 | **OPEN-E-6** | **The README campaign-control section IS PR E doc sync.** E-C8 creates it; §12 artifact 4 lives there |
@@ -3252,7 +3369,7 @@ Also closed, and not previously numbered:
 **OPEN-E-4a — which advice files does the V20 campaign use?**
 Closed *for PR E* (above) but **not closed for the launch.** The formal
 queue still points at `advice/workflow/v18r_${FLAVOR}_explorer.json`
-(`:310`) while `v19_gate0_arch.json` / `v19_gate0_loss.json` exist and
+(`:334`) while `v19_gate0_arch.json` / `v19_gate0_loss.json` exist and
 are unused. This is a scientific decision the code cannot answer.
 *Resolved by*: the operator naming the V20 advice files **in the V20
 launch packet**. Tracked here so it is not lost between PR E and launch.
