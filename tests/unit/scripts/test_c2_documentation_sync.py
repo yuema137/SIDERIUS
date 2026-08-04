@@ -306,8 +306,11 @@ class TestTheGateInvariantsAreStated:
         lines = DESIGN_DOC.read_text(encoding="utf-8").splitlines()
         head = lines[: next(i for i, x in enumerate(lines) if "Implementation shape" in x)]
         joined = " ".join(" ".join(head).split())
-        assert "Gate 2 Lite-A (RTX 5090): PASSED" in joined
-        assert "Gate 2 Lite-B (H100): PASSED" in joined
+        # Matched by pattern, not literal: the device name is allowed to
+        # get MORE specific (it did -- "H100" became "H100 80GB HBM3") and
+        # a pinned literal would fail on an improvement.
+        assert re.search(r"Gate 2 Lite-A \(RTX 5090[^)]*\): PASSED", joined), joined[:200]
+        assert re.search(r"Gate 2 Lite-B \(H100[^)]*\): PASSED", joined), joined[:200]
         assert "Gate-tested SHA" in joined
         for i, line in enumerate(head):
             if "no implementation has begun" not in line:

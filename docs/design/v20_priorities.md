@@ -2137,8 +2137,8 @@ site: calibration promotion (§3.2) and the isolated pre-flight worker
 |---|---|---|---|---|
 | **A** | Wire isolated pre-flight into production | Long-lived parent retains a CUDA context and allocator cache | none | **Yes** |
 | **B** | Chain/pair GPU aggregation and contention attribution | The per-attempt cap does not constrain actual chain process-tree usage | PR A validation | **MERGED 2026-08-02** (PR #153) |
-| **C1** | Calibration identity, promotion and honest reporting | Observations are collected but never promoted, applied, or reported as unauthoritative | independent after design review | **Yes** — implemented, in review |
-| **C2** | Authoritative GPU requirement acquisition and delivery | PR B's admission gate has no production input | C2 producer audit | **Yes** — not authorized yet |
+| **C1** | Calibration identity, promotion and honest reporting | Observations are collected but never promoted, applied, or reported as unauthoritative | independent after design review | **MERGED 2026-08-03** (PR #161, `781e3e8a`) |
+| **C2** | Authoritative GPU requirement acquisition and delivery | PR B's admission gate has no production input | C2 producer audit | **MERGED 2026-08-04** (PR #164, `40d17f69`) — Gate 2 Lite-A + Lite-B PASSED |
 | **D** | Formal HealthGate and zero-valid-trial policy | V19 deliberately used observe-only mode; formal proceeded with no valid trial | operator policy decision | **Yes** |
 | **E** | Campaign-scoped control state | An old campaign's STOP can block a new campaign | independent | **Yes** |
 
@@ -2548,13 +2548,26 @@ and free VRAM as they were before the failure.
 
 ### 20.5 PR C — Measured-evidence admission and calibration production wiring
 
-> **Status, 2026-08-02.** PR C is implemented as **two** PRs. The
+> **Status, 2026-08-04 — PR C IS COMPLETE. Both halves merged.** The
 > authoritative record for both is
 > `docs/design/v20_priorities/pr_c_measured_evidence_admission.md`.
 >
+> ```text
+> C1  MERGED 2026-08-03  PR #161  781e3e8a
+> C2  MERGED 2026-08-04  PR #164  40d17f69
+>     Gate 1        N/A (no LLM-facing surface)
+>     Gate 2 Lite-A PASS  RTX 5090
+>     Gate 2 Lite-B PASS  H100 80GB HBM3
+>     Gate-tested SHA     7302c467d81a575e3e35a8f81821eb5dbd63e451
+> ```
+>
+> **The D-B5 dependency below is therefore SATISFIED**: PR B's admission
+> gate now has a production input, and formal mode with new candidates is
+> no longer blocked by the absence of an authoritative measurement.
+>
 > * **C1 — calibration identity, promotion and honest reporting.**
->   Implemented on `feature/v20-pr-c1-calibration-identity-promotion`, in
->   review. Layer-3 validated on real hardware (§17b there).
+>   Merged from `feature/v20-pr-c1-calibration-identity-promotion`.
+>   Layer-3 validated on real hardware (§17b there).
 >   **C1 supplies nothing to PR B's admission gate, by design** — duration is
 >   milliseconds, and a promoted millisecond is never a memory requirement.
 >   So the D-B5 dependency below is **C2's**, not C1's.
@@ -2563,8 +2576,13 @@ and free VRAM as they were before the failure.
 >   allow/reject time decision (operator decision, 2026-08-02). The paragraph
 >   below describing PR C as owning "calibration production wiring" is
 >   therefore accurate for C2 and **not** for C1.
-> * **C2 — authoritative GPU requirement acquisition and delivery.** Not
->   authorized; gated on the read-only producer audit.
+> * **C2 — authoritative GPU requirement acquisition and delivery.**
+>   Merged. The producer audit was completed and both Gate 2 stages ran on
+>   real hardware. The measured claim, on both machines: the allocator
+>   under-reports by **627–1827 MiB**, so the authority is driver-visible,
+>   candidate-owned, ancestry-attributed process-tree memory. Peaks differ
+>   per card (5090 1476/3434 MiB, H100 1496/3384 MiB) **by design** — no
+>   requirement, duration, step count or cap travels between machines.
 
 #### D-B5 dependency — PR C owns formal cold-start measurement
 

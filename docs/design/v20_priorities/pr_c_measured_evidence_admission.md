@@ -1,23 +1,26 @@
 # Design: V20 PR C — Measured evidence and formal admission
 
-- **Status**: **IMPLEMENTED — both gates PASSED, PR open as Draft.**
+- **Status**: **COMPLETE — both PRs merged, both gates PASSED.**
   - Umbrella architecture and the ten §8.C operator decisions:
     **APPROVED 2026-08-03 UTC**.
-  - **PR C1: MERGED** — PR #161, `781e3e8a`.
-  - **PR C2: IMPLEMENTED**, Draft PR
-    [#164](https://github.com/Galileo-Sandbox/SIDERIUS/pull/164) on
-    `feature/v20-pr-c2-authoritative-gpu-requirement`.
+  - **PR C1: MERGED 2026-08-03** — PR #161, `781e3e8a`.
+  - **PR C2: MERGED 2026-08-04** — PR
+    [#164](https://github.com/Galileo-Sandbox/SIDERIUS/pull/164), merge
+    commit `40d17f69c2f4b74cb14e6624a9c72a5ef82d5dac`. Master CI green at
+    the merge commit.
   - **Gate 1: N/A** — C2 changes no LLM-facing prompt, schema or decision
     surface.
   - **Gate 2 Lite-A (RTX 5090): PASSED.**
-  - **Gate 2 Lite-B (H100): PASSED.**
+  - **Gate 2 Lite-B (H100 80GB HBM3): PASSED.**
   - **Gate-tested SHA**: `7302c467d81a575e3e35a8f81821eb5dbd63e451`.
-  - **NOT MERGEABLE YET** — exact-head CI is red on 44 pyright-strict
-    errors (see *Gate results* below). No runtime behaviour is affected;
-    the errors are type annotations in C2 modules.
+  - **Final CI-tested head**: `5dca28f9652ae003c4f2d3d229aedc03c1ccd730`.
+    The diff between the two is type annotations, one `cast`, one typing
+    import, comments, docs and tests — no runtime behaviour — so Lite-A and
+    Lite-B were **not** rerun. See *Type-only carry-forward* below.
   - Historical note: this header previously read "PR C2 implementation:
-    NOT AUTHORIZED … no implementation has begun; neither branch exists".
-    Both branches exist, C1 is merged, and both gates have run.
+    NOT AUTHORIZED … no implementation has begun; neither branch exists",
+    and later "NOT MERGEABLE YET — exact-head CI is red". Both are
+    superseded: C2 is merged and CI is green.
 - **Implementation shape**: this document is the umbrella design and
   launch-blocker record. Implementation is **two PRs** — C1 (calibration
   identity, reachability, promotion) and C2 (authoritative GPU requirement
@@ -4949,28 +4952,52 @@ persisted under `/workspace`; the inherited `c2_lite_a…` artifact-name
 prefix is cosmetic, since identity is carried by the embedded SHA, attempt
 and case; no code, docs, Git history or PR state was changed on the H100.
 
-#### Open blocker — exact-head CI is RED
+#### Type-only carry-forward — Gate-tested SHA vs final CI head  `[x]` RESOLVED
 
-[Run 30879511952](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/30879511952):
-**44 pyright-strict errors**, all in C2 files changed on this branch. Master
-is green at the merge-base `9533c65d`, so none are inherited.
+| | SHA |
+|---|---|
+| Gate-tested (Lite-A + Lite-B) | `7302c467d81a575e3e35a8f81821eb5dbd63e451` |
+| Final CI-tested head | `5dca28f9652ae003c4f2d3d229aedc03c1ccd730` |
+| Merge commit on `master` | `40d17f69c2f4b74cb14e6624a9c72a5ef82d5dac` |
 
-| file | errors | cause |
-|---|---|---|
-| `core/runtime_control/formal_stability.py` | 33 | an unannotated `common = dict(...)` collapses to a float-valued dict; `**common` then fails every `int` field |
-| `core/runtime_control/gpu_measurement_data.py` | 12 | h5py stub unions (`Dataset \| Group \| Datatype`) not narrowed |
-| `core/runtime_control/gpu_measurement_worker_main.py` | 1 | `str` passed where `WorkerStatus` is required |
+The first CI run on this branch found **44 pyright-strict errors**, all in
+C2 files, none inherited (master was green at the merge-base `9533c65d`).
+The operator authorized a **strictly type-only** fix so the Gate evidence
+could carry rather than rerunning either machine.
 
-No runtime behaviour is affected — 2416 unit tests and both Gates pass at
-this SHA. They stayed latent because CI had not run on this branch, and
-because pyright was believed unrunnable on the dev box's Node v10.19.0.
-**That belief was wrong**: `/usr/bin/node` exists and pyright can be run
-locally. Recorded here so the next author does not repeat the assumption.
+| file | errors | root cause | fix |
+|---|---|---|---|
+| `formal_stability.py` | 33 | `common = dict(...)` unannotated, so its inferred value type joined an int peak, a float timestamp and `base`'s float elapsed time; `**common` offered `float` to every `int` field | the `dict[str, Any]` annotation `base` already carried |
+| `gpu_measurement_data.py` | 11 | h5py types `__getitem__` as `Group \| Dataset \| Datatype`, so the chained subscript and the later `.shape` / slice / `.astype` / `.nbytes` were all rejected | `Any` walk + `cast`, mirroring `train_engine_sandbox._h5_dataset`; **no runtime fallback added, read semantics untouched** |
+| `gpu_measurement_worker_main.py` | 1 | pyright **widens literal types** when inferring an attribute's declared type from an assignment, so `self.status` inferred `str \| None` despite the parameter being `WorkerStatus \| None` | declare the attribute; the runtime value is unchanged |
 
-Fixing moves the head off the Gate-tested SHA. The changes are
-annotation-only and touch no measurement path, so the Gate evidence carries
-by the same reasoning that approved the c1–c11 reuse — but that is an
-operator decision, not an automatic one.
+**Five non-comment production lines.** Behavioural equivalence was *proven*,
+not asserted: against real TIDMAD data the pre-change h5py expression and
+the new path produce bit-identical tensors, equal `file_sample_count`
+(2,010,000,000), equal `bytes_read` and the same source file, and `cast`
+was confirmed a runtime identity. Lite-A and Lite-B were **not** rerun.
+
+**Two lessons worth more than the fix.**
+
+1. **CI had never run on this branch**, so 44 type errors and a guardrail
+   violation sat latent behind a locally-green suite.
+2. **A locally-green suite is not a green CI.** After pyright passed, CI
+   failed once more on a test that read `live_registry_before["sha256"]` --
+   a key `live_registry_fingerprint` records only when the calibration root
+   exists. It passed on a dev box with `~/.siderius` (27 files) and raised
+   `KeyError` on a runner without one. The production function was right:
+   it records `present: False` rather than fabricating a digest, exactly
+   the shape the H100 manifests carry. The test now covers both worlds and
+   the absent branch keeps a real claim -- *a missing tree must never carry
+   a digest*.
+
+**Running pyright locally**, since this was got wrong twice: the system
+Node is v10.19.0 and too old, but pyright-python caches its own
+**Node v26.2.0**, which reproduces CI exactly:
+
+```bash
+PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
+```
 
 ### C2 gate packets — the executable commands
 
