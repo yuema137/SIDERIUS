@@ -93,7 +93,6 @@ CAMPAIGN_ID="${CAMPAIGN_ID-v19}"
 CAMPAIGN_ITERATIONS="${CAMPAIGN_ITERATIONS:-10}"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
-MAX_CONC=2
 # --- campaign path resolution (V20 PR E, E-C2) -----------------------------
 # Campaign identity used to live in a FILENAME PREFIX
 # (`${CAMPAIGN_ID}_wave_state.jsonl`) under a shared root, and a prefix is
@@ -323,9 +322,73 @@ record_chain() {  # run wave exit start end [pid]
     "$1" "$2" "$3" "$4" "$5" "${6:-unknown}" >> "$WAVE_STATE"
 }
 
-record_wave_summary() {  # wave band arch_run loss_run arch_pid loss_pid arch_exit loss_exit start end disposition
-  printf '{"wave_summary": %s, "band": "%s", "arch_run": "%s", "loss_run": "%s", "arch_pid": "%s", "loss_pid": "%s", "arch_exit": %s, "loss_exit": %s, "start": "%s", "end": "%s", "disposition": "%s"}\n' \
-    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" >> "$WAVE_STATE"
+# Record one wave: canonical JSONL first, then the derived per-wave view.
+#
+#   record_wave_summary <wave> <band> <band_tag> <start> <end> <disposition> <run>...
+#
+# Delegated to Python (D-E-3). The eleven-positional `printf` this
+# replaces could describe exactly two chains called arch and loss; a
+# positional shell formatter cannot emit a variable-length array, and a
+# shell that hand-builds nested JSON is the hazard `campaign_spend` was
+# already moved out of shell to avoid.
+#
+# The role comes from the ROSTER, never from the run name (D-E-6). When
+# it cannot be resolved the field is left EMPTY and becomes `null` — a
+# gap, never a guess. Such a record simply gets no arch/loss
+# compatibility mirror, which is correct: an invented `arch_exit` is
+# worse than an absent one, because a report would show it.
+#
+# Resolution failures here must not be able to destroy the summary
+# itself. This function is called on EVERY wave exit path including the
+# aborted-launch one, and the launcher's own rule is that an aborted wave
+# must not be the one case that leaves no summary.
+record_wave_summary() {  # wave band band_tag start end disposition run...
+  local WAVE="$1" BAND="$2" TAG="$3" START="$4" END="$5" DISPOSITION="$6"; shift 6
+  local args=() RUN ROLE PID CODE
+  for RUN in "$@"; do
+    ROLE=""; ROLE="$(role_for_run "$RUN")" || ROLE=""
+    PID="unknown"; PID="$(chain_pid "$RUN")" || PID="unknown"
+    CODE="missing"; CODE="$(marker_exit "$RUN")" || CODE="missing"
+    args+=(--chain "$RUN:$ROLE:$PID:${CODE/missing/-1}")
+  done
+
+  # `set -e` is in effect and this function is called BARE, so errexit is
+  # NOT suspended inside it. The guarded form is mandatory (§3a.4): a
+  # plain assignment would terminate the runner at the failure, before
+  # any of the classification below could run.
+  local OUT="" RC=0
+  OUT="$("$REPO/.venv/bin/python" "$REPO/scripts/record_wave_summary.py" \
+      --canonical "$WAVE_STATE" \
+      --derived-dir "$PAIR_SUMMARY_DIR" \
+      --campaign-id "$CAMPAIGN_ID" \
+      --wave "$WAVE" \
+      --band "$BAND" \
+      --band-tag "$TAG" \
+      --start "$START" \
+      --end "$END" \
+      --disposition "$DISPOSITION" \
+      "${args[@]}")" || RC=$?
+  if [ "$RC" -eq 0 ]; then
+    log "WAVE $WAVE summary recorded: $OUT"
+    return 0
+  fi
+
+  # The two failures are NOT the same event and are not reported as one.
+  # Exit 3 means the append-only evidence survived and only the derived
+  # view is missing; exit 2 means nothing was written at all.
+  log "WAVE $WAVE: FAILED to record the wave summary (rc=$RC)"
+  log "  command: scripts/record_wave_summary.py --canonical $WAVE_STATE ... (reason on stderr)"
+  if [ "$RC" -eq 3 ]; then
+    log "  the CANONICAL record IS written; the derived per-wave summary is NOT."
+    log "  the evidence is intact and $PAIR_SUMMARY_DIR can be rebuilt from $WAVE_STATE"
+    record_queue_stop "wave_summary_derived_write_failed" "$WAVE" \
+      "canonical record preserved; derived summary under $PAIR_SUMMARY_DIR not written"
+  else
+    log "  NOTHING was written for this wave summary."
+    record_queue_stop "wave_summary_write_failed" "$WAVE" \
+      "record_wave_summary.py exited $RC; no wave record persisted"
+  fi
+  exit 1
 }
 
 chain_screen_alive() { screen -ls 2>/dev/null | grep -qF ".siderius-$1"$'\t'; }
@@ -643,7 +706,12 @@ if [ -n "$ONLY" ]; then
 fi
 
 # --- pairwise wave loop ----------------------------------------------------
-log "v19 pairwise queue started: waves=${#WAVES[@]} max_conc=$MAX_CONC resume=${V19_RESUME:-0}"
+# `MAX_CONC=2` used to appear here. It was deleted (D-E-3): it gated
+# nothing — the wave roster is what decides how many chains launch — but
+# a variable in a log line READS as a control, which is worse than
+# absent. The line now reports `chains_per_wave` per wave, a measured
+# fact, from the set actually launched.
+log "v19 pairwise queue started: waves=${#WAVES[@]} resume=${V19_RESUME:-0}"
 for wave_spec in "${WAVES[@]}"; do
   IFS=: read -r WAVE SCOPE FILES <<< "$wave_spec"
 
@@ -750,7 +818,7 @@ for wave_spec in "${WAVES[@]}"; do
     while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
   fi
 
-  log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]}"
+  log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]} (chains_per_wave=${#NEEDED[@]})"
   START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   LAUNCHED=()
   for RUN in "${NEEDED[@]}"; do
@@ -771,11 +839,9 @@ for wave_spec in "${WAVES[@]}"; do
       [ "${#LAUNCHED[@]}" -gt 0 ] && wait_and_record "$WAVE" "$START" "${LAUNCHED[@]}"
       # C13: a pair summary on EVERY exit path, including this one — an
       # aborted wave must not be the one case that leaves no summary.
-      record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
-        "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
-        "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
-        "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
-        "$START" "$(date -u '+%Y-%m-%dT%H:%M:%S')" "launch_failed"
+      record_wave_summary "$WAVE" "$SCOPE" "$TAG" \
+        "$START" "$(date -u '+%Y-%m-%dT%H:%M:%S')" "launch_failed" \
+        "$ARCH_RUN" "$LOSS_RUN"
       exit 1
     fi
   done
@@ -786,11 +852,9 @@ for wave_spec in "${WAVES[@]}"; do
     DISPOSITION="failed"
   fi
   END_TS="$(date -u '+%Y-%m-%dT%H:%M:%S')"
-  record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
-    "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
-    "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
-    "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
-    "$START" "$END_TS" "$DISPOSITION"
+  record_wave_summary "$WAVE" "$SCOPE" "$TAG" \
+    "$START" "$END_TS" "$DISPOSITION" \
+    "$ARCH_RUN" "$LOSS_RUN"
   if queue_stop_requested && [ "$DISPOSITION" != "complete" ]; then
     record_queue_stop "operator_stop_requested" "$WAVE" \
       "wave $WAVE ended under an operator stop — no further wave launched"

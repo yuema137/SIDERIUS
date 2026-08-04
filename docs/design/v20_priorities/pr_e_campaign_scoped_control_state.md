@@ -885,7 +885,10 @@ incident, because the two campaigns that collided shared one `WS_ROOT`.
 
 ### D-E-3 — The wave record becomes chain-list-shaped; `MAX_CONC` is retired as a label
 
-- [ ] Approved  [ ] Rejected  [ ] Modified
+- [x] **Approved with one correction — operator ruling, 2026-08-04.** The
+  E-C4 audit found that the example record's `{"run": …}` key makes a
+  failed chain satisfy `chain_completed`; the field is `run_name`. See
+  E-C4's implementation record.
 
 §20.7 requires that "a campaign with one chain, or five, or chains named
 for something other than architecture and loss, must not require a
@@ -1222,18 +1225,19 @@ the evidence named in its row.
 - [x] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
       compatibility override still works — E-C2
 - [x] `WAVE_STATE` and `LOGF` under `queue_state/` — E-C2
-- [ ] Wave summaries written **canonical-first**: append + `fsync` the
+- [x] Wave summaries written **canonical-first**: append + `fsync` the
       JSONL, then atomically write
       `pair_summaries/wave_<n>_<band>.json`, both carrying the same
-      `record_id` (D-E-3a)
+      `record_id` (D-E-3a) — E-C4; the fsync-before-replace ordering is
+      asserted by a spy, not inferred
 - [ ] Gate pair summary and runner log derive from `GATE_RUN_PREFIX`
 - [x] **Evidence**: a test enumerates every authority-bearing path the
       runner resolves and asserts each contains the campaign id; it
       fails if a new path is added without it — E-C2,
       `test_campaign_path_resolution.py::test_every_authority_bearing_path_contains_the_campaign_id`
-- [ ] **Evidence**: the wave/pair record is produced by the typed
+- [x] **Evidence**: the wave/pair record is produced by the typed
       atomic writer (D-E-3) and parses as JSON in the two-chain,
-      three-chain and aborted-launch cases
+      three-chain and aborted-launch cases — E-C4
 
 ### E2 — Backward compatibility
 
@@ -1498,7 +1502,7 @@ subsections below are the implementation contract.
 | **E-C1** `[x]` | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
 | **E-C2** `[x]` + **E-C2b** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
 | **E-C3** `[x]` | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
-| **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
+| **E-C4** `[x]` | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
 | **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
 | **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
@@ -2759,6 +2763,146 @@ ruff check . && ruff format --check .
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, both emitted records, and the
       test-deletion justification
+
+#### IMPLEMENTATION RECORD — E-C4 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C3 `ed61bb50`.
+
+**Behavior Delta: BD-4.**
+
+> ### A DEFECT IN THE FROZEN DESIGN, found by audit before implementing
+>
+> **D-E-3's own example record makes a failed chain read as complete.**
+>
+> The proposed array is `{"run": "v20a_arch_15_19", …, "exit": 0}`, and
+> `chain_completed` decides completion by grepping the **whole line**:
+>
+> ```bash
+> grep '"run": "<X>"' wave_state.jsonl | grep -q '"exit": 0'
+> ```
+>
+> A wave summary in which one chain succeeded therefore satisfies that
+> predicate for **every chain it names**. Measured on the design's own
+> example: a wave with `arch exit 0` and `loss exit 137` reports
+> `v19_loss_15_19 -> COMPLETED`. On the next resume that chain is
+> skipped as finished and its failure disappears from the science. The
+> pre-E-C4 record does not collide, because `"arch_run": "…"` has `_`
+> before `run`, not `"`.
+>
+> **Correction taken**: the field inside `chains` is **`run_name`**.
+> `chain_completed` is byte-identical, the interpretation of duplicate
+> JSONL records is unchanged, and no authority semantics move — this is
+> a field-naming fix, which is why it was made rather than escalated.
+> Guarded by two regression tests, one on the serialised bytes and one
+> end-to-end through the launcher.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/wave_records.py` (**new**, 289 lines) | `ChainRecord`, `WaveSummaryRecord`, the mirror rule, `next_attempt`, `build_record_id`, canonical append + fsync, atomic derived write, `CanonicalWriteError` / `DerivedWriteError` |
+| `scripts/record_wave_summary.py` (**new**, 138 lines) | the CLI; `--chain RUN:ROLE:PID:EXIT` repeatable; exit codes 0/2/3 |
+| `sdsc_submission_scripts/v19_queue_runner.sh` | `record_wave_summary()` rewritten as a guarded writer call; both call sites; `MAX_CONC` deleted; `chains_per_wave` logged |
+
+**The record**
+
+```json
+{"wave_summary": 1, "record_id": "v19:1:15_19:1", "campaign_id": "v19",
+ "band": "15-19", "band_tag": "15_19",
+ "chains": [{"run_name": "v19_arch_15_19", "role": "arch", "pid": "1111", "exit": 0},
+            {"run_name": "v19_loss_15_19", "role": "loss", "pid": "2222", "exit": 137}],
+ "arch_run": "v19_arch_15_19", "arch_pid": "1111", "arch_exit": 0,
+ "loss_run": "v19_loss_15_19", "loss_pid": "2222", "loss_exit": 137,
+ "start": "…", "end": "…", "disposition": "failed"}
+```
+
+Identical bytes in both destinations. The mirror is emitted **only** for
+exactly two chains whose roles are exactly `arch` and `loss`; a one-,
+three- or other-role wave gets `chains` and no mirror, never a fabricated
+one — an invented `arch_exit` is worse than an absent one, because a
+report would show it.
+
+**Retry and duplicate semantics — unchanged, and now expressible.**
+`record_id = <campaign_id>:<wave>:<band_tag>:<attempt>`, with `attempt`
+counted from the canonical file at write time, so a queue restart cannot
+reset it. Two attempts leave two JSONL records with **different**
+`record_id`s and one derived file carrying the later one. How duplicate
+JSONL records are interpreted did not change: `chain_completed` still
+reads per-chain `record_chain` lines, and wave summaries remain
+non-participating in that predicate.
+
+**Failure semantics, distinctly**
+
+| Outcome | Exit | Canonical | Shell |
+|---|---|---|---|
+| both written | 0 | written | logs `summary recorded: <record_id>` |
+| schema refusal / canonical write failed | 2 | **nothing written** | `record_queue_stop "wave_summary_write_failed"`, exit 1 |
+| derived write failed | 3 | **preserved** | `record_queue_stop "wave_summary_derived_write_failed"`, names the rebuild source, exit 1 |
+
+Collapsing 3 into 2 would report a missing convenience file as missing
+evidence and invite a retry that duplicates the canonical record.
+
+**Tests** — 471 pass in 38.3 s (E-C3 baseline 438); 36 net new.
+
+| File | Count | Covers |
+|---|---|---|
+| `tests/unit/core/test_wave_records.py` (**new**) | 25 | write order observed on disk; derived failure keeps the evidence; distinct error types; no surviving temp file; retry `record_id`s; attempt survives a restart; unparseable lines not counted; the mirror's four negative cases + positive; the `run_name` regression on serialised bytes; **fsync-before-replace ordering**, spied |
+| `test_campaign_admission.py::TestTheWaveSummaryWriterFailsExplicitly` (**new**) | 7 | the §3a.4 guarded form end to end: reason persisted, exit code, stderr visible, `errexit` still on, canonical preserved, null role does not destroy the summary |
+| `test_v19_queue_runner.py` | 2 rewritten | all operator fields over the new shape; a wave summary never makes a failed chain look complete |
+| `test_v19_queue_runner.py` | 1 replaced | `MAX_CONC == 2` → the wave launches exactly the ROSTER chains for its band |
+| `test_source_safe_entry.py` | 1 repointed | `${MAX_CONC:-unset}` → `$CAMPAIGN_HOME` |
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| derived write moved **before** canonical | **2 fail** |
+| `chains` field spelled `run` (D-E-3's own example) | **4 fail**, including the end-to-end "failed chain reads as complete" |
+| writer call → bare assignment + `RC=$?` (§3a.4) | **5 fail** — every classification path loses its diagnostic |
+| `attempt` pinned to 1 | **2 fail** — retries become indistinguishable |
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean.
+
+**Test deletions, justified**
+
+- `test_exactly_two_chains_per_wave_max_conc` — asserted a variable that
+  gated nothing; deleting `MAX_CONC` changed no behaviour, which is what
+  made it decoration. **Replaced**, not dropped: the defect it reached
+  for ("a wave must not launch more chains than intended") is now
+  asserted against the ROSTER.
+- A drafted `TestTheRecordIsValidated` (3 cases) was deleted before
+  commit: an empty `chains` list, a non-integer exit, and `-1` compared
+  to itself are `Field(min_length=1)`, a declared `int`, and a value
+  asserted against itself. Ruff's B017 flagged two of them as blind
+  `Exception` assertions, which is the same finding from the other
+  direction. The reachable behaviour is asserted end to end instead.
+
+**Deviations from the frozen plan**
+
+1. **`run_name`, not `run`** — the defect above. The only change to a
+   frozen artifact's contents, and it changes no semantics.
+2. **The role is resolved inside `record_wave_summary`, and a failure
+   yields `null`** rather than aborting. The function is called on every
+   wave exit path including the aborted-launch one, and the launcher's
+   own rule is that an aborted wave must not be the one case that leaves
+   no summary. A guess of `arch` is exactly what D-E-6 removed.
+3. **`--chain` is a colon-joined string**, `rsplit(":", 3)` — a run name
+   may contain no colon but the remaining fields never do, so splitting
+   from the right keeps a surprising run name from shifting every field.
+4. **Exit code 3 was added** for "canonical written, derived not". §4
+   required the two failures to be distinguishable; a distinct code is
+   how the shell distinguishes them.
+5. **`chains_per_wave` is logged per wave**, at the launch line, rather
+   than at the queue-start line where `MAX_CONC` was: the count is a
+   property of a wave's `NEEDED` set, and only that site knows it.
+
+**Not done, deliberately**: no launcher concurrency change (FU-E-2 stays
+deferred — `WAVES` still pairs two names), no rebuild of historical
+derived summaries (FU-E-7), no Gate runner change, no other shell record
+converted, no stop or exit-code semantics touched, no E-C3 change.
+
+**Next authorized checkpoint**: E-C5 (Gate pair summary scoping).
 
 ---
 ### E-C5 — Gate pair summary scoping

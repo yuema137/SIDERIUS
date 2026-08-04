@@ -701,3 +701,123 @@ class TestLegacyBytesAreNeverTouched:
         assert r.returncode == 0, r.stderr
         after = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in root.iterdir() if p.is_file()}
         assert after == before, "a pre-existing legacy file was modified"
+
+
+class TestTheWaveSummaryWriterFailsExplicitly:
+    """E-C4. The wave-summary writer is a new shell -> Python
+    authority-bearing call, so it uses the frozen guarded invocation form
+    (§3a.4) and its failures are classified rather than swallowed.
+
+    `record_wave_summary` is called BARE at the top level of the wave
+    loop, so `errexit` is NOT suspended inside it — a plain assignment
+    would kill the runner at the failure, before any classification ran.
+    """
+
+    def _sourced(self, tmp_path: Path, snippet: str, **env: str):
+        return subprocess.run(
+            ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{RUNNER}'; {snippet}"],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(os.environ, WS_ROOT=str(tmp_path), **env),
+            timeout=120,
+        )
+
+    def _call(self, extra: str = "") -> str:
+        return (
+            'WAVE_STATE="$WS_ROOT/queue_state/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; ' + extra + "record_wave_summary 1 15-19 15_19 s e failed "
+            "v19_arch_15_19 v19_loss_15_19"
+        )
+
+    def test_a_derived_write_failure_keeps_the_canonical_record(self, tmp_path):
+        """The canonical evidence survives, the runner exits non-zero, and
+        the reason names the derived write — not a lost record."""
+        (tmp_path / "pair_summaries").write_text("not a directory")
+
+        r = self._sourced(tmp_path, self._call())
+
+        assert r.returncode != 0
+        state = (tmp_path / "queue_state" / "wave_state.jsonl").read_text()
+        records = [json.loads(line) for line in state.splitlines() if line.strip()]
+        assert any(rec.get("wave_summary") == 1 for rec in records), (
+            "the canonical wave record was lost when the derived write failed"
+        )
+        stops = [rec for rec in records if rec.get("queue_stopped")]
+        assert stops and stops[-1]["reason"] == "wave_summary_derived_write_failed"
+        log = (tmp_path / "log").read_text()
+        assert "the CANONICAL record IS written" in log
+
+    def test_a_total_failure_is_reported_as_nothing_written(self, tmp_path):
+        """A schema refusal writes nothing anywhere, and must not be
+        reported as a derived-only failure."""
+        r = self._sourced(
+            tmp_path,
+            'WAVE_STATE="$WS_ROOT/queue_state/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 s e failed",  # no chains
+        )
+
+        assert r.returncode != 0
+        log = (tmp_path / "log").read_text()
+        assert "NOTHING was written for this wave summary" in log
+        assert "the CANONICAL record IS written" not in log
+
+    def test_the_diagnostic_and_stderr_are_visible(self, tmp_path):
+        (tmp_path / "pair_summaries").write_text("not a directory")
+        r = self._sourced(tmp_path, self._call())
+        assert "record_wave_summary" in r.stderr
+        log = (tmp_path / "log").read_text()
+        assert "FAILED to record the wave summary" in log
+
+    def test_errexit_is_still_enabled_when_the_failure_is_handled(self, tmp_path):
+        """The guarded form must not have been bought by disabling
+        errexit — that would weaken every other command in the runner."""
+        (tmp_path / "pair_summaries").write_text("not a directory")
+        r = self._sourced(
+            tmp_path,
+            "case $- in *e*) echo ERREXIT_BEFORE;; esac; " + self._call(),
+        )
+        assert "ERREXIT_BEFORE" in r.stdout
+        log = (tmp_path / "log").read_text()
+        assert "FAILED to record the wave summary" in log, (
+            "the runner died before classifying the failure — the bare assignment form is back"
+        )
+
+    def test_the_writer_call_uses_the_guarded_invocation_form(self):
+        """MUTATION TARGET: the §3a.4 hazard."""
+        src = RUNNER.read_text(encoding="utf-8")
+        assert '"${args[@]}")" || RC=$?' in src
+
+    def test_a_successful_write_logs_the_record_id(self, tmp_path):
+        r = self._sourced(tmp_path, self._call())
+        assert r.returncode == 0, r.stderr
+        log = (tmp_path / "log").read_text()
+        assert "summary recorded: v19:1:15_19:1" in log
+        assert (tmp_path / "pair_summaries" / "wave_1_15_19.json").is_file()
+
+    def test_an_unresolvable_role_does_not_destroy_the_summary(self, tmp_path):
+        """The launcher's own rule: an aborted wave must not be the one
+        case that leaves no summary. A role that cannot be resolved is
+        recorded as null — a gap, never a guess — and the record is still
+        written."""
+        r = self._sourced(
+            tmp_path,
+            'WAVE_STATE="$WS_ROOT/queue_state/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 s e failed not_in_the_roster",
+        )
+
+        assert r.returncode == 0, r.stderr
+        records = [
+            json.loads(line)
+            for line in (tmp_path / "queue_state" / "wave_state.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert records[0]["chains"] == [
+            {"run_name": "not_in_the_roster", "role": None, "pid": "unknown", "exit": -1}
+        ]
+        assert "arch_run" not in records[0]

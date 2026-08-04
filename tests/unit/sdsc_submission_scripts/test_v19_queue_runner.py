@@ -76,9 +76,30 @@ class TestFrozenWaves:
         got = [tuple(line.split()) for line in r.stdout.splitlines()]
         assert got == WAVE_PAIRS
 
-    def test_exactly_two_chains_per_wave_max_conc(self):
-        r = _sourced('echo "$MAX_CONC"')
-        assert r.stdout.strip() == "2"
+    def test_each_wave_launches_exactly_the_roster_chains_for_its_band(self):
+        """Replaces `test_exactly_two_chains_per_wave_max_conc`.
+
+        That test asserted `MAX_CONC == 2`, a variable that gated nothing
+        — deleting it changed no behaviour, which is what made it a
+        decoration test. The defect it was REACHING for is real and is
+        preserved here: a wave must not launch more chains than intended.
+        The property that was actually true is that the chains of a wave
+        are exactly the ROSTER entries for that wave's band, so that is
+        what is asserted — against the ROSTER, not against a constant.
+        """
+        r = _sourced(
+            'for w in "${WAVES[@]}"; do IFS=: read -r n s f <<< "$w"; '
+            'TAG="$(band_tag "$s")"; '
+            'for q in "${ROSTER[@]}"; do IFS=: read -r run _ _ _ <<< "$q"; '
+            'case "$run" in *_"$TAG") echo "$n $run";; esac; done; done'
+        )
+        assert r.returncode == 0, r.stderr
+        per_wave: dict[str, list[str]] = {}
+        for line in r.stdout.splitlines():
+            wave, run = line.split()
+            per_wave.setdefault(wave, []).append(run)
+        expected = {str(n): sorted([arch, loss]) for (n, _scope, arch, loss) in WAVE_PAIRS}
+        assert {k: sorted(v) for k, v in per_wave.items()} == expected
 
     def test_roster_covers_all_eight_exactly_once_in_wave_order(self):
         r = _sourced('for q in "${ROSTER[@]}"; do echo "${q%%:*}"; done')
@@ -182,29 +203,90 @@ class TestWaveStateMachine:
 
     def test_wave_summary_record_has_all_operator_fields(self, tmp_path):
         """§5.1: the wave summary persists wave/band/both runs/both pids/
-        both exits/start/end/disposition as one valid JSON record."""
-        env = {"WS_ROOT": str(tmp_path)}
+        both exits/start/end/disposition as one valid JSON record.
+
+        Same defect class as before E-C4 — an operator field silently
+        dropped from the record. The SHAPE changed: the eleven-positional
+        `printf` became a typed writer, chains moved into an array, and
+        the six `arch_*`/`loss_*` keys are now a compatibility mirror. The
+        mirror is asserted here precisely because the operator reports
+        still read those names.
+
+        Pids and exits come from the marker files rather than from
+        positional arguments, so the fixture writes them.
+        """
+        markers = tmp_path / "markers"
+        markers.mkdir()
+        for run, pid, code in (
+            ("v19_arch_15_19", "1111", "0"),
+            ("v19_loss_15_19", "2222", "137"),
+        ):
+            (markers / f"{run}.pid").write_text(pid)
+            (markers / f"{run}.exit").write_text(f"EXIT={code}\n")
+        env = {"WS_ROOT": str(tmp_path), "EXIT_DIR": str(markers)}
         r = _sourced(
-            'WAVE_STATE="$WS_ROOT/v19_wave_state.jsonl"; '
-            "record_wave_summary 1 15-19 v19_arch_15_19 v19_loss_15_19 "
-            "1111 2222 0 137 2026-07-30T00:00:00 2026-07-30T05:00:00 failed; "
+            'WAVE_STATE="$WS_ROOT/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 "
+            "2026-07-30T00:00:00 2026-07-30T05:00:00 failed "
+            "v19_arch_15_19 v19_loss_15_19; "
             'cat "$WAVE_STATE"',
             env,
         )
+        assert r.returncode == 0, r.stderr
         rec = json.loads(r.stdout.strip())
         assert rec == {
             "wave_summary": 1,
+            "record_id": "v19:1:15_19:1",
+            "campaign_id": "v19",
             "band": "15-19",
+            "band_tag": "15_19",
+            "chains": [
+                {"run_name": "v19_arch_15_19", "role": "arch", "pid": "1111", "exit": 0},
+                {"run_name": "v19_loss_15_19", "role": "loss", "pid": "2222", "exit": 137},
+            ],
             "arch_run": "v19_arch_15_19",
-            "loss_run": "v19_loss_15_19",
             "arch_pid": "1111",
-            "loss_pid": "2222",
             "arch_exit": 0,
+            "loss_run": "v19_loss_15_19",
+            "loss_pid": "2222",
             "loss_exit": 137,
             "start": "2026-07-30T00:00:00",
             "end": "2026-07-30T05:00:00",
             "disposition": "failed",
         }
+
+    def test_a_wave_summary_never_makes_a_failed_chain_look_complete(self, tmp_path):
+        """MUTATION TARGET, and the reason `chains` says `run_name`.
+
+        `chain_completed` greps the WHOLE LINE for `"run": "<X>"` and then
+        for `"exit": 0`. A chains array spelled `{"run": …, "exit": 0}`
+        lets a wave summary in which ONE chain succeeded satisfy that
+        predicate for EVERY chain it names — so the chain that exited 137
+        would be skipped as already complete on the next resume, and the
+        failure would disappear from the science.
+
+        Measured, not theorised: D-E-3's own example record reproduced
+        exactly this.
+        """
+        markers = tmp_path / "markers"
+        markers.mkdir()
+        for run, code in (("v19_arch_15_19", "0"), ("v19_loss_15_19", "137")):
+            (markers / f"{run}.exit").write_text(f"EXIT={code}\n")
+        env = {"WS_ROOT": str(tmp_path), "EXIT_DIR": str(markers)}
+        r = _sourced(
+            'WAVE_STATE="$WS_ROOT/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 s e failed "
+            "v19_arch_15_19 v19_loss_15_19; "
+            "chain_completed v19_loss_15_19 && echo COMPLETE || echo INCOMPLETE",
+            env,
+        )
+        assert r.stdout.strip().endswith("INCOMPLETE"), (
+            "a chain that exited 137 reads as complete from its wave summary"
+        )
 
 
 class TestLaunchCommandContent:

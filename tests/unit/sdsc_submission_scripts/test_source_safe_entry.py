@@ -85,7 +85,12 @@ class TestSourceSafety:
     def test_sourcing_still_exposes_the_definitions(self, name):
         """The whole point of sourcing: read the frozen command without
         running it."""
-        probe = "gate_chain_args arch | head -2" if name == "gate" else "echo ${MAX_CONC:-unset}"
+        # Repointed from `${MAX_CONC:-unset}` (D-E-3 deleted MAX_CONC as a
+        # label that gated nothing). The old probe would have printed
+        # "unset" and passed either way; `$CAMPAIGN_HOME` is a real
+        # definition, so an empty result now means sourcing exposed
+        # nothing — which is the defect this test is for.
+        probe = "gate_chain_args arch | head -2" if name == "gate" else 'echo "$CAMPAIGN_HOME"'
         result = _bash(f"source '{LAUNCHERS[name]}'; {probe}")
         assert result.stdout.strip(), result.stderr
 
