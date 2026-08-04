@@ -1,10 +1,17 @@
 # Design: V20 PR E — Campaign-scoped control state
 
-- **Status**: **DESIGN rev 3 — architecture direction APPROVED (operator,
-  second review 2026-08-04); the nine required corrections are applied
-  here. Implementation is not yet authorized**: the pending deviations in
-  §5 (D-E-1, D-E-2, D-E-3, D-E-5, D-E-7, D-E-8) still need individual
-  sign-off, and the predecessor docs hotfix in §12 must merge first.
+- **Status**: **IMPLEMENTED — all ten commits landed and pushed;
+  awaiting Draft PR, exact-head CI and operator review.** Branch
+  `feature/v20-pr-e-campaign-scoped-control`. See §16 for the
+  implementation ledger, the measured evidence and the unresolved
+  follow-ups. **CI: pending** — no exact-head CI run has completed yet,
+  and this line must not say otherwise until one has.
+
+  *Design history.* Rev 3's architecture direction was approved
+  (operator, second review 2026-08-04) with nine corrections applied;
+  the §5 deviations were then signed off individually during
+  implementation (D-E-3 with one correction found by the E-C4 audit,
+  D-E-7 with the fixed-string addition).
   Rev 3 changed the design in six substantive ways, not just the prose:
   legacy compatibility became a campaign-level adoption mode rather than
   a per-record fallback (BC-2); the override surface narrowed to three
@@ -4433,3 +4440,119 @@ Operator decisions:     Architecture direction APPROVED, second review
                         OPEN-E-11 (derived-view rebuild), OPEN-E-12
                         (EXIT_DIR markers).
 ```
+
+---
+
+## 16. Implementation ledger — final
+
+Written at E-C8, from `git log` and the per-checkpoint records above.
+Branch `feature/v20-pr-e-campaign-scoped-control`, cut from the design
+freeze `786e0319`.
+
+### 16.1 Commits
+
+| # | SHA | Commit | Behavior Delta |
+|---|---|---|---|
+| E-C1 | `ded153d0` | Campaign path resolver, deliberately inert | **none** — every path byte-identical |
+| E-C2 | `29af020c` | Campaign admission and the path move | **BD-1, BD-3 (partial), BD-5** |
+| E-C2b | `9060b13f` | Refuse an explicitly empty campaign id | an empty `CAMPAIGN_ID` exits 1 instead of running as `v19`; unset unchanged |
+| E-C3 | `ed61bb50` | Campaign-level legacy adoption | **BD-2, BD-3 (completes it)** |
+| E-C4 | `25a95556` | Typed wave record, canonical/derived dual write | **BD-4** |
+| E-C4b | `061bccfb` | State an unresolved chain role | none for a fully-resolved wave; two additive keys otherwise |
+| E-C5 | `240d7ac1` | Scope the Gate summary and log by run prefix | Gate artifacts prefix-scoped; `"gate"` is the resolved prefix; unsafe/empty prefix refused |
+| E-C6 | `6dc1fdb1` | Queue-runner self-exclusion from the script name | **BD-6** |
+| E-C6b | `f3c7cf5b` | Gate-runner self-exclusion from the script name | same, for the Gate |
+| E-C7 | `01ee1eda` | Multi-campaign isolation test | **none — zero production lines** |
+| E-C8 | *this commit* | Doc sync | **none — documentation only** |
+
+**Predecessor hotfixes**, merged to master before this branch and
+inherited rather than reimplemented: `fe51377c` (#165, role from the
+ROSTER — D-E-6), plus the `WAVE_WALL_SECONDS` docs fix, the
+`campaign_spend` membership fix and its fail-closed correction (#168).
+
+### 16.2 Checkpoints
+
+| | Status | Evidence |
+|---|---|---|
+| **E1** Path model | `[x]` | E-C1 + E-C2; the path-enumeration test asserts every authority-bearing path carries the campaign id |
+| **E2** Backward compatibility | `[x]` | E-C3; adoption is a once-only stamp field, and a four-file legacy tree is byte- and mtime-identical after an adopting run |
+| **E3** Campaign mismatch protection | `[x]` | E-C2 + E-C2b; one ordered guard, refusals observed on the filesystem |
+| **E4** Stop semantics preserved | `[x]` | property, not a commit: all 14 C13 assertions pass under the path-revert mutation |
+| **E5** Recovery validation | `[x]` | E-C7; 11 tests, two documented negative-control mutations |
+
+### 16.3 Measured evidence
+
+| Commit | Tests | Static | Mutations |
+|---|---|---|---|
+| E-C1 | 14 new / 340 targeted, 8.3 s | pyright 0, ruff clean | 2 (1 fail, 8 fail) |
+| E-C2 | 404, 10.8 s | pyright 0 | 4 (16, C13 14/14 green, 6, 2) |
+| E-C2b | 408 | pyright 0 | 1 (3 fail) |
+| E-C3 | 438, 37.2 s | pyright 0 | 4 (6, 2, 3, 2) |
+| E-C4 | 471, 38.3 s | pyright 0 | 4 (2, 4, 5, 2) |
+| E-C4b | 474 | pyright 0 | 1 (2 fail) |
+| E-C5 | 494, 54.4 s | pyright 0 | 3 (11, 12, 1) |
+| E-C6 | 2445 full unit, 103 s | pyright 0 | 2 (3, 2) |
+| E-C6b | 430 launcher | pyright 0 | 2 (3, 2) |
+| E-C7 | 11 module / 441 launcher | pyright 0 | 2 negative controls (3, 6) |
+| E-C8 | 498 launcher + doc-sync | pyright 0 | — |
+
+Pyright is **0 errors, 4 warnings** at every commit — identical to the
+pre-branch baseline; the two new `core/` modules and three new
+`scripts/` entries are all inside `pyrightconfig.json`'s `include`.
+`ruff check`, `ruff format --check` and `bash -n` clean throughout.
+`"typeCheckingMode"` is `"basic"`, not strict, and this PR does not
+change it.
+
+### 16.4 Deviations from the frozen design
+
+| # | Deviation | Why |
+|---|---|---|
+| 1 | **`chains[].run_name`, not `run`** (E-C4) | D-E-3's own example record made a **failed** chain satisfy `chain_completed`, which greps the whole line. Measured, not theorised. A field-naming fix: no authority semantics move |
+| 2 | Directory creation lives in Python, inside the one guard (E-C2) | a shell `mkdir` would necessarily precede the validator and break the "refuse before any `mkdir`" guarantee |
+| 3 | `${VAR-default}` for `CAMPAIGN_ID` and `GATE_RUN_PREFIX` (E-C2b, E-C5) | `:-` made an explicitly empty value unreachable by the validator that was required to refuse it |
+| 4 | Adoption source re-validated on every use, against the exact filename (E-C3) | §4 required "outside `$WS_ROOT` → STOP"; the exact-name form is stricter for the same cost and also closes a sibling campaign's file |
+| 5 | Exit code 3 for "canonical written, derived not" (E-C4) | §4 required the two failures to be distinguishable; this is how the shell distinguishes them |
+| 6 | `role_resolution_failed` / `unresolved_roles` rather than overloading `disposition` (E-C4b) | `disposition` describes chain outcomes; a recording gap is not one, and overloading it would drop the wave for anyone filtering on `complete` |
+| 7 | `validate_path_component` extracted; `validate_campaign_id` delegates (E-C5) | the Gate must reach one rule, not a second copy — but calling a campaign-named function from the Gate would have made the Gate a campaign |
+| 8 | `-F` on the self-exclusion (E-C6, E-C6b) | operator instruction, and load-bearing: the basename contains `.`, so a regex would widen the exclusion to processes that are not the runner |
+| 9 | C13 gained a 2-line `LOGF` pin (E-C2) | a test-harness assumption, not a semantics change: production `log()` is unreachable before admission, asserted by a test |
+| 10 | Three more tests re-pointed than §2 named (E-C2, E-C5) | a shared `_state_env` helper, a prefix-shaped pinning assertion, and the Gate harness's summary path |
+
+### 16.5 Follow-ups
+
+| id | Status |
+|---|---|
+| **FU-E-11** | **withdrawn** — reclassified by operator review as an E-C2 implementation defect; fixed in E-C2b |
+| **FU-E-12** | **closed** — the Gate's identical self-exclusion, fixed in E-C6b rather than deferred |
+| FU-E-1 | open — remove the `arch`/`loss` compatibility mirror once the report tooling reads `chains` |
+| FU-E-2 | open — an N-chain *scheduler* (the state schema is already N-chain-capable) |
+| FU-E-3 | open — `v18r_queue_runner.sh:48` carries the same self-exclusion pattern; historical surface, protected by an existing test |
+| FU-E-4 | open — unify `_WRITER_ID_RE` with `validate_path_component` |
+| FU-E-7 | open — rebuild derived per-wave views for historical waves |
+| FU-E-8 | open — a Gate stop channel, deliberately not added here |
+| FU-E-10 | open — `band_tag` yields `00_00` for malformed input instead of refusing |
+
+### 16.6 Final Behavior Delta
+
+**BD-1** the queue stop file's default moves into the campaign's
+`control/`. **BD-2** a legacy `$WS_ROOT/STOP` no longer blocks a launch;
+it is observed and recorded. **BD-3** queue and wave state move to a
+campaign directory, with a once-only legacy read-back. **BD-4** the wave
+summary gains `chains`, `record_id` and a derived per-wave file;
+`MAX_CONC` is gone. **BD-5** an invalid — or explicitly empty — campaign
+id is refused before anything is created. **BD-6** the live-process guard
+no longer hardcodes the script name, in either runner.
+
+Not changed: stop timing, exit code 99, signal handling, the no-respawn
+rule, chain-level `$WORKSPACE/STOP`, `chain_stopped.json`, chain
+workspace layout, `EXIT_DIR`, queue scheduling, concurrency, GPU
+admission, scientific configuration, and LLM-facing behaviour.
+
+### 16.7 Validation status
+
+- Local: full `tests/unit` green at E-C6 (2445 passed, 2 skipped);
+  launcher + doc-sync suites green at E-C8 (498 passed).
+- **CI: pending.** No exact-head CI run has completed. This must be
+  updated with the real result — never marked green in advance.
+- No real-training run, no GPU run, no API key, and no real Gate was
+  executed by any commit in this PR.
