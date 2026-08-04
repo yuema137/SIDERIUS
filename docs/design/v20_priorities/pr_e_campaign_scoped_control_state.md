@@ -1259,8 +1259,9 @@ the evidence named in its row.
 - [x] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
       `\`, control characters, over-length, and an id **equal to** `.`
       or `..` are refused; an id merely *containing* `..` is **accepted**
-      (D-E-9) — E-C2. NOTE: an *empty* id cannot reach the validator
-      through the shell (`${CAMPAIGN_ID:-v19}`); see FU-E-11
+      (D-E-9) — E-C2, and E-C2b for the empty case: the shell uses
+      `${CAMPAIGN_ID-v19}` so an explicitly empty id reaches the
+      validator, while an unset one still defaults
 - [ ] The same validator guards `GATE_RUN_PREFIX` (D-E-4)
 - [x] One guard owns the whole ordered admission sequence — validate id →
       inspect home → validate stamp → create dirs → atomically create
@@ -1487,7 +1488,7 @@ subsections below are the implementation contract.
 | # | Commit | Content | Checkpoint evidence |
 |---|---|---|---|
 | **E-C1** `[x]` | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
-| **E-C2** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
+| **E-C2** `[x]` + **E-C2b** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
 | **E-C3** | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
 | **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
 | **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
@@ -2137,23 +2138,96 @@ overridden `CAMPAIGN_HOME` would otherwise leave it uncreated.
    predicted "exactly one". Reported as measured; the suite is not
    weakened to match the estimate.
 
-**New follow-up**
+**Defect found in E-C2, corrected in E-C2b** — see the record below. It
+was first filed as a follow-up (FU-E-11); the operator's review
+(2026-08-04) correctly reclassified it as an **implementation defect
+against the identity contract E-C2 had already approved**, not a new
+policy question. FU-E-11 is withdrawn.
 
-- **FU-E-11** — an **empty** `CAMPAIGN_ID` never reaches the validator.
-  The runner resolves `CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"`, and `:-`
-  treats empty exactly like unset, so `CAMPAIGN_ID= bash …` silently
-  becomes `v19` — i.e. it adopts another campaign's identity rather than
-  refusing. Pre-existing, outside E-C2's causal scope, and changing it is
-  a behaviour change needing operator approval. The shell-level
-  parametrize records the omission and its reason; the validator's own
-  rejection of `""` is tested directly in Python.
+**Remaining risk — E-C2 and E-C2b are internal checkpoints, not a
+releasable state.** A campaign that already has a legacy
+`<R>/<id>_wave_state.jsonl` will not see its completion history at these
+commits: adoption is E-C3 by design. **Neither commit may be used for a
+legacy resume**, no Draft PR may stop at either head, and no unrelated
+work may be inserted before E-C3 closes the gap.
 
-**Remaining risk.** Between E-C2 and E-C3 a campaign that already has a
-legacy `<R>/<id>_wave_state.jsonl` will not see its completion history —
-adoption is E-C3 by design. No shipped operator command runs on that
-intermediate commit.
+**Next authorized checkpoint**: E-C2b, then immediately E-C3 (legacy
+campaign adoption).
 
-**Next authorized checkpoint**: E-C3 (legacy campaign adoption).
+#### IMPLEMENTATION RECORD — E-C2b `[x]` COMPLETE
+
+*An E-C2 correction, landed as its own commit. `29af020c` is pushed and
+is not amended or rewritten.*
+
+**Commit**: `<filled at commit>`.
+
+**The defect.** `CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"` collapses two
+different inputs into one. `:-` substitutes the default when the variable
+is unset **or empty**, so an explicitly empty id never reached the
+validator that D-E-9 requires to refuse it — it silently became `v19`.
+
+The failure mode is the one this PR exists to prevent, arrived at from
+the opposite direction: an operator who **clears** `CAMPAIGN_ID`
+specifically to avoid reusing an identity is handed exactly the identity
+they were avoiding, and then writes into that campaign's control state.
+
+**The fix**, one character:
+
+```bash
+CAMPAIGN_ID="${CAMPAIGN_ID-v19}"     # `-`, not `:-`
+```
+
+`-` substitutes only when the variable is **unset**, so:
+
+```text
+CAMPAIGN_ID unset            -> `v19`, the compatibility default, unchanged
+CAMPAIGN_ID explicitly empty -> stays empty -> the typed validator refuses
+```
+
+No validator change was needed — `validate_campaign_id("")` already
+refuses via the `{1,128}` bound, and `tests/unit/core/test_campaign_identity.py`
+already asserted it. The defect was entirely that the shell prevented the
+empty string from ever arriving.
+
+**Behavior Delta**: an explicitly empty `CAMPAIGN_ID` now exits 1 instead
+of running as `v19`. An unset `CAMPAIGN_ID` is byte-identical to before.
+This is BD-5's stated intent, not an extension of it.
+
+**Files changed**: `sdsc_submission_scripts/v19_queue_runner.sh` (the
+expansion plus its explanation);
+`tests/unit/sdsc_submission_scripts/test_campaign_admission.py` (`_run`
+gained `campaign_id=None` to leave the variable genuinely unset — the
+distinction cannot be tested without it).
+
+**Tests** — 408 pass (E-C2 baseline 404); 4 new in
+`TestAnUnsetIdAndAnEmptyIdAreDifferentInputs`:
+
+| Test | Proves |
+|---|---|
+| `test_an_unset_id_still_defaults_to_v19` | backward compatibility: `env -u CAMPAIGN_ID` still stamps `v19` |
+| `test_an_explicitly_empty_id_is_refused` | non-zero exit with the refusal diagnostic |
+| `test_the_empty_id_refusal_touches_nothing` | the whole contract: no directory created, **no STOP consulted**, no state written, no chain launched |
+| `test_the_runner_uses_the_unset_only_expansion` | structural, so the one-character difference cannot be re-introduced silently |
+
+**How "no STOP is read" is proven.** Through the exit code, not a
+comment. A run that reads a STOP and obeys it exits **99** and leaves a
+`queue_stopped` record; a refusal exits **1** and leaves none. The test
+arms *both* a legacy `<R>/STOP` and a `<R>/v19/control/STOP`, so if the
+empty id resolved to either location the run would stop rather than
+refuse — and the assertion is `returncode == 1`.
+
+**Mutation**: restoring `${CAMPAIGN_ID:-v19}` → **3 fail** (both
+behavioural cases and the structural guard). The unset-default test stays
+green under the mutation, which is correct: it is the compatibility half
+of the contract and the mutation does not break it.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean.
+
+**Deviations**: none.
+
+**Next authorized checkpoint**: E-C3, immediately, with no unrelated work
+inserted.
 
 ---
 ### E-C3 — Legacy campaign adoption

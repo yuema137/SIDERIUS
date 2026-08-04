@@ -63,9 +63,21 @@ source "$REPO/sdsc_submission_scripts/_chain_common.sh"
 # produces derives from this one value — run names, workspaces, queue
 # state, logs, summaries, screens — so a fresh campaign cannot collide
 # with, or be mistaken for, the stopped uncalibrated-preflight campaign
-# or any Gate. Required: there is no safe default, because a default
-# would silently reuse someone else's identity.
-CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"
+# or any Gate.
+#
+# `${VAR-default}`, NOT `${VAR:-default}` (E-C2b). The two forms differ on
+# exactly one input and it is the dangerous one:
+#
+#   CAMPAIGN_ID unset            -> `v19`, the compatibility default
+#   CAMPAIGN_ID explicitly empty -> stays empty, and the validator refuses
+#
+# `:-` treats an explicit empty value as if the variable were never set,
+# so `CAMPAIGN_ID= bash v19_queue_runner.sh` would silently become `v19`
+# — an operator who cleared the variable to avoid reusing an identity
+# would get exactly the identity they were avoiding, and would then write
+# into that campaign's control state. D-E-9 requires an empty id to be
+# REFUSED, and with `:-` it could never reach the validator to be refused.
+CAMPAIGN_ID="${CAMPAIGN_ID-v19}"
 #: 10 iterations per chain (operator 2026-07-31), replacing the frozen
 #: 20-iteration plan, to bound API cost, wall time and GPU use while
 #: keeping multi-iteration scientific evolution.

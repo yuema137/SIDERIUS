@@ -50,10 +50,12 @@ def _screen_shim(tmp_path: Path) -> tuple[Path, Path]:
 def _run(
     tmp_path: Path,
     *args: str,
-    campaign_id: str = "v19",
+    campaign_id: str | None = "v19",
     block_launches: bool = False,
     **env: str,
 ) -> subprocess.CompletedProcess[str]:
+    """Run the launcher. `campaign_id=None` leaves the variable UNSET,
+    which is a different input from the empty string (E-C2b)."""
     shim_dir, record = _screen_shim(tmp_path)
     root = tmp_path / "root"
     root.mkdir(exist_ok=True)
@@ -63,19 +65,23 @@ def _run(
         # starting anything or entering the 90 s pair stagger.
         for run in (f"{campaign_id}_arch_15_19", f"{campaign_id}_loss_15_19"):
             (root / run).mkdir(exist_ok=True)
+    child_env = dict(
+        os.environ,
+        WS_ROOT=str(root),
+        EXIT_DIR=str(tmp_path / "markers"),
+        PATH=f"{shim_dir}:{os.environ['PATH']}",
+        **env,
+    )
+    if campaign_id is None:
+        child_env.pop("CAMPAIGN_ID", None)
+    else:
+        child_env["CAMPAIGN_ID"] = campaign_id
     result = subprocess.run(
         ["bash", str(RUNNER), *args],
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
-        env=dict(
-            os.environ,
-            WS_ROOT=str(root),
-            CAMPAIGN_ID=campaign_id,
-            EXIT_DIR=str(tmp_path / "markers"),
-            PATH=f"{shim_dir}:{os.environ['PATH']}",
-            **env,
-        ),
+        env=child_env,
         timeout=120,
     )
     result.screen_invocations = record.read_text() if record.exists() else ""  # type: ignore[attr-defined]
@@ -165,14 +171,9 @@ class TestARunCreatesItsCampaignHome:
 
 
 class TestAnUnsafeIdIsRefusedBeforeAnythingIsCreated:
-    # An EMPTY id is absent from this list on purpose, and the reason is a
-    # finding rather than an oversight: the runner resolves
-    # `CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"`, and `:-` treats empty exactly
-    # like unset — so `CAMPAIGN_ID=` never reaches the validator, it
-    # silently becomes `v19`. That is pre-existing behaviour, outside
-    # E-C2's causal scope, and recorded as FU-E-11. The validator's own
-    # rejection of an empty id is covered directly in
-    # tests/unit/core/test_campaign_identity.py.
+    # The EMPTY id has its own class below: proving it is refused requires
+    # distinguishing it from an UNSET variable, which this parametrize
+    # cannot express.
     @pytest.mark.parametrize("campaign_id", ["..", ".", "a/b", "a b", "x" * 129])
     def test_the_run_refuses_and_the_root_gains_nothing(self, tmp_path, campaign_id):
         """D-E-9's ordering guarantee, observed rather than inferred: the
@@ -227,6 +228,82 @@ class TestAnUnsafeIdIsRefusedBeforeAnythingIsCreated:
 
         assert r.returncode == 0, r.stderr
         assert (root / "alpha..beta" / "control").is_dir()
+
+
+class TestAnUnsetIdAndAnEmptyIdAreDifferentInputs:
+    """E-C2b. `${CAMPAIGN_ID-v19}`, not `${CAMPAIGN_ID:-v19}`.
+
+    The two expansions differ on exactly one input, and it is the
+    dangerous one. `:-` treats an explicitly empty value as if the
+    variable had never been set, so an operator who CLEARS the variable
+    specifically to avoid reusing an identity gets `v19` — the identity
+    they were avoiding — and then writes into that campaign's control
+    state. D-E-9 requires an empty id to be refused; under `:-` it could
+    never reach the validator to be refused.
+
+    Unset must keep defaulting, because that is every existing caller.
+    """
+
+    def test_an_unset_id_still_defaults_to_v19(self, tmp_path):
+        """BACKWARD COMPATIBILITY. Every caller that never set the
+        variable — the docs, the operator's muscle memory, the other
+        tests in this suite — must be unaffected."""
+        root = tmp_path / "root"
+        root.mkdir()
+        _completed(root, "v19", "v19_arch_15_19")
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19", campaign_id=None)
+
+        assert r.returncode == 0, r.stderr
+        assert (root / "v19" / "control" / "campaign.json").is_file()
+        stamp = json.loads((root / "v19" / "control" / "campaign.json").read_text())
+        assert stamp["campaign_id"] == "v19"
+
+    def test_an_explicitly_empty_id_is_refused(self, tmp_path):
+        """MUTATION TARGET: restoring `${CAMPAIGN_ID:-v19}`.
+
+        Under `:-` this run silently becomes campaign `v19` and exits 0.
+        """
+        root = tmp_path / "root"
+        root.mkdir()
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19", campaign_id="")
+
+        assert r.returncode != 0, "an explicitly empty campaign id was accepted"
+        assert "REFUSED" in r.stderr
+
+    def test_the_empty_id_refusal_touches_nothing(self, tmp_path):
+        """The full refusal contract in one place: no directory created,
+        no STOP consulted, no state written, no chain launched.
+
+        The STOP claim is asserted through the exit code. A run that read
+        a STOP and obeyed it exits 99 (`CHAIN_STOP_EXIT_CODE`) and leaves
+        a `queue_stopped` record; a refusal exits 1 and leaves none. Both
+        a legacy shared STOP and a `v19` campaign STOP are armed here, so
+        if the empty id resolved to either location the run would stop
+        rather than refuse.
+        """
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "STOP").touch()
+        (root / "v19" / "control").mkdir(parents=True)
+        (root / "v19" / "control" / "STOP").touch()
+        before = sorted(p.name for p in root.iterdir())
+
+        r = _run(tmp_path, "--only", "v19_arch_15_19", campaign_id="")
+
+        assert r.returncode == 1, f"expected a refusal (1), got {r.returncode}"
+        assert r.returncode != STOP_EXIT, "the empty id read a STOP file"
+        assert sorted(p.name for p in root.iterdir()) == before
+        assert not (root / "v19" / "queue_state").exists(), "state was written"
+        assert r.screen_invocations == ""  # type: ignore[attr-defined]
+
+    def test_the_runner_uses_the_unset_only_expansion(self):
+        """MUTATION TARGET, stated structurally so the one-character
+        difference cannot be reintroduced by a careless edit."""
+        src = RUNNER.read_text(encoding="utf-8")
+        assert 'CAMPAIGN_ID="${CAMPAIGN_ID-v19}"' in src
+        assert 'CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"' not in src
 
 
 class TestAForeignStampRefusesBeforeAnyWrite:
