@@ -1,2 +1,0 @@
-[gpu-measure] punet_rej_cap_test_001:training: punet phase=training device=cuda
-[gpu-measure] punet_rej_cap_test_001:training: DEVICE_MISMATCH
