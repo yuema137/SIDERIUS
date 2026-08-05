@@ -30,6 +30,10 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.schemas.health_feedback import (
+    InvalidTrialOutcome,
+    TrialValidityFeedback,
+)
 from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     ExperimentRecord,
@@ -72,6 +76,7 @@ from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.health_checks.candidate_eligibility import (
+    classify_candidate_health,
     formal_validity_of,
     is_valid_candidate,
 )
@@ -79,6 +84,7 @@ from execute_tools.health_checks.evaluation import evaluate_and_persist_health_g
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
     BLOCKING_ACTIONS,
+    CandidateHealthValidity,
     GateAction,
     GateResult,
     HealthCheckContext,
@@ -2053,6 +2059,119 @@ def _collect_disallowed_patterns(
     return sorted(tags)
 
 
+def _build_trial_validity_feedback(
+    records: list,
+    *,
+    formal_skipped_for_no_valid_winner: bool,
+    healthgate_mode: str | None,
+) -> TrialValidityFeedback | None:
+    """Report an iteration whose trials produced no valid candidate.
+
+    V20 PR D (D-C6). Fires when trial-mode records exist but
+    :func:`_best_trial_winner` would return ``None`` — the planner
+    otherwise sees an iteration that simply produced no good score, with no
+    way to tell "nothing ran" from "everything collapsed".
+
+    **A separate carrier from `_build_gate_exhaustion`, and the audit is
+    why.** That helper's two triggers both require budget-gated records
+    (``skipped_oom_risk`` / ``skipped_time_risk``); an all-invalid
+    iteration has records that RAN and SUCCEEDED and then failed their
+    scientific gates, so neither trigger fires and the block would be
+    ``None``. Merging them would need a third trigger with unrelated
+    semantics inside a structure whose every field means "budget
+    exhaustion", and would tell the planner to propose something
+    *lighter* when the actual evidence says propose something that does
+    not *collapse*.
+
+    **Facts only, task-generic.** Gate names, reasons and metrics are
+    passed through exactly as the gate system recorded them. Nothing here
+    interprets a metric or suggests a remedy — that is the planner's job,
+    and task-specific advice in workflow code is what §3.3 forbids.
+
+    Returns ``None`` when at least one trial is valid, so a healthy run's
+    downstream prompt is byte-identical to before.
+    """
+    trials = [
+        r
+        for r in records
+        if r.get("is_trial") is True and (r.get("memory") or {}).get("time_mode") == "trial"
+    ]
+    if not trials:
+        return None  # no trial stage at all is a different fact, not this one
+    if any(is_valid_candidate(r) for r in trials):
+        return None  # a valid winner exists; nothing to report
+
+    outcomes: list[InvalidTrialOutcome] = []
+    invalid = unknown = execution_failures = 0
+    evidence_absent: list[str] = []
+
+    for record in trials:
+        exp_id = record.get("exp_id")
+        status = str(record.get("status", "unknown"))
+        validity = classify_candidate_health(record)
+
+        if status != "success":
+            # The evidence is ABSENT, not negative: nothing was scored, so
+            # no gate could have judged it.
+            execution_failures += 1
+        elif validity is CandidateHealthValidity.INVALID:
+            invalid += 1
+        else:
+            unknown += 1
+
+        results = [r for r in (record.get("health_gate_results") or []) if isinstance(r, dict)]
+        if status == "success" and validity is CandidateHealthValidity.UNKNOWN:
+            # UNKNOWN is not a soft "invalid" — it means the gate evidence
+            # was incomplete, and saying WHICH way is the difference
+            # between "the model collapsed" and "we cannot tell". A
+            # partial gate set reads exactly like a pass unless named.
+            evidence_absent.append(
+                f"{exp_id or '<unidentified>'}: validity unknown — "
+                + (
+                    "no gate results persisted"
+                    if not results
+                    else f"only {len(results)} gate result(s) persisted, required set incomplete"
+                )
+            )
+
+        failed_names = sorted(
+            str(r.get("gate_name"))
+            for r in results
+            if r.get("gate_name")
+            and (
+                r.get("check_passed") is False or r.get("would_invalidate_under_production_policy")
+            )
+        )
+        reasons = sorted({str(r["failure_reason"]) for r in results if r.get("failure_reason")})
+        metrics: dict[str, float | int | str] = {}
+        for r in results:
+            for key, value in (r.get("key_metrics") or {}).items():
+                if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                    metrics[f"{r.get('gate_name')}.{key}"] = value
+
+        outcomes.append(
+            InvalidTrialOutcome(
+                exp_id=exp_id,
+                status=status,
+                health_validity=validity,
+                failed_gate_names=failed_names,
+                failure_reasons=reasons,
+                key_metrics=metrics,
+            )
+        )
+
+    return TrialValidityFeedback(
+        trial_records_considered=len(trials),
+        invalid_count=invalid,
+        unknown_validity_count=unknown,
+        execution_failure_count=execution_failures,
+        outcomes=outcomes,
+        formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
+        healthgate_mode=healthgate_mode,
+        evidence_absent=evidence_absent,
+    )
+
+
 def _build_gate_exhaustion(
     records: list,
     active_mode: Literal["trial", "formal"],
@@ -3517,6 +3636,11 @@ class HyperparamTuningAgent:
         # any LLM call (the first plan call happens in the round loop below).
         _validate_history_and_lock(workspace, run_invariants, existing_history, _lock_was_present)
         consecutive_fails = 0
+        # D-C6: set at the skip gate itself, so the feedback can state
+        # WHY formal did not run rather than inferring it from the
+        # absence of a formal record — which cannot distinguish a
+        # no-winner skip from a budget skip.
+        _skipped_formal_for_no_valid_winner = False
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state
         # to distinguish gate-driven aborts from fail-round-driven aborts
@@ -3590,6 +3714,7 @@ class HyperparamTuningAgent:
                     # evidence, and no evidence does not justify the cost
                     # of a formal round. Previously this case returned
                     # False and the round ran anyway.
+                    _skipped_formal_for_no_valid_winner = True
                     print(
                         "\n  [SkipFormal] no HealthGate-valid trial winner in this "
                         "iteration (reason=no_valid_trial_winner) — skipping the "
@@ -5446,6 +5571,28 @@ class HyperparamTuningAgent:
             max_fail_rounds=max_fail_rounds_setting,
             completed_rounds=completed_rounds,
         )
+        # V20 PR D (D-C6): the OTHER failure mode — trials ran, succeeded,
+        # and then failed their scientific gates. Distinct carrier because
+        # gate_exhaustion's triggers require budget-gated records and would
+        # stay None here. `_skipped_formal_for_no_valid_winner` is set at
+        # the skip gate itself, so the report states WHY formal did not run
+        # rather than inferring it from the absence of a formal record.
+        trial_validity_feedback = _build_trial_validity_feedback(
+            all_records,
+            formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
+            healthgate_mode=agent_input.healthgate_mode,
+        )
+        if trial_validity_feedback is not None:
+            print(
+                f"[trial-validity] no HealthGate-valid trial winner: "
+                f"{trial_validity_feedback.invalid_count} gate-invalid, "
+                f"{trial_validity_feedback.unknown_validity_count} validity-unknown, "
+                f"{trial_validity_feedback.execution_failure_count} execution failures "
+                f"of {trial_validity_feedback.trial_records_considered} trial(s). "
+                f"Surfacing to next proposer.",
+                flush=True,
+            )
+
         if gate_exhaustion is not None:
             print(
                 f"[gate-exhaustion] iteration ended without ever training; "
@@ -5520,6 +5667,7 @@ class HyperparamTuningAgent:
             "started_at": started_at,
             "finished_at": finished_at,
             "gate_exhaustion": gate_exhaustion,
+            "trial_validity_feedback": trial_validity_feedback,
             # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
             # Empty list when every attempt was feasible. Orchestrator
             # aggregates (worst-offender per architecture) before rendering

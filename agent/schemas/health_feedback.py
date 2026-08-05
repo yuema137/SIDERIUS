@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from execute_tools.health_checks.schemas import (
     CandidateHealthValidity,
@@ -566,3 +566,106 @@ def merge_fingerprint_history(
             merged[model_type] = retained[: policy.max_entries_per_model]
 
     return merged
+
+
+# ---------------------------------------------------------------------------
+# V20 PR D (D-C6) — the iteration produced no scientifically valid trial
+# ---------------------------------------------------------------------------
+
+
+class InvalidTrialOutcome(BaseModel):
+    """Why ONE trial record failed to become a valid candidate.
+
+    Facts only. The workflow layer transports these; interpreting what a
+    particular gate's metrics imply for a particular task is the planner's
+    job, and task remediation advice must never be baked in here.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    exp_id: str | None = Field(default=None, description="Record identity, when persisted.")
+    status: str = Field(
+        description=(
+            "The record's own status verbatim (`ExperimentRecord.status`). "
+            "Distinguishes an EXECUTION failure from a completed run that "
+            "then failed its gates — collapsing those two into 'trial "
+            "failed' would tell the planner to fix the wrong thing."
+        )
+    )
+    health_validity: CandidateHealthValidity = Field(
+        description="invalid (a blocking gate failed) vs unknown (validity could not be established)."
+    )
+    failed_gate_names: list[str] = Field(
+        default_factory=list,
+        description="Blocking-role gates whose check did not pass, sorted for stable rendering.",
+    )
+    failure_reasons: list[str] = Field(
+        default_factory=list,
+        description="Machine-readable reasons already produced by the gate system. Never invented.",
+    )
+    key_metrics: dict[str, float | int | str] = Field(
+        default_factory=dict,
+        description=(
+            "Measurements the gates already recorded (e.g. a diversity ratio "
+            "or mode fraction). Passed through unchanged and unranked — the "
+            "workflow layer does not decide which number matters."
+        ),
+    )
+
+
+class TrialValidityFeedback(BaseModel):
+    """The iteration produced trial rounds but no HealthGate-valid winner.
+
+    **A separate carrier from `GateExhaustionInfo`, deliberately.** That
+    structure reports BUDGET exhaustion: its triggers require
+    `skipped_oom_risk` / `skipped_time_risk` records and it fires only when
+    nothing succeeded or a fail-round burst collapsed the search. An
+    all-invalid iteration is the opposite shape — trials RAN and SUCCEEDED,
+    then failed their scientific gates. Extending gate-exhaustion with a
+    third trigger would have merged two failure modes that call for
+    opposite planner responses: "propose something lighter" versus
+    "propose something that does not collapse".
+
+    Populated only when there is something to say. A run with at least one
+    valid trial leaves it `None`, so the proposer prompt is byte-identical
+    to before.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trial_records_considered: int = Field(description="Trial-mode records examined for candidacy.")
+    invalid_count: int = Field(description="Completed trials whose blocking gates failed.")
+    unknown_validity_count: int = Field(
+        description="Trials whose validity could not be established (missing or unrun gates)."
+    )
+    execution_failure_count: int = Field(
+        description=(
+            "Trials that never produced a scorable result (crash, OOM, skip). "
+            "Kept separate from gate invalidity: the evidence is ABSENT here, "
+            "not negative."
+        )
+    )
+    outcomes: list[InvalidTrialOutcome] = Field(
+        default_factory=list,
+        description="Per-record detail, oldest first.",
+    )
+    formal_skipped_for_no_valid_winner: bool = Field(
+        default=False,
+        description=(
+            "Whether the formal round was skipped BECAUSE no valid winner "
+            "existed. Distinct from a formal round skipped on the ordinary "
+            "time budget, and from a formal round that ran and then failed "
+            "its own gates — three different facts about the iteration."
+        ),
+    )
+    healthgate_mode: str | None = Field(
+        default=None,
+        description="The declared enforcement mode this iteration ran under.",
+    )
+    evidence_absent: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What could NOT be established, named explicitly rather than "
+            "left as a silent gap — e.g. gate results missing for a record."
+        ),
+    )

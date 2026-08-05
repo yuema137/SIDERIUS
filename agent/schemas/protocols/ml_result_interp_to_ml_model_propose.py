@@ -249,6 +249,18 @@ def local_full_context(
     if collected_gate_exhaustions:
         result["recent_gate_exhaustions"] = collected_gate_exhaustions
 
+    # V20 PR D (D-C6) — the same window, for the OTHER failure mode: trials
+    # that ran and then failed their scientific gates. Sparse in exactly the
+    # same way, so an iteration with a valid winner contributes nothing and
+    # the proposer prompt is byte-identical to before.
+    collected_trial_validity = [
+        tune_out.trial_validity_feedback.model_dump()
+        for tune_out in recent_tune_outputs
+        if tune_out is not None and tune_out.trial_validity_feedback is not None
+    ]
+    if collected_trial_validity:
+        result["recent_trial_validity"] = collected_trial_validity
+
     # V19 PR 3 §3.7 — thread the structured-health prompt flag. The
     # structured EVIDENCE always travels inside the interpretation dump;
     # this flag only decides whether the proposer prompt renders it.

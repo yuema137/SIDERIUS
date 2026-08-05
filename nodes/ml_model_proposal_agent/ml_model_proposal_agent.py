@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from agent.llm_bridge import LLMBridge
 from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from agent.schemas.proposal import (
     CausalStageOwnedContent,
@@ -569,6 +570,70 @@ def _render_constraints_block(
     for c in constraints or []:
         lines.append(f"  - {c}")
     return "\n".join(lines)
+
+
+def _format_recent_trial_validity_block(
+    entries: list[TrialValidityFeedback],
+) -> str:
+    """Render the [RECENT TRIAL VALIDITY] block (V20 PR D, D-C6).
+
+    Transports FACTS the gate system already recorded — record identities,
+    which blocking gates failed, the reasons and metrics they emitted, and
+    what could not be established. It states no remedy: what a particular
+    metric implies for a particular task is the planner's judgement, and
+    task-specific advice in workflow code is what §3.3 forbids.
+
+    The distinctions are preserved rather than collapsed into "trials
+    failed", because they call for different responses: an EXECUTION
+    failure means the evidence is absent, a gate INVALIDITY means the
+    evidence is negative, and validity UNKNOWN means the gates could not
+    judge it at all.
+
+    Empty list → "" so the placeholder collapses and a healthy chain's
+    prompt is byte-identical to before.
+    """
+    if not entries:
+        return ""
+
+    lines: list[str] = [
+        f"## [RECENT TRIAL VALIDITY] {len(entries)} iteration(s) with no valid trial",
+        "",
+        "These iterations ran trial rounds that produced NO HealthGate-valid",
+        "candidate. This is not a budget problem — the trials ran. Treat the",
+        "gate evidence below as the reason the results could not be used.",
+        "",
+    ]
+    total = len(entries)
+    for offset, entry in enumerate(entries):
+        tag = f"iter N-{total - offset}"
+        lines.append(f"### {tag}")
+        lines.append(
+            f"- {entry.trial_records_considered} trial(s): "
+            f"{entry.invalid_count} gate-invalid, "
+            f"{entry.unknown_validity_count} validity-unknown, "
+            f"{entry.execution_failure_count} execution failure(s)"
+        )
+        if entry.healthgate_mode:
+            lines.append(f"- healthgate_mode: {entry.healthgate_mode}")
+        if entry.formal_skipped_for_no_valid_winner:
+            lines.append(
+                "- the formal round was SKIPPED because no valid trial winner existed "
+                "(not because of the time budget)"
+            )
+        for outcome in entry.outcomes:
+            bits = [f"status={outcome.status}", f"validity={outcome.health_validity.value}"]
+            if outcome.failed_gate_names:
+                bits.append(f"failed_gates={','.join(outcome.failed_gate_names)}")
+            if outcome.failure_reasons:
+                bits.append(f"reasons={','.join(outcome.failure_reasons)}")
+            if outcome.key_metrics:
+                metrics = ", ".join(f"{k}={v}" for k, v in sorted(outcome.key_metrics.items()))
+                bits.append(f"metrics=({metrics})")
+            lines.append(f"  - {outcome.exp_id or '<unidentified>'}: " + "; ".join(bits))
+        for absent in entry.evidence_absent:
+            lines.append(f"  - EVIDENCE ABSENT — {absent}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _format_recent_gate_exhaustions_block(
@@ -1470,6 +1535,11 @@ class MLModelProposalAgent:
             # last 3 tuner iterations. Empty list collapses to "".
             "recent_gate_exhaustions_block": _format_recent_gate_exhaustions_block(
                 inp.recent_gate_exhaustions
+            ),
+            # V20 PR D (D-C6) — the all-trials-invalid report for the same
+            # window. Empty list collapses to "".
+            "recent_trial_validity_block": _format_recent_trial_validity_block(
+                inp.recent_trial_validity
             ),
             # V19 PR 3 (§3.7) — structured HealthGate evidence for the
             # PRODUCTION pipeline path (P3-V1 reopen fix: the legacy-mode

@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.ordering import (
     OrderingValidationError,
     OrderStrategy,
@@ -2539,6 +2540,21 @@ class HyperparamTuningOutput(BaseModel):
             "resource gate. Consumed by the next iteration's proposer via "
             "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
             "runs (any success) and on all-failure-but-not-budget-related runs."
+        ),
+    )
+    trial_validity_feedback: TrialValidityFeedback | None = Field(
+        default=None,
+        description=(
+            "V20 PR D (D-C6) — populated only when the iteration ran trial "
+            "rounds but produced NO HealthGate-valid winner. Consumed by the "
+            "next iteration's proposer via ProposalInput.recent_trial_validity. "
+            "Deliberately SEPARATE from gate_exhaustion, which reports BUDGET "
+            "exhaustion (OOM/time skips): an all-invalid iteration has trials "
+            "that ran and succeeded and then failed their scientific gates, so "
+            "gate_exhaustion's triggers never fire for it. The two call for "
+            "opposite planner responses — propose something lighter, versus "
+            "propose something that does not collapse. None whenever at least "
+            "one trial is valid, so healthy runs are byte-identical."
         ),
     )
 

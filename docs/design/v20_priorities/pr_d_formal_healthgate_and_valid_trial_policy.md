@@ -1,10 +1,10 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 7 of 10 checkpoints complete.**
+**Status: IMPLEMENTATION IN PROGRESS — 8 of 10 checkpoints complete.**
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
-closing FU-D-9), D-C5 (this commit). The formal-gate policy is FROZEN in §16 after two
+closing FU-D-9), D-C5 (`4767c72a`), D-C6 (this commit). The formal-gate policy is FROZEN in §16 after two
 read-only audits and the operator's negative-infinity bootstrap ruling
 (2026-08-05).
 
@@ -15,8 +15,8 @@ annotation, no sidecar, no reconstruction, no finer classification. The
 249-artifact audit under D-C4 is the evidence for why (see §15.E).
 
 Predecessor FU-D-10 merged to master as PR #172 (`51bab481`) and is
-integrated here at `12506d80`. Next: D-C6 (structured
-all-trials-invalid planner feedback; requires Gate 1). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
+integrated here at `12506d80`. Next: D-C7b (honest external
+fields and labels), then the combined bounded Gate 1. Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -694,7 +694,7 @@ refusal in addition to the mode↔config check.
 | **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[x]` **COMPLETE** — no-winner ⇒ skip, `-inf` bootstrap + provenance, one winner per formal round, JSON-safe persistence. 10/10 mutations caught. See the implementation record under Commit 6 |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[x]` **COMPLETE** — authority is an additional conjunct; fail-closed `resolve_record_authority`; legacy ladder; 10-row matrix; 8/8 mutations. Found and fixed a D-C2b defect: the verdict was silently dropped by `ExperimentRecord` |
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[x]` **COMPLETE** — new `execute_tools/scientific_aggregation.py`; verdict consumed not re-derived; provenance rendered from the typed object, never by the model. 6/6 mutations |
-| **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
+| **D-C6** | Structured all-trials-invalid feedback | `[x]` **COMPLETE** — DEVIATION: a new `TrialValidityFeedback` carrier, because gate-exhaustion's triggers require budget-gated records and never fire here. Full producer→planner path, 7/7 mutations. Gate 1 pending |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
 | **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
 | ~~**D-C9**~~ | ~~V19 retrospective closure annotation~~ | **WITHDRAWN — operator decision 2026-08-05.** Historical records stay readable and unchanged with authority simply not established; no annotation, no sidecar, no reconstruction. PR D is a **10-checkpoint** PR |
@@ -2521,6 +2521,101 @@ Field absent on legacy summaries → treat as UNKNOWN and **warn**.
 ---
 
 ### Commit 9 — `D-C6`: structured all-trials-invalid feedback
+
+#### IMPLEMENTATION RECORD — D-C6 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C5 `4767c72a`. Progress
+**8 / 10**.
+
+**DEVIATION, and the audit that forced it: a NEW carrier, not an extension
+of `GateExhaustionInfo`.** This section instructed extending
+`_build_gate_exhaustion` (§3.8) while also instructing "confirm it is the
+right carrier before extending it". The audit says it is not:
+
+| | `GateExhaustionInfo` | all-trials-invalid |
+|---|---|---|
+| trigger A | no record succeeded **and** ≥1 `skipped_oom_risk`/`skipped_time_risk` | records DID succeed |
+| trigger B | fail-round burst ≥50% budget-gated | no budget gating at all |
+| meaning | the architecture is too heavy for the budgets | the architecture collapses |
+| planner response | propose something **lighter** | propose something that does not **collapse** |
+
+Neither trigger fires for an all-invalid iteration, so extending it would
+have meant a third trigger with unrelated semantics inside a structure
+whose every field means "budget exhaustion" — merging two failure modes
+that call for opposite responses. Proven by execution in
+`test_the_carrier_is_not_gate_exhaustion`, which asserts
+`_build_gate_exhaustion` returns `None` for exactly this input.
+
+The new carrier mirrors the existing channel exactly rather than inventing
+a mechanism, so §3.8's real intent ("no second ad-hoc feedback path") is
+honoured.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `agent/schemas/health_feedback.py` | **new** `TrialValidityFeedback`, `InvalidTrialOutcome` |
+| `agent/schemas/hyperparam_tuning.py` | `HyperparamTuningOutput.trial_validity_feedback` |
+| `nodes/.../ml_hyperparameter_tune_agent.py` | `_build_trial_validity_feedback`; `_skipped_formal_for_no_valid_winner` set AT the skip gate |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | collects the window |
+| `agent/schemas/proposal.py` | `ProposalInput.recent_trial_validity` |
+| `nodes/.../ml_model_proposal_agent.py` | `_format_recent_trial_validity_block` + prompt variable |
+| `agent/prompt_templates/proposal/proposing_stage.md` | `{recent_trial_validity_block}` |
+
+**The real producer → consumer path** (every hop mutation-proven)
+
+```text
+trial records + gate verdicts
+  → _build_trial_validity_feedback(...)          [tuner, at run exit]
+  → HyperparamTuningOutput.trial_validity_feedback
+  → run_output_*.json
+  → ml_result_interp_to_ml_model_propose         [protocol, sparse window]
+  → ProposalInput.recent_trial_validity
+  → _format_recent_trial_validity_block(...)
+  → {recent_trial_validity_block}                [proposing_stage.md]
+  → the ACTUAL next planner request
+```
+
+**The distinctions are preserved, which is the checkpoint's point.**
+Execution failure (evidence *absent*) ≠ gate invalidity (evidence
+*negative*) ≠ validity unknown (gates could not judge) ≠ formal skipped
+for no winner ≠ formal skipped on budget (a different carrier) ≠ formal
+result invalidity (D-C2b). `_skipped_formal_for_no_valid_winner` is set
+where the decision is MADE, because inferring it later from a missing
+formal record cannot distinguish a no-winner skip from a budget skip.
+
+**Task-generic.** Gate names, reasons and metrics pass through exactly as
+the gate system recorded them; the block prescribes no remedy. A test
+asserts the builder's source contains no task names or advice verbs, and
+another asserts the rendered block contains no recommendation language —
+what a mode fraction implies is the planner's judgement, and baked-in
+advice would be wrong for the next task anyway.
+
+**Backward compatibility.** `None` whenever any trial is valid, so the
+window stays empty and the prompt block collapses to `""` — a healthy
+chain's proposer prompt is byte-identical to before.
+
+**Beyond the plan**: `evidence_absent` now also names a PARTIAL gate set,
+not just a wholly missing one. Found by execution — a record with one of
+three blocking gates classifies as UNKNOWN, and an unnamed partial set
+reads exactly like a pass.
+
+**Mutations — 7 run, 7 caught**: fires on healthy runs (1); execution
+failure merged into invalidity (2); skip reason never set (1); protocol
+stops forwarding (1); prompt variable dropped (1); template placeholder
+removed (1); absent evidence silenced (2).
+
+**Validation**: 24 focused tests; `tests/unit/agent` + `core` +
+`execute_tools` **5992 passed**, 278 s; pyright **0 errors**; ruff and
+format clean (726 files).
+
+**Gate 1 is REQUIRED and still pending** — this changes LLM-visible input.
+Deferred to one bounded combined run after D-C7b, per the plan, so the
+Gate proves the FINAL prompt rather than an intermediate one. D-C5's
+aggregate change is in the same scope.
+
+---
+
 
 **1. Goal.** Close D6 by extending the existing gate-exhaustion block rather
 than opening a second feedback channel (§3.8).
