@@ -3275,71 +3275,100 @@ environment being empty.
 
 Branch `fix/runtime-probe-evidence-consumption`, off master.
 
-**Commit 1 — attribution.** Per-process bytes are captured
-(`--query-compute-apps=pid,used_memory`) and the classifier attributes memory
-instead of thresholding the device total:
+**Commit 1 — attribution. LANDED `80f93ca9`.** Per-process bytes are captured
+(`--query-compute-apps=pid,used_memory`) and the classifier subtracts what
+the candidate itself owns before comparing against the threshold:
 
 ```text
-foreign-owned bytes over the EXISTING threshold  -> foreign_contended
-unattributable residual over that same threshold -> unknown_contention
-everything attributable to the candidate         -> not external contention
+external = device total - candidate-owned bytes
 ```
 
 The configured threshold is unchanged; only its subject is corrected. An
-empty or partial attribution map is UNATTRIBUTABLE, never "candidate-owned" —
-absence of evidence must not read as a clean device. A single-column driver
-response still yields PID-based foreign detection, with the memory left in
-the residual.
+empty or partial attribution map leaves those bytes EXTERNAL, never
+"candidate-owned" — absence of evidence must not read as a clean device. A
+single-column driver response still yields PID-based foreign detection, with
+the memory recorded as NaN so it stays unattributable rather than assumed
+zero.
+
+> **Narrowed during implementation.** The staged version attributed memory to
+> *every* holder, which had the side effect of clearing a **registered
+> peer's** occupancy as well. That is an admission-policy change and belongs
+> to PR C, so the landed version reclassifies **only candidate-owned bytes**;
+> a peer's memory still contends exactly as it does today, pinned by a test
+> named for that purpose. This is the §20.1 rule — no policy through a bug
+> fix — applied to my own patch.
+
+**One intentional, admission-neutral relabel**: unattributable memory over
+the threshold now classifies `unknown_contention` rather than
+`foreign_contended`, because naming an owner that nothing measured is the
+defect. Both identities are `contended`, so `blocking_eligible` and admission
+are identical; the two threshold-placement tests updated in that commit now
+assert the blocking consequence so a future relabel cannot quietly widen
+admission.
 
 *Verified against the real Gate 2 telemetry*: 5.98 GB, zero foreign PIDs,
 0% utilisation now classifies `single_candidate_idle` rather than
 `foreign_contended`.
 
-**Commit 2 — typed reasons, with per-reason audited disposition.**
-`REQUEST_PROBE` carries a **required** machine-readable reason, and the
-lifecycle dispatches **exhaustively** on it. The lifecycle stops inferring
-cause from a bare decision kind or a log string.
+**Commit 2 — the spent probe budget. LANDED `2184e1c8`.**
 
-> **Corrected 2026-08-05 (operator review).** This section previously said
-> that every reason except `missing_or_unconsumed_evidence` means "the
-> evidence WAS consumed but cannot settle the decision". **That is not
-> established, and asserting it would be exactly the inference-from-a-name
-> error this PR keeps finding.**
->
-> The real Gate 2 artifact proves only two things:
->
-> * `contended_measurement` — completed evidence WAS consumed, then judged
->   unusable under the current policy;
-> * `missing_or_unconsumed_evidence` — an invariant breach.
->
-> `candidate_identity_mismatch` and `capability_mismatch` may well indicate
-> the opposite: that the probe which just ran does not correspond to the
-> current candidate, i.e. a **wiring or identity invariant defect**.
-> Downgrading those to ADVISORY without evidence would silence the very
-> class of bug the invariant exists to catch. `stale_evidence` is equally
-> unproven either way.
+**The operator-required per-reason audit was performed first, and it
+REJECTED the planned design.** Recording that, because the rejection is the
+more useful result:
 
-The design rule is therefore:
+*The audit.* `REQUEST_PROBE` has exactly **three** producers, all in
+`decision_policy.py`:
 
-```text
-REQUEST_PROBE carries a required typed reason
-  -> the lifecycle switches explicitly on that reason
-  -> every reason has an independently audited disposition
-```
+| producer | condition | gated on `probe_available`? |
+|---|---|---|
+| formal probe absent | `evidence_channel == "probe_absent"` and formal phase and not blocking-eligible | **no** |
+| contended measurement | `estimate.contended` | **yes** |
+| prior-tier evidence | `evidence_rank(provenance) <= 1` | **yes** |
 
-and **not**:
+*The finding.* The reason vocabulary this section proposed **does not
+correspond to those producers**:
 
-```text
-anything except missing_or_unconsumed_evidence -> legitimate
-```
+* `stale_evidence` — **exists nowhere in the repository**;
+* `capability_mismatch` — **exists nowhere in the repository**;
+* `candidate_identity_mismatch` — exists, but in
+  `core/runtime_control/gpu_requirement.py`, an **unrelated subsystem**
+  where it describes a GPU-requirement identity check, not a probe reason.
 
-**Commit 2 is blocked on a per-reason audit** of each reason's *producer*
-and lifecycle meaning — `contended_measurement`, `stale_evidence`,
-`candidate_identity_mismatch`, `capability_mismatch`,
-`missing_or_unconsumed_evidence`. Each disposition is justified from the
-producing call site, not from the reason's name. Where the audit cannot
-establish that a reason is benign, it **stays fail-closed**; the invariant is
-not deleted, downgraded or bypassed.
+Two names were invented and one was borrowed from a subsystem that means
+something else by it. Adding them would have created dead vocabulary and a
+cross-subsystem name collision — precisely the *infer-semantics-from-a-name*
+error the operator's review was guarding against, committed in the proposal
+itself. **The operator's caution was justified for a sharper reason than
+either of us expected.**
+
+*The actual defect, and the actual fix.* The re-decision reused the caller's
+mode, in which `probe_available` was still True. A fresh probe that was
+itself classified contended therefore re-entered the contended producer, and
+the lifecycle reported *"the measured evidence was not consumed"* — blaming
+the wrong component. The evidence **had** been consumed: the probe ran, was
+extrapolated, was persisted, and was decided upon. The policy was simply
+never told the budget was gone.
+
+The fix is to say so — the re-decision runs with `probe_available=False`.
+Both gated producers then take their **existing** `else ADVISORY` branch, and
+the ungated producer cannot fire because it requires
+`evidence_channel == "probe_absent"` while the re-decision passes `"ok"`.
+
+**No typed-reason enum was needed, and none was added.** This is strictly
+smaller than the plan and removes the need for per-reason dispositions
+entirely: `REQUEST_PROBE` after a completed probe becomes **structurally
+impossible** rather than reachable-and-misreported.
+
+**The invariant is kept, not deleted, downgraded or bypassed** — as the
+operator required. It is now unreachable by construction, which is what an
+invariant should be: if a future producer stops honouring `probe_available`,
+it still fails closed rather than looping. Its existing stuck-policy test
+proves it still fires.
+
+**Budget: unchanged, and not invented.** The repository already fixed it —
+`probe_lifecycle.py` *"one attempt gets one probe"*, `probe_wiring.py` *"the
+exactly-once guarantee is per candidate attempt"*. No new counter, no new
+threshold, no new policy.
 
 **Legacy vocabulary, stated explicitly.** The hotfix preserves
 `foreign_contended` with its **existing presence-based policy meaning**, and
@@ -3348,13 +3377,6 @@ does so *only* to avoid changing admission policy inside a bug-fix PR. It is
 semantics with terms that separate occupancy *presence* from measurement
 *validity* (§20.3). Nothing downstream should treat `foreign_contended` as
 part of the post-PR-C design.
-
-**Budget: unchanged, and not invented.** The repository already fixes it —
-`probe_lifecycle.py:135` *"one attempt gets one probe"*, `probe_wiring.py:51`
-*"the exactly-once guarantee is per candidate attempt"*. After the probe is
-spent the lifecycle re-decides through the existing policy with
-`probe_available=False`, which takes the policy's own existing
-`else ADVISORY` branch. No new counter, no new policy.
 
 **This PR does NOT change external-occupancy admission semantics.**
 
@@ -3563,8 +3585,9 @@ whether to launch.
 PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
-runtime hotfix           AUTHORIZED; commit 1 verified against real
-                         telemetry, commit 2 blocked on the per-reason audit
+runtime hotfix           PR #175 OPEN — both commits landed
+                         (80f93ca9 attribution, 2184e1c8 spent budget);
+                         awaiting CI, then operator merge
 occupancy correction     direction approved; implementation NOT authorized
                          until the typed-boundary + stability audit is
                          reviewed. One open policy question (tolerance).
