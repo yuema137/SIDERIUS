@@ -87,6 +87,16 @@ class ContentionSnapshot(BaseModel):
     foreign_compute_pids: tuple[int, ...] = Field(
         default=(), description="Reported PIDs minus the excluded set."
     )
+    compute_process_memory_gb: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "pid (as a string key, for JSON) -> GB that process holds on the "
+            "device. Empty on producers that predate byte-level attribution, "
+            "which the classifier treats as UNATTRIBUTABLE rather than as "
+            "candidate-owned. A NaN value means the driver reported the "
+            "process but not its memory."
+        ),
+    )
     excluded_pids: tuple[int, ...] = Field(
         default=(),
         description="Self + descendant (+ explicitly excluded) PIDs — D3: "
@@ -243,8 +253,14 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
             .splitlines()[0]
         )
         util_pct, mem_mib = (float(x.strip()) for x in util.split(","))
+        # `used_memory` as well as `pid`: without per-process bytes the
+        # classifier cannot ATTRIBUTE memory, and a device total gets
+        # labelled "external" even when every process on the device is
+        # candidate-owned. That misclassification aborted a real chain
+        # (Gate 2 attempt 1: 5.98 GB, zero foreign PIDs, 0% utilisation,
+        # reported as foreign_contended).
         procs = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -257,9 +273,31 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
         # D3 extends this to the probe's descendants.
         own = os.getpid()
         excluded = {own} | set(descendant_pids(own)) | set(exclude_pids or ())
-        reported = tuple(int(line.strip()) for line in procs.splitlines() if line.strip().isdigit())
+        per_process: dict[int, float] = {}
+        for line in procs.splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if not parts or not parts[0].isdigit():
+                continue
+            pid = int(parts[0])
+            if len(parts) < 2:
+                # Single-column output: an older driver, or a producer that
+                # reports pids without sizes. The PID is still evidence and
+                # MUST keep counting toward foreign detection — dropping the
+                # row would silently disable that. Its memory is
+                # unattributable, which the classifier resolves through the
+                # residual rather than by assuming zero.
+                per_process[pid] = float("nan")
+                continue
+            try:
+                per_process[pid] = float(parts[1]) / 1024.0
+            except ValueError:
+                per_process[pid] = float("nan")
+        # Reported ORDER preserved (dicts keep insertion order); sorting
+        # here would silently change an observable field.
+        reported = tuple(per_process)
         foreign = tuple(pid for pid in reported if pid not in excluded)
         return ContentionSnapshot(
+            compute_process_memory_gb={str(k): v for k, v in per_process.items()},
             foreign_compute_processes=len(foreign),
             gpu_utilization_pct=util_pct,
             gpu_memory_used_gb=mem_mib / 1024.0,

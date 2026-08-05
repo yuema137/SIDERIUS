@@ -192,14 +192,73 @@ def classify_contention_window(
             f"{unaccounted_count} further unidentified foreign process(es))"
         )
         return "foreign_contended", tuple(reasons)
-    if max_mem > mem_threshold:
+    # --- memory: subtract what the CANDIDATE itself owns -----------------
+    #
+    # This branch used to compare the DEVICE TOTAL against the threshold and
+    # call the result "external GPU memory". It never asked whose memory it
+    # was. Measured failure (Gate 2 attempt 1, 2026-08-05): 5.98 GB total,
+    # `foreign_compute_pids: []`, every compute pid in `excluded_pids`, GPU
+    # at 0% — classified `foreign_contended`, which made the freshly
+    # measured probe non-blocking and aborted the chain. The candidate's own
+    # resident CUDA context was being counted against it.
+    #
+    # The fix is deliberately the NARROWEST one that corrects that: bytes
+    # attributable to the candidate's own excluded PIDs stop counting as
+    # external. The threshold is unchanged, and every OTHER holder of memory
+    # keeps exactly today's treatment — a registered peer's occupancy still
+    # makes the window contended, because deciding that an expected partner's
+    # memory is acceptable is an ADMISSION-POLICY change and belongs to PR C
+    # (§20.3), not to a bug fix.
+    #
+    #   external = device total - candidate-owned bytes
+    #
+    # An empty or partial attribution map (a producer predating byte
+    # capture, or a driver that reports PIDs without sizes) leaves those
+    # bytes in `external`, so legacy producers behave EXACTLY as before:
+    # absence of evidence must never read as evidence of a clean device.
+    external_gb = 0.0
+    peer_holds_memory = False
+    for s_ in samples:
+        per_process = s_.compute_process_memory_gb or {}
+        excluded_here = set(s_.excluded_pids or ())
+        candidate_gb = 0.0
+        for pid_key, gb in per_process.items():
+            if gb != gb:  # NaN — the driver named the process but not its size
+                continue  # unattributable: stays in `external` below
+            try:
+                pid = int(pid_key)
+            except (TypeError, ValueError):
+                continue
+            if pid in excluded_here:
+                candidate_gb += gb
+            elif pid in peers and gb > 0.0:
+                peer_holds_memory = True
+        external_gb = max(external_gb, max(0.0, (s_.gpu_memory_used_gb or 0.0) - candidate_gb))
+
+    if external_gb > mem_threshold:
+        if peer_holds_memory:
+            # A REGISTERED peer — today's outcome, preserved deliberately.
+            reasons.append(
+                f"external GPU memory {external_gb:.2f} GB (excluding "
+                f"candidate-owned bytes) exceeds "
+                f"max({policy.contention_memory_floor_gb:.0f} GiB, "
+                f"{policy.contention_memory_fraction:.0%} VRAM) = "
+                f"{mem_threshold:.2f} GB, held by a registered peer"
+            )
+            return "foreign_contended", tuple(reasons)
+        # Over the SAME configured threshold, and nobody can say whose it is:
+        # no unregistered foreign PID was reported (that check already
+        # returned above), yet the bytes are not the candidate's either.
+        # Conservative by design — unattributable occupancy is not evidence
+        # of a clean device, so the measurement cannot carry blocking
+        # authority, but it is not asserted to be foreign either.
         reasons.append(
-            f"pre-probe external GPU memory {max_mem:.2f} GB exceeds "
-            f"max({policy.contention_memory_floor_gb:.0f} GiB, "
-            f"{policy.contention_memory_fraction:.0%} VRAM) = "
-            f"{mem_threshold:.2f} GB"
+            f"GPU memory could not be attributed ({external_gb:.2f} GB of "
+            f"{max_mem:.2f} GB used is not accounted to the candidate, over "
+            f"the {mem_threshold:.2f} GB threshold); a measurement taken "
+            f"under unattributable occupancy cannot carry blocking authority"
         )
-        return "foreign_contended", tuple(reasons)
+        return "unknown_contention", tuple(reasons)
     if sustained_util:
         reasons.append(
             f"sustained GPU utilization ≥ {policy.contention_utilization_pct:.0f}% "

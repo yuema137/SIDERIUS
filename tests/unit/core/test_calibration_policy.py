@@ -119,16 +119,40 @@ class TestContentionClassification:
         assert verdict == "foreign_contended"
         assert "3 further unidentified" in reasons[0]
 
+    # These two own the THRESHOLD PLACEMENT, which is unchanged: 10% of a
+    # large device, a 1 GiB floor on a small one, and the same values on
+    # either side of the boundary.
+    #
+    # Their identity expectation moved from `foreign_contended` to
+    # `unknown_contention` on 2026-08-05. `_window` supplies no per-process
+    # attribution, so these bytes are UNATTRIBUTABLE — calling them "foreign"
+    # asserted an owner nothing had measured, which is the Gate 2 defect
+    # (§20.2). Admission is unaffected: both identities are `contended`, so
+    # neither can carry blocking authority. The added assertion pins that
+    # consequence, so a future relabel cannot quietly widen admission.
+    def _cannot_block(self, identity: str) -> bool:
+        from core.runtime_control.estimate_types import make_estimate
+
+        return not make_estimate(
+            provenance="bounded_live_probe",
+            confidence="medium",
+            expected_seconds=1.0,
+            concurrency_identity=identity,
+        ).blocking_eligible
+
     def test_memory_threshold_uses_ten_percent_on_large_device(self):
         assert _classify(_window(gpu_memory_used_gb=3.1))[0] == "single_candidate_idle"
         verdict, reasons = _classify(_window(gpu_memory_used_gb=3.3))
-        assert verdict == "foreign_contended"
+        assert verdict == "unknown_contention"
+        assert self._cannot_block(verdict)
         assert "3.20 GB" in reasons[0]
 
     def test_memory_threshold_uses_one_gib_floor_on_small_device(self):
         small = dict(device_vram_gb=4.0)  # 10% = 0.4 GB < 1 GiB floor
         assert _classify(_window(gpu_memory_used_gb=0.9), **small)[0] == "single_candidate_idle"
-        assert _classify(_window(gpu_memory_used_gb=1.1), **small)[0] == "foreign_contended"
+        verdict = _classify(_window(gpu_memory_used_gb=1.1), **small)[0]
+        assert verdict == "unknown_contention"
+        assert self._cannot_block(verdict)
 
     def test_sustained_utilization_across_whole_window_is_contended(self):
         assert _classify(_window(gpu_utilization_pct=25.0))[0] == "foreign_contended"
