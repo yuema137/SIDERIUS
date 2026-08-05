@@ -45,6 +45,7 @@ from core.run_invariants import (
     validate_stamped_invariants,
 )
 from core.sandbox_executor import get_plugin_dir
+from core.scientific_authority import resolve_record_authority
 from execute_tools.dataset_config import TIDMAD
 from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
@@ -640,6 +641,59 @@ def _candidates_from_persisted_verdicts(
     }
 
 
+def _formal_candidate_is_authoritative(
+    candidate: dict[str, Any],
+    parsed: HyperparamTuningOutput,
+    gate_ids: frozenset[str] | None,
+    iter_idx: int,
+) -> bool:
+    """V20 PR D (D-C4): may this formal candidate become the incumbent?
+
+    The authority question is answered by consuming the typed verdict
+    D-C2a/D-C2b already produce — never re-derived here from gate ids,
+    configured actions, an ``_blocking`` suffix, the score, the trial
+    evidence, or whether the round bypassed its time budget. A second
+    authority implementation is exactly the divergence the predecessor
+    hotfix (``af5339ce``) existed to remove.
+
+    Fail-closed. The persisted verdict is a plain dict that any later
+    writer could edit, so :func:`resolve_record_authority` re-derives the
+    conclusions from the record's own facts and refuses anything that
+    disagrees with itself. Excluded candidates are announced with a
+    structured reason rather than dropped silently — an operator watching
+    an incumbent stop advancing needs to know which record was refused and
+    why.
+
+    Args:
+        candidate: the formal candidate dict (carries ``record``).
+        parsed: the iteration's validated output — supplies the
+            output-level declaration used to reconstruct a legacy record.
+        gate_ids: commit-time blocking gate ids for this iteration.
+        iter_idx: for the log line.
+
+    Returns:
+        ``True`` only for an authoritative record.
+    """
+    record = candidate["record"]
+    resolution = resolve_record_authority(
+        record,
+        declared_healthgate_mode=getattr(parsed, "healthgate_mode", None),
+        declared_result_authority=getattr(parsed, "result_authority", None),
+        commit_time_validity=_classify_commit_time(record, gate_ids).value,
+    )
+    if resolution.authoritative:
+        candidate["authority_basis"] = resolution.basis
+        return True
+    print(
+        f"[resume] iter {iter_idx:03d}: formal candidate "
+        f"{record.get('exp_id')!r} (score {candidate['score']!r}) is NOT "
+        f"scientifically authoritative — reason={resolution.exclusion_reason}, "
+        f"basis={resolution.basis}. The record is kept; it cannot become the "
+        f"chain incumbent (V20 PR D §16.D)."
+    )
+    return False
+
+
 def _build_provenance(
     candidate: dict[str, Any],
     parsed: HyperparamTuningOutput,
@@ -664,6 +718,13 @@ def _build_provenance(
         "validity_basis": candidate["validity_basis"],
         "artifact_verified": artifact_verified,
     }
+    if not trial:
+        # V20 PR D (D-C4): HOW authority was established for the record
+        # that became the incumbent. Set by the admission predicate, which
+        # runs before this, so a present incumbent always carries it —
+        # `validity_basis` says the gates passed, this says the result was
+        # allowed to inform science, and they are different questions.
+        prov["authority_basis"] = candidate.get("authority_basis")
     if trial:
         eval_strategy = record.get("eval_strategy")
         eval_portion = record.get("eval_portion")
@@ -1286,6 +1347,17 @@ def restore_prior_state(
         formal_cand = _formal_candidate_from_committed_fields(parsed, manifest, iter_idx)
         if formal_cand is None and parsed.best_valid_formal_denoising_score is None:
             formal_cand = _candidates_from_persisted_verdicts(parsed, gate_ids, want_trial=False)
+        # V20 PR D (D-C4) — scientific authority is an ADDITIONAL conjunct
+        # on top of commit-time validity, never a replacement for it. A
+        # record that is commit-time valid but non-authoritative (declared
+        # diagnostic, observe-only, validity unknown, unreconstructable
+        # legacy, or a verdict that disagrees with its own facts) stays
+        # fully persisted and readable — it simply never becomes the
+        # comparison basis for a later gate.
+        if formal_cand is not None and not _formal_candidate_is_authoritative(
+            formal_cand, parsed, gate_ids, iter_idx
+        ):
+            formal_cand = None
         if formal_cand is not None and (
             state.chain_best_valid_formal_score is None
             or formal_cand["score"] > state.chain_best_valid_formal_score

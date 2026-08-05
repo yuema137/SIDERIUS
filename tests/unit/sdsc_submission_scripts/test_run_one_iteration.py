@@ -1440,6 +1440,16 @@ def _p1_tune_output(
         best_valid_formal_exp_id=exp_id,
         started_at="2026-07-27 00:00:00",
         finished_at="2026-07-27 00:00:01",
+        # V20 PR D (D-C4): the chain incumbent now additionally requires
+        # scientific authority. These tests are about incumbent
+        # ATTRIBUTION in the manifest — which iteration a carried-over
+        # score came from — so they declare the production posture the
+        # chain shell supplies and keep testing attribution. An output
+        # with no declaration is `unreconstructable_legacy` and yields no
+        # incumbent at all; that case is covered in
+        # tests/unit/core/test_resume_incumbent.py.
+        healthgate_mode="blocking",
+        result_authority="scientific",
     )
 
 

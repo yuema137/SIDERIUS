@@ -419,6 +419,24 @@ class ExperimentRecord(BaseModel):
         default_factory=list,
         description="Full typed results for every HealthGate configured for this experiment.",
     )
+    scientific_authority: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "V20 PR D — the formal record's authority verdict "
+            "(core.scientific_authority.ScientificAuthority.model_dump()). "
+            "Present on FORMAL records only; None on trial records, where "
+            "the question does not apply, and on records predating D-C2b. "
+            "Carries the three facts (healthgate_mode, "
+            "declared_result_authority, formal_validity) beside the derived "
+            "conclusions, which is what makes it recomputable and therefore "
+            "tamper-EVIDENT. Deliberately typed as a plain dict rather than "
+            "the model: ScientificAuthority sets extra='forbid' and exposes "
+            "its conclusions as computed fields, so its own dump cannot be "
+            "re-validated into it. Consumers must NOT trust the stored "
+            "conclusions — re-derive via resolve_record_authority(), which "
+            "refuses a verdict that disagrees with its own facts."
+        ),
+    )
 
     # --- Data volume ---
     training_psd_segments: int | None = Field(

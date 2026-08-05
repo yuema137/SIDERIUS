@@ -31,7 +31,8 @@ that throws on historical data makes the history unreadable.
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
@@ -174,3 +175,163 @@ class ScientificAuthority(BaseModel):
         one of the call sites.
         """
         return self.authoritative
+
+
+# ---------------------------------------------------------------------------
+# Resolving the verdict for a PERSISTED record (V20 PR D, D-C4)
+# ---------------------------------------------------------------------------
+
+#: How a persisted record's authority was established — or why it could not
+#: be. The three failure bases all exclude, and each names a different
+#: distrust so an operator can tell a tampered artifact from an old one.
+AuthorityBasis = Literal[
+    # The record carried a verdict whose conclusions match a fresh
+    # derivation from its own facts.
+    "stored_verdict",
+    # No verdict on the record, but its policy was reconstructable from the
+    # output-level declaration plus commit-time validity (§12A ladder).
+    "reconstructed_legacy",
+    # No verdict and the policy cannot be reconstructed — UNKNOWN, which is
+    # never a licence to assume.
+    "unreconstructable_legacy",
+    # A verdict was present but its conclusions contradict its own facts:
+    # somebody edited the dict after it was written.
+    "verdict_inconsistent_with_its_facts",
+    # The verdict claims its formal round passed while the iteration's own
+    # commit-time evidence says it failed.
+    "stored_validity_contradicts_commit_time",
+    # Present but unusable — not a mapping, or missing/invalid facts.
+    "malformed_verdict",
+]
+
+_FAILURE_BASES: frozenset[str] = frozenset(
+    {
+        "unreconstructable_legacy",
+        "verdict_inconsistent_with_its_facts",
+        "stored_validity_contradicts_commit_time",
+        "malformed_verdict",
+    }
+)
+
+_VALIDITIES: frozenset[str] = frozenset({"valid", "invalid", "unknown"})
+
+
+class RecordAuthority(BaseModel):
+    """Whether one PERSISTED formal record may inform decision state.
+
+    The distinction from :class:`ScientificAuthority` is the input. That one
+    takes three trusted facts. This one takes an artifact that a later
+    writer could have edited, and is therefore **fail-closed**: anything it
+    cannot independently justify is excluded.
+
+    **The stored conclusions are never believed.** ``verdict`` is always a
+    fresh derivation. D-C2b made the persisted block *tamper-evident* by
+    writing the facts beside the conclusions; this is the consumer that
+    actually acts on that, so a hand-edited ``authoritative: true`` buys
+    nothing.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: The freshly derived verdict, or ``None`` when nothing could be
+    #: derived. NEVER the stored dict's conclusions.
+    verdict: ScientificAuthority | None
+    basis: AuthorityBasis
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def authoritative(self) -> bool:
+        """May this record become the chain incumbent?"""
+        if self.basis in _FAILURE_BASES or self.verdict is None:
+            return False
+        return self.verdict.authoritative
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def exclusion_reason(self) -> str | None:
+        """Why it may not — machine-readable, ``None`` when it may.
+
+        A distrust basis outranks the verdict's own reason: "this artifact
+        disagrees with itself" is a different operator action from "this
+        run was diagnostic".
+        """
+        if self.authoritative:
+            return None
+        if self.basis in _FAILURE_BASES:
+            return self.basis
+        return self.verdict.primary_basis if self.verdict is not None else "malformed_verdict"
+
+
+def resolve_record_authority(
+    record: Mapping[str, Any],
+    *,
+    declared_healthgate_mode: str | None,
+    declared_result_authority: str | None,
+    commit_time_validity: FormalValidity,
+) -> RecordAuthority:
+    """Fail-closed authority for one persisted formal record.
+
+    Args:
+        record: the record as serialized in ``all_records``.
+        declared_healthgate_mode: the OUTPUT-level declaration, used only
+            to reconstruct a record that carries no verdict of its own.
+        declared_result_authority: same.
+        commit_time_validity: the iteration's own commit-time verdict for
+            this record, resolved by the caller against the workspace's
+            materialized effective policy — never against the repo-current
+            config.
+
+    Returns:
+        A :class:`RecordAuthority`. Never raises: a historical or corrupt
+        artifact must stay readable, and is excluded rather than fatal.
+    """
+    stored = record.get("scientific_authority")
+
+    if stored is None:
+        # --- legacy ladder (§12A) -------------------------------------
+        verdict = ScientificAuthority.from_context(
+            healthgate_mode=declared_healthgate_mode,
+            declared_result_authority=declared_result_authority,
+            formal_validity=commit_time_validity,
+        )
+        basis: AuthorityBasis = (
+            "unreconstructable_legacy"
+            if "legacy_authority_unknown" in verdict.blocking_reasons
+            else "reconstructed_legacy"
+        )
+        return RecordAuthority(verdict=verdict, basis=basis)
+
+    if not isinstance(stored, Mapping):
+        return RecordAuthority(verdict=None, basis="malformed_verdict")
+
+    validity = stored.get("formal_validity")
+    if validity not in _VALIDITIES:
+        # The one fact with no safe default. Without it the verdict cannot
+        # be re-derived at all, so there is nothing to check it against.
+        return RecordAuthority(verdict=None, basis="malformed_verdict")
+
+    recomputed = ScientificAuthority.from_context(
+        healthgate_mode=stored.get("healthgate_mode"),
+        declared_result_authority=stored.get("declared_result_authority"),
+        formal_validity=validity,  # type: ignore[arg-type]
+    )
+
+    # Conclusions must match a fresh derivation from the record's own
+    # facts. Only keys actually present are compared, so a verdict written
+    # by an older schema is not condemned for lacking a field that did not
+    # exist — but any key it DOES carry must agree.
+    fresh = recomputed.model_dump()
+    for key, value in stored.items():
+        if key in fresh and fresh[key] != value:
+            return RecordAuthority(verdict=None, basis="verdict_inconsistent_with_its_facts")
+
+    # The facts themselves can be edited too, so cross-check the one that
+    # the iteration independently recorded. Deliberately narrow: only a
+    # WEAKENING contradiction counts (stored says its gates passed, the
+    # commit-time evidence says they failed). A commit-time ``unknown`` is
+    # an evidence gap, not a contradiction, and must not retroactively
+    # condemn a record whose effective-policy artifact is simply missing.
+    if commit_time_validity == "invalid" and validity == "valid":
+        return RecordAuthority(verdict=None, basis="stored_validity_contradicts_commit_time")
+
+    return RecordAuthority(verdict=recomputed, basis="stored_verdict")

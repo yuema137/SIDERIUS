@@ -101,9 +101,22 @@ def _write_iter(
     with_hash: bool = True,
     health_config_sha256: str | None = None,
     manifest_status: str = "completed",
+    healthgate_mode: str | None = "blocking",
+    result_authority: str | None = "scientific",
 ) -> str:
     """Write one committed iteration (manifest + run_output). Returns the
-    run_output path."""
+    run_output path.
+
+    ``healthgate_mode`` / ``result_authority`` default to the production
+    posture the chain shell declares. V20 PR D (D-C4) made scientific
+    authority an admission requirement for the chain incumbent, so an
+    output with NO declaration is `unreconstructable_legacy` and every
+    record in it is excluded. These tests are about the incumbent WALK —
+    tie rules, round provenance, repo-policy isolation, artifact
+    verification — so they declare the posture and keep testing the walk.
+    Pass ``None`` to build a genuinely pre-declaration artifact; that case
+    is covered on purpose in ``TestScientificAuthorityAdmission``.
+    """
     run_name = f"iter_{iter_idx:03d}"
     iter_dir = os.path.join(workspace, run_name)
     model_dir = os.path.join(iter_dir, f"iteration_{iter_idx:03d}", "punet")
@@ -128,6 +141,8 @@ def _write_iter(
         best_valid_formal_denoising_score=best_valid_formal_score,
         best_valid_formal_exp_id=best_valid_formal_exp_id,
         health_config_sha256=health_config_sha256,
+        healthgate_mode=healthgate_mode,
+        result_authority=result_authority,
     )
     output_path = os.path.join(model_dir, f"run_output_{run_name}.json")
     with open(output_path, "w") as f:
@@ -478,3 +493,307 @@ def test_reconstruction_is_deterministic(tmp_path):
     assert a.chain_best_valid_formal_provenance == b.chain_best_valid_formal_provenance
     assert a.chain_best_trial_score == b.chain_best_trial_score
     assert a.chain_best_trial_provenance == b.chain_best_trial_provenance
+
+
+# ---------------------------------------------------------------------------
+# V20 PR D (D-C4) — scientific authority gates incumbent admission
+# ---------------------------------------------------------------------------
+
+
+def _verdict(mode: str | None, authority: str | None, validity: str) -> dict:
+    """The authority block exactly as D-C2b writes it onto a formal record."""
+    from core.scientific_authority import ScientificAuthority
+
+    return ScientificAuthority.from_context(
+        healthgate_mode=mode,
+        declared_result_authority=authority,
+        formal_validity=validity,  # type: ignore[arg-type]
+    ).model_dump()
+
+
+def _formal(exp_id: str, score: float, verdict: dict | None = None, **kw) -> dict:
+    rec = _record(exp_id, score, logical_round=1, **kw)
+    if verdict is not None:
+        rec["scientific_authority"] = verdict
+    return rec
+
+
+class TestScientificAuthorityAdmission:
+    """Only an authoritative formal record may become the chain incumbent.
+
+    Everything refused here is still **fully persisted and readable** — the
+    exclusion removes comparison authority, not the record. That is the
+    distinction the whole checkpoint rests on: an invalid or diagnostic
+    result remains evidence of what happened, it just cannot silently
+    become the bar the next iteration must clear.
+
+    Authority is CONSUMED from D-C2a/D-C2b's typed verdict, never
+    re-derived here from gate ids, configured actions, a `_blocking`
+    suffix, the score, the trial evidence, or whether the round bypassed
+    its time budget. A second authority implementation is the divergence
+    the predecessor hotfix `af5339ce` removed.
+    """
+
+    def _one(self, tmp_path, record, **iter_kw):
+        ws = str(tmp_path)
+        _write_iter(ws, 1, [record], **iter_kw)
+        return _restore(ws, 2)
+
+    # -- admitted ----------------------------------------------------------
+
+    def test_an_authoritative_record_becomes_the_incumbent(self, tmp_path):
+        state = self._one(tmp_path, _formal("f1", 1.2, _verdict("blocking", "scientific", "valid")))
+        assert state.chain_best_valid_formal_score == 1.2
+        assert state.chain_best_valid_formal_provenance["authority_basis"] == "stored_verdict"
+
+    def test_a_higher_authoritative_score_replaces_a_lower_one(self, tmp_path):
+        ws = str(tmp_path)
+        good = _verdict("blocking", "scientific", "valid")
+        _write_iter(ws, 1, [_formal("f1", 1.0, good)])
+        _write_iter(ws, 2, [_formal("f2", 2.0, good)])
+        state = _restore(ws, 3)
+        assert state.chain_best_valid_formal_score == 2.0
+        assert state.chain_best_valid_formal_provenance["exp_id"] == "f2"
+
+    def test_an_equal_score_does_not_replace(self, tmp_path):
+        """The EXISTING strictly-greater rule, unchanged by D-C4.
+
+        Ties are how earliest-iteration-wins falls out of the ascending
+        walk; loosening to `>=` here would silently rewrite that.
+        """
+        ws = str(tmp_path)
+        good = _verdict("blocking", "scientific", "valid")
+        _write_iter(ws, 1, [_formal("f1", 1.5, good)])
+        _write_iter(ws, 2, [_formal("f2", 1.5, good)])
+        state = _restore(ws, 3)
+        assert state.chain_best_valid_formal_provenance["exp_id"] == "f1"
+
+    def test_a_lower_authoritative_score_does_not_replace(self, tmp_path):
+        ws = str(tmp_path)
+        good = _verdict("blocking", "scientific", "valid")
+        _write_iter(ws, 1, [_formal("f1", 2.0, good)])
+        _write_iter(ws, 2, [_formal("f2", 1.0, good)])
+        state = _restore(ws, 3)
+        assert state.chain_best_valid_formal_score == 2.0
+
+    # -- refused, however high the score -----------------------------------
+
+    @pytest.mark.parametrize(
+        ("mode", "authority", "validity", "reason"),
+        [
+            ("blocking", "scientific", "invalid", "gate_invalidated"),
+            ("blocking", "scientific", "unknown", "formal_validity_unknown"),
+            ("blocking", "diagnostic", "valid", "declared_diagnostic"),
+            ("observe_only", "scientific", "valid", "non_blocking_mode"),
+            ("observe_only", "diagnostic", "valid", "declared_diagnostic"),
+        ],
+    )
+    def test_a_non_authoritative_record_never_becomes_the_incumbent(
+        self, tmp_path, capsys, mode, authority, validity, reason
+    ):
+        """MUTATION TARGET: admitting on score alone.
+
+        The score is 99.0 — far above anything else in these tests — so a
+        predicate that consulted the score instead of the verdict would
+        admit every one of these rows.
+        """
+        state = self._one(tmp_path, _formal("hot", 99.0, _verdict(mode, authority, validity)))
+
+        assert state.chain_best_valid_formal_score is None
+        out = capsys.readouterr().out
+        assert "NOT" in out and "authoritative" in out
+        assert reason in out
+
+    def test_a_tampered_verdict_is_refused_not_believed(self, tmp_path, capsys):
+        """MUTATION TARGET: trusting `authoritative` from the dict.
+
+        The record layer holds a plain dict, so a later writer CAN flip the
+        conclusion. What it cannot do is make the conclusion agree with the
+        facts persisted beside it — D-C2b wrote them there precisely so
+        this consumer can re-derive and refuse.
+        """
+        tampered = _verdict("blocking", "diagnostic", "valid")
+        tampered["authoritative"] = True
+        tampered["enters_incumbent_selection"] = True
+        tampered["primary_basis"] = "blocking_scientific_formal_valid"
+        tampered["blocking_reasons"] = []
+
+        state = self._one(tmp_path, _formal("forged", 99.0, tampered))
+
+        assert state.chain_best_valid_formal_score is None
+        assert "verdict_inconsistent_with_its_facts" in capsys.readouterr().out
+
+    def test_a_verdict_claiming_validity_its_iteration_denies_is_refused(self, tmp_path, capsys):
+        """Fact-level tampering, not conclusion-level: the whole verdict is
+        internally consistent, but it asserts its formal round PASSED while
+        the iteration's own commit-time evidence says the blocking gates
+        failed. Consistency alone cannot catch this — the cross-check can.
+
+        Routed through the COMMITTED-FIELDS fast path deliberately, and
+        that is the only way this check is reachable: the
+        persisted-verdicts path already refuses an invalid record via the
+        pre-existing commit-time conjunct, so the predicate never sees it.
+        The fast path instead TRUSTS the committed `best_valid_formal_*`
+        summary — which makes "edit the summary to promote an invalid
+        record" the realistic attack, and this the layer that catches it.
+
+        The materialized effective policy is required: without it the
+        commit-time answer is UNKNOWN rather than INVALID, and an evidence
+        gap is deliberately NOT treated as a contradiction (see
+        `test_a_missing_policy_artifact_is_a_gap_not_a_contradiction`).
+        """
+        from execute_tools.health_checks.config import materialize_effective_config
+
+        ws = str(tmp_path)
+        model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
+        os.makedirs(model_dir, exist_ok=True)
+        _, sha = materialize_effective_config(None, None, model_dir)
+
+        failing = [
+            {
+                "gate_name": gate_id,
+                "execution_status": "passed",
+                "check_passed": False,
+                "would_invalidate_under_production_policy": True,
+                "resolved_action": "invalidate_round",
+            }
+            for gate_id in _BLOCKING_IDS
+        ]
+        _write_iter(
+            ws,
+            1,
+            [
+                _formal(
+                    "liar",
+                    99.0,
+                    _verdict("blocking", "scientific", "valid"),
+                    waiver=None,
+                    verdicts=failing,
+                )
+            ],
+            health_config_sha256=sha,
+            best_valid_formal_score=99.0,
+            best_valid_formal_exp_id="liar",
+        )
+        state = _restore(ws, 2)
+
+        assert state.chain_best_valid_formal_score is None
+        assert "stored_validity_contradicts_commit_time" in capsys.readouterr().out
+
+    def test_a_missing_policy_artifact_is_a_gap_not_a_contradiction(self, tmp_path):
+        """THE SCOPING RULE for the cross-check above.
+
+        With no sha-matching effective-policy artifact the commit-time
+        answer is UNKNOWN. That is an evidence gap, and it must not
+        retroactively condemn a record whose own verdict is coherent — a
+        widened cross-check would empty the incumbent for every workspace
+        whose policy artifact was merely lost.
+
+        Admission still requires the verdict itself to be authoritative,
+        which is what the rest of this class covers.
+        """
+        state = self._one(
+            tmp_path,
+            _formal(
+                "gap",
+                1.4,
+                _verdict("blocking", "scientific", "valid"),
+                waiver=None,
+                verdicts=_passing_verdicts(),
+            ),
+            health_config_sha256="deadbeef" * 8,
+            best_valid_formal_score=1.4,
+            best_valid_formal_exp_id="gap",
+        )
+        assert state.chain_best_valid_formal_score == 1.4
+
+    def test_a_trial_record_is_never_a_formal_incumbent(self, tmp_path):
+        """Pre-existing separation, re-asserted because D-C4 is the
+        checkpoint that decides what MAY update the incumbent."""
+        ws = str(tmp_path)
+        _write_iter(ws, 1, [_record("t1", 99.0, is_trial=True)])
+        state = _restore(ws, 2)
+        assert state.chain_best_valid_formal_score is None
+
+    def test_an_iteration_with_no_formal_record_contributes_nothing(self, tmp_path):
+        ws = str(tmp_path)
+        _write_iter(ws, 1, [])
+        state = _restore(ws, 2)
+        assert state.chain_best_valid_formal_score is None
+
+    # -- the legacy ladder --------------------------------------------------
+
+    def test_a_legacy_record_under_a_declared_output_reconstructs(self, tmp_path):
+        """§12A step 1-2: the record predates the per-record verdict, but
+        its iteration DECLARED its policy, so authority is reconstructable
+        without touching the artifact."""
+        state = self._one(tmp_path, _formal("legacy_ok", 1.7, None))
+        assert state.chain_best_valid_formal_score == 1.7
+        assert state.chain_best_valid_formal_provenance["authority_basis"] == "reconstructed_legacy"
+
+    @pytest.mark.parametrize(
+        ("mode", "authority"),
+        [(None, None), ("blocking", None), (None, "scientific")],
+    )
+    def test_an_undeclared_legacy_record_is_excluded(self, tmp_path, capsys, mode, authority):
+        """§12A step 3. A pre-declaration artifact cannot have its policy
+        reconstructed from nothing, and UNKNOWN is never a licence to
+        assume. A high score does not buy authority, and neither does
+        having been the incumbent under the old rules.
+        """
+        state = self._one(
+            tmp_path,
+            _formal("old_hot", 99.0, None),
+            healthgate_mode=mode,
+            result_authority=authority,
+        )
+        assert state.chain_best_valid_formal_score is None
+        assert "unreconstructable_legacy" in capsys.readouterr().out
+
+    # -- the row that matters most -----------------------------------------
+
+    def test_an_excluded_high_score_does_not_raise_the_bar_for_a_later_one(self, tmp_path):
+        """THE POINT OF THE CHECKPOINT.
+
+        Incumbent 5.0, then a diagnostic 100.0, then an authoritative 6.0.
+        The 100.0 must neither become the incumbent NOR block the 6.0 —
+        if the refused record leaked into the comparison basis it would
+        silently freeze the chain at an unreachable bar, which is worse
+        than admitting it.
+        """
+        ws = str(tmp_path)
+        good = _verdict("blocking", "scientific", "valid")
+        _write_iter(ws, 1, [_formal("base", 5.0, good)])
+        _write_iter(
+            ws, 2, [_formal("diag_hot", 100.0, _verdict("blocking", "diagnostic", "valid"))]
+        )
+        _write_iter(ws, 3, [_formal("real", 6.0, good)])
+
+        state = _restore(ws, 4)
+
+        assert state.chain_best_valid_formal_score == 6.0
+        assert state.chain_best_valid_formal_provenance["exp_id"] == "real"
+        assert state.chain_best_valid_formal_provenance["iter_idx"] == 3
+
+    def test_the_incumbent_identity_is_atomic_with_its_score(self, tmp_path):
+        """Score and identity must come from the SAME admitted record.
+
+        A refused high scorer that updated only the score would leave the
+        previous record's exp_id and iter beside it — provenance that
+        describes a different experiment than the number it accompanies.
+        """
+        ws = str(tmp_path)
+        good = _verdict("blocking", "scientific", "valid")
+        _write_iter(ws, 1, [_formal("base", 5.0, good)])
+        _write_iter(
+            ws, 2, [_formal("diag_hot", 100.0, _verdict("blocking", "diagnostic", "valid"))]
+        )
+
+        state = _restore(ws, 3)
+        prov = state.chain_best_valid_formal_provenance
+
+        assert state.chain_best_valid_formal_score == 5.0
+        assert prov["exp_id"] == "base"
+        assert prov["iter_idx"] == 1
+        assert prov["score"] == 5.0
+        assert prov["authority_basis"] == "stored_verdict"

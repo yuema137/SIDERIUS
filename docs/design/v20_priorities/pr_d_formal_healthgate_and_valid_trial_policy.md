@@ -1,11 +1,12 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 5 of 11 checkpoints complete.**
+**Status: IMPLEMENTATION IN PROGRESS — 6 of 11 checkpoints complete.**
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
-D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (this commit). The
-formal-gate policy is FROZEN in §16 after two read-only audits and the
-operator's negative-infinity bootstrap ruling (2026-08-05). Next: D-C4
-(incumbent exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3
+D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
+`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (this commit). The formal-gate
+policy is FROZEN in §16 after two read-only audits and the operator's
+negative-infinity bootstrap ruling (2026-08-05). Next: D-C5 (aggregation
+and report exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3
 not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
@@ -682,7 +683,7 @@ refusal in addition to the mode↔config check.
 | **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped · **D-C1b `[x]`** five startup refusals at the chain boundary + launcher declares blocking+scientific |
 | **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | **D-C2a `[x]`** pure typed verdict, no call sites (`c8019e77`) · **D-C2b `[x]`** wired to every formal record (`84511954`, reinforced `8985d00f`) |
 | **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[x]` **COMPLETE** — no-winner ⇒ skip, `-inf` bootstrap + provenance, one winner per formal round, JSON-safe persistence. 10/10 mutations caught. See the implementation record under Commit 6 |
-| **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
+| **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[x]` **COMPLETE** — authority is an additional conjunct; fail-closed `resolve_record_authority`; legacy ladder; 10-row matrix; 8/8 mutations. Found and fixed a D-C2b defect: the verdict was silently dropped by `ExperimentRecord` |
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
@@ -1978,6 +1979,220 @@ not change `force_formal_round`'s meaning.
 ---
 
 ### Commit 7 — `D-C4`: incumbent exclusion
+
+#### IMPLEMENTATION RECORD — D-C4 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of the D-C3 reinforcement
+`42a9f679`. Progress **6 / 11**.
+
+**The rule**: only a formal record whose authority verdict is
+`authoritative` may become the chain incumbent. Everything else stays
+fully persisted and readable — the exclusion removes *comparison
+authority*, not the record.
+
+**Behavior Delta — present, and the largest in PR D so far.**
+
+| record | before | after |
+|---|---|---|
+| authoritative, higher score | incumbent | incumbent (unchanged) |
+| gate-invalid / diagnostic / observe-only / validity-unknown | **could become the incumbent** | excluded, reason logged |
+| verdict edited after the fact | believed | refused |
+| pre-declaration legacy artifact | **could become the incumbent** | excluded as `unreconstructable_legacy` |
+
+The last row is the one to be aware of operationally: **a workspace whose
+iterations predate D-C1a carries no incumbent forward.** That follows
+directly from §12A — a record whose declared authority was never recorded
+cannot have it reconstructed, and UNKNOWN is not a licence to assume. The
+operator's rule is explicit: a high score, or having been the incumbent
+under the old rules, does not confer authority.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/scientific_authority.py` | `RecordAuthority` + `resolve_record_authority(...)` — fail-closed resolution for a PERSISTED record |
+| `core/resume.py` | `_formal_candidate_is_authoritative(...)`, applied as an **additional conjunct** in the fold; `authority_basis` added to formal provenance |
+| `agent/schemas/hyperparam_tuning.py` | `ExperimentRecord.scientific_authority` **declared** — see the defect below |
+
+**The real producer → consumer path**
+
+```text
+tuner: final_record["scientific_authority"] = ScientificAuthority.from_context(...)   [D-C2b]
+  → ExperimentRecord (NOW declared — was silently dropped, see below)
+  → run_output_{iter}.json  all_records[]
+  → core/resume.py incumbent fold
+      → _formal_candidate_from_committed_fields | _candidates_from_persisted_verdicts
+      → _formal_candidate_is_authoritative      ← D-C4's conjunct
+          → resolve_record_authority(record, declared_*, commit_time_validity)
+      → state.chain_best_valid_formal_score / _provenance
+  → workflows/model_exploration.py → tuner input current_run_best_formal_score
+  → the D-C3 launch gates
+```
+
+**A REAL DEFECT IN D-C2b, found here and fixed.** `ExperimentRecord`
+declares no `extra` policy, so Pydantic's default `ignore` **silently
+dropped `scientific_authority`** when `all_records` was validated into
+`HyperparamTuningOutput`. D-C2b's verdict therefore never reached
+`run_output_*.json` — the artifact resume actually reads. Verified by
+execution: `model_validate({... "scientific_authority": {...}}).model_dump()`
+did not contain the key. D-C4 cannot function without it, and D-C2b's
+"tamper-evident, recomputable" property was unimplemented in the persisted
+form.
+
+This is the **third** instance in PR D of *emitted into a dict, never
+declared on the schema* (after `formal_comparison_reference_source` and
+its manifest hop). Filed as **FU-D-9** to add one cross-schema test that
+every field the tuner writes into an output-bound dict is declared on the
+receiving model — the per-field shape cannot express that rule.
+
+The field is typed `dict[str, Any] | None`, deliberately, **not** the
+model: `ScientificAuthority` sets `extra="forbid"` and exposes its
+conclusions as computed fields, so its own dump cannot be re-validated
+into it (verified — 5 validation errors). A plain dict is also what the
+tamper-evidence design wants, since the consumer must re-derive rather
+than trust.
+
+**Design decisions, each evidence-determined**
+
+1. **Consume, never re-derive.** `resolve_record_authority` calls
+   `ScientificAuthority.from_context` and nothing else. A test asserts its
+   source contains no `denoising_score`, `health_gate_results`,
+   `_blocking`, `on_fail`, `resolved_action`, `is_trial` or `gate_name` —
+   a second authority implementation is what the predecessor hotfix
+   `af5339ce` existed to delete.
+2. **The stored conclusions are never believed.** The returned `verdict`
+   is always a fresh derivation; every conclusion key the stored block
+   carries must equal it, or the record is refused as
+   `verdict_inconsistent_with_its_facts`. Keys it does *not* carry are not
+   compared, so an older verdict is not condemned for lacking a field that
+   did not exist.
+3. **A narrow fact-level cross-check, beyond the stated requirement.**
+   Conclusion-vs-facts cannot catch a tamperer who edits the *facts*. So a
+   stored `formal_validity: "valid"` contradicted by a commit-time
+   **invalid** is refused (`stored_validity_contradicts_commit_time`).
+   Deliberately scoped to that one weakening contradiction: commit-time
+   **unknown** is an evidence gap, not a contradiction, and widening it
+   would empty the incumbent for every workspace whose effective-policy
+   artifact was merely lost. Both halves are tested.
+   *Reachability note*: this check only bites on the **committed-fields**
+   fast path, because the persisted-verdicts path already refuses an
+   invalid record via the pre-existing commit-time conjunct. That makes
+   "edit the committed `best_valid_formal_*` summary to promote an invalid
+   record" the realistic attack it defends.
+4. **Additional conjunct, not a replacement.** Commit-time validity still
+   gates the candidate pool exactly as before; authority is applied on top.
+5. **The tie rule is untouched** — strictly `>`, so earliest-iteration-wins
+   still falls out of the ascending walk. Mutation C7 (`>` → `>=`) fails
+   2 tests.
+6. **Atomic provenance.** The predicate runs *before* the score/provenance
+   assignment and both come from the same candidate record, so a refused
+   record can never update the score while leaving another record's
+   identity beside it.
+
+**Tests** — the operator's 10-row matrix, all present, driving the real
+`restore_prior_state` over on-disk workspaces:
+
+| new formal | vs incumbent | expected | test |
+|---|---|---|---|
+| authoritative | higher | updates | `test_a_higher_authoritative_score_replaces_a_lower_one` |
+| authoritative | equal | no update (strict `>`) | `test_an_equal_score_does_not_replace` |
+| authoritative | lower | no update | `test_a_lower_authoritative_score_does_not_replace` |
+| invalid, score 99 | higher | no update | `test_a_non_authoritative_record_never_becomes_the_incumbent` |
+| diagnostic, score 99 | higher | no update | ″ |
+| unknown, score 99 | higher | no update | ″ |
+| verdict forged `true` | higher | refused by consistency | `test_a_tampered_verdict_is_refused_not_believed` |
+| legacy, reconstructable | higher | updates | `test_a_legacy_record_under_a_declared_output_reconstructs` |
+| legacy, unreconstructable | higher | no update | `test_an_undeclared_legacy_record_is_excluded` |
+| high non-authoritative, then lower authoritative | — | the later one updates | `test_an_excluded_high_score_does_not_raise_the_bar_for_a_later_one` |
+
+The last row is the one that matters most: incumbent 5.0 → diagnostic
+100.0 → authoritative 6.0 must end at **6.0**. A refused record that
+leaked into the comparison basis would freeze the chain at an unreachable
+bar — worse than admitting it.
+
+Plus `test_the_incumbent_identity_is_atomic_with_its_score`, the trial and
+no-formal-record rows, and 20 unit tests for the typed boundary itself.
+
+**Migrated fixtures.** `_write_iter` (`test_resume_incumbent.py`) and
+`_p1_tune_output` (`test_run_one_iteration.py`) now declare the production
+posture, because those tests are about the incumbent **walk** and
+**manifest attribution** — tie rules, round provenance, repo-policy
+isolation, artifact verification — not about authority. Without the
+declaration every record in them is `unreconstructable_legacy` and the
+behaviour under test never runs. The undeclared case is covered on purpose
+in `TestScientificAuthorityAdmission`.
+
+**Mutations — 8 run, 8 caught**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| C1 | admission predicate bypassed | the full matrix | 14 |
+| C2 | trust the stored `authoritative` flag | tamper + per-conclusion cases | 6 |
+| C3 | commit-time cross-check removed | both contradiction tests | 2 |
+| C4 | legacy assumed authoritative | the undeclared-legacy rows | 6 |
+| C5a | non-Mapping guard removed | malformed-verdict cases | 3 |
+| C5b | validity vocabulary guard weakened | malformed `formal_validity` | 1 |
+| C6 | schema drops the verdict again | the whole matrix | 11 |
+| C7 | tie loosened `>` → `>=` | tie-earliest-wins + equal-score | 2 |
+
+*Recorded honestly*: a first attempt at C5 (`return` → `stored = {}`) was
+an **equivalent mutant** — the next guard catches it — and survived. It
+was replaced with two mutations that genuinely change behaviour rather
+than being reported as a coverage gap.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_resume_incumbent.py` | 39 passed, 1.1 s |
+| `test_scientific_authority.py` | 49 passed, 0.1 s |
+| core + agent + sdsc + execute_tools | 6384 passed, 400 s |
+| full `tests/unit` | 7469 passed, 2 skipped, 4 xfailed, **3 failed** — all three PRE-EXISTING and unrelated; see below |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / ruff format | clean |
+
+> **THE BRANCH IS NOT FULLY GREEN, and this checkpoint did not make it
+> red.** Three tests fail in
+> `tests/unit/sdsc_submission_scripts/test_v19_queue_runner.py`
+> (`TestTheLiveProcessGuardExcludesOnlyItself`): the three cases asserting
+> the guard SHOULD block. The guard is silent, the launch proceeds, and
+> the log reads `screen did not start`.
+>
+> **Proved pre-existing, not assumed.** `git archive` exports of
+> `42a9f679` (D-C3 reinforcement) and `8985d00f` (before D-C3) were run
+> from clean temporary trees with none of the D-C4 changes present: both
+> reproduce the same three failures. They also reproduce 3/3 in isolation,
+> which rules out test-order pollution. D-C4 touches no shell script and
+> no queue-runner test.
+>
+> **What was ruled out**: `ps -eo args` truncation (a 156-char argv, the
+> realistic length, is shown in full), leaked `screen` sessions (only the
+> operator's own 07/31 monitor is present), and
+> `RUNNER_BASENAME` being derived from `$0` (it correctly uses
+> `${BASH_SOURCE[0]##*/}`). The cause is not yet identified; the tests
+> passed on this same box in two full-suite runs earlier the same day,
+> which points at an environment-sensitive process-scan rather than a code
+> change. Sourcing the runner to instrument it is refused by the repo's
+> own launch guard, so the next step needs a different probe.
+>
+> Filed as **FU-D-10**, owned by PR E's guard work. It must be resolved
+> before this PR can merge — which is not yet authorized in any case.
+
+**Follow-ups**
+
+- **FU-D-10** *(new)* — the three `TestTheLiveProcessGuardExcludesOnlyItself`
+  failures above. Pre-existing, unrelated to PR D's subject matter, and a
+  merge blocker.
+- **FU-D-9** *(new)* — one cross-schema test that every field the tuner
+  writes into an output-bound dict is declared on the receiving model.
+  Three instances of the same silent-drop defect in one PR is a pattern,
+  not bad luck, and the per-field shape cannot express the rule.
+- **FU-D-7** unchanged and still deferred.
+
+**Next checkpoint**: D-C5 — aggregation and report exclusion, stated
+deterministically rather than left to the LLM.
+
+---
 
 **1. Goal.** The first commit that changes a decision. Isolated so it can be
 reverted without touching reporting.
