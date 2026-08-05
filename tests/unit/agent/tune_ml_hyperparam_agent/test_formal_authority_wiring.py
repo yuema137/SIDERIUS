@@ -177,3 +177,92 @@ class TestTheTwoValidityVocabulariesAgree:
         from execute_tools.health_checks.schemas import CandidateHealthValidity
 
         assert {m.value for m in CandidateHealthValidity} == set(FormalValidity.__args__)  # type: ignore[attr-defined]
+
+
+class TestNoFormalProducedMeansNoVerdict:
+    """The matrix's last row: an iteration that produced no formal record
+    must not carry a fabricated authority block.
+
+    A verdict invented where no formal round ran would be worse than a
+    missing one — it would look like evidence.
+    """
+
+    def test_a_no_records_manifest_has_no_authority_block(self, tmp_path):
+        from sdsc_submission_scripts.run_one_iteration import write_manifest
+
+        manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[])
+
+        assert manifest["status"] == "no_records"
+        assert "scientific_authority" not in manifest
+
+    def test_a_failed_manifest_has_no_authority_block(self, tmp_path):
+        from sdsc_submission_scripts.run_one_iteration import write_manifest
+
+        manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[], crashed=True)
+
+        assert manifest["status"] == "failed"
+        assert "scientific_authority" not in manifest
+
+    def test_those_branches_still_record_the_declaration_as_null(self, tmp_path):
+        """D-C1a's rule, re-asserted here because it is what makes the
+        absence above readable: `null` says "no tuner output", which is
+        different from "authority was refused"."""
+        from sdsc_submission_scripts.run_one_iteration import write_manifest
+
+        manifest = write_manifest(iter_dir=str(tmp_path), run_name="r", results=[])
+
+        assert manifest["healthgate_mode"] is None
+        assert manifest["result_authority"] is None
+
+
+class TestThePersistedVerdictIsTamperEvident:
+    """The record layer holds a plain dict, so nothing can stop a later
+    writer mutating it. What CAN be guaranteed is that tampering is
+    detectable: the facts are persisted alongside the conclusions, so the
+    verdict is recomputable from its own record.
+    """
+
+    def test_the_persisted_conclusions_match_a_recomputation_from_its_facts(self):
+        persisted = _verdict_for(_record(passed=False), "blocking", "diagnostic").model_dump()
+
+        recomputed = ScientificAuthority.from_context(
+            healthgate_mode=persisted["healthgate_mode"],
+            declared_result_authority=persisted["declared_result_authority"],
+            formal_validity=persisted["formal_validity"],
+        ).model_dump()
+
+        assert persisted == recomputed
+
+    def test_a_tampered_conclusion_no_longer_matches_its_facts(self):
+        """MUTATION TARGET, in the data rather than the code: flipping
+        `authoritative` in a persisted record is detectable precisely
+        because the facts travel with it."""
+        persisted = _verdict_for(_record(passed=False), "blocking", "diagnostic").model_dump()
+        persisted["authoritative"] = True
+
+        recomputed = ScientificAuthority.from_context(
+            healthgate_mode=persisted["healthgate_mode"],
+            declared_result_authority=persisted["declared_result_authority"],
+            formal_validity=persisted["formal_validity"],
+        )
+
+        assert recomputed.authoritative is False
+        assert persisted["authoritative"] != recomputed.authoritative
+
+    def test_the_tuner_never_writes_into_the_persisted_block(self):
+        """Structural: the verdict is assigned once, whole. A later
+        `final_record["scientific_authority"][...] = ...` would be a second
+        authority editing the first."""
+        # Read the source directly rather than reaching into another
+        # class's `setup_class` attribute — that would make this test
+        # depend on collection order, which is how a guard silently
+        # becomes a no-op against `None`.
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[4]
+            / "nodes"
+            / "ml_hyperparameter_tune_agent"
+            / "ml_hyperparameter_tune_agent.py"
+        ).read_text(encoding="utf-8")
+        assert 'final_record["scientific_authority"][' not in src

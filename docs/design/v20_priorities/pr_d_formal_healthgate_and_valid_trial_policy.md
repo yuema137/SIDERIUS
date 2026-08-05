@@ -1478,6 +1478,30 @@ vocabularies cannot drift apart in separate modules.
    known flake left in CI is worse than the small out-of-scope edit, and
    it was mine.
 
+**Coverage gap closed after review (same checkpoint, follow-up commit).**
+Re-checking D-C2b against the operator's stated matrix found two rows the
+first commit did not assert:
+
+- *"no formal produced → no fabricated verdict"*. Now asserted on both
+  non-completed manifest branches: `no_records` and `failed` carry **no**
+  `scientific_authority` key, while still recording the declaration as
+  `null`. A verdict invented where no formal round ran would be worse
+  than a missing one — it would look like evidence.
+- *"the record writer cannot override the derived fields"*. D-C2a's
+  `extra="forbid"` protects the model, but the record holds a plain dict
+  and nothing can stop a later writer mutating it. What **can** be
+  guaranteed is that tampering is **detectable**: the facts are persisted
+  beside the conclusions, so the verdict is recomputable from its own
+  record. Asserted both ways — a clean record recomputes identically, and
+  a record with `authoritative` flipped no longer matches its own facts.
+  Plus a structural check that the tuner never writes *into* the
+  persisted block.
+
+Six further tests (21 in the file). One of them initially read another
+test class's `setup_class` attribute, which made it depend on collection
+order — a guard that silently becomes a no-op against `None`. Rewritten to
+read the source directly and verified in isolation.
+
 **Next authorized checkpoint**: D-C3 — the formal-launch correction, and
 the first checkpoint in this PR that changes launch behaviour.
 
