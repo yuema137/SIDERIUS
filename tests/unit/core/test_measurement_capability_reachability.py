@@ -217,9 +217,31 @@ class TestTheWorkflowIsSuppliedACapability:
         assert available is False
         assert "no measurement capability was resolved" in detail
 
-    def test_a_real_launch_would_now_find_the_capability_available(self):
-        """End to end for the property that actually failed."""
+    def test_supplying_a_capability_changes_the_REASON_not_just_the_answer(self):
+        """The property that actually failed, stated PORTABLY.
+
+        The first version asserted `available is True`, which needs CUDA
+        and a dataset — it passed on the GPU box and failed CI, where
+        neither exists. That is the machine-dependent-assertion defect the
+        repository's portability rule names, and a green local run was no
+        evidence of it.
+
+        The real property is environment-INDEPENDENT and is the whole
+        point of the fix: once a capability is supplied, the guard reports
+        the TASK's own reason. It can still refuse — on a CPU runner it
+        says "no CUDA device is visible" — but it must never again say
+        "no measurement capability was resolved by the caller", which is
+        the failure that aborted a real launch while the dataset was in
+        fact available.
+        """
         capability = resolve_tidmad_measurement_capability()
         available, detail = probe_runner_availability(capability)
-        assert available, f"probe runner unavailable: {detail}"
-        assert "no measurement capability was resolved" not in detail
+
+        assert "no measurement capability was resolved" not in detail, (
+            "supplying a capability did not reach the guard"
+        )
+        assert capability.task_identity in detail or detail == capability.detail, (
+            f"the guard did not report the task's own reason: {detail!r}"
+        )
+        # Availability itself is a property of the MACHINE, not of the fix.
+        assert isinstance(available, bool)
