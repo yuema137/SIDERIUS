@@ -1,17 +1,21 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION 10 of 10. FINAL ACCEPTANCE FAILED.**
+**Status: IMPLEMENTATION 10 of 10. PREDECESSORS CLEARED. GATE 2 PENDING.**
 Gate 1 PASSED. **Gate 2 attempt 1 FAILED** (§19) — no formal round
-completed, so G2-1 is not established. PR D's own declaration-loss defect is
-fixed (§19.1). Two runtime-control defects remain and BOTH block final
-acceptance: a narrow attribution/lifecycle hotfix, and a PR C
-occupancy-policy correction — stable external GPU occupancy must not
-invalidate a calibration. Plan in **§20, awaiting operator review**. PR D is
-NOT ready for merge.
+completed, so G2-1 is **not established**, and no acceptance language applies
+until a Gate 2 actually passes. All three defects that attempt 1 exposed are
+now closed: PR D's own declaration loss (§19.1, `735031ab`), the probe
+attribution/lifecycle hotfix (**PR #175**, `f99650a4`), and the PR C
+occupancy-policy correction (**PR #176**, `e4b2aff8`) — stable external GPU
+occupancy no longer invalidates a calibration. Both predecessors are merged
+to master and integrated here. Remaining: freeze the exact head, full local
+validation, full CI, then Gate 2's three-case matrix (§20.4) on that same
+head, then `reports/v20_prerequisite_review.md` (§20.5). PR D is **NOT ready
+for merge**.
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
-closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (`09be3357`), Gate 1 fix (`3172bc4c`), D-C8 (this commit). The formal-gate policy is FROZEN in §16 after two
+closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (`09be3357`), Gate 1 fix (`3172bc4c`), D-C8 (`3114e031`), declaration fix (`735031ab`). The formal-gate policy is FROZEN in §16 after two
 read-only audits and the operator's negative-infinity bootstrap ruling
 (2026-08-05).
 
@@ -3245,8 +3249,8 @@ This section is the plan to close both before PR D's final acceptance.
 | item | status |
 |---|---|
 | the two-PR split | **APPROVED in direction** |
-| PR 1, the narrow hotfix (§20.2) | **AUTHORIZED** — may be completed, opened and taken to CI-green |
-| PR 2, the occupancy correction (§20.3) | **design direction approved; implementation NOT authorized** |
+| PR 1, the narrow hotfix (§20.2) | **MERGED** as PR #175 (`f99650a4`) |
+| PR 2, the occupancy correction (§20.3) | **T0 adopted, implemented and MERGED** as PR #176 (`e4b2aff8`) |
 
 PR 2 requires a typed-boundary and stability-tolerance **design audit**,
 reviewed, before any implementation begins. The corrections the operator
