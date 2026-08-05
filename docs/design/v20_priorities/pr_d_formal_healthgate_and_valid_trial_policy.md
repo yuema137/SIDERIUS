@@ -3789,6 +3789,43 @@ MeasurementValidity verdict
 final admission decision
 ```
 
+**The launch commands**, pinned so both cases are reproducible and so the
+difference between them is visible as one variable:
+
+```bash
+# Case A — positive path. Fresh workspace; the flag attempt 1 did NOT set.
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /tmp/gate2_case_a \
+    --run_name gate2_case_a \
+    --num_iterations 1 --max_rounds 2 --max_epochs 1 \
+    --trial_portion 0.02 --formal_portion 0.02 \
+    --healthgate_mode blocking \
+    --result_authority scientific \
+    --enable_chain_incumbent_formal_gates
+
+# Case B — identical, plus a controlled external load already running.
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /tmp/gate2_case_b \
+    --run_name gate2_case_b \
+    --num_iterations 1 --max_rounds 2 --max_epochs 1 \
+    --trial_portion 0.02 --formal_portion 0.02 \
+    --healthgate_mode blocking \
+    --result_authority scientific \
+    --enable_chain_incumbent_formal_gates
+```
+
+Both are **cold-start** — no `--seed_paths` — per the standing rule for real
+training gate runs. Attempt 1 omitted
+`--enable_chain_incumbent_formal_gates`, which is why it could not have
+exercised the incumbent path at all.
+
+**Case B's external load** is the bounded harness described above: one
+process, one GPU, a steady block plus a periodic second block so bytes
+fluctuate while the PID set does not, with a memory ceiling and a hard
+deadline. Verified before use on this host — PID stable, allocation
+oscillating 4.00 ↔ 5.50 GiB, clean release back to the 273 MiB baseline with
+no leaked process.
+
 **Case C — unstable or unattributable activity.** Proved by
 **deterministic/synthetic tests**, which can construct these windows exactly
 and reproducibly. A real GPU case is added **only if** the code audit shows
