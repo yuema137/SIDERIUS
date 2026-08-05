@@ -5717,6 +5717,16 @@ class HyperparamTuningAgent:
                 "model_type": model_type_setting,
                 "file_index": file_index,
                 "status": "failed",
+                # V20 PR D — the DECLARATION is a launch fact, validated at
+                # the D-C1b boundary before any work began. It does not stop
+                # existing because the tuner later failed, so every
+                # post-launch branch carries it. Sourced from the validated
+                # input, never echoed back from a healthy output that may
+                # not exist. (Gate 2 attempt 1 found this: a real run
+                # launched with --healthgate_mode blocking wrote
+                # healthgate_mode: null because it failed.)
+                "healthgate_mode": agent_input.healthgate_mode,
+                "result_authority": agent_input.result_authority,
                 "completed_rounds": completed_rounds,
                 "total_attempts": total_attempts,
                 "formal_reference_score": _json_safe_reference(formal_reference_score),

@@ -363,6 +363,8 @@ def write_manifest(
     results: list,
     *,
     crashed: bool = False,
+    healthgate_mode: str | None = None,
+    result_authority: str | None = None,
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
     health_feedback_policy: dict | None = None,
@@ -511,13 +513,30 @@ def write_manifest(
     # is exactly when "was this run even allowed to be authoritative?" has
     # to be answerable.
     #
-    # Read off the tuner output rather than re-derived here, so the manifest
-    # cannot claim a posture the run did not actually carry. `None` on a
-    # crashed branch with no tune_output means undeclared, which downstream
-    # reads as "authority not establishable from the declaration" — never as
-    # a silent `blocking`.
-    manifest["healthgate_mode"] = getattr(tune_output, "healthgate_mode", None)
-    manifest["result_authority"] = getattr(tune_output, "result_authority", None)
+    # V20 PR D — the DECLARATION is a validated LAUNCH fact, not a
+    # tuner-result field. D-C1b refuses the launch outright unless both axes
+    # are declared and consistent, so by the time any artifact is written
+    # they exist — whether the iteration completed, produced no records,
+    # degraded, or crashed.
+    #
+    # CORRECTED after Gate 2 attempt 1: this previously read the posture off
+    # `tune_output` and wrote `null` whenever the tuner produced none. A real
+    # chain launched with `--healthgate_mode blocking` therefore recorded
+    # `healthgate_mode: null` because it failed, which makes its records
+    # `unreconstructable_legacy` under D-C4 even though the run DID declare
+    # its posture. The caller's validated declaration is authoritative; the
+    # tuner output is only a fallback for callers that predate this
+    # parameter.
+    manifest["healthgate_mode"] = (
+        healthgate_mode
+        if healthgate_mode is not None
+        else getattr(tune_output, "healthgate_mode", None)
+    )
+    manifest["result_authority"] = (
+        result_authority
+        if result_authority is not None
+        else getattr(tune_output, "result_authority", None)
+    )
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -1559,7 +1578,14 @@ def main():
         resolved_seeds = resolve_source_paths(args.seed_paths)
     except (FileNotFoundError, ValueError) as e:
         print(f"FAIL: Could not resolve seed source paths: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+        )
         sys.exit(1)
 
     # Step 2 — soul restoration. For start_iteration > 1, this re-registers
@@ -1575,7 +1601,14 @@ def main():
         expected_invariants = compute_expected_invariants(args)
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+        )
         sys.exit(1)
 
     try:
@@ -1587,7 +1620,14 @@ def main():
         )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+        )
         sys.exit(1)
 
     if state.committed_iters:
@@ -1788,18 +1828,35 @@ def main():
             f"prevent telemetry corruption.",
             file=sys.stderr,
         )
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+        )
         sys.exit(2)
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+        )
         sys.exit(1)
 
     manifest = write_manifest(
         iter_dir,
         run_name,
         results,
+        # V20 PR D: the validated launch declaration, on every branch.
+        healthgate_mode=args.healthgate_mode,
+        result_authority=args.result_authority,
         # V19 PR 1 (Invariant II): the chain incumbent this iteration
         # consumed, stamped under its own keys — never as an
         # iteration-local best_* field. ``used`` reflects the coupling

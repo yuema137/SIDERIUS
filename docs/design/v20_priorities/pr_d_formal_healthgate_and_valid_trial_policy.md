@@ -1,8 +1,10 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION COMPLETE — 10 of 10 checkpoints.** Gate 1 PASSED.
-Remaining before merge: full CI on the exact head, then the final integrated
-V20 Gate 2 on that same head.
+**Status: IMPLEMENTATION 10 of 10. FINAL ACCEPTANCE FAILED.**
+Gate 1 PASSED. **Gate 2 attempt 1 FAILED** (§19) — no formal round
+completed, so G2-1 is not established. Two root causes: a runtime-control
+probe-evidence defect (separate predecessor hotfix) and PR D's own
+declaration-loss defect (§19.1, fixed). PR D is NOT ready for merge.
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
@@ -3152,6 +3154,102 @@ These are jointly unsatisfiable.
 **Ready for implementation once D-C1/D-C3 carry the 15.C ruling.** No stop
 condition in §11 was triggered: no historical artifact needs rewriting, no
 scientific threshold changes, and GPU admission and O-7 are untouched.
+
+
+---
+
+## 19. Gate 2 attempt 1 — FAILED, 2026-08-05
+
+**Recorded as a failed acceptance attempt, not discarded work.** It did not
+establish G2-1 and PR D is NOT accepted on its basis.
+
+```text
+SHA under test   a09caa52   (full CI PASS on this head)
+workspace        /tmp/gate2_final
+config           1 iteration, ≤2 rounds, portions 0.02, 1 epoch,
+                 --healthgate_mode blocking --result_authority scientific
+hardware         RTX 5090, 274 MiB used at start, no external occupancy
+wall time        41m45s (09:50:35 → 10:32:20)
+outcome          chain halted; status=failed; best_score=None
+```
+
+### Confirmed on the real production path
+
+| property | evidence |
+|---|---|
+| the launch-guard hotfix is reachable | `[RUNTIME] Launch self-test passed (8 checks) \| probe_runner=tidmad_denoise: measurable on RTX 5090` |
+| real training executed | 3125 steps, `Epoch 0 \| Avg Loss: 4.225857` |
+| strict-JSON safety | 34 artifacts, **no `Infinity` / `-Infinity` / `NaN`** |
+| D-C3 provenance reaches a real artifact | `formal_comparison_reference_source: 'gates_disabled'` |
+| D-C6 reaches a real artifact | `trial_validity_feedback` present: 0 gate-invalid, 0 unknown, 1 execution failure |
+| **the two carriers stay distinct** | `[trial-validity] … 1 execution failures` AND `[gate-exhaustion] … 2 time-gated` fired separately — the real-path proof of D-C6's deviation |
+
+### Why it failed
+
+**1. Runtime-control infrastructure failure** (`probe_lifecycle.py:191`):
+
+```text
+policy still requests a probe after a completed, persisted probe —
+the measured evidence was not consumed (invariant failure)
+```
+
+Masked until now: the launch guard aborted before the probe path was
+reachable, so fixing that defect exposed the next one behind it. NOT PR D
+code. Owned by a separate predecessor hotfix
+(`fix/runtime-probe-evidence-consumption`); the invariant is correct and
+stays fail-closed.
+
+**2. PR D's own defect — the launch declaration was lost on failure.** See
+§19.1.
+
+### Not a defect
+
+The two `skipped_time_risk` formal records carry no `scientific_authority`.
+They never scored, so there is no formal RESULT to have authority over.
+Fabricating a verdict for an uncompleted round would be worse than its
+absence.
+
+### Not established
+
+G2-1 entirely: no formal round completed, so no real authority verdict and
+no real resume admission. The run also had `coupling=OFF`
+(`[chain_incumbent] provided=none; coupling=OFF; consumed=none`), so the
+`-inf` bootstrap, the skip gate and the bypass gate were not exercised
+either. **The final Gate 2 must enable the chain-incumbent formal gates.**
+
+### 19.1 The declaration-loss defect and its correction
+
+**Superseding the earlier D-C1a reasoning**, which this document recorded as
+deliberate: *"`None` on a crashed branch with no tune_output means
+undeclared"*. That was wrong.
+
+`healthgate_mode` and `result_authority` are **validated LAUNCH
+declarations**, not tuner-result fields. D-C1b refuses the launch outright
+unless both are declared and consistent, so by the time any artifact is
+written they exist — regardless of what the tuner later did.
+
+Measured: a chain launched with `--healthgate_mode blocking` wrote
+`healthgate_mode: null`, because both the tuner's degraded output dict and
+`write_manifest` sourced the posture from a healthy `tune_output` that never
+existed. Under D-C4 those records become `unreconstructable_legacy` — a
+failed iteration made to look like a pre-declaration artifact, which it is
+not.
+
+Corrected: every post-launch branch (completed, no-records, degraded,
+crashed) writes the declaration from the **validated launch input**. Six
+`write_manifest` call sites plus the tuner's failed-output dict. Fail-closed
+is preserved — a caller genuinely outside the contract still records `null`,
+never a defaulted `blocking`.
+
+FU-D-9 extended to the degraded and failure branches, which it had not
+covered. Mutations, all caught: manifest reverts to the tuner output (3);
+tuner degraded dict drops it (1); one crashed branch stops declaring (1);
+an undeclared caller gets a default (1).
+
+> The call-site test initially used a substring count and a mutation proved
+> it useless — it tolerated one missing site, so removing the declaration
+> from a crashed branch still passed. Rewritten to check every
+> `write_manifest` **call node** via AST.
 
 
 ---
