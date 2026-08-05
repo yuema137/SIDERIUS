@@ -67,26 +67,56 @@ def test_no_valid_trial_returns_none() -> None:
     assert _best_trial_winner([_trial("collapsed", 9.0, healthy=False)]) is None
 
 
+def _skip(records, *, threshold, gates_enabled=True) -> bool:
+    """Records → winner → gate, exactly as the tuner sequences it (D-C3).
+
+    The gates now take an already-resolved winner so that skip, bypass and
+    formal-plan inheritance all judge the same record. Routing through the
+    real `_best_trial_winner` here is what keeps "a collapsed trial can
+    never open a gate" an assertion rather than an assumption.
+    """
+    return _should_skip_formal(
+        _best_trial_winner(records), threshold=threshold, gates_enabled=gates_enabled
+    )
+
+
+def _bypass(records, *, threshold) -> bool:
+    """Records → winner → gate. See :func:`_skip`."""
+    return _should_bypass_formal_time_budget(_best_trial_winner(records), threshold=threshold)
+
+
 def test_skip_formal_uses_valid_candidate_and_zero_reference() -> None:
     # V19 PR 1: the helpers take the RESOLVED threshold
     # (reference 0.0 + delta 0.0 → 0.0).
-    assert _should_skip_formal([_trial("valid", -0.1)], threshold=0.0)
-    assert not _should_skip_formal([_trial("valid", 0.0)], threshold=0.0)
-    assert not _should_skip_formal([_trial("collapsed", 9.0, healthy=False)], threshold=0.0)
-    # None threshold (no chain incumbent) → never fires, even on a
-    # score that would fail any numeric threshold.
-    assert not _should_skip_formal([_trial("valid", -99.0)], threshold=None)
+    assert _skip([_trial("valid", -0.1)], threshold=0.0)
+    assert not _skip([_trial("valid", 0.0)], threshold=0.0)
+    # A collapsed trial scoring 9.0 cannot become the winner, so it can
+    # never hold the formal round open. D-C3 changes the OUTCOME while
+    # keeping that defect class: with no valid winner the round is now
+    # skipped for lack of evidence, where it previously ran anyway.
+    assert _skip([_trial("collapsed", 9.0, healthy=False)], threshold=0.0)
+    # ...and the reason is the absent winner, not the 9.0: the same
+    # verdict holds at a threshold the score would trivially clear.
+    assert _skip([_trial("collapsed", 9.0, healthy=False)], threshold=-100.0)
+    # With the gates switched off the pre-V20 behaviour survives: no
+    # valid winner, and the round still runs.
+    assert not _skip([_trial("collapsed", 9.0, healthy=False)], threshold=None, gates_enabled=False)
+    # A None threshold with a real winner → never fires, even on a score
+    # that would fail any numeric threshold.
+    assert not _skip([_trial("valid", -99.0)], threshold=None)
 
 
 def test_bypass_uses_valid_candidate_and_half_point_threshold() -> None:
     # Resolved threshold: reference 0.0 + delta 0.5 → 0.5.
-    assert not _should_bypass_formal_time_budget([_trial("valid", 0.49)], threshold=0.5)
-    assert _should_bypass_formal_time_budget([_trial("valid", 0.5)], threshold=0.5)
-    assert not _should_bypass_formal_time_budget(
-        [_trial("collapsed", 9.0, healthy=False)], threshold=0.5
-    )
-    # None threshold (no chain incumbent) → never fires.
-    assert not _should_bypass_formal_time_budget([_trial("valid", 99.0)], threshold=None)
+    assert not _bypass([_trial("valid", 0.49)], threshold=0.5)
+    assert _bypass([_trial("valid", 0.5)], threshold=0.5)
+    # The bypass side of the same defect class, and here the outcome is
+    # UNCHANGED by D-C3: an invalid trial must never buy a time-budget
+    # bypass, whatever it scored.
+    assert not _bypass([_trial("collapsed", 9.0, healthy=False)], threshold=0.5)
+    assert not _bypass([_trial("collapsed", 9.0, healthy=False)], threshold=float("-inf"))
+    # None threshold (no chain incumbent, gates off) → never fires.
+    assert not _bypass([_trial("valid", 99.0)], threshold=None)
 
 
 def test_failed_nontrial_and_contradictory_records_are_excluded() -> None:

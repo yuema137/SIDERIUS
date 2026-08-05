@@ -1259,40 +1259,62 @@ def _best_trial_winner(memory_history: list) -> dict | None:
 
 
 def _should_skip_formal(
-    memory_history: list,
+    winner: dict | None,
     *,
     threshold: float | None,
+    gates_enabled: bool,
 ) -> bool:
-    """Return whether the best valid trial falls below the formal threshold.
+    """Whether to skip the formal round.
 
-    ``threshold`` is the RESOLVED value from
-    ``_resolve_formal_comparison_thresholds`` — the single source of the
-    gate arithmetic (V19 PR 1). ``None`` (no chain incumbent) means the
-    gate never fires.
+    Takes the ALREADY-RESOLVED winner so that the skip gate, the bypass
+    gate and the formal plan inheritance all judge the same record. Three
+    independent `_best_trial_winner` calls would agree today only because
+    the history does not change between them — a coincidence, not a
+    guarantee.
+
+    Two reasons to skip, and the first is V20 PR D's correction:
+
+    - **no valid trial winner** — no trial ran, all failed, or none passed
+      its HealthGate. There is no evidence that justifies the cost of a
+      formal round. Previously this returned ``False`` (via
+      ``winner is not None and …``), so *absence of evidence* was
+      indistinguishable from *sufficient evidence* and the round ran
+      anyway. A high-scoring INVALID trial cannot change this: it never
+      becomes the winner.
+    - the winner is below the skip threshold.
+
+    ``gates_enabled`` is the feature switch. With the gates off this
+    behaves exactly as before — including running formal with no valid
+    winner — because the deltas are not consumed at all.
     """
 
+    if not gates_enabled:
+        return False
+    if winner is None:
+        return True
     if threshold is None or threshold == float("-inf"):
         return False
-    winner = _best_trial_winner(memory_history)
-    return winner is not None and winner["denoising_score"] < threshold
+    return winner["denoising_score"] < threshold
 
 
 def _should_bypass_formal_time_budget(
-    memory_history: list,
+    winner: dict | None,
     *,
     threshold: float | None,
 ) -> bool:
-    """Return whether the best valid trial clears the formal bypass threshold.
+    """Whether the winner clears the bypass threshold.
 
-    ``threshold`` is the RESOLVED value from
-    ``_resolve_formal_comparison_thresholds``. ``None`` (no chain
-    incumbent) means the gate never fires.
+    Takes the same resolved winner the skip gate judged. On a chain with
+    no formal incumbent the threshold resolves to ``-inf`` (the
+    ``negative_infinity_bootstrap``), so the first valid trial always
+    clears it and establishes the chain's first formal baseline.
     """
 
+    if winner is None:
+        return False
     if threshold is None or threshold == float("inf"):
         return False
-    winner = _best_trial_winner(memory_history)
-    return winner is not None and winner["denoising_score"] >= threshold
+    return winner["denoising_score"] >= threshold
 
 
 def _resolve_formal_comparison_thresholds(
@@ -1300,10 +1322,12 @@ def _resolve_formal_comparison_thresholds(
     reference_score: float | None,
     skip_min_delta: float,
     bypass_min_delta: float,
-) -> tuple[float | None, float | None, float | None]:
+    gates_enabled: bool,
+) -> tuple[float | None, float | None, float | None, str]:
     """Resolve invocation-wide formal comparison values once.
 
-    The returned tuple is ``(reference, skip_threshold, bypass_threshold)``.
+    The returned tuple is
+    ``(reference, skip_threshold, bypass_threshold, source)``.
     V19 PR 1: this is the SINGLE authoritative computation — the gates,
     the startup banner, and the durable output metadata all consume these
     values, so the persisted thresholds provably equal what the gates
@@ -1312,12 +1336,60 @@ def _resolve_formal_comparison_thresholds(
     """
 
     if reference_score is None:
-        return (None, None, None)
+        if not gates_enabled:
+            # Feature off: the deltas are not consumed, so nothing is
+            # resolved and both gates stay inert — pre-V20 behaviour,
+            # unchanged.
+            return (None, None, None, "gates_disabled")
+        # V20 PR D §16.C — the negative-infinity bootstrap. A chain with
+        # no restored HealthGate-valid formal incumbent has no reference,
+        # and the pre-D behaviour was for both gates to fall silent: a
+        # valid trial of 0.001 proceeded to formal, while an excellent
+        # trial was still budget-blocked because bypass could not fire.
+        # That is the v15 failure the bypass gate was written to fix,
+        # reappearing because the reference is absent.
+        #
+        # -inf arms them instead: the first valid trial is never skipped,
+        # always clears the bypass threshold, and establishes the chain's
+        # first formal baseline. From the next iteration the restored
+        # incumbent takes over and the gates tighten as the chain improves.
+        #
+        # There is no seeded artifact to use instead: every documented
+        # paper baseline is trained-but-collapsed, and the historical seed
+        # (5.5763) is the class-127 phantom.
+        bootstrap = float("-inf")
+        return (bootstrap, bootstrap, bootstrap, "negative_infinity_bootstrap")
     return (
         reference_score,
         reference_score + skip_min_delta,
         reference_score + bypass_min_delta,
+        "restored_valid_formal_incumbent",
     )
+
+
+def _json_safe_reference(value: float | None) -> float | None:
+    """A reference or threshold that JSON can actually carry.
+
+    ``-inf`` is a RESOLVER value, never a stored one (§16.C). Non-standard
+    JSON ``Infinity`` is rejected by strict parsers, and `29ec0542` removed
+    a fixed ``0.0`` default precisely because a stored sentinel became a
+    silent policy — so an infinite bound persists as ``null`` and
+    ``formal_comparison_reference_source`` carries the meaning instead.
+
+    This also covers the pre-existing case of an operator explicitly
+    disabling a gate with ``float("-inf")`` / ``float("inf")``, which could
+    already put ``Infinity`` in an artifact.
+
+    The test is ``math.isfinite``, deliberately, and NOT
+    ``value in (-inf, +inf)``: that form compares by equality, and **NaN is
+    not equal to itself**, so a NaN threshold would slip through and
+    ``json.dump`` (whose ``allow_nan`` defaults to ``True``) would write a
+    bare ``NaN`` into the artifact. One finite check covers all three
+    non-standard values.
+    """
+    if value is None or not math.isfinite(value):
+        return None
+    return value
 
 
 def _fmt_reference(value: float | None) -> str:
@@ -3285,8 +3357,10 @@ class HyperparamTuningAgent:
             formal_reference_score,
             resolved_skip_formal_threshold,
             resolved_bypass_formal_threshold,
+            formal_reference_source,
         ) = _resolve_formal_comparison_thresholds(
             reference_score=_consumed_reference,
+            gates_enabled=agent_input.enable_chain_incumbent_formal_gates,
             skip_min_delta=agent_input.skip_formal_min_delta,
             bypass_min_delta=agent_input.bypass_formal_time_budget_min_delta,
         )
@@ -3301,9 +3375,12 @@ class HyperparamTuningAgent:
             "max_rounds": max_rounds,
             "file_index": file_index,
             "trial_allowed": trial_allowed,
-            "formal_reference_score": formal_reference_score,
-            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            "formal_reference_score": _json_safe_reference(formal_reference_score),
+            "formal_comparison_reference_source": formal_reference_source,
+            "resolved_skip_formal_threshold": _json_safe_reference(resolved_skip_formal_threshold),
+            "resolved_bypass_formal_threshold": _json_safe_reference(
+                resolved_bypass_formal_threshold
+            ),
             # V19 PR 1 audit provenance: the provided incumbent and the
             # coupling-flag state, so "provided but not consumed" (flag
             # OFF) is distinguishable from "no incumbent existed".
@@ -3473,24 +3550,43 @@ class HyperparamTuningAgent:
             # the startup-resolved value (V19 PR 1: single-source
             # arithmetic; ``None`` = no chain incumbent = gate inert).
             # Disabled by ``skip_formal_min_delta=float('-inf')``.
+            # V20 PR D (D-C3): the winner is resolved ONCE here and reused
+            # by the skip gate, the bypass gate and the log line below.
+            # Three independent `_best_trial_winner` calls would agree only
+            # because the history does not change between them — a
+            # coincidence, not a guarantee.
+            formal_trial_winner = _best_trial_winner(sandbox.get_summary() or [])
             if (
                 is_formal_round
                 and agent_input.force_formal_round
                 and _should_skip_formal(
-                    sandbox.get_summary() or [],
+                    formal_trial_winner,
                     threshold=resolved_skip_formal_threshold,
+                    gates_enabled=agent_input.enable_chain_incumbent_formal_gates,
                 )
             ):
-                _winner = _best_trial_winner(sandbox.get_summary() or [])
+                _winner = formal_trial_winner
                 _best_trial_score = _winner.get("denoising_score") if _winner is not None else None
-                print(
-                    f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
-                    f"reference({_fmt_reference(formal_reference_score)}) "
-                    f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
-                    f"{_fmt_reference(resolved_skip_formal_threshold)} — "
-                    "skipping formal round.",
-                    flush=True,
-                )
+                if _best_trial_score is None:
+                    # D-C3's correction: no valid trial winner is no
+                    # evidence, and no evidence does not justify the cost
+                    # of a formal round. Previously this case returned
+                    # False and the round ran anyway.
+                    print(
+                        "\n  [SkipFormal] no HealthGate-valid trial winner in this "
+                        "iteration (reason=no_valid_trial_winner) — skipping the "
+                        "formal round rather than spending it on no evidence.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
+                        f"reference({_fmt_reference(formal_reference_score)}) "
+                        f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
+                        f"{_fmt_reference(resolved_skip_formal_threshold)} — "
+                        "skipping formal round.",
+                        flush=True,
+                    )
                 break  # exit the while loop; this iter has no formal score
 
             for attempt_in_round in range(1, N + 1):
@@ -4142,12 +4238,14 @@ class HyperparamTuningAgent:
                         if (
                             is_formal_round
                             and not time_check.get("feasible", True)
+                            # D-C3: the SAME winner the skip gate judged,
+                            # resolved once at the formal-round boundary.
                             and _should_bypass_formal_time_budget(
-                                memory_history,
+                                formal_trial_winner,
                                 threshold=resolved_bypass_formal_threshold,
                             )
                         ):
-                            _winner = _best_trial_winner(memory_history)
+                            _winner = formal_trial_winner
                             _best_trial_score = (
                                 _winner.get("denoising_score") if _winner is not None else None
                             )
@@ -5350,9 +5448,12 @@ class HyperparamTuningAgent:
             "result_authority": agent_input.result_authority,
             "health_checks_config_source": health_checks_config_source,
             "health_config_sha256": health_config_sha256,
-            "formal_reference_score": formal_reference_score,
-            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            "formal_reference_score": _json_safe_reference(formal_reference_score),
+            "formal_comparison_reference_source": formal_reference_source,
+            "resolved_skip_formal_threshold": _json_safe_reference(resolved_skip_formal_threshold),
+            "resolved_bypass_formal_threshold": _json_safe_reference(
+                resolved_bypass_formal_threshold
+            ),
             "status": run_status,
             "completed_rounds": completed_rounds,
             "total_attempts": total_attempts,
@@ -5441,9 +5542,14 @@ class HyperparamTuningAgent:
                 "status": "failed",
                 "completed_rounds": completed_rounds,
                 "total_attempts": total_attempts,
-                "formal_reference_score": formal_reference_score,
-                "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-                "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+                "formal_reference_score": _json_safe_reference(formal_reference_score),
+                "formal_comparison_reference_source": formal_reference_source,
+                "resolved_skip_formal_threshold": _json_safe_reference(
+                    resolved_skip_formal_threshold
+                ),
+                "resolved_bypass_formal_threshold": _json_safe_reference(
+                    resolved_bypass_formal_threshold
+                ),
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "termination_reason": termination_reason,

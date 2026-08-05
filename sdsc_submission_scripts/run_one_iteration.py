@@ -450,6 +450,13 @@ def write_manifest(
             "health_gate_enabled": getattr(tune_output, "health_gate_enabled", None),
             "health_config_sha256": getattr(tune_output, "health_config_sha256", None),
             "formal_reference_score": getattr(tune_output, "formal_reference_score", None),
+            # V20 PR D §16.C — the provenance travels WITH the reference.
+            # `formal_reference_score: null` alone is ambiguous: it means
+            # "no incumbent", "gates off" or "the bound was infinite", and
+            # those call for different readings of the iteration.
+            "formal_comparison_reference_source": getattr(
+                tune_output, "formal_comparison_reference_source", None
+            ),
             "resolved_skip_formal_threshold": getattr(
                 tune_output, "resolved_skip_formal_threshold", None
             ),

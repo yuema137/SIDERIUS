@@ -431,6 +431,7 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
     # incumbent-based gate can fire on ANY winning trial score. Uses
     # only production helpers; no re-implementation.
     from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+        _best_trial_winner,
         _resolve_formal_comparison_thresholds,
         _should_bypass_formal_time_budget,
         _should_skip_formal,
@@ -441,10 +442,11 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         if tune_input.enable_chain_incumbent_formal_gates
         else None
     )
-    ref, skip_t, bypass_t = _resolve_formal_comparison_thresholds(
+    ref, skip_t, bypass_t, source = _resolve_formal_comparison_thresholds(
         reference_score=consumed_reference,
         skip_min_delta=tune_input.skip_formal_min_delta,
         bypass_min_delta=tune_input.bypass_formal_time_budget_min_delta,
+        gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
     )
     # Reference actually consumed is None (NOT the pre-V19 fixed 0.0,
     # and NOT the numeric 1.25 that was delivered on the input).
@@ -454,6 +456,11 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         "OFF is not a fixed-0.0 mode and gates must not consume the "
         "reconstructed incumbent"
     )
+    # V20 PR D (D-C3): with the flag OFF the negative-infinity bootstrap
+    # must NOT engage — the deltas are not consumed at all, so this run
+    # resolves exactly as it did pre-V20. The source string is what makes
+    # the two indistinguishable-by-value cases distinguishable.
+    assert source == "gates_disabled"
     # Neither incumbent-based gate can fire even against a trial winner
     # that would have easily crossed a numeric threshold.
     trial_winner_record = {
@@ -464,8 +471,14 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         "health_gate_results": _passing_verdicts(),
         "memory": {"time_mode": "trial"},
     }
-    assert not _should_skip_formal([trial_winner_record], threshold=skip_t)
-    assert not _should_bypass_formal_time_budget([trial_winner_record], threshold=bypass_t)
+    trial_winner = _best_trial_winner([trial_winner_record])
+    assert trial_winner is not None
+    assert not _should_skip_formal(
+        trial_winner,
+        threshold=skip_t,
+        gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
+    )
+    assert not _should_bypass_formal_time_budget(trial_winner, threshold=bypass_t)
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,12 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: DESIGN — D-C1a IMPLEMENTED (`b751476b`); the formal-gate policy
-is FROZEN in §16 after two read-only audits and the operator's
-negative-infinity bootstrap ruling (2026-08-05). D-C1b AWAITS FINAL
-OPERATOR APPROVAL.**
+**Status: IMPLEMENTATION IN PROGRESS — 5 of 11 checkpoints complete.**
+D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
+D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (this commit). The
+formal-gate policy is FROZEN in §16 after two read-only audits and the
+operator's negative-infinity bootstrap ruling (2026-08-05). Next: D-C4
+(incumbent exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3
+not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -677,8 +680,8 @@ refusal in addition to the mode↔config check.
 | ID | Checkpoint | State |
 |---|---|---|
 | **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped · **D-C1b `[x]`** five startup refusals at the chain boundary + launcher declares blocking+scientific |
-| **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
-| **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[ ]` not started |
+| **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | **D-C2a `[x]`** pure typed verdict, no call sites (`c8019e77`) · **D-C2b `[x]`** wired to every formal record (`84511954`, reinforced `8985d00f`) |
+| **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[x]` **COMPLETE** — no-winner ⇒ skip, `-inf` bootstrap + provenance, one winner per formal round, JSON-safe persistence. 10/10 mutations caught. See the implementation record under Commit 6 |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
@@ -1558,6 +1561,255 @@ existing `best_valid_trial_score`.
 ---
 
 ### Commit 6 — `D-C3`: the formal-LAUNCH decision, corrected
+
+#### IMPLEMENTATION RECORD — D-C3 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C2b reinforcement `8985d00f`.
+
+> **Items 3, 5 and 8 below are SUPERSEDED.** They predate §16 and say
+> *"mostly tests; any production change here is a red flag to surface, not
+> to absorb"* and *"`completed_rounds` unchanged from pre-commit for the
+> same inputs"*. §16.G assigns D-C3 **the no-winner ⇒ skip correction and
+> the effective-reference resolution + provenance**, which are production
+> changes by definition, and the whole point is that `completed_rounds`
+> DOES change for a zero-valid-trial iteration. §16's supersession clause
+> governs; this record states what was actually built.
+
+**Behavior Delta**: **present, and intended.** Two decisions change, both
+only when `enable_chain_incumbent_formal_gates` is ON:
+
+1. an iteration with **no HealthGate-valid trial winner** now skips its
+   formal round instead of spending it. `completed_rounds` is lower by one
+   for exactly those iterations.
+2. a chain with **no restored valid formal incumbent** now resolves the
+   reference to `-inf` instead of `None`, so the first valid trial is never
+   skipped and always bypasses the formal time budget.
+
+With the switch OFF, behaviour is byte-identical to pre-D-C3 — asserted
+through the real tuner loop, not merely by helper unit tests.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `nodes/.../ml_hyperparameter_tune_agent.py` | `_should_skip_formal` / `_should_bypass_formal_time_budget` take a RESOLVED winner; `_resolve_formal_comparison_thresholds` gains `gates_enabled` and returns a 4-tuple with provenance; new `_json_safe_reference`; one winner resolved per formal round; the no-winner log line |
+| `agent/schemas/hyperparam_tuning.py` | `formal_comparison_reference_source` **declared** on `HyperparamTuningOutput` (see the gap below); four descriptions state the null-when-infinite rule |
+| `sdsc_submission_scripts/run_one_iteration.py` | the manifest carries the source beside the reference |
+
+**The real producer → consumer path**
+
+```text
+agent_input.current_run_best_formal_score
+  → _consumed_reference (gated on enable_chain_incumbent_formal_gates)
+  → _resolve_formal_comparison_thresholds(gates_enabled=…)
+      → (reference, skip_t, bypass_t, source)
+  → run_config dict                          [:3371-3374]  sanitised
+  → formal_trial_winner = _best_trial_winner(sandbox.get_summary())  [:3549]
+      → _should_skip_formal(...)             [:3553]  → break, no formal round
+      → _should_bypass_formal_time_budget(...) [:4233] → time_check["feasible"]=True
+  → agent_output_dict                        [:5441-5444] sanitised
+      → HyperparamTuningOutput.model_validate
+      → run_output_{run}.json
+      → run_one_iteration.write_manifest     [:452-462]
+      → manifest.json → core/resume.py → the next iteration
+  → partial_dict (degraded path)             [:5533-5536] sanitised
+```
+
+**Helper and schema changes**
+
+| Symbol | Before | After |
+|---|---|---|
+| `_should_skip_formal` | `(memory_history, *, threshold)` | `(winner, *, threshold, gates_enabled)` |
+| `_should_bypass_formal_time_budget` | `(memory_history, *, threshold)` | `(winner, *, threshold)` |
+| `_resolve_formal_comparison_thresholds` | → 3-tuple | → 4-tuple, **required** `gates_enabled` |
+| `_json_safe_reference` | — | new; `±inf → None` |
+| `HyperparamTuningOutput.formal_comparison_reference_source` | — | new `str \| None` |
+
+**Migrated tests — 18, not 17.** Each keeps the defect class it protected:
+
+| Test | Defect preserved | Change |
+|---|---|---|
+| `test_explicit_zero_reference_remains_legal` | explicit 0.0 ≠ `None` | + asserts source is `restored_valid_formal_incumbent` |
+| `test_none_reference_resolves_to_all_none` → `test_no_incumbent_bootstraps_to_negative_infinity_when_gates_are_on` | a missing incumbent never becomes a finite number, above all not 0.0 | **semantic rewrite**; the old rule is quoted in the docstring |
+| `test_skip_gate_cannot_fire_without_incumbent` → `test_the_skip_gate_still_cannot_fire_on_a_valid_first_trial` | a fresh chain must not skip its first real candidate | **semantic rewrite**; same outcome, new mechanism (`-inf`, not `None`) |
+| `test_bypass_gate_cannot_fire_without_incumbent` → `test_the_bypass_gate_now_fires_where_it_previously_could_not` | the v15 budget-block failure | **semantic rewrite, INVERTED outcome** — see deviation D-3 |
+| `test_numeric_reference_resolves_sums`, `test_gates_consume_resolver_output_verbatim`, 3 × skip-gate, 3 × bypass-gate, 2 × disable-via-infinity | arithmetic, single-source, boundaries, escape hatches | 4-tuple + winner-first |
+| `test_phantom_family_reference_is_just_a_number` | **no special-casing of 5.5763** | kept, strengthened — §16.C withdrew the seeded-baseline recommendation *because* of this phantom |
+| `test_skip_formal_uses_valid_candidate_and_zero_reference` | an invalid trial can never open a gate | outcome flips (skip now fires); a second assertion at `threshold=-100.0` proves the reason is the absent winner, not the 9.0 |
+| `test_bypass_uses_valid_candidate_and_half_point_threshold` | same, bypass side | outcome **unchanged**; + an `-inf` threshold case |
+| `tests/integration/workflows/test_chain_incumbent_pseudo.py` | flag-OFF resolves to all-`None`, not fixed-0.0 | **the 18th consumer**, outside the stated 17 — see deviation D-2 |
+
+New tests are consolidated in
+`tests/unit/agent/tune_ml_hyperparam_agent/test_formal_launch_decision.py`
+(29 tests): the 12-row matrix, the single-resolution property, the
+persistence rules and three real-loop reachability tests.
+
+**The 12-scenario matrix.** Every row asserts winner identity, skip,
+bypass, ordinary-budget applicability, reference, source, both thresholds
+and the JSON-safe persisted form (production posture: incumbent 10.0,
+skip Δ 0.0, bypass Δ 0.5 → 10.0 / 10.5).
+
+| # | scenario | winner | skip | bypass | ordinary | ref | source |
+|---|---|---|---|---|---|---|---|
+| 1 | no trial records | — | **T** | F | F | 10.0 | restored |
+| 2 | all trials invalid | — | **T** | F | F | 10.0 | restored |
+| 3 | invalid trial @ 99.0 | — | **T** | F | F | 10.0 | restored |
+| 4 | valid winner, **no incumbent** | first | F | **T** | F | `-inf` | **bootstrap** |
+| 5 | valid 9.0 (below skip) | weak | **T** | F | F | 10.0 | restored |
+| 6 | valid 10.0 (**== skip**) | at_skip | F | F | **T** | 10.0 | restored |
+| 7 | valid 10.2 (between) | middle | F | F | **T** | 10.0 | restored |
+| 8 | valid 10.5 (**== bypass**) | at_bypass | F | **T** | F | 10.0 | restored |
+| 9 | valid 11.0 (above bypass) | strong | F | **T** | F | 10.0 | restored |
+| 10 | **gates disabled**, no valid winner | — | F | F | **T** | `None` | gates_disabled |
+| 10b | gates disabled, valid winner | ignored | F | F | **T** | `None` | gates_disabled |
+| 11 | restored valid incumbent | normal | F | F | **T** | 10.0 | restored |
+| 12 | one winner for skip + bypass + logging + plan inheritance | — | — | — | — | — | — |
+
+Row 12 is `TestTheWinnerIsResolvedOnce`: the inheritance path resolves the
+winner independently inside `_apply_mode_override_chain`, so parity is
+**proved** rather than assumed — a formal round forces `plan.is_trial =
+False`, so nothing it appends can satisfy `_best_trial_winner`'s filter and
+the round-boundary snapshot stays valid for the whole round.
+
+Rows 1, 3 and 10 additionally run through the **real tuner loop** (resume
+into a final formal round, only skill execution mocked).
+
+**Mutation results — 11 run, 11 caught.** Baseline restored byte-identical
+after each (sha verified), `__pycache__` cleared per run, anchors asserted
+to match exactly once, and the clean baseline re-run at the end.
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| M1 | no winner continues to formal | matrix 1/2/3, real-loop skip test, valid-candidate | 5 |
+| M2 | missing incumbent stays `None` | matrix 4, bootstrap resolver + both gate tests | 4 |
+| M3 | an invalid trial becomes eligible | matrix 2/3/10, inheritance, real loop, selection | 11 |
+| M4 | skip `<` → `<=` | matrix 6, verbatim-consumption, valid-candidate | 3 |
+| M5 | bypass `>=` → `>` | matrix 8, verbatim-consumption, margin, valid-candidate | 4 |
+| M6 | gates-disabled behaviour altered | matrix 10, real-loop gates-off, valid-candidate | 3 |
+| M7 | bypass re-resolves its own winner | `test_the_production_site_resolves_the_winner_exactly_once` | 1 |
+| M8 | raw `Infinity` reaches an artifact | matrix 4, both `_json_safe_reference` cases, operator-disable | 4 |
+| M9 | schema drops the provenance field | `test_the_provenance_survives_the_typed_output_and_the_manifest` | 1 |
+| M10 | manifest drops the provenance field | `test_the_manifest_carries_the_source_beside_the_reference` | 1 |
+| M11 | `in (-inf, +inf)` membership instead of `math.isfinite` | NaN sanitisation + the parametrised `nan` row | 2 |
+
+*M7 is caught only by a structural assertion.* That is a real limitation
+and is recorded, not papered over: while the trial history cannot change
+mid-round the two resolutions agree by construction, so no behavioural test
+can distinguish them. The companion test
+`test_a_formal_round_cannot_add_a_trial_record_beneath_the_snapshot` proves
+*why* they agree, which is the property actually worth guarding.
+
+**Persistence audit.** Producers: three dict sites in the tuner
+(`:3371-3374` run_config, `:5441-5444` agent_output_dict, `:5533-5536`
+degraded partial_dict) — all four values sanitised at all three.
+Consumers: `HyperparamTuningOutput` (built from the sanitised dict, so the
+typed output cannot carry an infinity), `run_one_iteration.write_manifest`
+(reads the typed output), `core/resume.py`. Internal arithmetic uses `-inf`
+freely; nothing serialised does. `json.dumps(..., allow_nan=False)` is
+asserted over every matrix row and over the operator-disable case.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_formal_launch_decision.py` | 29 passed, 5.8 s |
+| migrated + integration consumers | 66 passed, 6.8 s |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` | 881 passed, 189 s |
+| schema + manifest + healthgate suites | 984 passed, 113 s |
+| full `tests/unit` | **7407 passed**, 2 skipped, 4 xfailed, 428 s — see the note below |
+| pyright (CI-equivalent, cached Node) | **0 errors**, 4 warnings — all pre-existing, none in a touched file |
+| `ruff check` | All checks passed |
+| `ruff format --check` | clean (3 files reformatted, all D-C3 lines) |
+| `bash -n` | n/a — no shell script touched |
+
+> **The full-suite run needs one note, because the raw number is
+> misleading.** The first run reported `1 failed, 7406 passed`:
+> `tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`.
+> It is **not** a D-C3 defect and not a test defect. It belongs to the
+> unrelated PR3-L2-calibration protocol and asserts
+> `no_production_file_modified` by running `git diff --name-only` — so it
+> fails for **any** uncommitted production change, naming exactly this
+> checkpoint's three files. Diagnosed by reading
+> `scripts/pr3_l2_calibration/preflight.py:286-299`, then **proved** by
+> staging the changes (which empties the worktree-vs-index diff) and
+> re-running: `1 passed`. The suite is green for the committed tree, which
+> is why the row above reads 7407.
+>
+> Consequence worth knowing: "full `tests/unit` green" is only assertable
+> with a clean working tree, i.e. at or after commit — never mid-edit.
+
+**Deviations from the frozen plan, and why each was necessary**
+
+- **D-1 — D-C3 is a production change.** Items 3/5/8 of this section
+  predate §16 and forbid exactly what §16.G assigns. Resolved in favour of
+  §16, which states it supersedes conflicting text. No operator question:
+  the conflict is settled by the document itself.
+- **D-2 — an 18th consumer.** `test_chain_incumbent_pseudo.py:444` unpacked
+  the 3-tuple and passed record lists positionally; it was outside the
+  stated 17 and would have failed CI. Its defect class (flag-OFF resolves
+  to all-`None`, not fixed-0.0) is preserved and strengthened with
+  `source == "gates_disabled"`.
+- **D-3 — a third semantics-changed test.**
+  `test_bypass_gate_cannot_fire_without_incumbent` encodes the same
+  superseded "no incumbent ⇒ inert" rule; under the bootstrap its assertion
+  **inverts**. Rewritten with the change stated, not re-pointed.
+- **D-4 — `gates_enabled` is a REQUIRED keyword**, not a defaulted one. A
+  default of `False` would silently hand a forgetful caller the pre-D-C3
+  behaviour — precisely the defect class this checkpoint fixes.
+- **D-5 — `flush=True` on the new log line**, matching every other gate
+  print. Chain stdout is piped to a log; an unflushed line interleaves.
+- **D-6 — the provenance field was undeclared (a real gap, found by the
+  step-7 audit and fixed here).** The tuner emitted
+  `formal_comparison_reference_source` into its dicts, but
+  `HyperparamTuningOutput` never declared it, so Pydantic's default
+  `extra="ignore"` **silently dropped it** before `run_output_*.json` and
+  the manifest — the two artifacts an operator reads. Nothing failed,
+  because a dropped field is indistinguishable from an unset one. Without
+  it, §16.C's persisted form is unimplemented and
+  `formal_reference_score: null` stays ambiguous across three genuinely
+  different runs. Closed by declaring the field, forwarding it in
+  `write_manifest`, and M9/M10.
+- **D-8 — NaN leaked past my own first implementation.** The audit's own
+  requirement names `Infinity`, `-Infinity` **and `NaN`**; the first
+  `_json_safe_reference` tested `value in (float("-inf"), float("inf"))`,
+  which compares by equality — and NaN is not equal to itself. Verified by
+  execution: `json.dumps({"t": _json_safe_reference(nan)})` produced
+  `{"t": NaN}`. Reachable, because the deltas are operator CLI floats and
+  `reference + nan` is `nan`. Replaced with a single `math.isfinite` check
+  (M11). This is exactly the class of defect the step-7 audit exists to
+  catch, and it was in the code under audit rather than in legacy.
+- **D-7 — the reachability harness had to avoid a DS5 trap.** Stamping the
+  seeded trial `health_gate_enabled: False` flips
+  `classify_candidate_health` to **VALID** regardless of its gate results
+  (`candidate_eligibility.py`, the self-describing disabled-mode waiver) —
+  a combination that cannot occur in production and that silently defeated
+  the harness. The tests run `health_gate_enabled=True` with an unstamped
+  seed (DS6b reads that as "legacy = gates active"), and the reason is
+  documented in the helper so it is not re-introduced.
+
+**Follow-ups**
+
+- **FU-D-6** *(new)* — `_best_trial_winner` is still resolved
+  independently in `_apply_mode_override_chain`. Parity is proved by test,
+  not enforced by construction. Threading the resolved winner through would
+  require reworking that function's OOM-recovery branch, which needs the
+  full `memory_history`; deliberately out of D-C3's scope.
+- **FU-D-8** *(new)* — a NaN delta is not REFUSED, only prevented from
+  reaching an artifact. Every comparison against NaN is `False`, so a NaN
+  threshold silently disables both launch gates, and D-C1b's
+  `skip > bypass` ordering check also returns `False` and passes it.
+  Refusing it belongs to D-C1b's launch validation, not to D-C3's
+  persistence fix; filed rather than absorbed to keep this checkpoint's
+  scope honest.
+- **FU-D-7** *(new)* — historical artifacts carry
+  `formal_comparison_reference_source: null`. Distinguishing "predates the
+  field" from the three live cases is a reconstruction question that
+  belongs with D-C4's legacy ladder.
+
+**Next checkpoint**: D-C4 — incumbent exclusion, extending
+`core/resume.py`'s commit-time validity predicate rather than replacing it.
+
+---
 
 > **Rewritten 2026-08-05** after the two gate audits. The previous version
 > of this section was **factually wrong** and is preserved only in Git: it

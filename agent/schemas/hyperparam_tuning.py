@@ -2346,21 +2346,43 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Resolved current_run_best_formal_score used by this tuner invocation. "
             "None on historical outputs written before this metadata existed, "
-            "AND on V19+ invocations that ran with no chain incumbent "
-            "(the gates were short-circuited)."
+            "on invocations that ran with the chain-incumbent gates disabled, "
+            "AND — V20 PR D §16.C — whenever the effective reference was "
+            "infinite. -inf is a RESOLVER value, never a stored one: "
+            "non-standard JSON `Infinity` is rejected by strict parsers, so an "
+            "infinite bound persists as null and "
+            "formal_comparison_reference_source carries the meaning instead. "
+            "Read the two fields together; null alone is ambiguous."
+        ),
+    )
+    formal_comparison_reference_source: str | None = Field(
+        default=None,
+        description=(
+            "Provenance of formal_reference_score (V20 PR D §16.C). One of: "
+            "'restored_valid_formal_incumbent' (a real HealthGate-valid "
+            "incumbent was restored and consumed), 'negative_infinity_bootstrap' "
+            "(no incumbent existed, so the reference resolved to -inf and the "
+            "first valid trial establishes the chain's first formal baseline), "
+            "or 'gates_disabled' (the chain-incumbent formal gates were off, so "
+            "the deltas were never consumed). None on outputs written before "
+            "this field existed. This is what distinguishes the three cases "
+            "that all persist formal_reference_score as null."
         ),
     )
     resolved_skip_formal_threshold: float | None = Field(
         default=None,
         description=(
-            "Resolved formal_reference_score + skip_formal_min_delta for this invocation."
+            "Resolved formal_reference_score + skip_formal_min_delta for this "
+            "invocation. Null when infinite, for the reason given on "
+            "formal_reference_score."
         ),
     )
     resolved_bypass_formal_threshold: float | None = Field(
         default=None,
         description=(
             "Resolved formal_reference_score + bypass_formal_time_budget_min_delta "
-            "for this invocation."
+            "for this invocation. Null when infinite, for the reason given on "
+            "formal_reference_score."
         ),
     )
 
