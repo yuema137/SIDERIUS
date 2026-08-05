@@ -614,6 +614,11 @@ class TestMeasuredOomReachesRejectNotAbort:
                         "samples": (ContentionSnapshot(telemetry_available=True),),
                         "reasons": ("idle",),
                         "raw_telemetry": lambda self: {},
+                        # V20 PR C: part of the window contract. Deliberately
+                        # spelled out rather than tolerated via getattr in
+                        # production — a real producer that stopped supplying
+                        # it must fail loudly, not default to None.
+                        "measurement_validity": None,
                     },
                 )(),
             )

@@ -223,3 +223,182 @@ class TestOomAttribution:
         a genuine one.
         """
         assert attribute_measured_failure(validity) == "insufficient_evidence"
+
+
+class TestTheBlockingRuleChanged:
+    """`blocking = measured and not contended` is gone.
+
+    These assert the ELIGIBILITY consequence, which is what actually
+    aborted the chain. A verdict nobody consults would change nothing.
+    """
+
+    @staticmethod
+    def _estimate(**kw):
+        from core.runtime_control.estimate_types import make_estimate
+
+        return make_estimate(
+            provenance="bounded_live_probe",
+            confidence="medium",
+            expected_seconds=10.0,
+            **kw,
+        )
+
+    def test_a_stable_neighbour_no_longer_blocks_the_measurement(self):
+        """MUTATION TARGET: restoring `blocking = measured and not contended`.
+
+        THE regression that PR C exists to prevent. The identity still says
+        `foreign_contended` — a neighbour IS present — but the window found
+        the conditions valid, and validity is what decides now.
+        """
+        estimate = self._estimate(
+            concurrency_identity="foreign_contended",
+            measurement_validity="valid_current_conditions",
+        )
+        assert estimate.blocking_eligible is True
+
+    @pytest.mark.parametrize(
+        "validity",
+        ["unstable_external_identity", "unattributed_occupancy_growth", "sampling_incomplete"],
+    )
+    def test_compromised_evidence_cannot_block_even_on_an_idle_device(self, validity):
+        """The converse, and the fail-closed half: an idle-looking identity
+        does not rescue a window whose evidence quality failed."""
+        estimate = self._estimate(
+            concurrency_identity="single_candidate_idle",
+            measurement_validity=validity,
+        )
+        assert estimate.blocking_eligible is False
+
+    def test_a_prior_still_cannot_block_however_valid_the_window(self):
+        """Validity is necessary, never sufficient. Provenance still rules:
+        a static prior with blocking authority stays unrepresentable."""
+        from core.runtime_control.estimate_types import make_estimate
+
+        estimate = make_estimate(
+            provenance="static_uncalibrated",
+            confidence="low",
+            expected_seconds=10.0,
+            measurement_validity="valid_current_conditions",
+        )
+        assert estimate.blocking_eligible is False
+
+    def test_no_window_falls_back_conservatively(self):
+        """Legacy producers supply no window. `None` means "no window", not
+        "invalid" — but a contended identity still cannot ESTABLISH
+        validity, so the pre-PR-C outcome is preserved exactly."""
+        assert self._estimate(concurrency_identity="single_candidate_idle").blocking_eligible
+        assert not self._estimate(concurrency_identity="foreign_contended").blocking_eligible
+        assert not self._estimate(concurrency_identity="unknown_contention").blocking_eligible
+
+
+class TestTheProducerPathIsWired:
+    """Reachability: a verdict nobody produces changes nothing.
+
+    The boundary and the eligibility rule are both correct in isolation and
+    still useless if the sampler never builds a window — which is exactly
+    how PR C could ship looking complete while every real run kept falling
+    back to the conservative rule.
+    """
+
+    def test_a_device_makes_the_sampler_produce_a_verdict(self):
+        """MUTATION TARGET: dropping `occupancy=` from the returned window."""
+        from core.runtime_control.calibration_policy import sample_contention_window
+        from core.runtime_control.probe import ContentionSnapshot
+
+        window = sample_contention_window(
+            device_vram_gb=80.0,
+            device=DEV,
+            root_pid=4242,
+            account=lambda _root, _dev: _snap(others={999: 20_000}),
+            capture=lambda *a, **k: ContentionSnapshot(telemetry_available=True),
+            sleep=lambda _s: None,
+        )
+        assert window.measurement_validity == "valid_current_conditions"
+        assert window.occupancy is not None
+        assert window.occupancy.max_external_mib == 20_000
+
+    def test_without_a_device_no_window_is_claimed(self):
+        """`None` must mean "not observed", never a fabricated verdict."""
+        from core.runtime_control.calibration_policy import sample_contention_window
+        from core.runtime_control.probe import ContentionSnapshot
+
+        window = sample_contention_window(
+            device_vram_gb=80.0,
+            capture=lambda *a, **k: ContentionSnapshot(telemetry_available=True),
+            sleep=lambda _s: None,
+        )
+        assert window.occupancy is None
+        assert window.measurement_validity is None
+
+    def test_accounting_is_sampled_on_every_tick_not_once(self):
+        """A single accounting sample cannot show change, so a one-shot
+        reading would make every window trivially 'stable'."""
+        from core.runtime_control.calibration_policy import sample_contention_window
+        from core.runtime_control.probe import ContentionSnapshot
+
+        calls: list[int] = []
+
+        def _account(_root, _dev):
+            calls.append(1)
+            return _snap(others={999: 5_000} if len(calls) < 3 else {1234: 5_000})
+
+        window = sample_contention_window(
+            device_vram_gb=80.0,
+            device=DEV,
+            root_pid=1,
+            account=_account,
+            capture=lambda *a, **k: ContentionSnapshot(telemetry_available=True),
+            sleep=lambda _s: None,
+        )
+        assert len(calls) == 5, "one accounting sample per contention tick"
+        assert window.measurement_validity == "unstable_external_identity"
+
+    def test_the_verdict_survives_the_probe_to_estimate_hop(self):
+        """MUTATION TARGET: `extrapolate_probe` dropping the field.
+
+        FOUND BY MUTATION — the first version of this suite missed it, and
+        the mutant survived. It is the last hop and the one that matters:
+        the window can compute a verdict and the probe result can carry it,
+        and if the ESTIMATE does not, admission falls back to the
+        conservative rule and a stable neighbour still cannot block. The
+        whole PR would look complete and change nothing.
+
+        This is the same defect class as PR D's three silent schema drops:
+        a value produced, and silently absent at the consumer.
+        """
+        from core.runtime_control.probe import (
+            ContentionSnapshot,
+            ProbeCaps,
+            ProbeResult,
+            RealizedModelProperties,
+            extrapolate_probe,
+        )
+
+        result = ProbeResult(
+            status="ok",
+            model_identity="candidate_x",
+            realized=RealizedModelProperties(
+                parameter_count=1_000,
+                trainable_parameter_count=1_000,
+                parameter_memory_gb=0.001,
+                dtype="float32",
+            ),
+            setup_seconds=1.0,
+            train_ms_per_step=20.0,
+            train_ms_spread=(19.0, 21.0),
+            inference_ms_per_batch=40.0,
+            inference_ms_spread=(39.0, 41.0),
+            # A neighbour IS present, and the window found it stable.
+            concurrency_identity="foreign_contended",
+            measurement_validity="valid_current_conditions",
+            contention=ContentionSnapshot(telemetry_available=True),
+            caps=ProbeCaps(),
+            wall_seconds=10.0,
+        )
+        estimate = extrapolate_probe(
+            result, train_steps=100, inference_batches=10, producer_identity="test@1.0.0"
+        )
+
+        assert estimate.measurement_validity == "valid_current_conditions"
+        # And the consequence, which is the point of carrying it at all.
+        assert estimate.blocking_eligible is True

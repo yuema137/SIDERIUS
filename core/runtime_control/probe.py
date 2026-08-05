@@ -50,6 +50,7 @@ from core.runtime_control.estimate_types import (
     RuntimeEstimate,
     make_estimate,
 )
+from core.runtime_control.measurement_validity import MeasurementValidity
 from core.runtime_control.registry_schemas import CalibrationObservation
 
 PROBE_PRODUCER_SEMVER = "1.0.0"
@@ -136,6 +137,10 @@ class ProbeResult(BaseModel):
     inference_ms_spread: tuple[float, float] | None = None
     peak_vram_gb: float | None = Field(default=None, gt=0.0)
     concurrency_identity: ConcurrencyIdentity
+    #: V20 PR C. The occupancy-window verdict, when the caller named the
+    #: device so accounting could be sampled. `None` means no window was
+    #: observed — NOT that the measurement was judged invalid.
+    measurement_validity: MeasurementValidity | None = None
     contention: ContentionSnapshot = Field(
         description="Last sample of the pre-probe window (compact view)."
     )
@@ -386,6 +391,7 @@ def run_bounded_probe(
             status=status,
             model_identity=model_identity,
             concurrency_identity=concurrency,
+            measurement_validity=window.measurement_validity,
             contention=snapshot,
             contention_telemetry=window.raw_telemetry(),
             caps=caps,
@@ -548,6 +554,7 @@ def extrapolate_probe(
         inference_seconds=inf_s,
         peak_vram_gb=result.peak_vram_gb,
         concurrency_identity=result.concurrency_identity,
+        measurement_validity=result.measurement_validity,
         probe_id=None,  # assigned when the observation is registered
         warnings=(),
     )
