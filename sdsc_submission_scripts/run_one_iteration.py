@@ -101,6 +101,71 @@ def _portion_floor(s: str) -> float:
     return v
 
 
+def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
+    """Load a fixed candidate PLAN for a validation run (V20 FU-D-11).
+
+    Returns the validated plan as a dict, or ``None`` when no path was given
+    (the ordinary campaign case — the proposer decides).
+
+    **Fails closed, loudly.** A malformed file, an unreadable path or a
+    payload that is not a valid ``ProposalOutput`` refuses the launch. It does
+    NOT fall back to the proposer: a run that asked for a fixed candidate and
+    silently got an invented one would report a deterministic acceptance it
+    never performed.
+
+    **Unknown keys are REFUSED, not dropped.** ``ProposalOutput`` has no field
+    for a score, record, gate verdict, authority verdict or incumbent, so
+    Pydantic's default ``extra="ignore"`` would silently discard one that
+    appeared. Silent discarding is precisely the defect class this PR family
+    hit three times, so a stray ``denoising_score`` fails the launch instead.
+
+    Raises:
+        SystemExit: on any unreadable, malformed or results-bearing payload.
+    """
+    if path is None:
+        return None
+
+    from pydantic import ValidationError
+
+    from agent.schemas.proposal import ProposalOutput
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except OSError as exc:
+        raise SystemExit(f"--validation_fixed_candidate_plan: cannot read {path!r}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} is not valid JSON: {exc}"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} must hold a JSON object "
+            f"describing one candidate plan, got {type(payload).__name__}"
+        )
+
+    known = set(ProposalOutput.model_fields)
+    unknown = sorted(set(payload) - known)
+    if unknown:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} carries keys that are "
+            f"not part of a candidate plan: {unknown}. This seam injects a PLAN "
+            f"only — a prior score, record, gate verdict, authority verdict or "
+            f"incumbent must never enter through it, and dropping them silently "
+            f"would hide that it happened."
+        )
+
+    try:
+        plan = ProposalOutput.model_validate(payload)
+    except ValidationError as exc:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} is not a valid candidate plan: {exc}"
+        ) from exc
+
+    return plan.model_dump(mode="json")
+
+
 def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     """Resolve the immutable per-chain run_id (§1.4.1) for this iteration.
 
@@ -920,6 +985,20 @@ def build_parser() -> argparse.ArgumentParser:
         "Overrides --human_advice_file when provided.",
     )
     parser.add_argument(
+        "--validation_fixed_candidate_plan",
+        type=str,
+        default=None,
+        help="VALIDATION POSTURE ONLY (V20 FU-D-11). Path to a JSON file "
+        "holding a serialised ProposalOutput. When supplied the PROPOSER is "
+        "bypassed and this candidate plan is used instead; implement, "
+        "validate, trial, HealthGate, formal launch, authority, resume and "
+        "aggregation all still run for real. Intended for acceptance runs "
+        "that must not depend on which architecture a planner invents. The "
+        "file may contain ONLY a candidate plan: unknown keys are REFUSED, "
+        "so a stray score, record or verdict fails the launch instead of "
+        "being silently dropped. Never use this in a normal campaign.",
+    )
+    parser.add_argument(
         "--max_impl_attempts",
         type=int,
         default=3,
@@ -1585,6 +1664,19 @@ def main():
         # name a task resolver itself.
         from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
+        # FU-D-11: resolved BEFORE the workflow starts, so a malformed or
+        # results-bearing plan refuses the launch rather than failing midway
+        # through a real run.
+        fixed_candidate_plan = load_validation_fixed_candidate_plan(
+            args.validation_fixed_candidate_plan
+        )
+        if fixed_candidate_plan is not None:
+            print(
+                f"[FIXED PLAN] validation posture: the proposer will be bypassed "
+                f"for candidate {fixed_candidate_plan.get('model_name')!r} "
+                f"(source={args.validation_fixed_candidate_plan})"
+            )
+
         results = run_workflow(
             measurement_capability=resolve_tidmad_measurement_capability(),
             source_paths=resolved_paths,
@@ -1670,6 +1762,7 @@ def main():
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
+            validation_fixed_candidate_plan=fixed_candidate_plan,
             # V19 PR 1 (P1-C3) — chain formal-incumbent carry-over.
             # Reconstruction is unconditional; the flag controls only
             # whether the tuner's formal gates consume the reference.
