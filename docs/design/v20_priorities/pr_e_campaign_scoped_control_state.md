@@ -1144,6 +1144,50 @@ directly related: it is the same class of "the current campaign's name
 is baked into generic logic" defect as D-E-6. `v18r_queue_runner.sh:48`
 carries the identical pattern and is **not** touched (§3.10).
 
+#### FOLLOW-UP DEFECT — the guard failed OPEN under `pipefail` (fixed 2026-08-05)
+
+E-C6 left the scan as
+`ps … | grep -v grep | grep -vF … | grep -qF -- "$WS_ROOT/$RUN"`.
+
+**`grep -q` exits on its FIRST match and closes the pipe.** `pipefail` is
+in effect (`_chain_common.sh:41`), so the upstream `grep` — still writing
+the rest of `ps` — was killed by SIGPIPE, the pipeline reported **141**,
+and the `if` read that as *no match*. The guard therefore **failed open**
+and would launch a chain on top of a workspace another process was
+already holding.
+
+It is **load-dependent**, which is why it read as flakiness: when `ps`
+output is short the upstream grep finishes writing before `-q` exits, no
+SIGPIPE occurs, and the guard works. Measured on lilab at **556
+processes** — `grep -qF` returned `141` where `grep -F` returned `0` for
+identical input. The guard failed exactly when the machine was busy,
+which is precisely when a competing chain is most likely to be live.
+
+Fixed by reading the whole stream into a variable, so nothing upstream is
+ever SIGPIPEd:
+
+```bash
+local LIVE_PROCS=""
+LIVE_PROCS="$(ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" \
+              | grep -F -- "$WS_ROOT/$RUN" || true)"
+if [ -n "$LIVE_PROCS" ]; then
+```
+
+`|| true` sits inside the substitution and covers only grep's legitimate
+"no match" exit 1, which the emptiness test then interprets.
+
+Guarded by two tests: `test_the_scan_never_uses_grep_q` (structural — the
+behavioural cases can only catch the revert while the box is loaded) and
+`test_the_scan_shape_does_not_fail_open_under_pipefail`, which reproduces
+the SIGPIPE **deterministically** by putting the match at the head of a
+200 000-line synthetic stream, and asserts BOTH that the `-q` shape fails
+open there (so the test is not vacuous) and that the production shape
+does not.
+
+**`v18r_queue_runner.sh` carries the same `grep -q` pipeline and is still
+not touched** (§3.10) — it belongs to a retired campaign. Recorded here so
+the defect is not rediscovered as a mystery.
+
 ### D-E-8 — The `bg_gpu_sampler.sh` STOP collision is recorded, not fixed
 
 - [ ] Approved  [ ] Rejected  [ ] Modified
