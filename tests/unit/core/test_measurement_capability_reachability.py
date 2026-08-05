@@ -132,3 +132,67 @@ class TestTheBoundaryStaysGeneric:
     def test_the_capability_type_is_what_crosses_the_boundary(self):
         cap = resolve_tidmad_measurement_capability(dataset_root=None)
         assert isinstance(cap, ResolvedMeasurementCapability)
+
+
+class TestTheWorkflowResolvesACapabilityToo:
+    """The OTHER call site, missed when C-C3b fixed the tuner's.
+
+    `workflows/model_exploration.py` calls `run_launch_self_test(...)`,
+    whose `capability` parameter defaults to `None`. Generic
+    runtime-control then reports "no measurement capability was resolved
+    by the caller" and — because a real launch passes
+    `require_probe_runner=True` — raises `LaunchGuardFailure` and aborts
+    the chain before any LLM call.
+
+    Measured, not theorised: a bounded real chain launch aborted with
+    exactly that message while
+    `resolve_tidmad_measurement_capability()` reported the dataset as
+    available. The class above proved the tuner resolves one; nothing
+    asserted the same of the workflow, which is precisely the gap its own
+    docstring warns about.
+    """
+
+    @staticmethod
+    def _launch_self_test_call() -> ast.Call:
+        import workflows.model_exploration as workflow
+
+        tree = ast.parse(Path(workflow.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+                if name == "run_launch_self_test":
+                    return node
+        raise AssertionError("the workflow no longer calls run_launch_self_test at all")
+
+    def test_the_workflow_passes_a_capability(self):
+        """MUTATION TARGET: dropping the argument again.
+
+        Without it a real launch can never satisfy the guard, however
+        available the dataset actually is.
+        """
+        call = self._launch_self_test_call()
+        keywords = {kw.arg for kw in call.keywords}
+        assert "capability" in keywords, (
+            "the workflow calls run_launch_self_test() without a capability; "
+            "a real launch will abort with LaunchGuardFailure even when the "
+            "measurement capability is available"
+        )
+
+    def test_it_resolves_through_the_task_owned_adapter(self):
+        import workflows.model_exploration as workflow
+
+        source = Path(workflow.__file__).read_text()
+        assert "resolve_tidmad_measurement_capability" in source, (
+            "generic workflow code must not choose a task's dataset itself; "
+            "it resolves through the task-owned adapter"
+        )
+
+    def test_a_real_launch_would_now_find_the_capability_available(self):
+        """End to end for the property that actually failed: with the
+        capability resolved the way the workflow now resolves it, the
+        guard's availability check passes on this machine."""
+        capability = resolve_tidmad_measurement_capability()
+        available, detail = probe_runner_availability(capability)
+        assert available, f"probe runner unavailable: {detail}"
+        assert "no measurement capability was resolved" not in detail

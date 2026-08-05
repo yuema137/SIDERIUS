@@ -1830,7 +1830,24 @@ def run_workflow(
     # infrastructure failure aborting). A real launch additionally
     # requires a buildable bounded-probe runner: without one, a formal
     # decision would have no measured evidence to resolve to.
-    _launch_report = run_launch_self_test(require_probe_runner=require_probe_runner)
+    # The capability must be resolved BY THE CALLER. `run_launch_self_test`
+    # defaults it to None, and generic runtime-control deliberately refuses
+    # to guess which task's dataset to look for — so a call that omits it
+    # reports "no measurement capability was resolved by the caller" and a
+    # real launch (`require_probe_runner=True`) can NEVER succeed.
+    #
+    # This is the same defect C-C3b fixed at the tuner's call site, at the
+    # OTHER call site: the reachability test added then asserts the tuner
+    # resolves one, and this site was missed. Measured here: a real chain
+    # launch aborted with LaunchGuardFailure before any LLM call while the
+    # capability was in fact available.
+    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+    _launch_capability = resolve_tidmad_measurement_capability()
+    _launch_report = run_launch_self_test(
+        require_probe_runner=require_probe_runner,
+        capability=_launch_capability,
+    )
     print(
         f"[RUNTIME] Launch self-test passed in {_launch_report.elapsed_seconds:.2f}s "
         f"({len(_launch_report.checks)} checks) | estimator="
