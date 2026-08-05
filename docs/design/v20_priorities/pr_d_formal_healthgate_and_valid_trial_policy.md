@@ -6,11 +6,20 @@ forced eight further corrections, now applied. IMPLEMENTATION AWAITS FINAL
 OPERATOR APPROVAL.**
 
 ```text
-Audited code baseline      dd8d66aa   (PR C2 merged, 40d17f69)
+Audited code baseline      334d388d   (re-audited 2026-08-05, after PR E)
+Previous baseline          dd8d66aa   (PR C2 merged, 40d17f69)
 Design head                58cbf5f9
-Policy dependencies        none — all resolved (§14)
+Policy dependencies        none — all resolved (§14, §15)
 Implementation             pending final operator approval
 ```
+
+**Re-audited against master after PR E (§15).** The re-audit confirmed
+this design's central premise by execution rather than by reading, found
+that PR E changed nothing PR D depends on, and found **one production
+defect that PR D must not build on top of** — two paths already disagree
+about whether the same record is HealthGate-valid. The operator's ruling
+(2026-08-05) resolves it inside D-C1/D-C3 rather than as a separate
+commit; see §15.
 
 Two questions remain, and neither is a policy decision: both are answered by
 **reading code** at the commit that needs them (§14).
@@ -1520,11 +1529,120 @@ already reflected in §4 and §7.
 
 ### Still open
 
-Nothing blocks the commit plan. Two implementation-time questions remain and
-are answered by reading code, not by deciding policy:
+Nothing blocks the commit plan. Both implementation-time questions that
+stood here were **answered by the §15 re-audit**:
 
-| # | Question | Answered by |
+| # | Question | Answer (re-audit, 2026-08-05) |
 |---|---|---|
-| A | Does a deterministic report layer exist outside the interpretation agent (§4.7)? | Reading the report assembly before implementing commit 7. |
-| B | Are `configured_action` / `effective_action` already derivable from the existing gate-result structure (§7 commit 9)? | Reading the gate-result model before implementing commit 9. |
+| A | Does a deterministic report layer exist outside the interpretation agent (§4.7)? | **No.** `execute_tools/` contains no report-assembly module; the only "report"-shaped code is `core/runtime_control/gpu_measurement_*` and `scripts/official_paper_health_scan.py`, neither of which assembles campaign results. Commit 7 must therefore *create* the deterministic exclusion surface rather than filter an existing one. Recorded in §15.D. |
+| B | Are `configured_action` / `effective_action` already derivable from the existing gate-result structure (§7 commit 9)? | **Partly.** `PersistedHealthGateResult` (`execute_tools/health_checks/schemas.py:300`) carries `resolved_action` and `would_invalidate_under_production_policy`, so the *effective* action and the production-policy verdict are both persisted today. The *configured* action is not persisted — it is re-read from the gate config at evaluation time (`evaluation.py:214-215`). Commit 9 adds only the missing half. |
+
+---
+
+## 15. Post-PR-E re-audit — read-only, 2026-08-05
+
+Commissioned before implementation, against master `334d388d` (PR E merged
+at `02f2709f`, master CI green). Every claim below was verified against
+current code, and the load-bearing ones by execution.
+
+### 15.A PR E impact: none
+
+PR E added five new files under `core/` and `scripts/` and modified
+`scripts/campaign_spend.py` (a predecessor hotfix). It changed **no**
+launcher argument assembly, manifest, campaign stamp, HealthGate path,
+tuner CLI, report path, historical-layout compatibility, or test harness
+this PR reuses. The only overlap in the whole diff is a link line in this
+document. Verified by file list, not inferred from PR scope.
+
+### 15.B The central premise, confirmed by execution
+
+`required_blocking_gate_ids` derives the scientific gate set from the
+**enforcement action** (`candidate_eligibility.py:37-47`), not from a
+declared role. Executed against both shipped configs:
+
+```text
+configs/health_checks.yaml                       -> ['amplitude_collapse_blocking',
+                                                     'output_diversity_blocking',
+                                                     'output_std_blocking']
+configs/health_checks_baseline_observe_mode.yaml -> EMPTY SET
+```
+
+The two configs declare **identical gate id sets** and differ only in
+action (9 `continue` + 3 `invalidate_round` versus 12 `continue`). So under
+an observe-only config the scientific gate set silently collapses to
+nothing, and `classify_candidate_health`'s `required.issubset(results)`
+becomes trivially true. **This is exactly why `gate_role` must be a
+declared typed property and can never be inferred from the action** — the
+inference does not merely lose information, it inverts the answer.
+
+### 15.C THE BLOCKER — two authority sources already disagree
+
+**Found during the re-audit; not previously recorded; reproduced.**
+
+| path | authority source | site |
+|---|---|---|
+| in-run trial selection | the **repo-current** shipped blocking config | `_best_trial_winner` → `is_valid_candidate(r)` with no `required_gate_ids` → `required_blocking_gate_ids()` with no path |
+| resume-time incumbent | the **effective** config pinned by sha | `core/resume.py:378-392`, whose docstring states the repo-current config is *deliberately never used here* |
+
+One record from an observe-only run — gate ran, check failed,
+`would_invalidate_under_production_policy: true`:
+
+```text
+in-run  (_best_trial_winner path) : invalid
+resume  (effective observe cfg)   : valid    required = EMPTY
+```
+
+**A record rejected during the run can become the incumbent on resume.**
+This is a live correctness defect independent of PR D, and D-C4/D-C5
+attach scientific authority to the path that currently answers `valid`.
+
+**Operator ruling, 2026-08-05.** The **effective config remains
+authoritative** — it is reproducible and resists repo drift, which is why
+§3.3 chose it. The divergence is closed by making the scientific set come
+from the **declared `gate_role`** rather than from the action, so an
+observe-only run is non-authoritative *by declaration* instead of by an
+empty gate set. This is folded into **D-C1** (declare the role) and
+**D-C3** (derive authority from it), not a separate commit.
+
+Consequence for the commit plan: **D-C1 must land the role in both shipped
+configs and switch `required_blocking_gate_ids` to read it**, and D-C3's
+`from_context` must take the declared role as input. A regression test must
+assert that the record above classifies identically on both paths.
+
+### 15.D Deterministic reporting has no existing home
+
+There is no report-assembly layer outside the interpretation agent
+(question A above). Commit 7 creates the deterministic exclusion surface;
+it does not filter an existing one. This does **not** make it LLM-facing —
+§4.7's ruling stands — but it does mean commit 7 is larger than "add a
+filter" and must state where the surface lives.
+
+### 15.E Legacy claims reconciled
+
+§12A previously implied both of:
+
+```text
+all legacy records without the new field are excluded
+historical replay preserves the previous incumbent
+```
+
+These are jointly unsatisfiable. The implementable rule, given that
+`classify_candidate_health` already returns a three-valued verdict:
+
+```text
+legacy record + effective config recoverable by sha  -> reconstruct, classify normally
+legacy record + effective config NOT recoverable      -> UNKNOWN, excluded from incumbent
+                                                         and from the scientific aggregate,
+                                                         counted and named in the report
+```
+
+"Preserves the previous incumbent" therefore holds only for records whose
+effective config is still recoverable — which is the honest claim, and the
+one the sha-pinned lookup at `resume.py:386-392` can actually deliver.
+
+### 15.F Verdict
+
+**Ready for implementation once D-C1/D-C3 carry the 15.C ruling.** No stop
+condition in §11 was triggered: no historical artifact needs rewriting, no
+scientific threshold changes, and GPU admission and O-7 are untouched.
 
