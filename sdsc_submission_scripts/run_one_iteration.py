@@ -105,6 +105,88 @@ def _portion_floor(s: str) -> float:
     return v
 
 
+def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
+    """Load a fixed candidate PLAN for a validation run (V20 FU-D-11).
+
+    Returns ``{"plan": ..., "provenance": ...}``, or ``None`` when no path was
+    given (the ordinary campaign case — the proposer decides).
+
+    The provenance half is not decoration: an acceptance run that bypassed the
+    proposer must be able to prove WHICH plan it used. It records
+    ``candidate_source``, the absolute path, a sha256 over the canonicalised
+    payload, and the resolved model identity — computed from the bytes
+    actually read, so the hash cannot drift from the plan that was used.
+
+    **Fails closed, loudly.** A malformed file, an unreadable path or a
+    payload that is not a valid ``ProposalOutput`` refuses the launch. It does
+    NOT fall back to the proposer: a run that asked for a fixed candidate and
+    silently got an invented one would report a deterministic acceptance it
+    never performed.
+
+    **Unknown keys are REFUSED, not dropped.** ``ProposalOutput`` has no field
+    for a score, record, gate verdict, authority verdict or incumbent, so
+    Pydantic's default ``extra="ignore"`` would silently discard one that
+    appeared. Silent discarding is precisely the defect class this PR family
+    hit three times, so a stray ``denoising_score`` fails the launch instead.
+
+    Raises:
+        SystemExit: on any unreadable, malformed or results-bearing payload.
+    """
+    if path is None:
+        return None
+
+    from pydantic import ValidationError
+
+    from agent.schemas.proposal import ProposalOutput
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except OSError as exc:
+        raise SystemExit(f"--validation_fixed_candidate_plan: cannot read {path!r}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} is not valid JSON: {exc}"
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} must hold a JSON object "
+            f"describing one candidate plan, got {type(payload).__name__}"
+        )
+
+    known = set(ProposalOutput.model_fields)
+    unknown = sorted(set(payload) - known)
+    if unknown:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} carries keys that are "
+            f"not part of a candidate plan: {unknown}. This seam injects a PLAN "
+            f"only — a prior score, record, gate verdict, authority verdict or "
+            f"incumbent must never enter through it, and dropping them silently "
+            f"would hide that it happened."
+        )
+
+    try:
+        plan = ProposalOutput.model_validate(payload)
+    except ValidationError as exc:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} is not a valid candidate plan: {exc}"
+        ) from exc
+
+    # Provenance is computed HERE, from the bytes actually read, so the
+    # recorded hash cannot drift from the plan that was used.
+    provenance = {
+        "candidate_source": "fixed_validation_plan",
+        "plan_path": os.path.abspath(path),
+        "plan_sha256": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "resolved_model_name": plan.model_name,
+        "resolved_baseline_config_keys": sorted(plan.baseline_config),
+    }
+    return {"plan": plan.model_dump(mode="json"), "provenance": provenance}
+
+
 def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
     """Resolve the immutable per-chain run_id (§1.4.1) for this iteration.
 
@@ -368,6 +450,7 @@ def write_manifest(
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
     health_feedback_policy: dict | None = None,
+    fixed_candidate_provenance: dict | None = None,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
@@ -497,6 +580,13 @@ def write_manifest(
     # auditable. Policy only: per-round gate evidence lives in the
     # records and the interpretation digest — never duplicated here.
     manifest["health_feedback_policy"] = health_feedback_policy
+
+    # V20 FU-D-11 — WHICH candidate plan this iteration ran, when the
+    # proposer was bypassed. Stamped on EVERY branch, like the policy above:
+    # an acceptance run that skipped the proposer must be able to prove what
+    # it used, and a failed iteration is exactly when that matters. `None`
+    # means the proposer chose normally.
+    manifest["fixed_candidate_provenance"] = fixed_candidate_provenance
 
     # V20 PR A (§11) — pre-flight execution provenance, stamped on EVERY
     # branch for the same reason as the policy above: a crashed iteration
@@ -986,6 +1076,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to a JSON advice file (propose/implement/tune/mindset keys). "
         "Overrides --human_advice_file when provided.",
+    )
+    parser.add_argument(
+        "--validation_fixed_candidate_plan",
+        type=str,
+        default=None,
+        help="VALIDATION POSTURE ONLY (V20 FU-D-11). Path to a JSON file "
+        "holding a serialised ProposalOutput. When supplied the PROPOSER is "
+        "bypassed and this candidate plan is used instead; implement, "
+        "validate, trial, HealthGate, formal launch, authority, resume and "
+        "aggregation all still run for real. Intended for acceptance runs "
+        "that must not depend on which architecture a planner invents. The "
+        "file may contain ONLY a candidate plan: unknown keys are REFUSED, "
+        "so a stray score, record or verdict fails the launch instead of "
+        "being silently dropped. Never use this in a normal campaign.",
     )
     parser.add_argument(
         "--max_impl_attempts",
@@ -1568,6 +1672,23 @@ def main():
         print(f"    - {p}")
     print("=" * 60)
 
+    # FU-D-11 — resolved BEFORE any manifest can be written, so a validation
+    # run's candidate provenance exists on EVERY branch including the early
+    # crash paths. This is the §19.1 lesson applied: a launch fact that only
+    # survives the healthy path is absent exactly when it is most needed.
+    # Refusing here also means a malformed or results-bearing plan stops the
+    # launch before any real work begins.
+    _fixed = load_validation_fixed_candidate_plan(args.validation_fixed_candidate_plan)
+    fixed_candidate_plan = _fixed["plan"] if _fixed else None
+    fixed_candidate_provenance = _fixed["provenance"] if _fixed else None
+    if fixed_candidate_provenance is not None:
+        print(
+            f"[FIXED PLAN] validation posture: the proposer will be bypassed for "
+            f"candidate {fixed_candidate_provenance['resolved_model_name']!r} "
+            f"(sha256={fixed_candidate_provenance['plan_sha256'][:12]}…, "
+            f"source={fixed_candidate_provenance['plan_path']})"
+        )
+
     # Step 1 — back-compat resolution of @manifest: indirection in the seed
     # list. The legacy chain shell still passes manifests this way; the new
     # run_chain.sh (Commit 11) won't, but we keep the resolver layered in
@@ -1585,6 +1706,7 @@ def main():
             crashed=True,
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
 
@@ -1608,6 +1730,7 @@ def main():
             crashed=True,
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
 
@@ -1627,6 +1750,7 @@ def main():
             crashed=True,
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
 
@@ -1786,6 +1910,7 @@ def main():
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
+            validation_fixed_candidate_plan=fixed_candidate_plan,
             # V19 PR 1 (P1-C3) — chain formal-incumbent carry-over.
             # Reconstruction is unconditional; the flag controls only
             # whether the tuner's formal gates consume the reference.
@@ -1835,6 +1960,7 @@ def main():
             crashed=True,
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(2)
     except Exception as e:
@@ -1847,6 +1973,7 @@ def main():
             crashed=True,
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
 
@@ -1870,6 +1997,7 @@ def main():
         chain_incumbent_source=state.chain_best_valid_formal_provenance,
         # V19 PR 3 — control policy only (per-round evidence stays in the
         # records / interpretation digest).
+        fixed_candidate_provenance=fixed_candidate_provenance,
         health_feedback_policy={
             "enable_structured_health_feedback": (args.enable_structured_health_feedback),
             "history_window_iterations": (args.health_feedback_history_window_iterations),

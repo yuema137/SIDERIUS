@@ -349,6 +349,8 @@ parse_chain_args() {
         # §3.2 — Propose→Implement retry brakes (13.C-bis)
         --max_proposal_attempts)     MAX_PROPOSAL_ATTEMPTS="$2"; shift 2 ;;
         --max_impl_attempts)         MAX_IMPL_ATTEMPTS="$2"; shift 2 ;;
+        # VALIDATION POSTURE ONLY (V20 FU-D-11) — bypasses the proposer.
+        --validation_fixed_candidate_plan) VALIDATION_FIXED_CANDIDATE_PLAN="$2"; shift 2 ;;
         # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
         --trial_strategy)            TRIAL_STRATEGY="$2"; shift 2 ;;
         --formal_strategy)           FORMAL_STRATEGY="$2"; shift 2 ;;
@@ -456,6 +458,9 @@ build_app_args() {
     # values would be an argparse error by design (see requirement 2).
     if [ ${#SEED_PATHS[@]} -gt 0 ]; then
         APP_ARGS+=(--seed_paths "${SEED_PATHS[@]}")
+    fi
+    if [[ -n "${VALIDATION_FIXED_CANDIDATE_PLAN:-}" ]]; then
+        APP_ARGS+=(--validation_fixed_candidate_plan "$VALIDATION_FIXED_CANDIDATE_PLAN")
     fi
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
