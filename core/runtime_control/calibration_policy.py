@@ -34,6 +34,7 @@ separation enforces this).
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Callable, Iterable, Sequence
 from statistics import median
@@ -47,7 +48,13 @@ from core.runtime_control.estimate_types import (
     RuntimeEstimate,
     make_estimate,
 )
+from core.runtime_control.gpu_accounting import DeviceIdentity
 from core.runtime_control.identity import component_identity, config_hash12
+from core.runtime_control.measurement_validity import (
+    MeasurementValidity,
+    OccupancyWindow,
+    build_occupancy_window,
+)
 from core.runtime_control.probe import ContentionSnapshot, capture_contention_snapshot
 from core.runtime_control.registry_schemas import (
     CalibrationObservation,
@@ -112,6 +119,18 @@ class ContentionWindow(BaseModel):
     reasons: tuple[str, ...]
     policy_identity: str
     expected_peer_pids: tuple[int, ...] = ()
+
+    #: V20 PR C. The occupancy-window verdict, present only when the caller
+    #: supplied a `DeviceIdentity` so per-device accounting could be
+    #: sampled alongside the contention samples. `None` means NO WINDOW WAS
+    #: OBSERVED — not that the measurement was judged invalid. Consumers
+    #: fall back to the conservative pre-PR-C rule in that case.
+    occupancy: OccupancyWindow | None = None
+
+    @property
+    def measurement_validity(self) -> MeasurementValidity | None:
+        """The typed validity verdict, or `None` when no window was taken."""
+        return self.occupancy.validity if self.occupancy is not None else None
 
     def raw_telemetry(self) -> dict[str, Any]:
         """Everything the verdict was derived from — the payload written
@@ -282,6 +301,9 @@ def sample_contention_window(
     policy: CalibrationPolicy = DEFAULT_POLICY,
     capture: Callable[..., ContentionSnapshot] = capture_contention_snapshot,
     sleep: Callable[[float], None] = time.sleep,
+    device: DeviceIdentity | None = None,
+    root_pid: int | None = None,
+    account: Callable[..., Any] | None = None,
 ) -> ContentionWindow:
     """Collect the bounded pre-probe window and classify it (D3).
 
@@ -292,9 +314,24 @@ def sample_contention_window(
         1,
         math.ceil(policy.contention_window_seconds / policy.contention_sample_interval_seconds),
     )
+    # V20 PR C: when the caller can name the device, per-device accounting
+    # is sampled on the SAME ticks as the contention samples, so the two
+    # describe one window rather than two nearby ones. Without a device
+    # nothing is sampled and `occupancy` stays None — "no window observed",
+    # which consumers treat conservatively rather than as a valid verdict.
+    if account is None:
+        from core.runtime_control import gpu_accounting
+
+        account = gpu_accounting.sample
+    if root_pid is None:
+        root_pid = os.getpid()
+
     samples: list[ContentionSnapshot] = []
+    accounting: list[Any] = []
     for i in range(n):
         samples.append(capture())
+        if device is not None:
+            accounting.append(account(root_pid, device))
         if i < n - 1:
             sleep(policy.contention_sample_interval_seconds)
     classification, reasons = classify_contention_window(
@@ -309,6 +346,7 @@ def sample_contention_window(
         reasons=reasons,
         policy_identity=policy.identity,
         expected_peer_pids=peers,
+        occupancy=build_occupancy_window(accounting) if device is not None else None,
     )
 
 

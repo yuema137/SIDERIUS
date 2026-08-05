@@ -37,6 +37,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.runtime_control.measurement_validity import (
+    VALID as VALID_MEASUREMENT,
+)
+from core.runtime_control.measurement_validity import (
+    MeasurementValidity,
+)
 from core.runtime_control.records import (
     MEASUREMENT_BACKED_SOURCES,
     Confidence,
@@ -106,6 +112,7 @@ def derive_decision_eligibility(
     verification_passed: bool = False,
     steady_state: bool = False,
     contended: bool = False,
+    measurement_validity: str | None = None,
 ) -> tuple[bool, bool, bool]:
     """Derive ``(advisory_eligible, blocking_eligible,
     formal_execution_eligible)`` from provenance + measurement state.
@@ -116,14 +123,53 @@ def derive_decision_eligibility(
 
     * every estimate is advisory-eligible;
     * priors (static/historical, tiers 0-1) can never block;
-    * measurement-backed evidence may block only when NOT contended;
+    * measurement-backed evidence may block only when the measurement is
+      VALID;
     * formal execution eligibility additionally requires verification
       passed + steady state (mirrors the records.py admission
       invariant).
+
+    **V20 PR C — the blocking rule changed.** It was::
+
+        blocking = measured and not contended
+
+    where ``contended`` was true whenever any foreign process held any
+    memory, however steadily. That asked whether the device was busy, not
+    whether the measurement could be trusted, and it made a correct
+    measurement taken beside a stable neighbour unusable — which aborted a
+    real chain (Gate 2 attempt 1, 2026-08-05). It is now::
+
+        blocking = measured and validity == valid_current_conditions
+
+    The presence of external occupancy no longer decides anything.
+
+    ``measurement_validity`` is the verdict from
+    :mod:`core.runtime_control.measurement_validity`, computed over a
+    bounded observation window. When it is ``None`` the caller had no
+    window, and validity is inferred **conservatively** from
+    ``contended``: an idle or registered-peer identity is treated as valid,
+    while a contended or unknown identity **cannot establish** validity and
+    therefore cannot block. That is deliberately the pre-PR-C outcome —
+    without window evidence there is no basis for claiming stability, and
+    inventing one is exactly the error being corrected. Producers that want
+    a stable neighbour to count must supply the window.
+
+    Args:
+        source: evidence provenance.
+        verification_passed: whether real-training verification passed.
+        steady_state: whether the measurement reached steady state.
+        contended: legacy presence flag, used ONLY to infer validity
+            conservatively when ``measurement_validity`` is absent.
+        measurement_validity: the typed verdict, when a window exists.
     """
+    if measurement_validity is None:
+        # No window was supplied. A contended/unknown identity cannot
+        # ESTABLISH validity, so it does not block; anything else is treated
+        # as valid. Both are the pre-PR-C outcomes.
+        measurement_validity = None if contended else VALID_MEASUREMENT
     advisory = True
     measured = source in MEASUREMENT_BACKED_SOURCES
-    blocking = measured and not contended
+    blocking = measured and measurement_validity == VALID_MEASUREMENT
     formal = blocking and verification_passed and steady_state
     return advisory, blocking, formal
 
@@ -200,6 +246,11 @@ class RuntimeEstimate(BaseModel):
     verification_passed: bool = False
     steady_state: bool = False
     concurrency_identity: ConcurrencyIdentity | None = None
+    #: V20 PR C. The verdict from a bounded occupancy window, when one was
+    #: observed. ``None`` means no window existed, NOT that the measurement
+    #: was found invalid — the two are different claims, and conflating them
+    #: is how presence became doubt in the first place.
+    measurement_validity: MeasurementValidity | None = None
 
     advisory_eligible: bool = True
     blocking_eligible: bool
@@ -222,6 +273,7 @@ class RuntimeEstimate(BaseModel):
             verification_passed=self.verification_passed,
             steady_state=self.steady_state,
             contended=self.contended,
+            measurement_validity=self.measurement_validity,
         )
         problems: list[str] = []
         if self.advisory_eligible is not advisory:
@@ -262,6 +314,7 @@ def make_estimate(
     verification_passed: bool = False,
     steady_state: bool = False,
     concurrency_identity: ConcurrencyIdentity | None = None,
+    measurement_validity: MeasurementValidity | None = None,
     **fields: Any,
 ) -> RuntimeEstimate:
     """Construct a ``RuntimeEstimate`` with eligibility DERIVED — the only
@@ -272,6 +325,7 @@ def make_estimate(
         verification_passed=verification_passed,
         steady_state=steady_state,
         contended=contended,
+        measurement_validity=measurement_validity,
     )
     return RuntimeEstimate(
         provenance=provenance,
@@ -279,6 +333,7 @@ def make_estimate(
         verification_passed=verification_passed,
         steady_state=steady_state,
         concurrency_identity=concurrency_identity,
+        measurement_validity=measurement_validity,
         advisory_eligible=advisory,
         blocking_eligible=blocking,
         formal_execution_eligible=formal,

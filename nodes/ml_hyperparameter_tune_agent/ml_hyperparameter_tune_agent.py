@@ -1099,6 +1099,7 @@ def _resolve_time_check_probe_request(
     data_dir: str | None,
     run_name: str,
     exp_id: str,
+    device_identity: Any | None = None,
 ) -> str:
     """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
 
@@ -1198,6 +1199,9 @@ def _resolve_time_check_probe_request(
             train_config=active_params.get("train_config") or {},
             loss_config=active_params.get("loss_config") or {},
             data_dir=data_dir,
+            # V20 PR C. Resolved ONCE at the orchestration boundary and
+            # passed down; the probe never discovers a device of its own.
+            device_identity=device_identity,
         ),
         persist=build_registry_persist(
             workload=request.workload,
@@ -4104,6 +4108,7 @@ class HyperparamTuningAgent:
                                 data_dir=time_data_dir,
                                 run_name=run_name,
                                 exp_id=exp_id,
+                                device_identity=device_identity,
                             )
                             == "abort"
                         ):
