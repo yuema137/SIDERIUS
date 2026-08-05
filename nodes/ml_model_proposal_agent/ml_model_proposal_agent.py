@@ -995,6 +995,9 @@ def _audit_proposer_components(
     recent_gate_chars = len(
         _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions or [])
     )
+    recent_trial_validity_chars = len(
+        _format_recent_trial_validity_block(inp.recent_trial_validity or [])
+    )
 
     components: dict[str, int] = {
         "system_prompt": len(system_prompt or ""),
@@ -1007,6 +1010,7 @@ def _audit_proposer_components(
         "agent_cards_block": len(agent_cards_block) if agent_cards_block else 0,
         "prior_stage_outputs": prior_stage_chars,
         "recent_gate_block": recent_gate_chars,
+        "recent_trial_validity_block": recent_trial_validity_chars,
     }
     return {
         "stage_name": stage_name,
@@ -1191,6 +1195,17 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     gate_block = _format_recent_gate_exhaustions_block(inp.recent_gate_exhaustions)
     if gate_block:
         lines += [gate_block, ""]
+
+    # V20 PR D (D-C6) — the all-trials-invalid report, spliced on the LEGACY
+    # path too. Found by Gate 1: the first wiring reached only the pipeline
+    # template, and the real proposer call took the legacy branch, so the
+    # block never reached the model. That is the mirror image of the P3-V1
+    # defect recorded below, where a legacy-only splice never reached
+    # pipeline mode — both paths must carry it or the evidence is silently
+    # dropped for whichever branch happens to run.
+    trial_validity_block = _format_recent_trial_validity_block(inp.recent_trial_validity)
+    if trial_validity_block:
+        lines += [trial_validity_block, ""]
 
     # V19 PR 3 §3.7 (flag-gated) — structured HealthGate evidence, rendered
     # AFTER and visibly separate from the §14.N resource-gate block (a

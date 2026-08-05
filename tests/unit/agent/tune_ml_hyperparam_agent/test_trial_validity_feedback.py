@@ -290,3 +290,63 @@ def test_the_carrier_is_not_gate_exhaustion(self=None):
         is None
     ), "gate_exhaustion fired for an all-invalid iteration — the carriers have merged"
     assert isinstance(_build(records), TrialValidityFeedback)
+
+
+class TestBothPromptPathsCarryTheBlock:
+    """REGRESSION, found by Gate 1 rather than by any unit test.
+
+    The first wiring reached only the PIPELINE template. The real proposer
+    call took the LEGACY branch, so the block never reached the model —
+    Gate 1 passed on its other properties while the headline one was
+    silently unproven.
+
+    This is the mirror image of the P3-V1 defect already recorded in the
+    proposal agent, where a legacy-only splice never reached pipeline mode.
+    Both directions have now occurred, so both paths are asserted here:
+    whichever branch a run takes, the evidence must travel.
+    """
+
+    @staticmethod
+    def _input(with_feedback: bool):
+        from agent.schemas.proposal import ProposalInput
+
+        entry = _build([_trial("t", passed=False)], skipped=True)
+        return ProposalInput(
+            interpretation={"model_types": ["a"], "best_denoising_score": 1.0},
+            recent_trial_validity=[entry] if with_feedback else [],
+        )
+
+    def test_the_legacy_reasoning_prompt_carries_it(self):
+        from nodes.ml_model_proposal_agent import _build_reasoning_prompt
+
+        assert "RECENT TRIAL VALIDITY" in _build_reasoning_prompt(self._input(True))
+
+    def test_the_legacy_prompt_is_unchanged_on_a_healthy_run(self):
+        from nodes.ml_model_proposal_agent import _build_reasoning_prompt
+
+        assert "RECENT TRIAL VALIDITY" not in _build_reasoning_prompt(self._input(False))
+
+    def test_the_pipeline_template_still_has_its_placeholder(self):
+        from pathlib import Path
+
+        template = (
+            Path(__file__).resolve().parents[4]
+            / "agent"
+            / "prompt_templates"
+            / "proposal"
+            / "proposing_stage.md"
+        ).read_text(encoding="utf-8")
+        assert "{recent_trial_validity_block}" in template
+
+    def test_both_splice_sites_exist_in_the_agent(self):
+        """MUTATION TARGET: wiring one path and forgetting the other."""
+        import inspect
+        import sys
+
+        from nodes.ml_model_proposal_agent import _format_recent_trial_validity_block as fn
+
+        src = inspect.getsource(sys.modules[fn.__module__])
+        assert src.count("_format_recent_trial_validity_block(") >= 3, (
+            "expected the formatter at the legacy splice, the pipeline "
+            "variable and the token accounting"
+        )

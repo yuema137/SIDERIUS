@@ -3119,6 +3119,57 @@ scientific threshold changes, and GPU admission and O-7 are untouched.
 
 ---
 
+## 17. Gate 1 — combined LLM-facing acceptance, 2026-08-05
+
+**Decision, made autonomously**: ONE bounded run covering D-C5, D-C6 and
+D-C7b together, deferred until all three were stable so the Gate proves
+the FINAL prompt rather than an intermediate one. D-C5 is included because
+filtering `per_model_formal` changes LLM-visible aggregate facts even
+though §4.7 keeps the exclusion REPORT out of the prompt.
+
+**Setup**: real OpenAI `gpt-5.4` proposer via `llm_configs/openai_tiered_v1.json`;
+pseudo training (no GPU, no training loop). Two real calls total (initial
+run + re-run after the defect below). ~60-67 s each, cost well inside the
+standard's $0.05-0.20 estimate.
+
+**Staged cheaply first**, per policy: structural tests → deterministic
+renderer tests → real call. The first three stages are permanent unit
+tests, not Gate-only scaffolding.
+
+| property | result |
+|---|---|
+| P1 the trial-validity block renders when populated | PASS |
+| P1b it reaches the prompt on the path that ACTUALLY ran | PASS *(after the fix)* |
+| P2 the real LLM returns schema-valid output given it | PASS — `skip_bottleneck_mixer`, expert advice present |
+| P3 no task-specific content in the generic template | PASS — zero leaks |
+| P5 healthy run suppresses the block entirely | PASS |
+| P5b legacy path suppresses it too | PASS |
+
+**GATE 1 FOUND A REAL DEFECT, which is the point of running it.** The
+first run passed every property except the one that mattered: the proposer
+took the **legacy** branch (`Proposed model (legacy)`), while the wiring
+had reached only the **pipeline** template. The block never entered the
+prompt the model actually saw. No unit test caught it, because each tested
+its own path.
+
+This is the **mirror image** of the P3-V1 defect already recorded in the
+proposal agent, where a legacy-only splice never reached pipeline mode.
+Both directions have now occurred. Fixed by splicing into
+`_build_reasoning_prompt` as well, adding the block to the token
+accounting, and adding `TestBothPromptPathsCarryTheBlock` so a future
+one-path wiring fails in unit tests rather than at a Gate.
+
+Re-run on the fixed code: **PASS**, with P1b and P5b added so the Gate now
+asserts the executed path rather than assuming it.
+
+**Consequence recorded**: `_audit_proposer_components`' expected key set
+grew by one. That test pins the exact set precisely so a new prompt
+component cannot escape token accounting — it failed correctly and was
+extended, not weakened.
+
+
+---
+
 ## 16. Formal-gate policy — FROZEN, 2026-08-05
 
 Two read-only audits established the current behaviour and the original
