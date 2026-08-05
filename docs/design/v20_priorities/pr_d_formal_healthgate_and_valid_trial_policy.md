@@ -3528,7 +3528,36 @@ real-device evidence carries distinct acceptance value that a synthetic
 window cannot — real unstable contention is by nature not reproducible, so a
 real run here would be weaker evidence, not stronger.
 
-### 20.5 Status
+### 20.5 After Gate 2 passes — the V20 prerequisite review (operator, 2026-08-05)
+
+**Gate 2 is launched autonomously**, and **may be re-run as many times as
+needed**. It is no longer an operator-gated action; only PR *merges* are.
+
+Once Gate 2 passes, a deliverable follows before final acceptance is
+claimed — `reports/v20_prerequisite_review.md`. Its purpose is decision
+support, stated plainly by the operator:
+
+> to foresee whether a new V20 run can beat FCNET.
+
+It must audit, from evidence rather than from this document's own claims:
+
+1. **the V19 reports** — `reports/v19_20260729_2136.md`,
+   `v19_gate0_20260729_2209.md`, `v19_fresh_10iter_20260731_0750.md`,
+   `v19_fresh_10iter_20260731_1842.md`;
+2. **`docs/design/v20_priorities.md`** — whether every V20 priority is
+   actually implemented, each with the evidence that establishes it (commit,
+   test, artifact — not a design-document assertion);
+3. **every change made since V19**, reviewed as a whole rather than
+   per-PR;
+4. **each problem V19 exposed**, classified as handled or not handled, with
+   the evidence for the classification.
+
+The honest-negative rule applies with full force here: a priority that is
+designed but unproven, or a V19 problem that remains open, must be reported
+as such. A review written to justify launching is worthless for deciding
+whether to launch.
+
+### 20.6 Status
 
 ```text
 PR D implementation      10 / 10
