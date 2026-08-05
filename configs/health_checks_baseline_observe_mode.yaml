@@ -2,6 +2,7 @@
 # Threshold evidence is reviewed in docs/design/v17_pregate_baseline_launch_plan.md §6.
 health_gates:
   - id: output_diversity_blocking
+    gate_role: blocking
     after_round: every
     short_circuit: true
     checks:
@@ -16,6 +17,7 @@ health_gates:
     reason: Observe only; production policy would invalidate a failed result.
 
   - id: output_std_blocking
+    gate_role: blocking
     after_round: every
     short_circuit: true
     checks:
@@ -30,6 +32,7 @@ health_gates:
     reason: Observe only; production policy would invalidate a failed result.
 
   - id: amplitude_collapse_blocking
+    gate_role: blocking
     after_round: every
     short_circuit: true
     checks:
@@ -44,6 +47,7 @@ health_gates:
     reason: Observe only; production policy would invalidate a failed result.
 
   - id: pearson_dispersion_recording
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:
@@ -54,6 +58,7 @@ health_gates:
     reason: Recording only.
 
   - id: spectral_peak_ratio_recording
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:
@@ -64,6 +69,7 @@ health_gates:
     reason: Recording only.
 
   - id: per_file_output_std_recording
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:

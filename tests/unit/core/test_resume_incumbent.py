@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pathlib
 
 import pytest
 
@@ -343,29 +344,57 @@ def test_unestablishable_commit_time_excluded(tmp_path):
 
 
 def test_repo_policy_never_consulted(tmp_path, monkeypatch):
-    """Decision state must never read the repo-current shipped config —
-    assert the default-path branch of ``required_blocking_gate_ids`` is
-    unreachable during reconstruction."""
+    """Decision state must never read the repo-current shipped config.
 
-    real = resume.required_blocking_gate_ids
+    Reconstruction must resolve policy from the iteration's own sha-pinned
+    effective config, never from whatever the repository happens to ship
+    today — otherwise replaying an old chain after a config change silently
+    re-judges its history.
 
-    def guarded(production_config_path=None):
-        assert production_config_path is not None, (
-            "reconstruction consulted the repo-current health_checks.yaml"
+    **This test was vacuous before the role hotfix.** It monkeypatched the
+    resolver and asserted on its argument, but the fixture never stamped a
+    `health_config_sha256` and never materialized an effective config, so
+    `_commit_time_gate_ids` returned None on the missing-stamp branch and
+    the guard was never reached. It passed for years without exercising the
+    thing it names. The `calls` assertion below is what makes that
+    impossible to repeat.
+    """
+    from execute_tools.health_checks.config import materialize_effective_config
+
+    real = resume.resolve_scientific_gate_ids
+    repo_config = str(
+        pathlib.Path(resume.__file__).resolve().parents[1] / "configs" / "health_checks.yaml"
+    )
+    calls: list[str] = []
+
+    def guarded(config_path):
+        calls.append(config_path)
+        assert os.path.realpath(config_path) != os.path.realpath(repo_config), (
+            f"reconstruction resolved policy from the repo-current shipped "
+            f"config ({config_path}) instead of the iteration's effective one"
         )
-        return real(production_config_path=production_config_path)
+        return real(config_path)
 
-    monkeypatch.setattr(resume, "required_blocking_gate_ids", guarded)
+    monkeypatch.setattr(resume, "resolve_scientific_gate_ids", guarded)
+
     ws = str(tmp_path)
+    model_dir = os.path.join(ws, "iter_001", "iteration_001", "punet")
+    os.makedirs(model_dir, exist_ok=True)
+    _, sha = materialize_effective_config(None, None, model_dir)
     _write_iter(
         ws,
         1,
-        [_record("f1", 1.1), _record("t1", 0.4, is_trial=True)],
-        best_valid_formal_score=1.1,
-        best_valid_formal_exp_id="f1",
+        [_record("f1", 0.9, waiver=None, verdicts=_passing_verdicts(), logical_round=2)],
+        health_config_sha256=sha,
     )
+
     state = _restore(ws, 2)
-    assert state.chain_best_valid_formal_score == 1.1
+
+    assert state.chain_best_valid_formal_score == 0.9
+    assert calls, (
+        "the guard was never invoked — this test is not reaching "
+        "resolve_scientific_gate_ids and proves nothing"
+    )
 
 
 def test_phantom_collapsed_record_never_incumbent(tmp_path):

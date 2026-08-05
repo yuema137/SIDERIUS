@@ -49,7 +49,7 @@ from execute_tools.dataset_config import TIDMAD
 from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
     classify_candidate_health,
-    required_blocking_gate_ids,
+    resolve_scientific_gate_ids,
 )
 from execute_tools.health_checks.config import (
     EFFECTIVE_CONFIG_BASENAME,
@@ -388,7 +388,14 @@ def _commit_time_gate_ids(
     )
     for path in candidates:
         if os.path.isfile(path) and _effective_config_body_sha(path) == stamped:
-            return required_blocking_gate_ids(production_config_path=path)
+            # `resolve_scientific_gate_ids`, not `required_blocking_gate_ids`:
+            # the shared resolver reads the DECLARED `gate_role` and can
+            # return None for a role-less config whose sha is not in the
+            # audited compatibility map. The deprecated shim collapses that
+            # None to an empty set, which reads as "no gate is required" —
+            # i.e. everything valid — and is how a record rejected in-run
+            # could become the incumbent on resume.
+            return resolve_scientific_gate_ids(path)
     return None
 
 
