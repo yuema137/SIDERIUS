@@ -442,10 +442,23 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         # every case wait out the full sleep.
         bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
         FIXTURE=$!
-        sleep 0.4
+        # DETERMINISTIC cleanup. Killing only on the happy path leaks a
+        # 20-second process whenever `launch_chain` exits non-zero or the
+        # subprocess times out — and a leaked fixture is not inert: its
+        # argv carries a workspace marker, so it pollutes the very `ps`
+        # scan these tests and the guard itself depend on. Observed: a
+        # full-suite run reported 148 unrelated failures purely from
+        # accumulated fixture processes.
+        trap 'kill "$FIXTURE" 2>/dev/null; wait "$FIXTURE" 2>/dev/null' EXIT
+        # POLL, do not sleep a fixed interval. A fixed wait is a race: under
+        # a loaded suite the fixture may not be visible in `ps` yet, the
+        # guard then sees nothing, and a "should block" case fails
+        # intermittently.
+        for _ in $(seq 1 100); do
+            if ps -eo args | grep -qF -- "{marker}"; then break; fi
+            sleep 0.05
+        done
         launch_chain {self.RUN} 15-19 15,16,17,18,19 arch
-        kill "$FIXTURE" 2>/dev/null
-        wait "$FIXTURE" 2>/dev/null
         """
         subprocess.run(
             ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{runner or RUNNER}'; {script}"],
@@ -463,6 +476,31 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         holding this workspace, so do not launch on top of it."""
         log = self._guard_says(tmp_path, "some_other_program")
         assert self.BLOCKED in log
+
+    def test_the_fixture_leaves_no_process_behind(self, tmp_path):
+        """MUTATION TARGET: dropping the fixture's EXIT trap.
+
+        These cases spawn a 20-second process whose argv carries a
+        workspace marker. A leak is not inert — it pollutes the `ps` scan
+        that both the guard and every other case in this class read, and
+        it outlives the test by design. Measured once: accumulated fixture
+        processes produced 148 unrelated failures across a full run.
+
+        Asserted against THIS test's own marker, so a leak from an
+        unrelated run cannot make it pass or fail spuriously.
+        """
+        import subprocess as _sp
+
+        marker = str(tmp_path / "root" / self.RUN)
+        self._guard_says(tmp_path, "leak_probe")
+
+        survivors = _sp.run(
+            ["bash", "-c", f"ps -eo args | grep -vF -- 'grep' | grep -F -- {marker!r} || true"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        assert survivors == "", f"the fixture leaked a live process: {survivors!r}"
 
     def test_the_runner_does_not_see_itself(self, tmp_path):
         """Behaviour under the CURRENT filename is unchanged: a process
