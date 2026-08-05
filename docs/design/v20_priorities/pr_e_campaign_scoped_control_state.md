@@ -4,8 +4,8 @@
   awaiting Draft PR, exact-head CI and operator review.** Branch
   `feature/v20-pr-e-campaign-scoped-control`. See §16 for the
   implementation ledger, the measured evidence and the unresolved
-  follow-ups. **CI: PASS** on the exact head `b0f83568`
-  (`Lint + Type + Unit Tests`, 9m53s, run 30959782093).
+  follow-ups. **CI: PASS** on the exact head `a44e01ef`
+  (`Lint + Type + Unit Tests`, 9m44s, run 30961809392).
   Draft PR: #169.
 
   *Design history.* Rev 3's architecture direction was approved
@@ -4570,8 +4570,12 @@ admission, scientific configuration, and LLM-facing behaviour.
 - Exact-head static checks: pyright **0 errors, 4 warnings**;
   `ruff check` clean; `ruff format --check` clean; `bash -n` clean over
   every script in `sdsc_submission_scripts/`.
-- **CI: PASS** on `b0f83568` — `Lint + Type + Unit Tests`, 9m53s,
-  [run 30959782093](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/30959782093).
+- **CI: PASS** on the exact head `a44e01ef` — `Lint + Type + Unit Tests`,
+  9m44s,
+  [run 30961809392](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/30961809392).
+  It also passed on the two preceding heads (`b0f83568`, `1eaac207`); the
+  head moved twice for documentation-only corrections, and each was
+  re-verified rather than assumed to carry over.
   Draft PR **#169**, not merged.
 - No real-training run, no GPU run, no API key, and no real Gate was
   executed by any commit in this PR.
