@@ -3690,12 +3690,14 @@ whether to launch.
 PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
-runtime hotfix           PR #175 OPEN — both commits landed
-                         (80f93ca9 attribution, 2184e1c8 spent budget);
-                         awaiting CI, then operator merge
-occupancy correction     direction approved; implementation NOT authorized
-                         until the typed-boundary + stability audit is
-                         reviewed. One open policy question (tolerance).
+runtime hotfix           PR #175 CI-GREEN at 2184e1c8, MERGEABLE.
+                         AWAITING OPERATOR MERGE (both commits landed:
+                         80f93ca9 attribution, 2184e1c8 spent budget)
+occupancy correction     design audit DONE (01062b10). Implementation
+                         still NOT authorized: blocked on ONE operator
+                         decision, the stability tolerance (T0-T3, T0
+                         recommended). Reshaped by the audit into a
+                         CONSOLIDATION, not a new schema.
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
