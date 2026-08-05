@@ -3396,11 +3396,86 @@ part of the post-PR-C design.
 | does `foreign_contended` mean instability? | **No.** Any foreign PID, any size, however steady → `foreign_contended` |
 | is stability assessed across the window? | **No.** `max_mem` takes the PEAK; nothing compares samples. A steady 8 GB and an 8 GB spike are indistinguishable |
 | why can a contended measurement not block? | `estimate_types.py:126` — `blocking = measured and not contended`, a frozen invariant, with `contended = identity in ("foreign_contended", "unknown_contention")` |
-| does admission separate the quantities? | **No.** No `external_occupancy` / `candidate_owned` / free-memory separation exists in `admission.py` or `gpu_accounting.py` |
+| does admission separate the quantities? | ~~**No.**~~ **WRONG — corrected below.** |
 
 `sustained_util` is the sharpest example: it treats a STEADY high load as
 evidence of contention, when under the frozen principle steadiness is
 precisely what makes a measurement usable.
+
+#### The audit's own last row was false — and correcting it reshapes PR C
+
+I wrote that no `external_occupancy` / `candidate_owned` / free-memory
+separation exists in `admission.py` or `gpu_accounting.py`. **It exists, and
+it is more complete than the model I then proposed.**
+`GpuAccountingSnapshot` (`core/runtime_control/gpu_accounting.py`, landed by
+PR B) already carries:
+
+| field | the fact it holds |
+|---|---|
+| `own_tree_mib`, `own_processes` | candidate-attributed occupancy, summed over processes whose **ancestry reaches `root_pid`** |
+| `other_mib`, `other_process_count`, `other_processes` | external attributed occupancy, **with PIDs** |
+| `unattributed_mib` | occupancy the per-process listing cannot explain |
+| `device_free_mib` | what the candidate must fit into |
+| `accounting_skew_mib` | the **signed** disagreement between the device total and the per-PID sum, deliberately left unclamped |
+
+And `other_processes` exists for exactly the reason the operator's stability
+list gives, stated in its own docstring:
+
+> *"A count alone cannot tell 'the same neighbour, still there' from 'one
+> left and another arrived' — and a Gate that compares only totals would
+> call those identical. Retained so environmental change is detectable over
+> a series of samples rather than inferred from two endpoints."*
+
+`admission.py` already takes a `GpuAccountingSnapshot`. A `telemetry_available=False`
+snapshot is validated to carry **no** numbers, so an unmeasured device can
+never read as an empty one.
+
+**So the real defect is not missing quantities — it is a duplicated,
+cruder parallel model.** The two subsystems are **disjoint**: nothing in
+`probe.py`, `calibration_policy.py` or `admission.py` imports the other's
+occupancy type. The calibration path built its own `ContentionSnapshot`
+carrying a device total, a PID list and a utilisation percentage, and
+classifies from that — while the accounting path, used by
+`sandbox_executor`, `gpu_observer`, the measurement runner and the tuner,
+already models every fact correctly.
+
+**This makes PR C a consolidation, not a new schema** — materially smaller
+and better than what §20.3 first proposed:
+
+* **`OccupancyContext` should NOT be invented.** `GpuAccountingSnapshot`
+  already is one. Creating a second would add exactly the duplicate state
+  the minimal-architecture rule forbids, and would be the third occupancy
+  model in the codebase.
+* **`MeasurementValidity` is the genuinely new boundary** — and the only
+  one PR C must design from scratch.
+* The calibration path should **consume** the existing accounting snapshot
+  rather than keep its parallel one.
+
+**A duplication this PR knowingly created.** The narrow hotfix added
+`ContentionSnapshot.compute_process_memory_gb`, which duplicates
+`ProcessOccupancy` in coarser units (GB floats vs MiB ints). That was the
+right call for a bug fix — restructuring two subsystems inside a hotfix is
+precisely what §20.1 forbids — but it is **debt, recorded here so PR C
+absorbs it** rather than treating it as the design.
+
+#### Stability, item by item (the operator's six)
+
+| # | requirement | what exists today |
+|---|---|---|
+| 1 | external PID-set changes | **Data yes, consumer no.** `other_processes` carries PIDs per snapshot; `classify_contention_window` takes a set UNION across samples and never compares them, so "the same neighbour throughout" and "a different neighbour each sample" are identical to it |
+| 2 | external attributed-byte changes | **Data yes, consumer no.** `other_mib` is per-snapshot; nothing differences it |
+| 3 | unattributed-residual changes | **Data yes, consumer no.** `unattributed_mib` + the signed `accounting_skew_mib`; nothing differences them |
+| 4 | sampling completeness | **Largely present.** The window is `ceil(window_s / interval_s)` samples by construction, so a sample cannot go missing; a failed capture surfaces as `telemetry_available=False`, and ANY such sample forces `unknown_contention`. The gap is that completeness is not expressed as a *validity* fact — it is entangled with the contention verdict |
+| 5 | OOM/timeout attribution | **Absent.** `admission.py` has `insufficient_headroom` as a refusal reason, but nothing correlates a probe's `oom`/`wall_cap` outcome with the occupancy observed around it. The lifecycle treats a measured OOM as purely candidate-local evidence (`REJECT`) without asking whether a neighbour arrived mid-probe |
+| 6 | candidate process-tree completeness | **Partial.** `own_tree_mib` sums by real ancestry (`is_descendant_of` walks to `root_pid`), which is the right basis; `accounting_skew_mib` is the closest thing to a completeness signal. There is no explicit "the tree was fully enumerated" flag, and a child spawned between enumeration and sampling lands in `unattributed_mib` rather than being reported as incomplete attribution |
+
+Items 1–3 share one shape: **the facts are already measured and persisted;
+no consumer differences them across the window.** That is the concrete work,
+and it is far narrower than a new schema.
+
+Item 5 is the one genuinely missing capability, and it is the one with
+safety consequences — misattributing a neighbour-induced OOM to the
+candidate rejects a model for someone else's memory.
 
 **The corrected model — two focused typed boundaries, not a broad admission
 rewrite.**
@@ -3428,15 +3503,21 @@ measured quantities above it):
                                              not a measured quantity
 ```
 
-They are carried by **two boundaries**:
+Facts 1, 2, 3 and 5 are **already carried by `GpuAccountingSnapshot`** (see
+the correction above). Fact 4 — change across the window — is the only one
+nothing computes, and it is a function OF a series of those snapshots rather
+than a new measurement.
+
+So the boundaries are:
 
 ```text
-OccupancyContext        the measured facts (1-4) plus the bounded
-                        observation window
+OccupancyContext        DO NOT INVENT. GpuAccountingSnapshot already is
+                        this. PR C makes the calibration path consume it
+                        instead of maintaining a parallel model.
 
-MeasurementValidity     whether the calibration can carry blocking
-                        authority — independent of whether external
-                        occupancy exists
+MeasurementValidity     the one genuinely new boundary: whether a
+                        calibration can carry blocking authority —
+                        independent of whether external occupancy exists
                           valid_stable_conditions
                           unstable_external_activity
                           attribution_incomplete
@@ -3493,14 +3574,38 @@ small correction, and it is why PR C is design-first and separately merged.
 * **candidate process-tree completeness** — whether every candidate-owned
   process was actually trackable.
 
-**OPEN QUESTION — the stability tolerance. No numeric tolerance is
-authorized.** None exists in the repository today; the window performs no
-sample-to-sample comparison at all (`max_mem` takes the peak and nothing
-looks across samples). Per the standing rule I will **not invent one**.
-After the audit I will present the smallest set of configurable tolerance
-options with their consequences and a recommendation, and **stop for the
-operator decision on the numeric/policy choice only** — every other part of
-the design proceeds from repository evidence.
+**OPEN QUESTION — the stability tolerance. AWAITING THE OPERATOR DECISION.**
+No such tolerance exists in the repository, and the window performs no
+sample-to-sample comparison at all. Per the standing rule I have **not
+invented one**. The audit is now complete, so here are the options.
+
+**What makes this decidable at all**: items 1–3 are *set and scalar
+comparisons over an existing series*, so one option needs no numeric
+threshold whatsoever. That is worth noticing before reaching for a number.
+
+| | option | rule | consequence |
+|---|---|---|---|
+| **T0** | **exact-match stability** — *recommended* | the external PID set is IDENTICAL across every sample, and `unattributed_mib` does not grow | **No new numeric threshold at all.** A steady neighbour is valid; a neighbour arriving or leaving mid-window is not. Strictest, and the only option that adds no tunable. Risk: a neighbour that merely *restarts* mid-window invalidates, which is arguably correct |
+| **T1** | byte-delta tolerance | as T0, plus external attributed bytes may vary by ≤ `X` | Tolerates a neighbour whose allocation breathes. Requires ONE new configured number, and its right value is not derivable from anything in the repository |
+| **T2** | fractional tolerance | external bytes may vary by ≤ `X %` of device VRAM | Scales across devices, which the existing `contention_memory_fraction` already does — the most consistent with current policy shape. Still one new number |
+| **T3** | tolerate change, require attribution only | any external change is fine provided every byte stays attributable | Weakest. Explicitly permits a neighbour to grow throughout the measurement, which is the case most likely to corrupt a timing calibration |
+
+**My recommendation: T0**, with T2 as the fallback if T0 proves too strict in
+practice.
+
+The reasoning is that T0 is the only option consistent with the standing rule
+against invented thresholds — it is a *predicate over measured facts*, not a
+tuned number — and the frozen principle asks whether occupancy CHANGED, which
+a set comparison answers directly. If a real workload later shows T0
+rejecting measurements that were in fact usable, that rejection will be
+visible in the recorded facts, and T2 can be introduced **with evidence for
+its value** rather than by guessing now.
+
+**T0 is also the safest thing to be wrong about**: it fails toward refusing
+blocking authority, never toward granting it.
+
+**This is the one decision PR C is blocked on.** Everything else in §20.3
+follows from repository evidence and needs no ruling.
 
 ### 20.4 Ordering, and the final Gate 2
 
