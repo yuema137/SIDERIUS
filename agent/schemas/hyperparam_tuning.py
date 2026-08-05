@@ -34,6 +34,26 @@ from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
+#: What a HealthGate verdict DOES in this run: enforce, or only record.
+#:
+#: Declared by the operator, never reconstructed by diffing the effective
+#: YAML against the shipped one. The predecessor role hotfix (`af5339ce`)
+#: already proved why: enforcement and science are different properties,
+#: and deriving one from the other inverts the answer under observe-only.
+HealthGateMode = Literal["blocking", "observe_only"]
+
+#: Whether this run's results may inform science, or are diagnostic only.
+#:
+#: A SEPARATE axis from :data:`HealthGateMode` (D-D-5). The pairing rules
+#: are enforced at the launcher, not here:
+#:
+#:     blocking     + scientific  -> the normal formal campaign
+#:     blocking     + diagnostic  -> coherent: enforced, deliberately not promoted
+#:     observe_only + diagnostic  -> the normal observation run
+#:     observe_only + scientific  -> REFUSED, a contradiction
+ResultAuthority = Literal["scientific", "diagnostic"]
+
+
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
 # ---------------------------------------------------------------------------
@@ -1659,6 +1679,30 @@ class HyperparamTuningInput(BaseModel):
             "See docs/design/enable_partial_file_list.md."
         ),
     )
+    healthgate_mode: HealthGateMode | None = Field(
+        default=None,
+        description=(
+            "Whether HealthGate verdicts ENFORCE (`blocking`) or only "
+            "record (`observe_only`). Declared, never reconstructed by "
+            "diffing YAML.\n\n"
+            "Optional here **only so historical replays still load**. A new "
+            "formal campaign that omits it is refused at the launcher "
+            "(D-C1b) — there is no safe default, because defaulting to "
+            "`blocking` would silently claim authority a run may not have."
+        ),
+    )
+    result_authority: ResultAuthority | None = Field(
+        default=None,
+        description=(
+            "Whether this run's results may inform science (`scientific`) "
+            "or are for diagnosis only (`diagnostic`).\n\n"
+            "A SEPARATE axis from `healthgate_mode` (D-D-5), not a second "
+            "spelling of it. `observe_only + scientific` is a contradiction "
+            "and is refused; `blocking + diagnostic` is coherent and "
+            "legitimate — a fully-enforced run whose results are "
+            "deliberately not promoted. Same optionality rule as above."
+        ),
+    )
     health_gate_enabled: bool = Field(
         default=True,
         description=(
@@ -2265,6 +2309,21 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Whether the HealthGate subsystem participated in this run. "
             "None on legacy outputs = enabled."
+        ),
+    )
+    healthgate_mode: HealthGateMode | None = Field(
+        default=None,
+        description=(
+            "The declared enforcement mode this run ran under. None on "
+            "legacy outputs = not declared, which downstream reads as "
+            "'authority cannot be established from the declaration alone'."
+        ),
+    )
+    result_authority: ResultAuthority | None = Field(
+        default=None,
+        description=(
+            "The declared result authority this run ran under. None on "
+            "legacy outputs = not declared."
         ),
     )
     health_checks_config_source: str | None = Field(

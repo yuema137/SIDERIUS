@@ -380,6 +380,12 @@ def write_manifest(
         resolution error, restore_prior_state error). The chain halts.
         Set via ``crashed=True``.
     """
+    # `tune_output` is only bound on the completed branch. The stamps at the
+    # bottom of this function run on EVERY branch, so it is initialised here
+    # rather than guarded there — a crashed or record-less iteration has no
+    # tuner output, and `None` is the honest answer for its declared posture.
+    tune_output = None
+
     if crashed:
         manifest = {
             "status": "failed",
@@ -488,6 +494,19 @@ def write_manifest(
     # mechanism the build ships; that production reaches it is a separate
     # claim, proven by the reachability guardrails.
     manifest["preflight_execution_mode"] = PREFLIGHT_EXECUTION_MODE
+
+    # V20 PR D (D-C1a) — the declared enforcement/authority axes, stamped on
+    # EVERY branch for the same reason as the two above: a crashed iteration
+    # is exactly when "was this run even allowed to be authoritative?" has
+    # to be answerable.
+    #
+    # Read off the tuner output rather than re-derived here, so the manifest
+    # cannot claim a posture the run did not actually carry. `None` on a
+    # crashed branch with no tune_output means undeclared, which downstream
+    # reads as "authority not establishable from the declaration" — never as
+    # a silent `blocking`.
+    manifest["healthgate_mode"] = getattr(tune_output, "healthgate_mode", None)
+    manifest["result_authority"] = getattr(tune_output, "result_authority", None)
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:

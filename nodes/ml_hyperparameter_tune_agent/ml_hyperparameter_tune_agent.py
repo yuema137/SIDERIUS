@@ -3320,6 +3320,11 @@ class HyperparamTuningAgent:
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,
+            # V20 PR D (D-C1a): declared enforcement/authority axes,
+            # echoed from the input so provenance and output cannot
+            # disagree with what the run was launched under.
+            "healthgate_mode": agent_input.healthgate_mode,
+            "result_authority": agent_input.result_authority,
             "health_checks_config_source": health_checks_config_source,
             "health_checks_config_effective": agent_input.health_checks_config
             if agent_input.health_gate_enabled
@@ -5306,6 +5311,11 @@ class HyperparamTuningAgent:
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,
+            # V20 PR D (D-C1a): declared enforcement/authority axes,
+            # echoed from the input so provenance and output cannot
+            # disagree with what the run was launched under.
+            "healthgate_mode": agent_input.healthgate_mode,
+            "result_authority": agent_input.result_authority,
             "health_checks_config_source": health_checks_config_source,
             "health_config_sha256": health_config_sha256,
             "formal_reference_score": formal_reference_score,
@@ -5868,6 +5878,27 @@ def main() -> int:
         "reference'.",
     )
 
+    parser.add_argument(
+        "--healthgate_mode",
+        choices=["blocking", "observe_only"],
+        default=None,
+        help="V20 PR D: whether HealthGate verdicts ENFORCE (blocking) or "
+        "only record (observe_only). Declared, never inferred from the "
+        "config file. No default: a formal campaign that omits it is "
+        "refused at launch, because defaulting would silently claim "
+        "authority the run may not have.",
+    )
+    parser.add_argument(
+        "--result_authority",
+        choices=["scientific", "diagnostic"],
+        default=None,
+        help="V20 PR D: whether this run's results may inform science "
+        "(scientific) or are for diagnosis only (diagnostic). A SEPARATE "
+        "axis from --healthgate_mode: observe_only+scientific is a "
+        "contradiction and is refused, while blocking+diagnostic is "
+        "coherent — enforced, and deliberately not promoted.",
+    )
+
     args = parser.parse_args()
 
     # Preflight: catch the "plugin model_type without seed file" mistake
@@ -5898,6 +5929,10 @@ def main() -> int:
         if args.data_scope
         else DataScope.default(),
         "health_gate_enabled": args.health_gate_enabled,
+        # V20 PR D (D-C1a): declared, never inferred. No default here —
+        # the launcher refuses omission in D-C1b.
+        "healthgate_mode": args.healthgate_mode,
+        "result_authority": args.result_authority,
         "health_gate_files": DataScope.from_cli(args.health_gate_files).file_indices
         if args.health_gate_files
         else None,

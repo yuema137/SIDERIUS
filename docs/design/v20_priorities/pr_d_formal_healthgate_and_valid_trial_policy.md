@@ -654,7 +654,7 @@ refusal in addition to the mode↔config check.
 
 | ID | Checkpoint | State |
 |---|---|---|
-| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | `[ ]` not started |
+| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped on every branch (Behavior Delta: none) · **D-C1b `[ ]`** enforcement not started |
 | **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
 | **D-C3** | An **explicitly overridden** zero-valid-trial formal round still completes, recorded non-authoritative (D-D-1) | `[ ]` not started |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
@@ -847,9 +847,92 @@ Any test that cannot be run is recorded as **not run**, with the reason. It
 is never reported as passed.
 
 **8. Commit boundary.**
-- [ ] Independently reviewable: adds a field, changes no decision.
-- [ ] No unrelated cleanup; no follow-up work folded in.
-- [ ] Before committing: show diff summary, staged file list, test output, and any deviation from this plan.
+- [x] Independently reviewable: adds a field, changes no decision.
+- [x] No unrelated cleanup; no follow-up work folded in.
+- [x] Before committing: show diff summary, staged file list, test output, and any deviation from this plan.
+
+#### IMPLEMENTATION RECORD — D-C1a `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on
+`feature/v20-pr-d-formal-healthgate`, branched from `e1748dcc`.
+
+**Behavior Delta: none.** 113 insertions, **0 deletions** — the diff is
+pure addition, which is the mechanical form of "a recorded field with no
+consumer cannot change behaviour".
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `agent/schemas/hyperparam_tuning.py` | `HealthGateMode` / `ResultAuthority` literals; both fields on the input schema and echoed on the output schema, **no default on either** |
+| `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` | `--healthgate_mode` / `--result_authority` (`choices=`, `default=None`); threaded into the input dict, the `run_config` provenance dict and `agent_output_dict` |
+| `sdsc_submission_scripts/run_one_iteration.py` | manifest stamp on **every** branch, read off `tune_output` rather than written as a literal |
+
+**Actual call path**
+
+```text
+CLI --healthgate_mode / --result_authority
+  -> tuner input dict            (args.*)
+  -> HyperparamTuningInput       (Literal, no default)
+  -> run_config provenance       (agent_input.*)
+  -> agent_output_dict           (agent_input.*)
+  -> HyperparamTuningOutput      (echoed)
+  -> manifest.json               (getattr(tune_output, …, None), every branch)
+```
+
+**Manifest, observed on all three branches** by executing
+`write_manifest` rather than reading it:
+
+| branch | `healthgate_mode` | `result_authority` |
+|---|---|---|
+| `completed` | the declared value | the declared value |
+| `no_records` | `null` | `null` |
+| `failed` | `null` | `null` |
+
+`null` on the two non-completed branches is the honest answer, not a gap
+to be filled: those paths have no tuner output, so there is no declaration
+to report. Downstream must read it as "authority not establishable from
+the declaration", never as a silent `blocking`.
+
+**Tests** — 15 new in
+`tests/unit/agent/schemas/test_healthgate_mode_declaration.py`; the
+targeted set (schema + `test_run_one_iteration.py` +
+`test_resume_incumbent.py`) is **99 passed in 1.34 s**.
+
+Covering: every mode×authority combination accepted at the schema level
+including `observe_only + scientific` (refused at the launcher in D-C1b,
+not here, so historical artifacts stay readable); `blocking + diagnostic`
+expressible, which is what proves the axes are independent; neither axis
+defaulting; declaring one not implying the other; five unknown-value
+rejections **including each axis being offered the other's vocabulary**;
+the output echo; a legacy output without either key still loading; and
+neither axis having become a required output field.
+
+**Static**: pyright **0 errors, 4 warnings** — identical to the branch
+baseline. `ruff check` and `ruff format --check` clean.
+
+**Deviations from the plan — two, both implementation corrections**
+
+1. **`tune_output` is initialised to `None` before the manifest branch.**
+   The plan says "stamp on every branch"; `tune_output` is only bound on
+   the completed branch, so the stamp as written would have raised
+   `UnboundLocalError` on `no_records` and `failed` — precisely the
+   branches the plan says matter most. Found by inspection, confirmed by
+   executing both paths. This narrows nothing: it is what "every branch"
+   requires.
+2. **Both `run_config` and `agent_output_dict` are stamped**, not just
+   the typed output. A `count == 1` assertion caught that the
+   output-shaped key block occurs **twice** — one is run-configuration
+   provenance, the other the typed output — and both already carry the
+   DS5 HealthGate stamps. Stamping one and not the other would create
+   exactly the provenance/output drift this field exists to prevent.
+
+**Not done, deliberately**: no enforcement of mandatoriness, no refusal of
+`observe_only + scientific`, no consistency check against the effective
+config, no consumer of either field. All of that is D-C1b.
+
+**Next authorized checkpoint**: D-C1b — the startup enforcement boundary,
+and the first commit in this PR that changes launch behaviour.
 
 ---
 
