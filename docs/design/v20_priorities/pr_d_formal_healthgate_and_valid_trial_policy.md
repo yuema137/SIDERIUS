@@ -1255,6 +1255,86 @@ boundary with no call sites.
 
 ### Commit 4 — `D-C2a`: the `ScientificAuthority` verdict, with no call sites
 
+#### IMPLEMENTATION RECORD — D-C2a `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C1b `8bdeb7d1`.
+
+**Behavior Delta: none.** A pure typed value with **no production call
+sites** — verified by grep: only tests import it. D-C2b wires it.
+
+**File**: `core/scientific_authority.py` (new, 176 lines).
+
+**Signature — launch history cannot reach it**
+
+```python
+ScientificAuthority.from_context(
+    *,
+    healthgate_mode: str | None,            # blocking | observe_only | None
+    declared_result_authority: str | None,  # scientific | diagnostic | None
+    formal_validity: FormalValidity,        # valid | invalid | unknown
+) -> ScientificAuthority
+```
+
+Absent by construction, per §16.D: the trial winner, `valid_trial_count`,
+the skip and bypass decisions, the comparison reference and
+`force_formal_round`. Those decide whether the round was worth running;
+this decides whether its result may be believed. A first formal result
+that bypassed the budget on the `-inf` bootstrap is **no less
+authoritative for it**. A test asserts the signature contains no
+trial-shaped parameter and that the `AuthorityBlocker` vocabulary cannot
+express `no_valid_trial`.
+
+**Conclusions are structural, not validated.** `authoritative`,
+`primary_basis`, `blocking_reasons`, `enters_incumbent_selection` and
+`enters_scientific_aggregation` are `@computed_field` properties — there
+is no constructor argument for them. `extra="forbid"` refuses a caller
+that tries anyway. That second half matters: without it Pydantic
+**silently discards** `authoritative=True`, so the verdict stays correct
+while the caller believes they set it — measured during implementation,
+which is why the config carries `forbid`.
+
+**Truth table — executed**
+
+| mode | authority | validity | authoritative | primary_basis |
+|---|---|---|---|---|
+| blocking | scientific | valid | **True** | `blocking_scientific_formal_valid` |
+| blocking | scientific | invalid | False | `gate_invalidated` |
+| blocking | scientific | unknown | False | `formal_validity_unknown` |
+| blocking | diagnostic | any | False | `declared_diagnostic` |
+| observe_only | diagnostic | any | False | `declared_diagnostic` |
+| observe_only | scientific | any | False | `non_blocking_mode` |
+| undeclared (`None`) | undeclared | any | False | `legacy_authority_unknown` |
+
+Asserted as a property as well as row-by-row: **exactly one** of the
+twelve combinations is authoritative.
+
+`observe_only + scientific` returns a verdict rather than raising. D-C1b
+refuses it at launch, but artifacts recorded under it exist and document
+an incident — a pure function that threw on historical data would make
+that history unreadable.
+
+`blocking_reasons` reports **all** applicable reasons in a fixed
+precedence, not just the first, so an operator fixing one can see the
+others without re-running.
+
+**Tests** — 25 in `tests/unit/core/test_scientific_authority.py`;
+`tests/unit/core/`: **2045 passed, 2 skipped** in 44 s.
+
+**Mutations — three, all caught**
+
+| mutation | fails |
+|---|---|
+| `extra="forbid"` dropped (caller-set silently ignored) | 5 |
+| `no_valid_trial` added to the blocker vocabulary | 1 |
+| `unknown` validity treated as passing | 2 |
+
+**Static**: pyright 0 errors / 4 warnings (baseline), ruff + format clean.
+
+**Deviations**: none.
+
+**Next authorized checkpoint**: D-C2b — wire the verdict onto every formal
+record at the tuner exit.
+
 **1. Goal.** Introduce the typed verdict and its computed consequences as a
 pure unit. It is separate from its wiring for the reason PR C learned the
 hard way: a boundary that lands together with its consumers cannot be
