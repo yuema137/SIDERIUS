@@ -59,8 +59,77 @@ class TestTheSeamAcceptsAPlan:
     def test_a_valid_plan_round_trips(self, tmp_path):
         loaded = load_validation_fixed_candidate_plan(_write(tmp_path, PLAN))
         assert loaded is not None
-        assert loaded["model_name"] == "fixed_validation_candidate"
-        assert loaded["baseline_config"] == PLAN["baseline_config"]
+        assert loaded["plan"]["model_name"] == "fixed_validation_candidate"
+        assert loaded["plan"]["baseline_config"] == PLAN["baseline_config"]
+
+
+class TestProvenanceIsRecorded:
+    """An acceptance run that bypassed the proposer must be able to prove
+    WHICH plan it used. Provenance that exists only as a local variable and a
+    log line proves nothing — that was the state of a first version of this
+    seam, and it is the fourth instance in this PR family of a value produced
+    and never delivered."""
+
+    def test_the_loader_returns_source_hash_and_identity(self, tmp_path):
+        """MUTATION TARGET: dropping the provenance half of the return."""
+        loaded = load_validation_fixed_candidate_plan(_write(tmp_path, PLAN))
+        prov = loaded["provenance"]
+        assert prov["candidate_source"] == "fixed_validation_plan"
+        assert len(prov["plan_sha256"]) == 64
+        assert prov["resolved_model_name"] == "fixed_validation_candidate"
+        assert prov["plan_path"].endswith("plan.json")
+
+    def test_the_hash_is_over_the_bytes_actually_read(self, tmp_path):
+        """A different plan must hash differently, and an identical plan
+        written twice must hash the same — otherwise the recorded hash cannot
+        identify what ran."""
+        a = load_validation_fixed_candidate_plan(_write(tmp_path, PLAN, "a.json"))
+        b = load_validation_fixed_candidate_plan(_write(tmp_path, PLAN, "b.json"))
+        changed = {**PLAN, "model_name": "other_candidate"}
+        c = load_validation_fixed_candidate_plan(_write(tmp_path, changed, "c.json"))
+
+        assert a["provenance"]["plan_sha256"] == b["provenance"]["plan_sha256"]
+        assert a["provenance"]["plan_sha256"] != c["provenance"]["plan_sha256"]
+
+    def test_every_manifest_branch_stamps_the_provenance(self):
+        """MUTATION TARGET: stamping it on the healthy path only.
+
+        Checked per AST call node. A failed iteration is exactly when you
+        need to know which candidate ran — the §19.1 lesson, applied to a
+        different field.
+        """
+        import ast
+        from pathlib import Path
+
+        launcher = (
+            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+        )
+        tree = ast.parse(launcher.read_text(encoding="utf-8"))
+        calls, undeclared = 0, []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name != "write_manifest":
+                continue
+            calls += 1
+            if "fixed_candidate_provenance" not in {kw.arg for kw in node.keywords}:
+                undeclared.append(node.lineno)
+
+        assert calls >= 5, f"expected every manifest branch; found {calls}"
+        assert undeclared == [], (
+            f"write_manifest called without fixed_candidate_provenance at lines "
+            f"{undeclared}; those branches cannot say which candidate ran"
+        )
+
+    def test_the_manifest_carries_the_key_even_when_absent(self, tmp_path):
+        """`None` must be recorded explicitly, so a reader can tell
+        "the proposer chose" from "nobody wrote the field"."""
+        from sdsc_submission_scripts.run_one_iteration import write_manifest
+
+        manifest = write_manifest(iter_dir=str(tmp_path), run_name="prov", results=[], crashed=True)
+        assert "fixed_candidate_provenance" in manifest
+        assert manifest["fixed_candidate_provenance"] is None
 
 
 class TestResultsCanNeverEnterThroughTheSeam:

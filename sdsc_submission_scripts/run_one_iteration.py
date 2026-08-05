@@ -104,8 +104,14 @@ def _portion_floor(s: str) -> float:
 def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
     """Load a fixed candidate PLAN for a validation run (V20 FU-D-11).
 
-    Returns the validated plan as a dict, or ``None`` when no path was given
-    (the ordinary campaign case — the proposer decides).
+    Returns ``{"plan": ..., "provenance": ...}``, or ``None`` when no path was
+    given (the ordinary campaign case — the proposer decides).
+
+    The provenance half is not decoration: an acceptance run that bypassed the
+    proposer must be able to prove WHICH plan it used. It records
+    ``candidate_source``, the absolute path, a sha256 over the canonicalised
+    payload, and the resolved model identity — computed from the bytes
+    actually read, so the hash cannot drift from the plan that was used.
 
     **Fails closed, loudly.** A malformed file, an unreadable path or a
     payload that is not a valid ``ProposalOutput`` refuses the launch. It does
@@ -163,7 +169,18 @@ def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
             f"--validation_fixed_candidate_plan: {path!r} is not a valid candidate plan: {exc}"
         ) from exc
 
-    return plan.model_dump(mode="json")
+    # Provenance is computed HERE, from the bytes actually read, so the
+    # recorded hash cannot drift from the plan that was used.
+    provenance = {
+        "candidate_source": "fixed_validation_plan",
+        "plan_path": os.path.abspath(path),
+        "plan_sha256": hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "resolved_model_name": plan.model_name,
+        "resolved_baseline_config_keys": sorted(plan.baseline_config),
+    }
+    return {"plan": plan.model_dump(mode="json"), "provenance": provenance}
 
 
 def _resolve_chain_run_id(workspace: str, run_name: str) -> str:
@@ -427,6 +444,7 @@ def write_manifest(
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
     health_feedback_policy: dict | None = None,
+    fixed_candidate_provenance: dict | None = None,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
@@ -543,6 +561,13 @@ def write_manifest(
     # auditable. Policy only: per-round gate evidence lives in the
     # records and the interpretation digest — never duplicated here.
     manifest["health_feedback_policy"] = health_feedback_policy
+
+    # V20 FU-D-11 — WHICH candidate plan this iteration ran, when the
+    # proposer was bypassed. Stamped on EVERY branch, like the policy above:
+    # an acceptance run that skipped the proposer must be able to prove what
+    # it used, and a failed iteration is exactly when that matters. `None`
+    # means the proposer chose normally.
+    manifest["fixed_candidate_provenance"] = fixed_candidate_provenance
 
     # V20 PR A (§11) — pre-flight execution provenance, stamped on EVERY
     # branch for the same reason as the policy above: a crashed iteration
@@ -1552,6 +1577,23 @@ def main():
         print(f"    - {p}")
     print("=" * 60)
 
+    # FU-D-11 — resolved BEFORE any manifest can be written, so a validation
+    # run's candidate provenance exists on EVERY branch including the early
+    # crash paths. This is the §19.1 lesson applied: a launch fact that only
+    # survives the healthy path is absent exactly when it is most needed.
+    # Refusing here also means a malformed or results-bearing plan stops the
+    # launch before any real work begins.
+    _fixed = load_validation_fixed_candidate_plan(args.validation_fixed_candidate_plan)
+    fixed_candidate_plan = _fixed["plan"] if _fixed else None
+    fixed_candidate_provenance = _fixed["provenance"] if _fixed else None
+    if fixed_candidate_provenance is not None:
+        print(
+            f"[FIXED PLAN] validation posture: the proposer will be bypassed for "
+            f"candidate {fixed_candidate_provenance['resolved_model_name']!r} "
+            f"(sha256={fixed_candidate_provenance['plan_sha256'][:12]}…, "
+            f"source={fixed_candidate_provenance['plan_path']})"
+        )
+
     # Step 1 — back-compat resolution of @manifest: indirection in the seed
     # list. The legacy chain shell still passes manifests this way; the new
     # run_chain.sh (Commit 11) won't, but we keep the resolver layered in
@@ -1562,7 +1604,13 @@ def main():
         resolved_seeds = resolve_source_paths(args.seed_paths)
     except (FileNotFoundError, ValueError) as e:
         print(f"FAIL: Could not resolve seed source paths: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
         sys.exit(1)
 
     # Step 2 — soul restoration. For start_iteration > 1, this re-registers
@@ -1578,7 +1626,13 @@ def main():
         expected_invariants = compute_expected_invariants(args)
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
         sys.exit(1)
 
     try:
@@ -1590,7 +1644,13 @@ def main():
         )
     except (ResumeError, RunInvariantsViolation) as e:
         print(f"FAIL: restore_prior_state refused to chain: {e}")
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
         sys.exit(1)
 
     if state.committed_iters:
@@ -1663,19 +1723,6 @@ def main():
         # "Callers that know the task supply those." The workflow must not
         # name a task resolver itself.
         from execute_tools.data_paths import resolve_tidmad_measurement_capability
-
-        # FU-D-11: resolved BEFORE the workflow starts, so a malformed or
-        # results-bearing plan refuses the launch rather than failing midway
-        # through a real run.
-        fixed_candidate_plan = load_validation_fixed_candidate_plan(
-            args.validation_fixed_candidate_plan
-        )
-        if fixed_candidate_plan is not None:
-            print(
-                f"[FIXED PLAN] validation posture: the proposer will be bypassed "
-                f"for candidate {fixed_candidate_plan.get('model_name')!r} "
-                f"(source={args.validation_fixed_candidate_plan})"
-            )
 
         results = run_workflow(
             measurement_capability=resolve_tidmad_measurement_capability(),
@@ -1805,12 +1852,24 @@ def main():
             f"prevent telemetry corruption.",
             file=sys.stderr,
         )
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
         sys.exit(2)
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")
         traceback.print_exc()
-        write_manifest(iter_dir, run_name, results=[], crashed=True)
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
         sys.exit(1)
 
     manifest = write_manifest(
@@ -1830,6 +1889,7 @@ def main():
         chain_incumbent_source=state.chain_best_valid_formal_provenance,
         # V19 PR 3 — control policy only (per-round evidence stays in the
         # records / interpretation digest).
+        fixed_candidate_provenance=fixed_candidate_provenance,
         health_feedback_policy={
             "enable_structured_health_feedback": (args.enable_structured_health_feedback),
             "history_window_iterations": (args.health_feedback_history_window_iterations),
