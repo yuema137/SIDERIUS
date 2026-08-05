@@ -3694,13 +3694,22 @@ follows from repository evidence and needs no ruling.
 ### 20.4 Ordering, and the final Gate 2
 
 ```text
-narrow runtime hotfix        -> operator merge
-PR C occupancy correction    -> operator merge
-integrate into PR D
-full CI on the exact head
-final integrated Gate 2 on that same head
+narrow runtime hotfix        MERGED  #175 (f99650a4)
+PR C occupancy correction    MERGED  #176 (e4b2aff8)
+integrate into PR D          DONE
+complete every tracked document
+FREEZE the exact head
+full local validation
+full GitHub CI on that head
+Gate 2's three cases on that SAME head
+reports/v20_prerequisite_review.md
 stop before PR D merge
 ```
+
+**The head is frozen before validation, not after.** Any tracked commit made
+after Gate 2 restarts both the CI and the Gate — that is the exact-head rule
+(§18 merge criteria), and it is why documentation is completed BEFORE the
+freeze rather than as a final tidy-up.
 
 **The final Gate 2 is a minimum bounded matrix, not one large campaign.**
 Attempt 1 ran on an effectively idle GPU, so it could not have exercised
@@ -3731,6 +3740,50 @@ an idle device and that these are recorded *separately*:
 * admission decided from the real present conditions — whatever that
   decision is. A rejection here is a **pass** for this case if it follows
   from insufficient free memory under a valid measurement.
+
+**The success criterion, stated so it cannot drift** (operator, 2026-08-05):
+
+> Calibration remains VALID under stable external occupancy, and makes a
+> normal admission-or-rejection decision from the real current resources.
+
+It is explicitly **not** "the candidate is admitted". Nothing may be tuned to
+make FCNet succeed, and **no admission threshold may be relaxed** for this
+case. A run that validly rejects on insufficient free memory PASSES.
+
+**Workload protocol** — the external load must be one we own and can account
+for, or the case measures `unstable`/`unattributed` instead of the thing it
+exists to prove:
+
+* started by us, with an identifiable PID and command line;
+* pinned to the **same** GPU as the candidate;
+* **PID set unchanged** across the observation window — no restarts, no
+  worker churn;
+* memory occupancy may fluctuate normally (that is T0's whole point);
+* an explicit **memory ceiling** and an explicit **maximum runtime**;
+* deterministic teardown after the case, verified;
+* not mixed with uncontrolled third-party GPU work.
+
+**Pre-flight condition.** The device need not be idle — but if any
+unattributable third-party GPU work is present that may start, exit or change
+sharply, clear it or wait first. Otherwise the run measures the
+unstable/unattributed path, which Case C already covers deterministically,
+and Case B establishes nothing.
+
+**Required Gate artifact fields** — recorded per case, from the run's own
+telemetry rather than reconstructed:
+
+```text
+external workload PID
+device identity
+start / end time
+external memory min / max
+PID set across samples
+unattributed memory behaviour
+candidate-owned memory
+device free memory
+MeasurementValidity verdict
+final admission decision
+```
 
 **Case C — unstable or unattributable activity.** Proved by
 **deterministic/synthetic tests**, which can construct these windows exactly
@@ -3775,10 +3828,7 @@ PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
 runtime hotfix           MERGED 2026-08-05 as PR #175 (f99650a4)
-occupancy correction     PR #176 CI-GREEN at a28a6813, MERGEABLE.
-                         AWAITING OPERATOR MERGE. 3 commits: 01406924
-                         boundary + OOM attribution, 779ccb46 invariant +
-                         producer path, a28a6813 device-identity threading.
+occupancy correction     MERGED 2026-08-05 as PR #176 (e4b2aff8)
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
