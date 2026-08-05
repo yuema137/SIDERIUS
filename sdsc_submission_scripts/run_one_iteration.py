@@ -53,6 +53,10 @@ from core.run_invariants import (
     build_run_invariants,
 )
 from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.health_checks.launch_policy import (
+    FormalLaunchPolicyError,
+    validate_formal_launch,
+)
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 
@@ -890,6 +894,25 @@ def build_parser() -> argparse.ArgumentParser:
         "Overrides --llm_model when provided.",
     )
     parser.add_argument(
+        "--healthgate_mode",
+        choices=["blocking", "observe_only"],
+        default=None,
+        help="V20 PR D: whether HealthGate verdicts ENFORCE (blocking) or "
+        "only record (observe_only). REQUIRED for a formal launch — there "
+        "is no default, because defaulting would let this run claim "
+        "enforcement nobody configured. Must agree with the HealthGate "
+        "config's actual enforcement or the launch is refused.",
+    )
+    parser.add_argument(
+        "--result_authority",
+        choices=["scientific", "diagnostic"],
+        default=None,
+        help="V20 PR D: whether this run's results may inform science "
+        "(scientific) or are diagnostic only. REQUIRED for a formal "
+        "launch. observe_only+scientific is refused as a contradiction; "
+        "blocking+diagnostic is legal.",
+    )
+    parser.add_argument(
         "--health_checks_config",
         type=str,
         default=None,
@@ -1367,6 +1390,33 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 
 def main():
     args = normalize_args(build_parser().parse_args())
+
+    # --- V20 PR D (D-C1b): formal-launch policy refusal ----------------
+    # THE FIRST thing done with the parsed arguments, and deliberately
+    # before the failure-brake preflight below: a launch whose declared
+    # policy cannot be honoured must not create an iter_dir, touch a
+    # sentinel, call an LLM, construct a model or reach a GPU.
+    #
+    # Enforced HERE rather than in the tuner's schema, because this is the
+    # new-formal-launch boundary. `validate_runtime_config` runs for every
+    # tuner invocation including diagnostic tooling
+    # (`scripts/bg_admission_validation.py` builds a tuner input), and the
+    # permissive schema is what keeps historical artifacts readable —
+    # `core/resume.py` reads manifests directly and never constructs a
+    # HyperparamTuningInput, so tightening the launch path cannot make an
+    # old artifact unopenable.
+    try:
+        validate_formal_launch(
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+            health_checks_config=args.health_checks_config,
+            gates_enabled=args.enable_chain_incumbent_formal_gates,
+            skip_formal_min_delta=args.skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+        )
+    except FormalLaunchPolicyError as exc:
+        print(f"[run_one_iteration] FORMAL LAUNCH REFUSED: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
     # Two cheap on-disk checks before we touch anything else. Runs before

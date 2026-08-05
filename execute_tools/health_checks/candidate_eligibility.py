@@ -72,7 +72,7 @@ _LEGACY_ROLES_BY_CONFIG_SHA: dict[str, dict[str, str]] = {
 }
 
 
-def legacy_config_body_sha(config_path: str) -> str | None:
+def legacy_config_body_sha(config_path: str | None = None) -> str | None:
     """The body sha this config WOULD have had before ``gate_role`` existed.
 
     ``health_config_sha256`` stamps recorded before this hotfix were computed
@@ -95,7 +95,7 @@ def legacy_config_body_sha(config_path: str) -> str | None:
     return hashlib.sha256(yaml.safe_dump(body, sort_keys=True).encode()).hexdigest()
 
 
-def resolve_scientific_gate_ids(config_path: str) -> frozenset[str] | None:
+def resolve_scientific_gate_ids(config_path: str | None = None) -> frozenset[str] | None:
     """The gates whose verdict decides scientific validity, by DECLARED role.
 
     **The one resolver.** In-run trial selection and resume-time incumbent
@@ -116,6 +116,8 @@ def resolve_scientific_gate_ids(config_path: str) -> frozenset[str] | None:
         compatibility map. ``None`` means UNKNOWN and the caller must exclude
         the record, never fall back to a guess.
     """
+    # `None` means the shipped default config — the same convention
+    # `load_health_gates_config` uses, rather than a second spelling of it.
     config = load_health_gates_config(config_path)
     declared = {gate.id: gate.gate_role for gate in config.health_gates}
     if all(role is not None for role in declared.values()):

@@ -676,7 +676,7 @@ refusal in addition to the mode↔config check.
 
 | ID | Checkpoint | State |
 |---|---|---|
-| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped on every branch (Behavior Delta: none) · **D-C1b `[ ]`** enforcement not started |
+| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped · **D-C1b `[x]`** five startup refusals at the chain boundary + launcher declares blocking+scientific |
 | **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
 | **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[ ]` not started |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
@@ -1106,8 +1106,150 @@ to match a declaration. It refuses, it does not repair.
 - [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
-- [ ] Independently reviewable and independently revertible — reverting restores commit 1's record-only behaviour.
-- [ ] Before committing: show the refusal message verbatim.
+- [x] Independently reviewable and independently revertible — reverting restores commit 1's record-only behaviour.
+- [x] Before committing: show the refusal message verbatim.
+
+#### IMPLEMENTATION RECORD — D-C1b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C1a `b751476b`.
+
+**Behavior Delta**: a chain iteration whose declared policy is missing,
+self-contradictory, or contradicted by its HealthGate config now **exits 2
+before any work**. Legal launches are unaffected.
+
+> ### The dependency this checkpoint's plan did not state
+>
+> **Nothing on the production chain path passed the declarations.** D-C1a
+> added the tuner CLI arguments; the launcher chain was never wired:
+>
+> ```text
+> v19_queue_runner.sh → run_chain.sh → _chain_common.sh → run_one_iteration.py → tuner
+>                     declarations passed at any hop:  0 shell files
+> ```
+>
+> So refusing omission would have made **every production chain launch
+> fail** — tests green, production dead. Operator ruling (2026-08-05): the
+> chain declares **`blocking + scientific`**, wired in this commit. That is
+> a statement of what a V19/V20 formal chain already is — it runs
+> `configs/health_checks.yaml`, whose three role:blocking gates invalidate
+> a round, and its results feed the incumbent and the science.
+
+**Refusal seam — `run_one_iteration.py`, not the schema.** Operator ruling.
+Two reasons, both load-bearing:
+
+- the permissive schema is what keeps historical artifacts readable. An
+  artifact recorded under `observe_only + scientific` documents an
+  incident; refusing it at the schema would make that incident unopenable.
+  Verified safe: `core/resume.py` reads manifests directly and **never**
+  constructs a `HyperparamTuningInput`, so tightening the launch path
+  cannot break historical reads.
+- `validate_runtime_config` runs for *every* tuner invocation including
+  diagnostic tooling (`scripts/bg_admission_validation.py:571` builds a
+  tuner input). Refusing there would block diagnosis, and an exemption flag
+  would be a bypass surface that can be used by accident.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/health_checks/launch_policy.py` (**new**, 175 lines) | `validate_formal_launch`, `FormalLaunchPolicyError`, `_enforcing_gate_ids` |
+| `sdsc_submission_scripts/run_one_iteration.py` | `--healthgate_mode` / `--result_authority`; the refusal as the first thing `main()` does with parsed args |
+| `sdsc_submission_scripts/_chain_common.sh` | `HEALTHGATE_MODE=blocking`, `RESULT_AUTHORITY=scientific`, CLI passthrough, argv assembly |
+| `execute_tools/health_checks/candidate_eligibility.py` | `resolve_scientific_gate_ids` / `legacy_config_body_sha` widened to `str \| None`, matching the loader they wrap |
+
+**The five refusals, and what each prevents**
+
+| # | Refusal | Prevents |
+|---|---|---|
+| 1 | `healthgate_mode` omitted | a run claiming enforcement nobody configured |
+| 2 | `result_authority` omitted | a run claiming scientific standing nobody granted |
+| 3 | `observe_only + scientific` | gates that only record certifying a result |
+| 4 | declaration contradicts the config's enforcement | **the 08:17 shape**: the artifact says enforced, the run was not |
+| 5 | inverted deltas **while gates are enabled** | both gates firing for one score, decided by statement order |
+
+Refusal 5 is scoped to `enable_chain_incumbent_formal_gates` per the
+operator: with the gates off the deltas are not consumed, so an unused
+historical pair must not block a launch.
+
+**Roles are not re-derived.** Scientific membership comes from the shared
+`resolve_scientific_gate_ids` merged in `af5339ce`. Only *enforcement* is
+action-derived (`_enforcing_gate_ids`), which is the correct question for
+"does this config actually invalidate anything". Keeping the two apart is
+the point of the hotfix.
+
+**Why the source config suffices** — verified, not assumed:
+`materialize_effective_config` only applies `apply_monitored_files`
+(`peek_file_indices`) and `validate_health_scope`; it never rewrites
+`on_fail.action` or `gate_role`. Enforcement semantics are therefore
+identical before and after materialization, so the check can run at the
+launch boundary without weakening.
+
+**Verbatim refusal messages**
+
+```text
+[run_one_iteration] FORMAL LAUNCH REFUSED: a formal launch must declare
+--healthgate_mode and --result_authority. There is no default: defaulting
+to blocking/scientific would let this run claim enforcement and scientific
+standing that nobody configured. Declare both explicitly.
+
+[run_one_iteration] FORMAL LAUNCH REFUSED: observe_only + scientific is a
+contradiction: gates that only record cannot certify a result. …
+
+[run_one_iteration] FORMAL LAUNCH REFUSED: healthgate_mode=blocking, but
+these role:blocking gates cannot invalidate anything in
+'configs/health_checks_baseline_observe_mode.yaml':
+['amplitude_collapse_blocking', 'output_diversity_blocking',
+'output_std_blocking']. The declaration says enforced and the
+configuration says observe — the artifact would record a policy the run
+did not have.
+```
+
+**Tests** — 15 new in `test_formal_launch_policy.py`, 3 new reachability
+tests in `test_run_one_iteration.py` (68 total there). Targeted suites
+(`sdsc_submission_scripts` + `health_checks` + `core` + `agent/schemas`):
+**2979 passed, 2 skipped** in 157 s. Full `tests/unit`: **7323 passed**,
+2 skipped, 4 xfailed.
+
+The reachability tests build argv **explicitly** and do not go through
+`_run_main`, which now synthesises the declarations the production shell
+supplies — a test using that helper could not observe an omission.
+
+**Existing tests updated, with reasons**
+
+- `_run_main` synthesises the two declarations, for the same stated reason
+  it already synthesises `--run_name`: a shell-side convention production
+  always supplies, in tests that target the argparse/wiring layer.
+- `test_health_checks_config_reaches_workflow` now declares
+  `observe_only + diagnostic`, because it drives the **observe-only**
+  config. The helper's `blocking` default was refused — **the check
+  catching a real mismatch in an existing fixture**, not a test defect.
+
+**Mutations — five, all caught**
+
+| mutation | fails |
+|---|---|
+| omission silently defaults to blocking+scientific | 4 |
+| `observe_only + scientific` accepted | 2 |
+| scientific membership inferred from the action | 2 |
+| the chain boundary bypasses validation | 2 |
+| the chain shell stops declaring the policy | 1 |
+
+**Static**: pyright **0 errors, 4 warnings** — back to baseline after
+widening two signatures that were needlessly narrower than the loader they
+wrap (`str` vs the loader's `str | None`, where `None` means the shipped
+default). `ruff check`, `ruff format --check`, `bash -n` clean.
+
+**Deviations from the plan**
+
+1. **The commit includes launcher wiring.** Unavoidable: the refusal is
+   unusable without it, and shipping the refusal alone would leave the
+   branch green while production could not launch.
+2. **Two signature widenings in the predecessor hotfix's module.** Caught
+   by pyright, not by tests. `None` is the loader's own convention for the
+   shipped default; the narrower annotation was an oversight in `af5339ce`.
+
+**Next authorized checkpoint**: D-C2a — the `ScientificAuthority` typed
+boundary with no call sites.
 
 ---
 
