@@ -67,6 +67,54 @@ Operator-advice JSON files (e.g. `human_advice_chain_test.json`,
 `advice/README.md` for the split between single-agent and workflow-level
 advice files.
 
+### Campaign launchers and their control state
+
+A **campaign** is a set of chains launched together under one identity.
+Each launcher owns its own control state; none of them reads another's.
+
+| file | status | control state | stop channel |
+|---|---|---|---|
+| `v19_queue_runner.sh` | **current production surface** | `$WS_ROOT/$CAMPAIGN_ID/{control,queue_state,pair_summaries}/` | `$WS_ROOT/$CAMPAIGN_ID/control/STOP`, or `SIGTERM`/`SIGINT`/`SIGHUP` |
+| `v19_gate0_pair_runner.sh` | **current production surface** (Gate) | `$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json`, `${GATE_RUN_PREFIX}_runner.log` | **none** — the Gate has no stop file; its summary is written on every exit path by an `EXIT` trap |
+| `v18r_queue_runner.sh` | **historical**, kept for reference | its own pre-V20 layout | unchanged; not modified by V20 PR E |
+
+Despite the `v19_` filenames, both current launchers are
+campaign-parameterised: the campaign id and the Gate prefix come from
+the environment, and every name they produce derives from them. Nothing
+infers a campaign, a role or a membership list from a filename prefix —
+membership comes from the launcher's own `ROSTER`, and a chain's role
+from that roster's fourth field.
+
+**Layout status.** The V20 PR E layout is the one written and read today.
+Pre-PR-E artifacts remain on disk and are never moved, rewritten or
+deleted:
+
+| path | read | written |
+|---|---|---|
+| `$WS_ROOT/$CAMPAIGN_ID/queue_state/wave_state.jsonl` | yes — canonical | yes |
+| `$WS_ROOT/$CAMPAIGN_ID/pair_summaries/wave_<n>_<tag>.json` | — | yes (derived view) |
+| `$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl` | **only under adoption** (see below) | never |
+| `$WS_ROOT/${CAMPAIGN_ID}_queue_runner.log` | never | never |
+| `$WS_ROOT/STOP` | observed and recorded; **no authority** | never |
+| `$GATE_ROOT/gate0_pair_summary.json`, `gate0_runner.log` | never | never |
+| `$WS_ROOT/<run_name>/` | chain workspaces, flat and unchanged | by the chain |
+
+**Adoption** is decided once, when a campaign's `control/campaign.json`
+is first written: if the campaign has no state of its own yet and a
+pre-PR-E `${CAMPAIGN_ID}_wave_state.jsonl` exists, the stamp records
+`legacy_adopted_from` and that file may be read for completion evidence.
+After the campaign has its own state the legacy file is never consulted
+again — a run recorded complete only there is launched, not skipped.
+
+`CAMPAIGN_ID` and `GATE_RUN_PREFIX` become directory and file names, so
+both are validated as safe path components (1-128 chars of
+`[A-Za-z0-9._-]`, and not exactly `.` or `..`; `alpha..beta` is fine).
+**Unset** falls back to the compatibility default; **explicitly empty**
+is refused before anything is created.
+
+Full operator detail — the stop commands, the wave-record schema and the
+canonical/derived contract — is in `docs/running_chain_test.md`.
+
 ### Generated / runtime
 
 | path | what |

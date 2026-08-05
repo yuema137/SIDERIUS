@@ -128,17 +128,31 @@ treated as an external stop, and the loop does not continue.
 **Stop the queue.** Same two channels, at the runner:
 
 ```bash
-touch "$WS_ROOT/STOP"            # or: kill -TERM <v19_queue_runner.sh pid>
+touch "$WS_ROOT/$CAMPAIGN_ID/control/STOP"   # or: kill -TERM <v19_queue_runner.sh pid>
 ```
 
+> **This path changed (V20 PR E).** It used to be `$WS_ROOT/STOP`, one
+> file shared by every campaign under the root — so on 2026-07-31 an
+> operator stopped one campaign and stopped an unrelated one with it.
+> The stop file now lives inside the campaign it stops. **A file at
+> `$WS_ROOT/STOP` no longer stops anything**: the launcher logs it,
+> appends a `legacy_global_stop_observed` record, and continues. It is
+> never deleted — removing it is an operator act, and its mtime is
+> evidence for reconstructing that incident.
+
 The queue lets the running wave finish, launches no further wave, appends
-a `queue_stopped` record to `v19_wave_state.jsonl`, and exits 99. A chain
-that exited 99 is logged as stopped-on-request and does **not** produce a
-targeted-restart suggestion.
+a `queue_stopped` record to
+`$WS_ROOT/$CAMPAIGN_ID/queue_state/wave_state.jsonl`, and exits 99. A
+chain that exited 99 is logged as stopped-on-request and does **not**
+produce a targeted-restart suggestion.
+
+The **chain**-level stop above is unchanged: `$WORKSPACE/STOP`,
+`chain_stopped.json`, exit 99, and the traps all behave exactly as
+before.
 
 | Env | Default | Purpose |
 |---|---|---|
-| `QUEUE_STOP_FILE` | `$WS_ROOT/STOP` | Where the queue looks for a stop request. |
+| `QUEUE_STOP_FILE` | `$WS_ROOT/$CAMPAIGN_ID/control/STOP` | Where the queue looks for a stop request. Only the DEFAULT moved; an explicit value still wins, for compatibility with existing habits and scripts. It is not a general-purpose relocation knob — use `CAMPAIGN_HOME` to move a campaign. |
 | `WAVE_WALL_SECONDS` | `259200` (72 h) | Bound on how long one wave may be waited on. On breach the QUEUE stops and records `wave_wall_cap_exceeded`; running chains are left alone — killing them stays an operator act. |
 
 Reasons: `operator_stop_requested`, `iteration_terminated_by_signal`,
@@ -148,6 +162,171 @@ including a failed launch (`disposition: launch_failed`).
 An ordinary non-zero iteration is **not** a stop: the frozen continuation
 policy is unchanged, because the no-respawn rule is scoped to an
 operator-directed stop.
+
+### Campaign control state (V20 PR E, operator surface)
+
+Campaign identity used to be a filename **prefix** under a shared root,
+and a prefix is easy to forget — `QUEUE_STOP_FILE` omitted it entirely.
+It is now a **directory**, which cannot be forgotten the same way.
+
+```text
+$WS_ROOT/                                campaign COLLECTION root
+├── <campaign_id>/                        one campaign's control state
+│   ├── control/
+│   │   ├── campaign.json                 identity stamp
+│   │   └── STOP                          operator-created; read ONLY here
+│   ├── queue_state/
+│   │   ├── wave_state.jsonl              canonical history
+│   │   └── queue_runner.log
+│   └── pair_summaries/
+│       └── wave_<n>_<band_tag>.json      derived per-wave view
+├── <run_name>/                           chain workspace (UNCHANGED, flat)
+├── <campaign_id>_wave_state.jsonl        LEGACY — read only under adoption
+├── <campaign_id>_queue_runner.log        LEGACY — never read, never written
+└── STOP                                  LEGACY GLOBAL — observed, no authority
+```
+
+`$WS_ROOT`'s default is `/home/klz/Data/SIDEREIS_DATA/v19`. The name
+looks like a campaign but is not one: it is a **collection root**, and
+two campaigns living under it is the normal case — the case that broke.
+
+Chain workspaces stay flat at `$WS_ROOT/<run_name>`. Run names already
+carry the campaign id, and moving them would break `campaign_spend.py`
+and every historical report path.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `WS_ROOT` | `/home/klz/Data/SIDEREIS_DATA/v19` | The campaign collection root. |
+| `CAMPAIGN_ID` | `v19` **when unset** | Names the campaign home and every run. See the unset/empty rule below. |
+| `CAMPAIGN_HOME` | `$WS_ROOT/$CAMPAIGN_ID` | The one knob that moves a campaign, coherently. |
+
+`control/`, `queue_state/` and `pair_summaries/` are **derived from
+`CAMPAIGN_HOME` and are not independently overridable**. Separate
+overrides would let two campaigns be aimed at one state directory, which
+is the defect this layout removes; a configuration surface that can
+reconstruct the defect is not a configuration surface.
+
+#### Unset is not the same as empty
+
+```text
+CAMPAIGN_ID unset             -> `v19`, the compatibility default
+CAMPAIGN_ID explicitly empty  -> REFUSED before anything is created
+```
+
+`GATE_RUN_PREFIX` behaves identically (`v19_c14` when unset). Clearing
+one of these on the command line is how an operator says "not that
+identity" — so it must refuse, not silently hand back the default and
+write into that campaign's control state.
+
+#### Valid campaign ids and Gate prefixes
+
+Both go through one rule, because both become path components:
+
+```text
+1-128 characters from [A-Za-z0-9._-]
+and not exactly `.` or `..`
+```
+
+Refused: empty, `.`, `..`, anything containing `/` or `\`, absolute
+paths, control characters, and values over 128 characters. An invalid id
+is refused **before any directory is created**.
+
+`alpha..beta` is **valid**. The rule rejects an id that *is* `.` or
+`..`, never one that merely *contains* two dots — separators are already
+excluded, so the id is always a single path segment and cannot traverse.
+
+#### Resuming a campaign that predates this layout
+
+Adoption is a **campaign-level decision made once**, at the moment the
+campaign's stamp is created:
+
+```text
+first start (no campaign.json yet)
+  AND $WS_ROOT/$CAMPAIGN_ID/queue_state/wave_state.jsonl does not exist
+  AND $WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl does exist
+    -> campaign.json records `legacy_adopted_from: <that path>`
+    -> this campaign may read that file for completion evidence, read-only
+```
+
+Once the campaign has its own `wave_state.jsonl`, the legacy file is
+**never consulted again**. In particular: if a run is recorded complete
+*only* in the legacy file and the campaign did not adopt it, **that run
+is launched**. There is no per-record fallback — a file the campaign
+never adopted does not get to decide that work is finished.
+
+Adoption is scoped to one campaign's own legacy file: `alpha` cannot
+adopt `beta_wave_state.jsonl`. Legacy files are read-only; nothing on
+disk is moved, rewritten or deleted, and their bytes and mtimes are
+unchanged by any run.
+
+#### Wave records: canonical history, derived view
+
+```text
+queue_state/wave_state.jsonl          canonical, append-only
+pair_summaries/wave_<n>_<tag>.json    derived, overwritten
+```
+
+The canonical line is appended and `fsync`ed **first**; only then is the
+per-wave file atomically replaced. A failure between the two loses the
+convenience, never the evidence — and a per-wave file with no matching
+canonical line is a detectable inconsistency, not a normal state. If the
+derived write fails the queue stops and says so; the canonical record is
+kept and the per-wave file can be rebuilt from the JSONL.
+
+Both carry the same `record_id`:
+
+```text
+<campaign_id>:<wave>:<band_tag>:<attempt>
+```
+
+`attempt` is counted from the canonical file, so a queue restart cannot
+reset it. A retried wave leaves two canonical records with different ids
+and one per-wave file holding the later one. **Per-wave files for
+historical waves are not rebuilt automatically.**
+
+The wave record is chain-list-shaped, so a campaign with one chain, or
+five, or other role names needs no schema change:
+
+```json
+{"wave_summary": 1, "record_id": "v19:1:15_19:1", "campaign_id": "v19",
+ "band": "15-19", "band_tag": "15_19",
+ "chains": [{"run_name": "v19_arch_15_19", "role": "arch",
+             "pid": "1111", "exit": 0}],
+ "start": "…", "end": "…", "disposition": "complete"}
+```
+
+The field inside `chains` is **`run_name`**, not `run`, and that is
+load-bearing: the completion check greps the whole line for
+`"run": "<name>"` followed by `"exit": 0`, so a bare `run` key would let
+one chain's success mark every chain in the wave complete — including one
+that failed.
+
+`exit: -1` means the chain left no exit marker. When a role cannot be
+resolved from the ROSTER it is recorded as `null` and the record also
+carries `role_resolution_failed: true` and `unresolved_roles: [...]`,
+rather than being guessed.
+
+The six `arch_*` / `loss_*` keys are a **compatibility mirror**, emitted
+only when a wave has exactly two chains whose roles are exactly `arch`
+and `loss`. Any other shape gets `chains` and no mirror — an invented
+`arch_exit` would show up in a report as though it were measured.
+
+#### Gate artifacts
+
+```text
+$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json
+$GATE_ROOT/${GATE_RUN_PREFIX}_runner.log
+```
+
+A prefix, not a directory: the Gate has no directory model. The summary's
+`"gate"` field is the resolved prefix, so two Gate runs under one
+`GATE_ROOT` no longer overwrite each other and are distinguishable by
+their own contents. Pre-existing `gate0_pair_summary.json` and
+`gate0_runner.log` keep their names and contents as historical
+artifacts; nothing reads, moves or deletes them.
+
+**The Gate has no STOP file and gains none here.** Its summary is written
+on every exit path by an `EXIT` trap, and its wall cap is unchanged.
 
 ### §3.2 flags (full input contract)
 The full set of `--max_rounds`, `--max_proposal_attempts`,

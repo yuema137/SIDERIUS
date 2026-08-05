@@ -1,10 +1,18 @@
 # Design: V20 PR E — Campaign-scoped control state
 
-- **Status**: **DESIGN rev 3 — architecture direction APPROVED (operator,
-  second review 2026-08-04); the nine required corrections are applied
-  here. Implementation is not yet authorized**: the pending deviations in
-  §5 (D-E-1, D-E-2, D-E-3, D-E-5, D-E-7, D-E-8) still need individual
-  sign-off, and the predecessor docs hotfix in §12 must merge first.
+- **Status**: **IMPLEMENTED — all ten commits landed and pushed;
+  awaiting Draft PR, exact-head CI and operator review.** Branch
+  `feature/v20-pr-e-campaign-scoped-control`. See §16 for the
+  implementation ledger, the measured evidence and the unresolved
+  follow-ups. **CI: PASS** on the exact head `a44e01ef`
+  (`Lint + Type + Unit Tests`, 9m44s, run 30961809392).
+  Draft PR: #169.
+
+  *Design history.* Rev 3's architecture direction was approved
+  (operator, second review 2026-08-04) with nine corrections applied;
+  the §5 deviations were then signed off individually during
+  implementation (D-E-3 with one correction found by the E-C4 audit,
+  D-E-7 with the fixed-string addition).
   Rev 3 changed the design in six substantive ways, not just the prose:
   legacy compatibility became a campaign-level adoption mode rather than
   a per-record fallback (BC-2); the override surface narrowed to three
@@ -885,7 +893,10 @@ incident, because the two campaigns that collided shared one `WS_ROOT`.
 
 ### D-E-3 — The wave record becomes chain-list-shaped; `MAX_CONC` is retired as a label
 
-- [ ] Approved  [ ] Rejected  [ ] Modified
+- [x] **Approved with one correction — operator ruling, 2026-08-04.** The
+  E-C4 audit found that the example record's `{"run": …}` key makes a
+  failed chain satisfy `chain_completed`; the field is `run_name`. See
+  E-C4's implementation record.
 
 §20.7 requires that "a campaign with one chain, or five, or chains named
 for something other than architecture and loss, must not require a
@@ -1122,7 +1133,10 @@ ROSTER field 4 (`:402`) and is unchanged.
 
 ### D-E-7 — The self-exclusion in the live-process guard derives from the script name
 
-- [ ] Approved  [ ] Rejected  [ ] Modified
+- [x] **Approved with one addition — operator ruling, 2026-08-04**: the
+  exclusion must be FIXED-STRING (`grep -vF`). The basename contains a
+  `.`, which as a regex would widen the exclusion to processes that are
+  not this runner. See E-C6's implementation record.
 
 `:259`'s `grep -v v19_queue_runner` becomes
 `grep -v "$(basename "${BASH_SOURCE[0]}")"`. Small, in-passing, and
@@ -1211,96 +1225,123 @@ the evidence named in its row.
 
 ### E1 — Path model
 
-- [ ] All campaign paths resolved in exactly one block, derived from
+- [x] All campaign paths resolved in exactly one block, derived from
       `CAMPAIGN_HOME`; **only** `WS_ROOT`, `CAMPAIGN_HOME` and the
       compatibility-only `QUEUE_STOP_FILE` are overridable (§4.2)
-- [ ] Setting `QUEUE_STATE_DIR` / `CAMPAIGN_CONTROL_DIR` /
+      — E-C2
+- [x] Setting `QUEUE_STATE_DIR` / `CAMPAIGN_CONTROL_DIR` /
       `PAIR_SUMMARY_DIR` in the environment has **no effect** — proved by
       test, because an override that split them could point two
-      campaigns at one state directory
-- [ ] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
-      compatibility override still works
-- [ ] `WAVE_STATE` and `LOGF` under `queue_state/`
-- [ ] Wave summaries written **canonical-first**: append + `fsync` the
+      campaigns at one state directory — E-C1, re-proved at E-C2
+- [x] `QUEUE_STOP_FILE` default is `$CAMPAIGN_HOME/control/STOP`; the
+      compatibility override still works — E-C2
+- [x] `WAVE_STATE` and `LOGF` under `queue_state/` — E-C2
+- [x] Wave summaries written **canonical-first**: append + `fsync` the
       JSONL, then atomically write
       `pair_summaries/wave_<n>_<band>.json`, both carrying the same
-      `record_id` (D-E-3a)
-- [ ] Gate pair summary and runner log derive from `GATE_RUN_PREFIX`
-- [ ] **Evidence**: a test enumerates every authority-bearing path the
+      `record_id` (D-E-3a) — E-C4; the fsync-before-replace ordering is
+      asserted by a spy, not inferred
+- [x] Gate pair summary and runner log derive from `GATE_RUN_PREFIX` —
+      E-C5; the `"gate"` field too
+- [x] **Evidence**: a test enumerates every authority-bearing path the
       runner resolves and asserts each contains the campaign id; it
-      fails if a new path is added without it
-- [ ] **Evidence**: the wave/pair record is produced by the typed
+      fails if a new path is added without it — E-C2,
+      `test_campaign_path_resolution.py::test_every_authority_bearing_path_contains_the_campaign_id`
+- [x] **Evidence**: the wave/pair record is produced by the typed
       atomic writer (D-E-3) and parses as JSON in the two-chain,
-      three-chain and aborted-launch cases
+      three-chain and aborted-launch cases — E-C4
 
 ### E2 — Backward compatibility
 
-- [ ] Legacy compatibility is a **campaign-level adoption mode** decided
+- [x] Legacy compatibility is a **campaign-level adoption mode** decided
       once at first start and recorded as `legacy_adopted_from` in the
-      stamp — **not** a per-record fallback (BC-2)
-- [ ] `chain_completed()` consults the legacy file **only** under
-      adoption, read-only, for the recorded path only
-- [ ] Adoption cannot be granted after first start
-- [ ] Legacy `$WS_ROOT/STOP` is observed, logged, recorded, and does
-      **not** stop the launch
-- [ ] No shipped code path deletes, moves or rewrites any legacy file
-- [ ] V18r layout untouched; `v18r_queue_runner.sh` not modified
-- [ ] **Evidence**: a test with a legacy tree on disk proves (a) an
+      stamp — **not** a per-record fallback (BC-2) — E-C3,
+      `core.campaign_identity.resolve_adoption`, called only on the
+      stamp-creating branch
+- [x] `chain_completed()` consults the legacy file **only** under
+      adoption, read-only, for the recorded path only — E-C3; the
+      predicate is shared via `_completed_in`, so it is provably
+      identical on both files
+- [x] Adoption cannot be granted after first start — E-C3; the
+      `existing is not None` branch re-validates but never re-decides
+- [x] Legacy `$WS_ROOT/STOP` is observed, logged, recorded, and does
+      **not** stop the launch — E-C3, `legacy_global_stop_observed`
+- [x] No shipped code path deletes, moves or rewrites any legacy file —
+      E-C3, proved by bytes and `st_mtime_ns` over a four-file tree
+- [x] V18r layout untouched; `v18r_queue_runner.sh` not modified —
+      verified at the final head: it is absent from `git diff --name-only
+      origin/master...HEAD` (FU-E-3 keeps its self-exclusion pattern)
+- [x] **Evidence**: a test with a legacy tree on disk proves (a) an
       adopted campaign still skips a chain completed in legacy state,
       (b) **a campaign whose new state exists does NOT skip a chain
       recorded complete only in legacy** — the blocker case, (c) the
       legacy global STOP does not block, (d) every legacy file is
-      byte-identical and mtime-identical after the run
+      byte-identical and mtime-identical after the run — E-C3, all four
+      in `test_campaign_admission.py`; (b) additionally asserts the
+      `screen` shim recorded the launch
 
 ### E3 — Campaign mismatch protection
 
-- [ ] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
+- [x] `campaign_id` is validated **before any `mkdir`** — empty, `/`,
       `\`, control characters, over-length, and an id **equal to** `.`
       or `..` are refused; an id merely *containing* `..` is **accepted**
-      (D-E-9)
-- [ ] The same validator guards `GATE_RUN_PREFIX` (D-E-4)
-- [ ] One guard owns the whole ordered admission sequence — validate id →
+      (D-E-9) — E-C2, and E-C2b for the empty case: the shell uses
+      `${CAMPAIGN_ID-v19}` so an explicitly empty id reaches the
+      validator, while an unset one still defaults
+- [x] The same validator guards `GATE_RUN_PREFIX` (D-E-4) — E-C5,
+      `core.campaign_identity.validate_path_component`, reached through
+      `scripts/validate_path_component.py`; asserted to be one rule, not
+      a second copy
+- [x] One guard owns the whole ordered admission sequence — validate id →
       inspect home → validate stamp → create dirs → atomically create
-      stamp (§4.2a)
-- [ ] `control/campaign.json` created atomically, first writer wins
-      (`os.link` semantics, per `core/run_invariants.py:190-222`)
-- [ ] A stamp naming a different `campaign_id` aborts **before any new
+      stamp (§4.2a) — E-C2, `core.campaign_identity.admit_campaign`
+- [x] `control/campaign.json` created atomically, first writer wins
+      (`os.link` semantics, per `core/run_invariants.py:190-222`) — E-C2
+- [x] A stamp naming a different `campaign_id` aborts **before any new
       state write, any STOP read and any chain launch**. Pre-existing
       directories are not this run's side effect and are not a violation
-- [ ] The refusal names both ids and the stamp path
-- [ ] **Evidence**: a test that pre-writes a foreign stamp and asserts
+      — E-C2
+- [x] The refusal names both ids and the stamp path — E-C2
+- [x] **Evidence**: a test that pre-writes a foreign stamp and asserts
       non-zero exit, the diagnostic text, that no chain was launched and
       no state file was written; plus a positive control that
-      `alpha..beta` is accepted
+      `alpha..beta` is accepted — E-C2,
+      `test_campaign_admission.py::TestAForeignStampRefusesBeforeAnyWrite`
+      and `::test_an_id_containing_two_dots_is_accepted`
 
 ### E4 — Stop semantics preserved
 
-- [ ] `test_c13_stop_semantics.py` passes unchanged except for the two
+- [x] `test_c13_stop_semantics.py` passes unchanged except for the two
       path expressions it constructs
-- [ ] Chain stop: after current iteration, `chain_stopped.json`,
+- [x] Chain stop: after current iteration, `chain_stopped.json`,
       `respawn: false`, exit 99 — unchanged
-- [ ] Queue stop: current wave finishes, no further wave, `queue_stopped`
+- [x] Queue stop: current wave finishes, no further wave, `queue_stopped`
       record, exit 99 — unchanged
-- [ ] Signalled child (`>= 128`) still ends the loop; ordinary non-zero
+- [x] Signalled child (`>= 128`) still ends the loop; ordinary non-zero
       still continues
-- [ ] **Evidence**: a mutation proof — revert the path change alone and
+- [x] **Evidence**: a mutation proof — revert the path change alone and
       show the C13 suite still passes, i.e. the C13 guarantees are
       genuinely independent of where the file lives
 
 ### E5 — Recovery validation
 
-- [ ] Two synthetic campaigns under one root, launched and stopped
-      independently, with `launch_chain` stubbed — no GPU, no API
-- [ ] Campaign A stopped → campaign B launches
-- [ ] Wrong-campaign STOP ignored; correct-campaign STOP honoured
-- [ ] Both campaigns' state files coexist and neither is written by the
-      other's runner
-- [ ] A legacy global STOP present throughout, and never honoured
-- [ ] **Evidence**: one test module,
+- [x] Two synthetic campaigns under one root, launched and stopped
+      independently, with `screen` shimmed — no GPU, no API — E-C7
+- [x] Campaign A stopped → campaign B launches — E-C7; proved by B
+      reaching the shim, not by the absence of a stop record
+- [x] Wrong-campaign STOP ignored; correct-campaign STOP honoured
+      (exit 99 + `operator_stop_requested`) — E-C7
+- [x] Both campaigns' state files coexist and neither is written by the
+      other's runner — E-C7, asserted by bytes **and** `st_mtime_ns`
+      over each neighbouring tree
+- [x] A legacy global STOP present throughout, and never honoured — E-C7;
+      it also survives byte- and mtime-identical
+- [x] **Evidence**: one test module,
       `test_multi_campaign_isolation.py`, **fully green in the committed
-      suite**, plus a **separate documented mutation run** showing it
-      fails when `QUEUE_STOP_FILE`'s default is temporarily reverted to
-      `$WS_ROOT/STOP` in the source, and green again after restoring
+      suite** (11 tests), plus **two separate documented mutation runs**:
+      reverting `QUEUE_STOP_FILE`'s default to `$WS_ROOT/STOP` fails 3,
+      and reverting `CAMPAIGN_HOME` to `$WS_ROOT` fails 6; both restored
+      and re-run green
 
 ---
 
@@ -1480,14 +1521,14 @@ subsections below are the implementation contract.
 
 | # | Commit | Content | Checkpoint evidence |
 |---|---|---|---|
-| **E-C1** | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
-| **E-C2** | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
-| **E-C3** | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
-| **E-C4** | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
-| **E-C5** | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
-| **E-C6** | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
-| **E-C7** | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
-| **E-C8** | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
+| **E-C1** `[x]` | Campaign path resolver | The resolution block (§4.2); **no consumer changes** — provably behaviour-neutral | pre-E1 |
+| **E-C2** `[x]` + **E-C2b** `[x]` | **Campaign admission and the path move** | The typed identity; the ordered admission sequence (§4.2a); the path-default flip; directory creation; atomic first-writer stamp | E1 + E3 |
+| **E-C3** `[x]` | Legacy campaign adoption | `legacy_adopted_from` in the stamp; adoption-gated legacy read; legacy-global-STOP observation | E2 |
+| **E-C4** `[x]` | Wave record and pair summaries | Typed atomic Python writer; `chains` array + mirror; canonical/derived dual write with `record_id`; `MAX_CONC` deleted | E1 |
+| **E-C5** `[x]` | Gate pair summary scoping | `GATE_RUN_PREFIX` derivation for `SUMMARY`, `RUNNER_LOG`, `"gate"`, plus the shared path-component validator | E1 |
+| **E-C6** `[x]` | Process-guard self-exclusion (D-E-7) | `grep -v` derives from `$(basename "${BASH_SOURCE[0]}")` | — |
+| **E-C7** `[x]` | Multi-campaign isolation test | `test_multi_campaign_isolation.py` | E5 |
+| **E-C8** `[x]` | Doc sync (last, per the operator rule) | Every documented variable and default quoted against merged source | merge blocker |
 
 **Four structural rulings from the second operator review are baked
 into this table.**
@@ -1703,6 +1744,58 @@ V19_QUEUE_NO_MAIN=1 bash -c \
       any deviation from this section
 
 ---
+#### IMPLEMENTATION RECORD — E-C1 `[x]` COMPLETE
+
+**Files changed** (2): `sdsc_submission_scripts/v19_queue_runner.sh`
+(+35, the resolver block at `:85-115`); new
+`tests/unit/sdsc_submission_scripts/test_campaign_path_resolution.py` (14
+tests).
+
+**Call path before/after**: unchanged. No consumer reads a new variable.
+`LOGF`, `WAVE_STATE` and `QUEUE_STOP_FILE` keep their original definitions
+verbatim, and the five new variables resolve to today's locations.
+
+**Checklist**: all §3 implementation items done; all §4 validation items
+done; all §5 acceptance criteria met.
+
+**Tests**: `test_campaign_path_resolution.py` — 14 passed, 0.12 s.
+Targeted suite `tests/unit/sdsc_submission_scripts/` — **340 passed,
+8.3 s, zero existing test files modified**.
+
+**Static**: pyright 0 errors (unchanged from the pre-commit baseline);
+`ruff check` clean; `ruff format --check` clean; `bash -n` clean.
+
+**Mutations**, each restored and re-baselined:
+
+| mutation | result |
+|---|---|
+| give `QUEUE_STATE_DIR` an independent `${NAME:-…}` override | 1 test fails |
+| flip `CAMPAIGN_HOME` to E-C2's target early | 8 tests fail |
+
+The second is the parity proof working in the direction that matters: if
+E-C2's move happens by accident inside E-C1, eight assertions say so.
+
+**Deviations from the plan**: none. Scope, non-goals and the "no `mkdir` at
+definition scope" constraint were all honoured;
+`test_source_safe_entry.py` passes unmodified.
+
+**Process note worth keeping.** The first attempt at this commit bundled
+the edit with a shell command that sourced the runner. The repository's
+launch guard blocked the *whole* invocation, so the edit never applied —
+and the block's output was briefly misread as a partial success. Verified
+afterwards by grepping for the new variables, which is why the miss was
+caught before any test was written against a file that had not changed.
+The verification now lives in a committed test rather than an ad-hoc
+source, which is the better outcome anyway.
+
+**New follow-ups**: none.
+
+**Remaining risk**: E-C1 is inert by construction, so its risk is confined
+to E-C2 flipping the defaults. The parity tests above are what will make
+that flip visible.
+
+**Next authorized checkpoint**: E-C2.
+
 ### E-C2 — Campaign admission and the path move
 
 *(Restructured after the second operator review: the stamp guard's
@@ -1961,6 +2054,215 @@ git diff --stat -- tests/unit/sdsc_submission_scripts/test_c13_stop_semantics.py
       the test output, the pyright count, the observed directory tree,
       both refusal listings, and any deviation from this section
 
+#### IMPLEMENTATION RECORD — E-C2 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>` on
+`feature/v20-pr-e-campaign-scoped-control`, on top of E-C1 `ded153d0`.
+
+**Behavior Delta: BD-1, BD-3 (partial), BD-5.** This is the commit that
+closes the §1 defect. Every campaign path moved; an invalid campaign id
+is now refused; a foreign stamp now stops a run.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `sdsc_submission_scripts/v19_queue_runner.sh` | defaults flipped to §4.2's targets; `QUEUE_STOP_FILE` default moved into `control/`; new `admit_campaign()` helper; admission call + startup path log in `main()` |
+| `core/campaign_identity.py` (**new**, 302 lines) | `validate_campaign_id`, `CampaignStamp`, `read_campaign_stamp`, `write_campaign_stamp`, `admit_campaign`, `CAMPAIGN_SUBDIRS` |
+| `scripts/campaign_admission.py` (**new**, 71 lines) | the CLI the shell calls; exit 0 admitted / 2 refused, modelled on `campaign_spend.py` |
+
+**Resolved paths, before → after** (`WS_ROOT=<R>`, `CAMPAIGN_ID=v19`):
+
+```text
+QUEUE_STOP_FILE  <R>/STOP                      -> <R>/v19/control/STOP
+WAVE_STATE       <R>/v19_wave_state.jsonl      -> <R>/v19/queue_state/wave_state.jsonl
+LOGF             <R>/v19_queue_runner.log      -> <R>/v19/queue_state/queue_runner.log
+CAMPAIGN_STAMP   <R>/v19_campaign.json         -> <R>/v19/control/campaign.json
+PAIR_SUMMARY_DIR <R>                           -> <R>/v19/pair_summaries
+```
+
+**Observed tree after a real `--only` run** (asserted, not echoed):
+
+```text
+<R>/v19/control/campaign.json
+<R>/v19/queue_state/queue_runner.log
+<R>/v19/queue_state/wave_state.jsonl
+<R>/v19/pair_summaries/
+```
+
+**Refusal listings.** `CAMPAIGN_ID=..` → rc≠0, `<R>` listing identical
+before and after, and no `control/`, `queue_state/` or `pair_summaries/`
+appears in `<R>`'s **parent** (the directory a `..` id resolves into).
+`CAMPAIGN_ID=alpha..beta` → **accepted**, produced
+`<R>/alpha..beta/control/`.
+
+**Tests** — 404 passed in 10.8 s
+(`tests/unit/sdsc_submission_scripts/` + `tests/unit/core/test_campaign_identity.py`);
+baseline before this commit was 340.
+
+| File | Count | Covers |
+|---|---|---|
+| `tests/unit/core/test_campaign_identity.py` (**new**) | 32 | D-E-9 refusal set + positive control; both ordering guarantees; stamp read/validate/adopt; first-writer-wins; unwritable root |
+| `tests/unit/sdsc_submission_scripts/test_campaign_admission.py` (**new**) | 23 | real-launcher runs: directory creation, stamp contents, startup log, both refusal classes, campaign STOP → exit 99, legacy STOP ignored, reachability + `errexit` |
+| `test_campaign_path_resolution.py` (rewritten) | 23 (was 14) | E-C1's parity assertions inverted into E-C2's move; E1 path enumeration; shell↔Python layout parity |
+
+**Static**: pyright **0 errors, 4 warnings** (baseline 0/4 — unchanged;
+the two new modules are inside `"include"`). `ruff check` clean.
+`ruff format --check` clean. `bash -n` clean.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| Admission call deleted from `main()` | **16 fail** (design predicted "exactly one"; the real figure is reported) |
+| Path defaults reverted to pre-E-C2 (7 lines) | **C13: 14/14 still pass** — the E4 proof; 32 of the E-C2 path/admission tests fail |
+| `\|\| ADMIT_RC=$?` → bare assignment + `RC=$?` (§3a.4 hazard) | **6 fail** — the 5 refusal cases lose their diagnostic entirely, confirming `errexit` kills the shell before it |
+| `value in {".",".."}` → `".." in value` | **2 fail** — both positive controls, in Python and through the shell |
+
+Hygiene: file backups, `__pycache__` cleared, each substitution asserted
+`count == 1`, restore verified by `grep -cF`, baseline re-run green after
+every restore.
+
+**Decisions recorded**
+
+*Interpreter unavailable → **fail closed*** (the design asked for this to
+be decided explicitly). A swallowed failure in `campaign_spend` produced
+a zero spend; a swallowed failure here would skip the guard entirely and
+launch into a directory whose owner was never proven. There is no safe
+default identity.
+
+*Directory creation lives in Python, inside the one guard*, not in the
+shell. §2 reads as though the shell's `mkdir` line becomes the campaign
+directories, but a shell `mkdir` would necessarily precede the Python
+validator and break guarantee 1 — `CAMPAIGN_ID=..` would create state
+outside the collection root before anything could refuse it. The whole
+ordered sequence is therefore one Python entry point, which is what §4.2a
+requires anyway. `mkdir -p "$WS_ROOT"` is **retained**, moved to just
+after admission: `WS_ROOT` holds the flat chain workspaces (§4.4) and an
+overridden `CAMPAIGN_HOME` would otherwise leave it uncreated.
+
+**Deviations from the frozen plan**
+
+1. **`test_c13_stop_semantics.py` is NOT diff-empty** — 2 lines added,
+   pinning `LOGF` beside the `WAVE_STATE` the tests already pinned.
+   §4 required this to be reported rather than absorbed, so: it is a
+   **test-harness assumption, not a semantics change**. Both tests call
+   `record_queue_stop` / `wait_and_record` directly, bypassing `main()`;
+   `record_queue_stop` ends in `log()`, and `LOGF`'s directory is now
+   created by admission. In production `log()` is unreachable before
+   admission — asserted by
+   `test_campaign_admission.py::test_no_log_call_precedes_admission`.
+   Stop timing, exit code 99, the record's fields and the trap channel
+   are untouched, and all 14 C13 assertions pass **unmodified** under
+   the E4 mutation.
+   *Second-order finding*: `test_the_wall_cap_is_configurable…` runs
+   under `set +e`, so its `log()` failure was silent — it passed while
+   half-broken. The same one-line pin fixes it.
+
+2. **Two more tests needed re-pointing than §2 named.** §2 named only
+   `test_v19_queue_runner.py:294-304`. Also required:
+   `TestWaveStateMachine._state_env` (the shared helper — one line, fixes
+   6 tests) and `test_v19_campaign_pinning.py::test_queue_state_and_log_carry_the_campaign_id`,
+   whose assertion was `"camp1_" in path` (a **prefix**). E-C2 replaces
+   the prefix mechanism with a directory, so the assertion now asks for
+   the segment `/camp1/`. The concept it guards — a queue-state path two
+   campaigns can both resolve to — is unchanged and now stronger.
+
+3. **The admission-removal mutation fails 16 tests, not one.** §5
+   predicted "exactly one". Reported as measured; the suite is not
+   weakened to match the estimate.
+
+**Defect found in E-C2, corrected in E-C2b** — see the record below. It
+was first filed as a follow-up (FU-E-11); the operator's review
+(2026-08-04) correctly reclassified it as an **implementation defect
+against the identity contract E-C2 had already approved**, not a new
+policy question. FU-E-11 is withdrawn.
+
+**Remaining risk — E-C2 and E-C2b are internal checkpoints, not a
+releasable state.** A campaign that already has a legacy
+`<R>/<id>_wave_state.jsonl` will not see its completion history at these
+commits: adoption is E-C3 by design. **Neither commit may be used for a
+legacy resume**, no Draft PR may stop at either head, and no unrelated
+work may be inserted before E-C3 closes the gap.
+
+**Next authorized checkpoint**: E-C2b, then immediately E-C3 (legacy
+campaign adoption).
+
+#### IMPLEMENTATION RECORD — E-C2b `[x]` COMPLETE
+
+*An E-C2 correction, landed as its own commit. `29af020c` is pushed and
+is not amended or rewritten.*
+
+**Commit**: `<filled at commit>`.
+
+**The defect.** `CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"` collapses two
+different inputs into one. `:-` substitutes the default when the variable
+is unset **or empty**, so an explicitly empty id never reached the
+validator that D-E-9 requires to refuse it — it silently became `v19`.
+
+The failure mode is the one this PR exists to prevent, arrived at from
+the opposite direction: an operator who **clears** `CAMPAIGN_ID`
+specifically to avoid reusing an identity is handed exactly the identity
+they were avoiding, and then writes into that campaign's control state.
+
+**The fix**, one character:
+
+```bash
+CAMPAIGN_ID="${CAMPAIGN_ID-v19}"     # `-`, not `:-`
+```
+
+`-` substitutes only when the variable is **unset**, so:
+
+```text
+CAMPAIGN_ID unset            -> `v19`, the compatibility default, unchanged
+CAMPAIGN_ID explicitly empty -> stays empty -> the typed validator refuses
+```
+
+No validator change was needed — `validate_campaign_id("")` already
+refuses via the `{1,128}` bound, and `tests/unit/core/test_campaign_identity.py`
+already asserted it. The defect was entirely that the shell prevented the
+empty string from ever arriving.
+
+**Behavior Delta**: an explicitly empty `CAMPAIGN_ID` now exits 1 instead
+of running as `v19`. An unset `CAMPAIGN_ID` is byte-identical to before.
+This is BD-5's stated intent, not an extension of it.
+
+**Files changed**: `sdsc_submission_scripts/v19_queue_runner.sh` (the
+expansion plus its explanation);
+`tests/unit/sdsc_submission_scripts/test_campaign_admission.py` (`_run`
+gained `campaign_id=None` to leave the variable genuinely unset — the
+distinction cannot be tested without it).
+
+**Tests** — 408 pass (E-C2 baseline 404); 4 new in
+`TestAnUnsetIdAndAnEmptyIdAreDifferentInputs`:
+
+| Test | Proves |
+|---|---|
+| `test_an_unset_id_still_defaults_to_v19` | backward compatibility: `env -u CAMPAIGN_ID` still stamps `v19` |
+| `test_an_explicitly_empty_id_is_refused` | non-zero exit with the refusal diagnostic |
+| `test_the_empty_id_refusal_touches_nothing` | the whole contract: no directory created, **no STOP consulted**, no state written, no chain launched |
+| `test_the_runner_uses_the_unset_only_expansion` | structural, so the one-character difference cannot be re-introduced silently |
+
+**How "no STOP is read" is proven.** Through the exit code, not a
+comment. A run that reads a STOP and obeys it exits **99** and leaves a
+`queue_stopped` record; a refusal exits **1** and leaves none. The test
+arms *both* a legacy `<R>/STOP` and a `<R>/v19/control/STOP`, so if the
+empty id resolved to either location the run would stop rather than
+refuse — and the assertion is `returncode == 1`.
+
+**Mutation**: restoring `${CAMPAIGN_ID:-v19}` → **3 fail** (both
+behavioural cases and the structural guard). The unset-default test stays
+green under the mutation, which is correct: it is the compatibility half
+of the contract and the mutation does not break it.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean.
+
+**Deviations**: none.
+
+**Next authorized checkpoint**: E-C3, immediately, with no unrelated work
+inserted.
+
 ---
 ### E-C3 — Legacy campaign adoption
 
@@ -2139,6 +2441,148 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, the blocker-case result, the
       identity-assertion result, and any deviation from this section
+
+#### IMPLEMENTATION RECORD — E-C3 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C2b `9060b13f`.
+
+**Behavior Delta: BD-2, BD-3 (completes it).** This commit closes the
+E-C2 gap: a campaign interrupted before the move can resume again.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/campaign_identity.py` | `legacy_wave_state_name`, `resolve_adoption`, `adopted_legacy_state`, `_validate_adoption_source`; `admit_campaign` gains `wave_state` / `legacy_wave_state` and populates `legacy_adopted_from` **only on the stamp-creating branch** |
+| `scripts/campaign_admission.py` | the two new arguments; a second output line carrying the adopted path or `-` |
+| `sdsc_submission_scripts/v19_queue_runner.sh` | `LEGACY_WAVE_STATE`, `LEGACY_GLOBAL_STOP`, `ADOPTED_LEGACY_STATE`; `chain_completed` split into `_completed_in` + an adoption-gated caller; the BC-3 observation record; the stale header comment naming the pre-move authoritative path |
+
+**The decision, and where it lives.** Adoption is evaluated in exactly
+one place — the branch of `admit_campaign` that *creates* the stamp:
+
+```text
+the campaign's own wave state does NOT exist yet
+AND a legacy wave state for THIS campaign id does
+  -> legacy_adopted_from = <that path>
+```
+
+The `existing is not None` branch **re-validates** the recorded path but
+never re-decides. That single structural fact is what makes adoption
+monotonic: a legacy file restored from a backup mid-campaign cannot
+acquire authority, because nothing after first start can grant it.
+
+**The predicate is provably identical on both files.** `_completed_in`
+holds the original `grep … | grep -q "\"exit\": 0"` and both call sites
+use it. Adoption may change *which* file is readable; it cannot change
+what "complete" means.
+
+```bash
+chain_completed() {
+  local RUN="$1"
+  _completed_in "$WAVE_STATE" "$RUN" && return 0
+  [ -n "$ADOPTED_LEGACY_STATE" ] || return 1
+  _completed_in "$ADOPTED_LEGACY_STATE" "$RUN"
+}
+```
+
+Note what this is **not**: "consult legacy when the new state lacks a
+record". That per-record fallback is the rejected design, and the gate is
+on the adoption *decision*, not on a missing record.
+
+**Adoption is not a read capability.** `_validate_adoption_source`
+re-checks, on every use including a pre-existing stamp, that the
+recorded path resolves to exactly `<ws_root>/<campaign_id>_wave_state.jsonl`.
+A hand-edited stamp stops the run rather than widening what it may read.
+This was not in the frozen plan's implementation steps; §4's
+"stamp records a path outside `$WS_ROOT` → STOP" required it, and the
+narrow form (exact name, exact directory) is stricter than "inside
+`$WS_ROOT`" for the same cost.
+
+**Tests** — 438 pass in 37.2 s (E-C2b baseline 408); 30 new.
+
+| Class | Count | Covers |
+|---|---|---|
+| `TestAdoptionIsDecidedOnce` | 6 | the conjunction; canonical-state-blocks-adoption; monotonicity with a byte-identical stamp; another campaign out of range |
+| `TestAdoptionIsNotAReadCapability` | 8 | four tampered paths refused, a positive control accepted, `None` is a value, reachability through `admit_campaign`, and a vanished-but-legitimate path still reported as adopted |
+| `TestLegacyAdoption` (shell) | 10 | the real launcher: pre-move resume, **the blocker case**, monotonicity, foreign campaign, fresh campaign, unusable/deleted adopted files, tampered stamp, and the legacy filename in a read position only |
+| `TestTheLegacyGlobalStopIsObservedNotHonoured` | 3 | the record's contents, the file's survival, and no record when absent |
+| `TestLegacyBytesAreNeverTouched` | 1 | E2: bytes **and** `st_mtime_ns` over a four-file legacy tree |
+| `TestResolveAdoptionDirectly` | 1 | refusal at the decision layer |
+
+**Blocker-case result.** `<R>/v19/queue_state/wave_state.jsonl` exists
+without the record, `<R>/v19_wave_state.jsonl` has it with `"exit": 0`:
+the stamp records `legacy_adopted_from: null`, the log contains no
+`SKIP`, and the `screen` shim records
+`-dmS siderius-v19_arch_15_19` — **the chain is launched.**
+
+**Byte/mtime identity result.** A four-file legacy tree
+(`v19_wave_state.jsonl`, `v19_queue_runner.log`, `STOP`,
+`v19_campaign.json`) is identical in both `read_bytes()` and
+`st_mtime_ns` after a full `--only` run that adopts and skips.
+
+**`legacy_global_stop_observed` record**
+
+```json
+{"legacy_global_stop_observed": true, "path": "<R>/STOP",
+ "mtime": "1754...", "observed_at": "…Z", "runner_pid": 1234,
+ "honoured": false, "removed": false}
+```
+
+Written to the **new** wave state, so the observation belongs to the
+campaign that made it. A failed `stat` yields `"unknown"`, never `0` — a
+gap is never a zero.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| `legacy_adopted_from=None` — the decision is computed but never persisted | **6 fail** |
+| `chain_completed` restored to the per-record fallback | **2 fail** — the blocker case and monotonicity, exactly the two the rejected design would have broken |
+| `QUEUE_STOP_FILE` default back to `$WS_ROOT/STOP` (honouring the legacy STOP) | **3 fail** |
+| `adopted_legacy_state(existing)` re-validation removed from `admit_campaign` | **2 fail** — proves the check is on the production path, not in an unused helper |
+
+Hygiene: backups, `__pycache__` cleared, every substitution asserted
+`count == 1`, restores verified by `grep -cF`, baseline re-run green.
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean.
+`grep -n '_wave_state' v19_queue_runner.sh` → three hits, two comments
+and one definition; **no write position**, asserted by a test.
+
+**Deviations from the frozen plan**
+
+1. **The adoption decision is computed in Python, not in the shell.** §3
+   places it "in the admission sequence's step 5", which is Python; the
+   shell supplies the two paths and consumes the answer. This keeps the
+   filename rule (`{campaign_id}_wave_state.jsonl`) in one place, where
+   "another campaign's file" is a comparison rather than a convention.
+2. **The helper's output gained a second line** rather than a third
+   field, because a path may contain a space and the launcher parses with
+   word splitting. "None" is spelled `-`: command substitution strips
+   trailing newlines, so an empty line 2 would be indistinguishable from
+   a missing one.
+3. **`chain_completed` was split into `_completed_in` + a caller.** The
+   plan said "keep the existing `grep … | grep -q` form so the predicate
+   is provably identical on both files"; extracting it makes that
+   *structurally* true rather than a matter of two copies staying in
+   sync.
+4. **The stale header comment at `:41` was corrected.** It named
+   `$WS_ROOT/v19_wave_state.jsonl` as the authoritative status file,
+   which E-C2 made false and this commit makes actively misleading. One
+   comment, describing exactly what this commit changes.
+
+**Self-corrected during implementation.** A first draft of
+`test_a_legacy_file_appearing_later_never_gains_authority` contained
+`assert first.returncode != 0 or True` — a vacuously true assertion, the
+exact anti-pattern CLAUDE.md records from 2026-08-02. Removed; the first
+run's launch outcome is not that test's subject and is now simply not
+asserted.
+
+**Remaining risk.** None specific to adoption. The E-C2 gap is closed:
+`<R>/<id>_wave_state.jsonl` is read again, under an auditable, recorded,
+once-only decision.
+
+**Next authorized checkpoint**: E-C4 (wave record and pair summaries).
 
 ---
 ### E-C4 — Wave record and pair summaries
@@ -2342,6 +2786,191 @@ ruff check . && ruff format --check .
       the test output, the pyright count, both emitted records, and the
       test-deletion justification
 
+#### IMPLEMENTATION RECORD — E-C4 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C3 `ed61bb50`.
+
+**Behavior Delta: BD-4.**
+
+> ### A DEFECT IN THE FROZEN DESIGN, found by audit before implementing
+>
+> **D-E-3's own example record makes a failed chain read as complete.**
+>
+> The proposed array is `{"run": "v20a_arch_15_19", …, "exit": 0}`, and
+> `chain_completed` decides completion by grepping the **whole line**:
+>
+> ```bash
+> grep '"run": "<X>"' wave_state.jsonl | grep -q '"exit": 0'
+> ```
+>
+> A wave summary in which one chain succeeded therefore satisfies that
+> predicate for **every chain it names**. Measured on the design's own
+> example: a wave with `arch exit 0` and `loss exit 137` reports
+> `v19_loss_15_19 -> COMPLETED`. On the next resume that chain is
+> skipped as finished and its failure disappears from the science. The
+> pre-E-C4 record does not collide, because `"arch_run": "…"` has `_`
+> before `run`, not `"`.
+>
+> **Correction taken**: the field inside `chains` is **`run_name`**.
+> `chain_completed` is byte-identical, the interpretation of duplicate
+> JSONL records is unchanged, and no authority semantics move — this is
+> a field-naming fix, which is why it was made rather than escalated.
+> Guarded by two regression tests, one on the serialised bytes and one
+> end-to-end through the launcher.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/wave_records.py` (**new**, 289 lines) | `ChainRecord`, `WaveSummaryRecord`, the mirror rule, `next_attempt`, `build_record_id`, canonical append + fsync, atomic derived write, `CanonicalWriteError` / `DerivedWriteError` |
+| `scripts/record_wave_summary.py` (**new**, 138 lines) | the CLI; `--chain RUN:ROLE:PID:EXIT` repeatable; exit codes 0/2/3 |
+| `sdsc_submission_scripts/v19_queue_runner.sh` | `record_wave_summary()` rewritten as a guarded writer call; both call sites; `MAX_CONC` deleted; `chains_per_wave` logged |
+
+**The record**
+
+```json
+{"wave_summary": 1, "record_id": "v19:1:15_19:1", "campaign_id": "v19",
+ "band": "15-19", "band_tag": "15_19",
+ "chains": [{"run_name": "v19_arch_15_19", "role": "arch", "pid": "1111", "exit": 0},
+            {"run_name": "v19_loss_15_19", "role": "loss", "pid": "2222", "exit": 137}],
+ "arch_run": "v19_arch_15_19", "arch_pid": "1111", "arch_exit": 0,
+ "loss_run": "v19_loss_15_19", "loss_pid": "2222", "loss_exit": 137,
+ "start": "…", "end": "…", "disposition": "failed"}
+```
+
+Identical bytes in both destinations. The mirror is emitted **only** for
+exactly two chains whose roles are exactly `arch` and `loss`; a one-,
+three- or other-role wave gets `chains` and no mirror, never a fabricated
+one — an invented `arch_exit` is worse than an absent one, because a
+report would show it.
+
+**Retry and duplicate semantics — unchanged, and now expressible.**
+`record_id = <campaign_id>:<wave>:<band_tag>:<attempt>`, with `attempt`
+counted from the canonical file at write time, so a queue restart cannot
+reset it. Two attempts leave two JSONL records with **different**
+`record_id`s and one derived file carrying the later one. How duplicate
+JSONL records are interpreted did not change: `chain_completed` still
+reads per-chain `record_chain` lines, and wave summaries remain
+non-participating in that predicate.
+
+**Failure semantics, distinctly**
+
+| Outcome | Exit | Canonical | Shell |
+|---|---|---|---|
+| both written | 0 | written | logs `summary recorded: <record_id>` |
+| schema refusal / canonical write failed | 2 | **nothing written** | `record_queue_stop "wave_summary_write_failed"`, exit 1 |
+| derived write failed | 3 | **preserved** | `record_queue_stop "wave_summary_derived_write_failed"`, names the rebuild source, exit 1 |
+
+Collapsing 3 into 2 would report a missing convenience file as missing
+evidence and invite a retry that duplicates the canonical record.
+
+**Tests** — 471 pass in 38.3 s (E-C3 baseline 438); 36 net new.
+
+| File | Count | Covers |
+|---|---|---|
+| `tests/unit/core/test_wave_records.py` (**new**) | 25 | write order observed on disk; derived failure keeps the evidence; distinct error types; no surviving temp file; retry `record_id`s; attempt survives a restart; unparseable lines not counted; the mirror's four negative cases + positive; the `run_name` regression on serialised bytes; **fsync-before-replace ordering**, spied |
+| `test_campaign_admission.py::TestTheWaveSummaryWriterFailsExplicitly` (**new**) | 7 | the §3a.4 guarded form end to end: reason persisted, exit code, stderr visible, `errexit` still on, canonical preserved, null role does not destroy the summary |
+| `test_v19_queue_runner.py` | 2 rewritten | all operator fields over the new shape; a wave summary never makes a failed chain look complete |
+| `test_v19_queue_runner.py` | 1 replaced | `MAX_CONC == 2` → the wave launches exactly the ROSTER chains for its band |
+| `test_source_safe_entry.py` | 1 repointed | `${MAX_CONC:-unset}` → `$CAMPAIGN_HOME` |
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| derived write moved **before** canonical | **2 fail** |
+| `chains` field spelled `run` (D-E-3's own example) | **4 fail**, including the end-to-end "failed chain reads as complete" |
+| writer call → bare assignment + `RC=$?` (§3a.4) | **5 fail** — every classification path loses its diagnostic |
+| `attempt` pinned to 1 | **2 fail** — retries become indistinguishable |
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean.
+
+**Test deletions, justified**
+
+- `test_exactly_two_chains_per_wave_max_conc` — asserted a variable that
+  gated nothing; deleting `MAX_CONC` changed no behaviour, which is what
+  made it decoration. **Replaced**, not dropped: the defect it reached
+  for ("a wave must not launch more chains than intended") is now
+  asserted against the ROSTER.
+- A drafted `TestTheRecordIsValidated` (3 cases) was deleted before
+  commit: an empty `chains` list, a non-integer exit, and `-1` compared
+  to itself are `Field(min_length=1)`, a declared `int`, and a value
+  asserted against itself. Ruff's B017 flagged two of them as blind
+  `Exception` assertions, which is the same finding from the other
+  direction. The reachable behaviour is asserted end to end instead.
+
+**Deviations from the frozen plan**
+
+1. **`run_name`, not `run`** — the defect above. The only change to a
+   frozen artifact's contents, and it changes no semantics.
+2. **The role is resolved inside `record_wave_summary`, and a failure
+   yields `null`** rather than aborting. The function is called on every
+   wave exit path including the aborted-launch one, and the launcher's
+   own rule is that an aborted wave must not be the one case that leaves
+   no summary. A guess of `arch` is exactly what D-E-6 removed.
+3. **`--chain` is a colon-joined string**, `rsplit(":", 3)` — a run name
+   may contain no colon but the remaining fields never do, so splitting
+   from the right keeps a surprising run name from shifting every field.
+4. **Exit code 3 was added** for "canonical written, derived not". §4
+   required the two failures to be distinguishable; a distinct code is
+   how the shell distinguishes them.
+5. **`chains_per_wave` is logged per wave**, at the launch line, rather
+   than at the queue-start line where `MAX_CONC` was: the count is a
+   property of a wave's `NEEDED` set, and only that site knows it.
+
+**Not done, deliberately**: no launcher concurrency change (FU-E-2 stays
+deferred — `WAVES` still pairs two names), no rebuild of historical
+derived summaries (FU-E-7), no Gate runner change, no other shell record
+converted, no stop or exit-code semantics touched, no E-C3 change.
+
+#### IMPLEMENTATION RECORD — E-C4b `[x]` COMPLETE
+
+*An E-C4 correction, landed as its own commit. `25a95556` is not amended.*
+
+**Commit**: `<filled at commit>`.
+
+**The gap.** E-C4 recorded an unresolvable role as `"role": null` and
+emitted no compatibility mirror — correct, but **silent**. A reader
+seeing a null role and no mirror cannot tell a wave with unusual roles
+*by design* from a ROSTER lookup that *failed*, and those two call for
+opposite operator responses: the first is normal, the second means the
+ROSTER and the launched set have diverged. The operator's acceptance of
+E-C4 stated the gap explicitly ("disposition/reason must record the
+resolution failure").
+
+**The fix.** Two additive fields, present **only** when at least one role
+is unresolved:
+
+```json
+{"role_resolution_failed": true, "unresolved_roles": ["not_in_the_roster"]}
+```
+
+**`disposition` is deliberately NOT overloaded.** Its vocabulary
+(`complete` / `failed` / `launch_failed`) describes what happened to the
+**chains**; a recording gap is not a chain outcome. Overloading it would
+also break an operator filtering on `disposition == "complete"`, who
+would lose the wave entirely. A test asserts the disposition is unchanged
+when the marker fires.
+
+**Behavior Delta**: none for a fully-resolved wave — the record is
+byte-identical to E-C4's, because the fields are absent rather than
+`false`. A wave with an unresolved role gains two keys.
+
+**Tests** — 474 pass (E-C4 baseline 471); 4 new: the marker fires, a
+normal record carries neither key, the disposition is not overloaded, and
+the end-to-end launcher path emits both fields.
+
+**Mutation**: dropping the marker → **2 fail**, one at the model and one
+through the real launcher.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean.
+
+**Deviations**: none.
+
+**Next authorized checkpoint**: E-C5 (Gate pair summary scoping).
+
 ---
 ### E-C5 — Gate pair summary scoping
 
@@ -2505,6 +3134,121 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
       the test output, the pyright count, the two-prefix listing, and
       both validator control results
 
+#### IMPLEMENTATION RECORD — E-C5 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C4b `061bccfb`.
+
+**Behavior Delta**: the Gate summary and runner log move from fixed
+`gate0_*` names to `${GATE_RUN_PREFIX}_*`; the summary's `"gate"` field
+becomes the resolved prefix instead of the literal `"v19_gate0"`; an
+unsafe or explicitly empty `GATE_RUN_PREFIX` is refused at startup.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/campaign_identity.py` | `validate_path_component(value, kind=)` extracted; `PathComponentError`; `validate_campaign_id` delegates to it and re-raises `CampaignIdError` so E-C2's callers and tests are untouched |
+| `scripts/validate_path_component.py` (**new**, 43 lines) | the CLI a shell caller reaches the shared rule through; exit 0 / 2 |
+| `sdsc_submission_scripts/v19_gate0_pair_runner.sh` | `SUMMARY`, `RUNNER_LOG`, the `"gate"` field; the startup guard; `${GATE_RUN_PREFIX-v19_c14}` |
+
+**A prefix, not a directory.** `$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json`,
+never `$GATE_ROOT/$GATE_RUN_PREFIX/…`. The Gate has no directory model and
+this commit does not invent one.
+
+**One rule, not a second copy.** The Gate reaches
+`validate_path_component` — the same function `validate_campaign_id` now
+delegates to. A shell `case` here would have been a second copy of a
+security rule, and a second copy is how two rules drift: one of them
+eventually learns about `..` and the other does not. Asserted
+structurally.
+
+**Written for THIS shell.** The Gate runner has `set -u` only, **no
+`errexit`** (`:42`) — unlike the queue runner, which inherits `-e` from
+`_chain_common.sh:40`. A failing command here does not abort, so the
+guard checks the status explicitly with `if ! cmd`, which is correct
+under either setting. The E-C2 pattern was **not** copied mechanically.
+
+**Guard placement, and why a refusal writes no summary.** The guard runs
+before `mkdir -p "$GATE_ROOT"` and before `trap write_summary EXIT`. It
+has to: `$SUMMARY`'s own path is built from the value being refused, so
+running `write_summary` would write to a path derived from a rejected
+prefix. A startup refusal therefore leaves **no artifacts at all**, which
+is the accurate representation — nothing ran. The diagnostic names the
+variable and the value on stderr, and the exit code is 2.
+
+> ### A second `:-` defect, found by the empty-prefix test
+>
+> `GATE_RUN_PREFIX="${GATE_RUN_PREFIX:-v19_c14}"` made
+> `GATE_RUN_PREFIX= bash …` run silently as `v19_c14` — so the operator's
+> refusal set could not include "empty", because an empty value never
+> reached the validator. Identical to FU-E-11 in the queue runner, in a
+> different file, and found the same way: by testing the case rather than
+> reading the line.
+>
+> Fixed with the same one-character change, `${GATE_RUN_PREFIX-v19_c14}`.
+> Unset still defaults to `v19_c14`; explicitly empty now reaches the
+> validator and is refused. An operator who **clears** the variable to
+> avoid reusing a Gate label would otherwise have been handed that label
+> and overwritten its summary.
+
+**Tests** — 494 pass in 54.4 s (E-C4b baseline 474); 20 new, all in
+`test_v19_gate0_pair_runner.py`.
+
+| Class | Count | Covers |
+|---|---|---|
+| `TestGateArtifactsAreScopedByPrefix` | 4 | two prefixes → four separate artifacts; each summary names its own run; a second run does not overwrite the first; a historical `gate0_*` pair is byte- and mtime-identical |
+| `TestAnUnsafeGatePrefixIsRefused` | 14 | seven refusals (incl. empty) with zero launches; no artifacts left; the diagnostic; four positive controls incl. the shipped default `v19_c14` and `alpha..beta`; guard reachability above `mkdir`/`trap`; the no-second-copy assertion |
+| `TestSourcingTheGateRunnerStillTouchesNothing` | 1 | sourcing with an invalid prefix neither refuses nor creates |
+| harness | repointed | `_run_main` takes a prefix and derives the summary path from it, so the test cannot drift from the runner |
+
+**Two-prefix listing observed** under one `GATE_ROOT`:
+
+```text
+probe1_pair_summary.json   probe1_runner.log
+probe2_pair_summary.json   probe2_runner.log
+gate0_pair_summary.json    gate0_runner.log     <- pre-existing, unchanged
+```
+
+`probe1`'s summary reports `"gate": "probe1"`, `probe2`'s reports
+`"gate": "probe2"`, and the historical pair is identical in bytes and
+`st_mtime_ns` after the runs.
+
+**Mutation and reachability proofs**
+
+| Mutation | Result |
+|---|---|
+| validator call removed from `main()` | **11 fail** |
+| `SUMMARY` / `RUNNER_LOG` back to fixed `gate0_*` | **12 fail** |
+| `${GATE_RUN_PREFIX:-v19_c14}` restored | **1 fail** — the empty-prefix case, precisely |
+
+**Static**: pyright **0 errors, 4 warnings** (unchanged), ruff check +
+format clean, `bash -n` clean on both runners. Full `tests/unit/` run:
+2439 passed, 2 skipped.
+
+**Deviations from the frozen plan**
+
+1. **`${GATE_RUN_PREFIX-v19_c14}`** — the second `:-` defect above. §4's
+   refusal set names "empty", and without this the case was unreachable.
+2. **A startup refusal writes no summary**, rather than a summary
+   recording the refusal. §4 asked that the refusal be accurately
+   represented; a summary cannot be, because its path derives from the
+   rejected value. Stated here so the absence is a decision, not a gap.
+3. **The shared rule was extracted rather than imported as
+   `validate_campaign_id`.** Calling a function named for campaigns from
+   the Gate would have made the Gate a campaign. `validate_campaign_id`
+   is now a thin caller-specific face over
+   `validate_path_component`, so E-C2's error type and tests are
+   unchanged — verified by the campaign suite passing untouched.
+
+**Not done, deliberately**: no Gate stop channel (FU-E-8), no
+`GATE_ROOT` restructuring, no conversion of the Gate's `printf` to
+E-C4's typed writer, no new Gate schema, no queue-runner change, no
+`bg_gpu_sampler.sh` change, no Gate execution parameters touched, no
+real Gate run.
+
+**Next authorized checkpoint**: E-C6 (process-guard self-exclusion,
+D-E-7).
+
 ---
 
 ### E-C6 — Process-guard self-exclusion (D-E-7)
@@ -2623,6 +3367,141 @@ PATH=~/.cache/pyright-python/nodeenv/bin:$PATH ./.venv/bin/pyright
       unrelated cleanup
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the test output, the pyright count, and the renamed-copy result
+
+#### IMPLEMENTATION RECORD — E-C6 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C5 `240d7ac1`.
+
+**Behavior Delta**: a runner running under any filename now excludes its
+own process from the live-process scan. Under the shipped filename,
+behaviour is unchanged.
+
+**Production diff — two lines**
+
+```diff
++RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
+-  if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
++  if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -qF -- "$WS_ROOT/$RUN"; then
+```
+
+`${BASH_SOURCE[0]##*/}` rather than `$(basename …)`: pure parameter
+expansion, so no subshell and no `set -e` surface, and it matches the
+form E-C2 already uses for the admission helper's `--runner` argument.
+
+**`-F` is not cosmetic — operator instruction, and it is load-bearing.**
+The basename is `v19_queue_runner.sh` and `.` is a regex wildcard, so a
+plain `grep -v` would also exclude a process named
+`v19_queue_runnerXsh`. That widens the exclusion to processes that are
+**not** this runner, which is the direction that silently skips the
+guard. Both sides of the pipeline are now fixed-string, and `--` guards
+a value that begins with `-`.
+
+**Unchanged**: the guard's meaning (a live process already referencing
+this run's workspace blocks the launch), its position among the three
+launch guards, the `grep -v grep` stage, and `pipefail`/return-code
+behaviour — the guard is inside `launch_chain`, which every call site
+invokes as a condition, so `errexit` stays suspended there exactly as
+before.
+
+**Tests** — 6 new in `test_v19_queue_runner.py`; full `tests/unit`:
+**2445 passed, 2 skipped** in 103 s.
+
+| Test | Proves |
+|---|---|
+| `test_a_genuine_external_process_still_blocks_the_launch` | the meaning is intact |
+| `test_the_runner_does_not_see_itself` | unchanged under the shipped filename |
+| `test_a_process_that_is_not_this_runner_is_not_excluded` | the exclusion stays narrow |
+| `test_a_renamed_runner_still_excludes_itself` | **the regression**, with an actually-renamed copy |
+| `test_the_exclusion_is_fixed_string_not_a_regex` | `v19_queue_runnerXsh` still blocks |
+| `test_the_exclusion_derives_from_the_script_name` | structural, no literal anywhere |
+
+Each behavioural case runs the **real `launch_chain`** against a real
+background process whose argv contains this run's workspace path, and
+reads the guard's own message out of the log — so what is asserted is the
+guard's decision, not the shape of a pipeline.
+
+**Mutations**
+
+| Mutation | Result |
+|---|---|
+| `grep -v v19_queue_runner` restored | **3 fail** |
+| `-F` dropped from the self-exclusion | **2 fail** |
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean. `git diff --stat` confirms only
+`v19_queue_runner.sh` and its test file changed: no `role_for_run`, no
+campaign paths, no legacy adoption, no wave writer, no
+`v18r_queue_runner.sh`, no Gate runner.
+
+**Two defects found in my own tests, both fixed before commit**
+
+1. **The rename test did not discriminate.** As first written it varied
+   the *fixture's* name, not the script's — and passed under the
+   hardcoded literal too, which the mutation exposed. It now copies the
+   runner and `_chain_common.sh` into a temp tree and runs the copy under
+   a different filename, which is the only form that reproduces the
+   defect. The mutation went from 2 failures to 3.
+2. **The fixture process was invisible to `ps`.** `bash -c "sleep 30 # <marker>"`
+   is a lone simple command, so bash **execs** it and replaces its own
+   argv — the marker vanished and three "should block" cases silently
+   didn't. Fixed with `; true`, verified by injection. Separately, the
+   fixture held the captured pipes open after being killed (its orphaned
+   `sleep` inherited them), making the class take 120 s; redirecting its
+   output brought that to 4.8 s.
+
+**Follow-up filed and immediately closed**
+
+- **FU-E-12** — `v19_gate0_pair_runner.sh:209` carried the identical
+  hardcoded self-exclusion (`grep -v gate0_pair_runner`, also without
+  `-F`). Filed as a follow-up because E-C6's frozen scope names the queue
+  runner only; the operator's review (2026-08-04) declined the deferral —
+  the Gate runner is a production surface PR E already touched in E-C5,
+  and the fix is the same two lines. **Closed by E-C6b below.**
+  `v18r_queue_runner.sh:48` remains FU-E-3: it is a historical launch
+  surface protected from change by an existing test.
+
+**Next authorized checkpoint**: E-C6b, then E-C7.
+
+#### IMPLEMENTATION RECORD — E-C6b `[x]` COMPLETE
+
+*Closes FU-E-12. Operator ruling, 2026-08-04: not deferred.*
+
+**Commit**: `<filled at commit>`, on top of E-C6 `6dc1fdb1`.
+
+**Behavior Delta**: a Gate runner running under any filename now excludes
+its own process from the live-process scan. Under the shipped filename,
+behaviour is unchanged.
+
+**Production diff — two lines**, the E-C6 change transposed:
+
+```diff
++GATE_RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
+-  if ps -eo args | grep -v grep | grep -v gate0_pair_runner | grep -qF "$GATE_ROOT/$RUN"; then
++  if ps -eo args | grep -v grep | grep -vF -- "$GATE_RUNNER_BASENAME" | grep -qF -- "$GATE_ROOT/$RUN"; then
+```
+
+**Tests** — 5 new, mirroring E-C6's class against
+`launch_gate_chain` and `$GATE_ROOT/$RUN`: the meaning is intact, the
+shipped filename is unchanged, an actually-renamed copy excludes itself,
+`v19_gate0_pair_runnerXsh` still blocks, and the literal is gone.
+`tests/unit/sdsc_submission_scripts/`: **430 passed** in 64 s.
+
+**Mutations**: the literal restored → **3 fail**; `-F` dropped →
+**2 fail**. Same discriminating pair as E-C6, including the
+actually-renamed-copy case.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean, `bash -n` clean.
+
+**Scope held**: only `v19_gate0_pair_runner.sh` and its test file
+changed. No `v18r_queue_runner.sh` (`git diff --stat` empty), no Gate
+stop channel, no summary/wall-cap/trap/execution-parameter change, no
+queue-runner change.
+
+**Next authorized checkpoint**: E-C7 (multi-campaign isolation test),
+**test-only** — any production change required there is a stop-and-report
+condition, because it would mean the preceding implementation evidence
+was insufficient.
 
 ---
 ### E-C7 — Multi-campaign isolation test
@@ -2768,6 +3647,66 @@ all, it is a broken test with an alibi.
 - [ ] Before committing, show `git diff --stat`, the staged file list,
       the module output (fully green), the CI result, and the separate
       mutation-run evidence
+
+#### IMPLEMENTATION RECORD — E-C7 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of E-C6b `f3c7cf5b`.
+
+**Behavior Delta: none. Zero production lines.**
+`git diff --stat -- sdsc_submission_scripts/ core/ scripts/` is **empty**
+— one new file,
+`tests/unit/sdsc_submission_scripts/test_multi_campaign_isolation.py`.
+
+That is the checkpoint's acceptance condition and it held: nothing in
+E-C2..E-C6b needed correcting to make the isolation observable, so the
+preceding implementation evidence was sufficient.
+
+**The fixture** — §9 Layer 2, built once and reused:
+
+```text
+<root>/STOP                  legacy global — no authority over anything
+<root>/alpha/control/STOP    alpha is stopped
+<root>/alpha/{control,queue_state,pair_summaries}/
+<root>/beta/{control,queue_state,pair_summaries}/
+```
+
+Every test runs the **real launcher** against that tree and then looks at
+the filesystem. A PATH `screen` shim records each invocation, so
+"nothing launched" *and* "something launched" are both assertions —
+`beta` proving it is unaffected by reaching its launch, not merely by
+lacking a stop record.
+
+**Tests** — 11, all green in 50.7 s.
+`tests/unit/sdsc_submission_scripts/`: **441 passed**.
+
+| Class | Count | Property |
+|---|---|---|
+| `TestOneCampaignsStopDoesNotStopTheOther` | 3 | **the 08:17 incident**: `alpha` exits 99 with `operator_stop_requested` and launches nothing; `beta` reaches its launch shim; neither honours `$WS_ROOT/STOP`, which survives byte- and mtime-identical |
+| `TestNeitherCampaignWritesIntoTheOther` | 4 | each run leaves the neighbour's whole tree byte- and mtime-identical; each stamps only its own home; canonical **and** derived records stay in their own home and never name the other campaign |
+| `TestTheCampaignsCannotBeConfusedForEachOther` | 3 | disjoint run names, screen sessions and `EXIT_DIR` markers; `record_id`s prefixed by their own campaign with an empty intersection; pointing `beta` at `alpha`'s home is refused by the stamp with `alpha`'s tree untouched |
+| `TestLegacyAdoptionIsPerCampaign` | 1 | `alpha` adopts its pre-PR-E file and skips; `beta` adopts nothing and launches; the legacy file is not written to |
+
+**Negative controls — executed against the implementation, and NOT left
+in the suite.** An `xfail`-shaped test that passes by failing is
+indistinguishable from a broken test six months later, so the module
+asserts correct behaviour only and the controls are run as mutations:
+
+| Mutation | Result |
+|---|---|
+| `QUEUE_STOP_FILE` default back to `$WS_ROOT/STOP` — the literal 08:17 defect | **3 fail**: `beta` stops on `alpha`'s file; both honour the legacy STOP; the launch sets collide |
+| `CAMPAIGN_HOME` back to `$WS_ROOT` — both campaigns share one home | **6 fail**: cross-tree writes, a shared stamp, colliding markers, and legacy adoption leaking across campaigns |
+
+Both restored and the module re-run green, verified by `grep -cF`.
+
+**Static**: pyright 0 errors / 4 warnings (unchanged), ruff + format
+clean.
+
+**Deviations**: none. One harness adjustment during writing — `_run`
+gained `**env` so the foreign-stamp case could pass `CAMPAIGN_HOME`;
+test-side only.
+
+**Next authorized checkpoint**: E-C8 (doc sync, last), then the full
+suite and one Draft PR.
 
 ---
 
@@ -3504,3 +4443,139 @@ Operator decisions:     Architecture direction APPROVED, second review
                         OPEN-E-11 (derived-view rebuild), OPEN-E-12
                         (EXIT_DIR markers).
 ```
+
+---
+
+## 16. Implementation ledger — final
+
+Written at E-C8, from `git log` and the per-checkpoint records above.
+Branch `feature/v20-pr-e-campaign-scoped-control`, cut from the design
+freeze `786e0319`.
+
+### 16.1 Commits
+
+| # | SHA | Commit | Behavior Delta |
+|---|---|---|---|
+| E-C1 | `ded153d0` | Campaign path resolver, deliberately inert | **none** — every path byte-identical |
+| E-C2 | `29af020c` | Campaign admission and the path move | **BD-1, BD-3 (partial), BD-5** |
+| E-C2b | `9060b13f` | Refuse an explicitly empty campaign id | an empty `CAMPAIGN_ID` exits 1 instead of running as `v19`; unset unchanged |
+| E-C3 | `ed61bb50` | Campaign-level legacy adoption | **BD-2, BD-3 (completes it)** |
+| E-C4 | `25a95556` | Typed wave record, canonical/derived dual write | **BD-4** |
+| E-C4b | `061bccfb` | State an unresolved chain role | none for a fully-resolved wave; two additive keys otherwise |
+| E-C5 | `240d7ac1` | Scope the Gate summary and log by run prefix | Gate artifacts prefix-scoped; `"gate"` is the resolved prefix; unsafe/empty prefix refused |
+| E-C6 | `6dc1fdb1` | Queue-runner self-exclusion from the script name | **BD-6** |
+| E-C6b | `f3c7cf5b` | Gate-runner self-exclusion from the script name | same, for the Gate |
+| E-C7 | `01ee1eda` | Multi-campaign isolation test | **none — zero production lines** |
+| E-C8 | *this commit* | Doc sync | **none — documentation only** |
+
+**Predecessor hotfixes**, merged to master before this branch and
+inherited rather than reimplemented: `fe51377c` (#165, role from the
+ROSTER — D-E-6), plus the `WAVE_WALL_SECONDS` docs fix, the
+`campaign_spend` membership fix and its fail-closed correction (#168).
+
+### 16.2 Checkpoints
+
+| | Status | Evidence |
+|---|---|---|
+| **E1** Path model | `[x]` | E-C1 + E-C2; the path-enumeration test asserts every authority-bearing path carries the campaign id |
+| **E2** Backward compatibility | `[x]` | E-C3; adoption is a once-only stamp field, and a four-file legacy tree is byte- and mtime-identical after an adopting run |
+| **E3** Campaign mismatch protection | `[x]` | E-C2 + E-C2b; one ordered guard, refusals observed on the filesystem |
+| **E4** Stop semantics preserved | `[x]` | property, not a commit: all 14 C13 assertions pass under the path-revert mutation |
+| **E5** Recovery validation | `[x]` | E-C7; 11 tests, two documented negative-control mutations |
+
+### 16.3 Measured evidence
+
+| Commit | Tests | Static | Mutations |
+|---|---|---|---|
+| E-C1 | 14 new / 340 targeted, 8.3 s | pyright 0, ruff clean | 2 (1 fail, 8 fail) |
+| E-C2 | 404, 10.8 s | pyright 0 | 4 (16, C13 14/14 green, 6, 2) |
+| E-C2b | 408 | pyright 0 | 1 (3 fail) |
+| E-C3 | 438, 37.2 s | pyright 0 | 4 (6, 2, 3, 2) |
+| E-C4 | 471, 38.3 s | pyright 0 | 4 (2, 4, 5, 2) |
+| E-C4b | 474 | pyright 0 | 1 (2 fail) |
+| E-C5 | 494, 54.4 s | pyright 0 | 3 (11, 12, 1) |
+| E-C6 | 2445 full unit, 103 s | pyright 0 | 2 (3, 2) |
+| E-C6b | 430 launcher | pyright 0 | 2 (3, 2) |
+| E-C7 | 11 module / 441 launcher | pyright 0 | 2 negative controls (3, 6) |
+| E-C8 | 498 launcher + doc-sync | pyright 0 | — |
+
+Pyright is **0 errors, 4 warnings** at every commit — identical to the
+pre-branch baseline; the two new `core/` modules and three new
+`scripts/` entries are all inside `pyrightconfig.json`'s `include`.
+`ruff check`, `ruff format --check` and `bash -n` clean throughout.
+`"typeCheckingMode"` is `"basic"`, not strict, and this PR does not
+change it.
+
+### 16.4 Deviations from the frozen design
+
+| # | Deviation | Why |
+|---|---|---|
+| 1 | **`chains[].run_name`, not `run`** (E-C4) | D-E-3's own example record made a **failed** chain satisfy `chain_completed`, which greps the whole line. Measured, not theorised. A field-naming fix: no authority semantics move |
+| 2 | Directory creation lives in Python, inside the one guard (E-C2) | a shell `mkdir` would necessarily precede the validator and break the "refuse before any `mkdir`" guarantee |
+| 3 | `${VAR-default}` for `CAMPAIGN_ID` and `GATE_RUN_PREFIX` (E-C2b, E-C5) | `:-` made an explicitly empty value unreachable by the validator that was required to refuse it |
+| 4 | Adoption source re-validated on every use, against the exact filename (E-C3) | §4 required "outside `$WS_ROOT` → STOP"; the exact-name form is stricter for the same cost and also closes a sibling campaign's file |
+| 5 | Exit code 3 for "canonical written, derived not" (E-C4) | §4 required the two failures to be distinguishable; this is how the shell distinguishes them |
+| 6 | `role_resolution_failed` / `unresolved_roles` rather than overloading `disposition` (E-C4b) | `disposition` describes chain outcomes; a recording gap is not one, and overloading it would drop the wave for anyone filtering on `complete` |
+| 7 | `validate_path_component` extracted; `validate_campaign_id` delegates (E-C5) | the Gate must reach one rule, not a second copy — but calling a campaign-named function from the Gate would have made the Gate a campaign |
+| 8 | `-F` on the self-exclusion (E-C6, E-C6b) | operator instruction, and load-bearing: the basename contains `.`, so a regex would widen the exclusion to processes that are not the runner |
+| 9 | C13 gained a 2-line `LOGF` pin (E-C2) | a test-harness assumption, not a semantics change: production `log()` is unreachable before admission, asserted by a test |
+| 10 | Three more tests re-pointed than §2 named (E-C2, E-C5) | a shared `_state_env` helper, a prefix-shaped pinning assertion, and the Gate harness's summary path |
+
+### 16.5 Follow-ups
+
+**Every `FU-E-*` id this document mentions appears below.** A first
+version of this table listed only nine of the twelve and the completion
+summary reported "seven open", which was wrong twice over: FU-E-5 and
+FU-E-6 are open and were missing, and FU-E-9 is closed and was missing.
+Corrected here, and the count is now derived from the table rather than
+asserted beside it.
+
+**Nine open, two closed, one withdrawn.**
+
+| id | Status |
+|---|---|
+| FU-E-1 | **open** — remove the `arch`/`loss` compatibility mirror once every report consumer reads `chains[]`. Deliberately not widened into PR E |
+| FU-E-2 | **open** — an N-chain *scheduler*; the state schema is already N-chain-capable, the launcher is not |
+| FU-E-3 | **open** — `v18r_queue_runner.sh:48` carries the same self-exclusion pattern; historical surface, protected from change by an existing test |
+| FU-E-4 | **open** — unify `_WRITER_ID_RE` (`observation_store.py:38`) with `validate_path_component` |
+| FU-E-5 | **open** — share one atomic-write helper instead of the local copy; reaching into a PR C module's private method is worse than one copy |
+| FU-E-6 | **open** — `pyrightconfig.json` excludes `tests` and runs `basic`, not `strict`. A type-checking policy change is not PR E's causal claim |
+| FU-E-7 | **open** — rebuild derived per-wave views for historical waves |
+| FU-E-8 | **open** — a Gate stop channel, deliberately not added here |
+| FU-E-10 | **open** — `band_tag` yields `00_00` for malformed input instead of refusing |
+| FU-E-9 | **closed** — the `campaign_spend` prefix-glob collision, fixed by a predecessor hotfix before this branch; `scripts/campaign_spend.py` now takes explicit `--run-name` values and the glob is gone |
+| FU-E-12 | **closed** — the Gate's identical self-exclusion, fixed in E-C6b rather than deferred (operator ruling) |
+| FU-E-11 | **withdrawn** — reclassified by operator review as an E-C2 implementation defect, not a follow-up; fixed in E-C2b |
+
+### 16.6 Final Behavior Delta
+
+**BD-1** the queue stop file's default moves into the campaign's
+`control/`. **BD-2** a legacy `$WS_ROOT/STOP` no longer blocks a launch;
+it is observed and recorded. **BD-3** queue and wave state move to a
+campaign directory, with a once-only legacy read-back. **BD-4** the wave
+summary gains `chains`, `record_id` and a derived per-wave file;
+`MAX_CONC` is gone. **BD-5** an invalid — or explicitly empty — campaign
+id is refused before anything is created. **BD-6** the live-process guard
+no longer hardcodes the script name, in either runner.
+
+Not changed: stop timing, exit code 99, signal handling, the no-respawn
+rule, chain-level `$WORKSPACE/STOP`, `chain_stopped.json`, chain
+workspace layout, `EXIT_DIR`, queue scheduling, concurrency, GPU
+admission, scientific configuration, and LLM-facing behaviour.
+
+### 16.7 Validation status
+
+- Local, full `tests/unit` at the final head `b0f83568`:
+  **7272 passed, 2 skipped, 4 xfailed** in 427 s.
+- Exact-head static checks: pyright **0 errors, 4 warnings**;
+  `ruff check` clean; `ruff format --check` clean; `bash -n` clean over
+  every script in `sdsc_submission_scripts/`.
+- **CI: PASS** on the exact head `a44e01ef` — `Lint + Type + Unit Tests`,
+  9m44s,
+  [run 30961809392](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/30961809392).
+  It also passed on the two preceding heads (`b0f83568`, `1eaac207`); the
+  head moved twice for documentation-only corrections, and each was
+  re-verified rather than assumed to carry over.
+  Draft PR **#169**, not merged.
+- No real-training run, no GPU run, no API key, and no real Gate was
+  executed by any commit in this PR.

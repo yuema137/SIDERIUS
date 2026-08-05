@@ -76,9 +76,30 @@ class TestFrozenWaves:
         got = [tuple(line.split()) for line in r.stdout.splitlines()]
         assert got == WAVE_PAIRS
 
-    def test_exactly_two_chains_per_wave_max_conc(self):
-        r = _sourced('echo "$MAX_CONC"')
-        assert r.stdout.strip() == "2"
+    def test_each_wave_launches_exactly_the_roster_chains_for_its_band(self):
+        """Replaces `test_exactly_two_chains_per_wave_max_conc`.
+
+        That test asserted `MAX_CONC == 2`, a variable that gated nothing
+        — deleting it changed no behaviour, which is what made it a
+        decoration test. The defect it was REACHING for is real and is
+        preserved here: a wave must not launch more chains than intended.
+        The property that was actually true is that the chains of a wave
+        are exactly the ROSTER entries for that wave's band, so that is
+        what is asserted — against the ROSTER, not against a constant.
+        """
+        r = _sourced(
+            'for w in "${WAVES[@]}"; do IFS=: read -r n s f <<< "$w"; '
+            'TAG="$(band_tag "$s")"; '
+            'for q in "${ROSTER[@]}"; do IFS=: read -r run _ _ _ <<< "$q"; '
+            'case "$run" in *_"$TAG") echo "$n $run";; esac; done; done'
+        )
+        assert r.returncode == 0, r.stderr
+        per_wave: dict[str, list[str]] = {}
+        for line in r.stdout.splitlines():
+            wave, run = line.split()
+            per_wave.setdefault(wave, []).append(run)
+        expected = {str(n): sorted([arch, loss]) for (n, _scope, arch, loss) in WAVE_PAIRS}
+        assert {k: sorted(v) for k, v in per_wave.items()} == expected
 
     def test_roster_covers_all_eight_exactly_once_in_wave_order(self):
         r = _sourced('for q in "${ROSTER[@]}"; do echo "${q%%:*}"; done')
@@ -102,7 +123,12 @@ class TestWaveStateMachine:
     persisted status, not log text)."""
 
     def _state_env(self, tmp_path: Path, records: list[dict]) -> dict:
-        state = tmp_path / "v19_wave_state.jsonl"
+        # E-C2: the queue state moved from a campaign-PREFIXED file under
+        # the shared root to a campaign-scoped DIRECTORY. The defect class
+        # here is unchanged — a completed chain must be recognised as
+        # completed — only the path it is recognised from.
+        state = tmp_path / "v19" / "queue_state" / "wave_state.jsonl"
+        state.parent.mkdir(parents=True, exist_ok=True)
         state.write_text(
             "".join(
                 f'{{"run": "{r["run"]}", "wave": {r["wave"]}, "exit": {r["exit"]}, '
@@ -177,29 +203,90 @@ class TestWaveStateMachine:
 
     def test_wave_summary_record_has_all_operator_fields(self, tmp_path):
         """§5.1: the wave summary persists wave/band/both runs/both pids/
-        both exits/start/end/disposition as one valid JSON record."""
-        env = {"WS_ROOT": str(tmp_path)}
+        both exits/start/end/disposition as one valid JSON record.
+
+        Same defect class as before E-C4 — an operator field silently
+        dropped from the record. The SHAPE changed: the eleven-positional
+        `printf` became a typed writer, chains moved into an array, and
+        the six `arch_*`/`loss_*` keys are now a compatibility mirror. The
+        mirror is asserted here precisely because the operator reports
+        still read those names.
+
+        Pids and exits come from the marker files rather than from
+        positional arguments, so the fixture writes them.
+        """
+        markers = tmp_path / "markers"
+        markers.mkdir()
+        for run, pid, code in (
+            ("v19_arch_15_19", "1111", "0"),
+            ("v19_loss_15_19", "2222", "137"),
+        ):
+            (markers / f"{run}.pid").write_text(pid)
+            (markers / f"{run}.exit").write_text(f"EXIT={code}\n")
+        env = {"WS_ROOT": str(tmp_path), "EXIT_DIR": str(markers)}
         r = _sourced(
-            'WAVE_STATE="$WS_ROOT/v19_wave_state.jsonl"; '
-            "record_wave_summary 1 15-19 v19_arch_15_19 v19_loss_15_19 "
-            "1111 2222 0 137 2026-07-30T00:00:00 2026-07-30T05:00:00 failed; "
+            'WAVE_STATE="$WS_ROOT/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 "
+            "2026-07-30T00:00:00 2026-07-30T05:00:00 failed "
+            "v19_arch_15_19 v19_loss_15_19; "
             'cat "$WAVE_STATE"',
             env,
         )
+        assert r.returncode == 0, r.stderr
         rec = json.loads(r.stdout.strip())
         assert rec == {
             "wave_summary": 1,
+            "record_id": "v19:1:15_19:1",
+            "campaign_id": "v19",
             "band": "15-19",
+            "band_tag": "15_19",
+            "chains": [
+                {"run_name": "v19_arch_15_19", "role": "arch", "pid": "1111", "exit": 0},
+                {"run_name": "v19_loss_15_19", "role": "loss", "pid": "2222", "exit": 137},
+            ],
             "arch_run": "v19_arch_15_19",
-            "loss_run": "v19_loss_15_19",
             "arch_pid": "1111",
-            "loss_pid": "2222",
             "arch_exit": 0,
+            "loss_run": "v19_loss_15_19",
+            "loss_pid": "2222",
             "loss_exit": 137,
             "start": "2026-07-30T00:00:00",
             "end": "2026-07-30T05:00:00",
             "disposition": "failed",
         }
+
+    def test_a_wave_summary_never_makes_a_failed_chain_look_complete(self, tmp_path):
+        """MUTATION TARGET, and the reason `chains` says `run_name`.
+
+        `chain_completed` greps the WHOLE LINE for `"run": "<X>"` and then
+        for `"exit": 0`. A chains array spelled `{"run": …, "exit": 0}`
+        lets a wave summary in which ONE chain succeeded satisfy that
+        predicate for EVERY chain it names — so the chain that exited 137
+        would be skipped as already complete on the next resume, and the
+        failure would disappear from the science.
+
+        Measured, not theorised: D-E-3's own example record reproduced
+        exactly this.
+        """
+        markers = tmp_path / "markers"
+        markers.mkdir()
+        for run, code in (("v19_arch_15_19", "0"), ("v19_loss_15_19", "137")):
+            (markers / f"{run}.exit").write_text(f"EXIT={code}\n")
+        env = {"WS_ROOT": str(tmp_path), "EXIT_DIR": str(markers)}
+        r = _sourced(
+            'WAVE_STATE="$WS_ROOT/wave_state.jsonl"; '
+            'PAIR_SUMMARY_DIR="$WS_ROOT/pair_summaries"; '
+            'LOGF="$WS_ROOT/log"; '
+            "record_wave_summary 1 15-19 15_19 s e failed "
+            "v19_arch_15_19 v19_loss_15_19; "
+            "chain_completed v19_loss_15_19 && echo COMPLETE || echo INCOMPLETE",
+            env,
+        )
+        assert r.stdout.strip().endswith("INCOMPLETE"), (
+            "a chain that exited 137 reads as complete from its wave summary"
+        )
 
 
 class TestLaunchCommandContent:
@@ -274,7 +361,7 @@ class TestOnlySelection:
         assert r.returncode == 1
         assert "unknown name" in r.stderr
         assert "v19_arch_15_19" in r.stderr
-        assert not (tmp_path / "v19_wave_state.jsonl").exists()
+        assert not (tmp_path / "v19" / "queue_state" / "wave_state.jsonl").exists()
 
     def test_duplicate_fails(self, tmp_path):
         r = _run(tmp_path, "--only", "v19_arch_15_19,v19_arch_15_19")
@@ -293,13 +380,153 @@ class TestOnlySelection:
 
     def test_completed_only_selection_skips_and_exits_clean(self, tmp_path):
         """A targeted run of an already-completed chain skips it (never
-        relaunched) and exits 0 without touching screens."""
-        state = tmp_path / "v19_wave_state.jsonl"
+        relaunched) and exits 0 without touching screens.
+
+        That is the defect this test catches, and E-C2 did not change it:
+        relaunching a completed chain clobbers its finished workspace.
+        Only the state and log LOCATIONS moved — from campaign-prefixed
+        files under the shared root into the campaign's own directory.
+        The legacy-filename variant of this scenario arrives in E-C3,
+        where adoption exists to read it.
+        """
+        state = tmp_path / "v19" / "queue_state" / "wave_state.jsonl"
+        state.parent.mkdir(parents=True)
         state.write_text(
             '{"run": "v19_arch_15_19", "wave": 1, "exit": 0, "start": "s", "end": "e"}\n'
         )
         r = _run(tmp_path, "--only", "v19_arch_15_19")
         assert r.returncode == 0, r.stderr
-        log = (tmp_path / "v19_queue_runner.log").read_text()
+        log = (tmp_path / "v19" / "queue_state" / "queue_runner.log").read_text()
         assert "SKIP v19_arch_15_19: already completed" in log
         assert "LAUNCHED" not in log
+
+
+class TestTheLiveProcessGuardExcludesOnlyItself:
+    """D-E-7 / E-C6. The guard's self-exclusion was the literal string
+    `v19_queue_runner`, so a renamed or copied runner stopped excluding
+    itself and refused to launch anything.
+
+    Each case runs the real `launch_chain` against a fixture process
+    whose argv contains this run's workspace path, and reads the guard's
+    own message out of the log — so what is asserted is the guard's
+    decision, not the shape of a pipeline.
+    """
+
+    RUN = "v19_arch_15_19"
+    BLOCKED = "live process referencing"
+
+    def _guard_says(self, tmp_path: Path, fixture_comment: str, runner: Path | None = None) -> str:
+        """Run `launch_chain` with one background process on the system
+        whose argv contains `$WS_ROOT/$RUN`, and return the log."""
+        import os
+
+        ws_root = tmp_path / "root"
+        ws_root.mkdir()
+        shim = tmp_path / "shim"
+        shim.mkdir()
+        # `screen -ls` lists nothing; anything else succeeds silently, so
+        # a launch that gets past the guard does not start a real chain.
+        (shim / "screen").write_text('#!/bin/bash\nif [ "$1" = "-ls" ]; then exit 1; fi\nexit 0\n')
+        (shim / "screen").chmod(0o755)
+        marker = f"{ws_root}/{self.RUN}"
+        script = f"""
+        set +e
+        LOGF="{tmp_path}/log"
+        EXIT_DIR="{tmp_path}/markers"; mkdir -p "$EXIT_DIR"
+        # A process whose argv contains this run's workspace path.
+        # `; true` matters: bash EXECs a lone simple command, replacing
+        # its own argv, and the marker would vanish from `ps` — the
+        # fixture would then prove nothing while passing.
+        # Output redirected: killing the wrapper orphans its `sleep`,
+        # which would otherwise hold the captured pipes open and make
+        # every case wait out the full sleep.
+        bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
+        FIXTURE=$!
+        sleep 0.4
+        launch_chain {self.RUN} 15-19 15,16,17,18,19 arch
+        kill "$FIXTURE" 2>/dev/null
+        wait "$FIXTURE" 2>/dev/null
+        """
+        subprocess.run(
+            ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{runner or RUNNER}'; {script}"],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+            env=dict(os.environ, WS_ROOT=str(ws_root), PATH=f"{shim}:{os.environ['PATH']}"),
+            timeout=60,
+        )
+        log = tmp_path / "log"
+        return log.read_text() if log.exists() else ""
+
+    def test_a_genuine_external_process_still_blocks_the_launch(self, tmp_path):
+        """The guard's MEANING, unchanged: something else is already
+        holding this workspace, so do not launch on top of it."""
+        log = self._guard_says(tmp_path, "some_other_program")
+        assert self.BLOCKED in log
+
+    def test_the_runner_does_not_see_itself(self, tmp_path):
+        """Behaviour under the CURRENT filename is unchanged: a process
+        whose argv carries this script's name is this runner."""
+        log = self._guard_says(tmp_path, "v19_queue_runner.sh")
+        assert self.BLOCKED not in log, "the runner treated its own process as a competing chain"
+
+    def test_a_process_that_is_not_this_runner_is_not_excluded(self, tmp_path):
+        """The exclusion must be narrow: only THIS script's name."""
+        log = self._guard_says(tmp_path, "renamed_queue_runner.sh")
+        assert self.BLOCKED in log, "a process that is NOT this runner was excluded from the scan"
+
+    def test_a_renamed_runner_still_excludes_itself(self, tmp_path):
+        """THE REGRESSION, and it requires an actually-renamed runner.
+
+        Under `grep -v v19_queue_runner` a copy running as
+        `renamed_queue_runner.sh` no longer matched its own exclusion, so
+        it saw its own process holding the workspace and refused to
+        launch anything. Varying only the FIXTURE's name cannot
+        distinguish the fix — that variant passes under both — so this
+        copies the runner and `_chain_common.sh` into a temp tree and
+        runs the copy under a different filename.
+        """
+        import shutil
+
+        scripts = tmp_path / "sdsc_submission_scripts"
+        scripts.mkdir()
+        renamed = scripts / "renamed_queue_runner.sh"
+        shutil.copy(RUNNER, renamed)
+        shutil.copy(RUNNER.parent / "_chain_common.sh", scripts / "_chain_common.sh")
+
+        log = self._guard_says(tmp_path, "renamed_queue_runner.sh", runner=renamed)
+
+        assert self.BLOCKED not in log, (
+            "a renamed runner saw its own process as a competing chain — "
+            "the hardcoded self-exclusion is back"
+        )
+
+    def test_the_exclusion_is_fixed_string_not_a_regex(self, tmp_path):
+        """MUTATION TARGET: dropping `-F`.
+
+        The basename is `v19_queue_runner.sh` and `.` is a regex
+        wildcard, so a plain `grep -v` also excludes
+        `v19_queue_runnerXsh` — widening the exclusion to processes that
+        are not this runner, which is the direction that silently skips
+        the guard.
+        """
+        log = self._guard_says(tmp_path, "v19_queue_runnerXsh")
+        assert self.BLOCKED in log, (
+            "a regex wildcard in the script's own name excluded an "
+            "unrelated process from the live-process scan"
+        )
+
+    def test_the_exclusion_derives_from_the_script_name(self):
+        """MUTATION TARGET: restoring the literal, in any campaign's
+        spelling."""
+        src = RUNNER.read_text(encoding="utf-8")
+        assert 'RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"' in src
+        live = [
+            line.strip()
+            for line in src.splitlines()
+            if "grep -v" in line and not line.strip().startswith("#")
+        ]
+        assert live == [
+            'if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
+            '| grep -qF -- "$WS_ROOT/$RUN"; then'
+        ], live

@@ -38,9 +38,13 @@
 #   never queue events. A watchdog/API failure that makes the chain
 #   process terminal follows the chain-failure rule above.
 #
-# Authoritative per-chain status: $WS_ROOT/v19_wave_state.jsonl (one JSON
-# line per finished chain attempt: run, wave, exit, start, end) — NOT log
-# text. Exit codes come from per-chain markers ($EXIT_DIR/<run>.exit,
+# Authoritative per-chain status:
+# $WS_ROOT/$CAMPAIGN_ID/queue_state/wave_state.jsonl (one JSON line per
+# finished chain attempt: run, wave, exit, start, end) — NOT log text.
+# A campaign interrupted BEFORE the V20 PR E move may additionally read
+# its own pre-move $WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl, read-only
+# and only when its stamp recorded that adoption at first start (BC-2).
+# Exit codes come from per-chain markers ($EXIT_DIR/<run>.exit,
 # EXIT=<n>) written inside each chain screen exactly as in V18r.
 #
 # Selective/targeted runs (V19 O2):
@@ -57,15 +61,33 @@
 # ---------------------------------------------------------------------------
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+#: This script's own filename, for the live-process guard's
+#: self-exclusion (D-E-7). Parameter expansion rather than
+#: `$(basename …)`: no subshell, so no `set -e` surface, and it
+#: matches the form already used for the admission helper's
+#: `--runner` argument.
+RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"
 # shellcheck source=_chain_common.sh
 source "$REPO/sdsc_submission_scripts/_chain_common.sh"
 # Campaign identity (operator 2026-07-31). Every name the campaign
 # produces derives from this one value — run names, workspaces, queue
 # state, logs, summaries, screens — so a fresh campaign cannot collide
 # with, or be mistaken for, the stopped uncalibrated-preflight campaign
-# or any Gate. Required: there is no safe default, because a default
-# would silently reuse someone else's identity.
-CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"
+# or any Gate.
+#
+# `${VAR-default}`, NOT `${VAR:-default}` (E-C2b). The two forms differ on
+# exactly one input and it is the dangerous one:
+#
+#   CAMPAIGN_ID unset            -> `v19`, the compatibility default
+#   CAMPAIGN_ID explicitly empty -> stays empty, and the validator refuses
+#
+# `:-` treats an explicit empty value as if the variable were never set,
+# so `CAMPAIGN_ID= bash v19_queue_runner.sh` would silently become `v19`
+# — an operator who cleared the variable to avoid reusing an identity
+# would get exactly the identity they were avoiding, and would then write
+# into that campaign's control state. D-E-9 requires an empty id to be
+# REFUSED, and with `:-` it could never reach the validator to be refused.
+CAMPAIGN_ID="${CAMPAIGN_ID-v19}"
 #: 10 iterations per chain (operator 2026-07-31), replacing the frozen
 #: 20-iteration plan, to bound API cost, wall time and GPU use while
 #: keeping multi-iteration scientific evolution.
@@ -77,9 +99,59 @@ CAMPAIGN_ID="${CAMPAIGN_ID:-v19}"
 CAMPAIGN_ITERATIONS="${CAMPAIGN_ITERATIONS:-10}"
 WS_ROOT="${WS_ROOT:-/home/klz/Data/SIDEREIS_DATA/v19}"
 EXIT_DIR="${EXIT_DIR:-/tmp}"
-MAX_CONC=2
-LOGF="$WS_ROOT/${CAMPAIGN_ID}_queue_runner.log"
-WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
+# --- campaign path resolution (V20 PR E, E-C2) -----------------------------
+# Campaign identity used to live in a FILENAME PREFIX
+# (`${CAMPAIGN_ID}_wave_state.jsonl`) under a shared root, and a prefix is
+# easy to forget: QUEUE_STOP_FILE omitted it entirely, so ONE campaign's
+# STOP halted every campaign sharing that root. That is the 08:17 incident.
+# A directory cannot be forgotten the way a prefix can.
+#
+# WS_ROOT is a campaign COLLECTION root — its default value happens to be
+# named `v19`, which looks like a campaign but is not one. Two campaigns
+# under one collection root is the normal case and the case that broke.
+#
+# CAMPAIGN_HOME is the ONE overridable root; it moves a campaign
+# coherently. The three directories below derive from it and are
+# deliberately NOT independently overridable: separate overrides would let
+# two campaigns be pointed at a single state directory, recreating the
+# cross-campaign authority defect this PR exists to remove. A
+# configuration surface that can reconstruct the defect is not a
+# configuration surface.
+#
+# No mkdir here, and nothing at definition scope touches the filesystem:
+# test_source_safe_entry.py asserts that merely sourcing this file creates
+# nothing, and that guard must keep holding. The directories are created
+# by the admission guard in main(), which validates CAMPAIGN_ID FIRST —
+# these expansions are just strings until then, so a `..` id resolves a
+# path here but can never reach a `mkdir`.
+#
+# The three subdirectory names are also declared in
+# `core/campaign_identity.py` (CAMPAIGN_SUBDIRS), which is what actually
+# creates them. The duplication is unavoidable — LOGF must resolve before
+# the runner may call Python — so a parity test pins the two lists
+# together instead.
+CAMPAIGN_HOME="${CAMPAIGN_HOME:-$WS_ROOT/$CAMPAIGN_ID}"
+CAMPAIGN_CONTROL_DIR="$CAMPAIGN_HOME/control"
+QUEUE_STATE_DIR="$CAMPAIGN_HOME/queue_state"
+PAIR_SUMMARY_DIR="$CAMPAIGN_HOME/pair_summaries"
+CAMPAIGN_STAMP="$CAMPAIGN_CONTROL_DIR/campaign.json"
+
+LOGF="$QUEUE_STATE_DIR/queue_runner.log"
+WAVE_STATE="$QUEUE_STATE_DIR/wave_state.jsonl"
+# --- pre-PR-E state, read only under adoption (E-C3, BC-2) -----------------
+# Where this campaign's history lived before the move. It is READ-ONLY and
+# only ever consulted when the campaign stamp records it as adopted; the
+# interpolated ${CAMPAIGN_ID} is what keeps another campaign's file out of
+# range. Nothing writes here, ever — BC-1.
+LEGACY_WAVE_STATE="$WS_ROOT/${CAMPAIGN_ID}_wave_state.jsonl"
+# The legacy SHARED stop file. Observed and recorded at startup, never
+# honoured and never deleted (BC-3): silently ignoring it would destroy
+# the operator's ability to reconstruct the 08:17 incident, and honouring
+# it would reproduce the defect.
+LEGACY_GLOBAL_STOP="$WS_ROOT/STOP"
+# Set from the admission decision in main(); empty means "no adoption",
+# which is every campaign created after PR E.
+ADOPTED_LEGACY_STATE=""
 # C13: a wave cannot wait forever. On breach the queue STOPS and reports;
 # it never kills a running chain on its own — that stays an operator act.
 # 72 h per wave (operator 2026-07-31). The former 24 h was sized for a
@@ -101,7 +173,15 @@ COST_PER_MTOK_USD="${COST_PER_MTOK_USD:-3.00}"
 CAMPAIGN_START_EPOCH="$(date -u +%s)"
 # C13: operator stop. Either touch this file or signal the runner; the
 # queue then finishes what is already running and starts nothing new.
-QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$WS_ROOT/STOP}"
+#
+# BD-1: the DEFAULT moved into the campaign's own control directory
+# (E-C2). It used to be `$WS_ROOT/STOP`, shared by every campaign under
+# the root — stopping one stopped all of them. The explicit override
+# survives for compatibility only: the docs table and
+# test_c13_stop_semantics.py both pass it, and operator muscle memory
+# expects it to work. It is NOT a general-purpose relocation knob, and a
+# legacy `$WS_ROOT/STOP` is no longer consulted at all.
+QUEUE_STOP_FILE="${QUEUE_STOP_FILE:-$CAMPAIGN_CONTROL_DIR/STOP}"
 #: Exit code a chain uses when it stopped on request (run_chain.sh).
 CHAIN_STOP_EXIT_CODE=99
 QUEUE_STOP_SIGNAL=""
@@ -210,12 +290,37 @@ record_queue_stop() {  # reason wave detail
   log "QUEUE STOPPED ($1) at wave $2: $3"
 }
 
-# Authoritative completion check: a v19_wave_state.jsonl record with
+# Authoritative completion check: a wave_state.jsonl record with
 # "exit": 0 for this run name (persisted status, never log text).
+#
+# The predicate is byte-identical on both files (E-C3): the same
+# `grep | grep -q` decides completion whether the evidence comes from
+# this campaign's own state or from an adopted legacy file. Adoption may
+# change WHICH file is readable; it must never change what "complete"
+# means.
+#
+# The legacy read is gated on ADOPTED_LEGACY_STATE, which is set from the
+# stamp at admission and is empty unless this campaign adopted a
+# pre-PR-E file at its FIRST start (BC-2). It is deliberately NOT
+# "consult legacy when the new state lacks a record": that per-record
+# fallback would skip a launch on the strength of a file the campaign was
+# never meant to obey, which is the §1 defect in a different costume.
+# A campaign that was not granted adoption never opens a legacy path at
+# all, however many records its own state is missing.
+#
+# An adopted file that is missing, unreadable or malformed yields no
+# match and therefore no evidence — the chain is launched. Refusing here
+# instead would hand a legacy file veto power over a new campaign.
+_completed_in() {  # state_file run
+  [ -f "$1" ] || return 1
+  grep "\"run\": \"$2\"" "$1" | grep -q "\"exit\": 0"
+}
+
 chain_completed() {
   local RUN="$1"
-  [ -f "$WAVE_STATE" ] || return 1
-  grep "\"run\": \"$RUN\"" "$WAVE_STATE" | grep -q "\"exit\": 0"
+  _completed_in "$WAVE_STATE" "$RUN" && return 0
+  [ -n "$ADOPTED_LEGACY_STATE" ] || return 1
+  _completed_in "$ADOPTED_LEGACY_STATE" "$RUN"
 }
 
 record_chain() {  # run wave exit start end [pid]
@@ -223,9 +328,73 @@ record_chain() {  # run wave exit start end [pid]
     "$1" "$2" "$3" "$4" "$5" "${6:-unknown}" >> "$WAVE_STATE"
 }
 
-record_wave_summary() {  # wave band arch_run loss_run arch_pid loss_pid arch_exit loss_exit start end disposition
-  printf '{"wave_summary": %s, "band": "%s", "arch_run": "%s", "loss_run": "%s", "arch_pid": "%s", "loss_pid": "%s", "arch_exit": %s, "loss_exit": %s, "start": "%s", "end": "%s", "disposition": "%s"}\n' \
-    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" >> "$WAVE_STATE"
+# Record one wave: canonical JSONL first, then the derived per-wave view.
+#
+#   record_wave_summary <wave> <band> <band_tag> <start> <end> <disposition> <run>...
+#
+# Delegated to Python (D-E-3). The eleven-positional `printf` this
+# replaces could describe exactly two chains called arch and loss; a
+# positional shell formatter cannot emit a variable-length array, and a
+# shell that hand-builds nested JSON is the hazard `campaign_spend` was
+# already moved out of shell to avoid.
+#
+# The role comes from the ROSTER, never from the run name (D-E-6). When
+# it cannot be resolved the field is left EMPTY and becomes `null` — a
+# gap, never a guess. Such a record simply gets no arch/loss
+# compatibility mirror, which is correct: an invented `arch_exit` is
+# worse than an absent one, because a report would show it.
+#
+# Resolution failures here must not be able to destroy the summary
+# itself. This function is called on EVERY wave exit path including the
+# aborted-launch one, and the launcher's own rule is that an aborted wave
+# must not be the one case that leaves no summary.
+record_wave_summary() {  # wave band band_tag start end disposition run...
+  local WAVE="$1" BAND="$2" TAG="$3" START="$4" END="$5" DISPOSITION="$6"; shift 6
+  local args=() RUN ROLE PID CODE
+  for RUN in "$@"; do
+    ROLE=""; ROLE="$(role_for_run "$RUN")" || ROLE=""
+    PID="unknown"; PID="$(chain_pid "$RUN")" || PID="unknown"
+    CODE="missing"; CODE="$(marker_exit "$RUN")" || CODE="missing"
+    args+=(--chain "$RUN:$ROLE:$PID:${CODE/missing/-1}")
+  done
+
+  # `set -e` is in effect and this function is called BARE, so errexit is
+  # NOT suspended inside it. The guarded form is mandatory (§3a.4): a
+  # plain assignment would terminate the runner at the failure, before
+  # any of the classification below could run.
+  local OUT="" RC=0
+  OUT="$("$REPO/.venv/bin/python" "$REPO/scripts/record_wave_summary.py" \
+      --canonical "$WAVE_STATE" \
+      --derived-dir "$PAIR_SUMMARY_DIR" \
+      --campaign-id "$CAMPAIGN_ID" \
+      --wave "$WAVE" \
+      --band "$BAND" \
+      --band-tag "$TAG" \
+      --start "$START" \
+      --end "$END" \
+      --disposition "$DISPOSITION" \
+      "${args[@]}")" || RC=$?
+  if [ "$RC" -eq 0 ]; then
+    log "WAVE $WAVE summary recorded: $OUT"
+    return 0
+  fi
+
+  # The two failures are NOT the same event and are not reported as one.
+  # Exit 3 means the append-only evidence survived and only the derived
+  # view is missing; exit 2 means nothing was written at all.
+  log "WAVE $WAVE: FAILED to record the wave summary (rc=$RC)"
+  log "  command: scripts/record_wave_summary.py --canonical $WAVE_STATE ... (reason on stderr)"
+  if [ "$RC" -eq 3 ]; then
+    log "  the CANONICAL record IS written; the derived per-wave summary is NOT."
+    log "  the evidence is intact and $PAIR_SUMMARY_DIR can be rebuilt from $WAVE_STATE"
+    record_queue_stop "wave_summary_derived_write_failed" "$WAVE" \
+      "canonical record preserved; derived summary under $PAIR_SUMMARY_DIR not written"
+  else
+    log "  NOTHING was written for this wave summary."
+    record_queue_stop "wave_summary_write_failed" "$WAVE" \
+      "record_wave_summary.py exited $RC; no wave record persisted"
+  fi
+  exit 1
 }
 
 chain_screen_alive() { screen -ls 2>/dev/null | grep -qF ".siderius-$1"$'\t'; }
@@ -266,6 +435,28 @@ campaign_spend() {
       --cost-per-mtok "$COST_PER_MTOK_USD"
 }
 
+# Admit this campaign to its home, or refuse. Prints "<outcome> <stamp>".
+#
+# Delegated to Python because the ORDER is the guarantee and one function
+# has to own it: validate the id -> inspect the home -> validate any
+# existing stamp -> create the directories -> publish the stamp. Two of
+# those steps are refusals that must happen before a specific side effect
+# (an invalid id before ANY mkdir; a foreign stamp before ANY write), and
+# an order split between a shell script and a helper is not checkable.
+#
+# It also needs the `os.link` publish that makes "first writer wins" true
+# under concurrency, which shell has no clean equivalent for.
+admit_campaign() {
+  "$REPO/.venv/bin/python" "$REPO/scripts/campaign_admission.py" \
+      --campaign-id "$CAMPAIGN_ID" \
+      --ws-root "$WS_ROOT" \
+      --campaign-home "$CAMPAIGN_HOME" \
+      --runner "${BASH_SOURCE[0]##*/}" \
+      --runner-pid "$$" \
+      --wave-state "$WAVE_STATE" \
+      --legacy-wave-state "$LEGACY_WAVE_STATE"
+}
+
 # Launch one chain in its own screen; marker carries the exit code.
 launch_chain() {
   local RUN="$1" SCOPE="$2" FILES="$3" FLAVOR="$4"
@@ -280,7 +471,19 @@ launch_chain() {
     log "ERROR $RUN: workspace exists — NOT launched (set V19_RESUME=1 for an intentional resume; completed chains are skipped automatically)"; return 1
   fi
   if chain_screen_alive "$RUN"; then log "ERROR $RUN: screen $SESSION already exists — NOT launched"; return 1; fi
-  if ps -eo args | grep -v grep | grep -v v19_queue_runner | grep -qF "$WS_ROOT/$RUN"; then
+  # The runner must not see ITSELF as a live process holding this
+  # workspace. The exclusion used to be the literal string
+  # `v19_queue_runner`, so a renamed or copied runner stopped excluding
+  # itself and refused to launch anything — the same "the current
+  # campaign's name is baked into generic logic" defect as D-E-6, one
+  # level down (D-E-7).
+  #
+  # `-F` is not cosmetic. The basename contains a `.`, which as a REGEX
+  # matches any character, so a plain `grep -v` would also exclude a
+  # process named `v19_queue_runnerXsh` — widening the exclusion to
+  # processes that are not this runner, which is the direction that
+  # silently skips the guard. Fixed-string on both sides.
+  if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -qF -- "$WS_ROOT/$RUN"; then
     log "ERROR $RUN: live process referencing $WS_ROOT/$RUN — NOT launched"; return 1
   fi
 
@@ -411,7 +614,91 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# --- campaign admission (V20 PR E, E-C2) -----------------------------------
+# The first thing main() does after parsing arguments, and BEFORE any
+# state write, any STOP read, any log line and any launch. Nothing above
+# this point touches the filesystem: argument parsing reports with
+# `echo … >&2`, never `log`, because LOGF now lives in a directory this
+# guard is what creates.
+#
+# FAIL-CLOSED, deliberately, and recorded as such (E-C2 §3). The sibling
+# helper `campaign_spend` once ended `|| echo "0 0.00"`, and a swallowed
+# failure there produced a zero spend that read as "budget available".
+# Swallowing a failure HERE would be worse: it would skip the guard
+# entirely and launch a campaign into a directory whose owner was never
+# proven. There is no safe default identity, so an unusable answer refuses.
+#
+# `set -e` is in effect (`_chain_common.sh:40`, sourced at :61), so a bare
+# `VAR="$(admit_campaign)"` would terminate the shell at the failure —
+# before the diagnostic below could run. `|| ADMIT_RC=$?` makes the
+# assignment part of a compound command, which `set -e` does not act on,
+# so the refusal is reachable. (§3a.4)
+#
+# The reason is reported to STDERR and is deliberately NOT appended to the
+# wave state: writing a record about campaign A's refused launch into
+# whatever state lives at campaign B's home is exactly the cross-campaign
+# write this PR removes — and on a refusal the state directory may not
+# exist at all.
+ADMIT_OUT=""
+ADMIT_RC=0
+ADMIT_OUT="$(admit_campaign)" || ADMIT_RC=$?
+if [ "$ADMIT_RC" -ne 0 ]; then
+  echo "[v19-queue] campaign admission REFUSED (rc=$ADMIT_RC)" >&2
+  echo "[v19-queue]   campaign_id=$CAMPAIGN_ID" >&2
+  echo "[v19-queue]   campaign_home=$CAMPAIGN_HOME" >&2
+  echo "[v19-queue]   command: scripts/campaign_admission.py (reason above)" >&2
+  echo "[v19-queue]   no directory created by this run, no chain launched" >&2
+  exit 1
+fi
+
+# Line 1 is "<outcome> <stamp path>"; line 2 is the adopted legacy state
+# or "-". Two lines, not three fields, because a path may contain a space.
+# Pure parameter expansion — no subshell, so no `set -e` surface. The
+# helper always prints both lines, and spells "none" as `-`, because
+# command substitution strips trailing newlines and an empty line 2 would
+# be indistinguishable from a missing one.
+ADMIT_SUMMARY="${ADMIT_OUT%%$'\n'*}"
+ADOPTED_LEGACY_STATE="${ADMIT_OUT#*$'\n'}"
+if [ "$ADOPTED_LEGACY_STATE" = "-" ]; then ADOPTED_LEGACY_STATE=""; fi
+
+# WS_ROOT holds the chain workspaces, which stay flat and are NOT scoped
+# by campaign (§4.4 — run names already carry the id, and moving them
+# would break campaign_spend.py and every historical report path).
 mkdir -p "$WS_ROOT"
+
+# BD-1 is operator-visible, so the resolved paths are logged at startup:
+# an operator who touches the old shared STOP must be able to see, from
+# the log alone, which file this campaign actually reads.
+log "campaign admission: $ADMIT_SUMMARY"
+log "  campaign_home=$CAMPAIGN_HOME"
+log "  stop file=$QUEUE_STOP_FILE"
+log "  wave state=$WAVE_STATE"
+if [ -n "$ADOPTED_LEGACY_STATE" ]; then
+  log "  legacy state ADOPTED (read-only, completion evidence only): $ADOPTED_LEGACY_STATE"
+else
+  log "  legacy state: not adopted — no pre-PR-E file is consulted"
+fi
+
+# BC-3: a legacy SHARED stop file is observed and recorded, never
+# honoured and never deleted.
+#
+# It is the file that halted an unrelated campaign in the 08:17 incident.
+# Silently ignoring it would destroy the operator's ability to
+# reconstruct that; honouring it would reproduce the defect. Recording it
+# is the only option that does neither, and archiving it stays a manual
+# operator act (D-E-5).
+#
+# The record goes into the NEW wave state, so the observation belongs to
+# the campaign that made it rather than to the shared root.
+if [ -e "$LEGACY_GLOBAL_STOP" ]; then
+  LEGACY_STOP_MTIME="$(stat -c %Y "$LEGACY_GLOBAL_STOP" 2>/dev/null || echo unknown)"
+  log "LEGACY GLOBAL STOP observed: $LEGACY_GLOBAL_STOP (mtime=$LEGACY_STOP_MTIME)"
+  log "  it has NO authority over this campaign and has NOT been removed;"
+  log "  this campaign stops only on $QUEUE_STOP_FILE"
+  printf '{"legacy_global_stop_observed": true, "path": "%s", "mtime": "%s", "observed_at": "%s", "runner_pid": %s, "honoured": false, "removed": false}\n' \
+    "$LEGACY_GLOBAL_STOP" "$LEGACY_STOP_MTIME" \
+    "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$$" >> "$WAVE_STATE"
+fi
 
 if [ -n "$ONLY" ]; then
   # Targeted SERIAL recovery: validate against the roster, then run the
@@ -437,7 +724,12 @@ if [ -n "$ONLY" ]; then
 fi
 
 # --- pairwise wave loop ----------------------------------------------------
-log "v19 pairwise queue started: waves=${#WAVES[@]} max_conc=$MAX_CONC resume=${V19_RESUME:-0}"
+# `MAX_CONC=2` used to appear here. It was deleted (D-E-3): it gated
+# nothing — the wave roster is what decides how many chains launch — but
+# a variable in a log line READS as a control, which is worse than
+# absent. The line now reports `chains_per_wave` per wave, a measured
+# fact, from the set actually launched.
+log "v19 pairwise queue started: waves=${#WAVES[@]} resume=${V19_RESUME:-0}"
 for wave_spec in "${WAVES[@]}"; do
   IFS=: read -r WAVE SCOPE FILES <<< "$wave_spec"
 
@@ -544,7 +836,7 @@ for wave_spec in "${WAVES[@]}"; do
     while IFS= read -r line; do log "  $line"; done <<< "$PAIR_CHECK"
   fi
 
-  log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]}"
+  log "WAVE $WAVE (band $SCOPE): launching ${NEEDED[*]} (chains_per_wave=${#NEEDED[@]})"
   START="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   LAUNCHED=()
   for RUN in "${NEEDED[@]}"; do
@@ -565,11 +857,9 @@ for wave_spec in "${WAVES[@]}"; do
       [ "${#LAUNCHED[@]}" -gt 0 ] && wait_and_record "$WAVE" "$START" "${LAUNCHED[@]}"
       # C13: a pair summary on EVERY exit path, including this one — an
       # aborted wave must not be the one case that leaves no summary.
-      record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
-        "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
-        "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
-        "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
-        "$START" "$(date -u '+%Y-%m-%dT%H:%M:%S')" "launch_failed"
+      record_wave_summary "$WAVE" "$SCOPE" "$TAG" \
+        "$START" "$(date -u '+%Y-%m-%dT%H:%M:%S')" "launch_failed" \
+        "$ARCH_RUN" "$LOSS_RUN"
       exit 1
     fi
   done
@@ -580,11 +870,9 @@ for wave_spec in "${WAVES[@]}"; do
     DISPOSITION="failed"
   fi
   END_TS="$(date -u '+%Y-%m-%dT%H:%M:%S')"
-  record_wave_summary "$WAVE" "$SCOPE" "$ARCH_RUN" "$LOSS_RUN" \
-    "$(chain_pid "$ARCH_RUN")" "$(chain_pid "$LOSS_RUN")" \
-    "$(marker_exit "$ARCH_RUN" | sed 's/missing/-1/')" \
-    "$(marker_exit "$LOSS_RUN" | sed 's/missing/-1/')" \
-    "$START" "$END_TS" "$DISPOSITION"
+  record_wave_summary "$WAVE" "$SCOPE" "$TAG" \
+    "$START" "$END_TS" "$DISPOSITION" \
+    "$ARCH_RUN" "$LOSS_RUN"
   if queue_stop_requested && [ "$DISPOSITION" != "complete" ]; then
     record_queue_stop "operator_stop_requested" "$WAVE" \
       "wave $WAVE ended under an operator stop — no further wave launched"
