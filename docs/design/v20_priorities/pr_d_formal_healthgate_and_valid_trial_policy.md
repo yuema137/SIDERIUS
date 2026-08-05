@@ -3574,7 +3574,83 @@ small correction, and it is why PR C is design-first and separately merged.
 * **candidate process-tree completeness** — whether every candidate-owned
   process was actually trackable.
 
-**OPEN QUESTION — the stability tolerance. AWAITING THE OPERATOR DECISION.**
+#### RESOLVED — T0 adopted, with the operator's clarification (2026-08-05)
+
+**This supersedes the options table below, which is kept as the reasoning
+that produced the decision.**
+
+> **T0 is an IDENTITY-AND-ATTRIBUTION stability rule, not a requirement that
+> external attributed bytes stay numerically constant.**
+
+That clarification is the load-bearing part, and it corrects a reading my own
+recommendation invited. The approved rule:
+
+```text
+blocking authority requires
+    the external PID IDENTITY set is unchanged across the bounded window
+AND unattributed_mib does not grow
+AND sampling is complete
+AND candidate-process-tree attribution is complete
+```
+
+**What must NOT invalidate a calibration:**
+
+* the mere **presence** of external occupancy, at any size;
+* **variation in attributed bytes belonging to the same identified
+  processes** — that is the real current environment, and it is recorded and
+  measured, not treated as corruption.
+
+**How the window is used** — conservatively, from the facts already
+recorded:
+
+```text
+minimum observed free memory        what the candidate must actually fit into
+maximum observed external occupancy the worst neighbour state in-window
+actual measured candidate performance under those conditions
+```
+
+**What DOES remove blocking authority** — evidence-quality failures only:
+
+* external **PID-set identity** changes;
+* growth in **unattributed** occupancy;
+* **incomplete sampling**;
+* **incomplete candidate-process-tree** attribution.
+
+**The invariant change**, replacing `estimate_types.py`'s frozen rule:
+
+```text
+blocking = measured and not contended                        # before
+blocking = measured and validity == valid_current_conditions # after
+```
+
+External occupancy no longer determines validity at all.
+
+**`MeasurementValidity` vocabulary** (operator-specified):
+
+```text
+valid_current_conditions
+unstable_external_identity
+unattributed_occupancy_growth
+sampling_incomplete
+```
+
+**No `OccupancyContext`.** Consolidate onto the existing
+`GpuAccountingSnapshot`, as the audit established.
+
+#### OOM attribution — the boundary, ruled
+
+| situation | correct outcome |
+|---|---|
+| candidate OOMs under **stable, attributable** external occupancy, and free memory was genuinely insufficient | a **valid current-condition rejection**. The measurement is good; the answer is no |
+| OOM coincides with **external identity change, unattributed growth, or incomplete attribution** | **NOT a candidate rejection.** The measurement cannot carry blocking authority — the evidence is insufficient to blame anyone |
+
+This closes audit item 5, the one genuinely missing capability, and it is
+**attribution only**: it changes no scientific threshold, no GPU-admission
+threshold, no O-7 accounting, and not the one-probe-per-attempt budget.
+
+---
+
+**OPEN QUESTION (RESOLVED ABOVE) — the stability tolerance.**
 No such tolerance exists in the repository, and the window performs no
 sample-to-sample comparison at all. Per the standing rule I have **not
 invented one**. The audit is now complete, so here are the options.
@@ -3690,14 +3766,12 @@ whether to launch.
 PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
-runtime hotfix           PR #175 CI-GREEN at 2184e1c8, MERGEABLE.
-                         AWAITING OPERATOR MERGE (both commits landed:
-                         80f93ca9 attribution, 2184e1c8 spent budget)
-occupancy correction     design audit DONE (01062b10). Implementation
-                         still NOT authorized: blocked on ONE operator
-                         decision, the stability tolerance (T0-T3, T0
-                         recommended). Reshaped by the audit into a
-                         CONSOLIDATION, not a new schema.
+runtime hotfix           MERGED 2026-08-05 as PR #175 (f99650a4)
+occupancy correction     T0 ADOPTED with the identity-vs-bytes
+                         clarification; OOM boundary ruled.
+                         IMPLEMENTATION AUTHORIZED, design-first, as a
+                         separate PR consolidating onto
+                         GpuAccountingSnapshot.
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
