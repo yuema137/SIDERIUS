@@ -42,6 +42,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.runtime_control.gpu_accounting import device_identity_from_hardware
+
 #: Bounded by construction: bootstrap must never look like a training run.
 DEFAULT_BOOTSTRAP_CAPS = {
     "max_wall_seconds": 90.0,
@@ -288,12 +290,26 @@ def run_bootstrap(
         return _finish(False)
     steps.append(BootstrapStep(name="probe executors", ok=True, detail=model_type))
 
+    # FU-C-1. The probe path builds an occupancy window — and therefore a
+    # `MeasurementValidity` verdict — only when the device is NAMED. Without
+    # this the bootstrap CLI silently produced `measurement_validity=None`,
+    # so V20 PR C's rule was unreachable from a real, production-supported
+    # probe entry point: a stable neighbour would still deny the measurement
+    # blocking authority.
+    #
+    # Resolved HERE, from the hardware record this flow already collected,
+    # through the ONE permitted adapter. `None` (CPU host, or a record with
+    # no UUID) stays None and fails closed — it is never repaired by
+    # assuming device 0, which would conflate two cards of the same model.
+    device_identity = device_identity_from_hardware(hardware)
+
     result = deps.run_probe(
         model_identity=model_type,
         executors=executors,
         caps=caps or DEFAULT_BOOTSTRAP_CAPS,
         device_vram_gb=vram_gb,
         expected_peer_pids=expected_peer_pids,
+        device_identity=device_identity,
     )
     if result.status != "ok":
         steps.append(
@@ -455,13 +471,22 @@ def production_dependencies() -> BootstrapDependencies:
             return True, str(TIDMAD_DATA_DIR)
         return False, f"not found at {TIDMAD_DATA_DIR!r}"
 
-    def _run_probe(*, model_identity, executors, caps, device_vram_gb, expected_peer_pids):
+    def _run_probe(
+        *,
+        model_identity,
+        executors,
+        caps,
+        device_vram_gb,
+        expected_peer_pids,
+        device_identity=None,
+    ):
         return run_bounded_probe(
             model_identity=model_identity,
             executors=executors,
             caps=ProbeCaps(**caps) if isinstance(caps, dict) else caps,
             device_vram_gb=device_vram_gb,
             expected_peer_pids=expected_peer_pids,
+            device_identity=device_identity,
         )
 
     def _build_observations(
