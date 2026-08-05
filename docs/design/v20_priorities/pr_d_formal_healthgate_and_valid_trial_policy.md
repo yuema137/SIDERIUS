@@ -2,9 +2,12 @@
 
 **Status: IMPLEMENTATION 10 of 10. FINAL ACCEPTANCE FAILED.**
 Gate 1 PASSED. **Gate 2 attempt 1 FAILED** (§19) — no formal round
-completed, so G2-1 is not established. Two root causes: a runtime-control
-probe-evidence defect (separate predecessor hotfix) and PR D's own
-declaration-loss defect (§19.1, fixed). PR D is NOT ready for merge.
+completed, so G2-1 is not established. PR D's own declaration-loss defect is
+fixed (§19.1). Two runtime-control defects remain and BOTH block final
+acceptance: a narrow attribution/lifecycle hotfix, and a PR C
+occupancy-policy correction — stable external GPU occupancy must not
+invalidate a calibration. Plan in **§20, awaiting operator review**. PR D is
+NOT ready for merge.
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
@@ -3154,6 +3157,160 @@ These are jointly unsatisfiable.
 **Ready for implementation once D-C1/D-C3 carry the 15.C ruling.** No stop
 condition in §11 was triggered: no historical artifact needs rewriting, no
 scientific threshold changes, and GPU admission and O-7 are untouched.
+
+
+---
+
+## 20. Final-acceptance plan after Gate 2 attempt 1 — PROPOSED, awaiting operator review
+
+Gate 2 attempt 1 (§19) exposed **two independent runtime-control defects**.
+This section is the plan to close both before PR D's final acceptance. It is
+a proposal; nothing here is implemented beyond the narrow hotfix already in
+progress.
+
+### 20.1 Why two PRs and not one
+
+The two defects have different natures, and merging them would smuggle an
+admission-policy change through a bug fix:
+
+| | defect | nature |
+|---|---|---|
+| **A** | the candidate's own CUDA context is counted as foreign occupancy | a straightforward attribution bug |
+| **B** | any post-probe `REQUEST_PROBE` is read as "evidence not consumed" | a state conflation in the lifecycle |
+| **C** | **stable external occupancy invalidates a calibration** | a POLICY error about what makes a measurement valid |
+
+A and B are bugs with a single correct answer. **C is a change to GPU
+admission semantics** and belongs to PR C, design-first.
+
+**C is a blocker, not a follow-up.** Fixing only A and then passing Gate 2 on
+an idle GPU would leave a confirmed V20 admission defect in place while
+claiming acceptance — the acceptance would be an artifact of the test
+environment being empty.
+
+### 20.2 PR 1 — the narrow hotfix (in progress)
+
+Branch `fix/runtime-probe-evidence-consumption`, off master.
+
+**Commit 1 — attribution.** Per-process bytes are captured
+(`--query-compute-apps=pid,used_memory`) and the classifier attributes memory
+instead of thresholding the device total:
+
+```text
+foreign-owned bytes over the EXISTING threshold  -> foreign_contended
+unattributable residual over that same threshold -> unknown_contention
+everything attributable to the candidate         -> not external contention
+```
+
+The configured threshold is unchanged; only its subject is corrected. An
+empty or partial attribution map is UNATTRIBUTABLE, never "candidate-owned" —
+absence of evidence must not read as a clean device. A single-column driver
+response still yields PID-based foreign detection, with the memory left in
+the residual.
+
+*Verified against the real Gate 2 telemetry*: 5.98 GB, zero foreign PIDs,
+0% utilisation now classifies `single_candidate_idle` rather than
+`foreign_contended`.
+
+**Commit 2 — typed reasons.** `REQUEST_PROBE` carries a machine-readable
+reason. Only `missing_or_unconsumed_evidence` is an invariant breach; the
+others (`contended_measurement`, `stale_evidence`,
+`candidate_identity_mismatch`, `capability_mismatch`) mean the evidence WAS
+consumed but cannot settle the decision. The lifecycle stops inferring cause
+from a bare decision kind or a log string.
+
+**Budget: unchanged, and not invented.** The repository already fixes it —
+`probe_lifecycle.py:135` *"one attempt gets one probe"*, `probe_wiring.py:51`
+*"the exactly-once guarantee is per candidate attempt"*. After the probe is
+spent the lifecycle re-decides through the existing policy with
+`probe_available=False`, which takes the policy's own existing
+`else ADVISORY` branch. No new counter, no new policy.
+
+**This PR does NOT change external-occupancy admission semantics.**
+
+### 20.3 PR 2 — PR C occupancy-policy correction (design-first)
+
+**The frozen principle** (operator, 2026-08-05):
+
+> External occupancy does not invalidate a calibration. Only occupancy that
+> CHANGES during the measurement enough to affect attribution, or that
+> cannot be reliably attributed, makes a measurement unable to carry
+> blocking authority.
+
+**What the audit found** — the current code contradicts this in three places:
+
+| question | finding |
+|---|---|
+| does `foreign_contended` mean instability? | **No.** Any foreign PID, any size, however steady → `foreign_contended` |
+| is stability assessed across the window? | **No.** `max_mem` takes the PEAK; nothing compares samples. A steady 8 GB and an 8 GB spike are indistinguishable |
+| why can a contended measurement not block? | `estimate_types.py:126` — `blocking = measured and not contended`, a frozen invariant, with `contended = identity in ("foreign_contended", "unknown_contention")` |
+| does admission separate the quantities? | **No.** No `external_occupancy` / `candidate_owned` / free-memory separation exists in `admission.py` or `gpu_accounting.py` |
+
+`sustained_util` is the sharpest example: it treats a STEADY high load as
+evidence of contention, when under the frozen principle steadiness is
+precisely what makes a measurement usable.
+
+**The corrected model** must represent four distinct quantities, none of
+which exist today:
+
+```text
+candidate-owned demand          the increment this candidate needs
+current free memory             what the device actually has now
+external occupancy              stable, and a legitimate part of the
+                                conditions being measured
+occupancy change in-window      the thing that can invalidate a measurement
+attribution/sampling completeness
+```
+
+and replace `contended` with an outcome vocabulary that separates validity
+from presence:
+
+```text
+candidate_owned_occupancy       not external
+stable_external_occupancy       calibration VALID; normal admission under
+                                the real current conditions
+unstable_external_activity      measurement cannot carry blocking authority
+unattributed_occupancy          measurement cannot carry blocking authority
+```
+
+**OPEN QUESTION — the stability tolerance.** No "how much change is
+unstable" tolerance exists in the repository; the window has no
+sample-to-sample comparison at all. Per the standing rule I will **not
+invent a numeric threshold**. After the design audit I will present options
+with their consequences and stop for the decision.
+
+### 20.4 Ordering, and the final Gate 2
+
+```text
+narrow runtime hotfix        -> operator merge
+PR C occupancy correction    -> operator merge
+integrate into PR D
+full CI on the exact head
+final integrated Gate 2 on that same head
+stop before PR D merge
+```
+
+**The final Gate 2 gains a bounded stable-external-occupancy case.** Attempt
+1 ran on an effectively idle GPU, so it could not have exercised this at all.
+The new case must show the system does NOT demand an idle device, while
+correctly recording candidate-owned demand, current free memory, external
+occupancy, occupancy stability, and attribution completeness.
+
+It must also still establish everything attempt 1 did not: a real
+HealthGate-valid trial winner, the `-inf` bootstrap, the budget bypass, a
+completed formal round carrying a recomputable authoritative verdict, and
+real `restore_prior_state` admission — with
+`enable_chain_incumbent_formal_gates=true`, which attempt 1 did not set.
+
+### 20.5 Status
+
+```text
+PR D implementation      10 / 10
+PR D declaration fix     landed (735031ab)
+runtime hotfix           commit 1 verified against real telemetry, in progress
+occupancy correction     PROPOSED — this section, awaiting review
+final Gate 2             attempt 1 FAILED; retry blocked on both PRs
+merge readiness          NOT READY
+```
 
 
 ---
