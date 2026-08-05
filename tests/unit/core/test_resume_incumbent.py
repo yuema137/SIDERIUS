@@ -723,10 +723,19 @@ class TestScientificAuthorityAdmission:
 
     # -- the legacy ladder --------------------------------------------------
 
-    def test_a_legacy_record_under_a_declared_output_reconstructs(self, tmp_path):
-        """§12A step 1-2: the record predates the per-record verdict, but
-        its iteration DECLARED its policy, so authority is reconstructable
-        without touching the artifact."""
+    def test_a_record_whose_iteration_declared_its_policy_is_usable(self, tmp_path):
+        """The D-C1a→D-C2b window, and NOT the withdrawn legacy scope.
+
+        This record has no per-record verdict block, but its iteration
+        DECLARED `healthgate_mode` and `result_authority` on the output.
+        Authority is read from a declaration the run actually made — it is
+        not inferred from configuration, age or score.
+
+        Distinct from a genuinely pre-declaration artifact, which is
+        excluded (`test_an_undeclared_legacy_record_is_excluded`). The
+        operator withdrew all reconstruction of records that never
+        recorded a declaration; nothing here reconstructs one.
+        """
         state = self._one(tmp_path, _formal("legacy_ok", 1.7, None))
         assert state.chain_best_valid_formal_score == 1.7
         assert state.chain_best_valid_formal_provenance["authority_basis"] == "reconstructed_legacy"

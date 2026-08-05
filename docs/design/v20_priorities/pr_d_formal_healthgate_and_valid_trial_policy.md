@@ -1,13 +1,22 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 6 of 11 checkpoints complete.**
+**Status: IMPLEMENTATION IN PROGRESS — 6 of 10 checkpoints complete.**
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
-`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (this commit). The formal-gate
-policy is FROZEN in §16 after two read-only audits and the operator's
-negative-infinity bootstrap ruling (2026-08-05). Next: D-C5 (aggregation
-and report exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3
-not run.
+`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced by this
+commit closing FU-D-9). The formal-gate policy is FROZEN in §16 after two
+read-only audits and the operator's negative-infinity bootstrap ruling
+(2026-08-05).
+
+**D-C9 was WITHDRAWN on 2026-08-05, so PR D is a 10-checkpoint PR.**
+Historical records missing the new authority contract stay readable and
+unchanged, with scientific authority simply not established — no
+annotation, no sidecar, no reconstruction, no finer classification. The
+249-artifact audit under D-C4 is the evidence for why (see §15.E).
+
+Predecessor FU-D-10 merged to master as PR #172 (`51bab481`) and is
+integrated here at `12506d80`. Next: D-C5 (aggregation and report
+exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -688,15 +697,16 @@ refusal in addition to the mode↔config check.
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
 | **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
-| **D-C9** | V19 retrospective closure annotation, archive untouched (§4.5) | `[ ]` not started |
+| ~~**D-C9**~~ | ~~V19 retrospective closure annotation~~ | **WITHDRAWN — operator decision 2026-08-05.** Historical records stay readable and unchanged with authority simply not established; no annotation, no sidecar, no reconstruction. PR D is a **10-checkpoint** PR |
 | **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
 
 Mapping to §20.6: D1→D-C1, D2→D-C2, D3→D-C3, D4→D-C4, D5→D-C5, D6→D-C6.
-D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above);
-D-C9 was added by the
-operator's V19-immutability decision. Note the ordering constraint: **D-C7a
-precedes D-C1b**, because a consistency check without typed roles would
-have passed V19's own config (§4.6.1).
+D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above).
+D-C9 was added by the operator's V19-immutability decision and **withdrawn
+on 2026-08-05**: historical records stay readable and unchanged with
+authority simply not established, so there is nothing to annotate. Note
+the ordering constraint: **D-C7a precedes D-C1b**, because a consistency
+check without typed roles would have passed V19's own config (§4.6.1).
 
 ---
 
@@ -728,7 +738,7 @@ commit**; everything after it moves up one.
 | 7 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
 | 8 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
 | 9 | `D-C7b` five recorded fields; honest display label | none (labels only) |
-| 10 | `D-C9` V19 closure annotation (schema in Git; sidecar is an evidence step, §7) | none — archive annotated, never modified |
+| ~~10~~ | ~~`D-C9` V19 closure annotation~~ | **WITHDRAWN 2026-08-05** — no annotation, no sidecar, no reconstruction |
 
 **Scope corrections forced by the hotfix.**
 
@@ -1806,7 +1816,8 @@ asserted over every matrix row and over the operator-disable case.
 #### REINFORCEMENT — D-C3 follow-up closure, NOT a new checkpoint
 
 **Commit**: `<filled at commit>`, on top of D-C3 `7a52e450`. The
-checkpoint count stays **5 / 11**; D-C4 is what makes it 6.
+checkpoint count stays **5 / 10**; D-C4 is what makes it 6. (Total
+revised from 11 to 10 when D-C9 was withdrawn, 2026-08-05.)
 
 Operator-approved after D-C3 was accepted: close the two follow-ups that
 are themselves launch-gate correctness, before starting D-C4.
@@ -1983,7 +1994,7 @@ not change `force_formal_round`'s meaning.
 #### IMPLEMENTATION RECORD — D-C4 `[x]` COMPLETE
 
 **Commit**: `<filled at commit>`, on top of the D-C3 reinforcement
-`42a9f679`. Progress **6 / 11**.
+`42a9f679`. Progress **6 / 10** once accepted.
 
 **The rule**: only a formal record whose authority verdict is
 `authoritative` may become the chain incumbent. Everything else stays
@@ -2180,14 +2191,85 @@ than being reported as a coverage gap.
 
 **Follow-ups**
 
-- **FU-D-10** *(new)* — the three `TestTheLiveProcessGuardExcludesOnlyItself`
-  failures above. Pre-existing, unrelated to PR D's subject matter, and a
-  merge blocker.
-- **FU-D-9** *(new)* — one cross-schema test that every field the tuner
-  writes into an output-bound dict is declared on the receiving model.
-  Three instances of the same silent-drop defect in one PR is a pattern,
-  not bad luck, and the per-field shape cannot express the rule.
-- **FU-D-7** unchanged and still deferred.
+- **FU-D-10** `[x]` **CLOSED** — merged to master as PR #172
+  (`775f0df8` + `36ecc5b1`, merge `51bab481`). Not a PR D regression and
+  not a test flake: the live-process guard **failed OPEN** because
+  `grep -q` closed the pipe early and `pipefail` turned the upstream
+  SIGPIPE into a non-zero pipeline. Load-dependent, so it failed exactly
+  when the machine was busy. Integrated into this branch at `12506d80`.
+- **FU-D-9** `[x]` **CLOSED** — see the reinforcement record below.
+- ~~**FU-D-7**~~ — **WITHDRAWN 2026-08-05** with the rest of the legacy
+  reconstruction scope. Historical artifacts are neither annotated nor
+  reinterpreted; a null `formal_comparison_reference_source` simply means
+  authority is not established.
+
+---
+
+#### REINFORCEMENT — the 249-artifact audit, FU-D-9, and the scope correction
+
+**Commit**: `<filled at commit>`. Still checkpoint **D-C4**; acceptance
+makes progress **6 / 10**.
+
+**1. The legacy audit that forced the scope correction.**
+
+Read-only over 249 real artifacts in `/home/klz/Data/SIDEREIS_DATA`:
+
+| fact | recoverable? | evidence |
+|---|---|---|
+| `healthgate_mode` | **absent 249/249**; derivable from a sha-pinned effective config | 42 artifacts stamp a sha; all 42 have a recoverable config; the 4 distinct configs resolve to 1 blocking / 3 observe-only |
+| `result_authority` | **absent 249/249, and derivable from nothing** | not in any output, not in `run_invariants_lock.json`, not in any manifest |
+| formal HealthGate validity | recoverable where the config is | `_classify_commit_time` against the sha-pinned effective config |
+
+`authoritative` requires `scientific`. `scientific` is recoverable from
+nothing, so **no historical record can reconstruct to authoritative** —
+and inferring it from a blocking configuration would invent a declaration
+nobody made, which is what D-C1b refuses at launch.
+
+The operator's ruling (2026-08-05) therefore **withdrew** observe-only and
+blocking reconstruction, the `operator_legacy_declaration` sidecar
+boundary, and D-C9 in full. §15.E is corrected accordingly.
+
+**No implementation change was required.** `eb789271` already returns
+`unreconstructable_legacy` for every record lacking the D-C1a fields,
+which is exactly the ruled behaviour. The audit is retained as the
+*evidence for why the rule is right*, not as a reconstruction spec.
+
+**2. FU-D-9 — producer-to-artifact transport.**
+
+`tests/unit/agent/schemas/test_producer_to_artifact_transport.py` (6
+tests). Kept separate from `test_cross_schema_invariants.py`, whose remit
+is *declaration consistency across models*; this is *runtime transport to
+artifacts*, a different rule class, and the filename says so.
+
+It validates **transport, not declaration**. Introspecting `model_fields`
+would pass for a field that is declared and then dropped at a later hop —
+which is the `write_manifest` defect exactly. So values are pushed through
+the real production boundaries and read back out of the real artifact:
+
+```text
+producer dict → HyperparamTuningOutput.model_validate
+              → model_dump_json → run_output_*.json   (what resume reads)
+              → write_manifest  → manifest.json        (the second hop)
+```
+
+Four channels at two nesting levels, which is what made the defects
+invisible:
+
+| field | boundary that dropped it |
+|---|---|
+| `healthgate_mode` | output schema |
+| `result_authority` | output schema |
+| `formal_comparison_reference_source` | output schema, **then again** at `write_manifest` |
+| `scientific_authority` | `ExperimentRecord`, nested inside `all_records` |
+
+Plus one test asserting a **single artifact carries all four** — a
+per-field test cannot catch a boundary that drops a *different* field,
+which is how three instances each passed review.
+
+**Mutations — 4 run, 4 caught**, each a faithful reproduction of a real
+defect: output drops the reference source (3 failing); `ExperimentRecord`
+drops `scientific_authority` (2); output drops `healthgate_mode` (2);
+`write_manifest` drops the reference source (1).
 
 **Next checkpoint**: D-C5 — aggregation and report exclusion, stated
 deterministically rather than left to the LLM.
@@ -2431,77 +2513,33 @@ recorded; if any lock compares across it, **stop**.
 
 ---
 
-### Commit 11 — `D-C9`: the V19 closure annotation — schema and generator (code), sidecar (evidence step)
+### ~~Commit 11~~ — `D-C9`: **WITHDRAWN — operator decision 2026-08-05**
 
-**1. Goal.** Record what V19 actually ran under, **without touching a single
-V19 byte** (§4.5, operator decision 2026-08-04). Last because it is
-historical bookkeeping, and separate because it writes to the incident
-archive rather than to production code.
+The V19 closure annotation, its schema/generator, and the sidecar evidence
+step are **removed from PR D's scope entirely**. So is every form of
+historical authority reconstruction and the
+`operator_legacy_declaration` boundary that an earlier revision of this
+document proposed.
 
-**2. Scope — and this commit is deliberately only half of the work.**
+**The single rule for historical records now reads:**
 
 ```text
-repository commit    the annotation schema + its validator/generator
-evidence step        running it beside the immutable V19 archive,
-                     and recording the before/after hashes
+missing the new authority contract
+  -> remains readable
+  -> remains unchanged
+  -> scientific authority is NOT established
+  -> never becomes the new-authority incumbent
+  -> never enters new-authority scientific aggregation
 ```
 
-The V19 forensic archive is not in the Git repository, so the sidecar's
-*generation* is an acceptance-artifact operation, not a code commit
-(operator, 2026-08-04). Only the schema and generator are committed here;
-pretending the generation is an ordinary commit would misrepresent where
-the evidence lives.
+No finer classification of historical records is required or wanted. The
+249-artifact audit recorded under D-C4 is retained as the *evidence for
+why* this rule is correct — `result_authority` was never persisted by any
+historical run and therefore cannot be recovered — not as a specification
+for reconstructing anything.
 
-*Non-goals — and this is the whole point*: **no V19 manifest is modified.**
-No field is back-filled. Nothing in the archive is deleted or moved.
-
-*Dependencies.* Commit 1 (so the vocabulary the annotation uses exists).
-
-**3. Implementation plan.**
-**Git commit — code only:**
-- [ ] Define the annotation schema (original config path + sha256, classification, basis, retrospective date, source-artifact hashes).
-- [ ] Write the validator and the generator, taking an archive path as input.
-- [ ] Unit-test both against a synthetic archive fixture — no real V19 data in the repository.
-
-**Post-code evidence step — NOT a Git commit:**
-- [ ] Run the generator against the real V19 archive.
-- [ ] Locate which config each iteration actually loaded, from the recorded `health_checks_config` / `health_config_sha256` — not from memory.
-- [ ] Verify the observe-only classification from recorded evidence: `on_fail: continue` in the effective config, and `would_invalidate_under_production_policy: true` on the rounds.
-- [ ] Hash every source artifact **before and after**, and show the two transcripts are identical.
-- [ ] Record the sidecar's own hash.
-
-**4. Validation plan.**
-- *Unit*: the annotation schema round-trips; a missing source artifact is reported, never guessed.
-- *Integration*: none required.
-- *Negative*: an artifact whose recorded sha256 does not match its content is reported as **tampered**, and the annotation refuses to classify it.
-- *Backward-compatibility*: every V19 file hash is byte-identical before and after.
-- *Real Gate*: none.
-
-**5. Acceptance criteria.**
-*For the Git commit:*
-- [ ] Schema, validator and generator are unit-tested against a synthetic fixture; **no V19 data enters the repository**.
-- [ ] `git diff --stat` shows only the new modules and their tests.
-
-*For the evidence step:*
-- [ ] `sha256sum` of every V19 artifact is **identical** before and after, with both transcripts recorded.
-- [ ] The annotation states the classification, its basis and its retrospective date, and does not claim the fields existed at run time.
-- [ ] The sidecar's own hash is recorded.
-
-**6. Failure and edge cases.** Recorded sha256 mismatch → **stop**, classify
-nothing, report tampering. Config path no longer resolvable → record
-`unresolvable` with the recorded sha256, never a guess.
-
-**7. Verification commands and evidence.**
-```bash
-# before and after, compared
-find <v19_artifact_root> -type f -exec sha256sum {} + | sort > /tmp/v19_before.txt
-```
-- [ ] hashes identical: __   - [ ] annotation reviewed: __
-
-**8. Commit boundary.**
-- [ ] The Git commit adds the schema, validator and generator — it **does** add code, and the boundary statement must say so rather than claiming it "touches the archive only".
-- [ ] The archive is touched only by the evidence step, which is not a commit.
-- [ ] Before committing: show that `git diff --stat` contains no V19 artifact.
+PR D is therefore a **10-checkpoint** PR. The full text of the withdrawn
+commit is preserved in Git history at `eb789271`.
 
 ---
 
@@ -2761,19 +2799,43 @@ all legacy records without the new field are excluded
 historical replay preserves the previous incumbent
 ```
 
-These are jointly unsatisfiable. The implementable rule, given that
-`classify_candidate_health` already returns a three-valued verdict:
+These are jointly unsatisfiable.
 
-```text
-legacy record + effective config recoverable by sha  -> reconstruct, classify normally
-legacy record + effective config NOT recoverable      -> UNKNOWN, excluded from incumbent
-                                                         and from the scientific aggregate,
-                                                         counted and named in the report
-```
-
-"Preserves the previous incumbent" therefore holds only for records whose
-effective config is still recoverable — which is the honest claim, and the
-one the sha-pinned lookup at `resume.py:386-392` can actually deliver.
+> **SUPERSEDED — operator decision 2026-08-05.** The rule this section
+> originally proposed —
+> *"effective config recoverable by sha → reconstruct, classify normally"* —
+> is **withdrawn**. It conflated two axes. Exact-SHA recovery reconstructs
+> the **HealthGate mode and validity** facts; it cannot reconstruct
+> `result_authority`, which no historical run ever persisted.
+>
+> **Measured, 249 real artifacts under `/home/klz/Data/SIDEREIS_DATA`**
+> (audit recorded under D-C4): `healthgate_mode` absent in **249/249**,
+> `result_authority` absent in **249/249**. `run_invariants_lock.json`
+> records scope, `health_gate_enabled` and the config sha — no authority.
+> Of the 42 artifacts stamping a config sha, all 42 have a recoverable
+> effective config, and resolving those 4 distinct configs yields a
+> determinable mode (1 blocking, 3 observe-only) — **and still no
+> authority**.
+>
+> Since `authoritative` requires `scientific`, and `scientific` is
+> recoverable from nothing, **no historical record can reconstruct to
+> authoritative.** Inferring it from a blocking configuration would invent
+> a declaration nobody made — precisely what D-C1b refuses at launch.
+>
+> **The rule that governs is therefore:**
+>
+> ```text
+> missing the new authority contract
+>   -> remains readable, remains unchanged
+>   -> scientific authority NOT established
+>   -> never the new-authority incumbent
+>   -> never in new-authority scientific aggregation
+> ```
+>
+> No finer classification — observe-only versus blocking, reconstructable
+> versus not — is required or wanted. "Preserves the previous incumbent"
+> is **not** a property PR D delivers on the authority axis, and this
+> document no longer claims it.
 
 ### 15.F Verdict
 
