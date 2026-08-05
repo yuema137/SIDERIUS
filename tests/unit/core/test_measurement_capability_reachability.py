@@ -132,3 +132,94 @@ class TestTheBoundaryStaysGeneric:
     def test_the_capability_type_is_what_crosses_the_boundary(self):
         cap = resolve_tidmad_measurement_capability(dataset_root=None)
         assert isinstance(cap, ResolvedMeasurementCapability)
+
+
+class TestTheWorkflowIsSuppliedACapability:
+    """The OTHER call site, missed when C-C3b fixed the tuner's.
+
+    `workflows/model_exploration.py` called `run_launch_self_test(...)`
+    without `capability`. It defaults to `None`, generic runtime-control
+    reports "no measurement capability was resolved by the caller", and a
+    real launch (`require_probe_runner=True`) raises `LaunchGuardFailure`
+    before any LLM call.
+
+    Measured, not theorised: a bounded real chain aborted with exactly that
+    message while `resolve_tidmad_measurement_capability()` reported the
+    dataset available. The class above proved the TUNER resolves one;
+    nothing asserted the same of the workflow — the gap this module's own
+    docstring warns about.
+
+    **The shape matters as much as the fix.** Generic orchestration must
+    not name a task's resolver, so the capability is resolved by the
+    task-aware launcher and THREADED IN, exactly as
+    `measurement_capability.py` specifies: "Callers that know the task
+    supply those."
+    """
+
+    @staticmethod
+    def _launch_self_test_call() -> ast.Call:
+        import workflows.model_exploration as workflow
+
+        tree = ast.parse(Path(workflow.__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+                if name == "run_launch_self_test":
+                    return node
+        raise AssertionError("the workflow no longer calls run_launch_self_test at all")
+
+    def test_the_workflow_passes_a_capability(self):
+        """MUTATION TARGET: dropping the argument again."""
+        call = self._launch_self_test_call()
+        assert "capability" in {kw.arg for kw in call.keywords}, (
+            "the workflow calls run_launch_self_test() without a capability; "
+            "a real launch will abort with LaunchGuardFailure even when the "
+            "measurement capability is available"
+        )
+
+    def test_the_workflow_accepts_one_rather_than_resolving_it(self):
+        """GENERICITY. The workflow takes a typed capability as a parameter;
+        it must not reach for a task's dataset itself."""
+        import inspect
+
+        import workflows.model_exploration as workflow
+
+        assert "measurement_capability" in inspect.signature(workflow.run_workflow).parameters
+
+    def test_no_task_resolver_is_named_in_generic_orchestration(self):
+        """MUTATION TARGET: importing the TIDMAD resolver into the workflow.
+
+        That is the defect `measurement_capability.py` exists to end — a
+        task assumption inside generic infrastructure, which fails the next
+        task silently rather than loudly.
+        """
+        import workflows.model_exploration as workflow
+
+        source = Path(workflow.__file__).read_text()
+        for forbidden in ("resolve_tidmad", "TIDMAD_DATA_DIR", "tidmad_denoise"):
+            assert forbidden not in source, (
+                f"generic workflow orchestration names {forbidden!r}; the "
+                f"capability must be threaded in by a caller that knows the task"
+            )
+
+    def test_the_task_aware_launcher_supplies_it(self):
+        """The other half: someone must actually pass one, or the parameter
+        is a boundary nobody uses."""
+        launcher = (
+            Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
+        ).read_text()
+        assert "measurement_capability=resolve_tidmad_measurement_capability()" in launcher
+
+    def test_fail_closed_is_preserved_when_none_is_supplied(self):
+        """Threading it in must not become a way to skip the check."""
+        available, detail = probe_runner_availability(None)
+        assert available is False
+        assert "no measurement capability was resolved" in detail
+
+    def test_a_real_launch_would_now_find_the_capability_available(self):
+        """End to end for the property that actually failed."""
+        capability = resolve_tidmad_measurement_capability()
+        available, detail = probe_runner_availability(capability)
+        assert available, f"probe runner unavailable: {detail}"
+        assert "no measurement capability was resolved" not in detail
