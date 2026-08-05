@@ -1391,6 +1391,96 @@ combination → unrepresentable by construction.
 
 ### Commit 5 — `D-C2b`: wire the verdict at the tuner exit
 
+#### IMPLEMENTATION RECORD — D-C2b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C2a `c8019e77`.
+
+**Behavior Delta — stated precisely**: *selection* delta **none**;
+*formal-record schema/provenance* delta **present**. Incumbent selection,
+aggregation and reporting are untouched and behave exactly as before; what
+changes is that every formal record now carries a verdict they may later
+consume.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/health_checks/candidate_eligibility.py` | `formal_validity_of(record, config_path)` → `Literal["valid","invalid","unknown"]` |
+| `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` | the formal-only authority block on `final_record` |
+
+**Call path**
+
+```text
+final_record (one construction site, :4852)
+  → if not trial_config.is_trial:
+        formal_validity_of(final_record, config_path=agent_input.health_checks_config)
+          → classify_candidate_health(record, resolve_scientific_gate_ids(cfg))   ← shared, role-aware
+        ScientificAuthority.from_context(mode, authority, validity)               ← D-C2a, derived
+      → final_record["scientific_authority"] = verdict.model_dump()
+```
+
+**The two asymmetries, both deliberate**
+
+*Every* formal record gets a verdict — valid, invalid, diagnostic and
+validity-unknown alike. A field present only on successes would make its
+absence ambiguous.
+
+*No* trial record gets one. Writing `authoritative: False` on a trial
+would conflate "formal authority does not apply here" with "this formal
+result was judged untrustworthy", and those call for opposite operator
+responses.
+
+**Validity is this record's own.** `formal_validity_of` reads the formal
+record's gate results through the shared role-aware resolver. It cannot
+see the trial winner, a trial count, the score, the skip/bypass decision
+or `force_formal_round` — none is in scope at the call.
+
+**Nothing is assembled locally.** A test asserts the tuner contains no
+`final_record["authoritative"]`, `["primary_basis"]` or
+`["blocking_reasons"]`; the conclusions come only from D-C2a.
+
+**Persistence keeps every reason.** A diagnostic run whose formal record
+also failed its gates round-trips as
+`primary_basis: declared_diagnostic` **and**
+`blocking_reasons: [declared_diagnostic, gate_invalidated]` — the gate
+failure stays a diagnostic fact rather than being collapsed into the
+headline. The three facts survive too, so the verdict is recomputable.
+
+**`legacy_authority_unknown` is unreachable for new records** — D-C1b
+refuses an undeclared launch. It exists for historical reconstruction, not
+as a fallback. Asserted across all four declared combinations.
+
+**Tests** — 15 new in `test_formal_authority_wiring.py`. Full
+`tests/unit`: **7363 passed**, 2 skipped, 4 xfailed.
+
+**Mutations — three, all caught**
+
+| mutation | fails |
+|---|---|
+| formal wiring call site removed | 1 |
+| verdict attached to trial records too | 1 |
+| formal validity hardcoded instead of sourced from the record | 1 |
+
+**Static**: pyright **0 errors** — after narrowing `formal_validity_of`'s
+return from `str` to the exact `Literal`. pyright caught the mismatch; the
+tests did not, because the value was always right. A new test pins the
+classifier enum's values against `FormalValidity`'s literal so the two
+vocabularies cannot drift apart in separate modules.
+
+**Deviations**
+
+1. **A flaky test from E-C6 was fixed in passing.** `TestTheLiveProcessGuardExcludesOnlyItself::test_the_exclusion_is_fixed_string_not_a_regex`
+   failed once in a full-suite run and passed 3/3 in isolation. Cause: the
+   fixture waited a fixed `sleep 0.4` for its process to appear in `ps`,
+   which is a race under load — the guard then sees nothing and a
+   "should block" case fails. Replaced with a bounded poll on `ps` in both
+   the queue-runner and Gate-runner fixtures. Not D-C2b's scope, but a
+   known flake left in CI is worse than the small out-of-scope edit, and
+   it was mine.
+
+**Next authorized checkpoint**: D-C3 — the formal-launch correction, and
+the first checkpoint in this PR that changes launch behaviour.
+
 **1. Goal.** Compute the verdict from data that already exists (§3.4) and
 attach it to the record. Separate from commit 3 so that "the verdict is
 reached in production" is a distinct, provable claim.

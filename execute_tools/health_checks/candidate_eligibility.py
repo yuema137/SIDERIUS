@@ -12,7 +12,7 @@ import hashlib
 import math
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -198,6 +198,34 @@ def classify_candidate_health(
             return CandidateHealthValidity.INVALID
 
     return CandidateHealthValidity.VALID
+
+
+def formal_validity_of(
+    record: Any, *, config_path: str | None = None
+) -> Literal["valid", "invalid", "unknown"]:
+    """A FORMAL record's own role-aware HealthGate verdict.
+
+    The input to ``ScientificAuthority.from_context``. It reads **this
+    record's** gate results and nothing else — not the trial winner, not a
+    trial count, not the score, not the skip/bypass decision. Authority is
+    a property of the result, not of how its launch was justified (§16.D).
+
+    Args:
+        record: the formal record.
+        config_path: the run's EFFECTIVE HealthGate config. ``None`` means
+            the shipped default.
+
+    Returns:
+        ``"valid"`` / ``"invalid"`` / ``"unknown"`` — the classifier's own
+        three-valued vocabulary, unchanged. ``"unknown"`` when the roles
+        cannot be established, which is a gap and never a pass.
+    """
+    # The enum's values ARE the vocabulary `ScientificAuthority` accepts;
+    # `test_formal_authority_wiring.py` pins the two together so a change
+    # to either is caught rather than discovered at a call site.
+    return classify_candidate_health(  # type: ignore[return-value]
+        record, required_gate_ids=resolve_scientific_gate_ids(config_path)
+    ).value
 
 
 def is_valid_candidate(

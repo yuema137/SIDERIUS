@@ -66,11 +66,15 @@ from core.run_invariants import (
 from core.runtime_control.failure_attribution import may_recommend_resource_reduction
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
+from core.scientific_authority import ScientificAuthority
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.dataset_config import DataScope, ScopeViolationError
-from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
+from execute_tools.health_checks.candidate_eligibility import (
+    formal_validity_of,
+    is_valid_candidate,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
@@ -5011,6 +5015,34 @@ class HyperparamTuningAgent:
                     final_record["resolved_order_strategy"] = ordering.resolved_strategy
                     final_record["resolved_file_order"] = ordering.resolved_file_order
                     final_record["ordering_resolution_source"] = ordering.resolution_source
+                    # --- V20 PR D (D-C2b): formal authority verdict -----
+                    # Attached to EVERY formal record — valid, invalid,
+                    # diagnostic and validity-unknown alike — because the
+                    # question "may this inform science?" has an answer in
+                    # all four cases, and a field present only on successes
+                    # would make absence ambiguous.
+                    #
+                    # Trial records get NO block at all. Writing
+                    # `authoritative: False` on a trial would conflate
+                    # "formal authority does not apply here" with "this
+                    # formal result was judged untrustworthy".
+                    #
+                    # The verdict comes ONLY from `from_context`; this site
+                    # never assembles `authoritative` / `primary_basis` /
+                    # `blocking_reasons` itself. Validity comes from THIS
+                    # record's own role-aware gate results — never from the
+                    # trial winner, a trial count, the score, the
+                    # skip/bypass decision or `force_formal_round`.
+                    if not trial_config.is_trial:
+                        final_record["scientific_authority"] = ScientificAuthority.from_context(
+                            healthgate_mode=agent_input.healthgate_mode,
+                            declared_result_authority=agent_input.result_authority,
+                            formal_validity=formal_validity_of(
+                                final_record,
+                                config_path=agent_input.health_checks_config,
+                            ),
+                        ).model_dump()
+
                     # Trial context
                     if trial_config.is_trial:
                         final_record["is_trial"] = True

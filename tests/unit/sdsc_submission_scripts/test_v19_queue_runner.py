@@ -442,7 +442,15 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         # every case wait out the full sleep.
         bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
         FIXTURE=$!
-        sleep 0.4
+        # POLL, do not sleep a fixed interval. A fixed wait is a race: under
+        # a loaded suite the fixture may not be visible in `ps` yet, the
+        # guard then sees nothing, and a "should block" case fails
+        # intermittently. Observed exactly once in a full-suite run and
+        # never in isolation, which is the signature of this bug.
+        for _ in $(seq 1 100); do
+            if ps -eo args | grep -qF -- "{marker}"; then break; fi
+            sleep 0.05
+        done
         launch_chain {self.RUN} 15-19 15,16,17,18,19 arch
         kill "$FIXTURE" 2>/dev/null
         wait "$FIXTURE" 2>/dev/null

@@ -498,7 +498,10 @@ class TestTheGateLiveProcessGuardExcludesOnlyItself:
         # captured pipes open.
         bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
         FIXTURE=$!
-        sleep 0.4
+        for _ in $(seq 1 100); do
+            if ps -eo args | grep -qF -- "{marker}"; then break; fi
+            sleep 0.05
+        done
         launch_gate_chain arch
         kill "$FIXTURE" 2>/dev/null
         """
