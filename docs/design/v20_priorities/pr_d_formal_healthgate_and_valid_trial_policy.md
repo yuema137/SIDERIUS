@@ -3415,8 +3415,16 @@ PR B) already carries:
 | `own_tree_mib`, `own_processes` | candidate-attributed occupancy, summed over processes whose **ancestry reaches `root_pid`** |
 | `other_mib`, `other_process_count`, `other_processes` | external attributed occupancy, **with PIDs** |
 | `unattributed_mib` | occupancy the per-process listing cannot explain |
-| `device_free_mib` | what the candidate must fit into |
+| `device_used_mib`, `device_total_mib` | free memory, by derivation (see the correction below) |
 | `accounting_skew_mib` | the **signed** disagreement between the device total and the per-PID sum, deliberately left unclamped |
+
+> **Corrected during implementation.** This table first listed
+> `device_free_mib` as a `GpuAccountingSnapshot` field. It is **not** — it
+> lives on `DeviceBaselineSnapshot`. `GpuAccountingSnapshot` states *used*
+> and *total*, so free memory is DERIVED. The conclusion stands (the fact is
+> available in `gpu_accounting.py`, and admission consumes it), but the field
+> attribution was wrong, and PR C derives rather than reads it — which keeps
+> the new boundary on the single snapshot type the calibration path has.
 
 And `other_processes` exists for exactly the reason the operator's stability
 list gives, stated in its own docstring:
@@ -3767,11 +3775,11 @@ PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
 runtime hotfix           MERGED 2026-08-05 as PR #175 (f99650a4)
-occupancy correction     T0 ADOPTED with the identity-vs-bytes
-                         clarification; OOM boundary ruled.
-                         IMPLEMENTATION AUTHORIZED, design-first, as a
-                         separate PR consolidating onto
-                         GpuAccountingSnapshot.
+occupancy correction     IMPLEMENTED. PR #176 open (3 commits):
+                         01406924 boundary + OOM attribution,
+                         779ccb46 invariant + producer path,
+                         4th commit device-identity threading.
+                         Awaiting CI, then operator merge.
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
