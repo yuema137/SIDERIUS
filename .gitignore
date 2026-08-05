@@ -71,3 +71,18 @@ time_calibration_*.json
 # agent_generated runtime artifacts (registry state + generated loss plugins)
 agent_generated/_capability_index.json
 agent_generated/losses/*.py
+
+# Test artifacts written through a MagicMock's `__fspath__`.
+#
+# `MagicMock` implements `__fspath__`, so `Path(sandbox.base_dir)` accepts a
+# mock silently and yields a literal `MagicMock/<mock name>/<id>` path — see
+# `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`'s
+# prephase workspace. A test that forgets `base_dir = str(tmp_path)` then
+# materialises that tree at the repo root, and 4,923 such files were once
+# committed (21 MB, ~10x the whole tests/ tree) before anyone noticed.
+#
+# No current test produces them — verified by running the full suite against
+# an mtime marker — so this is a guard against the defect returning, not a
+# licence for it. `tests/unit/test_repo_hygiene.py` fails if such a path is
+# ever tracked again.
+MagicMock/
