@@ -483,7 +483,29 @@ launch_chain() {
   # process named `v19_queue_runnerXsh` — widening the exclusion to
   # processes that are not this runner, which is the direction that
   # silently skips the guard. Fixed-string on both sides.
-  if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -qF -- "$WS_ROOT/$RUN"; then
+  #
+  # `grep -q` MUST NOT be used here, and the reason is not style.
+  # `-q` exits on its FIRST match and closes the pipe. `pipefail` is in
+  # effect (`_chain_common.sh:41`), so the upstream `grep` — still
+  # writing the rest of `ps` — is killed by SIGPIPE, the pipeline
+  # reports 141, and the `if` reads that as "no match". The guard then
+  # fails **OPEN** and launches on top of a workspace another process is
+  # already holding.
+  #
+  # It is load-dependent, which is what made it look like flakiness: when
+  # `ps` is short the upstream grep finishes writing before `-q` exits,
+  # no SIGPIPE occurs, and the guard works. Measured on this box at 556
+  # processes — `grep -qF` returned 141 where `grep -F` returned 0 for
+  # the identical input. So it fails exactly when the machine is busy,
+  # which is precisely when a competing chain is most likely to be live.
+  #
+  # Reading the whole stream into a variable removes the early close, so
+  # no upstream process is ever SIGPIPEd. `|| true` is inside the
+  # substitution and covers only grep's legitimate "no match" exit 1,
+  # which is the outcome the emptiness test then interprets.
+  local LIVE_PROCS=""
+  LIVE_PROCS="$(ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" | grep -F -- "$WS_ROOT/$RUN" || true)"
+  if [ -n "$LIVE_PROCS" ]; then
     log "ERROR $RUN: live process referencing $WS_ROOT/$RUN — NOT launched"; return 1
   fi
 

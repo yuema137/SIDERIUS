@@ -518,7 +518,7 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
 
     def test_the_exclusion_derives_from_the_script_name(self):
         """MUTATION TARGET: restoring the literal, in any campaign's
-        spelling."""
+        spelling — and there must be exactly ONE process scan."""
         src = RUNNER.read_text(encoding="utf-8")
         assert 'RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"' in src
         live = [
@@ -527,6 +527,67 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
             if "grep -v" in line and not line.strip().startswith("#")
         ]
         assert live == [
-            'if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
-            '| grep -qF -- "$WS_ROOT/$RUN"; then'
+            'LIVE_PROCS="$(ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
+            '| grep -F -- "$WS_ROOT/$RUN" || true)"'
         ], live
+
+    def test_the_scan_shape_does_not_fail_open_under_pipefail(self):
+        """DETERMINISTIC reproduction of the fail-open, independent of load.
+
+        The real defect only surfaces when `ps` output is long enough that
+        the upstream grep is still writing when the final grep exits — so
+        on a quiet box the behavioural tests above pass with the BROKEN
+        code. This reproduces it on demand by putting the match at the
+        very start of a large synthetic stream, which guarantees the early
+        close.
+
+        Both halves are asserted: the `-q` shape must fail open (proving
+        the test exercises the real mechanism and is not vacuous), and the
+        production shape must not.
+        """
+        stream = "printf 'MATCH_TOKEN\\n'; yes filler | head -200000"
+        broken = (
+            f"set -o pipefail; ({stream}) | grep -v grep "
+            '| grep -vF -- "runner.sh" | grep -qF -- "MATCH_TOKEN"'
+        )
+        fixed = (
+            f'set -o pipefail; FOUND="$(({stream}) | grep -v grep '
+            '| grep -vF -- "runner.sh" | grep -F -- "MATCH_TOKEN" || true)"; '
+            '[ -n "$FOUND" ]'
+        )
+
+        broken_rc = subprocess.run(["bash", "-c", broken], capture_output=True).returncode
+        fixed_rc = subprocess.run(["bash", "-c", fixed], capture_output=True).returncode
+
+        assert broken_rc != 0, (
+            "the `grep -q` shape did NOT fail open here, so this test is not "
+            "exercising the SIGPIPE mechanism and proves nothing"
+        )
+        assert fixed_rc == 0, (
+            "the production scan shape failed to report a match that is "
+            "present — the guard would fail OPEN"
+        )
+
+    def test_the_scan_never_uses_grep_q(self):
+        """MUTATION TARGET: reverting the scan to `grep -q`.
+
+        `-q` exits on its first match and closes the pipe; under
+        `pipefail` (`_chain_common.sh:41`) the upstream grep is SIGPIPEd,
+        the pipeline reports 141, and the `if` reads that as "no match" —
+        the guard fails OPEN. It is load-dependent, so the revert would
+        pass on a quiet box and silently stop guarding on a busy one.
+
+        Structural because the behavioural tests can only catch it while
+        the machine is loaded enough to trigger the SIGPIPE.
+        """
+        src = RUNNER.read_text(encoding="utf-8")
+        scan_lines = [
+            line
+            for line in src.splitlines()
+            if "$WS_ROOT/$RUN" in line and "grep" in line and not line.strip().startswith("#")
+        ]
+        assert scan_lines, "the live-process scan disappeared"
+        for line in scan_lines:
+            assert "grep -q" not in line, (
+                f"the live-process scan uses `grep -q`, which fails OPEN under pipefail: {line!r}"
+            )
