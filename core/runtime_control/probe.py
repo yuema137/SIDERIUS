@@ -348,6 +348,7 @@ def run_bounded_probe(
     expected_peer_pids: Iterable[int] = (),
     contention_window: Callable[..., Any] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    device_identity: Any | None = None,
 ) -> ProbeResult:
     """Run the bounded probe. Cap breaches and OOM are MEASURED outcomes
     (valid evidence, per §7.4 they may block) — never silent retries.
@@ -375,10 +376,17 @@ def run_bounded_probe(
 
     caps = caps or ProbeCaps()
     sampler = contention_window or sample_contention_window
-    window = sampler(
-        device_vram_gb=device_vram_gb,
-        expected_peer_pids=tuple(expected_peer_pids),
-    )
+    # V20 PR C: the identity is passed DOWN from the orchestration boundary,
+    # never discovered here. `None` means the caller had none (CPU host,
+    # legacy manifest), and the window then carries no validity verdict —
+    # a gap, not a guessed device.
+    window_kwargs: dict[str, Any] = {
+        "device_vram_gb": device_vram_gb,
+        "expected_peer_pids": tuple(expected_peer_pids),
+    }
+    if device_identity is not None:
+        window_kwargs["device"] = device_identity
+    window = sampler(**window_kwargs)
     concurrency = window.classification
     snapshot = window.samples[-1] if window.samples else ContentionSnapshot()
     start = clock()

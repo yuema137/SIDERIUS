@@ -95,6 +95,7 @@ def build_production_probe_runner(
     loss_config: dict[str, Any],
     data_dir: str | None = None,
     device: str = "cuda",
+    device_identity: Any | None = None,
 ) -> Callable[[ProbeRequest], ProbeResult]:
     """Build the REAL probe runner for one candidate.
 
@@ -131,6 +132,7 @@ def build_production_probe_runner(
             executors=executors,
             caps=ProbeCaps(max_wall_seconds=PRODUCTION_PROBE_WALL_SECONDS),
             device_vram_gb=vram_gb,
+            device_identity=device_identity,
         )
 
     return _run

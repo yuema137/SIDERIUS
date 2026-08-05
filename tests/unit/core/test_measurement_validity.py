@@ -402,3 +402,96 @@ class TestTheProducerPathIsWired:
         assert estimate.measurement_validity == "valid_current_conditions"
         # And the consequence, which is the point of carrying it at all.
         assert estimate.blocking_eligible is True
+
+
+class TestTheProductionChainIsConnected:
+    """Reachability for the LAST link: the orchestrator must actually pass a
+    device identity down, or every real run silently keeps the conservative
+    rule and PR C changes nothing in production.
+
+    This is the same failure the `extrapolate_probe` mutation exposed, one
+    hop further out — and it cannot be caught by any unit test of the
+    boundary itself, because the boundary would be behaving correctly on the
+    evidence it was handed.
+    """
+
+    def test_run_bounded_probe_forwards_the_identity_to_the_sampler(self):
+        """MUTATION TARGET: dropping `device_identity` from the forward."""
+        from core.runtime_control.probe import ProbeCaps, run_bounded_probe
+
+        seen: dict = {}
+
+        def _sampler(**kwargs):
+            seen.update(kwargs)
+            return type(
+                "W",
+                (),
+                {
+                    "classification": "single_candidate_idle",
+                    "samples": (),
+                    "reasons": (),
+                    "measurement_validity": "valid_current_conditions",
+                    "raw_telemetry": lambda self: {},
+                },
+            )()
+
+        class _Executors:
+            def __getattr__(self, _name):
+                raise RuntimeError("probe body not exercised by this test")
+
+        try:
+            run_bounded_probe(
+                model_identity="c",
+                executors=_Executors(),
+                caps=ProbeCaps(),
+                device_vram_gb=80.0,
+                contention_window=_sampler,
+                device_identity=DEV,
+            )
+        except Exception:
+            # The probe body is irrelevant here; the window call is not.
+            pass
+
+        assert seen.get("device") == DEV, (
+            "run_bounded_probe did not pass the device identity to the "
+            "contention sampler, so no occupancy window is ever built"
+        )
+
+    def test_the_tuner_passes_the_device_identity_it_resolved(self):
+        """MUTATION TARGET: the orchestrator resolving an identity and then
+        not passing it.
+
+        Structural, because reaching this line needs a real chain round.
+        Checked per CALL NODE via AST rather than by substring: a text
+        search would pass on the `device_identity=` that appears in the
+        sandbox construction nearby.
+        """
+        import ast
+        from pathlib import Path
+
+        tuner = (
+            Path(__file__).resolve().parents[3]
+            / "nodes"
+            / "ml_hyperparameter_tune_agent"
+            / "ml_hyperparameter_tune_agent.py"
+        )
+        tree = ast.parse(tuner.read_text(encoding="utf-8"))
+        calls = 0
+        undeclared: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name != "_resolve_time_check_probe_request":
+                continue
+            calls += 1
+            if "device_identity" not in {kw.arg for kw in node.keywords}:
+                undeclared.append(node.lineno)
+
+        assert calls >= 1, "the probe-resolution helper is no longer called"
+        assert undeclared == [], (
+            f"_resolve_time_check_probe_request called without device_identity "
+            f"at lines {undeclared}; the probe would then build no occupancy "
+            f"window and every measurement would fall back to the "
+            f"conservative pre-PR-C rule"
+        )
