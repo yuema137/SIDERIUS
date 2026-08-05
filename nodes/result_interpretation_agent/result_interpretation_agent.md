@@ -186,3 +186,11 @@ The constructor accepts `bridge_factory` (for test injection — defaults to `LL
   - **Phase 3 — vocab dedup** — one call when there are new candidate vocab entries that need consolidation against existing canonicals. System prompt: `DEDUP_SYSTEM_PROMPT` (module-level constant). Skipped (no LLM call) when no new candidates exist.
 - **GPU**: not required.
 - **External services**: none directly. Depends on the upstream tuning agent's experiment records (already on disk in `{workspace}/run_output_{run_name}.json`) and on `ml_models/{model_type}/description.md` for any model_type not carrying an inline description in its `ModelRunSummary`.
+
+## Scientific aggregation (V20 PR D, D-C5)
+
+`ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `run()` partitions the summaries via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim.
+
+Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines()`.
+
+The exclusion is derived and rendered **deterministically, never by the model** (design §4.7): a model may simply omit it, and exclusion text placed inside a prompt can steer the interpretation it then writes. `all_excluded` is explicit because an empty aggregate alone reads identically to a campaign that found nothing — the opposite conclusion.

@@ -1,10 +1,12 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 9 of 10 checkpoints complete.**
+**Status: IMPLEMENTATION COMPLETE — 10 of 10 checkpoints.** Gate 1 PASSED.
+Remaining before merge: full CI on the exact head, then the final integrated
+V20 Gate 2 on that same head.
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
-closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (this commit). The formal-gate policy is FROZEN in §16 after two
+closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (`09be3357`), Gate 1 fix (`3172bc4c`), D-C8 (this commit). The formal-gate policy is FROZEN in §16 after two
 read-only audits and the operator's negative-infinity bootstrap ruling
 (2026-08-05).
 
@@ -698,7 +700,7 @@ refusal in addition to the mode↔config check.
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
 | **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[x]` **COMPLETE** — no config touched, `health_config_sha256` unshifted, no id renamed; label derived from the configured action. 5/5 mutations (two after fixing a redundant branch and a real coverage gap) |
 | ~~**D-C9**~~ | ~~V19 retrospective closure annotation~~ | **WITHDRAWN — operator decision 2026-08-05.** Historical records stay readable and unchanged with authority simply not established; no annotation, no sidecar, no reconstruction. PR D is a **10-checkpoint** PR |
-| **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
+| **D-C8** | Doc sync + final audit | `[x]` **COMPLETE** — all ten verified against real call paths; stale claims superseded; three node docs synced; limitations, Gate 2 plan and merge criteria recorded (§18) |
 
 Mapping to §20.6: D1→D-C1, D2→D-C2, D3→D-C3, D4→D-C4, D5→D-C5, D6→D-C6.
 D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above).
@@ -2287,10 +2289,21 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 
 *Dependencies.* Commit 5 (`D-C2b`) — the consumer needs a verdict that production actually attaches.
 
+> **ITEMS BELOW MARKED "reconstruction" ARE SUPERSEDED — operator
+> decision 2026-08-05.** The ladder assumed `result_authority` could be
+> recovered from config provenance. The 249-artifact audit (see the D-C4
+> implementation record and §15.E) proves it cannot: it is absent in
+> 249/249 artifacts and derivable from nothing, so NO historical record
+> can reconstruct to authoritative. What was implemented is the frozen
+> rule — missing the contract ⇒ readable, unchanged, authority not
+> established. `reconstructed_legacy` survives only for the
+> D-C1a→D-C2b window, where the iteration DID declare its policy and
+> nothing is reconstructed from nothing.
+
 **3. Implementation plan.**
 - [ ] Read `:196-320` fully before editing.
 - [ ] Add `enters_incumbent_selection` as an **additional** conjunct.
-- [ ] Handle records predating the field by **deterministic reconstruction first**, not blanket exclusion. The draft said "legacy ⇒ UNKNOWN ⇒ excluded" while also promising replay parity — and since EVERY historical record lacks the fields, those two cannot both hold. Ladder:
+- [ ] ~~Handle records predating the field by deterministic reconstruction first~~ **SUPERSEDED, see above.** The draft said "legacy ⇒ UNKNOWN ⇒ excluded" while also promising replay parity — and since EVERY historical record lacks the fields, those two cannot both hold. Ladder:
   1. reconstruct from what old records already persist — `best_valid_trial_*`, the formal record's own gate validity, and the config provenance (`health_checks_config`, `health_config_sha256`);
   2. if reconstruction is complete, emit a `reconstructed_legacy` verdict — **without writing anything back to the artifact** (§4.5);
   3. only if it cannot be reconstructed is it `legacy_authority_unknown`, and excluded.
@@ -3115,6 +3128,87 @@ These are jointly unsatisfiable.
 **Ready for implementation once D-C1/D-C3 carry the 15.C ruling.** No stop
 condition in §11 was triggered: no historical artifact needs rewriting, no
 scientific threshold changes, and GPU admission and O-7 are untouched.
+
+
+---
+
+## 18. D-C8 — implementation and documentation closure, 2026-08-05
+
+**Progress: 10 / 10 implementation checkpoints complete.**
+
+### All ten, verified against real production call paths
+
+| # | checkpoint | commit | behaviour delta |
+|---|---|---|---|
+| 1 | D-C1a | `b751476b` | mode + authority become declared, recorded facts |
+| 2 | D-C1b | `8bdeb7d1` | six startup refusals at the launch boundary (incl. non-finite deltas, added by FU-D-8) |
+| 3 | D-C2a | `c8019e77` | `ScientificAuthority` — conclusions computed, never settable |
+| 4 | D-C2b | `84511954` + `8985d00f` | every FORMAL record carries a verdict; no trial record does |
+| 5 | D-C3 | `7a52e450` + `42a9f679` | **no valid winner ⇒ skip formal**; `-inf` bootstrap + provenance; JSON-safe persistence |
+| 6 | D-C4 | `eb789271` + `7a128f18` | **only an authoritative formal may become the chain incumbent**; fail-closed on tampered/unreconstructable verdicts |
+| 7 | D-C5 | `4767c72a` | non-authoritative results leave the scientific aggregate, and the exclusion is stated deterministically |
+| 8 | D-C6 | `3e91adb6` | structured all-trials-invalid evidence reaches the real planner request |
+| 9 | D-C7b | `09be3357` | gate results say what the gate WAS; ids never rewritten; config sha unshifted |
+| 10 | D-C8 | this commit | closure: audit, doc sync, ledger |
+
+Plus Gate 1's defect fix (`3172bc4c`) and predecessor FU-D-10 (PR #172,
+`51bab481`, integrated at `12506d80`).
+
+### Stale statements removed or superseded
+
+| claim | disposition |
+|---|---|
+| `force_formal_round` as an operator override | superseded in §16.A; the tracker, §15 and Commit 6 all carry the correction |
+| zero-valid-trial formal as an authority rule | superseded by §16.D — launch and authority are separate |
+| historical authority reconstruction | the D-C4 ladder is struck through and marked SUPERSEDED with the 249-artifact evidence |
+| `operator_legacy_declaration` sidecar | withdrawn; both mentions are withdrawal records |
+| D-C9 / eleven-checkpoint counts | withdrawn; totals retotalled to 10 throughout |
+| "recoverable config ⇒ full authority reconstruction" | §15.E corrected: exact-SHA recovery gives mode and validity, never an absent `result_authority` |
+
+### Node/skill documentation synced
+
+`ml_hyperparameter_tune_agent.md` (three new output fields),
+`ml_model_proposal_agent.md` (`recent_trial_validity` + the
+`[RECENT TRIAL VALIDITY]` block on BOTH prompt paths),
+`result_interpretation_agent.md` (the scientific-aggregation section).
+
+### Known limitations, stated rather than hidden
+
+- **Tamper-EVIDENT, not tamper-proof.** The persisted verdict is a plain
+  dict; any writer can edit it. What is guaranteed is detection —
+  the facts travel with the conclusions and every consumer re-derives.
+- **M7 (D-C3)** is caught only by a structural assertion. While trial
+  history cannot change mid-round the two winner resolutions agree by
+  construction, so no behavioural test can separate them.
+- **Historical workspaces carry no incumbent forward.** A direct,
+  intended consequence of the frozen rule; the `-inf` bootstrap applies
+  until a new authoritative formal is produced.
+- **`v18r_queue_runner.sh:48`** carries the same `grep -q` fail-open
+  pattern fixed in PR #172, deliberately untouched (retired campaign).
+- **A NaN delta is refused at launch but not schema-constrained**
+  (FU-D-8 closed the launch path; the field remains a plain `float`).
+
+### Final Gate 2 plan
+
+Minimum bounded workload, derived from what synthetic execution cannot
+establish. Everything provable without a GPU is already covered by 7,400+
+unit tests, the mutation suites and Gate 1.
+
+| case | property only real execution can establish | bound |
+|---|---|---|
+| G2-1 | a real chain iteration produces a formal record carrying a genuine `scientific_authority` verdict, and resume admits it as the incumbent | 1 iteration, 1 model, minimal scope/epochs |
+| G2-2 | the JSON artifacts written by a real run contain no `Infinity`/`NaN` and carry the provenance fields | same run's artifacts |
+
+Both read from a single bounded run — G2-2 inspects G2-1's artifacts
+rather than launching separately. Stable external GPU occupancy is
+acceptable; demand is attributed to the candidate-owned process tree.
+
+### Merge criteria
+
+1. full `tests/unit` green from a clean tree;
+2. full GitHub CI green on the exact merge head;
+3. final integrated V20 Gate 2 green on that same head;
+4. any commit after Gate 2 invalidates 2-3 and requires repeating both.
 
 
 ---
