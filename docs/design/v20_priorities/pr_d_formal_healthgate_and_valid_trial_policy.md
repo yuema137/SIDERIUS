@@ -21,9 +21,14 @@ unchanged, with scientific authority simply not established — no
 annotation, no sidecar, no reconstruction, no finer classification. The
 249-artifact audit under D-C4 is the evidence for why (see §15.E).
 
-Predecessor FU-D-10 merged to master as PR #172 (`51bab481`) and is
-integrated here at `12506d80`. Next: the combined bounded Gate 1, then
-D-C8 (final audit + documentation closure). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
+Predecessors merged to master and integrated here: FU-D-10 as PR #172
+(`51bab481`, integrated `12506d80`) and the workflow launch-guard capability
+as PR #174 (integrated `0ab71af4`). Gate 1 ran and PASSED (§17). D-C8 is
+complete (§18).
+
+**Next**: the two runtime-control predecessors in §20 — the narrow
+attribution/lifecycle hotfix and the PR C occupancy-policy correction — then
+full CI on the exact head, then final integrated Gate 2 on that same head.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -35,8 +40,13 @@ Audited code baseline      af5339ce   (after PR E and the role hotfix #171)
 Previous baselines         334d388d   (post-PR-E re-audit)
                            dd8d66aa   (PR C2 merged, 40d17f69)
 Predecessor hotfix         af5339ce   (D-C7a — DONE, PR #171, master CI green)
-Policy dependencies        none — all resolved (§14, §15)
-Implementation             pending final operator approval; 10 commits, D-C7a removed
+                           51bab481   (FU-D-10 — DONE, PR #172)
+                           d6473d93   (launch-guard capability — DONE, PR #174)
+Policy dependencies        PR D's own: none — all resolved (§14, §15)
+                           PR C occupancy correction: ONE OPEN (§20.3
+                           stability tolerance — no numeric value authorized)
+Implementation             10 of 10 complete; D-C7a removed. Acceptance
+                           blocked on the two §20 predecessors.
 ```
 
 **Re-audited against master after PR E (§15).** The re-audit confirmed
@@ -61,10 +71,17 @@ Parent scope: `docs/design/v20_priorities.md` §20.6.
 Governing genericization contract: `v20_priorities.md` §1.4 (§8 here).
 Predecessors: PR B (`4472f15`), PR C1 (`781e3e8a`), PR C2 (`40d17f69`).
 
-**Dependencies**: none outstanding. The §12A.4 default-mode decision is
-closed — a new formal campaign declares both dimensions or is refused
-(§4.1). PR D touches no GPU measurement, no admission path and no O-7
-accounting. One commit (D-C6) is LLM-facing and requires Gate 1.
+**Dependencies**: **two runtime-control predecessors are outstanding**, both
+blocking final acceptance (§20) — the narrow probe attribution/lifecycle
+hotfix, and the PR C occupancy-policy correction. Neither is a PR D code
+change: PR D's own implementation touches no GPU measurement, no admission
+path and no O-7 accounting. They block because **final Gate 2 cannot run
+until they land** — attempt 1 was aborted by them before any formal round
+completed (§19).
+
+The policy dependencies are closed: the §12A.4 default-mode decision — a new
+formal campaign declares both dimensions or is refused (§4.1). One commit
+(D-C6) is LLM-facing and required Gate 1, which has passed (§17).
 
 **What this PR is NOT.** It does not retune a threshold, does not remove
 observe-only mode, does not force a trial to succeed, and does not move any
@@ -470,24 +487,31 @@ boundary is how a second authority path gets built by accident.
 
 ---
 
-### 4.5 V19's artifacts are immutable; the classification is a sidecar
+### 4.5 V19's artifacts are immutable, and nothing is written alongside them
 
-**Operator decision 2026-08-04.** V19's manifests are read-only forensic
-evidence and are **not rewritten**. Back-filling `healthgate_mode:
-observe_only` onto them would manufacture a record that the field existed
-at the time, which is exactly the kind of retrospective tidying that
-destroys the evidential value of an incident archive.
+**Operator decision 2026-08-04, superseded 2026-08-05.** V19's manifests are
+read-only forensic evidence and are **not rewritten**. Back-filling
+`healthgate_mode: observe_only` onto them would manufacture a record that the
+field existed at the time, which is exactly the kind of retrospective tidying
+that destroys the evidential value of an incident archive. That part stands.
 
-Instead a separate **closure annotation** is written alongside, recording:
+**What changed**: the 2026-08-04 decision also called for a separate closure
+annotation written alongside the archive. **That sidecar was withdrawn on
+2026-08-05**, together with D-C9 and all historical-authority reconstruction.
 
-* the original config path and its sha256;
-* the verified observe-only classification, with the evidence it rests on;
-* the date and basis of the retrospective classification (2026-08);
-* hashes of the unchanged source artifacts, so the annotation can be shown
-  not to have touched them.
+The governing rule is now simply:
 
-This is the same principle PR E applies to historical STOP evidence:
-preserve, annotate, never delete or rewrite.
+> A record missing the authority contract has **authority not established**.
+> It stays readable and unchanged, never becomes an incumbent, and never
+> enters scientific aggregation. No annotation, no sidecar, no
+> reconstruction, no finer classification.
+
+The evidence is the 249-artifact audit recorded in §15.E: `healthgate_mode`
+and `result_authority` are absent in 249 of 249 historical artifacts, and
+`result_authority` is derivable from nothing that was persisted — so no
+historical record could reconstruct to authoritative even if a sidecar
+existed. D-C4 already returns `unreconstructable_legacy` for exactly this
+class, which is the ruled behaviour and needed no implementation change.
 
 ### 4.6 Mixed *roles* are legal; mixed *semantics within a role* are not
 
@@ -742,7 +766,9 @@ check without typed roles would have passed V19's own config (§4.6.1).
 
 ## 7. Commit plan
 
-Eleven commits. Each is independently revertible and states its own Behavior
+**Ten commits** (D-C9 withdrawn 2026-08-05; the former commit 2, `D-C7a`,
+landed on master as PR #171 and is no longer a PR D commit). Each is
+independently revertible and states its own Behavior
 Delta. The ordering rule is PR C's: **the typed boundary lands before
 anything consumes it**, so no commit adds branching to a consumer that
 cannot yet be told the truth.
@@ -952,13 +978,28 @@ CLI --healthgate_mode / --result_authority
 | branch | `healthgate_mode` | `result_authority` |
 |---|---|---|
 | `completed` | the declared value | the declared value |
-| `no_records` | `null` | `null` |
-| `failed` | `null` | `null` |
+| `no_records` | ~~`null`~~ → the declared value | ~~`null`~~ → the declared value |
+| `failed` | ~~`null`~~ → the declared value | ~~`null`~~ → the declared value |
 
-`null` on the two non-completed branches is the honest answer, not a gap
-to be filled: those paths have no tuner output, so there is no declaration
-to report. Downstream must read it as "authority not establishable from
-the declaration", never as a silent `blocking`.
+> **This table's original rationale was a DEFECT, corrected at `735031ab`
+> (§19.1).** It read: *"`null` on the two non-completed branches is the
+> honest answer, not a gap to be filled: those paths have no tuner output,
+> so there is no declaration to report."*
+>
+> That reasoning is wrong because it treats the two fields as tuner-result
+> fields. They are **validated launch declarations**. D-C1b refuses the
+> launch unless both are declared and consistent, so by the time any
+> artifact is written they exist regardless of what the tuner later did.
+>
+> Gate 2 attempt 1 measured the consequence: a chain launched with
+> `--healthgate_mode blocking` wrote `healthgate_mode: null`, which D-C4
+> then reads as `unreconstructable_legacy` — a failed iteration disguised as
+> a pre-declaration artifact. Every post-launch branch now writes the
+> declaration from the validated launch input.
+>
+> Fail-closed is unchanged: a caller genuinely outside the contract still
+> records `null`, which downstream reads as "authority not establishable",
+> never as a silent `blocking`.
 
 **Tests** — 15 new in
 `tests/unit/agent/schemas/test_healthgate_mode_declaration.py`; the
@@ -2896,13 +2937,29 @@ zero-valid-trial; one-valid-trial; mixed valid/invalid; diagnostic formal;
 incumbent exclusion; reporting exclusion; manifest provenance. All nine are
 §20.6's validation list.
 
-**Layer 3 — bounded real run.** §20.6 requires a small real run that
-**deliberately produces collapse** and proves the formal result cannot become
-authoritative. Run it in a **fresh workspace** with a bounded
-collapse-inducing configuration of the same class as V19's. **V19's
-artifacts are a read-only reference for the expected signature — never a run
-input** (§4.5); feeding them in would both contaminate the run and put the
-immutable archive on a write path.
+**Layer 3 — bounded real run.** §20.6's original framing asked for a small
+real run that **deliberately produces collapse**, proving a formal result
+cannot become authoritative.
+
+**Corrected 2026-08-05 by §16.D.** Collapse is the wrong instrument for that
+claim, because launch validity and result authority are separate axes: under
+the frozen policy a collapsed trial stage means formal is **skipped**, so a
+collapse run produces *no formal record at all* and therefore cannot
+demonstrate anything about a produced record's authority. The two properties
+are now proved separately:
+
+* **non-authority of a produced formal record** — proved deterministically,
+  by `ScientificAuthority` over every basis (Layer 1) and by the incumbent
+  and aggregation consumers refusing it (Layer 2). No real run is required
+  or able to add to this.
+* **the launch decision under zero valid trials** — proved by the real run:
+  no winner ⇒ formal skipped, with the structured planner feedback emitted.
+
+The real-run requirement itself is unchanged and is discharged by the Gate 2
+matrix in §20.4. Run it in a **fresh workspace**. **V19's artifacts are a
+read-only reference for the expected signature — never a run input** (§4.5);
+feeding them in would both contaminate the run and put the immutable archive
+on a write path.
 
 **Reachability evidence is mandatory** (PR C's lesson, twice over): a test
 that fails when the production path bypasses the verdict. PR C shipped an
@@ -2917,7 +2974,16 @@ verdict computed and never consulted — must fail a test.
 From §20.6, plus what the audit added:
 
 1. campaign mode is explicit **and verified against the resolved config**;
-2. no authoritative result exists without a valid trial;
+2. **no formal round is LAUNCHED without a valid trial**, and no produced
+   formal record is authoritative unless it is blocking + scientific +
+   formal-valid.
+
+   > Corrected 2026-08-05 by §16.D. This criterion previously read "no
+   > authoritative result exists without a valid trial", which conflates
+   > the two axes: trial evidence decides whether formal **runs**; a
+   > completed formal record's own facts decide whether it may inform
+   > science. Trial count must never appear in an authority verdict.
+
 3. observe-only remains available, unchanged in behaviour, and honest;
 4. labels do not contradict effective behaviour (§3.2 is fixed);
 5. incumbent and reports enforce the policy;
@@ -2959,9 +3025,15 @@ Stop for operator review if:
 ## 13. Expected artifacts
 
 The manifest mode field and its consistency check; the `ScientificAuthority`
-verdict with its tests and mutation proofs; the structured
-all-trials-invalid feedback block; and a bounded real run that deliberately
-collapses and proves non-authority.
+verdict with its tests and mutation proofs; the structured all-trials-invalid
+feedback block; and the bounded real-run evidence defined by the Gate 2
+matrix in §20.4.
+
+> Corrected 2026-08-05. This previously named "a bounded real run that
+> deliberately collapses and proves non-authority" — which §16.D shows
+> cannot exist, since a collapsed trial stage skips formal and so produces
+> no formal record whose authority could be examined. See §9 Layer 3 for how
+> the two properties are proved separately.
 
 ---
 
@@ -2974,7 +3046,7 @@ already reflected in §4 and §7.
 |---|---|---|
 | 1 | Default mode for a formal campaign | **No default.** A new formal campaign must declare both fields explicitly. Omission is refused before any LLM or GPU work. Policy is never inferred from a config filename. Historical manifests stay readable. |
 | 2 | Does `diagnostic` differ behaviourally from `observe_only`? | **The question was the symptom.** They are different axes, not values of one (D-D-5): `healthgate_mode` ∈ {blocking, observe_only} governs control flow; `result_authority` ∈ {scientific, diagnostic} governs eligibility. `observe_only + scientific` is refused; `blocking + diagnostic` is now expressible and legitimate. |
-| 3 | Retroactive labelling of V19 | **Do not rewrite.** V19 artifacts are immutable forensic evidence. A separate closure annotation records the classification, its basis and its retrospective date, with before/after hashes proving nothing was touched (§4.5, commit 10). |
+| 3 | Retroactive labelling of V19 | **Do not rewrite — and do not annotate either (revised 2026-08-05).** V19 artifacts are immutable forensic evidence. The closure annotation this row originally required was **withdrawn** with D-C9: a record missing the contract simply has authority not established, and is never an incumbent and never in scientific aggregation. No annotation, no sidecar, no reconstruction (§4.5). |
 
 | 4 | Is a **mixed** effective config a refusal? | **No — the question was posed at the wrong level (operator, 2026-08-04).** Mixed *roles* are the correct and normal configuration; mixed *semantics within one role* are the defect. See §4.6. |
 | 5 | Must the exclusion count reach the **LLM-facing** interpretation input? | **Default: no (operator, 2026-08-04).** The exclusion must reach the final report, but deterministically. See §4.7. |
@@ -3069,8 +3141,10 @@ still exposed to the window. What landed:
 UNKNOWN to the empty set; new code calls the resolver, which can express
 UNKNOWN. The hotfix carries **only** role consistency — `healthgate_mode`,
 `result_authority`, `ScientificAuthority`, zero-valid-trial authority,
-deterministic reporting, planner feedback and the V19 sidecar all remain
-PR D's work.
+deterministic reporting and planner feedback all remain PR D's work.
+
+> Corrected 2026-08-05: this list also named "the V19 sidecar", which was
+> **withdrawn** with D-C9 and is no longer in PR D's scope (§4.5).
 
 **The ruling it implements.** The **effective config remains
 authoritative** — it is reproducible and resists repo drift, which is why
@@ -3161,12 +3235,22 @@ scientific threshold changes, and GPU admission and O-7 are untouched.
 
 ---
 
-## 20. Final-acceptance plan after Gate 2 attempt 1 — PROPOSED, awaiting operator review
+## 20. Final-acceptance plan after Gate 2 attempt 1 — DIRECTION APPROVED 2026-08-05
 
 Gate 2 attempt 1 (§19) exposed **two independent runtime-control defects**.
-This section is the plan to close both before PR D's final acceptance. It is
-a proposal; nothing here is implemented beyond the narrow hotfix already in
-progress.
+This section is the plan to close both before PR D's final acceptance.
+
+**Authorization status** (operator, 2026-08-05):
+
+| item | status |
+|---|---|
+| the two-PR split | **APPROVED in direction** |
+| PR 1, the narrow hotfix (§20.2) | **AUTHORIZED** — may be completed, opened and taken to CI-green |
+| PR 2, the occupancy correction (§20.3) | **design direction approved; implementation NOT authorized** |
+
+PR 2 requires a typed-boundary and stability-tolerance **design audit**,
+reviewed, before any implementation begins. The corrections the operator
+required in this review are marked inline below.
 
 ### 20.1 Why two PRs and not one
 
@@ -3211,12 +3295,59 @@ the residual.
 0% utilisation now classifies `single_candidate_idle` rather than
 `foreign_contended`.
 
-**Commit 2 — typed reasons.** `REQUEST_PROBE` carries a machine-readable
-reason. Only `missing_or_unconsumed_evidence` is an invariant breach; the
-others (`contended_measurement`, `stale_evidence`,
-`candidate_identity_mismatch`, `capability_mismatch`) mean the evidence WAS
-consumed but cannot settle the decision. The lifecycle stops inferring cause
-from a bare decision kind or a log string.
+**Commit 2 — typed reasons, with per-reason audited disposition.**
+`REQUEST_PROBE` carries a **required** machine-readable reason, and the
+lifecycle dispatches **exhaustively** on it. The lifecycle stops inferring
+cause from a bare decision kind or a log string.
+
+> **Corrected 2026-08-05 (operator review).** This section previously said
+> that every reason except `missing_or_unconsumed_evidence` means "the
+> evidence WAS consumed but cannot settle the decision". **That is not
+> established, and asserting it would be exactly the inference-from-a-name
+> error this PR keeps finding.**
+>
+> The real Gate 2 artifact proves only two things:
+>
+> * `contended_measurement` — completed evidence WAS consumed, then judged
+>   unusable under the current policy;
+> * `missing_or_unconsumed_evidence` — an invariant breach.
+>
+> `candidate_identity_mismatch` and `capability_mismatch` may well indicate
+> the opposite: that the probe which just ran does not correspond to the
+> current candidate, i.e. a **wiring or identity invariant defect**.
+> Downgrading those to ADVISORY without evidence would silence the very
+> class of bug the invariant exists to catch. `stale_evidence` is equally
+> unproven either way.
+
+The design rule is therefore:
+
+```text
+REQUEST_PROBE carries a required typed reason
+  -> the lifecycle switches explicitly on that reason
+  -> every reason has an independently audited disposition
+```
+
+and **not**:
+
+```text
+anything except missing_or_unconsumed_evidence -> legitimate
+```
+
+**Commit 2 is blocked on a per-reason audit** of each reason's *producer*
+and lifecycle meaning — `contended_measurement`, `stale_evidence`,
+`candidate_identity_mismatch`, `capability_mismatch`,
+`missing_or_unconsumed_evidence`. Each disposition is justified from the
+producing call site, not from the reason's name. Where the audit cannot
+establish that a reason is benign, it **stays fail-closed**; the invariant is
+not deleted, downgraded or bypassed.
+
+**Legacy vocabulary, stated explicitly.** The hotfix preserves
+`foreign_contended` with its **existing presence-based policy meaning**, and
+does so *only* to avoid changing admission policy inside a bug-fix PR. It is
+**not** the final vocabulary: PR C replaces presence-based `contended`
+semantics with terms that separate occupancy *presence* from measurement
+*validity* (§20.3). Nothing downstream should treat `foreign_contended` as
+part of the post-PR-C design.
 
 **Budget: unchanged, and not invented.** The repository already fixes it —
 `probe_lifecycle.py:135` *"one attempt gets one probe"*, `probe_wiring.py:51`
@@ -3249,34 +3380,105 @@ spent the lifecycle re-decides through the existing policy with
 evidence of contention, when under the frozen principle steadiness is
 precisely what makes a measurement usable.
 
-**The corrected model** must represent four distinct quantities, none of
-which exist today:
+**The corrected model — two focused typed boundaries, not a broad admission
+rewrite.**
+
+> **Corrected 2026-08-05 (operator review).** This section previously
+> proposed adding several independent quantities throughout admission, and
+> miscounted them as "four" while listing five. Broadly extending the
+> admission schema **has not been shown to be necessary**, and doing it
+> first would be the large architectural change the minimal-architecture
+> rule forbids. The smaller design is two concepts with one rule between
+> them.
+
+**Five classes of fact** (the earlier text said four and listed five; the
+last is measurement-quality metadata, categorically different from the
+measured quantities above it):
 
 ```text
-candidate-owned demand          the increment this candidate needs
-current free memory             what the device actually has now
-external occupancy              stable, and a legitimate part of the
-                                conditions being measured
-occupancy change in-window      the thing that can invalidate a measurement
-attribution/sampling completeness
+1  candidate-attributed occupancy / demand   what this candidate owns or needs
+2  current free memory                       what the device actually has now
+3  external attributed occupancy             legitimately part of the
+                                             conditions being measured
+4  occupancy change in-window                the thing that can invalidate
+--------------------------------------------------------------------------
+5  attribution / sampling completeness       measurement-quality metadata,
+                                             not a measured quantity
 ```
 
-and replace `contended` with an outcome vocabulary that separates validity
-from presence:
+They are carried by **two boundaries**:
 
 ```text
-candidate_owned_occupancy       not external
-stable_external_occupancy       calibration VALID; normal admission under
-                                the real current conditions
-unstable_external_activity      measurement cannot carry blocking authority
-unattributed_occupancy          measurement cannot carry blocking authority
+OccupancyContext        the measured facts (1-4) plus the bounded
+                        observation window
+
+MeasurementValidity     whether the calibration can carry blocking
+                        authority — independent of whether external
+                        occupancy exists
+                          valid_stable_conditions
+                          unstable_external_activity
+                          attribution_incomplete
+                          sampling_incomplete
 ```
 
-**OPEN QUESTION — the stability tolerance.** No "how much change is
-unstable" tolerance exists in the repository; the window has no
-sample-to-sample comparison at all. Per the standing rule I will **not
-invent a numeric threshold**. After the design audit I will present options
-with their consequences and stop for the decision.
+The governing rule becomes:
+
+```text
+blocking authority = a measurement exists
+                     AND its MeasurementValidity is valid
+```
+
+instead of today's:
+
+```text
+blocking authority = no external occupancy
+```
+
+which decouples the **presence** of external occupancy from the
+**trustworthiness** of the measurement:
+
+```text
+stable external occupancy
+    -> measurement MAY remain valid
+
+unstable external activity,
+unattributed occupancy,
+or incomplete sampling
+    -> measurement cannot carry blocking authority
+```
+
+**Validity does not imply admission.** A valid calibration under stable
+external occupancy may still **reject** the candidate, because current free
+memory or measured performance is insufficient under the real present
+conditions. That is a normal rejection *from a valid measurement* — not an
+invalid calibration. Conflating the two is precisely the current defect,
+read from the other direction.
+
+**Scope honesty.** Retiring the presence-based `contended` predicate touches
+the frozen `blocking = measured and not contended` invariant
+(`estimate_types.py:126`). That is a runtime-control design change, not a
+small correction, and it is why PR C is design-first and separately merged.
+
+**Stability is not memory variance.** The audit must not reduce stability to
+`max(memory) - min(memory)`. At minimum it must cover:
+
+* external **PID-set** changes across the window;
+* external **attributed-byte** changes;
+* **unattributed-residual** changes;
+* **sampling completeness** (missing, partial or failed samples);
+* changes relevant to **OOM or timeout attribution** — whether external
+  activity changed before or after the failure being attributed;
+* **candidate process-tree completeness** — whether every candidate-owned
+  process was actually trackable.
+
+**OPEN QUESTION — the stability tolerance. No numeric tolerance is
+authorized.** None exists in the repository today; the window performs no
+sample-to-sample comparison at all (`max_mem` takes the peak and nothing
+looks across samples). Per the standing rule I will **not invent one**.
+After the audit I will present the smallest set of configurable tolerance
+options with their consequences and a recommendation, and **stop for the
+operator decision on the numeric/policy choice only** — every other part of
+the design proceeds from repository evidence.
 
 ### 20.4 Ordering, and the final Gate 2
 
@@ -3289,25 +3491,54 @@ final integrated Gate 2 on that same head
 stop before PR D merge
 ```
 
-**The final Gate 2 gains a bounded stable-external-occupancy case.** Attempt
-1 ran on an effectively idle GPU, so it could not have exercised this at all.
-The new case must show the system does NOT demand an idle device, while
-correctly recording candidate-owned demand, current free memory, external
-occupancy, occupancy stability, and attribution completeness.
+**The final Gate 2 is a minimum bounded matrix, not one large campaign.**
+Attempt 1 ran on an effectively idle GPU, so it could not have exercised
+external occupancy at all. Three cases, each proving what only it can:
 
-It must also still establish everything attempt 1 did not: a real
-HealthGate-valid trial winner, the `-inf` bootstrap, the budget bypass, a
-completed formal round carrying a recomputable authoritative verdict, and
-real `restore_prior_state` admission — with
-`enable_chain_incumbent_formal_gates=true`, which attempt 1 did not set.
+**Case A — PR D positive path (real run).** With
+`enable_chain_incumbent_formal_gates=true`, which attempt 1 did not set:
+
+* a real HealthGate-valid trial winner;
+* the `-inf` bootstrap and its recorded
+  `formal_comparison_reference_source`;
+* the budget bypass;
+* a **completed** formal round;
+* a recomputable **authoritative** verdict on that record;
+* `restore_prior_state` admitting it as incumbent;
+* scientific aggregation admitting it;
+* strict JSON throughout — no `Infinity`, no `NaN`.
+
+**Case B — stable external occupancy (real run).** A separate, stable,
+attributable external GPU workload, proving the system does **not** require
+an idle device and that these are recorded *separately*:
+
+* external occupancy present and recorded;
+* occupancy stable across the observation window;
+* the calibration remains **blocking-capable** under that occupancy;
+* candidate demand attributed to the candidate process tree only;
+* current free memory recorded as its own quantity;
+* admission decided from the real present conditions — whatever that
+  decision is. A rejection here is a **pass** for this case if it follows
+  from insufficient free memory under a valid measurement.
+
+**Case C — unstable or unattributable activity.** Proved by
+**deterministic/synthetic tests**, which can construct these windows exactly
+and reproducibly. A real GPU case is added **only if** the code audit shows
+real-device evidence carries distinct acceptance value that a synthetic
+window cannot — real unstable contention is by nature not reproducible, so a
+real run here would be weaker evidence, not stronger.
 
 ### 20.5 Status
 
 ```text
 PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
-runtime hotfix           commit 1 verified against real telemetry, in progress
-occupancy correction     PROPOSED — this section, awaiting review
+design cleanup           this commit — stale text rewritten, §20 corrected
+runtime hotfix           AUTHORIZED; commit 1 verified against real
+                         telemetry, commit 2 blocked on the per-reason audit
+occupancy correction     direction approved; implementation NOT authorized
+                         until the typed-boundary + stability audit is
+                         reviewed. One open policy question (tolerance).
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
@@ -3444,6 +3675,22 @@ Plus Gate 1's defect fix (`3172bc4c`) and predecessor FU-D-10 (PR #172,
 | D-C9 / eleven-checkpoint counts | withdrawn; totals retotalled to 10 throughout |
 | "recoverable config ⇒ full authority reconstruction" | §15.E corrected: exact-SHA recovery gives mode and validity, never an absent `result_authority` |
 
+> **This audit was incomplete, and the row above proves it.** D-C8 claimed
+> the eleven-checkpoint counts were "retotalled to 10 throughout" — but §7's
+> opening sentence still read *"Eleven commits"* until the 2026-08-05 design
+> cleanup found it. The operator review found eight further stale claims
+> that D-C8 passed over: the top-level next-steps and dependency status,
+> §4.5's withdrawn sidecar, §9 Layer 3, §10's merge criterion 2, §13, §14
+> decision 3, §15.C's PR-D scope list, §18's own Gate 2 plan, and the D-C1a
+> `null` rationale that §19.1 had already disproved.
+>
+> **The lesson, recorded rather than smoothed over**: D-C8 verified the
+> corrections it had *made* and did not re-read the document as a reviewer
+> would. A supersession note is not a correction — a reader who reaches §10
+> first is simply misinformed. The 2026-08-05 cleanup rewrites the stale
+> text in place, at its own location, rather than relying on precedence
+> reconstruction across 3,700 lines.
+
 ### Node/skill documentation synced
 
 `ml_hyperparameter_tune_agent.md` (three new output fields),
@@ -3479,8 +3726,22 @@ unit tests, the mutation suites and Gate 1.
 | G2-2 | the JSON artifacts written by a real run contain no `Infinity`/`NaN` and carry the provenance fields | same run's artifacts |
 
 Both read from a single bounded run — G2-2 inspects G2-1's artifacts
-rather than launching separately. Stable external GPU occupancy is
-acceptable; demand is attributed to the candidate-owned process tree.
+rather than launching separately.
+
+> **SUPERSEDED by §20.4.** This plan was written before Gate 2 attempt 1 ran.
+> Two things in it were wrong:
+>
+> * it asserted *"stable external GPU occupancy is acceptable; demand is
+>   attributed to the candidate-owned process tree"* — stated as fact about
+>   the system. Attempt 1 measured the opposite: the candidate's **own**
+>   memory was counted as foreign, and stable external occupancy is treated
+>   as invalidating. That is the §20.3 defect, and it was written here as a
+>   property rather than verified as one;
+> * two cases on an idle GPU cannot establish the occupancy behaviour at
+>   all.
+>
+> The governing plan is the three-case matrix in §20.4. G2-1/G2-2 survive
+> inside its Case A.
 
 ### Merge criteria
 
