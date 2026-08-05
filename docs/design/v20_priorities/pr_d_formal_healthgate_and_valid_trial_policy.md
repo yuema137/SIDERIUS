@@ -3775,11 +3775,10 @@ PR D implementation      10 / 10
 PR D declaration fix     landed (735031ab)
 design cleanup           this commit — stale text rewritten, §20 corrected
 runtime hotfix           MERGED 2026-08-05 as PR #175 (f99650a4)
-occupancy correction     IMPLEMENTED. PR #176 open (3 commits):
-                         01406924 boundary + OOM attribution,
-                         779ccb46 invariant + producer path,
-                         4th commit device-identity threading.
-                         Awaiting CI, then operator merge.
+occupancy correction     PR #176 CI-GREEN at a28a6813, MERGEABLE.
+                         AWAITING OPERATOR MERGE. 3 commits: 01406924
+                         boundary + OOM attribution, 779ccb46 invariant +
+                         producer path, a28a6813 device-identity threading.
 final Gate 2             attempt 1 FAILED; retry blocked on both PRs
 merge readiness          NOT READY
 ```
