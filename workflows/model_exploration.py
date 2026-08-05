@@ -83,7 +83,7 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
 )
 from agent.schemas.ordering import OrderStrategy
-from agent.schemas.proposal import ExpertContextItem, VocabEntry
+from agent.schemas.proposal import ExpertContextItem, ProposalOutput, VocabEntry
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
@@ -1461,6 +1461,21 @@ def run_workflow(
     # leave this at None and behaviour is bit-for-bit unchanged.
     # See docs/Consistent_growing_vocab_list.md §10.3.3.
     restored_previous_proposal: dict | None = None,
+    # --- Validation-only: a fixed candidate PLAN, replacing the proposer ---
+    #
+    # V20 FU-D-11. Supplies the typed `ProposalOutput` directly instead of
+    # asking the LLM for one, so an acceptance run stops depending on which
+    # architecture a planner happens to invent. It bypasses the PROPOSER and
+    # nothing else: implement, validate, trial, HealthGate, winner selection,
+    # formal launch, authority, resume and aggregation all run unchanged on
+    # the real path.
+    #
+    # It cannot carry results by construction — `ProposalOutput` has no field
+    # for a score, record, gate verdict, authority verdict or incumbent — and
+    # the loader rejects unknown keys rather than dropping them, so a file
+    # containing one fails loudly at startup instead of being silently
+    # ignored.
+    validation_fixed_candidate_plan: dict | None = None,
     # --- V19 PR 1 (P1-C3) — chain formal-incumbent carry-over ---
     # Two-state design (design doc §3.4): the restored chain incumbent
     # seeds ONLY the local ``chain_formal_incumbent_reference`` (consumed
@@ -2281,13 +2296,25 @@ def run_workflow(
                         f"iter{iteration:03d}_attempt{attempt:03d}_proposing_system_prompt.md",
                     )
 
-                _propose_agent = MLModelProposalAgent(
-                    **llm_config.get("propose"),
-                    bridge_factory=bridge_factory,
-                )
-                _bind_iter_context(_propose_agent)
-                proposal = _propose_agent.run(propose_input)
-                print(f"    Proposed: {proposal.model_name}")
+                if validation_fixed_candidate_plan is not None:
+                    # VALIDATION POSTURE ONLY. The proposer is skipped; every
+                    # downstream stage still runs for real.
+                    proposal = ProposalOutput.model_validate(validation_fixed_candidate_plan)
+                    candidate_source = "fixed_validation_plan"
+                    print(
+                        f"    [FIXED PLAN] proposer bypassed — candidate "
+                        f"{proposal.model_name!r} supplied by the operator "
+                        f"(candidate_source={candidate_source})"
+                    )
+                else:
+                    _propose_agent = MLModelProposalAgent(
+                        **llm_config.get("propose"),
+                        bridge_factory=bridge_factory,
+                    )
+                    _bind_iter_context(_propose_agent)
+                    proposal = _propose_agent.run(propose_input)
+                    candidate_source = "llm_proposal"
+                    print(f"    Proposed: {proposal.model_name}")
                 _log_rss(f"post-proposal (iter {iteration} attempt {attempt})")
 
                 # Rename attempt dir to include model name
