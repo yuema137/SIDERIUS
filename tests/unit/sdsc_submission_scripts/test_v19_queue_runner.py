@@ -442,10 +442,23 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         # every case wait out the full sleep.
         bash -c "sleep 20; true # {fixture_comment} {marker}" >/dev/null 2>&1 &
         FIXTURE=$!
-        sleep 0.4
+        # DETERMINISTIC cleanup. Killing only on the happy path leaks a
+        # 20-second process whenever `launch_chain` exits non-zero or the
+        # subprocess times out — and a leaked fixture is not inert: its
+        # argv carries a workspace marker, so it pollutes the very `ps`
+        # scan these tests and the guard itself depend on. Observed: a
+        # full-suite run reported 148 unrelated failures purely from
+        # accumulated fixture processes.
+        trap 'kill "$FIXTURE" 2>/dev/null; wait "$FIXTURE" 2>/dev/null' EXIT
+        # POLL, do not sleep a fixed interval. A fixed wait is a race: under
+        # a loaded suite the fixture may not be visible in `ps` yet, the
+        # guard then sees nothing, and a "should block" case fails
+        # intermittently.
+        for _ in $(seq 1 100); do
+            if ps -eo args | grep -qF -- "{marker}"; then break; fi
+            sleep 0.05
+        done
         launch_chain {self.RUN} 15-19 15,16,17,18,19 arch
-        kill "$FIXTURE" 2>/dev/null
-        wait "$FIXTURE" 2>/dev/null
         """
         subprocess.run(
             ["bash", "-c", f"V19_QUEUE_NO_MAIN=1 source '{runner or RUNNER}'; {script}"],
@@ -463,6 +476,31 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         holding this workspace, so do not launch on top of it."""
         log = self._guard_says(tmp_path, "some_other_program")
         assert self.BLOCKED in log
+
+    def test_the_fixture_leaves_no_process_behind(self, tmp_path):
+        """MUTATION TARGET: dropping the fixture's EXIT trap.
+
+        These cases spawn a 20-second process whose argv carries a
+        workspace marker. A leak is not inert — it pollutes the `ps` scan
+        that both the guard and every other case in this class read, and
+        it outlives the test by design. Measured once: accumulated fixture
+        processes produced 148 unrelated failures across a full run.
+
+        Asserted against THIS test's own marker, so a leak from an
+        unrelated run cannot make it pass or fail spuriously.
+        """
+        import subprocess as _sp
+
+        marker = str(tmp_path / "root" / self.RUN)
+        self._guard_says(tmp_path, "leak_probe")
+
+        survivors = _sp.run(
+            ["bash", "-c", f"ps -eo args | grep -vF -- 'grep' | grep -F -- {marker!r} || true"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        assert survivors == "", f"the fixture leaked a live process: {survivors!r}"
 
     def test_the_runner_does_not_see_itself(self, tmp_path):
         """Behaviour under the CURRENT filename is unchanged: a process
@@ -518,7 +556,7 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
 
     def test_the_exclusion_derives_from_the_script_name(self):
         """MUTATION TARGET: restoring the literal, in any campaign's
-        spelling."""
+        spelling — and there must be exactly ONE process scan."""
         src = RUNNER.read_text(encoding="utf-8")
         assert 'RUNNER_BASENAME="${BASH_SOURCE[0]##*/}"' in src
         live = [
@@ -527,6 +565,67 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
             if "grep -v" in line and not line.strip().startswith("#")
         ]
         assert live == [
-            'if ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
-            '| grep -qF -- "$WS_ROOT/$RUN"; then'
+            'LIVE_PROCS="$(ps -eo args | grep -v grep | grep -vF -- "$RUNNER_BASENAME" '
+            '| grep -F -- "$WS_ROOT/$RUN" || true)"'
         ], live
+
+    def test_the_scan_shape_does_not_fail_open_under_pipefail(self):
+        """DETERMINISTIC reproduction of the fail-open, independent of load.
+
+        The real defect only surfaces when `ps` output is long enough that
+        the upstream grep is still writing when the final grep exits — so
+        on a quiet box the behavioural tests above pass with the BROKEN
+        code. This reproduces it on demand by putting the match at the
+        very start of a large synthetic stream, which guarantees the early
+        close.
+
+        Both halves are asserted: the `-q` shape must fail open (proving
+        the test exercises the real mechanism and is not vacuous), and the
+        production shape must not.
+        """
+        stream = "printf 'MATCH_TOKEN\\n'; yes filler | head -200000"
+        broken = (
+            f"set -o pipefail; ({stream}) | grep -v grep "
+            '| grep -vF -- "runner.sh" | grep -qF -- "MATCH_TOKEN"'
+        )
+        fixed = (
+            f'set -o pipefail; FOUND="$(({stream}) | grep -v grep '
+            '| grep -vF -- "runner.sh" | grep -F -- "MATCH_TOKEN" || true)"; '
+            '[ -n "$FOUND" ]'
+        )
+
+        broken_rc = subprocess.run(["bash", "-c", broken], capture_output=True).returncode
+        fixed_rc = subprocess.run(["bash", "-c", fixed], capture_output=True).returncode
+
+        assert broken_rc != 0, (
+            "the `grep -q` shape did NOT fail open here, so this test is not "
+            "exercising the SIGPIPE mechanism and proves nothing"
+        )
+        assert fixed_rc == 0, (
+            "the production scan shape failed to report a match that is "
+            "present — the guard would fail OPEN"
+        )
+
+    def test_the_scan_never_uses_grep_q(self):
+        """MUTATION TARGET: reverting the scan to `grep -q`.
+
+        `-q` exits on its first match and closes the pipe; under
+        `pipefail` (`_chain_common.sh:41`) the upstream grep is SIGPIPEd,
+        the pipeline reports 141, and the `if` reads that as "no match" —
+        the guard fails OPEN. It is load-dependent, so the revert would
+        pass on a quiet box and silently stop guarding on a busy one.
+
+        Structural because the behavioural tests can only catch it while
+        the machine is loaded enough to trigger the SIGPIPE.
+        """
+        src = RUNNER.read_text(encoding="utf-8")
+        scan_lines = [
+            line
+            for line in src.splitlines()
+            if "$WS_ROOT/$RUN" in line and "grep" in line and not line.strip().startswith("#")
+        ]
+        assert scan_lines, "the live-process scan disappeared"
+        for line in scan_lines:
+            assert "grep -q" not in line, (
+                f"the live-process scan uses `grep -q`, which fails OPEN under pipefail: {line!r}"
+            )
