@@ -1591,6 +1591,50 @@ class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
         assert "FORMAL LAUNCH REFUSED" in capsys.readouterr().err
         assert not os.path.exists(ws), "the refusal created a workspace"
 
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    @pytest.mark.parametrize(
+        "flag", ["--skip_formal_min_delta", "--bypass_formal_time_budget_min_delta"]
+    )
+    def test_a_non_finite_delta_refuses_before_any_work(self, capsys, tmp_path, flag, value):
+        """FU-D-8 reachability, on the REAL launch path.
+
+        `argparse(type=float)` happily parses 'nan'/'inf', so this reaches
+        the validator exactly as an operator's CLI would. Without the
+        refusal the run would proceed with both gates silently disabled
+        while the artifact recorded an enforced launch.
+
+        Same assertion as the declaration proof above: exit 2, refusal on
+        stderr, and NO workspace on disk — so it precedes the failure-brake
+        preflight, the LLM, model construction and the GPU.
+        """
+        ws = str(tmp_path / "ws")
+        code = self._main(
+            [
+                "--workspace",
+                ws,
+                "--run_name",
+                "iter_001",
+                "--start_iteration",
+                "1",
+                "--healthgate_mode",
+                "blocking",
+                "--result_authority",
+                "scientific",
+                "--enable_chain_incumbent_formal_gates",
+                # `=` form deliberately: argparse reads a bare `-inf` as a
+                # flag because of the leading dash and errors out before
+                # the validator. That path fails closed, so it is safe —
+                # but it is not the path under test here.
+                f"{flag}={value}",
+            ]
+        )
+
+        assert code == 2
+        err = capsys.readouterr().err
+        assert "FORMAL LAUNCH REFUSED" in err
+        assert "not finite" in err
+        assert not os.path.exists(ws), "the refusal created a workspace"
+
     def test_the_contradiction_refuses_on_the_real_path(self, capsys, tmp_path):
         code = self._main(
             [

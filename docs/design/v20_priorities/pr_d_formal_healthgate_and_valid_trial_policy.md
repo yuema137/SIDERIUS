@@ -1789,25 +1789,116 @@ asserted over every matrix row and over the operator-disable case.
 
 **Follow-ups**
 
-- **FU-D-6** *(new)* — `_best_trial_winner` is still resolved
-  independently in `_apply_mode_override_chain`. Parity is proved by test,
-  not enforced by construction. Threading the resolved winner through would
-  require reworking that function's OOM-recovery branch, which needs the
-  full `memory_history`; deliberately out of D-C3's scope.
-- **FU-D-8** *(new)* — a NaN delta is not REFUSED, only prevented from
-  reaching an artifact. Every comparison against NaN is `False`, so a NaN
-  threshold silently disables both launch gates, and D-C1b's
-  `skip > bypass` ordering check also returns `False` and passes it.
-  Refusing it belongs to D-C1b's launch validation, not to D-C3's
-  persistence fix; filed rather than absorbed to keep this checkpoint's
-  scope honest.
-- **FU-D-7** *(new)* — historical artifacts carry
-  `formal_comparison_reference_source: null`. Distinguishing "predates the
-  field" from the three live cases is a reconstruction question that
-  belongs with D-C4's legacy ladder.
+- **FU-D-6** `[x]` **CLOSED** by the reinforcement commit below.
+- **FU-D-8** `[x]` **CLOSED** by the reinforcement commit below.
+- **FU-D-7** *(new, **DEFERRED — operator decision 2026-08-05**)* —
+  historical artifacts carry `formal_comparison_reference_source: null`,
+  which does not distinguish "predates the field" from the three live
+  cases. **Historical artifacts are NOT to be rewritten to populate it.**
+  It is handled at the legacy-reconstruction / V19-sidecar checkpoint:
+  emit a derived source where reconstruction is reliable, keep
+  unknown/null where it is not, and never modify the V19 originals. Does
+  not block D-C4.
+
+---
+
+#### REINFORCEMENT — D-C3 follow-up closure, NOT a new checkpoint
+
+**Commit**: `<filled at commit>`, on top of D-C3 `7a52e450`. The
+checkpoint count stays **5 / 11**; D-C4 is what makes it 6.
+
+Operator-approved after D-C3 was accepted: close the two follow-ups that
+are themselves launch-gate correctness, before starting D-C4.
+
+**FU-D-6 — one winner snapshot, structurally**
+
+`_apply_mode_override_chain` no longer calls `_best_trial_winner`; it
+takes a required keyword-only `trial_winner`, and the tuner passes the
+same snapshot the skip gate, the bypass gate and the log line used. The
+two agreed before by construction — a formal round forces
+`plan.is_trial = False`, so nothing it appends can satisfy the winner
+filter — but §16.F requires one *snapshot*, not two computations that
+happen to match, and the old seam would diverge the moment anyone added a
+state update between the gates and inheritance.
+
+`memory_history` stays, and is not redundant: the full-clone OOM-recovery
+branch reads the latest record and the maximum `round_index` across the
+whole history, which a winner alone cannot answer.
+
+`trial_winner` is **required**, not defaulted — a `None` default would
+make a forgetful caller silently mean "inherit nothing", a behaviour
+change with no error. Cost: 27 test call sites migrated. In
+`test_force_formal_round.py` a local `_override(...)` helper resolves the
+winner from the supplied history through the real `_best_trial_winner`,
+so the eligibility rules under test (collapsed excluded, formal excluded,
+highest score wins) stay live rather than being bypassed by a hand-built
+dict.
+
+*New test that can actually see the guarantee*:
+`test_inheritance_obeys_the_supplied_winner_over_the_history` hands
+inheritance a history whose own best is `real_winner` while supplying
+`weaker` (different `lr`) as the snapshot. Re-derivation inherits
+`real_winner`; using the snapshot inherits `weaker`. The configuration
+cannot arise in production — that is the point: it isolates *which*
+source is consulted, which no production-shaped fixture can do.
+
+**FU-D-8 — non-finite configured deltas are refused at launch**
+
+Sixth refusal in `validate_formal_launch`. With the gates enabled, both
+`skip_formal_min_delta` and `bypass_formal_time_budget_min_delta` must be
+finite; `NaN`, `+inf` and `-inf` are refused, naming every offending
+field at once.
+
+Checked **before** the ordering rule, and that order is load-bearing:
+`NaN > NaN` is `False`, so an unusable pair passes the ordering check
+unnoticed. At runtime a non-finite delta makes every gate comparison
+`False`, silently disabling both gates while the artifact still records
+an enforced run — the same fail-open shape §16.C eliminated for the
+missing bootstrap reference. Both fields are plain `float` on the schema
+with no finiteness constraint, so this was reachable from the CLI.
+
+**Scope, stated because conflating the two would break the bootstrap**:
+what is refused is the *operator-configured delta*. The internally
+resolved `-inf` comparison reference (§16.C) is a deliberate resolver
+value and stays legal. `TestTheBootstrapIsNotRefused` pins the separation
+by asserting the validator's signature never receives a reference, and
+that the resolver still bootstraps to `-inf`.
+
+Gates disabled → unchanged, matching the established D-C1b convention
+that unused deltas must not block a launch (audited: that is exactly what
+`test_inverted_deltas_are_ignored_when_the_gates_are_disabled` already
+encodes).
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| launch-policy + tuner + reachability (focused) | 112 passed, 6.4 s |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` + health_checks | 1159 passed, 189 s |
+| full `tests/unit` | **7428 passed**, 2 skipped, 4 xfailed, 432 s — run with the tree staged, so the PR3-L2 preflight guard sees a clean diff (see the D-C3 note above) |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / ruff format | clean, 580 files |
+
+**Mutations — 5 run, 5 caught**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| R1 | inheritance re-derives its own winner | `test_inheritance_obeys_the_supplied_winner_over_the_history` | 1 |
+| R2 | `trial_winner` gets a `None` default | `test_the_helper_cannot_silently_fall_back_to_the_history` | 1 |
+| R3 | non-finite refusal removed | the 6 field×value cases + 2 | 8 |
+| R4 | finiteness checked AFTER ordering | same | 8 |
+| R5 | gates-disabled early return removed | inverted-delta compat + 3 scoping cases | 4 |
+
+**Implementation detail found during the work.** `argparse` reads a bare
+`-inf` as a flag (leading dash) and errors before the validator — fail-closed,
+so safe, but not the path under test. The reachability tests use the
+`--flag=value` form to reach the refusal, and say why.
 
 **Next checkpoint**: D-C4 — incumbent exclusion, extending
-`core/resume.py`'s commit-time validity predicate rather than replacing it.
+`core/resume.py`'s commit-time validity predicate rather than replacing
+it. Goal: only an authoritative formal result may update the chain
+incumbent; invalid, diagnostic and unknown formal records stay persisted
+but can never become the comparison basis for a later gate.
 
 ---
 

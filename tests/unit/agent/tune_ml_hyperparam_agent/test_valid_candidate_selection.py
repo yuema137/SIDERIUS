@@ -129,16 +129,18 @@ def test_failed_nontrial_and_contradictory_records_are_excluded() -> None:
 
 
 def test_forced_formal_inherits_best_valid_trial() -> None:
+    history = [_trial("collapsed", 9.0, healthy=False), _trial("healthy", -0.5)]
     plan = _apply_mode_override_chain(
         _plan(),
         trial_allowed=True,
         is_formal_round=True,
         force_formal_round=True,
         formal_round_strategy="inherit_best_trial",
-        memory_history=[
-            _trial("collapsed", 9.0, healthy=False),
-            _trial("healthy", -0.5),
-        ],
+        memory_history=history,
+        # FU-D-6: the winner is resolved once and supplied, exactly as the
+        # tuner does — the collapsed 9.0 is still excluded by the real
+        # resolver, which is the defect this test protects.
+        trial_winner=_best_trial_winner(history),
     )
     assert plan.is_trial is False
     assert plan.model_cfg == {"depth": 2}
@@ -148,13 +150,15 @@ def test_forced_formal_inherits_best_valid_trial() -> None:
 def test_forced_formal_with_no_valid_trial_preserves_planner_config() -> None:
     plan = _plan()
     original_model_cfg = dict(plan.model_cfg)
+    history = [_trial("collapsed", 9.0, healthy=False)]
     result = _apply_mode_override_chain(
         plan,
         trial_allowed=True,
         is_formal_round=True,
         force_formal_round=True,
         formal_round_strategy="inherit_best_trial",
-        memory_history=[_trial("collapsed", 9.0, healthy=False)],
+        memory_history=history,
+        trial_winner=_best_trial_winner(history),
     )
     assert result.is_trial is False
     assert result.model_cfg == original_model_cfg

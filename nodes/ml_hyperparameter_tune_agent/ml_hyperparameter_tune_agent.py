@@ -1534,6 +1534,7 @@ def _apply_mode_override_chain(
     force_formal_round: bool,
     formal_round_strategy: str = "full_clone",
     memory_history: list | None = None,
+    trial_winner: dict | None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
 
@@ -1584,6 +1585,23 @@ def _apply_mode_override_chain(
       score=<float> inherited=<comma-list>`` on the inherit path, OR
       a WARNING line on the no-winner path (full_clone / hybrid_params).
 
+    **``trial_winner`` is supplied, never re-derived** (V20 PR D, FU-D-6).
+    The tuner resolves the iteration's HealthGate-valid trial winner ONCE
+    at the formal-round boundary, and the skip gate, the bypass gate, the
+    log line and this inheritance path all judge that same record. This
+    function used to call ``_best_trial_winner(memory_history)`` itself.
+    That agreed with the gates by construction — a formal round forces
+    ``plan.is_trial = False``, so nothing it appends can satisfy the
+    winner filter — but agreement by construction is not the same as one
+    snapshot, and the frozen design (§16.F) requires the snapshot. Keeping
+    the second call would leave a seam where a later state update between
+    the gates and inheritance silently diverges the two.
+
+    ``memory_history`` is still required, and is NOT redundant: the
+    full-clone OOM-recovery branch inspects the LATEST record and the
+    maximum ``round_index`` across the whole history, which a winner alone
+    cannot answer.
+
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
     if not trial_allowed:
@@ -1611,7 +1629,7 @@ def _apply_mode_override_chain(
         + (f" (alias_of:{formal_round_strategy})" if canonical != formal_round_strategy else "")
     )
 
-    winner = _best_trial_winner(memory_history or [])
+    winner = trial_winner
     if winner is None:
         if canonical == "independent":
             # ``independent`` explicitly disclaims inheritance — a missing
@@ -3724,6 +3742,10 @@ class HyperparamTuningAgent:
                         force_formal_round=agent_input.force_formal_round,
                         formal_round_strategy=agent_input.formal_round_strategy,
                         memory_history=memory_history,
+                        # FU-D-6: the SAME winner the skip and bypass gates
+                        # judged, resolved once at the formal-round
+                        # boundary above — not re-derived here.
+                        trial_winner=formal_trial_winner,
                     )
 
                     # DataScope DS5 — normalize LLM-planned strategies under a

@@ -374,10 +374,10 @@ class TestTheWinnerIsResolvedOnce:
     """Row 12 — the same winner snapshot reaches skip, bypass, the log
     line and formal-plan inheritance.
 
-    Three independent `_best_trial_winner` calls would agree today only
-    because the trial history cannot change between them. That is a
-    property worth asserting rather than assuming, because it is what
-    makes the single-resolution refactor behaviour-preserving.
+    Originally three independent `_best_trial_winner` calls agreed only
+    because the trial history cannot change between them. FU-D-6 closed
+    that seam: inheritance now RECEIVES the winner instead of deriving
+    one, so agreement is structural rather than coincidental.
     """
 
     RECORDS: ClassVar[list[dict]] = [
@@ -390,9 +390,6 @@ class TestTheWinnerIsResolvedOnce:
         winner = _best_trial_winner(self.RECORDS)
         assert winner is not None and winner["exp_id"] == "real_winner"
 
-        # The formal plan inherits from `_apply_mode_override_chain`, which
-        # resolves the winner itself from `memory_history`. Prove it lands
-        # on the same record by checking the config it actually inherited.
         from agent.schemas.hyperparam_tuning import ExperimentPlan
 
         plan = _apply_mode_override_chain(
@@ -409,9 +406,68 @@ class TestTheWinnerIsResolvedOnce:
             force_formal_round=True,
             formal_round_strategy="inherit_best_trial",
             memory_history=self.RECORDS,
+            trial_winner=winner,
         )
         assert plan.model_cfg == winner["params"]["model_config"]
         assert plan.train_cfg["lr"] == winner["params"]["train_config"]["lr"]
+
+    def test_inheritance_obeys_the_supplied_winner_over_the_history(self):
+        """FU-D-6's actual guarantee, and the only test that can show it.
+
+        Hand inheritance a history whose OWN best is `real_winner` while
+        supplying `weaker` as the resolved winner. If the function still
+        re-derived from the history it would inherit `real_winner`'s
+        config; because it uses the snapshot it must inherit `weaker`'s.
+
+        The two are deliberately given different `lr` values so the
+        assertion cannot pass by coincidence. This configuration cannot
+        arise in production — that is the point: it isolates *which*
+        source is consulted.
+        """
+        from agent.schemas.hyperparam_tuning import ExperimentPlan
+
+        weaker = _trial("weaker", 10.1)
+        # Only the lr differs; the rest of `params` stays intact because
+        # `hybrid_params` also reads `loss_config`.
+        weaker["params"] = {**weaker["params"], "train_config": {"lr": 0.00042}}
+        history = [_trial("real_winner", 10.6), weaker]
+        supplied = weaker
+
+        plan = _apply_mode_override_chain(
+            ExperimentPlan.with_defaults(
+                {
+                    "model_cfg": {"depth": 4},
+                    "train_cfg": {"lr": 0.002, "epochs": 1, "batch_size": 4},
+                    "loss_cfg": {"loss_type": "ce"},
+                    "is_trial": True,
+                }
+            ),
+            trial_allowed=True,
+            is_formal_round=True,
+            force_formal_round=True,
+            formal_round_strategy="hybrid_params",
+            memory_history=history,
+            trial_winner=supplied,
+        )
+
+        assert plan.train_cfg["lr"] == 0.00042, (
+            "inheritance re-derived the winner from memory_history instead "
+            "of using the supplied snapshot"
+        )
+
+    def test_the_helper_cannot_silently_fall_back_to_the_history(self):
+        """MUTATION TARGET: giving `trial_winner` a `None` default.
+
+        A default would make a forgetful caller silently mean "no winner",
+        which for `full_clone`/`hybrid_params` means "inherit nothing" —
+        a behaviour change with no error. Keeping it required turns that
+        into a `TypeError` at the call site.
+        """
+        import inspect
+
+        parameter = inspect.signature(_apply_mode_override_chain).parameters["trial_winner"]
+        assert parameter.default is inspect.Parameter.empty
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
     def test_a_formal_round_cannot_add_a_trial_record_beneath_the_snapshot(self):
         """WHY the round-boundary snapshot is safe to reuse inside the

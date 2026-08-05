@@ -168,6 +168,113 @@ class TestTheDeltaOrderingInvariant:
         _check(skip_formal_min_delta=0.5, bypass_formal_time_budget_min_delta=0.5)
 
 
+class TestNonFiniteDeltasAreRefused:
+    """FU-D-8, closed as D-C3 reinforcement.
+
+    A NaN or infinite delta makes every gate comparison `False`, so both
+    gates are SILENTLY DISABLED while the artifact still records an
+    enforced run. That is the same fail-open shape §16.C eliminated for
+    the missing bootstrap reference, and it is a configuration refusal for
+    the same reason: the alternative is a run that looks enforced and
+    gates nothing.
+
+    Scope matters. What is refused is the OPERATOR-CONFIGURED delta. The
+    internally resolved `-inf` comparison reference is a deliberate
+    resolver value and stays legal — `TestTheBootstrapIsNotRefused` below
+    is what stops a future edit from conflating them.
+    """
+
+    @pytest.mark.parametrize(
+        "value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"]
+    )
+    @pytest.mark.parametrize(
+        "field", ["skip_formal_min_delta", "bypass_formal_time_budget_min_delta"]
+    )
+    def test_each_field_rejects_each_non_finite_value(self, field, value):
+        with pytest.raises(FormalLaunchPolicyError) as exc:
+            _check(**{field: value})
+        message = str(exc.value)
+        assert "not finite" in message
+        assert field in message
+
+    def test_nan_cannot_hide_behind_the_ordering_check(self):
+        """MUTATION TARGET: ordering checked BEFORE finiteness.
+
+        `NaN > NaN` is `False`, so an inverted-and-unusable pair passes the
+        ordering rule unnoticed. Finiteness must be evaluated first — this
+        is the case that proves the order of the two checks matters.
+        """
+        with pytest.raises(FormalLaunchPolicyError) as exc:
+            _check(
+                skip_formal_min_delta=float("nan"),
+                bypass_formal_time_budget_min_delta=float("nan"),
+            )
+        assert "not finite" in str(exc.value)
+
+    def test_both_non_finite_fields_are_named_at_once(self):
+        """An operator fixing one should see the other without re-running."""
+        with pytest.raises(FormalLaunchPolicyError) as exc:
+            _check(
+                skip_formal_min_delta=float("-inf"),
+                bypass_formal_time_budget_min_delta=float("inf"),
+            )
+        message = str(exc.value)
+        assert "skip_formal_min_delta" in message
+        assert "bypass_formal_time_budget_min_delta" in message
+
+    @pytest.mark.parametrize(
+        "value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"]
+    )
+    def test_the_gates_disabled_scoping_rule_still_holds(self, value):
+        """THE COMPATIBILITY BOUNDARY, matching the established convention
+        for inverted deltas: with the gates off the deltas are not consumed
+        at all, so a malformed unused value must not block a launch."""
+        _check(
+            gates_enabled=False,
+            skip_formal_min_delta=value,
+            bypass_formal_time_budget_min_delta=value,
+        )
+
+    def test_ordinary_finite_deltas_including_negatives_still_launch(self):
+        """The refusal is finiteness, NOT sign. `-1.0` is the production
+        default for the skip delta and must stay legal."""
+        _check(skip_formal_min_delta=-1.0, bypass_formal_time_budget_min_delta=0.0)
+
+
+class TestTheBootstrapIsNotRefused:
+    def test_the_internal_negative_infinity_reference_is_a_different_concept(self):
+        """MUTATION TARGET: extending the finiteness refusal to the
+        comparison REFERENCE.
+
+        §16.C makes `-inf` the effective reference when no valid formal
+        incumbent was restored — that is how a fresh chain's first valid
+        trial gets its formal baseline. Refusing it would break the
+        bootstrap outright. `validate_formal_launch` never receives the
+        reference, and this test pins that separation by signature.
+        """
+        import inspect
+
+        params = set(inspect.signature(validate_formal_launch).parameters)
+        assert "current_run_best_formal_score" not in params
+        assert "formal_reference_score" not in params
+        assert "reference_score" not in params
+
+        # And the resolver still bootstraps to -inf, unaffected by the
+        # launch-time delta refusal.
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            _resolve_formal_comparison_thresholds,
+        )
+
+        reference, _, _, source = _resolve_formal_comparison_thresholds(
+            reference_score=None,
+            skip_min_delta=0.0,
+            bypass_min_delta=0.5,
+            gates_enabled=True,
+        )
+        assert reference == float("-inf")
+        assert source == "negative_infinity_bootstrap"
+
+
 class TestRefusalIsNotAScientificEvent:
     def test_it_raises_the_startup_configuration_error_type(self):
         """A policy mismatch is a configuration refusal — not a candidate
