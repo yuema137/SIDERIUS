@@ -1,9 +1,14 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: DESIGN — direction and all five deviations APPROVED; the
-operator's second review (2026-08-04) closed every policy question and
-forced eight further corrections, now applied. IMPLEMENTATION AWAITS FINAL
+**Status: DESIGN — D-C1a IMPLEMENTED (`b751476b`); the formal-gate policy
+is FROZEN in §16 after two read-only audits and the operator's
+negative-infinity bootstrap ruling (2026-08-05). D-C1b AWAITS FINAL
 OPERATOR APPROVAL.**
+
+> **§16 supersedes any earlier statement in this document that conflicts
+> with it**, most consequentially the "explicitly overridden formal round"
+> framing, which was reasoning from the name `force_formal_round` rather
+> than from the code.
 
 ```text
 Audited code baseline      af5339ce   (after PR E and the role hotfix #171)
@@ -288,10 +293,18 @@ valid_trials == 0  =>  no authoritative candidate exists for the iteration
 ```
 
 **Running the formal round and certifying its result are separate
-decisions** (D-D-1, as refined by the operator 2026-08-04). Zero valid
-trials does not *cause* a formal execution: formal runs only through an
-explicit diagnostic or `force_formal_round` override. Whether it runs or
-not, it cannot be granted scientific authority.
+decisions** (D-D-1). That separation survives §16 and is in fact
+strengthened by it.
+
+> **SUPERSEDED BY §16.** The rest of this paragraph read: *"Zero valid
+> trials does not cause a formal execution: formal runs only through an
+> explicit diagnostic or `force_formal_round` override."* Both clauses
+> are false against the code. Zero valid trials leaves the skip gate
+> inert, so formal **does** run; and `force_formal_round` defaults to
+> `True` and is the final-round phase transition, not an override
+> (§16.A). The corrected launch rule is §16.D: **no valid winner ⇒ skip
+> formal.** Authority remains a separate question and is decided from
+> the formal record itself.
 
 When it does run it is fully persisted, labelled `diagnostic`, excluded
 from incumbent selection, excluded from scientific aggregation and grand
@@ -561,13 +574,22 @@ which is a contamination of a different kind.
 result", and D3 permits a diagnostic formal marked non-authoritative. Read
 together with §3.5's resilience intent, the implementable rule is:
 
-> **The round runs only if explicitly overridden. Whether it runs or not,
-> its authority is refused.**
+> ~~**The round runs only if explicitly overridden. Whether it runs or
+> not, its authority is refused.**~~
+>
+> **SUPERSEDED BY §16.** The first sentence was wrong — there is no such
+> override, and the round runs by default. The corrected pair:
+> **no valid trial winner ⇒ the round is skipped**, and authority, when a
+> round does run, is decided from the formal record itself (§16.D).
 
-**Operator refinement, 2026-08-04**: permitting a diagnostic formal is *not*
-the same as automatically running one. Zero valid trials never *causes* a
+**Operator refinement, 2026-08-04, PARTLY SUPERSEDED BY §16**: permitting
+a diagnostic formal is *not* the same as automatically running one — that
+half stands. The half that does not: *"Zero valid trials never causes a
 formal execution — that requires an explicit diagnostic or
-`force_formal_round` override. The two decisions are independent, and only
+`force_formal_round` override."* Measured, zero valid trials **does**
+cause one, because the skip gate returns `False` when there is no winner
+(§16.B). §16.C/D replace the mechanism: no winner ⇒ skip. The two
+decisions are independent, and only
 the second is what D-D-1 governs.
 
 Cancelling the round instead would (a) contradict the deliberate resilience
@@ -656,7 +678,7 @@ refusal in addition to the mode↔config check.
 |---|---|---|
 | **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped on every branch (Behavior Delta: none) · **D-C1b `[ ]`** enforcement not started |
 | **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
-| **D-C3** | An **explicitly overridden** zero-valid-trial formal round still completes, recorded non-authoritative (D-D-1) | `[ ]` not started |
+| **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[ ]` not started |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
@@ -697,7 +719,7 @@ commit**; everything after it moves up one.
 | 2 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
 | 3 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
 | 4 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
-| 5 | `D-C3` explicitly overridden zero-valid-trial formal recorded non-authoritative | none — the override already ran it |
+| 5 | `D-C3` formal-launch correction: no valid winner ⇒ skip formal; `-inf` bootstrap reference | **zero-evidence iterations stop spending a formal round; a fresh chain's gates become armed** |
 | 6 | `D-C4` incumbent exclusion | **non-authoritative results stop entering the incumbent** |
 | 7 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
 | 8 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
@@ -1199,24 +1221,50 @@ existing `best_valid_trial_score`.
 
 ---
 
-### Commit 6 — `D-C3`: an explicitly overridden zero-valid-trial formal round remains runnable, and is recorded non-authoritative
+### Commit 6 — `D-C3`: the formal-LAUNCH decision, corrected
 
-**1. Goal.** Land D-D-1 explicitly, in the direction the title now states.
-Zero valid trials **never causes** a formal execution — that requires an
-explicit diagnostic or `force_formal_round` override. What this commit
-proves is that when such an override *has* fired, the round is **not
-cancelled** and its result is **not certified**. Its own commit so the "we
-did not break the resilience at `:1487-1489`" claim is reviewable in
-isolation.
+> **Rewritten 2026-08-05** after the two gate audits. The previous version
+> of this section was **factually wrong** and is preserved only in Git: it
+> claimed *"Zero valid trials **never causes** a formal execution — that
+> requires an explicit diagnostic or `force_formal_round` override."*
+> Both halves are false, and §16 has the evidence.
 
-The title was previously "a non-blocking formal round runs", which invited
-exactly the reading the operator rejected — that `observe_only` or zero
-valid trials would themselves trigger a formal round. They do not.
+**1. Goal.** Correct the formal-launch decision so that the **absence of
+valid trial evidence stops the spend**, instead of being indistinguishable
+from sufficient evidence.
 
-**2. Scope.** Verification and recording around `force_formal_round`
-(`:1455-1492`). *Non-goals — and this is the point of the commit*: the
-no-winner fallback keeps preserving the planner's plan and keeps logging its
-WARNING. Control flow is unchanged.
+The measured defect (§16.B):
+
+```text
+winner = _best_trial_winner(memory_history)   # HealthGate-valid, this iteration
+_should_skip_formal -> `winner is not None and winner.score < threshold`
+
+winner is None  ->  returns False  ->  formal RUNS
+```
+
+`force_formal_round` does not rescue this and is not an override: it
+defaults to `True` and means *the last round of every iteration runs in
+formal mode regardless of what the planner picked* — the
+cross-architecture comparability contract
+(`hyperparam_tuning.py:1188-1206`). So formal on the final round is the
+**default path**, and the skip gate is the **only** thing that can prevent
+it. An inert skip gate therefore does not merely fail to stop a rare
+override; it lets every zero-evidence iteration spend a full formal round.
+
+**2. Scope.** The launch decision only:
+
+- `winner is None` → **skip formal.** No valid trial is no evidence, and
+  no evidence does not justify the cost.
+- an invalid trial can never be the winner, so it can never open either
+  gate — already true, and asserted so it stays true.
+- the winner is resolved **once** for the launch decision; no second
+  mutable best-trial score is introduced.
+- the effective reference resolves per §16.C, so the gates are armed on a
+  fresh chain instead of silently inert.
+
+*Non-goals.* This commit does not touch formal-RESULT authority — §16.D
+separates them. It does not change what the planner proposes, and it does
+not change `force_formal_round`'s meaning.
 
 *Dependencies.* Commit 5 (`D-C2b`) — the verdict must already be wired in production, not merely defined.
 
@@ -1839,3 +1887,173 @@ one the sha-pinned lookup at `resume.py:386-392` can actually deliver.
 condition in §11 was triggered: no historical artifact needs rewriting, no
 scientific threshold changes, and GPU admission and O-7 are untouched.
 
+
+---
+
+## 16. Formal-gate policy — FROZEN, 2026-08-05
+
+Two read-only audits established the current behaviour and the original
+intent; the operator's ruling below closes the remaining question. This
+section supersedes any earlier statement in this document that conflicts
+with it.
+
+### 16.A What `force_formal_round` actually is
+
+**Not an operator override.** It defaults to `True` and forces
+`plan.is_trial = False` on the last round of every iteration regardless of
+what the planner picked — the "cross-architecture comparable formal score"
+contract the interpreter and proposer depend on
+(`agent/schemas/hyperparam_tuning.py:1188-1206`). Setting it `False` is
+documented as *"ONLY for testing/debugging"*.
+
+Every earlier passage in this document describing a formal round as
+"explicitly overridden" was reasoning from the name. Formal on the final
+round is the **default**, so the skip gate is the only thing that can
+prevent it.
+
+### 16.B The measured launch behaviour
+
+Executed through the real helpers, production posture (switch ON,
+skip Δ 0.0, bypass Δ 0.5, incumbent 10.0):
+
+| trial evidence | winner | skip | bypass | formal |
+|---|---|---|---|---|
+| no records | none | False | False | **RUNS** |
+| all invalid (99.0, 50.0) | none | False | False | **RUNS** |
+| invalid 99.0 only | none | False | False | **RUNS** |
+| valid 9.0 | 9.0 | **True** | False | skipped |
+| valid 10.0 (`== skip`) | 10.0 | False | False | RUNS |
+| valid 10.5 (`== bypass`) | 10.5 | False | **True** | RUNS, budget bypassed |
+| **no incumbent**, valid 0.001 | 0.001 | False | False | **RUNS** — gates inert |
+| **no incumbent**, valid 99.0, budget infeasible | 99.0 | False | False | **SKIPPED** — bypass could not fire |
+
+The last row is the v15 failure `8f1cf528` was written to fix, reappearing
+because the reference is absent rather than because the gate is wrong.
+
+### 16.C The bootstrap reference — OPERATOR DECISION
+
+**When the chain has no restored HealthGate-valid formal incumbent, the
+effective comparison reference is `-inf`.**
+
+Consequences, accepted deliberately: the first HealthGate-valid trial is
+never skipped, always clears any finite bypass threshold, bypasses the
+formal time budget, and establishes the chain's first formal baseline.
+From the next iteration the restored incumbent takes over and the gates
+tighten as the chain improves — the behaviour `8f1cf528` described.
+
+**No task-owned bootstrap artifact.** An earlier audit recommended seeding
+from a configured baseline; that recommendation is **withdrawn**. The
+historical seed was `5.5763`, and the repository classifies it in three
+independent places as the **class-127 phantom** — a *collapsed* model
+scoring well by a PSD artifact
+(`scripts/official_paper_health_scan.py:5`;
+`paper_and_collapse_reference_baselines.md:21` classifies the paper-spec
+wavenet baseline as **"Trained-but-collapsed"**, `mode_fraction ≥ 99.4%`,
+which fails all three role-`blocking` gates). Seeding it would give a
+collapse artifact gate authority over every new chain, and
+`test_delta_gates.py:250` already forbids phantom defaults. Every
+documented paper baseline is collapsed, so **there is no valid artifact to
+bootstrap from** — which is why `-inf` is the answer rather than a lookup.
+
+**Representation — `-inf` is a resolver value, never a stored one.**
+
+```text
+current_run_best_formal_score is not None
+  -> effective reference = that value
+  -> source = restored_valid_formal_incumbent
+
+current_run_best_formal_score is None
+  -> effective reference = float("-inf")
+  -> source = negative_infinity_bootstrap
+```
+
+The persisted form stays `None`; provenance records the source:
+
+```json
+{"formal_comparison_reference": null,
+ "formal_comparison_reference_source": "negative_infinity_bootstrap"}
+```
+
+Non-standard JSON `Infinity` is not emitted. `29ec0542` removed a fixed
+`0.0` default precisely because a stored sentinel became a silent policy;
+`-inf` must not repeat that as a stored value.
+
+*Audited, not assumed*: `current_run_best_formal_score` is **not** an
+operator-facing CLI flag. Its only supply path is
+`resume state → run_one_iteration.py:1687 → workflows/model_exploration.py:1471,1885 → tuner input`.
+No new CLI surface is required.
+
+### 16.D Launch validity and result authority are separate
+
+**Launch** asks: is there evidence worth spending a formal round on?
+
+```text
+winner = _best_trial_winner(memory_history)     # the single source
+winner is None                       -> skip formal
+winner.score <  ref + skip Δ         -> skip formal
+winner.score >= ref + bypass Δ       -> bypass the formal time budget
+otherwise                            -> ordinary time-budget decision
+```
+
+**Authority** asks: once a formal result exists, may it inform science?
+
+```text
+the formal record itself passes role-aware HealthGate validity
+AND result_authority == scientific
+AND (for historical records) authority is reconstructable
+```
+
+`valid_trial_count` and `no_valid_trial` are **removed as
+formal-authority blockers**. A first formal result that bypassed on the
+`-inf` bootstrap is no less authoritative for it; authority is a property
+of the result, not of how the launch was justified.
+
+`result_authority=diagnostic` does **not** suppress or bypass launch
+gates. A diagnostic run still obeys skip / budget / bypass; its results
+simply never become scientific. Any future "run formal with no valid
+trial" need is a **new explicit launch override**, never a reuse of
+`force_formal_round`.
+
+### 16.E The delta-ordering invariant
+
+```text
+skip_formal_min_delta <= bypass_formal_time_budget_min_delta
+```
+
+Measured: inverting them makes **both** gates fire
+(`skip Δ 1.0, bypass Δ 0.0` → thresholds 11.0 / 10.0 → scores 10.0-10.9
+return `skip=True` and `bypass=True`), and the schema accepts it with no
+validator. Today skip is evaluated first and short-circuits, so precedence
+is **statement order, not policy**. An inverted ordering is a
+**configuration refusal**, not a precedence rule.
+
+### 16.F Single source for the trial best
+
+`_best_trial_winner(memory_history)` stays authoritative for the current
+iteration's best HealthGate-valid trial. It is recomputed deterministically
+from records, already filters on validity, and already returns the **whole
+record** — which formal plan inheritance needs and a score-only field could
+not supply. `best_valid_trial_denoising_score` remains persisted
+provenance and must not become a second authority.
+
+**No mutable `best_valid_trial_score` is introduced.** A running value
+would add an update-ordering question and a resume-restoration question
+that the deterministic recomputation does not have.
+
+### 16.G Ownership
+
+| checkpoint | owns |
+|---|---|
+| **D-C1b** | delta-ordering refusal (16.E) |
+| **D-C3** | no-winner ⇒ skip; effective-reference resolution + provenance (16.C) |
+| **D-C2a/b** | authority derived from the formal record; `valid_trial_count` removed (16.D) |
+| **D-C8/doc** | purge remaining "explicitly overridden formal" language (16.A) |
+
+### 16.H Validation impact
+
+Layer 1 gains the 16.E refusal and the 16.C source resolution. Layer 2
+gains the 16.B matrix as scenarios, including both no-incumbent rows.
+Layer 3's scenario changes from *"zero valid trials + explicit override →
+formal runs non-authoritatively"* to **"zero valid trials → formal is
+skipped"**, plus a first-valid-trial run proving the `-inf` bootstrap
+bypasses the budget and establishes the first baseline.
