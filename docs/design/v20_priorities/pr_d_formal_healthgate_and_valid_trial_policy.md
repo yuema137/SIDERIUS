@@ -108,10 +108,16 @@ Every step is individually defensible. The composition is not.
 
 ## 2. Objective and non-goals
 
-**Objective.** A formal scientific campaign must state which HealthGate mode
-it runs under, and a formal result produced with **zero valid trials must
-not be able to become authoritative** — not in incumbent selection, not in
-scientific aggregation, not in the report.
+**Objective.** A formal scientific campaign must state which HealthGate
+mode it runs under, and only an **authoritative** formal result may inform
+science — not in incumbent selection, not in scientific aggregation, not
+in the report.
+
+> The original wording was *"a formal result produced with zero valid
+> trials must not be able to become authoritative"*, and §16.D superseded
+> it. Zero valid trials now means the formal round is **skipped** (D-C3),
+> so no such result is produced; and if one exists, its authority is
+> decided by its own record, never by how its launch was justified.
 
 **Non-goals**, restated from §20.6 and reinforced by the audit:
 
@@ -345,11 +351,19 @@ reasons       = (no_valid_trial,)      <- cannot both be true
 A verdict whose fields can disagree is not a verdict. **The only
 constructor takes facts**; every conclusion is derived:
 
+> **SUPERSEDED by §16.D — the shipped signature has no trial concept.**
+> `valid_trial_count` was removed as an authority input: launch evidence
+> and result authority are different questions, and a first formal result
+> that bypassed the budget on the `-inf` bootstrap is no less
+> authoritative for it. `test_no_trial_concept_appears_in_the_signature`
+> asserts the parameter set contains none of `valid_trial_count`,
+> `trial_winner`, `skip_formal`, `bypass_formal_time_budget`,
+> `formal_reference_score` or `force_formal_round`.
+
 ```text
-ScientificAuthority.from_context(
-    healthgate_mode,             blocking | observe_only
-    declared_result_authority,   scientific | diagnostic
-    valid_trial_count,           int  (iteration-level support context)
+ScientificAuthority.from_context(          # as shipped
+    healthgate_mode,             blocking | observe_only | None
+    declared_result_authority,   scientific | diagnostic | None
     formal_validity,             this record's own gate validity
 )
 ```
@@ -394,9 +408,13 @@ Authority is granted **only** for:
 ```text
 healthgate_mode  == blocking
 result_authority == scientific
-valid_trial_count >= 1
-the formal record itself meets the existing validity requirements
+the formal record's OWN role-aware HealthGate validity == valid
 ```
+
+> **`valid_trial_count >= 1` was listed here and is SUPERSEDED by §16.D**,
+> which removed `valid_trial_count` and `no_valid_trial` as authority
+> blockers. Zero valid trials now means formal is **skipped** (D-C3); a
+> formal record that exists at all has its authority decided by itself.
 
 The consequences are computed properties — PR C's O-7 boundary is the
 precedent: six frozen consequences derived from one disposition, so a new
@@ -411,9 +429,14 @@ about which the verdict belongs to. Fixed:
 > *references* the iteration's valid-trial support context.
 
 ```text
-valid_trial_count   iteration-level    shared by every record of that iteration
 formal_validity     record-level       this record's own gate outcome
 ```
+
+> **SUPERSEDED by §16.D.** This subsection previously carried
+> `valid_trial_count` as iteration-level context referenced by the
+> verdict. The shipped verdict is **purely record-level** — it references
+> no iteration-level trial support at all, which is what makes the
+> incumbent and the report unable to disagree about it.
 
 Without this, the incumbent (which reads records) and the report (which may
 read iteration summaries) could consult authority computed at different
@@ -1804,14 +1827,15 @@ asserted over every matrix row and over the operator-disable case.
 
 - **FU-D-6** `[x]` **CLOSED** by the reinforcement commit below.
 - **FU-D-8** `[x]` **CLOSED** by the reinforcement commit below.
-- **FU-D-7** *(new, **DEFERRED — operator decision 2026-08-05**)* —
+- **FU-D-7** *(**WITHDRAWN — operator decision 2026-08-05**)* —
   historical artifacts carry `formal_comparison_reference_source: null`,
   which does not distinguish "predates the field" from the three live
-  cases. **Historical artifacts are NOT to be rewritten to populate it.**
-  It is handled at the legacy-reconstruction / V19-sidecar checkpoint:
-  emit a derived source where reconstruction is reliable, keep
-  unknown/null where it is not, and never modify the V19 originals. Does
-  not block D-C4.
+  cases. This was originally deferred to "the legacy-reconstruction /
+  V19-sidecar checkpoint", and **that checkpoint no longer exists**: the
+  same ruling withdrew D-C9, the sidecar boundary and all historical
+  reconstruction. There is therefore nothing to defer TO and nothing to
+  do. Historical artifacts are never rewritten; a null source simply
+  means authority is not established, which is the frozen rule.
 
 ---
 
@@ -2114,7 +2138,7 @@ than trust.
 | diagnostic, score 99 | higher | no update | ″ |
 | unknown, score 99 | higher | no update | ″ |
 | verdict forged `true` | higher | refused by consistency | `test_a_tampered_verdict_is_refused_not_believed` |
-| legacy, reconstructable | higher | updates | `test_a_legacy_record_under_a_declared_output_reconstructs` |
+| iteration DECLARED its policy (D-C1a→D-C2b window) | higher | updates | `test_a_record_whose_iteration_declared_its_policy_is_usable` |
 | legacy, unreconstructable | higher | no update | `test_an_undeclared_legacy_record_is_excluded` |
 | high non-authoritative, then lower authoritative | — | the later one updates | `test_an_excluded_high_score_does_not_raise_the_bar_for_a_later_one` |
 
