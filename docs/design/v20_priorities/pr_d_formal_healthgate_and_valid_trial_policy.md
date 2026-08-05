@@ -4302,3 +4302,210 @@ Layer 3's scenario changes from *"zero valid trials + explicit override →
 formal runs non-authoritatively"* to **"zero valid trials → formal is
 skipped"**, plus a first-valid-trial run proving the `-inf` bootstrap
 bypasses the budget and establishes the first baseline.
+
+---
+
+## 21. Gate-readiness packets — Case A and Case B (2026-08-05)
+
+Required by the audit-before-expensive-validation policy. **No Gate launches
+until this section is reviewed.** Expensive validation is confirmation, never
+discovery.
+
+### 21.1 Case A — the formal/authority path
+
+**The one property.** A HealthGate-valid trial winner leads to a *completed*
+formal round whose record carries a recomputable authoritative verdict, and
+that record is admitted as the chain incumbent and into scientific
+aggregation.
+
+**Why synthetic execution cannot prove it.** Every step is already covered
+deterministically in unit tests. What no synthetic run can establish is that
+the REAL chain, on a real GPU with real training, traverses
+trial → winner → bootstrap → bypass → formal → authority → resume →
+aggregation as one connected path and persists each fact. Gate 2 has three
+times shown that the connected path is where things break.
+
+**PASS artifact.** Not "training started". Specifically:
+
+```text
+a formal record with time_mode=formal and status=success
+scientific_authority.authoritative == true, recomputable from stored facts
+formal_comparison_reference_source == negative_infinity_bootstrap
+the record admitted by restore_prior_state as incumbent
+the record present in the scientific aggregate
+no Infinity/NaN in any artifact
+manifest carries healthgate_mode, result_authority and
+  fixed_candidate_provenance on whatever branch is reached
+```
+
+**The candidate** — chosen as the LIGHTEST qualifying candidate, not the
+highest scoring:
+
+```text
+model            embedded_resconv_bigru_head_compact
+evidence         /home/klz/Data/SIDEREIS_DATA/v19/gate0/v19_c14_arch_15_19/
+                 iter_002/iteration_002/.../run_output_iter_002.json
+artifact sha256  2764d3d71b5b20466e7fe2c9b84e4ceb3b9b3a044553e4df19885b7410f724dc
+exp_id           embedded_resconv_bigru_head_compact_iter_002_001
+recorded         status=success, time_mode=trial, score 4.757
+gates passed     output_diversity_blocking, output_std_blocking,
+                 amplitude_collapse_blocking — all three, evaluated at
+                 today's thresholds (25 / 1.0 / 0.95)
+plugin source    10f7ab4e0b28809dcb8b719b05aeb2a93678b203b6c687c98da5c0746d7ee897
+                 historical and current are IDENTICAL byte-for-byte,
+                 so parameter semantics cannot have drifted
+candidate_source reconstructed_validation_plan
+```
+
+**Two caveats, stated rather than glossed:**
+
+1. **The historical framework SHA is unrecoverable** — the artifact records
+   none. What is proven is that the MODEL implementation and the GATE
+   THRESHOLDS are identical, not that the whole environment is reproduced.
+2. **The historical evidence is a TRIAL success only.** It supports "this
+   candidate very likely yields a valid trial winner". It does NOT support
+   "formal will succeed" — and formal completion, authority, resume and
+   aggregation are precisely what Case A must newly establish.
+
+#### 21.1.1 Workload bounds — requested vs ENFORCED
+
+The proposer being bypassed fixes the CANDIDATE. It does **not** bound the
+run: the tuner still resolves execution parameters, and some come from the
+LLM plan rather than the CLI. Audited per value; a value with no hard
+enforcement is **not** written as a ceiling.
+
+| value | requested | resolved from | hard maximum | enforced by |
+|---|---|---|---|---|
+| iterations | 1 | CLI | 1 | launcher (`max_iterations=1`) |
+| rounds | 2 | CLI | 2 | tuner loop `while completed_rounds < max_rounds` |
+| proposal attempts | n/a | — | n/a | proposer bypassed entirely |
+| epochs | 1 | CLI | 1 | **clamp** `min(planned, max_epochs)`, logged |
+| **trial portion** | 0.02 | **`plan.trial_portion`** | **NONE** | **nothing — the planner decides** |
+| **trial train/eval portion** | — | **`plan.*`** | **NONE** | **nothing** |
+| formal portion | 0.02 | `agent_input.formal_portion` | 0.02 | tuner reads the CLI value, not the plan |
+| formal train portion | 1.0 | `agent_input.formal_train_portion` | 1.0 | same |
+| formal eval portion | — | `agent_input.formal_eval_portion` | as set | same |
+| batch / segmentation | fixed plan | the injected plan | fixed | plan is frozen by hash |
+| trial time budget | 10 min | CLI | 10 min | `evaluate_time_skill` gates trial rounds |
+| formal time budget | 20 min | CLI | 20 min | `evaluate_time_skill` gates formal rounds |
+| total wall clock | — | outer `timeout` | **30 min** | OS, absolute |
+| VRAM inspection per candidate | — | `probe_budgets` | 120 s | `InconclusivePreflight` |
+| VRAM preflight total | — | `probe_budgets` | 1200 s | same |
+
+**The honest consequence**: trial-mode portions have **no hard ceiling**.
+That is the defect that made attempt 2 run 0.1 against a requested 0.02. The
+real bound on the trial phase is therefore the **time budget and the outer
+timeout**, not the portion, and this packet does not pretend otherwise.
+
+Batch and segmentation are fixed because the plan is frozen and hashed —
+which is a genuine improvement over attempt 2, where the planner chose them.
+
+#### 21.1.2 Phase time estimate
+
+Measured from attempt 2, which ran the same shape at `segmentation_size=16000`:
+
+| phase | attempt 2 (seg 16000) | Case A estimate (seg 625) |
+|---|---|---|
+| proposal + implementation | ~3 min | **~1 min** (proposer bypassed; implement/validate still run) |
+| VRAM pre-flight sweep | ~13 min | **1–4 min** — the dominant cost scales with the forward trace, and segments are 25.6× shorter |
+| trial round | 5m41s train + ~5 min score | **3–8 min** |
+| formal round | not reached | **5–12 min** (portion 0.02, train_portion 1.0) |
+| **total** | 50 min (no formal) | **10–25 min**, hard-capped at 30 |
+
+If it exceeds 30 minutes the outer timeout ends it and that is a
+harness-design finding, not a reason to extend.
+
+#### 21.1.3 Go conditions
+
+```text
+[ ] fixed plan written and its sha256 frozen
+[ ] fresh workspace, never used
+[ ] proposer bypassed          (log: "[FIXED PLAN] proposer bypassed")
+[ ] implementor/validator/tuner still run   (asserted by unit test)
+[ ] --health_gate_enabled
+[ ] --healthgate_mode blocking
+[ ] --result_authority scientific
+[ ] --enable_chain_incumbent_formal_gates
+[ ] no prior incumbent (cold start, no --seed_paths)
+[ ] declarations + candidate provenance reachable on every branch (AST-verified)
+[ ] --trial_time_budget_minutes 10 --formal_time_budget_minutes 20
+[ ] outer timeout 30m
+```
+
+#### 21.1.4 Failure classification, decided BEFORE launch
+
+| observation | classification |
+|---|---|
+| formal completes, verdict authoritative, incumbent admitted | **PASS** |
+| trial collapses under HealthGates → formal skipped | **legitimate scientific invalidity** — but the fixed candidate has passing evidence, so this would indicate environment drift, NOT a product defect. Do not reroll the candidate |
+| `InconclusivePreflight` | **harness defect** — the budget is too small for this candidate; redesign, do not extend |
+| outer timeout fires | **missing bounds** — a harness-design finding |
+| formal record produced but not authoritative | **PRODUCT DEFECT** — the thing PR D exists to prevent |
+| record authoritative but not admitted by resume/aggregation | **PRODUCT DEFECT** |
+| crash in runtime control / probe | **product defect**, classify against §20 |
+
+### 21.2 Case B — stable external occupancy
+
+**The one property.** Stable, attributable external GPU occupancy does not
+invalidate a calibration.
+
+**Why synthetic execution cannot prove it.** 32 unit tests already prove the
+classifier and the eligibility rule. What they cannot prove is that a REAL
+device with a REAL foreign process holding memory produces attributable
+telemetry and a valid verdict through the production path.
+
+**No LLM, no training, no formal round.** Case A owns the formal chain.
+
+**Components — the repository's own, not a bespoke harness:**
+
+```text
+scripts/bg_gpu_holder.py       controlled external load: occupancy MEASURED
+                               not assumed, device named by UUID not index,
+                               self-terminating on deadline/signal/exception
+scripts/runtime_bootstrap.py   samples the contention window and runs a real
+                               bounded probe — now passes device_identity
+                               after FU-C-1 (#177)
+```
+
+**Production reachability — established by FU-C-1, not assumed.** Before that
+fix `bootstrap.py` called `run_bounded_probe` without a device, so no
+occupancy window was built and `MeasurementValidity` was always `None`. Case
+B would have run to completion and proved nothing. That is why the fix was a
+prerequisite rather than a follow-up.
+
+**PASS artifact:**
+
+```text
+external PID set identical across every sample in the window
+external attributed bytes VARY (a constant load proves the weaker property)
+candidate-owned demand attributed separately
+unattributed memory does not grow
+sampling complete — no telemetry gaps
+MeasurementValidity == valid_current_conditions
+the estimate remains blocking-capable under that occupancy
+```
+
+**Bounds**: hard total timeout **10 minutes**; stop the moment the verdict is
+observed. Expected: 2–4 minutes.
+
+**Failure classification:**
+
+| observation | classification |
+|---|---|
+| `valid_current_conditions` with a stable external PID set | **PASS** |
+| `unstable_external_identity` | the load misbehaved — **harness defect**, fix the holder |
+| `unattributed_occupancy_growth` | third-party GPU work present — **environment**, clear and retry |
+| `sampling_incomplete` | telemetry failure — **environment** |
+| verdict absent entirely | **PRODUCT DEFECT** — the FU-C-1 path regressed |
+
+### 21.3 Status
+
+```text
+fixed candidate selected            PASS
+plugin semantic equivalence         PASS (byte-identical)
+historical trial validity           PASS (all three blocking gates, today's thresholds)
+formal-path evidence                PENDING — this is what Case A must produce
+PR D integrated head                14d77eab
+readiness packets                   THIS SECTION — awaiting review
+Gate 2                              NOT LAUNCHED
+```
