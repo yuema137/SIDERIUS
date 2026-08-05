@@ -1578,7 +1578,15 @@ def main():
             ml_lit_review_enabled_resolved = False
 
     try:
+        # The launcher is the layer that knows the task, so it resolves the
+        # measurement capability and threads it into generic orchestration.
+        # `measurement_capability.py` states this contract explicitly:
+        # "Callers that know the task supply those." The workflow must not
+        # name a task resolver itself.
+        from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
         results = run_workflow(
+            measurement_capability=resolve_tidmad_measurement_capability(),
             source_paths=resolved_paths,
             workspace=args.workspace,
             run_name=run_name,

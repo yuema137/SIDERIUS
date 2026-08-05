@@ -98,6 +98,7 @@ from core.run_invariants import (
 )
 from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.launch_guard import run_launch_self_test
+from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
 from execute_tools.dataset_config import DataScope
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
@@ -1547,6 +1548,11 @@ def run_workflow(
     # whether GPU training will happen, and it made workflow startup
     # silently GPU-dependent.
     require_probe_runner: bool = False,
+    #: Resolved by the CALLER, which knows the task. Generic
+    #: orchestration must not choose a task's dataset, so this is
+    #: threaded in rather than looked up here. None keeps the guard
+    #: fail-closed: it refuses a real launch and says why.
+    measurement_capability: ResolvedMeasurementCapability | None = None,
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -1830,7 +1836,24 @@ def run_workflow(
     # infrastructure failure aborting). A real launch additionally
     # requires a buildable bounded-probe runner: without one, a formal
     # decision would have no measured evidence to resolve to.
-    _launch_report = run_launch_self_test(require_probe_runner=require_probe_runner)
+    # The capability is RESOLVED BY THE CALLER and threaded in. This module
+    # is generic orchestration: it must not know which task's dataset to
+    # look for, so it neither imports a task resolver nor names one.
+    #
+    # `run_launch_self_test` defaults `capability` to None, and generic
+    # runtime-control then reports "no measurement capability was resolved
+    # by the caller" — so a real launch (`require_probe_runner=True`) could
+    # never satisfy the guard. Measured: a bounded real chain aborted with
+    # LaunchGuardFailure before any LLM call while the capability was in
+    # fact available.
+    #
+    # Same defect class C-C3b fixed at the tuner's call site, at the site
+    # its reachability test did not cover. Fail-closed is preserved: a
+    # genuinely unavailable capability still refuses, with its reason.
+    _launch_report = run_launch_self_test(
+        require_probe_runner=require_probe_runner,
+        capability=measurement_capability,
+    )
     print(
         f"[RUNTIME] Launch self-test passed in {_launch_report.elapsed_seconds:.2f}s "
         f"({len(_launch_report.checks)} checks) | estimator="
