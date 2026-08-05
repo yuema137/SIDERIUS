@@ -1,10 +1,10 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 6 of 10 checkpoints complete.**
+**Status: IMPLEMENTATION IN PROGRESS — 7 of 10 checkpoints complete.**
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
-`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced by this
-commit closing FU-D-9). The formal-gate policy is FROZEN in §16 after two
+`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
+closing FU-D-9), D-C5 (this commit). The formal-gate policy is FROZEN in §16 after two
 read-only audits and the operator's negative-infinity bootstrap ruling
 (2026-08-05).
 
@@ -15,8 +15,8 @@ annotation, no sidecar, no reconstruction, no finer classification. The
 249-artifact audit under D-C4 is the evidence for why (see §15.E).
 
 Predecessor FU-D-10 merged to master as PR #172 (`51bab481`) and is
-integrated here at `12506d80`. Next: D-C5 (aggregation and report
-exclusion). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
+integrated here at `12506d80`. Next: D-C6 (structured
+all-trials-invalid planner feedback; requires Gate 1). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -693,7 +693,7 @@ refusal in addition to the mode↔config check.
 | **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | **D-C2a `[x]`** pure typed verdict, no call sites (`c8019e77`) · **D-C2b `[x]`** wired to every formal record (`84511954`, reinforced `8985d00f`) |
 | **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[x]` **COMPLETE** — no-winner ⇒ skip, `-inf` bootstrap + provenance, one winner per formal round, JSON-safe persistence. 10/10 mutations caught. See the implementation record under Commit 6 |
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[x]` **COMPLETE** — authority is an additional conjunct; fail-closed `resolve_record_authority`; legacy ladder; 10-row matrix; 8/8 mutations. Found and fixed a D-C2b defect: the verdict was silently dropped by `ExperimentRecord` |
-| **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
+| **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[x]` **COMPLETE** — new `execute_tools/scientific_aggregation.py`; verdict consumed not re-derived; provenance rendered from the typed object, never by the model. 6/6 mutations |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
 | **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
@@ -2330,6 +2330,117 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 ---
 
 ### Commit 8 — `D-C5`: aggregation and report exclusion, stated not silent
+
+#### IMPLEMENTATION RECORD — D-C5 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C4 `7a128f18`. Progress
+**7 / 10**.
+
+**Behavior Delta**: a non-authoritative formal score no longer enters the
+scientific aggregate, and the exclusion is stated rather than silent.
+
+**The named contract in this section was confirmed against master and
+implemented as specified** — `execute_tools/scientific_aggregation.py`,
+`AggregationScope(included / excluded / excluded_count / all_excluded)`.
+Two additions the audit showed were needed: `no_records` (distinct from
+`all_excluded`) and `exclusion_reason_counts` (grouped and order-stable,
+so a rendered report diff shows real change rather than dict ordering).
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/scientific_aggregation.py` | **new** — `AggregationScope`, `ExcludedResult`, `partition_for_aggregation`, `provenance_lines()` |
+| `agent/schemas/interpretation.py` | `ModelRunSummary.scientific_authority`; `InterpretationOutput.scientific_aggregation` |
+| `nodes/result_interpretation_agent/result_interpretation_agent.py` | producer attaches the formal record's verdict; `run()` partitions before any LLM call and filters `per_model_formal`; both output-assembly sites carry the scope |
+
+**The real producer → consumer path**
+
+```text
+tuner: final_record["scientific_authority"]                    [D-C2b]
+  → ExperimentRecord                                           [D-C4]
+  → run_output_*.json
+  → tuning_output_to_model_run_summary()
+      → ModelRunSummary.scientific_authority   (the SAME formal record
+        `formal_score` came from, so score and authority cannot describe
+        different experiments)
+  → ResultInterpretationAgent.run()
+      → partition_for_aggregation(inp.summaries)   ← BEFORE any LLM call
+      → per_model_formal filtered to authoritative only
+          → _build_synthesis_prompt(per_model_formal=…)   ← the LLM sees
+            only authoritative formal scores
+      → InterpretationOutput.scientific_aggregation (both healthy AND
+        degraded assembly, so an interpreter LLM failure cannot lose the
+        provenance — the rule the health evidence already follows)
+```
+
+**§4.7 satisfied, and the preferred branch taken.** The exclusion is
+derived deterministically and rendered from the typed object; **no
+exclusion text is placed in any prompt.** Both reasons in §4.7 hold: a
+model may simply not mention the exclusion, and exclusion text inside a
+prompt can steer the interpretation it then writes.
+
+**D-C5 IS LLM-AFFECTING, and the design's "non-LLM-facing" note is
+narrower than it reads.** Filtering `per_model_formal` necessarily changes
+the synthesis prompt's content — that is the point of the checkpoint. What
+§4.7 forbids is routing the *exclusion report* through the model, and that
+is honoured. Recorded here because it sets the Gate 1 scope: D-C5 alters
+LLM-visible aggregate facts, so the single bounded Gate 1 run after D-C6 /
+D-C7b must cover it.
+
+**Authority is consumed, never re-derived.** A test asserts
+`partition_for_aggregation`'s source contains no `denoising_score`,
+`formal_score`, `health_gate_results`, `_blocking`, `on_fail`,
+`resolved_action` or `gate_name`, and does call
+`resolve_record_authority`. Tampered and malformed verdicts fail closed
+through the same D-C4 resolver.
+
+**Task-generic**: the boundary consumes a structural protocol
+(`model_type` + `scientific_authority`), not `ModelRunSummary`, and names
+no task, model or metric.
+
+**Tests** — 21 in `tests/unit/execute_tools/test_scientific_aggregation.py`
+plus 5 reachability tests in the interpretation-agent suite. The operator's
+matrix, all covered: authoritative included; invalid / diagnostic /
+unknown / observe-only high scorers excluded with their reasons; mixed;
+all-excluded; no-records; ordering and counts ignore excluded records;
+excluded retained with reasons; tampered and malformed fail closed.
+
+**Mutations — 6 run, 6 caught.**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| A1 | agent stops filtering the aggregate | `test_an_excluded_formal_score_never_reaches_the_synthesis_prompt` | 1 |
+| A2 | summary drops the verdict | producer reachability test | 1 |
+| A3 | non-authoritative treated as included | the matrix | 19 |
+| A4 | `all_excluded` collapses to `no_records` | stated-outcome + provenance tests | 2 |
+| A5 | excluded results are dropped | the matrix | 18 |
+| A6 | provenance omits the reasons | the rendering test | 1 |
+
+> **A1 SURVIVED on the first run — a genuine coverage gap, not an
+> equivalent mutant, and worth recording.** The reachability tests
+> asserted the typed scope reached the output but never that the excluded
+> score stayed out of the *prompt*. The fixture also set
+> `best_denoising_score == formal_score`, and the renderer emits a
+> "Formal score" line only when the two DIFFER — so removing the filter
+> changed nothing observable. Closed by a test that captures the real
+> synthesis prompt with deliberately unequal scores. The same shape as the
+> D-C4 equivalent-mutant note: a mutation that survives is either a gap or
+> a bad mutation, and the two must be told apart rather than assumed.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_scientific_aggregation.py` | 21 passed |
+| interpretation-agent suite | 256 passed |
+| `tests/unit/agent` + `execute_tools` + `core` | 5968 passed, 277 s |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / format | clean, 725 files |
+
+**Next checkpoint**: D-C6 — structured all-trials-invalid planner feedback.
+
+---
 
 **1. Goal.** Non-authoritative results leave scientific aggregation, **and
 the exclusion is visible**. Separate from commit 6 because it changes what a
