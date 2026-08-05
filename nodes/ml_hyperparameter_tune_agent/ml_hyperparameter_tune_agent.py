@@ -4722,6 +4722,13 @@ class HyperparamTuningAgent:
                                                 SIDERIUS_ROOT, "configs", "health_checks.yaml"
                                             ),
                                             gate_ids=_gate_ids,
+                                            # D-C7b: the run's declaration
+                                            # travels onto every gate result,
+                                            # so an external reader never has
+                                            # to infer the posture from a
+                                            # gate id's spelling.
+                                            healthgate_mode=agent_input.healthgate_mode,
+                                            result_authority=agent_input.result_authority,
                                         )
                                     )
                                     is_degenerate, failure_reason, _gate_action_str = (

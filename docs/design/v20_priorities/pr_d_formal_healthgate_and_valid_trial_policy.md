@@ -1,10 +1,10 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: IMPLEMENTATION IN PROGRESS — 8 of 10 checkpoints complete.**
+**Status: IMPLEMENTATION IN PROGRESS — 9 of 10 checkpoints complete.**
 D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
 D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
 `42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
-closing FU-D-9), D-C5 (`4767c72a`), D-C6 (this commit). The formal-gate policy is FROZEN in §16 after two
+closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (this commit). The formal-gate policy is FROZEN in §16 after two
 read-only audits and the operator's negative-infinity bootstrap ruling
 (2026-08-05).
 
@@ -15,8 +15,8 @@ annotation, no sidecar, no reconstruction, no finer classification. The
 249-artifact audit under D-C4 is the evidence for why (see §15.E).
 
 Predecessor FU-D-10 merged to master as PR #172 (`51bab481`) and is
-integrated here at `12506d80`. Next: D-C7b (honest external
-fields and labels), then the combined bounded Gate 1. Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
+integrated here at `12506d80`. Next: the combined bounded Gate 1, then
+D-C8 (final audit + documentation closure). Not merged; no Draft PR yet; Gate 1 and Layer 3 not run.
 
 > **§16 supersedes any earlier statement in this document that conflicts
 > with it**, most consequentially the "explicitly overridden formal round"
@@ -696,7 +696,7 @@ refusal in addition to the mode↔config check.
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[x]` **COMPLETE** — new `execute_tools/scientific_aggregation.py`; verdict consumed not re-derived; provenance rendered from the typed object, never by the model. 6/6 mutations |
 | **D-C6** | Structured all-trials-invalid feedback | `[x]` **COMPLETE** — DEVIATION: a new `TrialValidityFeedback` carrier, because gate-exhaustion's triggers require budget-gated records and never fire here. Full producer→planner path, 7/7 mutations. Gate 1 pending |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
-| **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
+| **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[x]` **COMPLETE** — no config touched, `health_config_sha256` unshifted, no id renamed; label derived from the configured action. 5/5 mutations (two after fixing a redundant branch and a real coverage gap) |
 | ~~**D-C9**~~ | ~~V19 retrospective closure annotation~~ | **WITHDRAWN — operator decision 2026-08-05.** Historical records stay readable and unchanged with authority simply not established; no annotation, no sidecar, no reconstruction. PR D is a **10-checkpoint** PR |
 | **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
 
@@ -2670,6 +2670,73 @@ respect the existing `health_feedback_policy`.
 ---
 
 ### Commit 10 — `D-C7b`: five fields recorded per gate; the operator-facing label stops lying
+
+#### IMPLEMENTATION RECORD — D-C7b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C6 `3e91adb6`. Progress
+**9 / 10**.
+
+**Behavior Delta**: gate results now say what the gate WAS, not what its id
+is spelled like. No decision changes — this is the labelling checkpoint.
+
+**The preferred outcome was achieved: NO config file was touched**, so
+`health_config_sha256` is unshifted. Verified against the audited values —
+`configs/health_checks.yaml` → `3b552118…`, the observe config →
+`d133a12d…`, exactly the shas in the compatibility map. No workspace
+invariant lock crosses a boundary, and the acceptance criterion "zero
+changes to any gate id string" holds: `git diff` touches no config and no
+id, the only occurrence being a docstring quoting one as an example.
+
+**What was already there, confirmed before adding anything** (the design
+asked): `gate_name` IS the stable `gate_id`; `resolved_action` IS the
+effective action. Added beside them: `gate_role`, `configured_action`,
+`healthgate_mode`, `result_authority`, plus a derived `display_label`.
+
+**Why `configured_action` is not redundant with `resolved_action`**:
+`resolved_action: continue` is ambiguous on its own — it means either
+"the check passed, so nothing to do" or "configured to do nothing". Only
+both together separate them, and that ambiguity is what let a
+`_blocking`-named gate read as enforcing when it enforced nothing.
+
+**The label is derived, never read from the id.** A gate whose configured
+action cannot invalidate reads `observational` however it is spelled; one
+that can reads `enforcing`; one whose posture cannot be established reads
+`role-unknown` rather than defaulting. Ids are never rewritten — they are
+the join key for `health_gate_results` and archived artifacts.
+
+| id | configured action | label |
+|---|---|---|
+| `output_diversity_blocking` | `continue` | `output_diversity_blocking (observational)` |
+| `output_diversity_blocking` | `invalidate_round` | `output_diversity_blocking (enforcing)` |
+| `legacy_blocking` | absent | `legacy_blocking (role-unknown)` |
+
+**Backward compatibility**: every new field is optional, so an archived
+result parses unchanged and joins by `gate_id` exactly as before.
+
+**Mutations — 5 run, 5 caught, but two only after fixing real problems the
+first pass exposed:**
+
+| # | mutation | outcome |
+|---|---|---|
+| C1 | label read from the id suffix | caught (5) |
+| C2 | unknown role defaults to enforcing | **survived** — the guard was a REDUNDANT branch producing identical output. Removed the redundancy; the re-run mutation is caught |
+| C3 | producer stops recording `configured_action` | caught (1) |
+| C4 | role inferred instead of read | caught (1) |
+| C5 | tuner stops supplying the declaration | **survived** — a REAL coverage gap: the asserted string occurs three times in `run()` (D-C2b, D-C6, here), so deleting one still passed. Re-pointed at the gate-evaluation call site specifically; now caught |
+
+C5 is the more instructive of the two. A structural assertion that searches
+a 2,000-line function for a string is only as strong as that string's
+uniqueness, and this one had stopped being unique two checkpoints earlier.
+Fixing it also required a bounded window rather than a regex, because the
+call contains a nested `os.path.join(...)` and a non-greedy match silently
+truncated the body at the wrong closing paren.
+
+**Validation**: 17 focused tests; `tests/unit/execute_tools` + `agent` +
+`core` **6009 passed**, 286 s; pyright **0 errors**; ruff and format clean
+(727 files).
+
+---
+
 
 **1. Goal.** Close D-D-3 and §3.2. Last among behavioural commits because it
 is cosmetic in effect and must not be confused with the authority work.
