@@ -95,6 +95,26 @@ class GateConfig(BaseModel):
             "``HealthChecksConfig._validate_unique_ids``."
         ),
     )
+    gate_role: Literal["blocking", "observational"] | None = Field(
+        default=None,
+        description=(
+            "What this gate MEANS scientifically, declared — never inferred. "
+            "``blocking`` gates decide whether a record is a valid candidate; "
+            "``observational`` gates only record.\n\n"
+            "This is a property of the SCIENCE, not of enforcement, so it is "
+            "identical in the blocking and observe-only configs; those differ "
+            "only in ``on_fail.action``. Deriving it from the action instead "
+            "does not merely lose information, it INVERTS the answer: under an "
+            "observe-only config every action is ``continue``, so an "
+            "action-derived scientific set is EMPTY and every record classifies "
+            "valid. That was a live defect (see "
+            "``resolve_scientific_gate_ids``).\n\n"
+            "``None`` only for a historical config written before this field "
+            "existed. Such a config is resolved through the audited "
+            "compatibility map, or treated as UNKNOWN — never guessed from the "
+            "gate id, the filename or the action."
+        ),
+    )
     after_round: int | Literal["every"] | list[int] = Field(
         ...,
         description=(

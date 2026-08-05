@@ -1596,7 +1596,31 @@ resume  (effective observe cfg)   : valid    required = EMPTY
 This is a live correctness defect independent of PR D, and D-C4/D-C5
 attach scientific authority to the path that currently answers `valid`.
 
-**Operator ruling, 2026-08-05.** The **effective config remains
+**CLOSED by a predecessor hotfix, 2026-08-05** — branch
+`fix/healthgate-scientific-role-consistency`. The operator chose a narrow
+hotfix over pulling D-C1 forward, because any resume before PR D merges is
+still exposed to the window. What landed:
+
+- typed `gate_role` (`blocking` | `observational`) on `GateConfig`;
+- identical roles declared in **both** shipped configs — three collapse
+  detectors `blocking`, three recording metrics `observational` — so the
+  two differ only in `on_fail`;
+- one shared `resolve_scientific_gate_ids`, consumed by **both** the
+  in-run and the resume-time path;
+- historical role-less configs recovered through an audited compatibility
+  map keyed on the exact pre-hotfix body sha (`3b552118…` blocking,
+  `d133a12d…` observe-only), never inferred from the `_blocking` suffix,
+  the action or the filename;
+- an unaudited role-less config resolves to `None` → UNKNOWN → excluded.
+
+`required_blocking_gate_ids` survives as a deprecated shim that collapses
+UNKNOWN to the empty set; new code calls the resolver, which can express
+UNKNOWN. The hotfix carries **only** role consistency — `healthgate_mode`,
+`result_authority`, `ScientificAuthority`, zero-valid-trial authority,
+deterministic reporting, planner feedback and the V19 sidecar all remain
+PR D's work.
+
+**The ruling it implements.** The **effective config remains
 authoritative** — it is reproducible and resists repo drift, which is why
 §3.3 chose it. The divergence is closed by making the scientific set come
 from the **declared `gate_role`** rather than from the action, so an
@@ -1604,10 +1628,22 @@ observe-only run is non-authoritative *by declaration* instead of by an
 empty gate set. This is folded into **D-C1** (declare the role) and
 **D-C3** (derive authority from it), not a separate commit.
 
-Consequence for the commit plan: **D-C1 must land the role in both shipped
-configs and switch `required_blocking_gate_ids` to read it**, and D-C3's
-`from_context` must take the declared role as input. A regression test must
-assert that the record above classifies identically on both paths.
+Consequence for the commit plan, **as amended once the hotfix landed**:
+the role schema, both config declarations and the shared resolver are
+already on master, so **D-C1 does not repeat them**. D-C1 returns to its
+original scope (campaign mode/authority declaration and recording), and
+D-C3's `from_context` consumes the role-aware **formal validity** the
+shared resolver produces rather than a raw `gate_role` input. D-C7b must
+no longer describe the gate entry model as "gaining a role" — it has one.
+
+**A second defect the hotfix exposed**, worth carrying into PR D's test
+standards: `test_repo_policy_never_consulted` was **vacuous**. It
+monkeypatched the resolver and asserted on its argument, but the fixture
+never stamped a `health_config_sha256`, so `_commit_time_gate_ids`
+returned on the missing-stamp branch and the guard was never reached. The
+mutation that made resume read the repo-current config was **not caught**
+until the test was rebuilt on a reachable scenario and made to assert that
+its own guard fired.
 
 ### 15.D Deterministic reporting has no existing home
 

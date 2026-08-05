@@ -24,6 +24,7 @@
 health_gates:
   # ---------------------------------------------------------------- BLOCKING
   - id: "output_diversity_blocking"
+    gate_role: blocking
     after_round: every                    # NEW schema value; requires M8 §3.2 extension
     short_circuit: true
     checks:
@@ -48,6 +49,7 @@ health_gates:
       peeked file passes; collapse fails only when all three files degrade.
 
   - id: "output_std_blocking"
+    gate_role: blocking
     after_round: every
     short_circuit: true
     checks:
@@ -69,6 +71,7 @@ health_gates:
       matches output_diversity: [3, 10, 17] + any_pass.
 
   - id: "amplitude_collapse_blocking"
+    gate_role: blocking
     after_round: every                    # was: after_round: 1
     short_circuit: true
     checks:
@@ -99,6 +102,7 @@ health_gates:
   # into the round's record.
 
   - id: "pearson_dispersion_recording"
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:
@@ -119,6 +123,7 @@ health_gates:
       on high-signal files). See docs/design/paper_and_collapse_reference_baselines.md §6.3.
 
   - id: "spectral_peak_ratio_recording"
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:
@@ -135,6 +140,7 @@ health_gates:
       the "phantom scored high" case without triggering it. Never blocks.
 
   - id: "per_file_output_std_recording"
+    gate_role: observational
     after_round: every
     short_circuit: false
     checks:
