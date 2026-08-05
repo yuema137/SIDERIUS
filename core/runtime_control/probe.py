@@ -50,6 +50,7 @@ from core.runtime_control.estimate_types import (
     RuntimeEstimate,
     make_estimate,
 )
+from core.runtime_control.measurement_validity import MeasurementValidity
 from core.runtime_control.registry_schemas import CalibrationObservation
 
 PROBE_PRODUCER_SEMVER = "1.0.0"
@@ -86,6 +87,16 @@ class ContentionSnapshot(BaseModel):
     )
     foreign_compute_pids: tuple[int, ...] = Field(
         default=(), description="Reported PIDs minus the excluded set."
+    )
+    compute_process_memory_gb: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "pid (as a string key, for JSON) -> GB that process holds on the "
+            "device. Empty on producers that predate byte-level attribution, "
+            "which the classifier treats as UNATTRIBUTABLE rather than as "
+            "candidate-owned. A NaN value means the driver reported the "
+            "process but not its memory."
+        ),
     )
     excluded_pids: tuple[int, ...] = Field(
         default=(),
@@ -126,6 +137,10 @@ class ProbeResult(BaseModel):
     inference_ms_spread: tuple[float, float] | None = None
     peak_vram_gb: float | None = Field(default=None, gt=0.0)
     concurrency_identity: ConcurrencyIdentity
+    #: V20 PR C. The occupancy-window verdict, when the caller named the
+    #: device so accounting could be sampled. `None` means no window was
+    #: observed — NOT that the measurement was judged invalid.
+    measurement_validity: MeasurementValidity | None = None
     contention: ContentionSnapshot = Field(
         description="Last sample of the pre-probe window (compact view)."
     )
@@ -243,8 +258,14 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
             .splitlines()[0]
         )
         util_pct, mem_mib = (float(x.strip()) for x in util.split(","))
+        # `used_memory` as well as `pid`: without per-process bytes the
+        # classifier cannot ATTRIBUTE memory, and a device total gets
+        # labelled "external" even when every process on the device is
+        # candidate-owned. That misclassification aborted a real chain
+        # (Gate 2 attempt 1: 5.98 GB, zero foreign PIDs, 0% utilisation,
+        # reported as foreign_contended).
         procs = subprocess.run(
-            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -257,9 +278,31 @@ def capture_contention_snapshot(*, exclude_pids: Iterable[int] | None = None) ->
         # D3 extends this to the probe's descendants.
         own = os.getpid()
         excluded = {own} | set(descendant_pids(own)) | set(exclude_pids or ())
-        reported = tuple(int(line.strip()) for line in procs.splitlines() if line.strip().isdigit())
+        per_process: dict[int, float] = {}
+        for line in procs.splitlines():
+            parts = [part.strip() for part in line.split(",")]
+            if not parts or not parts[0].isdigit():
+                continue
+            pid = int(parts[0])
+            if len(parts) < 2:
+                # Single-column output: an older driver, or a producer that
+                # reports pids without sizes. The PID is still evidence and
+                # MUST keep counting toward foreign detection — dropping the
+                # row would silently disable that. Its memory is
+                # unattributable, which the classifier resolves through the
+                # residual rather than by assuming zero.
+                per_process[pid] = float("nan")
+                continue
+            try:
+                per_process[pid] = float(parts[1]) / 1024.0
+            except ValueError:
+                per_process[pid] = float("nan")
+        # Reported ORDER preserved (dicts keep insertion order); sorting
+        # here would silently change an observable field.
+        reported = tuple(per_process)
         foreign = tuple(pid for pid in reported if pid not in excluded)
         return ContentionSnapshot(
+            compute_process_memory_gb={str(k): v for k, v in per_process.items()},
             foreign_compute_processes=len(foreign),
             gpu_utilization_pct=util_pct,
             gpu_memory_used_gb=mem_mib / 1024.0,
@@ -305,6 +348,7 @@ def run_bounded_probe(
     expected_peer_pids: Iterable[int] = (),
     contention_window: Callable[..., Any] | None = None,
     clock: Callable[[], float] = time.monotonic,
+    device_identity: Any | None = None,
 ) -> ProbeResult:
     """Run the bounded probe. Cap breaches and OOM are MEASURED outcomes
     (valid evidence, per §7.4 they may block) — never silent retries.
@@ -332,10 +376,17 @@ def run_bounded_probe(
 
     caps = caps or ProbeCaps()
     sampler = contention_window or sample_contention_window
-    window = sampler(
-        device_vram_gb=device_vram_gb,
-        expected_peer_pids=tuple(expected_peer_pids),
-    )
+    # V20 PR C: the identity is passed DOWN from the orchestration boundary,
+    # never discovered here. `None` means the caller had none (CPU host,
+    # legacy manifest), and the window then carries no validity verdict —
+    # a gap, not a guessed device.
+    window_kwargs: dict[str, Any] = {
+        "device_vram_gb": device_vram_gb,
+        "expected_peer_pids": tuple(expected_peer_pids),
+    }
+    if device_identity is not None:
+        window_kwargs["device"] = device_identity
+    window = sampler(**window_kwargs)
     concurrency = window.classification
     snapshot = window.samples[-1] if window.samples else ContentionSnapshot()
     start = clock()
@@ -348,6 +399,7 @@ def run_bounded_probe(
             status=status,
             model_identity=model_identity,
             concurrency_identity=concurrency,
+            measurement_validity=window.measurement_validity,
             contention=snapshot,
             contention_telemetry=window.raw_telemetry(),
             caps=caps,
@@ -510,6 +562,7 @@ def extrapolate_probe(
         inference_seconds=inf_s,
         peak_vram_gb=result.peak_vram_gb,
         concurrency_identity=result.concurrency_identity,
+        measurement_validity=result.measurement_validity,
         probe_id=None,  # assigned when the observation is registered
         warnings=(),
     )

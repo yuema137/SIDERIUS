@@ -34,6 +34,7 @@ separation enforces this).
 from __future__ import annotations
 
 import math
+import os
 import time
 from collections.abc import Callable, Iterable, Sequence
 from statistics import median
@@ -47,7 +48,13 @@ from core.runtime_control.estimate_types import (
     RuntimeEstimate,
     make_estimate,
 )
+from core.runtime_control.gpu_accounting import DeviceIdentity
 from core.runtime_control.identity import component_identity, config_hash12
+from core.runtime_control.measurement_validity import (
+    MeasurementValidity,
+    OccupancyWindow,
+    build_occupancy_window,
+)
 from core.runtime_control.probe import ContentionSnapshot, capture_contention_snapshot
 from core.runtime_control.registry_schemas import (
     CalibrationObservation,
@@ -112,6 +119,18 @@ class ContentionWindow(BaseModel):
     reasons: tuple[str, ...]
     policy_identity: str
     expected_peer_pids: tuple[int, ...] = ()
+
+    #: V20 PR C. The occupancy-window verdict, present only when the caller
+    #: supplied a `DeviceIdentity` so per-device accounting could be
+    #: sampled alongside the contention samples. `None` means NO WINDOW WAS
+    #: OBSERVED — not that the measurement was judged invalid. Consumers
+    #: fall back to the conservative pre-PR-C rule in that case.
+    occupancy: OccupancyWindow | None = None
+
+    @property
+    def measurement_validity(self) -> MeasurementValidity | None:
+        """The typed validity verdict, or `None` when no window was taken."""
+        return self.occupancy.validity if self.occupancy is not None else None
 
     def raw_telemetry(self) -> dict[str, Any]:
         """Everything the verdict was derived from — the payload written
@@ -192,14 +211,73 @@ def classify_contention_window(
             f"{unaccounted_count} further unidentified foreign process(es))"
         )
         return "foreign_contended", tuple(reasons)
-    if max_mem > mem_threshold:
+    # --- memory: subtract what the CANDIDATE itself owns -----------------
+    #
+    # This branch used to compare the DEVICE TOTAL against the threshold and
+    # call the result "external GPU memory". It never asked whose memory it
+    # was. Measured failure (Gate 2 attempt 1, 2026-08-05): 5.98 GB total,
+    # `foreign_compute_pids: []`, every compute pid in `excluded_pids`, GPU
+    # at 0% — classified `foreign_contended`, which made the freshly
+    # measured probe non-blocking and aborted the chain. The candidate's own
+    # resident CUDA context was being counted against it.
+    #
+    # The fix is deliberately the NARROWEST one that corrects that: bytes
+    # attributable to the candidate's own excluded PIDs stop counting as
+    # external. The threshold is unchanged, and every OTHER holder of memory
+    # keeps exactly today's treatment — a registered peer's occupancy still
+    # makes the window contended, because deciding that an expected partner's
+    # memory is acceptable is an ADMISSION-POLICY change and belongs to PR C
+    # (§20.3), not to a bug fix.
+    #
+    #   external = device total - candidate-owned bytes
+    #
+    # An empty or partial attribution map (a producer predating byte
+    # capture, or a driver that reports PIDs without sizes) leaves those
+    # bytes in `external`, so legacy producers behave EXACTLY as before:
+    # absence of evidence must never read as evidence of a clean device.
+    external_gb = 0.0
+    peer_holds_memory = False
+    for s_ in samples:
+        per_process = s_.compute_process_memory_gb or {}
+        excluded_here = set(s_.excluded_pids or ())
+        candidate_gb = 0.0
+        for pid_key, gb in per_process.items():
+            if gb != gb:  # NaN — the driver named the process but not its size
+                continue  # unattributable: stays in `external` below
+            try:
+                pid = int(pid_key)
+            except (TypeError, ValueError):
+                continue
+            if pid in excluded_here:
+                candidate_gb += gb
+            elif pid in peers and gb > 0.0:
+                peer_holds_memory = True
+        external_gb = max(external_gb, max(0.0, (s_.gpu_memory_used_gb or 0.0) - candidate_gb))
+
+    if external_gb > mem_threshold:
+        if peer_holds_memory:
+            # A REGISTERED peer — today's outcome, preserved deliberately.
+            reasons.append(
+                f"external GPU memory {external_gb:.2f} GB (excluding "
+                f"candidate-owned bytes) exceeds "
+                f"max({policy.contention_memory_floor_gb:.0f} GiB, "
+                f"{policy.contention_memory_fraction:.0%} VRAM) = "
+                f"{mem_threshold:.2f} GB, held by a registered peer"
+            )
+            return "foreign_contended", tuple(reasons)
+        # Over the SAME configured threshold, and nobody can say whose it is:
+        # no unregistered foreign PID was reported (that check already
+        # returned above), yet the bytes are not the candidate's either.
+        # Conservative by design — unattributable occupancy is not evidence
+        # of a clean device, so the measurement cannot carry blocking
+        # authority, but it is not asserted to be foreign either.
         reasons.append(
-            f"pre-probe external GPU memory {max_mem:.2f} GB exceeds "
-            f"max({policy.contention_memory_floor_gb:.0f} GiB, "
-            f"{policy.contention_memory_fraction:.0%} VRAM) = "
-            f"{mem_threshold:.2f} GB"
+            f"GPU memory could not be attributed ({external_gb:.2f} GB of "
+            f"{max_mem:.2f} GB used is not accounted to the candidate, over "
+            f"the {mem_threshold:.2f} GB threshold); a measurement taken "
+            f"under unattributable occupancy cannot carry blocking authority"
         )
-        return "foreign_contended", tuple(reasons)
+        return "unknown_contention", tuple(reasons)
     if sustained_util:
         reasons.append(
             f"sustained GPU utilization ≥ {policy.contention_utilization_pct:.0f}% "
@@ -223,6 +301,9 @@ def sample_contention_window(
     policy: CalibrationPolicy = DEFAULT_POLICY,
     capture: Callable[..., ContentionSnapshot] = capture_contention_snapshot,
     sleep: Callable[[float], None] = time.sleep,
+    device: DeviceIdentity | None = None,
+    root_pid: int | None = None,
+    account: Callable[..., Any] | None = None,
 ) -> ContentionWindow:
     """Collect the bounded pre-probe window and classify it (D3).
 
@@ -233,9 +314,24 @@ def sample_contention_window(
         1,
         math.ceil(policy.contention_window_seconds / policy.contention_sample_interval_seconds),
     )
+    # V20 PR C: when the caller can name the device, per-device accounting
+    # is sampled on the SAME ticks as the contention samples, so the two
+    # describe one window rather than two nearby ones. Without a device
+    # nothing is sampled and `occupancy` stays None — "no window observed",
+    # which consumers treat conservatively rather than as a valid verdict.
+    if account is None:
+        from core.runtime_control import gpu_accounting
+
+        account = gpu_accounting.sample
+    if root_pid is None:
+        root_pid = os.getpid()
+
     samples: list[ContentionSnapshot] = []
+    accounting: list[Any] = []
     for i in range(n):
         samples.append(capture())
+        if device is not None:
+            accounting.append(account(root_pid, device))
         if i < n - 1:
             sleep(policy.contention_sample_interval_seconds)
     classification, reasons = classify_contention_window(
@@ -250,6 +346,7 @@ def sample_contention_window(
         reasons=reasons,
         policy_identity=policy.identity,
         expected_peer_pids=peers,
+        occupancy=build_occupancy_window(accounting) if device is not None else None,
     )
 
 

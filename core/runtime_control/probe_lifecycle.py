@@ -136,6 +136,37 @@ class ProbeResolver:
             # probe is answered by ABORT/REJECT, never by probing again.
             self._probe_completed = True
 
+        # The probe budget for this attempt is now SPENT, and every
+        # re-decision below must be told so.
+        #
+        # Why this matters (Gate 2 attempt 1, 2026-08-05): the re-decision
+        # used to run with the ORIGINAL mode, in which `probe_available` was
+        # still True. Two of the policy's three `REQUEST_PROBE` producers are
+        # gated on exactly that flag:
+        #
+        #   decision_policy.py:346  contended measurement + probe_available
+        #   decision_policy.py:347  prior-tier evidence  + probe_available
+        #
+        # so a freshly measured probe that was ITSELF classified contended
+        # re-entered producer 346 and asked for another probe — which the
+        # invariant below then reported as "the measured evidence was not
+        # consumed". The evidence HAD been consumed; the policy was simply
+        # never told the budget was gone, and the diagnosis blamed the wrong
+        # component.
+        #
+        # With the budget marked spent, both producers take their EXISTING
+        # `else ADVISORY` branch, and the third producer (line 309) cannot
+        # fire because it requires `evidence_channel == "probe_absent"` while
+        # the re-decision passes "ok". A `REQUEST_PROBE` after a completed
+        # probe therefore becomes structurally impossible rather than
+        # reachable-and-misreported.
+        #
+        # The invariant check is deliberately KEPT below. It is now
+        # unreachable by construction, which is what an invariant should be:
+        # if a future producer stops honouring `probe_available`, it still
+        # fails closed rather than looping.
+        spent = mode.model_copy(update={"probe_available": False})
+
         if result.status in ("oom", "wall_cap"):
             # MEASURED candidate failure — the strongest candidate-local
             # evidence there is.
@@ -148,7 +179,11 @@ class ProbeResolver:
             decision = self._policy.decide(
                 _unpriced_probe_estimate(result),
                 budget,
-                mode,
+                # Behaviourally identical here — `measured_failure`
+                # short-circuits to REJECT/ABORT before any producer reads
+                # `probe_available` — but the budget IS spent, and one mode
+                # object that tells the truth beats two that differ.
+                spent,
                 measured_failure=measured_failure,  # type: ignore[arg-type]
             )
             return ProbeResolution(decision=decision, probe_ran=True, probe_status=result.status)
@@ -184,7 +219,7 @@ class ProbeResolver:
                     probe_status=result.status,
                 )
 
-        decision = self._policy.decide(estimate, budget, mode, evidence_channel="ok")
+        decision = self._policy.decide(estimate, budget, spent, evidence_channel="ok")
         if decision.kind == "REQUEST_PROBE":
             return self._abort(
                 "policy still requests a probe after a completed, persisted probe — "

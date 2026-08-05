@@ -315,6 +315,54 @@ class TestExactlyOnceAndNoLoop:
         assert resolution.decision.kind == "ABORT"
         assert "not consumed" in resolution.decision.reasons[0]
 
+    def test_a_contended_fresh_probe_is_consumed_not_reported_as_unconsumed(self):
+        """MUTATION TARGET: re-deciding with the original `mode`.
+
+        **The Gate 2 attempt 1 abort (2026-08-05).** The probe ran, was
+        extrapolated and was persisted — the evidence WAS consumed. But the
+        re-decision reused the caller's mode, in which `probe_available` was
+        still True, so the policy's contended-measurement producer
+        (`decision_policy.py:346`) asked for another probe, and the
+        invariant reported "the measured evidence was not consumed".
+
+        The diagnosis blamed the wrong component: nothing had failed to
+        consume anything: the policy was never told the probe budget was
+        spent. With it spent, that producer takes its EXISTING
+        `else ADVISORY` branch — no new counter, no new threshold, no new
+        policy.
+
+        A contended measurement still cannot block, which is why ADVISORY
+        rather than REJECT is the correct outcome here.
+        """
+        probe_offered = RuntimeMode(
+            phase="formal", candidate_stage="post_implementation", probe_available=True
+        )
+        # Over the 600 s budget, and measured under contention.
+        contended = _result(
+            "ok",
+            concurrency_identity="foreign_contended",
+            train_ms_per_step=1000.0,
+            train_ms_spread=(990.0, 1010.0),
+        )
+        resolution = _resolver(lambda _r: contended).resolve(
+            PROBE_REQUEST, budget=BUDGET, mode=probe_offered
+        )
+
+        assert resolution.probe_ran is True
+        assert resolution.decision.kind == "ADVISORY", resolution.decision.reasons
+        assert not any("not consumed" in r for r in resolution.decision.reasons)
+
+    def test_the_spent_budget_does_not_leak_back_to_the_caller(self):
+        """The caller's mode is frozen and must stay untouched: the spent
+        budget describes this resolver's attempt, not the caller's state."""
+        probe_offered = RuntimeMode(
+            phase="formal", candidate_stage="post_implementation", probe_available=True
+        )
+        _resolver(lambda _r: _result("ok")).resolve(
+            PROBE_REQUEST, budget=BUDGET, mode=probe_offered
+        )
+        assert probe_offered.probe_available is True
+
     def test_resolution_never_returns_request_probe(self):
         """The whole contract in one assertion, over every probe outcome."""
         for status in ("ok", "oom", "wall_cap", "load_failure"):
