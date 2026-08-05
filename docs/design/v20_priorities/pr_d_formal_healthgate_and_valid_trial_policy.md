@@ -6,11 +6,12 @@ forced eight further corrections, now applied. IMPLEMENTATION AWAITS FINAL
 OPERATOR APPROVAL.**
 
 ```text
-Audited code baseline      334d388d   (re-audited 2026-08-05, after PR E)
-Previous baseline          dd8d66aa   (PR C2 merged, 40d17f69)
-Design head                58cbf5f9
+Audited code baseline      af5339ce   (after PR E and the role hotfix #171)
+Previous baselines         334d388d   (post-PR-E re-audit)
+                           dd8d66aa   (PR C2 merged, 40d17f69)
+Predecessor hotfix         af5339ce   (D-C7a — DONE, PR #171, master CI green)
 Policy dependencies        none — all resolved (§14, §15)
-Implementation             pending final operator approval
+Implementation             pending final operator approval; 10 commits, D-C7a removed
 ```
 
 **Re-audited against master after PR E (§15).** The re-audit confirmed
@@ -659,13 +660,14 @@ refusal in addition to the mode↔config check.
 | **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
 | **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
 | **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
-| **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[ ]` not started |
+| **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
 | **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
 | **D-C9** | V19 retrospective closure annotation, archive untouched (§4.5) | `[ ]` not started |
 | **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
 
 Mapping to §20.6: D1→D-C1, D2→D-C2, D3→D-C3, D4→D-C4, D5→D-C5, D6→D-C6.
-D-C7a/b and D-C8 are additions this audit forced; D-C9 was added by the
+D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above);
+D-C9 was added by the
 operator's V19-immutability decision. Note the ordering constraint: **D-C7a
 precedes D-C1b**, because a consistency check without typed roles would
 have passed V19's own config (§4.6.1).
@@ -683,19 +685,43 @@ Nothing below is `[x]`. A step becomes `[x]` only when it is implemented
 **and** verified with recorded evidence — the test name and count that
 proved it, written back into this document at the checkpoint.
 
+**Renumbered 2026-08-05**, after the predecessor hotfix (`af5339ce`)
+landed `gate_role`, both config declarations and the shared resolver on
+master. The former commit 2 (`D-C7a`) is **DONE and is no longer a PR D
+commit**; everything after it moves up one.
+
 | # | Commit | Behavior Delta |
 |---|---|---|
-| 1 | `D-C1a` mode declared and recorded | none |
-| 2 | `D-C7a` typed `gate_role` metadata (**prerequisite**, §4.6.1) | none — declared, not yet enforced |
-| 3 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
-| 4 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
-| 5 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
-| 6 | `D-C3` explicitly overridden zero-valid-trial formal recorded non-authoritative | none — the override already ran it |
-| 7 | `D-C4` incumbent exclusion | **non-authoritative results stop entering the incumbent** |
-| 8 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
-| 9 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
-| 10 | `D-C7b` five recorded fields; honest display label | none (labels only) |
-| 11 | `D-C9` V19 closure annotation (schema in Git; sidecar is an evidence step, §7) | none — archive annotated, never modified |
+| — | ~~`D-C7a` typed `gate_role` metadata~~ | **DONE — predecessor hotfix `af5339ce`**, not part of PR D |
+| 1 | `D-C1a` mode/authority declared and recorded | none |
+| 2 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
+| 3 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
+| 4 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
+| 5 | `D-C3` explicitly overridden zero-valid-trial formal recorded non-authoritative | none — the override already ran it |
+| 6 | `D-C4` incumbent exclusion | **non-authoritative results stop entering the incumbent** |
+| 7 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
+| 8 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
+| 9 | `D-C7b` five recorded fields; honest display label | none (labels only) |
+| 10 | `D-C9` V19 closure annotation (schema in Git; sidecar is an evidence step, §7) | none — archive annotated, never modified |
+
+**Scope corrections forced by the hotfix.**
+
+- **`D-C1a` returns to its original scope** — campaign mode/authority
+  declaration and recording. It does **not** carry the live classifier
+  fix; that is already on master.
+- **`D-C1b`'s consistency check now has a real input.** It compares the
+  declared campaign mode against the **declared** `gate_role`s in the
+  effective config, which is what makes the check non-circular: an
+  inference-based check would have passed V19's own configuration.
+- **`D-C2b` and `D-C3` consume role-aware *formal validity*** produced by
+  the shared `resolve_scientific_gate_ids`, **not** a raw `gate_role`
+  input. Neither should re-derive membership.
+- **`D-C7b` must not describe the gate entry model as "gaining a role"** —
+  it has one. Its remaining scope is the other recorded fields and the
+  display label.
+- **`D-C5` must name its module.** The re-audit established there is *no*
+  deterministic report layer today (§15.D), so this commit creates one; it
+  cannot be written as "filter the existing report path".
 
 `D-C8` (doc sync) is not a numbered commit here: per the repository rule it
 is the **last step before merge**, written against the merged code.
@@ -827,7 +853,23 @@ is never reported as passed.
 
 ---
 
-### Commit 2 — `D-C7a`: typed `gate_role` metadata (prerequisite for the check)
+### ~~Commit 2~~ — `D-C7a`: typed `gate_role` metadata — **DONE, NOT A PR D COMMIT**
+
+> **Landed as a predecessor hotfix (`af5339ce`, PR #171, 2026-08-05)** and
+> removed from the PR D sequence. It was pulled out because the post-PR-E
+> re-audit found the same missing declaration causing a *live* defect on
+> master — the in-run and resume paths disagreed about the same record —
+> and any resume before PR D merged was exposed.
+>
+> The hotfix delivered more than this section planned: not only the typed
+> field and both config declarations, but the single shared
+> `resolve_scientific_gate_ids` that both production paths now call, plus
+> the sha-keyed compatibility map for historical role-less configs.
+>
+> The rationale below is retained because it is still the reason the field
+> must be **declared** rather than inferred, and D-C1b depends on it.
+
+**Original rationale (historical).**
 
 **1. Goal.** Give the consistency check in commit 3 a reliable notion of
 "declared blocking". Without it the check must either trust the misleading
@@ -1192,14 +1234,46 @@ summary consumption (`:911`, `:924`, `:961`, `:1272`) and the report path.
 *Non-goals.* No change to the frozen TIDMAD score formula. No change to how
 a score is computed — only to which scores are aggregated.
 
-*Dependencies.* Commit 5 (`D-C2b`).
+*Dependencies.* Commit 4 (`D-C2b`) — renumbered 2026-08-05.
+
+> **The report layer does not exist — this commit CREATES it.**
+> The post-PR-E re-audit answered the open question (§15.D): there is no
+> report-assembly module outside the interpretation agent. `execute_tools/`
+> has none, and the only report-shaped code is
+> `core/runtime_control/gpu_measurement_*` and
+> `scripts/official_paper_health_scan.py`, neither of which assembles
+> campaign results. So this commit cannot be written as "filter the
+> existing report path".
+>
+> **Named contract**, to be confirmed against master at implementation
+> time rather than assumed now:
+>
+> ```text
+> module   execute_tools/scientific_aggregation.py        (new)
+> input    list of summary records carrying ScientificAuthority
+> output   AggregationScope(
+>              included:        list[record],
+>              excluded:        list[(record_id, typed_reason)],
+>              excluded_count:  int,
+>              all_excluded:    bool,
+>          )
+> ```
+>
+> The interpretation agent consumes `included`; the deterministic
+> provenance section renders `excluded` and `excluded_count` from the same
+> typed object. **No model involvement**, so §4.7's ruling holds and this
+> stays non-LLM-facing.
+>
+> `all_excluded` is explicit because "every result was excluded" must read
+> as a stated outcome, never as an empty aggregate that looks like a
+> successful campaign with no findings.
 
 **3. Implementation plan.**
 - [ ] Read each of the four `inp.summaries` loops before editing; they are not obviously equivalent and may need different handling.
+- [ ] Create the aggregation module above; it owns the include/exclude decision, and the agent consumes its output.
 - [ ] Filter on `enters_scientific_aggregation`.
 - [ ] Emit an explicit "N results excluded as non-authoritative, because …" line — a silently smaller sample is the failure mode being prevented.
-- [ ] **Find the deterministic report layer first** (§4.7). The default is that aggregation code derives the count and reasons and the report renders a fixed provenance section — no model involvement.
-- [ ] Only if a code audit proves the final report is produced wholly by the interpretation agent with no layer able to append deterministically, fall back to an LLM-facing input — and **stop for separate approval** before doing so.
+- [ ] Render the exclusion deterministically from the typed object; **no LLM-facing input**. If implementation shows that is impossible, **stop for separate approval** rather than routing it through the model.
 
 **4. Validation plan.**
 - *Unit*: excluded results absent from aggregation; the count is reported.
