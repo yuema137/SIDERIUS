@@ -163,7 +163,7 @@ ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset(
 )
 
 
-def stops_phase(enforcement: str, reason_code: str) -> bool:
+def stops_phase(enforcement: str, reason_code: str | None) -> bool:
     """Whether an ADVERSE decision stops the phase under this posture.
 
     One home for the enforcement question, so the executor cannot answer
@@ -174,12 +174,19 @@ def stops_phase(enforcement: str, reason_code: str) -> bool:
             treated as non-enforcing here **only** because
             `GpuAdmissionPolicy` already refuses it at construction; this
             function is not the validation point.
-        reason_code: the refusal's `AdmissionReason`.
+        reason_code: the refusal's `AdmissionReason`, typed Optional
+            because `AdmissionDecision.reason_code` is — an admitted
+            decision carries none. `_a_refusal_must_say_why` makes `None`
+            unreachable for an actual refusal, so this is a type-level
+            honesty fix, not a behaviour change. It is still answered
+            explicitly rather than left to fall through: a missing reason
+            is not a resource rejection, and `enforce`'s "stop on any
+            adverse decision" already has an adverse decision in hand.
     """
     if enforcement == "enforce":
         return True
     if enforcement == "enforce_resource_limits":
-        return reason_code in RESOURCE_REJECTIONS
+        return reason_code is not None and reason_code in RESOURCE_REJECTIONS
     return False
 
 

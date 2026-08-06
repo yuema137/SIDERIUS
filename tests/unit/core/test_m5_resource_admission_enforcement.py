@@ -49,6 +49,15 @@ class TestTheEnforcementQuestionHasOneHome:
         # invent enforcement for a value the policy layer would refuse.
         assert stops_phase("nonsense", "insufficient_headroom") is False
 
+    def test_a_missing_reason_is_not_a_resource_rejection(self):
+        # `AdmissionDecision.reason_code` is Optional — an admitted
+        # decision carries none — and pyright caught the executor passing
+        # `AdmissionReason | None` into a `str` parameter on the frozen
+        # head. `_a_refusal_must_say_why` makes None unreachable for a
+        # real refusal, so this pins the type-level answer rather than a
+        # behaviour: absence of a reason cannot be a resource verdict.
+        assert stops_phase("enforce_resource_limits", None) is False
+
     def test_the_production_posture_is_an_accepted_value(self):
         assert "enforce_resource_limits" in ACCEPTED_ENFORCEMENT
 
