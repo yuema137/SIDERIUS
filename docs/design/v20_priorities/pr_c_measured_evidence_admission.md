@@ -6992,9 +6992,31 @@ utilisation). **Consumers**: `bootstrap` readiness (above);
 
 `unstable_external_identity` makes a changing external PID set an invalidity
 reason. Under the corrected semantics a changing PID set is an
-**observation**. Only `sampling_incomplete` survives as a genuine integrity
-reason; `unattributed_occupancy_growth` survives only where it means
-attribution actually failed, not merely that a neighbour grew.
+**observation**.
+
+**Correction (operator, 2026-08-06)**: do not read this as "only
+`sampling_incomplete` survives". The vocabulary is not being narrowed to one
+reason — it is being *re-grounded*. EVERY genuine measurement-integrity
+failure remains a valid invalidity reason:
+
+* candidate-owned process attribution failed;
+* device identity missing or inconsistent;
+* required samples missing or corrupted;
+* probe lifecycle incomplete;
+* telemetry cannot separate candidate demand;
+* a required interpretation invariant does not hold.
+
+What loses its standing as a **direct** invalidity reason is only:
+
+* an external PID exists;
+* an external PID is unregistered;
+* the external PID set changed;
+* external memory fluctuated;
+* the external workload is bursty.
+
+`unattributed_occupancy_growth` therefore survives *as an attribution
+failure* — when growth means candidate demand can no longer be separated —
+and not as a statement that a neighbour grew.
 
 ### 30.2 Frozen semantics — three independent questions
 
