@@ -3930,6 +3930,47 @@ class HyperparamTuningAgent:
                     cfg_eval_strategy = _cfg["eval_strategy"]
                     cfg_eval_portion = _cfg["eval_portion"]
 
+                    # FU-D-12 — VALIDATION-ONLY workload ceiling, applied to
+                    # the RESOLVED values so it holds whichever branch
+                    # produced them.
+                    #
+                    # Trial-mode portions come from the LLM PLAN, not from
+                    # operator input, so a Gate that requested 0.02 measured
+                    # 0.1. Time budgets bound wall time but not WORKLOAD, and
+                    # the harness must own the maximum. Formal-mode portions
+                    # already come from `agent_input.formal_*` and are
+                    # unaffected.
+                    #
+                    # A maximum, never a replacement: `min` can only reduce.
+                    _planned_portions = {
+                        "trial_portion": cfg_trial_portion,
+                        "train_portion": cfg_train_portion,
+                        "eval_portion": cfg_eval_portion,
+                    }
+                    if agent_input.validation_max_portion is not None:
+                        _ceiling = agent_input.validation_max_portion
+                        for _label, _planned in (
+                            ("trial_portion", cfg_trial_portion),
+                            ("train_portion", cfg_train_portion),
+                            ("eval_portion", cfg_eval_portion),
+                        ):
+                            if _planned > _ceiling:
+                                print(
+                                    f"  Clamping {_label}: {_planned} → {_ceiling} "
+                                    f"(validation_max_portion)"
+                                )
+                        # Assigned unconditionally: BOTH branches of
+                        # `_resolve_sample_set_cfg` yield a non-optional float
+                        # (`ExperimentPlan.trial_portion` and
+                        # `HyperparamTuningInput.formal_*` are both `float`),
+                        # and `TrialConfig` requires `float`. Guarding on
+                        # `is not None` here would widen the inferred type to
+                        # `float | None` and break the TrialConfig contract —
+                        # which is exactly what CI caught.
+                        cfg_trial_portion = min(cfg_trial_portion, _ceiling)
+                        cfg_train_portion = min(cfg_train_portion, _ceiling)
+                        cfg_eval_portion = min(cfg_eval_portion, _ceiling)
+
                     # Generate deterministic seeds for reproducibility.
                     import hashlib
 
@@ -5255,6 +5296,23 @@ class HyperparamTuningAgent:
                     # fields below hold the EFFECTIVE strategies.
                     final_record["resolved_data_scope"] = resolved_data_scope
                     final_record["health_gate_enabled"] = agent_input.health_gate_enabled
+                    # FU-D-12 — workload-ceiling provenance. Recorded on EVERY
+                    # round so a Gate can PROVE the workload was bounded rather
+                    # than merely that a CLI flag was accepted. Carries the
+                    # planned values as well as the resolved ones: without the
+                    # before/after pair, a clamp that silently stopped firing
+                    # would be indistinguishable from a planner that happened
+                    # to choose small values.
+                    final_record["validation_workload_ceiling"] = {
+                        "enabled": agent_input.validation_max_portion is not None,
+                        "configured_ceiling": agent_input.validation_max_portion,
+                        "planned": _planned_portions,
+                        "resolved": {
+                            "trial_portion": cfg_trial_portion,
+                            "train_portion": cfg_train_portion,
+                            "eval_portion": cfg_eval_portion,
+                        },
+                    }
                     # V19 PR 2 — data-ordering provenance. Stamped for EVERY
                     # round (trial and formal alike), unlike the trial-only
                     # block below: ordering applies to all training. Only the

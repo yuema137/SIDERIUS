@@ -481,6 +481,22 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="File indices sampled (only for 'target' strategy).",
     )
+    validation_workload_ceiling: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "VALIDATION POSTURE ONLY (V20 FU-D-12). Workload-ceiling "
+            "provenance for this round: whether a ceiling was configured, its "
+            "value, the PLANNED trial portions, and the RESOLVED ones after "
+            "clamping. None on ordinary campaigns.\n\n"
+            "Declared here because an undeclared field is silently dropped by "
+            "Pydantic's default extra='ignore' — the defect that hit this PR "
+            "three times. The planned/resolved PAIR is the point: without it a "
+            "clamp that stopped firing would look identical to a planner that "
+            "happened to choose small values, and a Gate could not PROVE the "
+            "workload was bounded."
+        ),
+    )
+
     # --- DataScope stamps + strategy-normalization provenance (DS5) ---
     # The existing ``trial_strategy`` / ``eval_strategy`` fields above hold
     # the EFFECTIVE (executed) strategies; the ``planned_*`` fields record
@@ -1670,6 +1686,27 @@ class HyperparamTuningInput(BaseModel):
             "planned epochs to min(planned_epochs, max_epochs). Use this to prevent "
             "the LLM from choosing excessively long training in integration tests "
             "or resource-constrained environments."
+        ),
+    )
+    validation_max_portion: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "VALIDATION POSTURE ONLY (V20 FU-D-12). Hard ceiling on the "
+            "RESOLVED trial-mode data portions — trial_portion, train_portion "
+            "and eval_portion — applied as min(planned, ceiling) at the "
+            "plan-to-trial boundary, beside the existing max_epochs clamp.\n\n"
+            "It exists because those three values are resolved from the LLM "
+            "PLAN, not from operator input: a Gate that requested 0.02 "
+            "measured 0.1 in practice. Time budgets bound wall time but do "
+            "not bound WORKLOAD, and the harness — not the planner — must own "
+            "the maximum.\n\n"
+            "A maximum, never a replacement: it can only reduce a planned "
+            "portion, never raise one, so it cannot make a run larger. "
+            "``None`` (the default) leaves ordinary campaigns completely "
+            "unchanged. Formal-mode portions are unaffected — they already "
+            "come from operator input rather than the plan."
         ),
     )
     plan_overrides: dict[str, Any] = Field(
