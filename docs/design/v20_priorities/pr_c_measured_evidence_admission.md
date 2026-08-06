@@ -6932,3 +6932,210 @@ Per PR, since the two are reviewed separately.
 **Both**
 - Mutation proofs per merged family, each against real production source.
 - Follow-ups FU-C-1..FU-C-8 filed with evidence.
+
+---
+
+## 30. Validity separation — the audited path and the frozen semantics (2026-08-05)
+
+**Operator correction.** PR C's occupancy work (#176) implemented T0 at the
+eligibility layer but left a presence-based refusal upstream, and defined
+validity partly in terms of external *stability*. Both are wrong. Governing
+mandate: `v20_prelaunch_completion_mandate.md` §2.4.
+
+### 30.1 Audit — what production actually does today
+
+Traced by reading the call path and by executing it (real-GPU Case B,
+2026-08-05), not inferred from names.
+
+**The refusal**, `core/runtime_control/bootstrap.py`:
+
+```python
+contended = window.classification not in ("single_candidate_idle",
+                                          "pairwise_expected_peer")
+...
+remedy = ("Another process is using this GPU. The measurement would not "
+          "describe an idle baseline — stop the other workload and re-run.")
+if contended:
+    return _finish(False)
+```
+
+Measured consequence — a stable, sole-occupant, 5104 MiB holder:
+
+```text
+bootstrap  ready: False
+           contention window: foreign_contended (5 samples)
+           "known foreign GPU process present (unregistered PIDs [2280629])"
+```
+
+`MeasurementValidity` was **never reached**. Three defects in one gate:
+
+1. **presence decides readiness** — any unregistered PID refuses, regardless
+   of stability or attribution;
+2. **registration is privileged** — `pairwise_expected_peer` passes while an
+   otherwise identical unregistered process is refused. Registration becomes
+   a correctness requirement, which the mandate forbids;
+3. **the remedy is dishonest** — it tells the operator to stop other
+   workloads, i.e. that SIDERIUS requires an empty GPU.
+
+**Producers of `foreign_contended`**: `calibration_policy.classify_contention_window`
+(3 return sites — unregistered PID, peer-held memory over threshold, sustained
+utilisation). **Consumers**: `bootstrap` readiness (above);
+`estimate_types.contended` (2 sites) feeding `derive_decision_eligibility`;
+`decision_policy` for the contended-measurement `REQUEST_PROBE` producer.
+
+**The current `MeasurementValidity` is itself wrong** — mine, from #176:
+
+```python
+"valid_current_conditions" | "unstable_external_identity"
+| "unattributed_occupancy_growth" | "sampling_incomplete"
+```
+
+`unstable_external_identity` makes a changing external PID set an invalidity
+reason. Under the corrected semantics a changing PID set is an
+**observation**.
+
+**Correction (operator, 2026-08-06)**: do not read this as "only
+`sampling_incomplete` survives". The vocabulary is not being narrowed to one
+reason — it is being *re-grounded*. EVERY genuine measurement-integrity
+failure remains a valid invalidity reason:
+
+* candidate-owned process attribution failed;
+* device identity missing or inconsistent;
+* required samples missing or corrupted;
+* probe lifecycle incomplete;
+* telemetry cannot separate candidate demand;
+* a required interpretation invariant does not hold.
+
+What loses its standing as a **direct** invalidity reason is only:
+
+* an external PID exists;
+* an external PID is unregistered;
+* the external PID set changed;
+* external memory fluctuated;
+* the external workload is bursty.
+
+`unattributed_occupancy_growth` therefore survives *as an attribution
+failure* — when growth means candidate demand can no longer be separated —
+and not as a statement that a neighbour grew.
+
+### 30.2 Frozen semantics — three independent questions
+
+**(1) External activity — CONTEXT, never validity.** Recorded: present or
+absent; registered PIDs; unregistered PIDs; whether the PID set changed;
+external attributed-memory min/max/latest; a descriptive marker
+(`absent` / `stable` / `variable` / `unknown`). Descriptive only.
+
+**(2) Measurement validity — INTEGRITY only.** Valid when the device is known,
+candidate-owned processes and descendants are attributable, samples are
+complete and interpretable, candidate demand is separable from other demand,
+the probe lifecycle completed, and interpretation invariants hold.
+
+Invalid only for a **named integrity failure**: attribution unavailable;
+process tree untrackable; device identity missing or inconsistent; samples
+incomplete or corrupted; telemetry cannot separate candidate usage; probe
+lifecycle incomplete; invariant failed.
+
+**Never invalidity reasons**: an external process exists; it is unregistered;
+its memory changes; the PID set changes; it is bursty; there are several.
+
+Where external change genuinely destroys attribution, the reason is the
+**attribution/telemetry failure**, never the external presence.
+
+**(3) Admission — SEPARATE.** Candidate-attributed demand vs current available
+resources vs configured margin, with external occupancy recorded alongside.
+Both `valid + admit` and `valid + reject_insufficient_current_resources` are
+expected. No hidden stability gate. No registration requirement.
+
+**Registration is metadata.** Given identical measured facts and resources,
+registered and unregistered external workloads must produce identical validity
+and admission outcomes.
+
+**Historical compatibility.** Existing `foreign_contended` records stay
+readable; new records do not emit it as a blocking presence verdict; nothing
+is reconstructed or upgraded.
+
+### 30.3 Decision ledger
+
+| | |
+|---|---|
+| current behaviour | presence refuses readiness before validity is computed; registration privileged; remedy demands an empty GPU |
+| corrected behaviour | presence is observation; validity is integrity; admission is separate; registration is provenance |
+| why the old behaviour is wrong | it asks "is anyone else on the GPU?" — the question T0 was adopted to stop asking — and makes SIDERIUS unusable on a shared device |
+| alternative rejected | register the holder as an expected peer. Rejected: it produces a green result for a *different* property and leaves the real claim untested |
+| alternative rejected | retire `classify_contention_window` entirely. Rejected: it still produces useful observations and is consumed elsewhere; the narrow fix is to stop it *deciding readiness* |
+| compatibility | old vocabulary readable; new records use honest non-blocking terms; no historical upgrade |
+
+### 30.4 Implementation record (2026-08-06)
+
+| checkpoint | commit | what landed |
+|---|---|---|
+| A | `ac0afeed` | `ExternalActivityObservation` + `summarise_external_activity` — activity marker, registered/unregistered PID split, PID-set-change flag, external memory min/max/latest. Pure observation, no verdict. Unreadable telemetry reports `unknown`, never `absent` |
+| B | `ac0afeed` | the presence gate removed from `bootstrap.py`; the window is still sampled and recorded with `decides_readiness: False` |
+| C | `ac0afeed` | validity re-grounded to integrity: `candidate_attribution_failed`, `device_identity_unavailable`, `sampling_incomplete`, `probe_lifecycle_incomplete`, `measurement_invariant_failed`; retired reasons named in `RETIRED_PRESENCE_REASONS` |
+| D | `8c888891` | admission separation asserted; scope narrowed (below) |
+| E | this commit | bootstrap docstrings and the operator doc corrected |
+
+**Scope narrowed, and the attempt recorded.** Widening the no-window fallback
+so `foreign_contended` no longer withheld blocking authority changed behaviour
+across five modules for paths carrying **no occupancy evidence at all**. It
+was reverted. The fallback now reads "validity NOT ESTABLISHED", not "presence
+invalidates", and every path that names its device — including the real
+bootstrap/probe path after FU-C-1 — builds a window and is decided by
+integrity.
+
+**Mutation guards** (all caught): PID-set change invalidating again; presence
+refusing readiness again; registration privileged in the summary; conservative
+aggregates dropped.
+
+**Re-grounded suites**, because they encoded the retired semantics:
+`test_measurement_validity` (identity change now valid),
+`test_c10_bootstrap` and `test_bootstrap_pseudo` (a busy GPU is recorded and
+still measured). A `_Window` fake also needed `occupancy` — the fourth
+instance of the injection-seam class; the fake was fixed rather than
+production weakened.
+
+**Not stale after review**: "idle baseline" in `campaign.py`,
+`runtime_campaign.py`, `running_chain_test.md` and
+`runtime_estimation_and_calibration.md` describes the C12 campaign's
+*scientific* design — measure alone, then paired, to derive a contention
+multiplier. That is a legitimate experimental requirement, not a readiness
+gate, and was deliberately left unchanged.
+
+### 30.5 Pre-freeze transport verification, and one honest residue
+
+Run against the candidate head before freezing. Six properties verified by
+execution; the seventh is a documented residue rather than a clean claim.
+
+| # | property | result |
+|---|---|---|
+| 1 | a no-window path does not FABRICATE `VALID` in the persisted field | **OK** — `measurement_validity` stays `None`; only the local eligibility computation treats idle as valid, preserving legacy behaviour without writing a claim |
+| 2 | registered and unregistered produce identical validity and aggregates | **OK** — labels differ (`registered_pids` vs `unregistered_pids`), `activity` and `external_mib_max` identical, same verdict |
+| 3 | an attribution failure names attribution, never resources | **OK** — reason contains none of "insufficient / free memory / headroom / resources" |
+| 4 | `ExternalActivityObservation` round-trips and is strict JSON | **OK** — reload equals the original; no `Infinity`/`NaN` |
+| 5 | the observation is actually attached to the bootstrap step, from the window's REAL snapshots | **OK** — `external.model_dump(mode="json")` on the step; summarised from `window.occupancy.snapshots` |
+| 6 | `decides_readiness: False` is a CONSTRAINT, not decoration | **OK** — the step's `ok=True` is literal, so presence cannot refuse; guarded by a test and by mutation 2 |
+| 7 | `foreign_contended` is read-only for history | **RESIDUE — see below** |
+
+**The residue.** `classify_contention_window` still *produces*
+`foreign_contended` (3 return sites), and `estimate_types` still maps it into
+`contended`, which feeds the no-window eligibility fallback. So on paths that
+name **no device** — and therefore have no occupancy window — external
+presence still influences blocking authority indirectly.
+
+Where it does **not** apply: the bootstrap readiness gate (removed), and every
+path that names its device, which builds a window and is decided by integrity.
+That includes the real Case B bootstrap/probe path after FU-C-1.
+
+**Why it is left.** Removing it means changing the eligibility rule for
+measurements carrying no occupancy evidence at all. That was attempted and
+reverted: it altered behaviour across five modules for paths where nothing had
+been sampled, and granting blocking authority there would rest on no evidence.
+The mandate's narrow-correction rule excludes that scope, and the operator's
+instruction is explicit that a missing-evidence path must not fail OPEN merely
+to retire old vocabulary.
+
+**How to read the residue honestly**: on a no-window path the outcome is
+"validity NOT ESTABLISHED", and `foreign_contended` is the legacy signal that
+happens to carry it. The classification remains useful provenance. Retiring
+the vocabulary entirely belongs to a later change that gives those paths real
+occupancy evidence, not to this one.

@@ -51,15 +51,39 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
 
+#: What was ELSE on the device. Context and provenance — never a validity
+#: criterion. `unknown` means telemetry could not say, which is itself a fact
+#: rather than a verdict.
+ExternalActivity = Literal["absent", "stable", "variable", "unknown"]
+
 MeasurementValidity = Literal[
+    # The measurement can be trusted.
     "valid_current_conditions",
-    "unstable_external_identity",
-    "unattributed_occupancy_growth",
+    # --- integrity failures, each naming what actually broke -------------
+    "candidate_attribution_failed",
+    "device_identity_unavailable",
     "sampling_incomplete",
+    "probe_lifecycle_incomplete",
+    "measurement_invariant_failed",
 ]
 
 #: The only value that may carry blocking authority.
 VALID: MeasurementValidity = "valid_current_conditions"
+
+#: Reasons that were REMOVED (operator, 2026-08-06). Kept as a named set so a
+#: regression that reintroduces one is obvious in review, and so historical
+#: artifacts remain readable.
+#:
+#: External activity is CONTEXT. None of these may ever be a direct invalidity
+#: reason: an external process exists; it is unregistered; the external PID
+#: set changed; external memory fluctuated; the workload is bursty.
+#:
+#: `unattributed_occupancy_growth` survives only in re-grounded form, as
+#: `candidate_attribution_failed`: growth invalidates when it makes candidate
+#: demand INSEPARABLE, never because a neighbour grew.
+RETIRED_PRESENCE_REASONS: frozenset[str] = frozenset(
+    {"unstable_external_identity", "unattributed_occupancy_growth"}
+)
 
 
 class OccupancyWindow(BaseModel):
@@ -115,59 +139,148 @@ def classify_measurement_validity(
     #
     # An empty window is not a clean device; it is an unobserved one. A
     # snapshot whose telemetry failed carries no numbers at all (the schema
-    # enforces that), so it cannot contribute to any comparison below.
+    # enforces that), so it cannot support any attribution claim.
     if not window:
         return "sampling_incomplete", ("no occupancy samples were taken",)
     gaps = [i for i, s in enumerate(window) if not s.telemetry_available]
     if gaps:
         return "sampling_incomplete", (
             f"{len(gaps)} of {len(window)} samples had no telemetry "
-            f"(indices {gaps}); an unobserved interval cannot support a "
-            "stability claim",
+            f"(indices {gaps}); an unobserved interval cannot support an "
+            "attribution claim",
         )
 
-    # --- external identity stability (T0's core) -------------------------
+    # --- device identity --------------------------------------------------
     #
-    # Identity, NOT bytes. The same neighbours holding a varying amount are
-    # stable conditions; a neighbour arriving or leaving is a different
-    # environment before and after, and a measurement spanning both
-    # describes neither.
-    identities = {_external_identity(s) for s in window}
-    if len(identities) > 1:
-        first = sorted(_external_identity(window[0]))
-        arrived = sorted(set().union(*identities) - _external_identity(window[0]))
-        departed = sorted(_external_identity(window[0]) - set().intersection(*identities))
-        return "unstable_external_identity", (
-            f"the external process set changed during the window "
-            f"(started as {first}; joined {arrived}; left {departed}) — the "
-            "conditions before and after are different environments",
+    # A measurement that cannot say WHICH device it describes cannot be
+    # compared with anything.
+    devices = {s.device.uuid for s in window}
+    if len(devices) > 1:
+        return "device_identity_unavailable", (
+            f"the window spans more than one device ({sorted(devices)}); a "
+            "single measurement cannot describe two accelerators",
         )
 
-    # --- attribution completeness ---------------------------------------
+    # --- candidate attribution -------------------------------------------
     #
-    # Growth in unattributed occupancy means bytes appeared that nobody can
-    # account to a process — including a candidate child that was spawned
-    # after the process tree was enumerated. Either way the window no longer
-    # supports an attribution claim.
-    #
-    # GROWTH, not presence: a device may carry a constant unattributed
-    # baseline (driver context, a graphics client), and that is part of the
-    # stable conditions being measured.
+    # THE integrity question: can the candidate's own demand be separated
+    # from everyone else's? Note what is NOT asked — whether anyone else is
+    # present, whether they are registered, whether their PID set changed,
+    # whether their memory moved. Those are recorded by
+    # `summarise_external_activity` as CONTEXT (operator, 2026-08-06).
+    own = [s.own_tree_mib for s in window if s.own_tree_mib is not None]
+    if len(own) != len(window):
+        return "candidate_attribution_failed", (
+            "a sample reported telemetry without a candidate process-tree "
+            "figure, so the candidate's own demand cannot be separated from "
+            "other demand",
+        )
+
     unattributed = [s.unattributed_mib for s in window if s.unattributed_mib is not None]
     if len(unattributed) != len(window):
-        return "sampling_incomplete", (
+        return "candidate_attribution_failed", (
             "a sample reported telemetry without an unattributed figure, so "
-            "attribution completeness cannot be established",
+            "the share of memory belonging to no enumerated process — and "
+            "therefore the candidate's separable demand — is unknown",
         )
+
+    # Growth in UNATTRIBUTED memory invalidates only because it means bytes
+    # exist that belong to no enumerated process, so candidate demand can no
+    # longer be stated. This is the re-grounded form of the retired
+    # `unattributed_occupancy_growth`: the failure is ATTRIBUTION, never the
+    # fact that a neighbour grew. A neighbour whose OWN attributed memory
+    # grows leaves this untouched.
     if unattributed and max(unattributed) > unattributed[0]:
-        return "unattributed_occupancy_growth", (
+        return "candidate_attribution_failed", (
             f"unattributed GPU memory grew during the window "
-            f"({unattributed[0]} -> {max(unattributed)} MiB); those bytes "
-            "belong to no enumerated process, so neither the candidate's "
-            "demand nor the neighbours' can be stated",
+            f"({unattributed[0]} -> {max(unattributed)} MiB): those bytes "
+            "belong to no enumerated process, so the candidate's own demand "
+            "can no longer be separated from unaccounted usage",
         )
 
     return VALID, ()
+
+
+class ExternalActivityObservation(BaseModel):
+    """What ELSE was on the device — recorded, never a validity criterion.
+
+    Every field here is an observation. None of them may decide validity or
+    readiness (operator, 2026-08-06): presence, non-registration, PID-set
+    change, memory fluctuation and burstiness are facts about the
+    environment, not defects in the measurement.
+
+    Registration appears only as the split between `registered_pids` and
+    `unregistered_pids`. That split is PROVENANCE: given identical measured
+    facts, a registered and an unregistered neighbour must produce identical
+    validity and admission outcomes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    activity: ExternalActivity = "unknown"
+    #: Peers the launcher explicitly declared. Labelling only.
+    registered_pids: tuple[int, ...] = ()
+    #: Everything else on the device. NOT a defect.
+    unregistered_pids: tuple[int, ...] = ()
+    #: Whether the external PID set changed across the window. Recorded so
+    #: the environment is described honestly; it does not invalidate anything.
+    pid_set_changed: bool = False
+    external_mib_min: int | None = Field(default=None, ge=0)
+    external_mib_max: int | None = Field(default=None, ge=0)
+    external_mib_latest: int | None = Field(default=None, ge=0)
+
+    @property
+    def present(self) -> bool:
+        return bool(self.registered_pids or self.unregistered_pids)
+
+
+def summarise_external_activity(
+    snapshots: Iterable[GpuAccountingSnapshot],
+    *,
+    registered_pids: Iterable[int] = (),
+) -> ExternalActivityObservation:
+    """Describe external activity across a window. Pure observation.
+
+    Deliberately returns no verdict: a caller that wants to know whether the
+    measurement can be trusted asks `classify_measurement_validity`, and a
+    caller that wants to know whether the candidate may run asks admission.
+    """
+    window = tuple(snapshots)
+    usable = [s for s in window if s.telemetry_available]
+    if not usable:
+        return ExternalActivityObservation(activity="unknown")
+
+    registered = set(registered_pids)
+    per_sample_sets: list[frozenset[int]] = []
+    seen_registered: set[int] = set()
+    seen_unregistered: set[int] = set()
+    totals: list[int] = []
+
+    for snap in usable:
+        pids = frozenset(p.pid for p in snap.other_processes)
+        per_sample_sets.append(pids)
+        seen_registered |= pids & registered
+        seen_unregistered |= pids - registered
+        if snap.other_mib is not None:
+            totals.append(snap.other_mib)
+
+    if not seen_registered and not seen_unregistered and not any(totals):
+        return ExternalActivityObservation(activity="absent")
+
+    changed = len(set(per_sample_sets)) > 1
+    varied = bool(totals) and min(totals) != max(totals)
+
+    return ExternalActivityObservation(
+        # `variable` covers both a moving PID set and moving bytes. Both are
+        # ordinary shared-device behaviour.
+        activity="variable" if (changed or varied) else "stable",
+        registered_pids=tuple(sorted(seen_registered)),
+        unregistered_pids=tuple(sorted(seen_unregistered)),
+        pid_set_changed=changed,
+        external_mib_min=min(totals) if totals else None,
+        external_mib_max=max(totals) if totals else None,
+        external_mib_latest=totals[-1] if totals else None,
+    )
 
 
 def build_occupancy_window(snapshots: Iterable[GpuAccountingSnapshot]) -> OccupancyWindow:

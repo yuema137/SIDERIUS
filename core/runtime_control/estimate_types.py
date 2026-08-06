@@ -113,6 +113,7 @@ def derive_decision_eligibility(
     steady_state: bool = False,
     contended: bool = False,
     measurement_validity: str | None = None,
+    concurrency_identity: str | None = None,
 ) -> tuple[bool, bool, bool]:
     """Derive ``(advisory_eligible, blocking_eligible,
     formal_execution_eligible)`` from provenance + measurement state.
@@ -163,9 +164,26 @@ def derive_decision_eligibility(
         measurement_validity: the typed verdict, when a window exists.
     """
     if measurement_validity is None:
-        # No window was supplied. A contended/unknown identity cannot
-        # ESTABLISH validity, so it does not block; anything else is treated
-        # as valid. Both are the pre-PR-C outcomes.
+        # No occupancy window was supplied, so validity was never computed.
+        #
+        # SCOPE NOTE (2026-08-06). The presence-based REFUSAL was removed
+        # where it did real harm: bootstrap readiness, which stopped the flow
+        # before validity was ever computed on a shared device.
+        #
+        # This fallback is deliberately left conservative. It applies ONLY
+        # when no occupancy window exists — i.e. when no device identity was
+        # named, so `gpu_accounting` was never sampled and integrity was
+        # never assessed. Granting blocking authority there would rest on no
+        # evidence at all.
+        #
+        # Read it as "validity NOT ESTABLISHED", not as "presence
+        # invalidates". Every path that names its device — including the real
+        # Case B bootstrap/probe path after FU-C-1 — builds a window and is
+        # decided by integrity above, never by this branch.
+        #
+        # Widening it was tried and reverted: it changed behaviour across
+        # five modules for paths carrying no occupancy evidence, which is
+        # scope the mandate's narrow-correction rule excludes.
         measurement_validity = None if contended else VALID_MEASUREMENT
     advisory = True
     measured = source in MEASUREMENT_BACKED_SOURCES
@@ -274,6 +292,7 @@ class RuntimeEstimate(BaseModel):
             steady_state=self.steady_state,
             contended=self.contended,
             measurement_validity=self.measurement_validity,
+            concurrency_identity=self.concurrency_identity,
         )
         problems: list[str] = []
         if self.advisory_eligible is not advisory:
@@ -326,6 +345,7 @@ def make_estimate(
         steady_state=steady_state,
         contended=contended,
         measurement_validity=measurement_validity,
+        concurrency_identity=concurrency_identity,
     )
     return RuntimeEstimate(
         provenance=provenance,

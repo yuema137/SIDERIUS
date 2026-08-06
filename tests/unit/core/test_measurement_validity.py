@@ -107,34 +107,51 @@ class TestStableExternalOccupancyIsValid:
 class TestEvidenceQualityFailures:
     """The only things that may remove blocking authority."""
 
-    def test_a_neighbour_arriving_mid_window_is_unstable_identity(self):
+    def test_a_neighbour_arriving_mid_window_does_NOT_invalidate(self):
+        """RE-GROUNDED 2026-08-06. This previously asserted
+        `unstable_external_identity`. External PID-set change is an
+        OBSERVATION, not a defect in the measurement — the candidate's own
+        demand is still separable, so the measurement is still trustworthy.
+        """
         window = [
             _snap(others={999: 5_000}),
             _snap(others={999: 5_000}),
             _snap(others={999: 5_000, 1234: 2_000}),
         ]
-        validity, reasons = classify_measurement_validity(window)
-        assert validity == "unstable_external_identity"
-        assert "1234" in reasons[0]
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
 
-    def test_a_neighbour_leaving_mid_window_is_unstable_identity(self):
-        """Departure matters as much as arrival: the second half of the
-        window describes a different machine from the first."""
+    def test_a_neighbour_leaving_mid_window_does_NOT_invalidate(self):
+        """Departure is equally an observation."""
         window = [_snap(others={999: 5_000}), _snap(others={999: 5_000}), _snap(others={})]
-        assert classify_measurement_validity(window)[0] == "unstable_external_identity"
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
 
-    def test_a_neighbour_that_restarts_changes_identity(self):
-        """Same memory, same count, different PID. A totals-only comparison
-        would call these identical — which is precisely why the ruling is
-        about identity."""
+    def test_a_neighbour_that_restarts_does_NOT_invalidate(self):
+        """MUTATION TARGET: reintroducing a PID-constancy requirement.
+
+        A restarted neighbour changes the PID set and nothing about whether
+        the candidate's demand can be measured.
+        """
         window = [_snap(others={999: 5_000}), _snap(others={1000: 5_000})]
-        assert classify_measurement_validity(window)[0] == "unstable_external_identity"
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
 
-    def test_growing_unattributed_memory_is_a_failure(self):
+    def test_growing_unattributed_memory_is_an_ATTRIBUTION_failure(self):
+        """RE-GROUNDED: the verdict is `candidate_attribution_failed`, and the
+        reason names attribution rather than "a neighbour grew".
+
+        Growth in UNATTRIBUTED bytes invalidates because those bytes belong
+        to no enumerated process, so candidate demand can no longer be
+        separated — not because the device got busier.
+        """
         window = [_snap(unattributed=500), _snap(unattributed=500), _snap(unattributed=9_000)]
         validity, reasons = classify_measurement_validity(window)
-        assert validity == "unattributed_occupancy_growth"
-        assert "500" in reasons[0] and "9000" in reasons[0].replace(",", "")
+        assert validity == "candidate_attribution_failed"
+        assert "separated" in reasons[0]
+
+    def test_a_neighbour_growing_its_OWN_attributed_memory_is_valid(self):
+        """The distinction that matters: attributed growth is a neighbour
+        being busy; unattributed growth is evidence going missing."""
+        window = [_snap(others={999: 1_000}), _snap(others={999: 20_000})]
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
 
     def test_shrinking_unattributed_memory_is_not_a_failure(self):
         """Only GROWTH compromises attribution. Bytes becoming explicable
@@ -167,7 +184,6 @@ class TestEvidenceQualityFailures:
         for window in (
             [],
             [_snap(available=False)],
-            [_snap(others={1: 10}), _snap(others={2: 10})],
             [_snap(unattributed=10), _snap(unattributed=900)],
         ):
             validity, reasons = classify_measurement_validity(window)
@@ -213,7 +229,7 @@ class TestOomAttribution:
 
     @pytest.mark.parametrize(
         "validity",
-        ["unstable_external_identity", "unattributed_occupancy_growth", "sampling_incomplete"],
+        ["candidate_attribution_failed", "sampling_incomplete", "probe_lifecycle_incomplete"],
     )
     def test_an_oom_under_compromised_evidence_is_not_the_candidates(self, validity):
         """MUTATION TARGET: attributing every OOM to the candidate.
@@ -258,7 +274,13 @@ class TestTheBlockingRuleChanged:
 
     @pytest.mark.parametrize(
         "validity",
-        ["unstable_external_identity", "unattributed_occupancy_growth", "sampling_incomplete"],
+        [
+            "candidate_attribution_failed",
+            "device_identity_unavailable",
+            "sampling_incomplete",
+            "probe_lifecycle_incomplete",
+            "measurement_invariant_failed",
+        ],
     )
     def test_compromised_evidence_cannot_block_even_on_an_idle_device(self, validity):
         """The converse, and the fail-closed half: an idle-looking identity
@@ -351,7 +373,10 @@ class TestTheProducerPathIsWired:
             sleep=lambda _s: None,
         )
         assert len(calls) == 5, "one accounting sample per contention tick"
-        assert window.measurement_validity == "unstable_external_identity"
+        # RE-GROUNDED: a changing external PID set is an observation, so the
+        # measurement stays valid. The property under test here is that
+        # accounting is sampled EVERY tick, which the call count proves.
+        assert window.measurement_validity == "valid_current_conditions"
 
     def test_the_verdict_survives_the_probe_to_estimate_hop(self):
         """MUTATION TARGET: `extrapolate_probe` dropping the field.
@@ -495,3 +520,199 @@ class TestTheProductionChainIsConnected:
             f"window and every measurement would fall back to the "
             f"conservative pre-PR-C rule"
         )
+
+
+class TestExternalActivityIsObservationOnly:
+    """Operator ruling, 2026-08-06: external GPU activity is CONTEXT.
+
+    Presence, non-registration, PID-set change, memory fluctuation and
+    burstiness are facts about the environment. None of them may decide
+    validity, readiness or admission. Registration is provenance only —
+    given identical measured facts, a registered and an unregistered
+    neighbour must produce identical outcomes.
+    """
+
+    @staticmethod
+    def _observe(window, registered=()):
+        from core.runtime_control.measurement_validity import summarise_external_activity
+
+        return summarise_external_activity(window, registered_pids=registered)
+
+    def test_no_external_workload_is_recorded_as_absent(self):
+        obs = self._observe([_snap() for _ in range(3)])
+        assert obs.activity == "absent"
+        assert obs.present is False
+        assert classify_measurement_validity([_snap() for _ in range(3)])[0] == (
+            "valid_current_conditions"
+        )
+
+    def test_a_stable_unregistered_workload_is_recorded_and_still_valid(self):
+        window = [_snap(others={999: 5_000}, own={111: 1_000}) for _ in range(4)]
+        obs = self._observe(window)
+        assert obs.activity == "stable"
+        assert obs.unregistered_pids == (999,)
+        assert obs.registered_pids == ()
+        assert obs.pid_set_changed is False
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+    def test_a_variable_memory_workload_is_recorded_and_still_valid(self):
+        """MUTATION TARGET: mapping memory variation to invalidity."""
+        window = [_snap(others={999: mib}) for mib in (2_000, 18_000, 5_000, 12_000)]
+        obs = self._observe(window)
+        assert obs.activity == "variable"
+        assert obs.external_mib_min == 2_000
+        assert obs.external_mib_max == 18_000
+        assert obs.external_mib_latest == 12_000
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+    def test_a_changing_pid_set_is_recorded_and_still_valid(self):
+        """MUTATION TARGET: reintroducing a PID-constancy requirement."""
+        window = [_snap(others={999: 5_000}), _snap(others={1234: 5_000})]
+        obs = self._observe(window)
+        assert obs.pid_set_changed is True
+        assert obs.activity == "variable"
+        assert set(obs.unregistered_pids) == {999, 1234}
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+    def test_registration_changes_labels_only_not_outcomes(self):
+        """MUTATION TARGET: privileging a registered peer.
+
+        THE property the old bootstrap gate violated: it admitted
+        `pairwise_expected_peer` and refused an identical unregistered
+        process. Same facts must give the same verdict.
+        """
+        window = [_snap(others={999: 5_000}) for _ in range(3)]
+
+        unregistered = self._observe(window)
+        registered = self._observe(window, registered=(999,))
+
+        # Labels differ...
+        assert unregistered.unregistered_pids == (999,)
+        assert registered.registered_pids == (999,)
+        assert registered.unregistered_pids == ()
+        # ...and nothing else does.
+        assert unregistered.activity == registered.activity
+        assert unregistered.external_mib_max == registered.external_mib_max
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+    def test_unreadable_telemetry_is_unknown_not_absent(self):
+        """A gap is not an empty device."""
+        assert self._observe([_snap(available=False)]).activity == "unknown"
+        assert self._observe([]).activity == "unknown"
+
+
+class TestIntegrityFailuresSurvive:
+    """Validity was RE-GROUNDED, not narrowed: every genuine
+    measurement-integrity failure remains grounds for invalidity."""
+
+    def test_missing_candidate_attribution_is_invalid(self):
+        from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
+
+        blind = GpuAccountingSnapshot(
+            device=DEV,
+            telemetry_available=True,
+            device_used_mib=10_000,
+            device_total_mib=81_920,
+            own_tree_mib=None,  # the candidate's own demand is unknown
+            other_mib=10_000,
+            other_process_count=1,
+            per_pid_total_mib=10_000,
+            unattributed_mib=0,
+            accounting_skew_mib=0,
+        )
+        validity, reasons = classify_measurement_validity([blind])
+        assert validity == "candidate_attribution_failed"
+        assert "separated" in reasons[0]
+
+    def test_a_window_spanning_two_devices_is_invalid(self):
+        from core.runtime_control.gpu_accounting import DeviceIdentity
+
+        other = DeviceIdentity(uuid="GPU-zzzz", physical_index=1)
+        a = _snap()
+        b = _snap().model_copy(update={"device": other})
+        validity, reasons = classify_measurement_validity([a, b])
+        assert validity == "device_identity_unavailable"
+        assert "one device" in reasons[0]
+
+    def test_incomplete_sampling_is_invalid(self):
+        assert classify_measurement_validity([_snap(), _snap(available=False)])[0] == (
+            "sampling_incomplete"
+        )
+
+    def test_no_retired_presence_reason_can_be_produced(self):
+        """MUTATION TARGET: reintroducing a retired verdict.
+
+        Sweeps the shapes that used to produce one — arriving, departing and
+        restarting neighbours, and fluctuating attributed memory — and
+        asserts none of them yields a retired reason.
+        """
+        from core.runtime_control.measurement_validity import RETIRED_PRESENCE_REASONS
+
+        shapes = [
+            [_snap(others={1: 100}), _snap(others={1: 100, 2: 100})],
+            [_snap(others={1: 100}), _snap(others={})],
+            [_snap(others={1: 100}), _snap(others={2: 100})],
+            [_snap(others={1: 100}), _snap(others={1: 30_000})],
+        ]
+        for window in shapes:
+            verdict = classify_measurement_validity(window)[0]
+            assert verdict not in RETIRED_PRESENCE_REASONS, verdict
+
+
+class TestAdmissionIsSeparateFromValidity:
+    """The third of the three independent questions.
+
+    Validity asks whether the measurement can be trusted. Admission asks
+    whether the candidate may run given current resources. A valid
+    measurement may be REJECTED for insufficient resources, and that is
+    expected — not a measurement defect.
+    """
+
+    def test_a_valid_measurement_under_heavy_external_load_still_blocks(self):
+        """A 20 GiB stable neighbour: measurement valid, and the estimate
+        carries blocking authority. Whether the candidate then FITS is
+        admission's question, asked with the free-memory figure."""
+        from core.runtime_control.estimate_types import make_estimate
+
+        window = [_snap(others={999: 20_000}, own={111: 2_000}, free=5_000) for _ in range(4)]
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+        estimate = make_estimate(
+            provenance="bounded_live_probe",
+            confidence="medium",
+            expected_seconds=10.0,
+            concurrency_identity="foreign_contended",
+            measurement_validity="valid_current_conditions",
+        )
+        assert estimate.blocking_eligible is True
+
+    def test_the_window_reports_the_resources_admission_needs(self):
+        """MUTATION TARGET: dropping the conservative aggregates.
+
+        Admission needs the worst case actually observed — minimum free and
+        maximum external — not an average of a moving environment.
+        """
+        window = build_occupancy_window(
+            [
+                _snap(others={999: 4_000}, free=30_000),
+                _snap(others={999: 22_000}, free=8_000),
+                _snap(others={999: 9_000}, free=25_000),
+            ]
+        )
+        assert window.validity == "valid_current_conditions"
+        assert window.min_free_mib == 8_000
+        assert window.max_external_mib == 22_000
+        assert window.blocking_capable is True
+
+    def test_insufficient_resources_is_not_a_measurement_defect(self):
+        """The distinction stated where it can fail: a window that leaves
+        almost no headroom is still a VALID measurement. Rejecting the
+        candidate is admission's job and carries admission's reason."""
+        window = build_occupancy_window(
+            [_snap(others={999: 30_000}, own={111: 500}, free=200) for _ in range(3)]
+        )
+        assert window.validity == "valid_current_conditions"
+        assert window.min_free_mib == 200
+        # No validity reason mentions resources — that vocabulary belongs to
+        # admission, not to measurement integrity.
+        assert window.reasons == ()

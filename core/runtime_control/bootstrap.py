@@ -10,7 +10,7 @@ The eleven §12-directive steps, in order:
  2 build the hardware compatibility profile
  3 build the execution environment profile
  4 validate the dataset
- 5 sample the pre-probe contention window
+ 5 sample the pre-probe contention window (recorded as CONTEXT only)
  6 build the probe executors for a real registered model
  7 bounded TRAINING probe
  8 bounded INFERENCE probe (same probe, separate measurement)
@@ -43,6 +43,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
+from core.runtime_control.measurement_validity import summarise_external_activity
 
 #: Bounded by construction: bootstrap must never look like a training run.
 DEFAULT_BOOTSTRAP_CAPS = {
@@ -128,6 +129,9 @@ class BootstrapDependencies(BaseModel):
     sample_contention: Callable[..., Any]
     build_executors: Callable[..., Any]
     run_probe: Callable[..., Any]
+    #: Discovers the active device record for identity resolution. Injected
+    #: so the whole sequence stays testable without a GPU.
+    discover_device: Callable[[], Any] = lambda: None
     build_observations: Callable[..., list]
     launch_self_test: Callable[..., Any]
     device_vram_gb: Callable[[], float]
@@ -234,11 +238,21 @@ def run_bootstrap(
     if not data_ok:
         return _finish(False)
 
-    # 5 — pre-probe contention window (recorded, and flagged when dirty)
+    # 5 — pre-probe contention window (RECORDED as context; it does not
+    #     decide readiness — see the note below)
     try:
         vram_gb = deps.device_vram_gb()
+        # Resolved BEFORE sampling: without a named device the window builds
+        # no occupancy snapshots, and the external-activity observation can
+        # only honestly report `unknown` — which is what it did until this
+        # ordering was fixed.
+        _identity = device_identity_from_hardware(hardware) or device_identity_from_hardware(
+            deps.discover_device()
+        )
         window = deps.sample_contention(
-            device_vram_gb=vram_gb, expected_peer_pids=expected_peer_pids
+            device_vram_gb=vram_gb,
+            expected_peer_pids=expected_peer_pids,
+            device=_identity,
         )
     except Exception as exc:
         steps.append(
@@ -250,24 +264,52 @@ def run_bootstrap(
             )
         )
         return _finish(False)
-    contended = window.classification not in ("single_candidate_idle", "pairwise_expected_peer")
+    # V20 — external activity is CONTEXT, never readiness (operator,
+    # 2026-08-06). This step used to refuse whenever the window was anything
+    # other than idle-or-registered-peer:
+    #
+    #     contended = classification not in ("single_candidate_idle",
+    #                                        "pairwise_expected_peer")
+    #     if contended: return _finish(False)
+    #
+    # Three defects in one gate, all measured on real hardware (a stable
+    # sole-occupant 5,104 MiB holder produced ready=False):
+    #
+    #   1. PRESENCE decided readiness — any unregistered PID refused,
+    #      however stable, and `MeasurementValidity` was never reached;
+    #   2. REGISTRATION was privileged — `pairwise_expected_peer` passed
+    #      where an identical unregistered process was refused, making
+    #      registration a correctness requirement;
+    #   3. the remedy told operators to stop other workloads, i.e. that
+    #      SIDERIUS requires an empty GPU.
+    #
+    # The window is still SAMPLED and RECORDED — it is useful provenance —
+    # but it no longer decides. Whether the measurement can be trusted is
+    # decided downstream by measurement integrity, and whether the candidate
+    # may run is decided separately by admission.
+    # Summarised from the accounting snapshots the window actually collected.
+    # `occupancy` is present only when the caller named a device (FU-C-1); on
+    # a CPU host or an unnamed device there are no snapshots and the summary
+    # honestly reports `unknown` rather than inventing `absent`.
+    _accounting = window.occupancy.snapshots if window.occupancy is not None else ()
+    external = summarise_external_activity(_accounting, registered_pids=expected_peer_pids)
     steps.append(
         BootstrapStep(
             name="contention window",
-            ok=not contended,
-            detail=f"{window.classification} ({len(window.samples)} samples)",
-            remedy=""
-            if not contended
-            else (
-                "Another process is using this GPU. The measurement would not "
-                "describe an idle baseline — stop the other workload and re-run."
+            ok=True,
+            detail=(
+                f"{window.classification} ({len(window.samples)} samples) — "
+                f"recorded as context; readiness is decided by measurement "
+                f"integrity, not by external presence"
             ),
-            data={"classification": window.classification, "reasons": list(window.reasons)},
+            data={
+                "classification": window.classification,
+                "reasons": list(window.reasons),
+                "external_activity": external.model_dump(mode="json"),
+                "decides_readiness": False,
+            },
         )
     )
-    if contended:
-        # Recorded, never silently folded into the baseline.
-        return _finish(False)
 
     # 6-8 — bounded probe (training and inference measured separately)
     try:
@@ -301,7 +343,12 @@ def run_bootstrap(
     # through the ONE permitted adapter. `None` (CPU host, or a record with
     # no UUID) stays None and fails closed — it is never repaired by
     # assuming device 0, which would conflate two cards of the same model.
-    device_identity = device_identity_from_hardware(hardware)
+    # The hardware COMPATIBILITY profile carries no UUID by design — it is
+    # hashed into `hardware_compatibility_id`, so adding fields there would
+    # invalidate every historical calibration bucket. The identity therefore
+    # comes from a separate discovery record, still through the one permitted
+    # adapter. `None` stays None: a gap, never a guessed device 0.
+    device_identity = _identity
 
     result = deps.run_probe(
         model_identity=model_type,
@@ -458,6 +505,7 @@ def production_dependencies() -> BootstrapDependencies:
     from core.runtime_control.probe_production import (
         collect_execution_environment_profile,
         collect_hardware_compatibility_profile,
+        discover_active_device_record,
         probe_device_vram_gb,
         production_probe_executors,
     )
@@ -515,6 +563,7 @@ def production_dependencies() -> BootstrapDependencies:
         sample_contention=sample_contention_window,
         build_executors=production_probe_executors,
         run_probe=_run_probe,
+        discover_device=discover_active_device_record,
         build_observations=_build_observations,
         launch_self_test=run_launch_self_test,
         device_vram_gb=probe_device_vram_gb,
