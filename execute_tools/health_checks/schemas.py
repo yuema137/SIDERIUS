@@ -19,7 +19,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # ---------------------------------------------------------------------------
 # GateAction — routing verdict enum
@@ -292,7 +292,20 @@ class HealthCheckResult(BaseModel):
 
 
 class PersistedHealthGateResult(BaseModel):
-    """Fully serialisable gate observation for durable experiment records."""
+    """Fully serialisable gate observation for durable experiment records.
+
+    **V20 PR D (D-C7b) — the record says what it actually was.** Before,
+    an external reader had only `gate_name` and `resolved_action`, and the
+    ids carry a historical `_blocking` suffix that describes the ROLE the
+    gate was written for, not what it did on this run. A gate named
+    `output_diversity_blocking` that resolved `continue` under an
+    observe-only config blocked nothing, and every report that echoed its
+    id said otherwise.
+
+    `gate_name` is **never rewritten** — it is the join key for
+    `health_gate_results` and for archived artifacts. The honest label is
+    added BESIDE it.
+    """
 
     gate_name: str
     execution_status: GateExecutionStatus
@@ -304,6 +317,56 @@ class PersistedHealthGateResult(BaseModel):
     aggregation: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     gate_runtime_seconds: float = 0.0
+
+    # --- D-C7b: what this gate WAS, recorded alongside what it did ------
+    gate_role: str | None = Field(
+        default=None,
+        description=(
+            "The gate's DECLARED scientific role (`blocking` / "
+            "`observational`), from `gate_role` in the effective config. "
+            "None on results predating the declaration. Never inferred "
+            "from the id or the action — that inversion is what the "
+            "predecessor hotfix `af5339ce` removed."
+        ),
+    )
+    configured_action: GateAction | None = Field(
+        default=None,
+        description=(
+            "The gate's configured `on_fail.action` — what it WOULD do on "
+            "failure. Distinct from `resolved_action`, which is the action "
+            "actually taken this round (the `on_pass` action when the "
+            "check passed). Both are needed: `resolved_action: continue` "
+            "alone cannot distinguish 'passed, so nothing to do' from "
+            "'configured to do nothing'."
+        ),
+    )
+    healthgate_mode: str | None = Field(
+        default=None,
+        description="The run's declared enforcement mode (D-C1a). None on legacy results.",
+    )
+    result_authority: str | None = Field(
+        default=None,
+        description="The run's declared result authority (D-C1a). None on legacy results.",
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def display_label(self) -> str:
+        """Operator-facing label derived from what actually happened.
+
+        Never from the id. A gate whose configured action cannot
+        invalidate anything is displayed as observational however its id
+        is spelled, and a gate whose role cannot be established says
+        `role-unknown` rather than guessing.
+        """
+        if self.configured_action is None:
+            # Nothing configured to read: fall back to the declared role,
+            # and say `role-unknown` rather than guessing when even that is
+            # absent. A legacy result must not default to "enforcing".
+            label = self.gate_role or "role-unknown"
+        else:
+            label = "enforcing" if self.configured_action in BLOCKING_ACTIONS else "observational"
+        return f"{self.gate_name} ({label})"
 
 
 # ---------------------------------------------------------------------------

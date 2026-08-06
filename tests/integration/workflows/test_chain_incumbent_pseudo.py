@@ -53,6 +53,7 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.resume import restore_prior_state
+from core.scientific_authority import ScientificAuthority
 from sdsc_submission_scripts.run_one_iteration import write_manifest
 from workflows.model_exploration import run_workflow
 
@@ -99,6 +100,19 @@ def _formal_record(
         "file_vector": [score] + [None] * 19,
         "health_gate_results": _passing_verdicts(),
         "health_gate_enabled": False,  # DS5 waiver: commit-time VALID
+        # V20 PR D (D-C4): a formal record may become the chain incumbent
+        # ONLY when its scientific authority is established. This fixture
+        # predates that contract, so without a verdict it now resolves to
+        # `unreconstructable_legacy` and is correctly refused — which would
+        # make branch A unable to exercise the threading it exists to test.
+        #
+        # The verdict is DERIVED from the three facts, never asserted, so
+        # this remains a fixture of facts rather than of conclusions.
+        "scientific_authority": ScientificAuthority(
+            healthgate_mode="blocking",
+            declared_result_authority="scientific",
+            formal_validity="valid",
+        ).model_dump(mode="json"),
     }
 
 
@@ -431,6 +445,7 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
     # incumbent-based gate can fire on ANY winning trial score. Uses
     # only production helpers; no re-implementation.
     from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+        _best_trial_winner,
         _resolve_formal_comparison_thresholds,
         _should_bypass_formal_time_budget,
         _should_skip_formal,
@@ -441,10 +456,11 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         if tune_input.enable_chain_incumbent_formal_gates
         else None
     )
-    ref, skip_t, bypass_t = _resolve_formal_comparison_thresholds(
+    ref, skip_t, bypass_t, source = _resolve_formal_comparison_thresholds(
         reference_score=consumed_reference,
         skip_min_delta=tune_input.skip_formal_min_delta,
         bypass_min_delta=tune_input.bypass_formal_time_budget_min_delta,
+        gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
     )
     # Reference actually consumed is None (NOT the pre-V19 fixed 0.0,
     # and NOT the numeric 1.25 that was delivered on the input).
@@ -454,6 +470,11 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         "OFF is not a fixed-0.0 mode and gates must not consume the "
         "reconstructed incumbent"
     )
+    # V20 PR D (D-C3): with the flag OFF the negative-infinity bootstrap
+    # must NOT engage — the deltas are not consumed at all, so this run
+    # resolves exactly as it did pre-V20. The source string is what makes
+    # the two indistinguishable-by-value cases distinguishable.
+    assert source == "gates_disabled"
     # Neither incumbent-based gate can fire even against a trial winner
     # that would have easily crossed a numeric threshold.
     trial_winner_record = {
@@ -464,8 +485,14 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         "health_gate_results": _passing_verdicts(),
         "memory": {"time_mode": "trial"},
     }
-    assert not _should_skip_formal([trial_winner_record], threshold=skip_t)
-    assert not _should_bypass_formal_time_budget([trial_winner_record], threshold=bypass_t)
+    trial_winner = _best_trial_winner([trial_winner_record])
+    assert trial_winner is not None
+    assert not _should_skip_formal(
+        trial_winner,
+        threshold=skip_t,
+        gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
+    )
+    assert not _should_bypass_formal_time_budget(trial_winner, threshold=bypass_t)
 
 
 # ---------------------------------------------------------------------------

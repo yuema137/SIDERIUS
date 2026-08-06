@@ -182,6 +182,8 @@ def _persist(
     ctx: HealthCheckContext,
     runtime_seconds: float,
     checkpoint_sha256: str | None,
+    healthgate_mode: str | None = None,
+    result_authority: str | None = None,
 ) -> PersistedHealthGateResult:
     check = result.check_results[0] if result.check_results else None
     metrics = _decode_json_metrics(check.metrics if check else {})
@@ -216,6 +218,13 @@ def _persist(
     )
     return PersistedHealthGateResult(
         gate_name=result.gate_id,
+        # D-C7b: what this gate WAS, recorded beside what it did. The id is
+        # never rewritten — it is the join key for archived artifacts — so
+        # the honest label is derived from these instead.
+        gate_role=getattr(gate_config, "gate_role", None),
+        configured_action=gate_config.on_fail.action,
+        healthgate_mode=healthgate_mode,
+        result_authority=result_authority,
         execution_status=_execution_status(result, metrics),
         check_passed=result.passed,
         would_invalidate_under_production_policy=would_invalidate,
@@ -234,6 +243,8 @@ def evaluate_and_persist_health_gates(
     config_path: str | None = None,
     production_config_path: str | None = None,
     gate_ids: list[str] | None = None,
+    healthgate_mode: str | None = None,
+    result_authority: str | None = None,
 ) -> tuple[list[GateResult], list[PersistedHealthGateResult], GateAction]:
     """Run every gate matching ``ctx.round_index`` and build durable results."""
     config = load_health_gates_config(config_path)
@@ -261,6 +272,8 @@ def evaluate_and_persist_health_gates(
                 ctx,
                 elapsed,
                 checkpoint_sha256,
+                healthgate_mode=healthgate_mode,
+                result_authority=result_authority,
             )
         )
     return runtime_results, persisted, resolve_action(runtime_results)

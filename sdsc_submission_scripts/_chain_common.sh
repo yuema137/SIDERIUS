@@ -55,6 +55,17 @@ MAX_EPOCHS=1                        # §3.2: matches run_one_iteration.py defaul
 # Tuner delta-gates (added in commit 8f1cf52). Defaults match the
 # HyperparamTuningInput schema defaults so omitting these flags
 # reproduces pre-v16 behaviour.
+# V20 PR D (D-C1b): the formal-launch policy declarations. A chain launch
+# must state what its HealthGate verdicts DO and whether its results may
+# inform science; run_one_iteration.py refuses a launch that omits either,
+# or whose declaration contradicts the HealthGate config it names.
+#
+# blocking + scientific is what a V19/V20 formal chain already IS: it runs
+# configs/health_checks.yaml, whose three role:blocking gates invalidate a
+# round, and its results feed the chain incumbent and the science. These
+# values state that fact; they do not change it.
+HEALTHGATE_MODE=blocking
+RESULT_AUTHORITY=scientific
 SKIP_FORMAL_MIN_DELTA=-1.0
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
@@ -276,6 +287,8 @@ parse_chain_args() {
           ;;
         --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
         --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
+        --healthgate_mode)                    HEALTHGATE_MODE="$2"; shift 2 ;;
+        --result_authority)                   RESULT_AUTHORITY="$2"; shift 2 ;;
         --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_min_delta) BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA="$2"; shift 2 ;;
         --llm_model)              LLM_MODEL="$2"; shift 2 ;;
@@ -415,6 +428,8 @@ build_app_args() {
         --start_iteration "$iter"
         --max_rounds "$MAX_ROUNDS"
         --max_epochs "$MAX_EPOCHS"
+        --healthgate_mode "$HEALTHGATE_MODE"
+        --result_authority "$RESULT_AUTHORITY"
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         --llm_model "$LLM_MODEL"

@@ -1200,3 +1200,144 @@ class TestDegradedInterpreterPath:
         inp = make_input(PUNET_SUMMARY, workspace=str(tmp_path))
         output = agent.run(inp)
         assert output.is_degraded is False
+
+
+# ---------------------------------------------------------------------------
+# V20 PR D (D-C5) — the scientific aggregate excludes non-authoritative formal
+# ---------------------------------------------------------------------------
+
+
+class TestScientificAggregationReachesTheRealOutput:
+    """Reachability, not a unit test of the boundary.
+
+    `execute_tools.scientific_aggregation` is proven separately. What is
+    proven HERE is that the interpretation agent actually calls it on the
+    production path, that a non-authoritative formal score really is kept
+    out of the aggregate the synthesis prompt sees, and that the exclusion
+    provenance reaches the output where a report can render it without a
+    model's cooperation.
+    """
+
+    @staticmethod
+    def _verdict(mode, authority, validity) -> dict:
+        from core.scientific_authority import ScientificAuthority
+
+        return ScientificAuthority.from_context(
+            healthgate_mode=mode,
+            declared_result_authority=authority,
+            formal_validity=validity,
+        ).model_dump()
+
+    def _summary(self, model_type, formal, verdict):
+        return ModelRunSummary(
+            model_type=model_type,
+            run_name="v1",
+            status="completed",
+            completed_rounds=1,
+            best_denoising_score=formal,
+            worst_denoising_score=formal,
+            formal_score=formal,
+            scientific_authority=verdict,
+            round_scores=[formal],
+            round_conclusions=["c"],
+        )
+
+    def test_the_summary_carries_the_formal_records_verdict(self):
+        """The PRODUCER half: `tuning_output_to_model_run_summary` must
+        attach the verdict of the SAME formal record `formal_score` came
+        from, or the consumer has nothing to partition on — and the score
+        and its authority could describe different experiments."""
+        import inspect
+
+        from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+
+        src = inspect.getsource(tuning_output_to_model_run_summary)
+        assert "formal_rec.scientific_authority" in src, (
+            "the summary does not carry the formal record's verdict, so the "
+            "aggregation boundary has nothing to partition on"
+        )
+
+    def test_the_agent_partitions_before_any_llm_call(self):
+        """§4.7: the filtering is deterministic. A model must not be the
+        thing that decides — or remembers to mention — the exclusion."""
+        import inspect
+
+        from nodes.result_interpretation_agent import ResultInterpretationAgent as _Agent
+
+        src = inspect.getsource(_Agent.run)
+        assert "partition_for_aggregation(inp.summaries)" in src
+        # The partition must precede the synthesis call in the source.
+        assert src.index("partition_for_aggregation") < src.index("synthesis_response")
+
+    def test_a_non_authoritative_formal_score_is_kept_out_of_the_aggregate(self, tmp_path):
+        """The behaviour, end to end through the real agent."""
+        summaries = [
+            self._summary("punet", 1.0, self._verdict("blocking", "scientific", "valid")),
+            self._summary("fcnet", 99.0, self._verdict("blocking", "diagnostic", "valid")),
+        ]
+        out = _run_once(tmp_path, summaries)
+
+        scope = out.scientific_aggregation
+        assert scope is not None
+        assert scope["included"] == ["punet"]
+        assert scope["excluded_count"] == 1
+        assert scope["exclusion_reason_counts"] == {"declared_diagnostic": 1}
+
+    def test_the_exclusion_provenance_survives_to_the_output(self, tmp_path):
+        """A report renders this; it must not depend on the LLM."""
+        out = _run_once(
+            tmp_path,
+            [self._summary("fcnet", 99.0, self._verdict("blocking", "diagnostic", "valid"))],
+        )
+        scope = out.scientific_aggregation
+        assert scope["all_excluded"] is True
+        assert scope["included"] == []
+
+    def test_an_excluded_formal_score_never_reaches_the_synthesis_prompt(self, tmp_path):
+        """MUTATION TARGET: the agent stops filtering `per_model_formal`.
+
+        This is the property D-C5 exists for, and it is only observable at
+        the PROMPT — the aggregate is a local. An earlier version of this
+        class missed it: the fixture set `best_denoising_score` equal to
+        `formal_score`, and the renderer only emits a "Formal score" line
+        when the two DIFFER, so removing the filter changed nothing
+        visible and the mutation survived. The scores here are deliberately
+        unequal so the line renders.
+
+        The diagnostic model scores 99.0 against the authoritative 1.0, so
+        an unfiltered aggregate would hand the model a non-authoritative
+        result as the best formal evidence in the campaign.
+        """
+        captured: list[str] = []
+
+        def _capture(system_prompt: str, user_prompt: str, **kwargs):
+            captured.append(user_prompt)
+            return _llm_dispatch(system_prompt, user_prompt, **kwargs)
+
+        good = self._summary("punet", 1.0, self._verdict("blocking", "scientific", "valid"))
+        good.best_denoising_score = 0.5  # differs from formal_score -> line renders
+        diag = self._summary("fcnet", 99.0, self._verdict("blocking", "diagnostic", "valid"))
+        diag.best_denoising_score = 50.0  # differs from formal_score -> line would render
+
+        with patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge:
+            MockBridge.return_value.generate.side_effect = _capture
+            agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+            agent.bridge = MockBridge.return_value
+            agent.run(
+                InterpretationInput(
+                    summaries=[good, diag],
+                    storage={
+                        "backend": "local",
+                        "local": {"workspace": str(tmp_path), "run_name": "r1"},
+                    },
+                )
+            )
+
+        synthesis = "\n".join(captured)
+        assert "Formal score: 1.0" in synthesis, (
+            "the authoritative formal score should still reach the aggregate"
+        )
+        assert "Formal score: 99.0" not in synthesis, (
+            "a non-authoritative formal score reached the synthesis prompt — it "
+            "can now inform a scientific claim, which is what D-C5 prevents"
+        )

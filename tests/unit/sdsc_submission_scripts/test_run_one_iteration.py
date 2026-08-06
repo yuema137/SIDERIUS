@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import sys
 import textwrap
 import warnings
@@ -367,6 +368,16 @@ def _run_main(argv):
     convention here rather than baking ``--run_name`` into every
     hand-crafted argv list.
     """
+    # V20 PR D (D-C1b): the formal-launch policy declarations, synthesised
+    # for the same reason as --run_name below — the production chain shell
+    # always supplies them, and these tests target the runner's argparse +
+    # wiring layer, not the launch-policy refusal. The refusal itself is
+    # tested directly in test_formal_launch_policy.py, which builds its
+    # argv explicitly and does NOT go through this helper.
+    if "--healthgate_mode" not in argv:
+        argv = [*argv, "--healthgate_mode", "blocking"]
+    if "--result_authority" not in argv:
+        argv = [*argv, "--result_authority", "scientific"]
     if "--run_name" not in argv:
         iter_n = 1
         for flag in ("--start_iteration", "--iteration"):
@@ -483,6 +494,15 @@ class TestRestoreWiring:
                         str(seed_file),
                         "--health_checks_config",
                         health_path,
+                        # D-C1b: this test drives the OBSERVE-ONLY config, so
+                        # it must declare the matching posture. The helper's
+                        # default `blocking` would be refused as a
+                        # declaration/config mismatch — which is the check
+                        # doing its job, not a test defect.
+                        "--healthgate_mode",
+                        "observe_only",
+                        "--result_authority",
+                        "diagnostic",
                     ]
                 )
 
@@ -1420,6 +1440,16 @@ def _p1_tune_output(
         best_valid_formal_exp_id=exp_id,
         started_at="2026-07-27 00:00:00",
         finished_at="2026-07-27 00:00:01",
+        # V20 PR D (D-C4): the chain incumbent now additionally requires
+        # scientific authority. These tests are about incumbent
+        # ATTRIBUTION in the manifest — which iteration a carried-over
+        # score came from — so they declare the production posture the
+        # chain shell supplies and keep testing attribution. An output
+        # with no declaration is `unreconstructable_legacy` and yields no
+        # incumbent at all; that case is covered in
+        # tests/unit/core/test_resume_incumbent.py.
+        healthgate_mode="blocking",
+        result_authority="scientific",
     )
 
 
@@ -1532,3 +1562,120 @@ class TestChainIncumbentManifest:
         _p1_write_iter_output(ws, 2, out2)
         m2 = runner.write_manifest(os.path.join(ws, "iter_002"), "iter_002", [out2])
         assert m2["best_valid_trial_score"] is None
+
+
+class TestFormalLaunchPolicyIsEnforcedAtTheChainBoundary:
+    """D-C1b reachability: the refusal must be on the REAL launch path.
+
+    These build argv explicitly and do NOT go through `_run_main`, which
+    synthesises the declarations the production shell supplies. A test that
+    used the helper could not observe an omission.
+    """
+
+    def _main(self, argv):
+        """Invoke the real `main()` and return its exit code."""
+        import sys as _sys
+
+        from sdsc_submission_scripts import run_one_iteration as runner
+
+        argv = ["run_one_iteration.py", *argv]
+        old = _sys.argv
+        _sys.argv = argv
+        try:
+            runner.main()
+            return 0
+        except SystemExit as exc:
+            return exc.code
+        finally:
+            _sys.argv = old
+
+    def test_omitting_the_declarations_refuses_before_any_work(self, capsys, tmp_path):
+        """THE REACHABILITY PROOF. Exit 2 with the refusal on stderr, and
+        no iteration directory created — the refusal precedes even the
+        failure-brake preflight, which is the first thing that touches
+        disk."""
+        ws = str(tmp_path / "ws")
+        code = self._main(["--workspace", ws, "--run_name", "iter_001", "--start_iteration", "1"])
+
+        assert code == 2
+        assert "FORMAL LAUNCH REFUSED" in capsys.readouterr().err
+        assert not os.path.exists(ws), "the refusal created a workspace"
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    @pytest.mark.parametrize(
+        "flag", ["--skip_formal_min_delta", "--bypass_formal_time_budget_min_delta"]
+    )
+    def test_a_non_finite_delta_refuses_before_any_work(self, capsys, tmp_path, flag, value):
+        """FU-D-8 reachability, on the REAL launch path.
+
+        `argparse(type=float)` happily parses 'nan'/'inf', so this reaches
+        the validator exactly as an operator's CLI would. Without the
+        refusal the run would proceed with both gates silently disabled
+        while the artifact recorded an enforced launch.
+
+        Same assertion as the declaration proof above: exit 2, refusal on
+        stderr, and NO workspace on disk — so it precedes the failure-brake
+        preflight, the LLM, model construction and the GPU.
+        """
+        ws = str(tmp_path / "ws")
+        code = self._main(
+            [
+                "--workspace",
+                ws,
+                "--run_name",
+                "iter_001",
+                "--start_iteration",
+                "1",
+                "--healthgate_mode",
+                "blocking",
+                "--result_authority",
+                "scientific",
+                "--enable_chain_incumbent_formal_gates",
+                # `=` form deliberately: argparse reads a bare `-inf` as a
+                # flag because of the leading dash and errors out before
+                # the validator. That path fails closed, so it is safe —
+                # but it is not the path under test here.
+                f"{flag}={value}",
+            ]
+        )
+
+        assert code == 2
+        err = capsys.readouterr().err
+        assert "FORMAL LAUNCH REFUSED" in err
+        assert "not finite" in err
+        assert not os.path.exists(ws), "the refusal created a workspace"
+
+    def test_the_contradiction_refuses_on_the_real_path(self, capsys, tmp_path):
+        code = self._main(
+            [
+                "--workspace",
+                str(tmp_path / "ws"),
+                "--run_name",
+                "iter_001",
+                "--start_iteration",
+                "1",
+                "--healthgate_mode",
+                "observe_only",
+                "--result_authority",
+                "scientific",
+            ]
+        )
+
+        assert code == 2
+        assert "contradiction" in capsys.readouterr().err
+
+    def test_the_chain_shell_declares_blocking_scientific(self):
+        """The launcher must actually supply what the boundary requires —
+        otherwise this checkpoint would refuse every production launch.
+
+        MUTATION TARGET: dropping either line from the argv assembly.
+        """
+        common = (
+            pathlib.Path(__file__).resolve().parents[3]
+            / "sdsc_submission_scripts"
+            / "_chain_common.sh"
+        ).read_text(encoding="utf-8")
+        assert "HEALTHGATE_MODE=blocking" in common
+        assert "RESULT_AUTHORITY=scientific" in common
+        assert '--healthgate_mode "$HEALTHGATE_MODE"' in common
+        assert '--result_authority "$RESULT_AUTHORITY"' in common

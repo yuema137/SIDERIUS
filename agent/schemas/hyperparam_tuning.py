@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.ordering import (
     OrderingValidationError,
     OrderStrategy,
@@ -33,6 +34,26 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
+
+#: What a HealthGate verdict DOES in this run: enforce, or only record.
+#:
+#: Declared by the operator, never reconstructed by diffing the effective
+#: YAML against the shipped one. The predecessor role hotfix (`af5339ce`)
+#: already proved why: enforcement and science are different properties,
+#: and deriving one from the other inverts the answer under observe-only.
+HealthGateMode = Literal["blocking", "observe_only"]
+
+#: Whether this run's results may inform science, or are diagnostic only.
+#:
+#: A SEPARATE axis from :data:`HealthGateMode` (D-D-5). The pairing rules
+#: are enforced at the launcher, not here:
+#:
+#:     blocking     + scientific  -> the normal formal campaign
+#:     blocking     + diagnostic  -> coherent: enforced, deliberately not promoted
+#:     observe_only + diagnostic  -> the normal observation run
+#:     observe_only + scientific  -> REFUSED, a contradiction
+ResultAuthority = Literal["scientific", "diagnostic"]
+
 
 # ---------------------------------------------------------------------------
 # Expert advice — two protocols
@@ -398,6 +419,24 @@ class ExperimentRecord(BaseModel):
     health_gate_results: list[PersistedHealthGateResult] = Field(
         default_factory=list,
         description="Full typed results for every HealthGate configured for this experiment.",
+    )
+    scientific_authority: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "V20 PR D — the formal record's authority verdict "
+            "(core.scientific_authority.ScientificAuthority.model_dump()). "
+            "Present on FORMAL records only; None on trial records, where "
+            "the question does not apply, and on records predating D-C2b. "
+            "Carries the three facts (healthgate_mode, "
+            "declared_result_authority, formal_validity) beside the derived "
+            "conclusions, which is what makes it recomputable and therefore "
+            "tamper-EVIDENT. Deliberately typed as a plain dict rather than "
+            "the model: ScientificAuthority sets extra='forbid' and exposes "
+            "its conclusions as computed fields, so its own dump cannot be "
+            "re-validated into it. Consumers must NOT trust the stored "
+            "conclusions — re-derive via resolve_record_authority(), which "
+            "refuses a verdict that disagrees with its own facts."
+        ),
     )
 
     # --- Data volume ---
@@ -1696,6 +1735,30 @@ class HyperparamTuningInput(BaseModel):
             "See docs/design/enable_partial_file_list.md."
         ),
     )
+    healthgate_mode: HealthGateMode | None = Field(
+        default=None,
+        description=(
+            "Whether HealthGate verdicts ENFORCE (`blocking`) or only "
+            "record (`observe_only`). Declared, never reconstructed by "
+            "diffing YAML.\n\n"
+            "Optional here **only so historical replays still load**. A new "
+            "formal campaign that omits it is refused at the launcher "
+            "(D-C1b) — there is no safe default, because defaulting to "
+            "`blocking` would silently claim authority a run may not have."
+        ),
+    )
+    result_authority: ResultAuthority | None = Field(
+        default=None,
+        description=(
+            "Whether this run's results may inform science (`scientific`) "
+            "or are for diagnosis only (`diagnostic`).\n\n"
+            "A SEPARATE axis from `healthgate_mode` (D-D-5), not a second "
+            "spelling of it. `observe_only + scientific` is a contradiction "
+            "and is refused; `blocking + diagnostic` is coherent and "
+            "legitimate — a fully-enforced run whose results are "
+            "deliberately not promoted. Same optionality rule as above."
+        ),
+    )
     health_gate_enabled: bool = Field(
         default=True,
         description=(
@@ -2304,6 +2367,21 @@ class HyperparamTuningOutput(BaseModel):
             "None on legacy outputs = enabled."
         ),
     )
+    healthgate_mode: HealthGateMode | None = Field(
+        default=None,
+        description=(
+            "The declared enforcement mode this run ran under. None on "
+            "legacy outputs = not declared, which downstream reads as "
+            "'authority cannot be established from the declaration alone'."
+        ),
+    )
+    result_authority: ResultAuthority | None = Field(
+        default=None,
+        description=(
+            "The declared result authority this run ran under. None on "
+            "legacy outputs = not declared."
+        ),
+    )
     health_checks_config_source: str | None = Field(
         default=None,
         description=(
@@ -2324,21 +2402,43 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "Resolved current_run_best_formal_score used by this tuner invocation. "
             "None on historical outputs written before this metadata existed, "
-            "AND on V19+ invocations that ran with no chain incumbent "
-            "(the gates were short-circuited)."
+            "on invocations that ran with the chain-incumbent gates disabled, "
+            "AND — V20 PR D §16.C — whenever the effective reference was "
+            "infinite. -inf is a RESOLVER value, never a stored one: "
+            "non-standard JSON `Infinity` is rejected by strict parsers, so an "
+            "infinite bound persists as null and "
+            "formal_comparison_reference_source carries the meaning instead. "
+            "Read the two fields together; null alone is ambiguous."
+        ),
+    )
+    formal_comparison_reference_source: str | None = Field(
+        default=None,
+        description=(
+            "Provenance of formal_reference_score (V20 PR D §16.C). One of: "
+            "'restored_valid_formal_incumbent' (a real HealthGate-valid "
+            "incumbent was restored and consumed), 'negative_infinity_bootstrap' "
+            "(no incumbent existed, so the reference resolved to -inf and the "
+            "first valid trial establishes the chain's first formal baseline), "
+            "or 'gates_disabled' (the chain-incumbent formal gates were off, so "
+            "the deltas were never consumed). None on outputs written before "
+            "this field existed. This is what distinguishes the three cases "
+            "that all persist formal_reference_score as null."
         ),
     )
     resolved_skip_formal_threshold: float | None = Field(
         default=None,
         description=(
-            "Resolved formal_reference_score + skip_formal_min_delta for this invocation."
+            "Resolved formal_reference_score + skip_formal_min_delta for this "
+            "invocation. Null when infinite, for the reason given on "
+            "formal_reference_score."
         ),
     )
     resolved_bypass_formal_threshold: float | None = Field(
         default=None,
         description=(
             "Resolved formal_reference_score + bypass_formal_time_budget_min_delta "
-            "for this invocation."
+            "for this invocation. Null when infinite, for the reason given on "
+            "formal_reference_score."
         ),
     )
 
@@ -2477,6 +2577,21 @@ class HyperparamTuningOutput(BaseModel):
             "resource gate. Consumed by the next iteration's proposer via "
             "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
             "runs (any success) and on all-failure-but-not-budget-related runs."
+        ),
+    )
+    trial_validity_feedback: TrialValidityFeedback | None = Field(
+        default=None,
+        description=(
+            "V20 PR D (D-C6) — populated only when the iteration ran trial "
+            "rounds but produced NO HealthGate-valid winner. Consumed by the "
+            "next iteration's proposer via ProposalInput.recent_trial_validity. "
+            "Deliberately SEPARATE from gate_exhaustion, which reports BUDGET "
+            "exhaustion (OOM/time skips): an all-invalid iteration has trials "
+            "that ran and succeeded and then failed their scientific gates, so "
+            "gate_exhaustion's triggers never fire for it. The two call for "
+            "opposite planner responses — propose something lighter, versus "
+            "propose something that does not collapse. None whenever at least "
+            "one trial is valid, so healthy runs are byte-identical."
         ),
     )
 

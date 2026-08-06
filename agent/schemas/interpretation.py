@@ -192,6 +192,22 @@ class ModelRunSummary(BaseModel):
         default=None,
         description="Highest HealthGate-valid formal score; None when none is valid.",
     )
+    scientific_authority: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "V20 PR D (D-C5) — the authority verdict of the FORMAL record "
+            "this summary's `formal_score` came from "
+            "(core.scientific_authority.ScientificAuthority.model_dump()). "
+            "Decides whether this model's formal result may inform a "
+            "scientific aggregate; `execute_tools.scientific_aggregation` "
+            "consumes it. None on a summary with no formal record, and on "
+            "summaries predating the field — both of which are EXCLUDED "
+            "from aggregation, because authority that cannot be established "
+            "is not authority. HealthGate validity is a different question: "
+            "a diagnostic run's formal record can be perfectly valid and "
+            "still carry no scientific authority."
+        ),
+    )
     formal_file_vector: list[float | None] | None = Field(
         default=None,
         description="File vector from the formal round. Definitive per-file performance.",
@@ -523,6 +539,25 @@ class InterpretationOutput(BaseModel):
         default_factory=dict,
         description="model_type → worst denoising score. "
         "None if the model has no successful experiments.",
+    )
+    scientific_aggregation: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "V20 PR D (D-C5) — which formal results informed the scientific "
+            "aggregate and which were excluded, as an "
+            "execute_tools.scientific_aggregation.AggregationScope dump: "
+            "included / excluded / included_count / excluded_count / "
+            "all_excluded / no_records / exclusion_reason_counts. Derived "
+            "DETERMINISTICALLY before any LLM call and never written by a "
+            "model (§4.7): a model may simply omit the exclusion, and "
+            "exclusion text placed inside a prompt can steer the "
+            "interpretation it then writes. Excluded results are retained "
+            "here as evidence — nothing is deleted. `all_excluded` is "
+            "explicit because an empty aggregate alone is ambiguous: it "
+            "reads identically to a campaign that found nothing, which is "
+            "the opposite conclusion. Render with "
+            "AggregationScope.provenance_lines()."
+        ),
     )
 
     # --- Overall best ---

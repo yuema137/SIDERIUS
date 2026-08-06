@@ -453,7 +453,8 @@ class TestTheLiveProcessGuardExcludesOnlyItself:
         # POLL, do not sleep a fixed interval. A fixed wait is a race: under
         # a loaded suite the fixture may not be visible in `ps` yet, the
         # guard then sees nothing, and a "should block" case fails
-        # intermittently.
+        # intermittently. Observed exactly once in a full-suite run and
+        # never in isolation, which is the signature of this bug.
         for _ in $(seq 1 100); do
             if ps -eo args | grep -qF -- "{marker}"; then break; fi
             sleep 0.05

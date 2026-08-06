@@ -1,17 +1,56 @@
 # PR D — Formal HealthGate mode and the zero-valid-trial policy
 
-**Status: DESIGN — direction and all five deviations APPROVED; the
-operator's second review (2026-08-04) closed every policy question and
-forced eight further corrections, now applied. IMPLEMENTATION AWAITS FINAL
-OPERATOR APPROVAL.**
+**Status: IMPLEMENTATION 10 of 10. PREDECESSORS CLEARED. GATE 2 PENDING.**
+Gate 1 PASSED. **Gate 2 attempt 1 FAILED** (§19) — no formal round
+completed, so G2-1 is **not established**, and no acceptance language applies
+until a Gate 2 actually passes. All three defects that attempt 1 exposed are
+now closed: PR D's own declaration loss (§19.1, `735031ab`), the probe
+attribution/lifecycle hotfix (**PR #175**, `f99650a4`), and the PR C
+occupancy-policy correction (**PR #176**, `e4b2aff8`) — stable external GPU
+occupancy no longer invalidates a calibration. Both predecessors are merged
+to master and integrated here. Remaining: freeze the exact head, full local
+validation, full CI, then Gate 2's three-case matrix (§20.4) on that same
+head, then `reports/v20_prerequisite_review.md` (§20.5). PR D is **NOT ready
+for merge**.
+D-C1a (`b751476b`), D-C1b (`8bdeb7d1`), D-C2a (`c8019e77`),
+D-C2b (`84511954`, reinforced `8985d00f`), D-C3 (`7a52e450`, reinforced
+`42a9f679` closing FU-D-6 + FU-D-8), D-C4 (`eb789271`, reinforced `7a128f18`
+closing FU-D-9), D-C5 (`4767c72a`), D-C6 (`3e91adb6`), D-C7b (`09be3357`), Gate 1 fix (`3172bc4c`), D-C8 (`3114e031`), declaration fix (`735031ab`). The formal-gate policy is FROZEN in §16 after two
+read-only audits and the operator's negative-infinity bootstrap ruling
+(2026-08-05).
+
+**D-C9 was WITHDRAWN on 2026-08-05, so PR D is a 10-checkpoint PR.**
+Historical records missing the new authority contract stay readable and
+unchanged, with scientific authority simply not established — no
+annotation, no sidecar, no reconstruction, no finer classification. The
+249-artifact audit under D-C4 is the evidence for why (see §15.E).
+
+Predecessors merged to master and integrated here: FU-D-10 as PR #172
+(`51bab481`, integrated `12506d80`) and the workflow launch-guard capability
+as PR #174 (integrated `0ab71af4`). Gate 1 ran and PASSED (§17). D-C8 is
+complete (§18).
+
+**Next**: the two runtime-control predecessors in §20 — the narrow
+attribution/lifecycle hotfix and the PR C occupancy-policy correction — then
+full CI on the exact head, then final integrated Gate 2 on that same head.
+
+> **§16 supersedes any earlier statement in this document that conflicts
+> with it**, most consequentially the "explicitly overridden formal round"
+> framing, which was reasoning from the name `force_formal_round` rather
+> than from the code.
 
 ```text
 Audited code baseline      af5339ce   (after PR E and the role hotfix #171)
 Previous baselines         334d388d   (post-PR-E re-audit)
                            dd8d66aa   (PR C2 merged, 40d17f69)
 Predecessor hotfix         af5339ce   (D-C7a — DONE, PR #171, master CI green)
-Policy dependencies        none — all resolved (§14, §15)
-Implementation             pending final operator approval; 10 commits, D-C7a removed
+                           51bab481   (FU-D-10 — DONE, PR #172)
+                           d6473d93   (launch-guard capability — DONE, PR #174)
+Policy dependencies        PR D's own: none — all resolved (§14, §15)
+                           PR C occupancy correction: ONE OPEN (§20.3
+                           stability tolerance — no numeric value authorized)
+Implementation             10 of 10 complete; D-C7a removed. Acceptance
+                           blocked on the two §20 predecessors.
 ```
 
 **Re-audited against master after PR E (§15).** The re-audit confirmed
@@ -36,10 +75,17 @@ Parent scope: `docs/design/v20_priorities.md` §20.6.
 Governing genericization contract: `v20_priorities.md` §1.4 (§8 here).
 Predecessors: PR B (`4472f15`), PR C1 (`781e3e8a`), PR C2 (`40d17f69`).
 
-**Dependencies**: none outstanding. The §12A.4 default-mode decision is
-closed — a new formal campaign declares both dimensions or is refused
-(§4.1). PR D touches no GPU measurement, no admission path and no O-7
-accounting. One commit (D-C6) is LLM-facing and requires Gate 1.
+**Dependencies**: **two runtime-control predecessors are outstanding**, both
+blocking final acceptance (§20) — the narrow probe attribution/lifecycle
+hotfix, and the PR C occupancy-policy correction. Neither is a PR D code
+change: PR D's own implementation touches no GPU measurement, no admission
+path and no O-7 accounting. They block because **final Gate 2 cannot run
+until they land** — attempt 1 was aborted by them before any formal round
+completed (§19).
+
+The policy dependencies are closed: the §12A.4 default-mode decision — a new
+formal campaign declares both dimensions or is refused (§4.1). One commit
+(D-C6) is LLM-facing and required Gate 1, which has passed (§17).
 
 **What this PR is NOT.** It does not retune a threshold, does not remove
 observe-only mode, does not force a trial to succeed, and does not move any
@@ -88,10 +134,16 @@ Every step is individually defensible. The composition is not.
 
 ## 2. Objective and non-goals
 
-**Objective.** A formal scientific campaign must state which HealthGate mode
-it runs under, and a formal result produced with **zero valid trials must
-not be able to become authoritative** — not in incumbent selection, not in
-scientific aggregation, not in the report.
+**Objective.** A formal scientific campaign must state which HealthGate
+mode it runs under, and only an **authoritative** formal result may inform
+science — not in incumbent selection, not in scientific aggregation, not
+in the report.
+
+> The original wording was *"a formal result produced with zero valid
+> trials must not be able to become authoritative"*, and §16.D superseded
+> it. Zero valid trials now means the formal round is **skipped** (D-C3),
+> so no such result is produced; and if one exists, its authority is
+> decided by its own record, never by how its launch was justified.
 
 **Non-goals**, restated from §20.6 and reinforced by the audit:
 
@@ -288,10 +340,18 @@ valid_trials == 0  =>  no authoritative candidate exists for the iteration
 ```
 
 **Running the formal round and certifying its result are separate
-decisions** (D-D-1, as refined by the operator 2026-08-04). Zero valid
-trials does not *cause* a formal execution: formal runs only through an
-explicit diagnostic or `force_formal_round` override. Whether it runs or
-not, it cannot be granted scientific authority.
+decisions** (D-D-1). That separation survives §16 and is in fact
+strengthened by it.
+
+> **SUPERSEDED BY §16.** The rest of this paragraph read: *"Zero valid
+> trials does not cause a formal execution: formal runs only through an
+> explicit diagnostic or `force_formal_round` override."* Both clauses
+> are false against the code. Zero valid trials leaves the skip gate
+> inert, so formal **does** run; and `force_formal_round` defaults to
+> `True` and is the final-round phase transition, not an override
+> (§16.A). The corrected launch rule is §16.D: **no valid winner ⇒ skip
+> formal.** Authority remains a separate question and is decided from
+> the formal record itself.
 
 When it does run it is fully persisted, labelled `diagnostic`, excluded
 from incumbent selection, excluded from scientific aggregation and grand
@@ -317,11 +377,19 @@ reasons       = (no_valid_trial,)      <- cannot both be true
 A verdict whose fields can disagree is not a verdict. **The only
 constructor takes facts**; every conclusion is derived:
 
+> **SUPERSEDED by §16.D — the shipped signature has no trial concept.**
+> `valid_trial_count` was removed as an authority input: launch evidence
+> and result authority are different questions, and a first formal result
+> that bypassed the budget on the `-inf` bootstrap is no less
+> authoritative for it. `test_no_trial_concept_appears_in_the_signature`
+> asserts the parameter set contains none of `valid_trial_count`,
+> `trial_winner`, `skip_formal`, `bypass_formal_time_budget`,
+> `formal_reference_score` or `force_formal_round`.
+
 ```text
-ScientificAuthority.from_context(
-    healthgate_mode,             blocking | observe_only
-    declared_result_authority,   scientific | diagnostic
-    valid_trial_count,           int  (iteration-level support context)
+ScientificAuthority.from_context(          # as shipped
+    healthgate_mode,             blocking | observe_only | None
+    declared_result_authority,   scientific | diagnostic | None
     formal_validity,             this record's own gate validity
 )
 ```
@@ -366,9 +434,13 @@ Authority is granted **only** for:
 ```text
 healthgate_mode  == blocking
 result_authority == scientific
-valid_trial_count >= 1
-the formal record itself meets the existing validity requirements
+the formal record's OWN role-aware HealthGate validity == valid
 ```
+
+> **`valid_trial_count >= 1` was listed here and is SUPERSEDED by §16.D**,
+> which removed `valid_trial_count` and `no_valid_trial` as authority
+> blockers. Zero valid trials now means formal is **skipped** (D-C3); a
+> formal record that exists at all has its authority decided by itself.
 
 The consequences are computed properties — PR C's O-7 boundary is the
 precedent: six frozen consequences derived from one disposition, so a new
@@ -383,9 +455,14 @@ about which the verdict belongs to. Fixed:
 > *references* the iteration's valid-trial support context.
 
 ```text
-valid_trial_count   iteration-level    shared by every record of that iteration
 formal_validity     record-level       this record's own gate outcome
 ```
+
+> **SUPERSEDED by §16.D.** This subsection previously carried
+> `valid_trial_count` as iteration-level context referenced by the
+> verdict. The shipped verdict is **purely record-level** — it references
+> no iteration-level trial support at all, which is what makes the
+> incumbent and the report unable to disagree about it.
 
 Without this, the incumbent (which reads records) and the report (which may
 read iteration summaries) could consult authority computed at different
@@ -414,24 +491,31 @@ boundary is how a second authority path gets built by accident.
 
 ---
 
-### 4.5 V19's artifacts are immutable; the classification is a sidecar
+### 4.5 V19's artifacts are immutable, and nothing is written alongside them
 
-**Operator decision 2026-08-04.** V19's manifests are read-only forensic
-evidence and are **not rewritten**. Back-filling `healthgate_mode:
-observe_only` onto them would manufacture a record that the field existed
-at the time, which is exactly the kind of retrospective tidying that
-destroys the evidential value of an incident archive.
+**Operator decision 2026-08-04, superseded 2026-08-05.** V19's manifests are
+read-only forensic evidence and are **not rewritten**. Back-filling
+`healthgate_mode: observe_only` onto them would manufacture a record that the
+field existed at the time, which is exactly the kind of retrospective tidying
+that destroys the evidential value of an incident archive. That part stands.
 
-Instead a separate **closure annotation** is written alongside, recording:
+**What changed**: the 2026-08-04 decision also called for a separate closure
+annotation written alongside the archive. **That sidecar was withdrawn on
+2026-08-05**, together with D-C9 and all historical-authority reconstruction.
 
-* the original config path and its sha256;
-* the verified observe-only classification, with the evidence it rests on;
-* the date and basis of the retrospective classification (2026-08);
-* hashes of the unchanged source artifacts, so the annotation can be shown
-  not to have touched them.
+The governing rule is now simply:
 
-This is the same principle PR E applies to historical STOP evidence:
-preserve, annotate, never delete or rewrite.
+> A record missing the authority contract has **authority not established**.
+> It stays readable and unchanged, never becomes an incumbent, and never
+> enters scientific aggregation. No annotation, no sidecar, no
+> reconstruction, no finer classification.
+
+The evidence is the 249-artifact audit recorded in §15.E: `healthgate_mode`
+and `result_authority` are absent in 249 of 249 historical artifacts, and
+`result_authority` is derivable from nothing that was persisted — so no
+historical record could reconstruct to authoritative even if a sidecar
+existed. D-C4 already returns `unreconstructable_legacy` for exactly this
+class, which is the ruled behaviour and needed no implementation change.
 
 ### 4.6 Mixed *roles* are legal; mixed *semantics within a role* are not
 
@@ -561,13 +645,22 @@ which is a contamination of a different kind.
 result", and D3 permits a diagnostic formal marked non-authoritative. Read
 together with §3.5's resilience intent, the implementable rule is:
 
-> **The round runs only if explicitly overridden. Whether it runs or not,
-> its authority is refused.**
+> ~~**The round runs only if explicitly overridden. Whether it runs or
+> not, its authority is refused.**~~
+>
+> **SUPERSEDED BY §16.** The first sentence was wrong — there is no such
+> override, and the round runs by default. The corrected pair:
+> **no valid trial winner ⇒ the round is skipped**, and authority, when a
+> round does run, is decided from the formal record itself (§16.D).
 
-**Operator refinement, 2026-08-04**: permitting a diagnostic formal is *not*
-the same as automatically running one. Zero valid trials never *causes* a
+**Operator refinement, 2026-08-04, PARTLY SUPERSEDED BY §16**: permitting
+a diagnostic formal is *not* the same as automatically running one — that
+half stands. The half that does not: *"Zero valid trials never causes a
 formal execution — that requires an explicit diagnostic or
-`force_formal_round` override. The two decisions are independent, and only
+`force_formal_round` override."* Measured, zero valid trials **does**
+cause one, because the skip gate returns `False` when there is no winner
+(§16.B). §16.C/D replace the mechanism: no winner ⇒ skip. The two
+decisions are independent, and only
 the second is what D-D-1 governs.
 
 Cancelling the round instead would (a) contradict the deliberate resilience
@@ -654,29 +747,32 @@ refusal in addition to the mode↔config check.
 
 | ID | Checkpoint | State |
 |---|---|---|
-| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | `[ ]` not started |
-| **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | `[ ]` not started |
-| **D-C3** | An **explicitly overridden** zero-valid-trial formal round still completes, recorded non-authoritative (D-D-1) | `[ ]` not started |
-| **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[ ]` not started |
-| **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[ ]` not started |
-| **D-C6** | Structured all-trials-invalid feedback, extending `_build_gate_exhaustion` (§3.8) | `[ ]` not started |
+| **D-C1** | `healthgate_mode` + `result_authority` typed and validated (D-D-5); manifest fields; **mandatory declaration, mode↔config consistency, and invalid-combination refusal** (D-D-2) | **D-C1a `[x]`** typed, recorded, manifest-stamped · **D-C1b `[x]`** five startup refusals at the chain boundary + launcher declares blocking+scientific |
+| **D-C2** | `ScientificAuthority` verdict: computed consequences, typed `reasons`, fixed precedence incl. `declared_diagnostic` (§4.3); wired to the existing `valid_trial_records` (§3.4) | **D-C2a `[x]`** pure typed verdict, no call sites (`c8019e77`) · **D-C2b `[x]`** wired to every formal record (`84511954`, reinforced `8985d00f`) |
+| **D-C3** | **The formal-LAUNCH correction**: no valid trial winner ⇒ skip formal; effective reference resolved per §16.C (rewritten 2026-08-05 — the previous "explicitly overridden" framing was factually wrong) | `[x]` **COMPLETE** — no-winner ⇒ skip, `-inf` bootstrap + provenance, one winner per formal round, JSON-safe persistence. 10/10 mutations caught. See the implementation record under Commit 6 |
+| **D-C4** | Incumbent exclusion — extend `resume.py`'s predicate, do not replace it (§3.6) | `[x]` **COMPLETE** — authority is an additional conjunct; fail-closed `resolve_record_authority`; legacy ladder; 10-row matrix; 8/8 mutations. Found and fixed a D-C2b defect: the verdict was silently dropped by `ExperimentRecord` |
+| **D-C5** | Aggregation/report exclusion, stated **deterministically** — not via the LLM (§4.7) | `[x]` **COMPLETE** — new `execute_tools/scientific_aggregation.py`; verdict consumed not re-derived; provenance rendered from the typed object, never by the model. 6/6 mutations |
+| **D-C6** | Structured all-trials-invalid feedback | `[x]` **COMPLETE** — DEVIATION: a new `TrialValidityFeedback` carrier, because gate-exhaustion's triggers require budget-gated records and never fire here. Full producer→planner path, 7/7 mutations. Gate 1 pending |
 | **D-C7a** | Typed `gate_role` metadata — **prerequisite for D-C1b** (§4.6.1) | `[x]` **DONE — predecessor hotfix `af5339ce`, merged 2026-08-05.** Not a PR D commit |
-| **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[ ]` not started |
-| **D-C9** | V19 retrospective closure annotation, archive untouched (§4.5) | `[ ]` not started |
-| **D-C8** | Doc sync — **skill, node, agent, launcher, CLI and example `.md` in the same change** | `[ ]` not started |
+| **D-C7b** | Five recorded fields per gate; honest display label; **ids never rewritten** (D-D-3) | `[x]` **COMPLETE** — no config touched, `health_config_sha256` unshifted, no id renamed; label derived from the configured action. 5/5 mutations (two after fixing a redundant branch and a real coverage gap) |
+| ~~**D-C9**~~ | ~~V19 retrospective closure annotation~~ | **WITHDRAWN — operator decision 2026-08-05.** Historical records stay readable and unchanged with authority simply not established; no annotation, no sidecar, no reconstruction. PR D is a **10-checkpoint** PR |
+| **D-C8** | Doc sync + final audit | `[x]` **COMPLETE** — all ten verified against real call paths; stale claims superseded; three node docs synced; limitations, Gate 2 plan and merge criteria recorded (§18) |
 
 Mapping to §20.6: D1→D-C1, D2→D-C2, D3→D-C3, D4→D-C4, D5→D-C5, D6→D-C6.
-D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above);
-D-C9 was added by the
-operator's V19-immutability decision. Note the ordering constraint: **D-C7a
-precedes D-C1b**, because a consistency check without typed roles would
-have passed V19's own config (§4.6.1).
+D-C7b and D-C8 are additions this audit forced (D-C7a is done — see above).
+D-C9 was added by the operator's V19-immutability decision and **withdrawn
+on 2026-08-05**: historical records stay readable and unchanged with
+authority simply not established, so there is nothing to annotate. Note
+the ordering constraint: **D-C7a precedes D-C1b**, because a consistency
+check without typed roles would have passed V19's own config (§4.6.1).
 
 ---
 
 ## 7. Commit plan
 
-Eleven commits. Each is independently revertible and states its own Behavior
+**Ten commits** (D-C9 withdrawn 2026-08-05; the former commit 2, `D-C7a`,
+landed on master as PR #171 and is no longer a PR D commit). Each is
+independently revertible and states its own Behavior
 Delta. The ordering rule is PR C's: **the typed boundary lands before
 anything consumes it**, so no commit adds branching to a consumer that
 cannot yet be told the truth.
@@ -697,12 +793,12 @@ commit**; everything after it moves up one.
 | 2 | `D-C1b` mode↔config consistency check | **mismatched declaration fails at startup** |
 | 3 | `D-C2a` `ScientificAuthority` verdict, no call sites | none |
 | 4 | `D-C2b` verdict wired at the tuner exit | records carry authority; nothing consumes it |
-| 5 | `D-C3` explicitly overridden zero-valid-trial formal recorded non-authoritative | none — the override already ran it |
+| 5 | `D-C3` formal-launch correction: no valid winner ⇒ skip formal; `-inf` bootstrap reference | **zero-evidence iterations stop spending a formal round; a fresh chain's gates become armed** |
 | 6 | `D-C4` incumbent exclusion | **non-authoritative results stop entering the incumbent** |
 | 7 | `D-C5` aggregation/report exclusion, deterministic (§4.7) | **non-authoritative results leave scientific aggregation** |
 | 8 | `D-C6` all-trials-invalid feedback | planner receives structured evidence |
 | 9 | `D-C7b` five recorded fields; honest display label | none (labels only) |
-| 10 | `D-C9` V19 closure annotation (schema in Git; sidecar is an evidence step, §7) | none — archive annotated, never modified |
+| ~~10~~ | ~~`D-C9` V19 closure annotation~~ | **WITHDRAWN 2026-08-05** — no annotation, no sidecar, no reconstruction |
 
 **Scope corrections forced by the hotfix.**
 
@@ -847,9 +943,107 @@ Any test that cannot be run is recorded as **not run**, with the reason. It
 is never reported as passed.
 
 **8. Commit boundary.**
-- [ ] Independently reviewable: adds a field, changes no decision.
-- [ ] No unrelated cleanup; no follow-up work folded in.
-- [ ] Before committing: show diff summary, staged file list, test output, and any deviation from this plan.
+- [x] Independently reviewable: adds a field, changes no decision.
+- [x] No unrelated cleanup; no follow-up work folded in.
+- [x] Before committing: show diff summary, staged file list, test output, and any deviation from this plan.
+
+#### IMPLEMENTATION RECORD — D-C1a `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on
+`feature/v20-pr-d-formal-healthgate`, branched from `e1748dcc`.
+
+**Behavior Delta: none.** 113 insertions, **0 deletions** — the diff is
+pure addition, which is the mechanical form of "a recorded field with no
+consumer cannot change behaviour".
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `agent/schemas/hyperparam_tuning.py` | `HealthGateMode` / `ResultAuthority` literals; both fields on the input schema and echoed on the output schema, **no default on either** |
+| `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` | `--healthgate_mode` / `--result_authority` (`choices=`, `default=None`); threaded into the input dict, the `run_config` provenance dict and `agent_output_dict` |
+| `sdsc_submission_scripts/run_one_iteration.py` | manifest stamp on **every** branch, read off `tune_output` rather than written as a literal |
+
+**Actual call path**
+
+```text
+CLI --healthgate_mode / --result_authority
+  -> tuner input dict            (args.*)
+  -> HyperparamTuningInput       (Literal, no default)
+  -> run_config provenance       (agent_input.*)
+  -> agent_output_dict           (agent_input.*)
+  -> HyperparamTuningOutput      (echoed)
+  -> manifest.json               (getattr(tune_output, …, None), every branch)
+```
+
+**Manifest, observed on all three branches** by executing
+`write_manifest` rather than reading it:
+
+| branch | `healthgate_mode` | `result_authority` |
+|---|---|---|
+| `completed` | the declared value | the declared value |
+| `no_records` | ~~`null`~~ → the declared value | ~~`null`~~ → the declared value |
+| `failed` | ~~`null`~~ → the declared value | ~~`null`~~ → the declared value |
+
+> **This table's original rationale was a DEFECT, corrected at `735031ab`
+> (§19.1).** It read: *"`null` on the two non-completed branches is the
+> honest answer, not a gap to be filled: those paths have no tuner output,
+> so there is no declaration to report."*
+>
+> That reasoning is wrong because it treats the two fields as tuner-result
+> fields. They are **validated launch declarations**. D-C1b refuses the
+> launch unless both are declared and consistent, so by the time any
+> artifact is written they exist regardless of what the tuner later did.
+>
+> Gate 2 attempt 1 measured the consequence: a chain launched with
+> `--healthgate_mode blocking` wrote `healthgate_mode: null`, which D-C4
+> then reads as `unreconstructable_legacy` — a failed iteration disguised as
+> a pre-declaration artifact. Every post-launch branch now writes the
+> declaration from the validated launch input.
+>
+> Fail-closed is unchanged: a caller genuinely outside the contract still
+> records `null`, which downstream reads as "authority not establishable",
+> never as a silent `blocking`.
+
+**Tests** — 15 new in
+`tests/unit/agent/schemas/test_healthgate_mode_declaration.py`; the
+targeted set (schema + `test_run_one_iteration.py` +
+`test_resume_incumbent.py`) is **99 passed in 1.34 s**.
+
+Covering: every mode×authority combination accepted at the schema level
+including `observe_only + scientific` (refused at the launcher in D-C1b,
+not here, so historical artifacts stay readable); `blocking + diagnostic`
+expressible, which is what proves the axes are independent; neither axis
+defaulting; declaring one not implying the other; five unknown-value
+rejections **including each axis being offered the other's vocabulary**;
+the output echo; a legacy output without either key still loading; and
+neither axis having become a required output field.
+
+**Static**: pyright **0 errors, 4 warnings** — identical to the branch
+baseline. `ruff check` and `ruff format --check` clean.
+
+**Deviations from the plan — two, both implementation corrections**
+
+1. **`tune_output` is initialised to `None` before the manifest branch.**
+   The plan says "stamp on every branch"; `tune_output` is only bound on
+   the completed branch, so the stamp as written would have raised
+   `UnboundLocalError` on `no_records` and `failed` — precisely the
+   branches the plan says matter most. Found by inspection, confirmed by
+   executing both paths. This narrows nothing: it is what "every branch"
+   requires.
+2. **Both `run_config` and `agent_output_dict` are stamped**, not just
+   the typed output. A `count == 1` assertion caught that the
+   output-shaped key block occurs **twice** — one is run-configuration
+   provenance, the other the typed output — and both already carry the
+   DS5 HealthGate stamps. Stamping one and not the other would create
+   exactly the provenance/output drift this field exists to prevent.
+
+**Not done, deliberately**: no enforcement of mandatoriness, no refusal of
+`observe_only + scientific`, no consistency check against the effective
+config, no consumer of either field. All of that is D-C1b.
+
+**Next authorized checkpoint**: D-C1b — the startup enforcement boundary,
+and the first commit in this PR that changes launch behaviour.
 
 ---
 
@@ -1001,12 +1195,234 @@ to match a declaration. It refuses, it does not repair.
 - [ ] test count: __   - [ ] wall time: __   - [ ] focused pyright: __ errors
 
 **8. Commit boundary.**
-- [ ] Independently reviewable and independently revertible — reverting restores commit 1's record-only behaviour.
-- [ ] Before committing: show the refusal message verbatim.
+- [x] Independently reviewable and independently revertible — reverting restores commit 1's record-only behaviour.
+- [x] Before committing: show the refusal message verbatim.
+
+#### IMPLEMENTATION RECORD — D-C1b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C1a `b751476b`.
+
+**Behavior Delta**: a chain iteration whose declared policy is missing,
+self-contradictory, or contradicted by its HealthGate config now **exits 2
+before any work**. Legal launches are unaffected.
+
+> ### The dependency this checkpoint's plan did not state
+>
+> **Nothing on the production chain path passed the declarations.** D-C1a
+> added the tuner CLI arguments; the launcher chain was never wired:
+>
+> ```text
+> v19_queue_runner.sh → run_chain.sh → _chain_common.sh → run_one_iteration.py → tuner
+>                     declarations passed at any hop:  0 shell files
+> ```
+>
+> So refusing omission would have made **every production chain launch
+> fail** — tests green, production dead. Operator ruling (2026-08-05): the
+> chain declares **`blocking + scientific`**, wired in this commit. That is
+> a statement of what a V19/V20 formal chain already is — it runs
+> `configs/health_checks.yaml`, whose three role:blocking gates invalidate
+> a round, and its results feed the incumbent and the science.
+
+**Refusal seam — `run_one_iteration.py`, not the schema.** Operator ruling.
+Two reasons, both load-bearing:
+
+- the permissive schema is what keeps historical artifacts readable. An
+  artifact recorded under `observe_only + scientific` documents an
+  incident; refusing it at the schema would make that incident unopenable.
+  Verified safe: `core/resume.py` reads manifests directly and **never**
+  constructs a `HyperparamTuningInput`, so tightening the launch path
+  cannot break historical reads.
+- `validate_runtime_config` runs for *every* tuner invocation including
+  diagnostic tooling (`scripts/bg_admission_validation.py:571` builds a
+  tuner input). Refusing there would block diagnosis, and an exemption flag
+  would be a bypass surface that can be used by accident.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/health_checks/launch_policy.py` (**new**, 175 lines) | `validate_formal_launch`, `FormalLaunchPolicyError`, `_enforcing_gate_ids` |
+| `sdsc_submission_scripts/run_one_iteration.py` | `--healthgate_mode` / `--result_authority`; the refusal as the first thing `main()` does with parsed args |
+| `sdsc_submission_scripts/_chain_common.sh` | `HEALTHGATE_MODE=blocking`, `RESULT_AUTHORITY=scientific`, CLI passthrough, argv assembly |
+| `execute_tools/health_checks/candidate_eligibility.py` | `resolve_scientific_gate_ids` / `legacy_config_body_sha` widened to `str \| None`, matching the loader they wrap |
+
+**The five refusals, and what each prevents**
+
+| # | Refusal | Prevents |
+|---|---|---|
+| 1 | `healthgate_mode` omitted | a run claiming enforcement nobody configured |
+| 2 | `result_authority` omitted | a run claiming scientific standing nobody granted |
+| 3 | `observe_only + scientific` | gates that only record certifying a result |
+| 4 | declaration contradicts the config's enforcement | **the 08:17 shape**: the artifact says enforced, the run was not |
+| 5 | inverted deltas **while gates are enabled** | both gates firing for one score, decided by statement order |
+
+Refusal 5 is scoped to `enable_chain_incumbent_formal_gates` per the
+operator: with the gates off the deltas are not consumed, so an unused
+historical pair must not block a launch.
+
+**Roles are not re-derived.** Scientific membership comes from the shared
+`resolve_scientific_gate_ids` merged in `af5339ce`. Only *enforcement* is
+action-derived (`_enforcing_gate_ids`), which is the correct question for
+"does this config actually invalidate anything". Keeping the two apart is
+the point of the hotfix.
+
+**Why the source config suffices** — verified, not assumed:
+`materialize_effective_config` only applies `apply_monitored_files`
+(`peek_file_indices`) and `validate_health_scope`; it never rewrites
+`on_fail.action` or `gate_role`. Enforcement semantics are therefore
+identical before and after materialization, so the check can run at the
+launch boundary without weakening.
+
+**Verbatim refusal messages**
+
+```text
+[run_one_iteration] FORMAL LAUNCH REFUSED: a formal launch must declare
+--healthgate_mode and --result_authority. There is no default: defaulting
+to blocking/scientific would let this run claim enforcement and scientific
+standing that nobody configured. Declare both explicitly.
+
+[run_one_iteration] FORMAL LAUNCH REFUSED: observe_only + scientific is a
+contradiction: gates that only record cannot certify a result. …
+
+[run_one_iteration] FORMAL LAUNCH REFUSED: healthgate_mode=blocking, but
+these role:blocking gates cannot invalidate anything in
+'configs/health_checks_baseline_observe_mode.yaml':
+['amplitude_collapse_blocking', 'output_diversity_blocking',
+'output_std_blocking']. The declaration says enforced and the
+configuration says observe — the artifact would record a policy the run
+did not have.
+```
+
+**Tests** — 15 new in `test_formal_launch_policy.py`, 3 new reachability
+tests in `test_run_one_iteration.py` (68 total there). Targeted suites
+(`sdsc_submission_scripts` + `health_checks` + `core` + `agent/schemas`):
+**2979 passed, 2 skipped** in 157 s. Full `tests/unit`: **7323 passed**,
+2 skipped, 4 xfailed.
+
+The reachability tests build argv **explicitly** and do not go through
+`_run_main`, which now synthesises the declarations the production shell
+supplies — a test using that helper could not observe an omission.
+
+**Existing tests updated, with reasons**
+
+- `_run_main` synthesises the two declarations, for the same stated reason
+  it already synthesises `--run_name`: a shell-side convention production
+  always supplies, in tests that target the argparse/wiring layer.
+- `test_health_checks_config_reaches_workflow` now declares
+  `observe_only + diagnostic`, because it drives the **observe-only**
+  config. The helper's `blocking` default was refused — **the check
+  catching a real mismatch in an existing fixture**, not a test defect.
+
+**Mutations — five, all caught**
+
+| mutation | fails |
+|---|---|
+| omission silently defaults to blocking+scientific | 4 |
+| `observe_only + scientific` accepted | 2 |
+| scientific membership inferred from the action | 2 |
+| the chain boundary bypasses validation | 2 |
+| the chain shell stops declaring the policy | 1 |
+
+**Static**: pyright **0 errors, 4 warnings** — back to baseline after
+widening two signatures that were needlessly narrower than the loader they
+wrap (`str` vs the loader's `str | None`, where `None` means the shipped
+default). `ruff check`, `ruff format --check`, `bash -n` clean.
+
+**Deviations from the plan**
+
+1. **The commit includes launcher wiring.** Unavoidable: the refusal is
+   unusable without it, and shipping the refusal alone would leave the
+   branch green while production could not launch.
+2. **Two signature widenings in the predecessor hotfix's module.** Caught
+   by pyright, not by tests. `None` is the loader's own convention for the
+   shipped default; the narrower annotation was an oversight in `af5339ce`.
+
+**Next authorized checkpoint**: D-C2a — the `ScientificAuthority` typed
+boundary with no call sites.
 
 ---
 
 ### Commit 4 — `D-C2a`: the `ScientificAuthority` verdict, with no call sites
+
+#### IMPLEMENTATION RECORD — D-C2a `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C1b `8bdeb7d1`.
+
+**Behavior Delta: none.** A pure typed value with **no production call
+sites** — verified by grep: only tests import it. D-C2b wires it.
+
+**File**: `core/scientific_authority.py` (new, 176 lines).
+
+**Signature — launch history cannot reach it**
+
+```python
+ScientificAuthority.from_context(
+    *,
+    healthgate_mode: str | None,            # blocking | observe_only | None
+    declared_result_authority: str | None,  # scientific | diagnostic | None
+    formal_validity: FormalValidity,        # valid | invalid | unknown
+) -> ScientificAuthority
+```
+
+Absent by construction, per §16.D: the trial winner, `valid_trial_count`,
+the skip and bypass decisions, the comparison reference and
+`force_formal_round`. Those decide whether the round was worth running;
+this decides whether its result may be believed. A first formal result
+that bypassed the budget on the `-inf` bootstrap is **no less
+authoritative for it**. A test asserts the signature contains no
+trial-shaped parameter and that the `AuthorityBlocker` vocabulary cannot
+express `no_valid_trial`.
+
+**Conclusions are structural, not validated.** `authoritative`,
+`primary_basis`, `blocking_reasons`, `enters_incumbent_selection` and
+`enters_scientific_aggregation` are `@computed_field` properties — there
+is no constructor argument for them. `extra="forbid"` refuses a caller
+that tries anyway. That second half matters: without it Pydantic
+**silently discards** `authoritative=True`, so the verdict stays correct
+while the caller believes they set it — measured during implementation,
+which is why the config carries `forbid`.
+
+**Truth table — executed**
+
+| mode | authority | validity | authoritative | primary_basis |
+|---|---|---|---|---|
+| blocking | scientific | valid | **True** | `blocking_scientific_formal_valid` |
+| blocking | scientific | invalid | False | `gate_invalidated` |
+| blocking | scientific | unknown | False | `formal_validity_unknown` |
+| blocking | diagnostic | any | False | `declared_diagnostic` |
+| observe_only | diagnostic | any | False | `declared_diagnostic` |
+| observe_only | scientific | any | False | `non_blocking_mode` |
+| undeclared (`None`) | undeclared | any | False | `legacy_authority_unknown` |
+
+Asserted as a property as well as row-by-row: **exactly one** of the
+twelve combinations is authoritative.
+
+`observe_only + scientific` returns a verdict rather than raising. D-C1b
+refuses it at launch, but artifacts recorded under it exist and document
+an incident — a pure function that threw on historical data would make
+that history unreadable.
+
+`blocking_reasons` reports **all** applicable reasons in a fixed
+precedence, not just the first, so an operator fixing one can see the
+others without re-running.
+
+**Tests** — 25 in `tests/unit/core/test_scientific_authority.py`;
+`tests/unit/core/`: **2045 passed, 2 skipped** in 44 s.
+
+**Mutations — three, all caught**
+
+| mutation | fails |
+|---|---|
+| `extra="forbid"` dropped (caller-set silently ignored) | 5 |
+| `no_valid_trial` added to the blocker vocabulary | 1 |
+| `unknown` validity treated as passing | 2 |
+
+**Static**: pyright 0 errors / 4 warnings (baseline), ruff + format clean.
+
+**Deviations**: none.
+
+**Next authorized checkpoint**: D-C2b — wire the verdict onto every formal
+record at the tuner exit.
 
 **1. Goal.** Introduce the typed verdict and its computed consequences as a
 pure unit. It is separate from its wiring for the reason PR C learned the
@@ -1064,6 +1480,120 @@ combination → unrepresentable by construction.
 
 ### Commit 5 — `D-C2b`: wire the verdict at the tuner exit
 
+#### IMPLEMENTATION RECORD — D-C2b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C2a `c8019e77`.
+
+**Behavior Delta — stated precisely**: *selection* delta **none**;
+*formal-record schema/provenance* delta **present**. Incumbent selection,
+aggregation and reporting are untouched and behave exactly as before; what
+changes is that every formal record now carries a verdict they may later
+consume.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/health_checks/candidate_eligibility.py` | `formal_validity_of(record, config_path)` → `Literal["valid","invalid","unknown"]` |
+| `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` | the formal-only authority block on `final_record` |
+
+**Call path**
+
+```text
+final_record (one construction site, :4852)
+  → if not trial_config.is_trial:
+        formal_validity_of(final_record, config_path=agent_input.health_checks_config)
+          → classify_candidate_health(record, resolve_scientific_gate_ids(cfg))   ← shared, role-aware
+        ScientificAuthority.from_context(mode, authority, validity)               ← D-C2a, derived
+      → final_record["scientific_authority"] = verdict.model_dump()
+```
+
+**The two asymmetries, both deliberate**
+
+*Every* formal record gets a verdict — valid, invalid, diagnostic and
+validity-unknown alike. A field present only on successes would make its
+absence ambiguous.
+
+*No* trial record gets one. Writing `authoritative: False` on a trial
+would conflate "formal authority does not apply here" with "this formal
+result was judged untrustworthy", and those call for opposite operator
+responses.
+
+**Validity is this record's own.** `formal_validity_of` reads the formal
+record's gate results through the shared role-aware resolver. It cannot
+see the trial winner, a trial count, the score, the skip/bypass decision
+or `force_formal_round` — none is in scope at the call.
+
+**Nothing is assembled locally.** A test asserts the tuner contains no
+`final_record["authoritative"]`, `["primary_basis"]` or
+`["blocking_reasons"]`; the conclusions come only from D-C2a.
+
+**Persistence keeps every reason.** A diagnostic run whose formal record
+also failed its gates round-trips as
+`primary_basis: declared_diagnostic` **and**
+`blocking_reasons: [declared_diagnostic, gate_invalidated]` — the gate
+failure stays a diagnostic fact rather than being collapsed into the
+headline. The three facts survive too, so the verdict is recomputable.
+
+**`legacy_authority_unknown` is unreachable for new records** — D-C1b
+refuses an undeclared launch. It exists for historical reconstruction, not
+as a fallback. Asserted across all four declared combinations.
+
+**Tests** — 15 new in `test_formal_authority_wiring.py`. Full
+`tests/unit`: **7363 passed**, 2 skipped, 4 xfailed.
+
+**Mutations — three, all caught**
+
+| mutation | fails |
+|---|---|
+| formal wiring call site removed | 1 |
+| verdict attached to trial records too | 1 |
+| formal validity hardcoded instead of sourced from the record | 1 |
+
+**Static**: pyright **0 errors** — after narrowing `formal_validity_of`'s
+return from `str` to the exact `Literal`. pyright caught the mismatch; the
+tests did not, because the value was always right. A new test pins the
+classifier enum's values against `FormalValidity`'s literal so the two
+vocabularies cannot drift apart in separate modules.
+
+**Deviations**
+
+1. **A flaky test from E-C6 was fixed in passing.** `TestTheLiveProcessGuardExcludesOnlyItself::test_the_exclusion_is_fixed_string_not_a_regex`
+   failed once in a full-suite run and passed 3/3 in isolation. Cause: the
+   fixture waited a fixed `sleep 0.4` for its process to appear in `ps`,
+   which is a race under load — the guard then sees nothing and a
+   "should block" case fails. Replaced with a bounded poll on `ps` in both
+   the queue-runner and Gate-runner fixtures. Not D-C2b's scope, but a
+   known flake left in CI is worse than the small out-of-scope edit, and
+   it was mine.
+
+**Coverage gap closed after review (same checkpoint, follow-up commit).**
+Re-checking D-C2b against the operator's stated matrix found two rows the
+first commit did not assert:
+
+- *"no formal produced → no fabricated verdict"*. Now asserted on both
+  non-completed manifest branches: `no_records` and `failed` carry **no**
+  `scientific_authority` key, while still recording the declaration as
+  `null`. A verdict invented where no formal round ran would be worse
+  than a missing one — it would look like evidence.
+- *"the record writer cannot override the derived fields"*. D-C2a's
+  `extra="forbid"` protects the model, but the record holds a plain dict
+  and nothing can stop a later writer mutating it. What **can** be
+  guaranteed is that tampering is **detectable**: the facts are persisted
+  beside the conclusions, so the verdict is recomputable from its own
+  record. Asserted both ways — a clean record recomputes identically, and
+  a record with `authoritative` flipped no longer matches its own facts.
+  Plus a structural check that the tuner never writes *into* the
+  persisted block.
+
+Six further tests (21 in the file). One of them initially read another
+test class's `setup_class` attribute, which made it depend on collection
+order — a guard that silently becomes a no-op against `None`. Rewritten to
+read the source directly and verified in isolation.
+
+**Next authorized checkpoint**: D-C3 — the formal-launch correction, and
+the first checkpoint in this PR that changes launch behaviour.
+
 **1. Goal.** Compute the verdict from data that already exists (§3.4) and
 attach it to the record. Separate from commit 3 so that "the verdict is
 reached in production" is a distinct, provable claim.
@@ -1116,24 +1646,392 @@ existing `best_valid_trial_score`.
 
 ---
 
-### Commit 6 — `D-C3`: an explicitly overridden zero-valid-trial formal round remains runnable, and is recorded non-authoritative
+### Commit 6 — `D-C3`: the formal-LAUNCH decision, corrected
 
-**1. Goal.** Land D-D-1 explicitly, in the direction the title now states.
-Zero valid trials **never causes** a formal execution — that requires an
-explicit diagnostic or `force_formal_round` override. What this commit
-proves is that when such an override *has* fired, the round is **not
-cancelled** and its result is **not certified**. Its own commit so the "we
-did not break the resilience at `:1487-1489`" claim is reviewable in
-isolation.
+#### IMPLEMENTATION RECORD — D-C3 `[x]` COMPLETE
 
-The title was previously "a non-blocking formal round runs", which invited
-exactly the reading the operator rejected — that `observe_only` or zero
-valid trials would themselves trigger a formal round. They do not.
+**Commit**: `<filled at commit>`, on top of D-C2b reinforcement `8985d00f`.
 
-**2. Scope.** Verification and recording around `force_formal_round`
-(`:1455-1492`). *Non-goals — and this is the point of the commit*: the
-no-winner fallback keeps preserving the planner's plan and keeps logging its
-WARNING. Control flow is unchanged.
+> **Items 3, 5 and 8 below are SUPERSEDED.** They predate §16 and say
+> *"mostly tests; any production change here is a red flag to surface, not
+> to absorb"* and *"`completed_rounds` unchanged from pre-commit for the
+> same inputs"*. §16.G assigns D-C3 **the no-winner ⇒ skip correction and
+> the effective-reference resolution + provenance**, which are production
+> changes by definition, and the whole point is that `completed_rounds`
+> DOES change for a zero-valid-trial iteration. §16's supersession clause
+> governs; this record states what was actually built.
+
+**Behavior Delta**: **present, and intended.** Two decisions change, both
+only when `enable_chain_incumbent_formal_gates` is ON:
+
+1. an iteration with **no HealthGate-valid trial winner** now skips its
+   formal round instead of spending it. `completed_rounds` is lower by one
+   for exactly those iterations.
+2. a chain with **no restored valid formal incumbent** now resolves the
+   reference to `-inf` instead of `None`, so the first valid trial is never
+   skipped and always bypasses the formal time budget.
+
+With the switch OFF, behaviour is byte-identical to pre-D-C3 — asserted
+through the real tuner loop, not merely by helper unit tests.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `nodes/.../ml_hyperparameter_tune_agent.py` | `_should_skip_formal` / `_should_bypass_formal_time_budget` take a RESOLVED winner; `_resolve_formal_comparison_thresholds` gains `gates_enabled` and returns a 4-tuple with provenance; new `_json_safe_reference`; one winner resolved per formal round; the no-winner log line |
+| `agent/schemas/hyperparam_tuning.py` | `formal_comparison_reference_source` **declared** on `HyperparamTuningOutput` (see the gap below); four descriptions state the null-when-infinite rule |
+| `sdsc_submission_scripts/run_one_iteration.py` | the manifest carries the source beside the reference |
+
+**The real producer → consumer path**
+
+```text
+agent_input.current_run_best_formal_score
+  → _consumed_reference (gated on enable_chain_incumbent_formal_gates)
+  → _resolve_formal_comparison_thresholds(gates_enabled=…)
+      → (reference, skip_t, bypass_t, source)
+  → run_config dict                          [:3371-3374]  sanitised
+  → formal_trial_winner = _best_trial_winner(sandbox.get_summary())  [:3549]
+      → _should_skip_formal(...)             [:3553]  → break, no formal round
+      → _should_bypass_formal_time_budget(...) [:4233] → time_check["feasible"]=True
+  → agent_output_dict                        [:5441-5444] sanitised
+      → HyperparamTuningOutput.model_validate
+      → run_output_{run}.json
+      → run_one_iteration.write_manifest     [:452-462]
+      → manifest.json → core/resume.py → the next iteration
+  → partial_dict (degraded path)             [:5533-5536] sanitised
+```
+
+**Helper and schema changes**
+
+| Symbol | Before | After |
+|---|---|---|
+| `_should_skip_formal` | `(memory_history, *, threshold)` | `(winner, *, threshold, gates_enabled)` |
+| `_should_bypass_formal_time_budget` | `(memory_history, *, threshold)` | `(winner, *, threshold)` |
+| `_resolve_formal_comparison_thresholds` | → 3-tuple | → 4-tuple, **required** `gates_enabled` |
+| `_json_safe_reference` | — | new; `±inf → None` |
+| `HyperparamTuningOutput.formal_comparison_reference_source` | — | new `str \| None` |
+
+**Migrated tests — 18, not 17.** Each keeps the defect class it protected:
+
+| Test | Defect preserved | Change |
+|---|---|---|
+| `test_explicit_zero_reference_remains_legal` | explicit 0.0 ≠ `None` | + asserts source is `restored_valid_formal_incumbent` |
+| `test_none_reference_resolves_to_all_none` → `test_no_incumbent_bootstraps_to_negative_infinity_when_gates_are_on` | a missing incumbent never becomes a finite number, above all not 0.0 | **semantic rewrite**; the old rule is quoted in the docstring |
+| `test_skip_gate_cannot_fire_without_incumbent` → `test_the_skip_gate_still_cannot_fire_on_a_valid_first_trial` | a fresh chain must not skip its first real candidate | **semantic rewrite**; same outcome, new mechanism (`-inf`, not `None`) |
+| `test_bypass_gate_cannot_fire_without_incumbent` → `test_the_bypass_gate_now_fires_where_it_previously_could_not` | the v15 budget-block failure | **semantic rewrite, INVERTED outcome** — see deviation D-3 |
+| `test_numeric_reference_resolves_sums`, `test_gates_consume_resolver_output_verbatim`, 3 × skip-gate, 3 × bypass-gate, 2 × disable-via-infinity | arithmetic, single-source, boundaries, escape hatches | 4-tuple + winner-first |
+| `test_phantom_family_reference_is_just_a_number` | **no special-casing of 5.5763** | kept, strengthened — §16.C withdrew the seeded-baseline recommendation *because* of this phantom |
+| `test_skip_formal_uses_valid_candidate_and_zero_reference` | an invalid trial can never open a gate | outcome flips (skip now fires); a second assertion at `threshold=-100.0` proves the reason is the absent winner, not the 9.0 |
+| `test_bypass_uses_valid_candidate_and_half_point_threshold` | same, bypass side | outcome **unchanged**; + an `-inf` threshold case |
+| `tests/integration/workflows/test_chain_incumbent_pseudo.py` | flag-OFF resolves to all-`None`, not fixed-0.0 | **the 18th consumer**, outside the stated 17 — see deviation D-2 |
+
+New tests are consolidated in
+`tests/unit/agent/tune_ml_hyperparam_agent/test_formal_launch_decision.py`
+(29 tests): the 12-row matrix, the single-resolution property, the
+persistence rules and three real-loop reachability tests.
+
+**The 12-scenario matrix.** Every row asserts winner identity, skip,
+bypass, ordinary-budget applicability, reference, source, both thresholds
+and the JSON-safe persisted form (production posture: incumbent 10.0,
+skip Δ 0.0, bypass Δ 0.5 → 10.0 / 10.5).
+
+| # | scenario | winner | skip | bypass | ordinary | ref | source |
+|---|---|---|---|---|---|---|---|
+| 1 | no trial records | — | **T** | F | F | 10.0 | restored |
+| 2 | all trials invalid | — | **T** | F | F | 10.0 | restored |
+| 3 | invalid trial @ 99.0 | — | **T** | F | F | 10.0 | restored |
+| 4 | valid winner, **no incumbent** | first | F | **T** | F | `-inf` | **bootstrap** |
+| 5 | valid 9.0 (below skip) | weak | **T** | F | F | 10.0 | restored |
+| 6 | valid 10.0 (**== skip**) | at_skip | F | F | **T** | 10.0 | restored |
+| 7 | valid 10.2 (between) | middle | F | F | **T** | 10.0 | restored |
+| 8 | valid 10.5 (**== bypass**) | at_bypass | F | **T** | F | 10.0 | restored |
+| 9 | valid 11.0 (above bypass) | strong | F | **T** | F | 10.0 | restored |
+| 10 | **gates disabled**, no valid winner | — | F | F | **T** | `None` | gates_disabled |
+| 10b | gates disabled, valid winner | ignored | F | F | **T** | `None` | gates_disabled |
+| 11 | restored valid incumbent | normal | F | F | **T** | 10.0 | restored |
+| 12 | one winner for skip + bypass + logging + plan inheritance | — | — | — | — | — | — |
+
+Row 12 is `TestTheWinnerIsResolvedOnce`: the inheritance path resolves the
+winner independently inside `_apply_mode_override_chain`, so parity is
+**proved** rather than assumed — a formal round forces `plan.is_trial =
+False`, so nothing it appends can satisfy `_best_trial_winner`'s filter and
+the round-boundary snapshot stays valid for the whole round.
+
+Rows 1, 3 and 10 additionally run through the **real tuner loop** (resume
+into a final formal round, only skill execution mocked).
+
+**Mutation results — 11 run, 11 caught.** Baseline restored byte-identical
+after each (sha verified), `__pycache__` cleared per run, anchors asserted
+to match exactly once, and the clean baseline re-run at the end.
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| M1 | no winner continues to formal | matrix 1/2/3, real-loop skip test, valid-candidate | 5 |
+| M2 | missing incumbent stays `None` | matrix 4, bootstrap resolver + both gate tests | 4 |
+| M3 | an invalid trial becomes eligible | matrix 2/3/10, inheritance, real loop, selection | 11 |
+| M4 | skip `<` → `<=` | matrix 6, verbatim-consumption, valid-candidate | 3 |
+| M5 | bypass `>=` → `>` | matrix 8, verbatim-consumption, margin, valid-candidate | 4 |
+| M6 | gates-disabled behaviour altered | matrix 10, real-loop gates-off, valid-candidate | 3 |
+| M7 | bypass re-resolves its own winner | `test_the_production_site_resolves_the_winner_exactly_once` | 1 |
+| M8 | raw `Infinity` reaches an artifact | matrix 4, both `_json_safe_reference` cases, operator-disable | 4 |
+| M9 | schema drops the provenance field | `test_the_provenance_survives_the_typed_output_and_the_manifest` | 1 |
+| M10 | manifest drops the provenance field | `test_the_manifest_carries_the_source_beside_the_reference` | 1 |
+| M11 | `in (-inf, +inf)` membership instead of `math.isfinite` | NaN sanitisation + the parametrised `nan` row | 2 |
+
+*M7 is caught only by a structural assertion.* That is a real limitation
+and is recorded, not papered over: while the trial history cannot change
+mid-round the two resolutions agree by construction, so no behavioural test
+can distinguish them. The companion test
+`test_a_formal_round_cannot_add_a_trial_record_beneath_the_snapshot` proves
+*why* they agree, which is the property actually worth guarding.
+
+**Persistence audit.** Producers: three dict sites in the tuner
+(`:3371-3374` run_config, `:5441-5444` agent_output_dict, `:5533-5536`
+degraded partial_dict) — all four values sanitised at all three.
+Consumers: `HyperparamTuningOutput` (built from the sanitised dict, so the
+typed output cannot carry an infinity), `run_one_iteration.write_manifest`
+(reads the typed output), `core/resume.py`. Internal arithmetic uses `-inf`
+freely; nothing serialised does. `json.dumps(..., allow_nan=False)` is
+asserted over every matrix row and over the operator-disable case.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_formal_launch_decision.py` | 29 passed, 5.8 s |
+| migrated + integration consumers | 66 passed, 6.8 s |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` | 881 passed, 189 s |
+| schema + manifest + healthgate suites | 984 passed, 113 s |
+| full `tests/unit` | **7407 passed**, 2 skipped, 4 xfailed, 428 s — see the note below |
+| pyright (CI-equivalent, cached Node) | **0 errors**, 4 warnings — all pre-existing, none in a touched file |
+| `ruff check` | All checks passed |
+| `ruff format --check` | clean (3 files reformatted, all D-C3 lines) |
+| `bash -n` | n/a — no shell script touched |
+
+> **The full-suite run needs one note, because the raw number is
+> misleading.** The first run reported `1 failed, 7406 passed`:
+> `tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`.
+> It is **not** a D-C3 defect and not a test defect. It belongs to the
+> unrelated PR3-L2-calibration protocol and asserts
+> `no_production_file_modified` by running `git diff --name-only` — so it
+> fails for **any** uncommitted production change, naming exactly this
+> checkpoint's three files. Diagnosed by reading
+> `scripts/pr3_l2_calibration/preflight.py:286-299`, then **proved** by
+> staging the changes (which empties the worktree-vs-index diff) and
+> re-running: `1 passed`. The suite is green for the committed tree, which
+> is why the row above reads 7407.
+>
+> Consequence worth knowing: "full `tests/unit` green" is only assertable
+> with a clean working tree, i.e. at or after commit — never mid-edit.
+
+**Deviations from the frozen plan, and why each was necessary**
+
+- **D-1 — D-C3 is a production change.** Items 3/5/8 of this section
+  predate §16 and forbid exactly what §16.G assigns. Resolved in favour of
+  §16, which states it supersedes conflicting text. No operator question:
+  the conflict is settled by the document itself.
+- **D-2 — an 18th consumer.** `test_chain_incumbent_pseudo.py:444` unpacked
+  the 3-tuple and passed record lists positionally; it was outside the
+  stated 17 and would have failed CI. Its defect class (flag-OFF resolves
+  to all-`None`, not fixed-0.0) is preserved and strengthened with
+  `source == "gates_disabled"`.
+- **D-3 — a third semantics-changed test.**
+  `test_bypass_gate_cannot_fire_without_incumbent` encodes the same
+  superseded "no incumbent ⇒ inert" rule; under the bootstrap its assertion
+  **inverts**. Rewritten with the change stated, not re-pointed.
+- **D-4 — `gates_enabled` is a REQUIRED keyword**, not a defaulted one. A
+  default of `False` would silently hand a forgetful caller the pre-D-C3
+  behaviour — precisely the defect class this checkpoint fixes.
+- **D-5 — `flush=True` on the new log line**, matching every other gate
+  print. Chain stdout is piped to a log; an unflushed line interleaves.
+- **D-6 — the provenance field was undeclared (a real gap, found by the
+  step-7 audit and fixed here).** The tuner emitted
+  `formal_comparison_reference_source` into its dicts, but
+  `HyperparamTuningOutput` never declared it, so Pydantic's default
+  `extra="ignore"` **silently dropped it** before `run_output_*.json` and
+  the manifest — the two artifacts an operator reads. Nothing failed,
+  because a dropped field is indistinguishable from an unset one. Without
+  it, §16.C's persisted form is unimplemented and
+  `formal_reference_score: null` stays ambiguous across three genuinely
+  different runs. Closed by declaring the field, forwarding it in
+  `write_manifest`, and M9/M10.
+- **D-8 — NaN leaked past my own first implementation.** The audit's own
+  requirement names `Infinity`, `-Infinity` **and `NaN`**; the first
+  `_json_safe_reference` tested `value in (float("-inf"), float("inf"))`,
+  which compares by equality — and NaN is not equal to itself. Verified by
+  execution: `json.dumps({"t": _json_safe_reference(nan)})` produced
+  `{"t": NaN}`. Reachable, because the deltas are operator CLI floats and
+  `reference + nan` is `nan`. Replaced with a single `math.isfinite` check
+  (M11). This is exactly the class of defect the step-7 audit exists to
+  catch, and it was in the code under audit rather than in legacy.
+- **D-7 — the reachability harness had to avoid a DS5 trap.** Stamping the
+  seeded trial `health_gate_enabled: False` flips
+  `classify_candidate_health` to **VALID** regardless of its gate results
+  (`candidate_eligibility.py`, the self-describing disabled-mode waiver) —
+  a combination that cannot occur in production and that silently defeated
+  the harness. The tests run `health_gate_enabled=True` with an unstamped
+  seed (DS6b reads that as "legacy = gates active"), and the reason is
+  documented in the helper so it is not re-introduced.
+
+**Follow-ups**
+
+- **FU-D-6** `[x]` **CLOSED** by the reinforcement commit below.
+- **FU-D-8** `[x]` **CLOSED** by the reinforcement commit below.
+- **FU-D-7** *(**WITHDRAWN — operator decision 2026-08-05**)* —
+  historical artifacts carry `formal_comparison_reference_source: null`,
+  which does not distinguish "predates the field" from the three live
+  cases. This was originally deferred to "the legacy-reconstruction /
+  V19-sidecar checkpoint", and **that checkpoint no longer exists**: the
+  same ruling withdrew D-C9, the sidecar boundary and all historical
+  reconstruction. There is therefore nothing to defer TO and nothing to
+  do. Historical artifacts are never rewritten; a null source simply
+  means authority is not established, which is the frozen rule.
+
+---
+
+#### REINFORCEMENT — D-C3 follow-up closure, NOT a new checkpoint
+
+**Commit**: `<filled at commit>`, on top of D-C3 `7a52e450`. The
+checkpoint count stays **5 / 10**; D-C4 is what makes it 6. (Total
+revised from 11 to 10 when D-C9 was withdrawn, 2026-08-05.)
+
+Operator-approved after D-C3 was accepted: close the two follow-ups that
+are themselves launch-gate correctness, before starting D-C4.
+
+**FU-D-6 — one winner snapshot, structurally**
+
+`_apply_mode_override_chain` no longer calls `_best_trial_winner`; it
+takes a required keyword-only `trial_winner`, and the tuner passes the
+same snapshot the skip gate, the bypass gate and the log line used. The
+two agreed before by construction — a formal round forces
+`plan.is_trial = False`, so nothing it appends can satisfy the winner
+filter — but §16.F requires one *snapshot*, not two computations that
+happen to match, and the old seam would diverge the moment anyone added a
+state update between the gates and inheritance.
+
+`memory_history` stays, and is not redundant: the full-clone OOM-recovery
+branch reads the latest record and the maximum `round_index` across the
+whole history, which a winner alone cannot answer.
+
+`trial_winner` is **required**, not defaulted — a `None` default would
+make a forgetful caller silently mean "inherit nothing", a behaviour
+change with no error. Cost: 27 test call sites migrated. In
+`test_force_formal_round.py` a local `_override(...)` helper resolves the
+winner from the supplied history through the real `_best_trial_winner`,
+so the eligibility rules under test (collapsed excluded, formal excluded,
+highest score wins) stay live rather than being bypassed by a hand-built
+dict.
+
+*New test that can actually see the guarantee*:
+`test_inheritance_obeys_the_supplied_winner_over_the_history` hands
+inheritance a history whose own best is `real_winner` while supplying
+`weaker` (different `lr`) as the snapshot. Re-derivation inherits
+`real_winner`; using the snapshot inherits `weaker`. The configuration
+cannot arise in production — that is the point: it isolates *which*
+source is consulted, which no production-shaped fixture can do.
+
+**FU-D-8 — non-finite configured deltas are refused at launch**
+
+Sixth refusal in `validate_formal_launch`. With the gates enabled, both
+`skip_formal_min_delta` and `bypass_formal_time_budget_min_delta` must be
+finite; `NaN`, `+inf` and `-inf` are refused, naming every offending
+field at once.
+
+Checked **before** the ordering rule, and that order is load-bearing:
+`NaN > NaN` is `False`, so an unusable pair passes the ordering check
+unnoticed. At runtime a non-finite delta makes every gate comparison
+`False`, silently disabling both gates while the artifact still records
+an enforced run — the same fail-open shape §16.C eliminated for the
+missing bootstrap reference. Both fields are plain `float` on the schema
+with no finiteness constraint, so this was reachable from the CLI.
+
+**Scope, stated because conflating the two would break the bootstrap**:
+what is refused is the *operator-configured delta*. The internally
+resolved `-inf` comparison reference (§16.C) is a deliberate resolver
+value and stays legal. `TestTheBootstrapIsNotRefused` pins the separation
+by asserting the validator's signature never receives a reference, and
+that the resolver still bootstraps to `-inf`.
+
+Gates disabled → unchanged, matching the established D-C1b convention
+that unused deltas must not block a launch (audited: that is exactly what
+`test_inverted_deltas_are_ignored_when_the_gates_are_disabled` already
+encodes).
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| launch-policy + tuner + reachability (focused) | 112 passed, 6.4 s |
+| `tests/unit/agent/tune_ml_hyperparam_agent/` + health_checks | 1159 passed, 189 s |
+| full `tests/unit` | **7428 passed**, 2 skipped, 4 xfailed, 432 s — run with the tree staged, so the PR3-L2 preflight guard sees a clean diff (see the D-C3 note above) |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / ruff format | clean, 580 files |
+
+**Mutations — 5 run, 5 caught**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| R1 | inheritance re-derives its own winner | `test_inheritance_obeys_the_supplied_winner_over_the_history` | 1 |
+| R2 | `trial_winner` gets a `None` default | `test_the_helper_cannot_silently_fall_back_to_the_history` | 1 |
+| R3 | non-finite refusal removed | the 6 field×value cases + 2 | 8 |
+| R4 | finiteness checked AFTER ordering | same | 8 |
+| R5 | gates-disabled early return removed | inverted-delta compat + 3 scoping cases | 4 |
+
+**Implementation detail found during the work.** `argparse` reads a bare
+`-inf` as a flag (leading dash) and errors before the validator — fail-closed,
+so safe, but not the path under test. The reachability tests use the
+`--flag=value` form to reach the refusal, and say why.
+
+**Next checkpoint**: D-C4 — incumbent exclusion, extending
+`core/resume.py`'s commit-time validity predicate rather than replacing
+it. Goal: only an authoritative formal result may update the chain
+incumbent; invalid, diagnostic and unknown formal records stay persisted
+but can never become the comparison basis for a later gate.
+
+---
+
+> **Rewritten 2026-08-05** after the two gate audits. The previous version
+> of this section was **factually wrong** and is preserved only in Git: it
+> claimed *"Zero valid trials **never causes** a formal execution — that
+> requires an explicit diagnostic or `force_formal_round` override."*
+> Both halves are false, and §16 has the evidence.
+
+**1. Goal.** Correct the formal-launch decision so that the **absence of
+valid trial evidence stops the spend**, instead of being indistinguishable
+from sufficient evidence.
+
+The measured defect (§16.B):
+
+```text
+winner = _best_trial_winner(memory_history)   # HealthGate-valid, this iteration
+_should_skip_formal -> `winner is not None and winner.score < threshold`
+
+winner is None  ->  returns False  ->  formal RUNS
+```
+
+`force_formal_round` does not rescue this and is not an override: it
+defaults to `True` and means *the last round of every iteration runs in
+formal mode regardless of what the planner picked* — the
+cross-architecture comparability contract
+(`hyperparam_tuning.py:1188-1206`). So formal on the final round is the
+**default path**, and the skip gate is the **only** thing that can prevent
+it. An inert skip gate therefore does not merely fail to stop a rare
+override; it lets every zero-evidence iteration spend a full formal round.
+
+**2. Scope.** The launch decision only:
+
+- `winner is None` → **skip formal.** No valid trial is no evidence, and
+  no evidence does not justify the cost.
+- an invalid trial can never be the winner, so it can never open either
+  gate — already true, and asserted so it stays true.
+- the winner is resolved **once** for the launch decision; no second
+  mutable best-trial score is introduced.
+- the effective reference resolves per §16.C, so the gates are armed on a
+  fresh chain instead of silently inert.
+
+*Non-goals.* This commit does not touch formal-RESULT authority — §16.D
+separates them. It does not change what the planner proposes, and it does
+not change `force_formal_round`'s meaning.
 
 *Dependencies.* Commit 5 (`D-C2b`) — the verdict must already be wired in production, not merely defined.
 
@@ -1169,6 +2067,291 @@ WARNING. Control flow is unchanged.
 
 ### Commit 7 — `D-C4`: incumbent exclusion
 
+#### IMPLEMENTATION RECORD — D-C4 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of the D-C3 reinforcement
+`42a9f679`. Progress **6 / 10** once accepted.
+
+**The rule**: only a formal record whose authority verdict is
+`authoritative` may become the chain incumbent. Everything else stays
+fully persisted and readable — the exclusion removes *comparison
+authority*, not the record.
+
+**Behavior Delta — present, and the largest in PR D so far.**
+
+| record | before | after |
+|---|---|---|
+| authoritative, higher score | incumbent | incumbent (unchanged) |
+| gate-invalid / diagnostic / observe-only / validity-unknown | **could become the incumbent** | excluded, reason logged |
+| verdict edited after the fact | believed | refused |
+| pre-declaration legacy artifact | **could become the incumbent** | excluded as `unreconstructable_legacy` |
+
+The last row is the one to be aware of operationally: **a workspace whose
+iterations predate D-C1a carries no incumbent forward.** That follows
+directly from §12A — a record whose declared authority was never recorded
+cannot have it reconstructed, and UNKNOWN is not a licence to assume. The
+operator's rule is explicit: a high score, or having been the incumbent
+under the old rules, does not confer authority.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `core/scientific_authority.py` | `RecordAuthority` + `resolve_record_authority(...)` — fail-closed resolution for a PERSISTED record |
+| `core/resume.py` | `_formal_candidate_is_authoritative(...)`, applied as an **additional conjunct** in the fold; `authority_basis` added to formal provenance |
+| `agent/schemas/hyperparam_tuning.py` | `ExperimentRecord.scientific_authority` **declared** — see the defect below |
+
+**The real producer → consumer path**
+
+```text
+tuner: final_record["scientific_authority"] = ScientificAuthority.from_context(...)   [D-C2b]
+  → ExperimentRecord (NOW declared — was silently dropped, see below)
+  → run_output_{iter}.json  all_records[]
+  → core/resume.py incumbent fold
+      → _formal_candidate_from_committed_fields | _candidates_from_persisted_verdicts
+      → _formal_candidate_is_authoritative      ← D-C4's conjunct
+          → resolve_record_authority(record, declared_*, commit_time_validity)
+      → state.chain_best_valid_formal_score / _provenance
+  → workflows/model_exploration.py → tuner input current_run_best_formal_score
+  → the D-C3 launch gates
+```
+
+**A REAL DEFECT IN D-C2b, found here and fixed.** `ExperimentRecord`
+declares no `extra` policy, so Pydantic's default `ignore` **silently
+dropped `scientific_authority`** when `all_records` was validated into
+`HyperparamTuningOutput`. D-C2b's verdict therefore never reached
+`run_output_*.json` — the artifact resume actually reads. Verified by
+execution: `model_validate({... "scientific_authority": {...}}).model_dump()`
+did not contain the key. D-C4 cannot function without it, and D-C2b's
+"tamper-evident, recomputable" property was unimplemented in the persisted
+form.
+
+This is the **third** instance in PR D of *emitted into a dict, never
+declared on the schema* (after `formal_comparison_reference_source` and
+its manifest hop). Filed as **FU-D-9** to add one cross-schema test that
+every field the tuner writes into an output-bound dict is declared on the
+receiving model — the per-field shape cannot express that rule.
+
+The field is typed `dict[str, Any] | None`, deliberately, **not** the
+model: `ScientificAuthority` sets `extra="forbid"` and exposes its
+conclusions as computed fields, so its own dump cannot be re-validated
+into it (verified — 5 validation errors). A plain dict is also what the
+tamper-evidence design wants, since the consumer must re-derive rather
+than trust.
+
+**Design decisions, each evidence-determined**
+
+1. **Consume, never re-derive.** `resolve_record_authority` calls
+   `ScientificAuthority.from_context` and nothing else. A test asserts its
+   source contains no `denoising_score`, `health_gate_results`,
+   `_blocking`, `on_fail`, `resolved_action`, `is_trial` or `gate_name` —
+   a second authority implementation is what the predecessor hotfix
+   `af5339ce` existed to delete.
+2. **The stored conclusions are never believed.** The returned `verdict`
+   is always a fresh derivation; every conclusion key the stored block
+   carries must equal it, or the record is refused as
+   `verdict_inconsistent_with_its_facts`. Keys it does *not* carry are not
+   compared, so an older verdict is not condemned for lacking a field that
+   did not exist.
+3. **A narrow fact-level cross-check, beyond the stated requirement.**
+   Conclusion-vs-facts cannot catch a tamperer who edits the *facts*. So a
+   stored `formal_validity: "valid"` contradicted by a commit-time
+   **invalid** is refused (`stored_validity_contradicts_commit_time`).
+   Deliberately scoped to that one weakening contradiction: commit-time
+   **unknown** is an evidence gap, not a contradiction, and widening it
+   would empty the incumbent for every workspace whose effective-policy
+   artifact was merely lost. Both halves are tested.
+   *Reachability note*: this check only bites on the **committed-fields**
+   fast path, because the persisted-verdicts path already refuses an
+   invalid record via the pre-existing commit-time conjunct. That makes
+   "edit the committed `best_valid_formal_*` summary to promote an invalid
+   record" the realistic attack it defends.
+4. **Additional conjunct, not a replacement.** Commit-time validity still
+   gates the candidate pool exactly as before; authority is applied on top.
+5. **The tie rule is untouched** — strictly `>`, so earliest-iteration-wins
+   still falls out of the ascending walk. Mutation C7 (`>` → `>=`) fails
+   2 tests.
+6. **Atomic provenance.** The predicate runs *before* the score/provenance
+   assignment and both come from the same candidate record, so a refused
+   record can never update the score while leaving another record's
+   identity beside it.
+
+**Tests** — the operator's 10-row matrix, all present, driving the real
+`restore_prior_state` over on-disk workspaces:
+
+| new formal | vs incumbent | expected | test |
+|---|---|---|---|
+| authoritative | higher | updates | `test_a_higher_authoritative_score_replaces_a_lower_one` |
+| authoritative | equal | no update (strict `>`) | `test_an_equal_score_does_not_replace` |
+| authoritative | lower | no update | `test_a_lower_authoritative_score_does_not_replace` |
+| invalid, score 99 | higher | no update | `test_a_non_authoritative_record_never_becomes_the_incumbent` |
+| diagnostic, score 99 | higher | no update | ″ |
+| unknown, score 99 | higher | no update | ″ |
+| verdict forged `true` | higher | refused by consistency | `test_a_tampered_verdict_is_refused_not_believed` |
+| iteration DECLARED its policy (D-C1a→D-C2b window) | higher | updates | `test_a_record_whose_iteration_declared_its_policy_is_usable` |
+| legacy, unreconstructable | higher | no update | `test_an_undeclared_legacy_record_is_excluded` |
+| high non-authoritative, then lower authoritative | — | the later one updates | `test_an_excluded_high_score_does_not_raise_the_bar_for_a_later_one` |
+
+The last row is the one that matters most: incumbent 5.0 → diagnostic
+100.0 → authoritative 6.0 must end at **6.0**. A refused record that
+leaked into the comparison basis would freeze the chain at an unreachable
+bar — worse than admitting it.
+
+Plus `test_the_incumbent_identity_is_atomic_with_its_score`, the trial and
+no-formal-record rows, and 20 unit tests for the typed boundary itself.
+
+**Migrated fixtures.** `_write_iter` (`test_resume_incumbent.py`) and
+`_p1_tune_output` (`test_run_one_iteration.py`) now declare the production
+posture, because those tests are about the incumbent **walk** and
+**manifest attribution** — tie rules, round provenance, repo-policy
+isolation, artifact verification — not about authority. Without the
+declaration every record in them is `unreconstructable_legacy` and the
+behaviour under test never runs. The undeclared case is covered on purpose
+in `TestScientificAuthorityAdmission`.
+
+**Mutations — 8 run, 8 caught**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| C1 | admission predicate bypassed | the full matrix | 14 |
+| C2 | trust the stored `authoritative` flag | tamper + per-conclusion cases | 6 |
+| C3 | commit-time cross-check removed | both contradiction tests | 2 |
+| C4 | legacy assumed authoritative | the undeclared-legacy rows | 6 |
+| C5a | non-Mapping guard removed | malformed-verdict cases | 3 |
+| C5b | validity vocabulary guard weakened | malformed `formal_validity` | 1 |
+| C6 | schema drops the verdict again | the whole matrix | 11 |
+| C7 | tie loosened `>` → `>=` | tie-earliest-wins + equal-score | 2 |
+
+*Recorded honestly*: a first attempt at C5 (`return` → `stored = {}`) was
+an **equivalent mutant** — the next guard catches it — and survived. It
+was replaced with two mutations that genuinely change behaviour rather
+than being reported as a coverage gap.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_resume_incumbent.py` | 39 passed, 1.1 s |
+| `test_scientific_authority.py` | 49 passed, 0.1 s |
+| core + agent + sdsc + execute_tools | 6384 passed, 400 s |
+| full `tests/unit` | 7469 passed, 2 skipped, 4 xfailed, **3 failed** — all three PRE-EXISTING and unrelated; see below |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / ruff format | clean |
+
+> **THE BRANCH IS NOT FULLY GREEN, and this checkpoint did not make it
+> red.** Three tests fail in
+> `tests/unit/sdsc_submission_scripts/test_v19_queue_runner.py`
+> (`TestTheLiveProcessGuardExcludesOnlyItself`): the three cases asserting
+> the guard SHOULD block. The guard is silent, the launch proceeds, and
+> the log reads `screen did not start`.
+>
+> **Proved pre-existing, not assumed.** `git archive` exports of
+> `42a9f679` (D-C3 reinforcement) and `8985d00f` (before D-C3) were run
+> from clean temporary trees with none of the D-C4 changes present: both
+> reproduce the same three failures. They also reproduce 3/3 in isolation,
+> which rules out test-order pollution. D-C4 touches no shell script and
+> no queue-runner test.
+>
+> **What was ruled out**: `ps -eo args` truncation (a 156-char argv, the
+> realistic length, is shown in full), leaked `screen` sessions (only the
+> operator's own 07/31 monitor is present), and
+> `RUNNER_BASENAME` being derived from `$0` (it correctly uses
+> `${BASH_SOURCE[0]##*/}`). The cause is not yet identified; the tests
+> passed on this same box in two full-suite runs earlier the same day,
+> which points at an environment-sensitive process-scan rather than a code
+> change. Sourcing the runner to instrument it is refused by the repo's
+> own launch guard, so the next step needs a different probe.
+>
+> Filed as **FU-D-10**, owned by PR E's guard work. It must be resolved
+> before this PR can merge — which is not yet authorized in any case.
+
+**Follow-ups**
+
+- **FU-D-10** `[x]` **CLOSED** — merged to master as PR #172
+  (`775f0df8` + `36ecc5b1`, merge `51bab481`). Not a PR D regression and
+  not a test flake: the live-process guard **failed OPEN** because
+  `grep -q` closed the pipe early and `pipefail` turned the upstream
+  SIGPIPE into a non-zero pipeline. Load-dependent, so it failed exactly
+  when the machine was busy. Integrated into this branch at `12506d80`.
+- **FU-D-9** `[x]` **CLOSED** — see the reinforcement record below.
+- ~~**FU-D-7**~~ — **WITHDRAWN 2026-08-05** with the rest of the legacy
+  reconstruction scope. Historical artifacts are neither annotated nor
+  reinterpreted; a null `formal_comparison_reference_source` simply means
+  authority is not established.
+
+---
+
+#### REINFORCEMENT — the 249-artifact audit, FU-D-9, and the scope correction
+
+**Commit**: `<filled at commit>`. Still checkpoint **D-C4**; acceptance
+makes progress **6 / 10**.
+
+**1. The legacy audit that forced the scope correction.**
+
+Read-only over 249 real artifacts in `/home/klz/Data/SIDEREIS_DATA`:
+
+| fact | recoverable? | evidence |
+|---|---|---|
+| `healthgate_mode` | **absent 249/249**; derivable from a sha-pinned effective config | 42 artifacts stamp a sha; all 42 have a recoverable config; the 4 distinct configs resolve to 1 blocking / 3 observe-only |
+| `result_authority` | **absent 249/249, and derivable from nothing** | not in any output, not in `run_invariants_lock.json`, not in any manifest |
+| formal HealthGate validity | recoverable where the config is | `_classify_commit_time` against the sha-pinned effective config |
+
+`authoritative` requires `scientific`. `scientific` is recoverable from
+nothing, so **no historical record can reconstruct to authoritative** —
+and inferring it from a blocking configuration would invent a declaration
+nobody made, which is what D-C1b refuses at launch.
+
+The operator's ruling (2026-08-05) therefore **withdrew** observe-only and
+blocking reconstruction, the `operator_legacy_declaration` sidecar
+boundary, and D-C9 in full. §15.E is corrected accordingly.
+
+**No implementation change was required.** `eb789271` already returns
+`unreconstructable_legacy` for every record lacking the D-C1a fields,
+which is exactly the ruled behaviour. The audit is retained as the
+*evidence for why the rule is right*, not as a reconstruction spec.
+
+**2. FU-D-9 — producer-to-artifact transport.**
+
+`tests/unit/agent/schemas/test_producer_to_artifact_transport.py` (6
+tests). Kept separate from `test_cross_schema_invariants.py`, whose remit
+is *declaration consistency across models*; this is *runtime transport to
+artifacts*, a different rule class, and the filename says so.
+
+It validates **transport, not declaration**. Introspecting `model_fields`
+would pass for a field that is declared and then dropped at a later hop —
+which is the `write_manifest` defect exactly. So values are pushed through
+the real production boundaries and read back out of the real artifact:
+
+```text
+producer dict → HyperparamTuningOutput.model_validate
+              → model_dump_json → run_output_*.json   (what resume reads)
+              → write_manifest  → manifest.json        (the second hop)
+```
+
+Four channels at two nesting levels, which is what made the defects
+invisible:
+
+| field | boundary that dropped it |
+|---|---|
+| `healthgate_mode` | output schema |
+| `result_authority` | output schema |
+| `formal_comparison_reference_source` | output schema, **then again** at `write_manifest` |
+| `scientific_authority` | `ExperimentRecord`, nested inside `all_records` |
+
+Plus one test asserting a **single artifact carries all four** — a
+per-field test cannot catch a boundary that drops a *different* field,
+which is how three instances each passed review.
+
+**Mutations — 4 run, 4 caught**, each a faithful reproduction of a real
+defect: output drops the reference source (3 failing); `ExperimentRecord`
+drops `scientific_authority` (2); output drops `healthgate_mode` (2);
+`write_manifest` drops the reference source (1).
+
+**Next checkpoint**: D-C5 — aggregation and report exclusion, stated
+deterministically rather than left to the LLM.
+
+---
+
 **1. Goal.** The first commit that changes a decision. Isolated so it can be
 reverted without touching reporting.
 
@@ -1180,10 +2363,21 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 
 *Dependencies.* Commit 5 (`D-C2b`) — the consumer needs a verdict that production actually attaches.
 
+> **ITEMS BELOW MARKED "reconstruction" ARE SUPERSEDED — operator
+> decision 2026-08-05.** The ladder assumed `result_authority` could be
+> recovered from config provenance. The 249-artifact audit (see the D-C4
+> implementation record and §15.E) proves it cannot: it is absent in
+> 249/249 artifacts and derivable from nothing, so NO historical record
+> can reconstruct to authoritative. What was implemented is the frozen
+> rule — missing the contract ⇒ readable, unchanged, authority not
+> established. `reconstructed_legacy` survives only for the
+> D-C1a→D-C2b window, where the iteration DID declare its policy and
+> nothing is reconstructed from nothing.
+
 **3. Implementation plan.**
 - [ ] Read `:196-320` fully before editing.
 - [ ] Add `enters_incumbent_selection` as an **additional** conjunct.
-- [ ] Handle records predating the field by **deterministic reconstruction first**, not blanket exclusion. The draft said "legacy ⇒ UNKNOWN ⇒ excluded" while also promising replay parity — and since EVERY historical record lacks the fields, those two cannot both hold. Ladder:
+- [ ] ~~Handle records predating the field by deterministic reconstruction first~~ **SUPERSEDED, see above.** The draft said "legacy ⇒ UNKNOWN ⇒ excluded" while also promising replay parity — and since EVERY historical record lacks the fields, those two cannot both hold. Ladder:
   1. reconstruct from what old records already persist — `best_valid_trial_*`, the formal record's own gate validity, and the config provenance (`health_checks_config`, `health_config_sha256`);
   2. if reconstruction is complete, emit a `reconstructed_legacy` verdict — **without writing anything back to the artifact** (§4.5);
   3. only if it cannot be reconstructed is it `legacy_authority_unknown`, and excluded.
@@ -1223,6 +2417,117 @@ NEVER consulted" guarantee (`:306-310`) must survive untouched.
 ---
 
 ### Commit 8 — `D-C5`: aggregation and report exclusion, stated not silent
+
+#### IMPLEMENTATION RECORD — D-C5 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C4 `7a128f18`. Progress
+**7 / 10**.
+
+**Behavior Delta**: a non-authoritative formal score no longer enters the
+scientific aggregate, and the exclusion is stated rather than silent.
+
+**The named contract in this section was confirmed against master and
+implemented as specified** — `execute_tools/scientific_aggregation.py`,
+`AggregationScope(included / excluded / excluded_count / all_excluded)`.
+Two additions the audit showed were needed: `no_records` (distinct from
+`all_excluded`) and `exclusion_reason_counts` (grouped and order-stable,
+so a rendered report diff shows real change rather than dict ordering).
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `execute_tools/scientific_aggregation.py` | **new** — `AggregationScope`, `ExcludedResult`, `partition_for_aggregation`, `provenance_lines()` |
+| `agent/schemas/interpretation.py` | `ModelRunSummary.scientific_authority`; `InterpretationOutput.scientific_aggregation` |
+| `nodes/result_interpretation_agent/result_interpretation_agent.py` | producer attaches the formal record's verdict; `run()` partitions before any LLM call and filters `per_model_formal`; both output-assembly sites carry the scope |
+
+**The real producer → consumer path**
+
+```text
+tuner: final_record["scientific_authority"]                    [D-C2b]
+  → ExperimentRecord                                           [D-C4]
+  → run_output_*.json
+  → tuning_output_to_model_run_summary()
+      → ModelRunSummary.scientific_authority   (the SAME formal record
+        `formal_score` came from, so score and authority cannot describe
+        different experiments)
+  → ResultInterpretationAgent.run()
+      → partition_for_aggregation(inp.summaries)   ← BEFORE any LLM call
+      → per_model_formal filtered to authoritative only
+          → _build_synthesis_prompt(per_model_formal=…)   ← the LLM sees
+            only authoritative formal scores
+      → InterpretationOutput.scientific_aggregation (both healthy AND
+        degraded assembly, so an interpreter LLM failure cannot lose the
+        provenance — the rule the health evidence already follows)
+```
+
+**§4.7 satisfied, and the preferred branch taken.** The exclusion is
+derived deterministically and rendered from the typed object; **no
+exclusion text is placed in any prompt.** Both reasons in §4.7 hold: a
+model may simply not mention the exclusion, and exclusion text inside a
+prompt can steer the interpretation it then writes.
+
+**D-C5 IS LLM-AFFECTING, and the design's "non-LLM-facing" note is
+narrower than it reads.** Filtering `per_model_formal` necessarily changes
+the synthesis prompt's content — that is the point of the checkpoint. What
+§4.7 forbids is routing the *exclusion report* through the model, and that
+is honoured. Recorded here because it sets the Gate 1 scope: D-C5 alters
+LLM-visible aggregate facts, so the single bounded Gate 1 run after D-C6 /
+D-C7b must cover it.
+
+**Authority is consumed, never re-derived.** A test asserts
+`partition_for_aggregation`'s source contains no `denoising_score`,
+`formal_score`, `health_gate_results`, `_blocking`, `on_fail`,
+`resolved_action` or `gate_name`, and does call
+`resolve_record_authority`. Tampered and malformed verdicts fail closed
+through the same D-C4 resolver.
+
+**Task-generic**: the boundary consumes a structural protocol
+(`model_type` + `scientific_authority`), not `ModelRunSummary`, and names
+no task, model or metric.
+
+**Tests** — 21 in `tests/unit/execute_tools/test_scientific_aggregation.py`
+plus 5 reachability tests in the interpretation-agent suite. The operator's
+matrix, all covered: authoritative included; invalid / diagnostic /
+unknown / observe-only high scorers excluded with their reasons; mixed;
+all-excluded; no-records; ordering and counts ignore excluded records;
+excluded retained with reasons; tampered and malformed fail closed.
+
+**Mutations — 6 run, 6 caught.**
+
+| # | mutation | caught by | n |
+|---|---|---|---|
+| A1 | agent stops filtering the aggregate | `test_an_excluded_formal_score_never_reaches_the_synthesis_prompt` | 1 |
+| A2 | summary drops the verdict | producer reachability test | 1 |
+| A3 | non-authoritative treated as included | the matrix | 19 |
+| A4 | `all_excluded` collapses to `no_records` | stated-outcome + provenance tests | 2 |
+| A5 | excluded results are dropped | the matrix | 18 |
+| A6 | provenance omits the reasons | the rendering test | 1 |
+
+> **A1 SURVIVED on the first run — a genuine coverage gap, not an
+> equivalent mutant, and worth recording.** The reachability tests
+> asserted the typed scope reached the output but never that the excluded
+> score stayed out of the *prompt*. The fixture also set
+> `best_denoising_score == formal_score`, and the renderer emits a
+> "Formal score" line only when the two DIFFER — so removing the filter
+> changed nothing observable. Closed by a test that captures the real
+> synthesis prompt with deliberately unequal scores. The same shape as the
+> D-C4 equivalent-mutant note: a mutation that survives is either a gap or
+> a bad mutation, and the two must be told apart rather than assumed.
+
+**Validation**
+
+| Check | Result |
+|---|---|
+| `test_scientific_aggregation.py` | 21 passed |
+| interpretation-agent suite | 256 passed |
+| `tests/unit/agent` + `execute_tools` + `core` | 5968 passed, 277 s |
+| pyright | **0 errors**, 4 warnings (pre-existing) |
+| ruff / format | clean, 725 files |
+
+**Next checkpoint**: D-C6 — structured all-trials-invalid planner feedback.
+
+---
 
 **1. Goal.** Non-authoritative results leave scientific aggregation, **and
 the exclusion is visible**. Separate from commit 6 because it changes what a
@@ -1304,6 +2609,101 @@ Field absent on legacy summaries → treat as UNKNOWN and **warn**.
 
 ### Commit 9 — `D-C6`: structured all-trials-invalid feedback
 
+#### IMPLEMENTATION RECORD — D-C6 `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C5 `4767c72a`. Progress
+**8 / 10**.
+
+**DEVIATION, and the audit that forced it: a NEW carrier, not an extension
+of `GateExhaustionInfo`.** This section instructed extending
+`_build_gate_exhaustion` (§3.8) while also instructing "confirm it is the
+right carrier before extending it". The audit says it is not:
+
+| | `GateExhaustionInfo` | all-trials-invalid |
+|---|---|---|
+| trigger A | no record succeeded **and** ≥1 `skipped_oom_risk`/`skipped_time_risk` | records DID succeed |
+| trigger B | fail-round burst ≥50% budget-gated | no budget gating at all |
+| meaning | the architecture is too heavy for the budgets | the architecture collapses |
+| planner response | propose something **lighter** | propose something that does not **collapse** |
+
+Neither trigger fires for an all-invalid iteration, so extending it would
+have meant a third trigger with unrelated semantics inside a structure
+whose every field means "budget exhaustion" — merging two failure modes
+that call for opposite responses. Proven by execution in
+`test_the_carrier_is_not_gate_exhaustion`, which asserts
+`_build_gate_exhaustion` returns `None` for exactly this input.
+
+The new carrier mirrors the existing channel exactly rather than inventing
+a mechanism, so §3.8's real intent ("no second ad-hoc feedback path") is
+honoured.
+
+**Production files changed**
+
+| File | What |
+|---|---|
+| `agent/schemas/health_feedback.py` | **new** `TrialValidityFeedback`, `InvalidTrialOutcome` |
+| `agent/schemas/hyperparam_tuning.py` | `HyperparamTuningOutput.trial_validity_feedback` |
+| `nodes/.../ml_hyperparameter_tune_agent.py` | `_build_trial_validity_feedback`; `_skipped_formal_for_no_valid_winner` set AT the skip gate |
+| `agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py` | collects the window |
+| `agent/schemas/proposal.py` | `ProposalInput.recent_trial_validity` |
+| `nodes/.../ml_model_proposal_agent.py` | `_format_recent_trial_validity_block` + prompt variable |
+| `agent/prompt_templates/proposal/proposing_stage.md` | `{recent_trial_validity_block}` |
+
+**The real producer → consumer path** (every hop mutation-proven)
+
+```text
+trial records + gate verdicts
+  → _build_trial_validity_feedback(...)          [tuner, at run exit]
+  → HyperparamTuningOutput.trial_validity_feedback
+  → run_output_*.json
+  → ml_result_interp_to_ml_model_propose         [protocol, sparse window]
+  → ProposalInput.recent_trial_validity
+  → _format_recent_trial_validity_block(...)
+  → {recent_trial_validity_block}                [proposing_stage.md]
+  → the ACTUAL next planner request
+```
+
+**The distinctions are preserved, which is the checkpoint's point.**
+Execution failure (evidence *absent*) ≠ gate invalidity (evidence
+*negative*) ≠ validity unknown (gates could not judge) ≠ formal skipped
+for no winner ≠ formal skipped on budget (a different carrier) ≠ formal
+result invalidity (D-C2b). `_skipped_formal_for_no_valid_winner` is set
+where the decision is MADE, because inferring it later from a missing
+formal record cannot distinguish a no-winner skip from a budget skip.
+
+**Task-generic.** Gate names, reasons and metrics pass through exactly as
+the gate system recorded them; the block prescribes no remedy. A test
+asserts the builder's source contains no task names or advice verbs, and
+another asserts the rendered block contains no recommendation language —
+what a mode fraction implies is the planner's judgement, and baked-in
+advice would be wrong for the next task anyway.
+
+**Backward compatibility.** `None` whenever any trial is valid, so the
+window stays empty and the prompt block collapses to `""` — a healthy
+chain's proposer prompt is byte-identical to before.
+
+**Beyond the plan**: `evidence_absent` now also names a PARTIAL gate set,
+not just a wholly missing one. Found by execution — a record with one of
+three blocking gates classifies as UNKNOWN, and an unnamed partial set
+reads exactly like a pass.
+
+**Mutations — 7 run, 7 caught**: fires on healthy runs (1); execution
+failure merged into invalidity (2); skip reason never set (1); protocol
+stops forwarding (1); prompt variable dropped (1); template placeholder
+removed (1); absent evidence silenced (2).
+
+**Validation**: 24 focused tests; `tests/unit/agent` + `core` +
+`execute_tools` **5992 passed**, 278 s; pyright **0 errors**; ruff and
+format clean (726 files).
+
+**Gate 1 is REQUIRED and still pending** — this changes LLM-visible input.
+Deferred to one bounded combined run after D-C7b, per the plan, so the
+Gate proves the FINAL prompt rather than an intermediate one. D-C5's
+aggregate change is in the same scope.
+
+---
+
+
 **1. Goal.** Close D6 by extending the existing gate-exhaustion block rather
 than opening a second feedback channel (§3.8).
 
@@ -1358,6 +2758,73 @@ respect the existing `health_feedback_policy`.
 
 ### Commit 10 — `D-C7b`: five fields recorded per gate; the operator-facing label stops lying
 
+#### IMPLEMENTATION RECORD — D-C7b `[x]` COMPLETE
+
+**Commit**: `<filled at commit>`, on top of D-C6 `3e91adb6`. Progress
+**9 / 10**.
+
+**Behavior Delta**: gate results now say what the gate WAS, not what its id
+is spelled like. No decision changes — this is the labelling checkpoint.
+
+**The preferred outcome was achieved: NO config file was touched**, so
+`health_config_sha256` is unshifted. Verified against the audited values —
+`configs/health_checks.yaml` → `3b552118…`, the observe config →
+`d133a12d…`, exactly the shas in the compatibility map. No workspace
+invariant lock crosses a boundary, and the acceptance criterion "zero
+changes to any gate id string" holds: `git diff` touches no config and no
+id, the only occurrence being a docstring quoting one as an example.
+
+**What was already there, confirmed before adding anything** (the design
+asked): `gate_name` IS the stable `gate_id`; `resolved_action` IS the
+effective action. Added beside them: `gate_role`, `configured_action`,
+`healthgate_mode`, `result_authority`, plus a derived `display_label`.
+
+**Why `configured_action` is not redundant with `resolved_action`**:
+`resolved_action: continue` is ambiguous on its own — it means either
+"the check passed, so nothing to do" or "configured to do nothing". Only
+both together separate them, and that ambiguity is what let a
+`_blocking`-named gate read as enforcing when it enforced nothing.
+
+**The label is derived, never read from the id.** A gate whose configured
+action cannot invalidate reads `observational` however it is spelled; one
+that can reads `enforcing`; one whose posture cannot be established reads
+`role-unknown` rather than defaulting. Ids are never rewritten — they are
+the join key for `health_gate_results` and archived artifacts.
+
+| id | configured action | label |
+|---|---|---|
+| `output_diversity_blocking` | `continue` | `output_diversity_blocking (observational)` |
+| `output_diversity_blocking` | `invalidate_round` | `output_diversity_blocking (enforcing)` |
+| `legacy_blocking` | absent | `legacy_blocking (role-unknown)` |
+
+**Backward compatibility**: every new field is optional, so an archived
+result parses unchanged and joins by `gate_id` exactly as before.
+
+**Mutations — 5 run, 5 caught, but two only after fixing real problems the
+first pass exposed:**
+
+| # | mutation | outcome |
+|---|---|---|
+| C1 | label read from the id suffix | caught (5) |
+| C2 | unknown role defaults to enforcing | **survived** — the guard was a REDUNDANT branch producing identical output. Removed the redundancy; the re-run mutation is caught |
+| C3 | producer stops recording `configured_action` | caught (1) |
+| C4 | role inferred instead of read | caught (1) |
+| C5 | tuner stops supplying the declaration | **survived** — a REAL coverage gap: the asserted string occurs three times in `run()` (D-C2b, D-C6, here), so deleting one still passed. Re-pointed at the gate-evaluation call site specifically; now caught |
+
+C5 is the more instructive of the two. A structural assertion that searches
+a 2,000-line function for a string is only as strong as that string's
+uniqueness, and this one had stopped being unique two checkpoints earlier.
+Fixing it also required a bounded window rather than a regex, because the
+call contains a nested `os.path.join(...)` and a non-greedy match silently
+truncated the body at the wrong closing paren.
+
+**Validation**: 17 focused tests; `tests/unit/execute_tools` + `agent` +
+`core` **6009 passed**, 286 s; pyright **0 errors**; ruff and format clean
+(727 files).
+
+---
+
+
 **1. Goal.** Close D-D-3 and §3.2. Last among behavioural commits because it
 is cosmetic in effect and must not be confused with the authority work.
 
@@ -1406,77 +2873,33 @@ recorded; if any lock compares across it, **stop**.
 
 ---
 
-### Commit 11 — `D-C9`: the V19 closure annotation — schema and generator (code), sidecar (evidence step)
+### ~~Commit 11~~ — `D-C9`: **WITHDRAWN — operator decision 2026-08-05**
 
-**1. Goal.** Record what V19 actually ran under, **without touching a single
-V19 byte** (§4.5, operator decision 2026-08-04). Last because it is
-historical bookkeeping, and separate because it writes to the incident
-archive rather than to production code.
+The V19 closure annotation, its schema/generator, and the sidecar evidence
+step are **removed from PR D's scope entirely**. So is every form of
+historical authority reconstruction and the
+`operator_legacy_declaration` boundary that an earlier revision of this
+document proposed.
 
-**2. Scope — and this commit is deliberately only half of the work.**
+**The single rule for historical records now reads:**
 
 ```text
-repository commit    the annotation schema + its validator/generator
-evidence step        running it beside the immutable V19 archive,
-                     and recording the before/after hashes
+missing the new authority contract
+  -> remains readable
+  -> remains unchanged
+  -> scientific authority is NOT established
+  -> never becomes the new-authority incumbent
+  -> never enters new-authority scientific aggregation
 ```
 
-The V19 forensic archive is not in the Git repository, so the sidecar's
-*generation* is an acceptance-artifact operation, not a code commit
-(operator, 2026-08-04). Only the schema and generator are committed here;
-pretending the generation is an ordinary commit would misrepresent where
-the evidence lives.
+No finer classification of historical records is required or wanted. The
+249-artifact audit recorded under D-C4 is retained as the *evidence for
+why* this rule is correct — `result_authority` was never persisted by any
+historical run and therefore cannot be recovered — not as a specification
+for reconstructing anything.
 
-*Non-goals — and this is the whole point*: **no V19 manifest is modified.**
-No field is back-filled. Nothing in the archive is deleted or moved.
-
-*Dependencies.* Commit 1 (so the vocabulary the annotation uses exists).
-
-**3. Implementation plan.**
-**Git commit — code only:**
-- [ ] Define the annotation schema (original config path + sha256, classification, basis, retrospective date, source-artifact hashes).
-- [ ] Write the validator and the generator, taking an archive path as input.
-- [ ] Unit-test both against a synthetic archive fixture — no real V19 data in the repository.
-
-**Post-code evidence step — NOT a Git commit:**
-- [ ] Run the generator against the real V19 archive.
-- [ ] Locate which config each iteration actually loaded, from the recorded `health_checks_config` / `health_config_sha256` — not from memory.
-- [ ] Verify the observe-only classification from recorded evidence: `on_fail: continue` in the effective config, and `would_invalidate_under_production_policy: true` on the rounds.
-- [ ] Hash every source artifact **before and after**, and show the two transcripts are identical.
-- [ ] Record the sidecar's own hash.
-
-**4. Validation plan.**
-- *Unit*: the annotation schema round-trips; a missing source artifact is reported, never guessed.
-- *Integration*: none required.
-- *Negative*: an artifact whose recorded sha256 does not match its content is reported as **tampered**, and the annotation refuses to classify it.
-- *Backward-compatibility*: every V19 file hash is byte-identical before and after.
-- *Real Gate*: none.
-
-**5. Acceptance criteria.**
-*For the Git commit:*
-- [ ] Schema, validator and generator are unit-tested against a synthetic fixture; **no V19 data enters the repository**.
-- [ ] `git diff --stat` shows only the new modules and their tests.
-
-*For the evidence step:*
-- [ ] `sha256sum` of every V19 artifact is **identical** before and after, with both transcripts recorded.
-- [ ] The annotation states the classification, its basis and its retrospective date, and does not claim the fields existed at run time.
-- [ ] The sidecar's own hash is recorded.
-
-**6. Failure and edge cases.** Recorded sha256 mismatch → **stop**, classify
-nothing, report tampering. Config path no longer resolvable → record
-`unresolvable` with the recorded sha256, never a guess.
-
-**7. Verification commands and evidence.**
-```bash
-# before and after, compared
-find <v19_artifact_root> -type f -exec sha256sum {} + | sort > /tmp/v19_before.txt
-```
-- [ ] hashes identical: __   - [ ] annotation reviewed: __
-
-**8. Commit boundary.**
-- [ ] The Git commit adds the schema, validator and generator — it **does** add code, and the boundary statement must say so rather than claiming it "touches the archive only".
-- [ ] The archive is touched only by the evidence step, which is not a commit.
-- [ ] Before committing: show that `git diff --stat` contains no V19 artifact.
+PR D is therefore a **10-checkpoint** PR. The full text of the withdrawn
+commit is preserved in Git history at `eb789271`.
 
 ---
 
@@ -1518,13 +2941,29 @@ zero-valid-trial; one-valid-trial; mixed valid/invalid; diagnostic formal;
 incumbent exclusion; reporting exclusion; manifest provenance. All nine are
 §20.6's validation list.
 
-**Layer 3 — bounded real run.** §20.6 requires a small real run that
-**deliberately produces collapse** and proves the formal result cannot become
-authoritative. Run it in a **fresh workspace** with a bounded
-collapse-inducing configuration of the same class as V19's. **V19's
-artifacts are a read-only reference for the expected signature — never a run
-input** (§4.5); feeding them in would both contaminate the run and put the
-immutable archive on a write path.
+**Layer 3 — bounded real run.** §20.6's original framing asked for a small
+real run that **deliberately produces collapse**, proving a formal result
+cannot become authoritative.
+
+**Corrected 2026-08-05 by §16.D.** Collapse is the wrong instrument for that
+claim, because launch validity and result authority are separate axes: under
+the frozen policy a collapsed trial stage means formal is **skipped**, so a
+collapse run produces *no formal record at all* and therefore cannot
+demonstrate anything about a produced record's authority. The two properties
+are now proved separately:
+
+* **non-authority of a produced formal record** — proved deterministically,
+  by `ScientificAuthority` over every basis (Layer 1) and by the incumbent
+  and aggregation consumers refusing it (Layer 2). No real run is required
+  or able to add to this.
+* **the launch decision under zero valid trials** — proved by the real run:
+  no winner ⇒ formal skipped, with the structured planner feedback emitted.
+
+The real-run requirement itself is unchanged and is discharged by the Gate 2
+matrix in §20.4. Run it in a **fresh workspace**. **V19's artifacts are a
+read-only reference for the expected signature — never a run input** (§4.5);
+feeding them in would both contaminate the run and put the immutable archive
+on a write path.
 
 **Reachability evidence is mandatory** (PR C's lesson, twice over): a test
 that fails when the production path bypasses the verdict. PR C shipped an
@@ -1539,7 +2978,16 @@ verdict computed and never consulted — must fail a test.
 From §20.6, plus what the audit added:
 
 1. campaign mode is explicit **and verified against the resolved config**;
-2. no authoritative result exists without a valid trial;
+2. **no formal round is LAUNCHED without a valid trial**, and no produced
+   formal record is authoritative unless it is blocking + scientific +
+   formal-valid.
+
+   > Corrected 2026-08-05 by §16.D. This criterion previously read "no
+   > authoritative result exists without a valid trial", which conflates
+   > the two axes: trial evidence decides whether formal **runs**; a
+   > completed formal record's own facts decide whether it may inform
+   > science. Trial count must never appear in an authority verdict.
+
 3. observe-only remains available, unchanged in behaviour, and honest;
 4. labels do not contradict effective behaviour (§3.2 is fixed);
 5. incumbent and reports enforce the policy;
@@ -1581,9 +3029,15 @@ Stop for operator review if:
 ## 13. Expected artifacts
 
 The manifest mode field and its consistency check; the `ScientificAuthority`
-verdict with its tests and mutation proofs; the structured
-all-trials-invalid feedback block; and a bounded real run that deliberately
-collapses and proves non-authority.
+verdict with its tests and mutation proofs; the structured all-trials-invalid
+feedback block; and the bounded real-run evidence defined by the Gate 2
+matrix in §20.4.
+
+> Corrected 2026-08-05. This previously named "a bounded real run that
+> deliberately collapses and proves non-authority" — which §16.D shows
+> cannot exist, since a collapsed trial stage skips formal and so produces
+> no formal record whose authority could be examined. See §9 Layer 3 for how
+> the two properties are proved separately.
 
 ---
 
@@ -1596,7 +3050,7 @@ already reflected in §4 and §7.
 |---|---|---|
 | 1 | Default mode for a formal campaign | **No default.** A new formal campaign must declare both fields explicitly. Omission is refused before any LLM or GPU work. Policy is never inferred from a config filename. Historical manifests stay readable. |
 | 2 | Does `diagnostic` differ behaviourally from `observe_only`? | **The question was the symptom.** They are different axes, not values of one (D-D-5): `healthgate_mode` ∈ {blocking, observe_only} governs control flow; `result_authority` ∈ {scientific, diagnostic} governs eligibility. `observe_only + scientific` is refused; `blocking + diagnostic` is now expressible and legitimate. |
-| 3 | Retroactive labelling of V19 | **Do not rewrite.** V19 artifacts are immutable forensic evidence. A separate closure annotation records the classification, its basis and its retrospective date, with before/after hashes proving nothing was touched (§4.5, commit 10). |
+| 3 | Retroactive labelling of V19 | **Do not rewrite — and do not annotate either (revised 2026-08-05).** V19 artifacts are immutable forensic evidence. The closure annotation this row originally required was **withdrawn** with D-C9: a record missing the contract simply has authority not established, and is never an incumbent and never in scientific aggregation. No annotation, no sidecar, no reconstruction (§4.5). |
 
 | 4 | Is a **mixed** effective config a refusal? | **No — the question was posed at the wrong level (operator, 2026-08-04).** Mixed *roles* are the correct and normal configuration; mixed *semantics within one role* are the defect. See §4.6. |
 | 5 | Must the exclusion count reach the **LLM-facing** interpretation input? | **Default: no (operator, 2026-08-04).** The exclusion must reach the final report, but deterministically. See §4.7. |
@@ -1691,8 +3145,10 @@ still exposed to the window. What landed:
 UNKNOWN to the empty set; new code calls the resolver, which can express
 UNKNOWN. The hotfix carries **only** role consistency — `healthgate_mode`,
 `result_authority`, `ScientificAuthority`, zero-valid-trial authority,
-deterministic reporting, planner feedback and the V19 sidecar all remain
-PR D's work.
+deterministic reporting and planner feedback all remain PR D's work.
+
+> Corrected 2026-08-05: this list also named "the V19 sidecar", which was
+> **withdrawn** with D-C9 and is no longer in PR D's scope (§4.5).
 
 **The ruling it implements.** The **effective config remains
 authoritative** — it is reproducible and resists repo drift, which is why
@@ -1736,19 +3192,43 @@ all legacy records without the new field are excluded
 historical replay preserves the previous incumbent
 ```
 
-These are jointly unsatisfiable. The implementable rule, given that
-`classify_candidate_health` already returns a three-valued verdict:
+These are jointly unsatisfiable.
 
-```text
-legacy record + effective config recoverable by sha  -> reconstruct, classify normally
-legacy record + effective config NOT recoverable      -> UNKNOWN, excluded from incumbent
-                                                         and from the scientific aggregate,
-                                                         counted and named in the report
-```
-
-"Preserves the previous incumbent" therefore holds only for records whose
-effective config is still recoverable — which is the honest claim, and the
-one the sha-pinned lookup at `resume.py:386-392` can actually deliver.
+> **SUPERSEDED — operator decision 2026-08-05.** The rule this section
+> originally proposed —
+> *"effective config recoverable by sha → reconstruct, classify normally"* —
+> is **withdrawn**. It conflated two axes. Exact-SHA recovery reconstructs
+> the **HealthGate mode and validity** facts; it cannot reconstruct
+> `result_authority`, which no historical run ever persisted.
+>
+> **Measured, 249 real artifacts under `/home/klz/Data/SIDEREIS_DATA`**
+> (audit recorded under D-C4): `healthgate_mode` absent in **249/249**,
+> `result_authority` absent in **249/249**. `run_invariants_lock.json`
+> records scope, `health_gate_enabled` and the config sha — no authority.
+> Of the 42 artifacts stamping a config sha, all 42 have a recoverable
+> effective config, and resolving those 4 distinct configs yields a
+> determinable mode (1 blocking, 3 observe-only) — **and still no
+> authority**.
+>
+> Since `authoritative` requires `scientific`, and `scientific` is
+> recoverable from nothing, **no historical record can reconstruct to
+> authoritative.** Inferring it from a blocking configuration would invent
+> a declaration nobody made — precisely what D-C1b refuses at launch.
+>
+> **The rule that governs is therefore:**
+>
+> ```text
+> missing the new authority contract
+>   -> remains readable, remains unchanged
+>   -> scientific authority NOT established
+>   -> never the new-authority incumbent
+>   -> never in new-authority scientific aggregation
+> ```
+>
+> No finer classification — observe-only versus blocking, reconstructable
+> versus not — is required or wanted. "Preserves the previous incumbent"
+> is **not** a property PR D delivers on the authority axis, and this
+> document no longer claims it.
 
 ### 15.F Verdict
 
@@ -1756,3 +3236,1499 @@ one the sha-pinned lookup at `resume.py:386-392` can actually deliver.
 condition in §11 was triggered: no historical artifact needs rewriting, no
 scientific threshold changes, and GPU admission and O-7 are untouched.
 
+
+---
+
+## 20. Final-acceptance plan after Gate 2 attempt 1 — DIRECTION APPROVED 2026-08-05
+
+Gate 2 attempt 1 (§19) exposed **two independent runtime-control defects**.
+This section is the plan to close both before PR D's final acceptance.
+
+**Authorization status** (operator, 2026-08-05):
+
+| item | status |
+|---|---|
+| the two-PR split | **APPROVED in direction** |
+| PR 1, the narrow hotfix (§20.2) | **MERGED** as PR #175 (`f99650a4`) |
+| PR 2, the occupancy correction (§20.3) | **T0 adopted, implemented and MERGED** as PR #176 (`e4b2aff8`) |
+
+PR 2 requires a typed-boundary and stability-tolerance **design audit**,
+reviewed, before any implementation begins. The corrections the operator
+required in this review are marked inline below.
+
+### 20.1 Why two PRs and not one
+
+The two defects have different natures, and merging them would smuggle an
+admission-policy change through a bug fix:
+
+| | defect | nature |
+|---|---|---|
+| **A** | the candidate's own CUDA context is counted as foreign occupancy | a straightforward attribution bug |
+| **B** | any post-probe `REQUEST_PROBE` is read as "evidence not consumed" | a state conflation in the lifecycle |
+| **C** | **stable external occupancy invalidates a calibration** | a POLICY error about what makes a measurement valid |
+
+A and B are bugs with a single correct answer. **C is a change to GPU
+admission semantics** and belongs to PR C, design-first.
+
+**C is a blocker, not a follow-up.** Fixing only A and then passing Gate 2 on
+an idle GPU would leave a confirmed V20 admission defect in place while
+claiming acceptance — the acceptance would be an artifact of the test
+environment being empty.
+
+### 20.2 PR 1 — the narrow hotfix (in progress)
+
+Branch `fix/runtime-probe-evidence-consumption`, off master.
+
+**Commit 1 — attribution. LANDED `80f93ca9`.** Per-process bytes are captured
+(`--query-compute-apps=pid,used_memory`) and the classifier subtracts what
+the candidate itself owns before comparing against the threshold:
+
+```text
+external = device total - candidate-owned bytes
+```
+
+The configured threshold is unchanged; only its subject is corrected. An
+empty or partial attribution map leaves those bytes EXTERNAL, never
+"candidate-owned" — absence of evidence must not read as a clean device. A
+single-column driver response still yields PID-based foreign detection, with
+the memory recorded as NaN so it stays unattributable rather than assumed
+zero.
+
+> **Narrowed during implementation.** The staged version attributed memory to
+> *every* holder, which had the side effect of clearing a **registered
+> peer's** occupancy as well. That is an admission-policy change and belongs
+> to PR C, so the landed version reclassifies **only candidate-owned bytes**;
+> a peer's memory still contends exactly as it does today, pinned by a test
+> named for that purpose. This is the §20.1 rule — no policy through a bug
+> fix — applied to my own patch.
+
+**One intentional, admission-neutral relabel**: unattributable memory over
+the threshold now classifies `unknown_contention` rather than
+`foreign_contended`, because naming an owner that nothing measured is the
+defect. Both identities are `contended`, so `blocking_eligible` and admission
+are identical; the two threshold-placement tests updated in that commit now
+assert the blocking consequence so a future relabel cannot quietly widen
+admission.
+
+*Verified against the real Gate 2 telemetry*: 5.98 GB, zero foreign PIDs,
+0% utilisation now classifies `single_candidate_idle` rather than
+`foreign_contended`.
+
+**Commit 2 — the spent probe budget. LANDED `2184e1c8`.**
+
+**The operator-required per-reason audit was performed first, and it
+REJECTED the planned design.** Recording that, because the rejection is the
+more useful result:
+
+*The audit.* `REQUEST_PROBE` has exactly **three** producers, all in
+`decision_policy.py`:
+
+| producer | condition | gated on `probe_available`? |
+|---|---|---|
+| formal probe absent | `evidence_channel == "probe_absent"` and formal phase and not blocking-eligible | **no** |
+| contended measurement | `estimate.contended` | **yes** |
+| prior-tier evidence | `evidence_rank(provenance) <= 1` | **yes** |
+
+*The finding.* The reason vocabulary this section proposed **does not
+correspond to those producers**:
+
+* `stale_evidence` — **exists nowhere in the repository**;
+* `capability_mismatch` — **exists nowhere in the repository**;
+* `candidate_identity_mismatch` — exists, but in
+  `core/runtime_control/gpu_requirement.py`, an **unrelated subsystem**
+  where it describes a GPU-requirement identity check, not a probe reason.
+
+Two names were invented and one was borrowed from a subsystem that means
+something else by it. Adding them would have created dead vocabulary and a
+cross-subsystem name collision — precisely the *infer-semantics-from-a-name*
+error the operator's review was guarding against, committed in the proposal
+itself. **The operator's caution was justified for a sharper reason than
+either of us expected.**
+
+*The actual defect, and the actual fix.* The re-decision reused the caller's
+mode, in which `probe_available` was still True. A fresh probe that was
+itself classified contended therefore re-entered the contended producer, and
+the lifecycle reported *"the measured evidence was not consumed"* — blaming
+the wrong component. The evidence **had** been consumed: the probe ran, was
+extrapolated, was persisted, and was decided upon. The policy was simply
+never told the budget was gone.
+
+The fix is to say so — the re-decision runs with `probe_available=False`.
+Both gated producers then take their **existing** `else ADVISORY` branch, and
+the ungated producer cannot fire because it requires
+`evidence_channel == "probe_absent"` while the re-decision passes `"ok"`.
+
+**No typed-reason enum was needed, and none was added.** This is strictly
+smaller than the plan and removes the need for per-reason dispositions
+entirely: `REQUEST_PROBE` after a completed probe becomes **structurally
+impossible** rather than reachable-and-misreported.
+
+**The invariant is kept, not deleted, downgraded or bypassed** — as the
+operator required. It is now unreachable by construction, which is what an
+invariant should be: if a future producer stops honouring `probe_available`,
+it still fails closed rather than looping. Its existing stuck-policy test
+proves it still fires.
+
+**Budget: unchanged, and not invented.** The repository already fixed it —
+`probe_lifecycle.py` *"one attempt gets one probe"*, `probe_wiring.py` *"the
+exactly-once guarantee is per candidate attempt"*. No new counter, no new
+threshold, no new policy.
+
+**Legacy vocabulary, stated explicitly.** The hotfix preserves
+`foreign_contended` with its **existing presence-based policy meaning**, and
+does so *only* to avoid changing admission policy inside a bug-fix PR. It is
+**not** the final vocabulary: PR C replaces presence-based `contended`
+semantics with terms that separate occupancy *presence* from measurement
+*validity* (§20.3). Nothing downstream should treat `foreign_contended` as
+part of the post-PR-C design.
+
+**This PR does NOT change external-occupancy admission semantics.**
+
+### 20.3 PR 2 — PR C occupancy-policy correction (design-first)
+
+**The frozen principle** (operator, 2026-08-05):
+
+> External occupancy does not invalidate a calibration. Only occupancy that
+> CHANGES during the measurement enough to affect attribution, or that
+> cannot be reliably attributed, makes a measurement unable to carry
+> blocking authority.
+
+**What the audit found** — the current code contradicts this in three places:
+
+| question | finding |
+|---|---|
+| does `foreign_contended` mean instability? | **No.** Any foreign PID, any size, however steady → `foreign_contended` |
+| is stability assessed across the window? | **No.** `max_mem` takes the PEAK; nothing compares samples. A steady 8 GB and an 8 GB spike are indistinguishable |
+| why can a contended measurement not block? | `estimate_types.py:126` — `blocking = measured and not contended`, a frozen invariant, with `contended = identity in ("foreign_contended", "unknown_contention")` |
+| does admission separate the quantities? | ~~**No.**~~ **WRONG — corrected below.** |
+
+`sustained_util` is the sharpest example: it treats a STEADY high load as
+evidence of contention, when under the frozen principle steadiness is
+precisely what makes a measurement usable.
+
+#### The audit's own last row was false — and correcting it reshapes PR C
+
+I wrote that no `external_occupancy` / `candidate_owned` / free-memory
+separation exists in `admission.py` or `gpu_accounting.py`. **It exists, and
+it is more complete than the model I then proposed.**
+`GpuAccountingSnapshot` (`core/runtime_control/gpu_accounting.py`, landed by
+PR B) already carries:
+
+| field | the fact it holds |
+|---|---|
+| `own_tree_mib`, `own_processes` | candidate-attributed occupancy, summed over processes whose **ancestry reaches `root_pid`** |
+| `other_mib`, `other_process_count`, `other_processes` | external attributed occupancy, **with PIDs** |
+| `unattributed_mib` | occupancy the per-process listing cannot explain |
+| `device_used_mib`, `device_total_mib` | free memory, by derivation (see the correction below) |
+| `accounting_skew_mib` | the **signed** disagreement between the device total and the per-PID sum, deliberately left unclamped |
+
+> **Corrected during implementation.** This table first listed
+> `device_free_mib` as a `GpuAccountingSnapshot` field. It is **not** — it
+> lives on `DeviceBaselineSnapshot`. `GpuAccountingSnapshot` states *used*
+> and *total*, so free memory is DERIVED. The conclusion stands (the fact is
+> available in `gpu_accounting.py`, and admission consumes it), but the field
+> attribution was wrong, and PR C derives rather than reads it — which keeps
+> the new boundary on the single snapshot type the calibration path has.
+
+And `other_processes` exists for exactly the reason the operator's stability
+list gives, stated in its own docstring:
+
+> *"A count alone cannot tell 'the same neighbour, still there' from 'one
+> left and another arrived' — and a Gate that compares only totals would
+> call those identical. Retained so environmental change is detectable over
+> a series of samples rather than inferred from two endpoints."*
+
+`admission.py` already takes a `GpuAccountingSnapshot`. A `telemetry_available=False`
+snapshot is validated to carry **no** numbers, so an unmeasured device can
+never read as an empty one.
+
+**So the real defect is not missing quantities — it is a duplicated,
+cruder parallel model.** The two subsystems are **disjoint**: nothing in
+`probe.py`, `calibration_policy.py` or `admission.py` imports the other's
+occupancy type. The calibration path built its own `ContentionSnapshot`
+carrying a device total, a PID list and a utilisation percentage, and
+classifies from that — while the accounting path, used by
+`sandbox_executor`, `gpu_observer`, the measurement runner and the tuner,
+already models every fact correctly.
+
+**This makes PR C a consolidation, not a new schema** — materially smaller
+and better than what §20.3 first proposed:
+
+* **`OccupancyContext` should NOT be invented.** `GpuAccountingSnapshot`
+  already is one. Creating a second would add exactly the duplicate state
+  the minimal-architecture rule forbids, and would be the third occupancy
+  model in the codebase.
+* **`MeasurementValidity` is the genuinely new boundary** — and the only
+  one PR C must design from scratch.
+* The calibration path should **consume** the existing accounting snapshot
+  rather than keep its parallel one.
+
+**A duplication this PR knowingly created.** The narrow hotfix added
+`ContentionSnapshot.compute_process_memory_gb`, which duplicates
+`ProcessOccupancy` in coarser units (GB floats vs MiB ints). That was the
+right call for a bug fix — restructuring two subsystems inside a hotfix is
+precisely what §20.1 forbids — but it is **debt, recorded here so PR C
+absorbs it** rather than treating it as the design.
+
+#### Stability, item by item (the operator's six)
+
+| # | requirement | what exists today |
+|---|---|---|
+| 1 | external PID-set changes | **Data yes, consumer no.** `other_processes` carries PIDs per snapshot; `classify_contention_window` takes a set UNION across samples and never compares them, so "the same neighbour throughout" and "a different neighbour each sample" are identical to it |
+| 2 | external attributed-byte changes | **Data yes, consumer no.** `other_mib` is per-snapshot; nothing differences it |
+| 3 | unattributed-residual changes | **Data yes, consumer no.** `unattributed_mib` + the signed `accounting_skew_mib`; nothing differences them |
+| 4 | sampling completeness | **Largely present.** The window is `ceil(window_s / interval_s)` samples by construction, so a sample cannot go missing; a failed capture surfaces as `telemetry_available=False`, and ANY such sample forces `unknown_contention`. The gap is that completeness is not expressed as a *validity* fact — it is entangled with the contention verdict |
+| 5 | OOM/timeout attribution | **Absent.** `admission.py` has `insufficient_headroom` as a refusal reason, but nothing correlates a probe's `oom`/`wall_cap` outcome with the occupancy observed around it. The lifecycle treats a measured OOM as purely candidate-local evidence (`REJECT`) without asking whether a neighbour arrived mid-probe |
+| 6 | candidate process-tree completeness | **Partial.** `own_tree_mib` sums by real ancestry (`is_descendant_of` walks to `root_pid`), which is the right basis; `accounting_skew_mib` is the closest thing to a completeness signal. There is no explicit "the tree was fully enumerated" flag, and a child spawned between enumeration and sampling lands in `unattributed_mib` rather than being reported as incomplete attribution |
+
+Items 1–3 share one shape: **the facts are already measured and persisted;
+no consumer differences them across the window.** That is the concrete work,
+and it is far narrower than a new schema.
+
+Item 5 is the one genuinely missing capability, and it is the one with
+safety consequences — misattributing a neighbour-induced OOM to the
+candidate rejects a model for someone else's memory.
+
+**The corrected model — two focused typed boundaries, not a broad admission
+rewrite.**
+
+> **Corrected 2026-08-05 (operator review).** This section previously
+> proposed adding several independent quantities throughout admission, and
+> miscounted them as "four" while listing five. Broadly extending the
+> admission schema **has not been shown to be necessary**, and doing it
+> first would be the large architectural change the minimal-architecture
+> rule forbids. The smaller design is two concepts with one rule between
+> them.
+
+**Five classes of fact** (the earlier text said four and listed five; the
+last is measurement-quality metadata, categorically different from the
+measured quantities above it):
+
+```text
+1  candidate-attributed occupancy / demand   what this candidate owns or needs
+2  current free memory                       what the device actually has now
+3  external attributed occupancy             legitimately part of the
+                                             conditions being measured
+4  occupancy change in-window                the thing that can invalidate
+--------------------------------------------------------------------------
+5  attribution / sampling completeness       measurement-quality metadata,
+                                             not a measured quantity
+```
+
+Facts 1, 2, 3 and 5 are **already carried by `GpuAccountingSnapshot`** (see
+the correction above). Fact 4 — change across the window — is the only one
+nothing computes, and it is a function OF a series of those snapshots rather
+than a new measurement.
+
+So the boundaries are:
+
+```text
+OccupancyContext        DO NOT INVENT. GpuAccountingSnapshot already is
+                        this. PR C makes the calibration path consume it
+                        instead of maintaining a parallel model.
+
+MeasurementValidity     the one genuinely new boundary: whether a
+                        calibration can carry blocking authority —
+                        independent of whether external occupancy exists
+                          valid_stable_conditions
+                          unstable_external_activity
+                          attribution_incomplete
+                          sampling_incomplete
+```
+
+The governing rule becomes:
+
+```text
+blocking authority = a measurement exists
+                     AND its MeasurementValidity is valid
+```
+
+instead of today's:
+
+```text
+blocking authority = no external occupancy
+```
+
+which decouples the **presence** of external occupancy from the
+**trustworthiness** of the measurement:
+
+```text
+stable external occupancy
+    -> measurement MAY remain valid
+
+unstable external activity,
+unattributed occupancy,
+or incomplete sampling
+    -> measurement cannot carry blocking authority
+```
+
+**Validity does not imply admission.** A valid calibration under stable
+external occupancy may still **reject** the candidate, because current free
+memory or measured performance is insufficient under the real present
+conditions. That is a normal rejection *from a valid measurement* — not an
+invalid calibration. Conflating the two is precisely the current defect,
+read from the other direction.
+
+**Scope honesty.** Retiring the presence-based `contended` predicate touches
+the frozen `blocking = measured and not contended` invariant
+(`estimate_types.py:126`). That is a runtime-control design change, not a
+small correction, and it is why PR C is design-first and separately merged.
+
+**Stability is not memory variance.** The audit must not reduce stability to
+`max(memory) - min(memory)`. At minimum it must cover:
+
+* external **PID-set** changes across the window;
+* external **attributed-byte** changes;
+* **unattributed-residual** changes;
+* **sampling completeness** (missing, partial or failed samples);
+* changes relevant to **OOM or timeout attribution** — whether external
+  activity changed before or after the failure being attributed;
+* **candidate process-tree completeness** — whether every candidate-owned
+  process was actually trackable.
+
+#### RESOLVED — T0 adopted, with the operator's clarification (2026-08-05)
+
+**This supersedes the options table below, which is kept as the reasoning
+that produced the decision.**
+
+> **T0 is an IDENTITY-AND-ATTRIBUTION stability rule, not a requirement that
+> external attributed bytes stay numerically constant.**
+
+That clarification is the load-bearing part, and it corrects a reading my own
+recommendation invited. The approved rule:
+
+```text
+blocking authority requires
+    the external PID IDENTITY set is unchanged across the bounded window
+AND unattributed_mib does not grow
+AND sampling is complete
+AND candidate-process-tree attribution is complete
+```
+
+**What must NOT invalidate a calibration:**
+
+* the mere **presence** of external occupancy, at any size;
+* **variation in attributed bytes belonging to the same identified
+  processes** — that is the real current environment, and it is recorded and
+  measured, not treated as corruption.
+
+**How the window is used** — conservatively, from the facts already
+recorded:
+
+```text
+minimum observed free memory        what the candidate must actually fit into
+maximum observed external occupancy the worst neighbour state in-window
+actual measured candidate performance under those conditions
+```
+
+**What DOES remove blocking authority** — evidence-quality failures only:
+
+* external **PID-set identity** changes;
+* growth in **unattributed** occupancy;
+* **incomplete sampling**;
+* **incomplete candidate-process-tree** attribution.
+
+**The invariant change**, replacing `estimate_types.py`'s frozen rule:
+
+```text
+blocking = measured and not contended                        # before
+blocking = measured and validity == valid_current_conditions # after
+```
+
+External occupancy no longer determines validity at all.
+
+**`MeasurementValidity` vocabulary** (operator-specified):
+
+```text
+valid_current_conditions
+unstable_external_identity
+unattributed_occupancy_growth
+sampling_incomplete
+```
+
+**No `OccupancyContext`.** Consolidate onto the existing
+`GpuAccountingSnapshot`, as the audit established.
+
+#### OOM attribution — the boundary, ruled
+
+| situation | correct outcome |
+|---|---|
+| candidate OOMs under **stable, attributable** external occupancy, and free memory was genuinely insufficient | a **valid current-condition rejection**. The measurement is good; the answer is no |
+| OOM coincides with **external identity change, unattributed growth, or incomplete attribution** | **NOT a candidate rejection.** The measurement cannot carry blocking authority — the evidence is insufficient to blame anyone |
+
+This closes audit item 5, the one genuinely missing capability, and it is
+**attribution only**: it changes no scientific threshold, no GPU-admission
+threshold, no O-7 accounting, and not the one-probe-per-attempt budget.
+
+---
+
+**OPEN QUESTION (RESOLVED ABOVE) — the stability tolerance.**
+No such tolerance exists in the repository, and the window performs no
+sample-to-sample comparison at all. Per the standing rule I have **not
+invented one**. The audit is now complete, so here are the options.
+
+**What makes this decidable at all**: items 1–3 are *set and scalar
+comparisons over an existing series*, so one option needs no numeric
+threshold whatsoever. That is worth noticing before reaching for a number.
+
+| | option | rule | consequence |
+|---|---|---|---|
+| **T0** | **exact-match stability** — *recommended* | the external PID set is IDENTICAL across every sample, and `unattributed_mib` does not grow | **No new numeric threshold at all.** A steady neighbour is valid; a neighbour arriving or leaving mid-window is not. Strictest, and the only option that adds no tunable. Risk: a neighbour that merely *restarts* mid-window invalidates, which is arguably correct |
+| **T1** | byte-delta tolerance | as T0, plus external attributed bytes may vary by ≤ `X` | Tolerates a neighbour whose allocation breathes. Requires ONE new configured number, and its right value is not derivable from anything in the repository |
+| **T2** | fractional tolerance | external bytes may vary by ≤ `X %` of device VRAM | Scales across devices, which the existing `contention_memory_fraction` already does — the most consistent with current policy shape. Still one new number |
+| **T3** | tolerate change, require attribution only | any external change is fine provided every byte stays attributable | Weakest. Explicitly permits a neighbour to grow throughout the measurement, which is the case most likely to corrupt a timing calibration |
+
+**My recommendation: T0**, with T2 as the fallback if T0 proves too strict in
+practice.
+
+The reasoning is that T0 is the only option consistent with the standing rule
+against invented thresholds — it is a *predicate over measured facts*, not a
+tuned number — and the frozen principle asks whether occupancy CHANGED, which
+a set comparison answers directly. If a real workload later shows T0
+rejecting measurements that were in fact usable, that rejection will be
+visible in the recorded facts, and T2 can be introduced **with evidence for
+its value** rather than by guessing now.
+
+**T0 is also the safest thing to be wrong about**: it fails toward refusing
+blocking authority, never toward granting it.
+
+**This is the one decision PR C is blocked on.** Everything else in §20.3
+follows from repository evidence and needs no ruling.
+
+### 20.4 Ordering, and the final Gate 2
+
+```text
+narrow runtime hotfix        MERGED  #175 (f99650a4)
+PR C occupancy correction    MERGED  #176 (e4b2aff8)
+integrate into PR D          DONE
+complete every tracked document
+FREEZE the exact head
+full local validation
+full GitHub CI on that head
+Gate 2's three cases on that SAME head
+reports/v20_prerequisite_review.md
+stop before PR D merge
+```
+
+**The head is frozen before validation, not after.** Any tracked commit made
+after Gate 2 restarts both the CI and the Gate — that is the exact-head rule
+(§18 merge criteria), and it is why documentation is completed BEFORE the
+freeze rather than as a final tidy-up.
+
+**The final Gate 2 is a minimum bounded matrix, not one large campaign.**
+Attempt 1 ran on an effectively idle GPU, so it could not have exercised
+external occupancy at all. Three cases, each proving what only it can:
+
+**Case A — PR D positive path (real run).** With
+`enable_chain_incumbent_formal_gates=true`, which attempt 1 did not set:
+
+* a real HealthGate-valid trial winner;
+* the `-inf` bootstrap and its recorded
+  `formal_comparison_reference_source`;
+* the budget bypass;
+* a **completed** formal round;
+* a recomputable **authoritative** verdict on that record;
+* `restore_prior_state` admitting it as incumbent;
+* scientific aggregation admitting it;
+* strict JSON throughout — no `Infinity`, no `NaN`.
+
+**Case B — stable external occupancy (real run).** A separate, stable,
+attributable external GPU workload, proving the system does **not** require
+an idle device and that these are recorded *separately*:
+
+* external occupancy present and recorded;
+* occupancy stable across the observation window;
+* the calibration remains **blocking-capable** under that occupancy;
+* candidate demand attributed to the candidate process tree only;
+* current free memory recorded as its own quantity;
+* admission decided from the real present conditions — whatever that
+  decision is. A rejection here is a **pass** for this case if it follows
+  from insufficient free memory under a valid measurement.
+
+**The success criterion, stated so it cannot drift** (operator, 2026-08-05):
+
+> Calibration remains VALID under stable external occupancy, and makes a
+> normal admission-or-rejection decision from the real current resources.
+
+It is explicitly **not** "the candidate is admitted". Nothing may be tuned to
+make FCNet succeed, and **no admission threshold may be relaxed** for this
+case. A run that validly rejects on insufficient free memory PASSES.
+
+**Workload protocol** — the external load must be one we own and can account
+for, or the case measures `unstable`/`unattributed` instead of the thing it
+exists to prove:
+
+* started by us, with an identifiable PID and command line;
+* pinned to the **same** GPU as the candidate;
+* **PID set unchanged** across the observation window — no restarts, no
+  worker churn;
+* memory occupancy may fluctuate normally (that is T0's whole point);
+* an explicit **memory ceiling** and an explicit **maximum runtime**;
+* deterministic teardown after the case, verified;
+* not mixed with uncontrolled third-party GPU work.
+
+**Pre-flight condition.** The device need not be idle — but if any
+unattributable third-party GPU work is present that may start, exit or change
+sharply, clear it or wait first. Otherwise the run measures the
+unstable/unattributed path, which Case C already covers deterministically,
+and Case B establishes nothing.
+
+**Required Gate artifact fields** — recorded per case, from the run's own
+telemetry rather than reconstructed:
+
+```text
+external workload PID
+device identity
+start / end time
+external memory min / max
+PID set across samples
+unattributed memory behaviour
+candidate-owned memory
+device free memory
+MeasurementValidity verdict
+final admission decision
+```
+
+**The launch commands**, pinned so both cases are reproducible and so the
+difference between them is visible as one variable:
+
+```bash
+# Case A — positive path. Fresh workspace; the flag attempt 1 did NOT set.
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /tmp/gate2_case_a \
+    --run_name gate2_case_a \
+    --num_iterations 1 --max_rounds 2 --max_epochs 1 \
+    --trial_portion 0.02 --formal_portion 0.02 \
+    --healthgate_mode blocking \
+    --result_authority scientific \
+    --enable_chain_incumbent_formal_gates
+
+# Case B — identical, plus a controlled external load already running.
+bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /tmp/gate2_case_b \
+    --run_name gate2_case_b \
+    --num_iterations 1 --max_rounds 2 --max_epochs 1 \
+    --trial_portion 0.02 --formal_portion 0.02 \
+    --healthgate_mode blocking \
+    --result_authority scientific \
+    --enable_chain_incumbent_formal_gates
+```
+
+Both are **cold-start** — no `--seed_paths` — per the standing rule for real
+training gate runs. Attempt 1 omitted
+`--enable_chain_incumbent_formal_gates`, which is why it could not have
+exercised the incumbent path at all.
+
+**Case B's external load** is the bounded harness described above: one
+process, one GPU, a steady block plus a periodic second block so bytes
+fluctuate while the PID set does not, with a memory ceiling and a hard
+deadline. Verified before use on this host — PID stable, allocation
+oscillating 4.00 ↔ 5.50 GiB, clean release back to the 273 MiB baseline with
+no leaked process.
+
+**Case C — unstable or unattributable activity.** Proved by
+**deterministic/synthetic tests**, which can construct these windows exactly
+and reproducibly. A real GPU case is added **only if** the code audit shows
+real-device evidence carries distinct acceptance value that a synthetic
+window cannot — real unstable contention is by nature not reproducible, so a
+real run here would be weaker evidence, not stronger.
+
+### 20.5 After Gate 2 passes — the V20 prerequisite review (operator, 2026-08-05)
+
+**Gate 2 is launched autonomously**, and **may be re-run as many times as
+needed**. It is no longer an operator-gated action; only PR *merges* are.
+
+Once Gate 2 passes, a deliverable follows before final acceptance is
+claimed — `reports/v20_prerequisite_review.md`. Its purpose is decision
+support, stated plainly by the operator:
+
+> to foresee whether a new V20 run can beat FCNET.
+
+It must audit, from evidence rather than from this document's own claims:
+
+1. **the V19 reports** — `reports/v19_20260729_2136.md`,
+   `v19_gate0_20260729_2209.md`, `v19_fresh_10iter_20260731_0750.md`,
+   `v19_fresh_10iter_20260731_1842.md`;
+2. **`docs/design/v20_priorities.md`** — whether every V20 priority is
+   actually implemented, each with the evidence that establishes it (commit,
+   test, artifact — not a design-document assertion);
+3. **every change made since V19**, reviewed as a whole rather than
+   per-PR;
+4. **each problem V19 exposed**, classified as handled or not handled, with
+   the evidence for the classification.
+
+The honest-negative rule applies with full force here: a priority that is
+designed but unproven, or a V19 problem that remains open, must be reported
+as such. A review written to justify launching is worthless for deciding
+whether to launch.
+
+### 20.6 Status
+
+```text
+PR D implementation      10 / 10
+PR D declaration fix     landed (735031ab)
+design cleanup           this commit — stale text rewritten, §20 corrected
+runtime hotfix           MERGED 2026-08-05 as PR #175 (f99650a4)
+occupancy correction     MERGED 2026-08-05 as PR #176 (e4b2aff8)
+final Gate 2             attempt 1 FAILED; retry blocked on both PRs
+merge readiness          NOT READY
+```
+
+
+---
+
+## 19. Gate 2 attempt 1 — FAILED, 2026-08-05
+
+**Recorded as a failed acceptance attempt, not discarded work.** It did not
+establish G2-1 and PR D is NOT accepted on its basis.
+
+```text
+SHA under test   a09caa52   (full CI PASS on this head)
+workspace        /tmp/gate2_final
+config           1 iteration, ≤2 rounds, portions 0.02, 1 epoch,
+                 --healthgate_mode blocking --result_authority scientific
+hardware         RTX 5090, 274 MiB used at start, no external occupancy
+wall time        41m45s (09:50:35 → 10:32:20)
+outcome          chain halted; status=failed; best_score=None
+```
+
+### Confirmed on the real production path
+
+| property | evidence |
+|---|---|
+| the launch-guard hotfix is reachable | `[RUNTIME] Launch self-test passed (8 checks) \| probe_runner=tidmad_denoise: measurable on RTX 5090` |
+| real training executed | 3125 steps, `Epoch 0 \| Avg Loss: 4.225857` |
+| strict-JSON safety | 34 artifacts, **no `Infinity` / `-Infinity` / `NaN`** |
+| D-C3 provenance reaches a real artifact | `formal_comparison_reference_source: 'gates_disabled'` |
+| D-C6 reaches a real artifact | `trial_validity_feedback` present: 0 gate-invalid, 0 unknown, 1 execution failure |
+| **the two carriers stay distinct** | `[trial-validity] … 1 execution failures` AND `[gate-exhaustion] … 2 time-gated` fired separately — the real-path proof of D-C6's deviation |
+
+### Why it failed
+
+**1. Runtime-control infrastructure failure** (`probe_lifecycle.py:191`):
+
+```text
+policy still requests a probe after a completed, persisted probe —
+the measured evidence was not consumed (invariant failure)
+```
+
+Masked until now: the launch guard aborted before the probe path was
+reachable, so fixing that defect exposed the next one behind it. NOT PR D
+code. Owned by a separate predecessor hotfix
+(`fix/runtime-probe-evidence-consumption`); the invariant is correct and
+stays fail-closed.
+
+**2. PR D's own defect — the launch declaration was lost on failure.** See
+§19.1.
+
+### Not a defect
+
+The two `skipped_time_risk` formal records carry no `scientific_authority`.
+They never scored, so there is no formal RESULT to have authority over.
+Fabricating a verdict for an uncompleted round would be worse than its
+absence.
+
+### Not established
+
+G2-1 entirely: no formal round completed, so no real authority verdict and
+no real resume admission. The run also had `coupling=OFF`
+(`[chain_incumbent] provided=none; coupling=OFF; consumed=none`), so the
+`-inf` bootstrap, the skip gate and the bypass gate were not exercised
+either. **The final Gate 2 must enable the chain-incumbent formal gates.**
+
+### 19.1 The declaration-loss defect and its correction
+
+**Superseding the earlier D-C1a reasoning**, which this document recorded as
+deliberate: *"`None` on a crashed branch with no tune_output means
+undeclared"*. That was wrong.
+
+`healthgate_mode` and `result_authority` are **validated LAUNCH
+declarations**, not tuner-result fields. D-C1b refuses the launch outright
+unless both are declared and consistent, so by the time any artifact is
+written they exist — regardless of what the tuner later did.
+
+Measured: a chain launched with `--healthgate_mode blocking` wrote
+`healthgate_mode: null`, because both the tuner's degraded output dict and
+`write_manifest` sourced the posture from a healthy `tune_output` that never
+existed. Under D-C4 those records become `unreconstructable_legacy` — a
+failed iteration made to look like a pre-declaration artifact, which it is
+not.
+
+Corrected: every post-launch branch (completed, no-records, degraded,
+crashed) writes the declaration from the **validated launch input**. Six
+`write_manifest` call sites plus the tuner's failed-output dict. Fail-closed
+is preserved — a caller genuinely outside the contract still records `null`,
+never a defaulted `blocking`.
+
+FU-D-9 extended to the degraded and failure branches, which it had not
+covered. Mutations, all caught: manifest reverts to the tuner output (3);
+tuner degraded dict drops it (1); one crashed branch stops declaring (1);
+an undeclared caller gets a default (1).
+
+> The call-site test initially used a substring count and a mutation proved
+> it useless — it tolerated one missing site, so removing the declaration
+> from a crashed branch still passed. Rewritten to check every
+> `write_manifest` **call node** via AST.
+
+
+---
+
+## 18. D-C8 — implementation and documentation closure, 2026-08-05
+
+**Progress: 10 / 10 implementation checkpoints complete.**
+
+### All ten, verified against real production call paths
+
+| # | checkpoint | commit | behaviour delta |
+|---|---|---|---|
+| 1 | D-C1a | `b751476b` | mode + authority become declared, recorded facts |
+| 2 | D-C1b | `8bdeb7d1` | six startup refusals at the launch boundary (incl. non-finite deltas, added by FU-D-8) |
+| 3 | D-C2a | `c8019e77` | `ScientificAuthority` — conclusions computed, never settable |
+| 4 | D-C2b | `84511954` + `8985d00f` | every FORMAL record carries a verdict; no trial record does |
+| 5 | D-C3 | `7a52e450` + `42a9f679` | **no valid winner ⇒ skip formal**; `-inf` bootstrap + provenance; JSON-safe persistence |
+| 6 | D-C4 | `eb789271` + `7a128f18` | **only an authoritative formal may become the chain incumbent**; fail-closed on tampered/unreconstructable verdicts |
+| 7 | D-C5 | `4767c72a` | non-authoritative results leave the scientific aggregate, and the exclusion is stated deterministically |
+| 8 | D-C6 | `3e91adb6` | structured all-trials-invalid evidence reaches the real planner request |
+| 9 | D-C7b | `09be3357` | gate results say what the gate WAS; ids never rewritten; config sha unshifted |
+| 10 | D-C8 | this commit | closure: audit, doc sync, ledger |
+
+Plus Gate 1's defect fix (`3172bc4c`) and predecessor FU-D-10 (PR #172,
+`51bab481`, integrated at `12506d80`).
+
+### Stale statements removed or superseded
+
+| claim | disposition |
+|---|---|
+| `force_formal_round` as an operator override | superseded in §16.A; the tracker, §15 and Commit 6 all carry the correction |
+| zero-valid-trial formal as an authority rule | superseded by §16.D — launch and authority are separate |
+| historical authority reconstruction | the D-C4 ladder is struck through and marked SUPERSEDED with the 249-artifact evidence |
+| `operator_legacy_declaration` sidecar | withdrawn; both mentions are withdrawal records |
+| D-C9 / eleven-checkpoint counts | withdrawn; totals retotalled to 10 throughout |
+| "recoverable config ⇒ full authority reconstruction" | §15.E corrected: exact-SHA recovery gives mode and validity, never an absent `result_authority` |
+
+> **This audit was incomplete, and the row above proves it.** D-C8 claimed
+> the eleven-checkpoint counts were "retotalled to 10 throughout" — but §7's
+> opening sentence still read *"Eleven commits"* until the 2026-08-05 design
+> cleanup found it. The operator review found eight further stale claims
+> that D-C8 passed over: the top-level next-steps and dependency status,
+> §4.5's withdrawn sidecar, §9 Layer 3, §10's merge criterion 2, §13, §14
+> decision 3, §15.C's PR-D scope list, §18's own Gate 2 plan, and the D-C1a
+> `null` rationale that §19.1 had already disproved.
+>
+> **The lesson, recorded rather than smoothed over**: D-C8 verified the
+> corrections it had *made* and did not re-read the document as a reviewer
+> would. A supersession note is not a correction — a reader who reaches §10
+> first is simply misinformed. The 2026-08-05 cleanup rewrites the stale
+> text in place, at its own location, rather than relying on precedence
+> reconstruction across 3,700 lines.
+
+### Node/skill documentation synced
+
+`ml_hyperparameter_tune_agent.md` (three new output fields),
+`ml_model_proposal_agent.md` (`recent_trial_validity` + the
+`[RECENT TRIAL VALIDITY]` block on BOTH prompt paths),
+`result_interpretation_agent.md` (the scientific-aggregation section).
+
+### Known limitations, stated rather than hidden
+
+- **Tamper-EVIDENT, not tamper-proof.** The persisted verdict is a plain
+  dict; any writer can edit it. What is guaranteed is detection —
+  the facts travel with the conclusions and every consumer re-derives.
+- **M7 (D-C3)** is caught only by a structural assertion. While trial
+  history cannot change mid-round the two winner resolutions agree by
+  construction, so no behavioural test can separate them.
+- **Historical workspaces carry no incumbent forward.** A direct,
+  intended consequence of the frozen rule; the `-inf` bootstrap applies
+  until a new authoritative formal is produced.
+- **`v18r_queue_runner.sh:48`** carries the same `grep -q` fail-open
+  pattern fixed in PR #172, deliberately untouched (retired campaign).
+- **A NaN delta is refused at launch but not schema-constrained**
+  (FU-D-8 closed the launch path; the field remains a plain `float`).
+
+### Final Gate 2 plan
+
+Minimum bounded workload, derived from what synthetic execution cannot
+establish. Everything provable without a GPU is already covered by 7,400+
+unit tests, the mutation suites and Gate 1.
+
+| case | property only real execution can establish | bound |
+|---|---|---|
+| G2-1 | a real chain iteration produces a formal record carrying a genuine `scientific_authority` verdict, and resume admits it as the incumbent | 1 iteration, 1 model, minimal scope/epochs |
+| G2-2 | the JSON artifacts written by a real run contain no `Infinity`/`NaN` and carry the provenance fields | same run's artifacts |
+
+Both read from a single bounded run — G2-2 inspects G2-1's artifacts
+rather than launching separately.
+
+> **SUPERSEDED by §20.4.** This plan was written before Gate 2 attempt 1 ran.
+> Two things in it were wrong:
+>
+> * it asserted *"stable external GPU occupancy is acceptable; demand is
+>   attributed to the candidate-owned process tree"* — stated as fact about
+>   the system. Attempt 1 measured the opposite: the candidate's **own**
+>   memory was counted as foreign, and stable external occupancy is treated
+>   as invalidating. That is the §20.3 defect, and it was written here as a
+>   property rather than verified as one;
+> * two cases on an idle GPU cannot establish the occupancy behaviour at
+>   all.
+>
+> The governing plan is the three-case matrix in §20.4. G2-1/G2-2 survive
+> inside its Case A.
+
+### Merge criteria
+
+1. full `tests/unit` green from a clean tree;
+2. full GitHub CI green on the exact merge head;
+3. final integrated V20 Gate 2 green on that same head;
+4. any commit after Gate 2 invalidates 2-3 and requires repeating both.
+
+
+---
+
+## 17. Gate 1 — combined LLM-facing acceptance, 2026-08-05
+
+**Decision, made autonomously**: ONE bounded run covering D-C5, D-C6 and
+D-C7b together, deferred until all three were stable so the Gate proves
+the FINAL prompt rather than an intermediate one. D-C5 is included because
+filtering `per_model_formal` changes LLM-visible aggregate facts even
+though §4.7 keeps the exclusion REPORT out of the prompt.
+
+**Setup**: real OpenAI `gpt-5.4` proposer via `llm_configs/openai_tiered_v1.json`;
+pseudo training (no GPU, no training loop). Two real calls total (initial
+run + re-run after the defect below). ~60-67 s each, cost well inside the
+standard's $0.05-0.20 estimate.
+
+**Staged cheaply first**, per policy: structural tests → deterministic
+renderer tests → real call. The first three stages are permanent unit
+tests, not Gate-only scaffolding.
+
+| property | result |
+|---|---|
+| P1 the trial-validity block renders when populated | PASS |
+| P1b it reaches the prompt on the path that ACTUALLY ran | PASS *(after the fix)* |
+| P2 the real LLM returns schema-valid output given it | PASS — `skip_bottleneck_mixer`, expert advice present |
+| P3 no task-specific content in the generic template | PASS — zero leaks |
+| P5 healthy run suppresses the block entirely | PASS |
+| P5b legacy path suppresses it too | PASS |
+
+**GATE 1 FOUND A REAL DEFECT, which is the point of running it.** The
+first run passed every property except the one that mattered: the proposer
+took the **legacy** branch (`Proposed model (legacy)`), while the wiring
+had reached only the **pipeline** template. The block never entered the
+prompt the model actually saw. No unit test caught it, because each tested
+its own path.
+
+This is the **mirror image** of the P3-V1 defect already recorded in the
+proposal agent, where a legacy-only splice never reached pipeline mode.
+Both directions have now occurred. Fixed by splicing into
+`_build_reasoning_prompt` as well, adding the block to the token
+accounting, and adding `TestBothPromptPathsCarryTheBlock` so a future
+one-path wiring fails in unit tests rather than at a Gate.
+
+Re-run on the fixed code: **PASS**, with P1b and P5b added so the Gate now
+asserts the executed path rather than assuming it.
+
+**Consequence recorded**: `_audit_proposer_components`' expected key set
+grew by one. That test pins the exact set precisely so a new prompt
+component cannot escape token accounting — it failed correctly and was
+extended, not weakened.
+
+
+---
+
+## 16. Formal-gate policy — FROZEN, 2026-08-05
+
+Two read-only audits established the current behaviour and the original
+intent; the operator's ruling below closes the remaining question. This
+section supersedes any earlier statement in this document that conflicts
+with it.
+
+### 16.A What `force_formal_round` actually is
+
+**Not an operator override.** It defaults to `True` and forces
+`plan.is_trial = False` on the last round of every iteration regardless of
+what the planner picked — the "cross-architecture comparable formal score"
+contract the interpreter and proposer depend on
+(`agent/schemas/hyperparam_tuning.py:1188-1206`). Setting it `False` is
+documented as *"ONLY for testing/debugging"*.
+
+Every earlier passage in this document describing a formal round as
+"explicitly overridden" was reasoning from the name. Formal on the final
+round is the **default**, so the skip gate is the only thing that can
+prevent it.
+
+### 16.B The measured launch behaviour
+
+Executed through the real helpers, production posture (switch ON,
+skip Δ 0.0, bypass Δ 0.5, incumbent 10.0):
+
+| trial evidence | winner | skip | bypass | formal |
+|---|---|---|---|---|
+| no records | none | False | False | **RUNS** |
+| all invalid (99.0, 50.0) | none | False | False | **RUNS** |
+| invalid 99.0 only | none | False | False | **RUNS** |
+| valid 9.0 | 9.0 | **True** | False | skipped |
+| valid 10.0 (`== skip`) | 10.0 | False | False | RUNS |
+| valid 10.5 (`== bypass`) | 10.5 | False | **True** | RUNS, budget bypassed |
+| **no incumbent**, valid 0.001 | 0.001 | False | False | **RUNS** — gates inert |
+| **no incumbent**, valid 99.0, budget infeasible | 99.0 | False | False | **SKIPPED** — bypass could not fire |
+
+The last row is the v15 failure `8f1cf528` was written to fix, reappearing
+because the reference is absent rather than because the gate is wrong.
+
+### 16.C The bootstrap reference — OPERATOR DECISION
+
+**When the chain has no restored HealthGate-valid formal incumbent, the
+effective comparison reference is `-inf`.**
+
+Consequences, accepted deliberately: the first HealthGate-valid trial is
+never skipped, always clears any finite bypass threshold, bypasses the
+formal time budget, and establishes the chain's first formal baseline.
+From the next iteration the restored incumbent takes over and the gates
+tighten as the chain improves — the behaviour `8f1cf528` described.
+
+**No task-owned bootstrap artifact.** An earlier audit recommended seeding
+from a configured baseline; that recommendation is **withdrawn**. The
+historical seed was `5.5763`, and the repository classifies it in three
+independent places as the **class-127 phantom** — a *collapsed* model
+scoring well by a PSD artifact
+(`scripts/official_paper_health_scan.py:5`;
+`paper_and_collapse_reference_baselines.md:21` classifies the paper-spec
+wavenet baseline as **"Trained-but-collapsed"**, `mode_fraction ≥ 99.4%`,
+which fails all three role-`blocking` gates). Seeding it would give a
+collapse artifact gate authority over every new chain, and
+`test_delta_gates.py:250` already forbids phantom defaults. Every
+documented paper baseline is collapsed, so **there is no valid artifact to
+bootstrap from** — which is why `-inf` is the answer rather than a lookup.
+
+**Representation — `-inf` is a resolver value, never a stored one.**
+
+```text
+current_run_best_formal_score is not None
+  -> effective reference = that value
+  -> source = restored_valid_formal_incumbent
+
+current_run_best_formal_score is None
+  -> effective reference = float("-inf")
+  -> source = negative_infinity_bootstrap
+```
+
+The persisted form stays `None`; provenance records the source:
+
+```json
+{"formal_comparison_reference": null,
+ "formal_comparison_reference_source": "negative_infinity_bootstrap"}
+```
+
+Non-standard JSON `Infinity` is not emitted. `29ec0542` removed a fixed
+`0.0` default precisely because a stored sentinel became a silent policy;
+`-inf` must not repeat that as a stored value.
+
+*Audited, not assumed*: `current_run_best_formal_score` is **not** an
+operator-facing CLI flag. Its only supply path is
+`resume state → run_one_iteration.py:1687 → workflows/model_exploration.py:1471,1885 → tuner input`.
+No new CLI surface is required.
+
+### 16.D Launch validity and result authority are separate
+
+**Launch** asks: is there evidence worth spending a formal round on?
+
+```text
+winner = _best_trial_winner(memory_history)     # the single source
+winner is None                       -> skip formal
+winner.score <  ref + skip Δ         -> skip formal
+winner.score >= ref + bypass Δ       -> bypass the formal time budget
+otherwise                            -> ordinary time-budget decision
+```
+
+**Authority** asks: once a formal result exists, may it inform science?
+
+```text
+the formal record itself passes role-aware HealthGate validity
+AND result_authority == scientific
+AND (for historical records) authority is reconstructable
+```
+
+`valid_trial_count` and `no_valid_trial` are **removed as
+formal-authority blockers**. A first formal result that bypassed on the
+`-inf` bootstrap is no less authoritative for it; authority is a property
+of the result, not of how the launch was justified.
+
+`result_authority=diagnostic` does **not** suppress or bypass launch
+gates. A diagnostic run still obeys skip / budget / bypass; its results
+simply never become scientific. Any future "run formal with no valid
+trial" need is a **new explicit launch override**, never a reuse of
+`force_formal_round`.
+
+### 16.E The delta-ordering invariant
+
+```text
+skip_formal_min_delta <= bypass_formal_time_budget_min_delta
+```
+
+Measured: inverting them makes **both** gates fire
+(`skip Δ 1.0, bypass Δ 0.0` → thresholds 11.0 / 10.0 → scores 10.0-10.9
+return `skip=True` and `bypass=True`), and the schema accepts it with no
+validator. Today skip is evaluated first and short-circuits, so precedence
+is **statement order, not policy**. An inverted ordering is a
+**configuration refusal**, not a precedence rule.
+
+### 16.F Single source for the trial best
+
+`_best_trial_winner(memory_history)` stays authoritative for the current
+iteration's best HealthGate-valid trial. It is recomputed deterministically
+from records, already filters on validity, and already returns the **whole
+record** — which formal plan inheritance needs and a score-only field could
+not supply. `best_valid_trial_denoising_score` remains persisted
+provenance and must not become a second authority.
+
+**No mutable `best_valid_trial_score` is introduced.** A running value
+would add an update-ordering question and a resume-restoration question
+that the deterministic recomputation does not have.
+
+### 16.G Ownership
+
+| checkpoint | owns |
+|---|---|
+| **D-C1b** | delta-ordering refusal (16.E) |
+| **D-C3** | no-winner ⇒ skip; effective-reference resolution + provenance (16.C) |
+| **D-C2a/b** | authority derived from the formal record; `valid_trial_count` removed (16.D) |
+| **D-C8/doc** | purge remaining "explicitly overridden formal" language (16.A) |
+
+### 16.H Validation impact
+
+Layer 1 gains the 16.E refusal and the 16.C source resolution. Layer 2
+gains the 16.B matrix as scenarios, including both no-incumbent rows.
+Layer 3's scenario changes from *"zero valid trials + explicit override →
+formal runs non-authoritatively"* to **"zero valid trials → formal is
+skipped"**, plus a first-valid-trial run proving the `-inf` bootstrap
+bypasses the budget and establishes the first baseline.
+
+---
+
+## 21. Gate-readiness packets — Case A and Case B (2026-08-05)
+
+Required by the audit-before-expensive-validation policy. **No Gate launches
+until this section is reviewed.** Expensive validation is confirmation, never
+discovery.
+
+### 21.1 Case A — the formal/authority path
+
+**The one property.** A HealthGate-valid trial winner leads to a *completed*
+formal round whose record carries a recomputable authoritative verdict, and
+that record is admitted as the chain incumbent and into scientific
+aggregation.
+
+**Why synthetic execution cannot prove it.** Every step is already covered
+deterministically in unit tests. What no synthetic run can establish is that
+the REAL chain, on a real GPU with real training, traverses
+trial → winner → bootstrap → bypass → formal → authority → resume →
+aggregation as one connected path and persists each fact. Gate 2 has three
+times shown that the connected path is where things break.
+
+**PASS artifact.** Not "training started". Specifically:
+
+```text
+a formal record with time_mode=formal and status=success
+scientific_authority.authoritative == true, recomputable from stored facts
+formal_comparison_reference_source == negative_infinity_bootstrap
+the record admitted by restore_prior_state as incumbent
+the record present in the scientific aggregate
+no Infinity/NaN in any artifact
+manifest carries healthgate_mode, result_authority and
+  fixed_candidate_provenance on whatever branch is reached
+```
+
+**The candidate** — chosen as the LIGHTEST qualifying candidate, not the
+highest scoring:
+
+```text
+model            embedded_resconv_bigru_head_compact
+evidence         /home/klz/Data/SIDEREIS_DATA/v19/gate0/v19_c14_arch_15_19/
+                 iter_002/iteration_002/.../run_output_iter_002.json
+artifact sha256  2764d3d71b5b20466e7fe2c9b84e4ceb3b9b3a044553e4df19885b7410f724dc
+exp_id           embedded_resconv_bigru_head_compact_iter_002_001
+recorded         status=success, time_mode=trial, score 4.757
+gates passed     output_diversity_blocking, output_std_blocking,
+                 amplitude_collapse_blocking — all three, evaluated at
+                 today's thresholds (25 / 1.0 / 0.95)
+plugin source    10f7ab4e0b28809dcb8b719b05aeb2a93678b203b6c687c98da5c0746d7ee897
+                 historical and current are IDENTICAL byte-for-byte,
+                 so parameter semantics cannot have drifted
+candidate_source reconstructed_validation_plan
+```
+
+**Two caveats, stated rather than glossed:**
+
+1. **The historical framework SHA is unrecoverable** — the artifact records
+   none. What is proven is that the MODEL implementation and the GATE
+   THRESHOLDS are identical, not that the whole environment is reproduced.
+2. **The historical evidence is a TRIAL success only.** It supports "this
+   candidate very likely yields a valid trial winner". It does NOT support
+   "formal will succeed" — and formal completion, authority, resume and
+   aggregation are precisely what Case A must newly establish.
+
+#### 21.1.1 Workload bounds — requested vs ENFORCED
+
+The proposer being bypassed fixes the CANDIDATE. It does **not** bound the
+run: the tuner still resolves execution parameters, and some come from the
+LLM plan rather than the CLI. Audited per value; a value with no hard
+enforcement is **not** written as a ceiling.
+
+| value | requested | resolved from | hard maximum | enforced by |
+|---|---|---|---|---|
+| iterations | 1 | CLI | 1 | launcher (`max_iterations=1`) |
+| rounds | 2 | CLI | 2 | tuner loop `while completed_rounds < max_rounds` |
+| proposal attempts | n/a | — | n/a | proposer bypassed entirely |
+| epochs | 1 | CLI | 1 | **clamp** `min(planned, max_epochs)`, logged |
+| **trial portion** | 0.02 | `plan.trial_portion`, then clamped | **0.02** | **FU-D-12** `min(planned, validation_max_portion)` |
+| **trial train portion** | 0.02 | `plan.train_portion`, then clamped | **0.02** | **FU-D-12**, same clamp |
+| **trial eval portion** | 0.02 | `plan.eval_portion`, then clamped | **0.02** | **FU-D-12**, same clamp |
+| formal portion | 0.02 | `agent_input.formal_portion` | 0.02 | tuner reads the CLI value, not the plan |
+| formal train portion | 1.0 | `agent_input.formal_train_portion` | 1.0 | same |
+| formal eval portion | — | `agent_input.formal_eval_portion` | as set | same |
+| batch / segmentation | fixed plan | the injected plan | fixed | plan is frozen by hash |
+| trial time budget | 10 min | CLI | 10 min | `evaluate_time_skill` gates trial rounds |
+| formal time budget | 20 min | CLI | 20 min | `evaluate_time_skill` gates formal rounds |
+| total wall clock | — | outer `timeout` | **30 min** | OS, absolute |
+| VRAM inspection per candidate | — | `probe_budgets` | 120 s | `InconclusivePreflight` |
+| VRAM preflight total | — | `probe_budgets` | 1200 s | same |
+
+**CLOSED by FU-D-12** (PR #179, merged `ff6a143c`). Trial-mode portions were
+resolved from `plan.*` with no ceiling — the defect that made attempt 2 run
+0.1 against a requested 0.02. They are now clamped at the resolved boundary,
+in the same block as the existing `max_epochs` clamp:
+
+```text
+resolved trial value = min(planned value, validation_max_portion)
+```
+
+A maximum, never a replacement — it can only reduce. Formal-mode portions are
+untouched because they already come from operator input.
+
+**The artifact must prove it.** Every round records, on `ExperimentRecord`:
+
+```text
+validation_workload_ceiling:
+  enabled: true
+  configured_ceiling: 0.02
+  planned:   {trial_portion, train_portion, eval_portion}   # BEFORE the clamp
+  resolved:  {trial_portion, train_portion, eval_portion}   # what actually ran
+```
+
+The planned/resolved **pair** is the point: without it, a clamp that stopped
+firing would be indistinguishable from a planner that happened to choose
+small values, and the Gate could not prove the workload was bounded rather
+than merely requested. **Case A's artifact must contain this block**, and its
+absence is a Gate failure, not a cosmetic gap.
+
+Batch and segmentation are fixed because the plan is frozen and hashed —
+which is a genuine improvement over attempt 2, where the planner chose them.
+
+#### 21.1.2 Phase time estimate
+
+Measured from attempt 2, which ran the same shape at `segmentation_size=16000`:
+
+| phase | attempt 2 (seg 16000) | Case A estimate (seg 625) |
+|---|---|---|
+| proposal + implementation | ~3 min | **~1 min** (proposer bypassed; implement/validate still run) |
+| VRAM pre-flight sweep | ~13 min | **1–4 min** — the dominant cost scales with the forward trace, and segments are 25.6× shorter |
+| trial round | 5m41s train + ~5 min score | **3–8 min** |
+| formal round | not reached | **5–12 min** (portion 0.02, train_portion 1.0) |
+| **total** | 50 min (no formal) | **10–25 min**, hard-capped at 30 |
+
+If it exceeds 30 minutes the outer timeout ends it and that is a
+harness-design finding, not a reason to extend.
+
+#### 21.1.3 Go conditions
+
+```text
+[ ] fixed plan written and its sha256 frozen
+[ ] fresh workspace, never used
+[ ] proposer bypassed          (log: "[FIXED PLAN] proposer bypassed")
+[ ] implementor/validator/tuner still run   (asserted by unit test)
+[ ] --health_gate_enabled
+[ ] --healthgate_mode blocking
+[ ] --result_authority scientific
+[ ] --enable_chain_incumbent_formal_gates
+[ ] no prior incumbent (cold start, no --seed_paths)
+[ ] declarations + candidate provenance reachable on every branch (AST-verified)
+[ ] --trial_time_budget_minutes 10 --formal_time_budget_minutes 20
+[ ] outer timeout 30m
+```
+
+#### 21.1.4 Failure classification, decided BEFORE launch
+
+| observation | classification |
+|---|---|
+| formal completes, verdict authoritative, incumbent admitted | **PASS** |
+| trial collapses under HealthGates → formal skipped | **legitimate scientific invalidity** — but the fixed candidate has passing evidence, so this would indicate environment drift, NOT a product defect. Do not reroll the candidate |
+| `InconclusivePreflight` | **harness defect** — the budget is too small for this candidate; redesign, do not extend |
+| outer timeout fires | **missing bounds** — a harness-design finding |
+| formal record produced but not authoritative | **PRODUCT DEFECT** — the thing PR D exists to prevent |
+| record authoritative but not admitted by resume/aggregation | **PRODUCT DEFECT** |
+| crash in runtime control / probe | **product defect**, classify against §20 |
+
+### 21.2 Case B — stable external occupancy
+
+**The one property.** Stable, attributable external GPU occupancy does not
+invalidate a calibration.
+
+**Why synthetic execution cannot prove it.** 32 unit tests already prove the
+classifier and the eligibility rule. What they cannot prove is that a REAL
+device with a REAL foreign process holding memory produces attributable
+telemetry and a valid verdict through the production path.
+
+**No LLM, no training, no formal round.** Case A owns the formal chain.
+
+**Components — the repository's own, not a bespoke harness:**
+
+```text
+scripts/bg_gpu_holder.py       controlled external load: occupancy MEASURED
+                               not assumed, device named by UUID not index,
+                               self-terminating on deadline/signal/exception
+scripts/runtime_bootstrap.py   samples the contention window and runs a real
+                               bounded probe — now passes device_identity
+                               after FU-C-1 (#177)
+```
+
+**Production reachability — established by FU-C-1, not assumed.** Before that
+fix `bootstrap.py` called `run_bounded_probe` without a device, so no
+occupancy window was built and `MeasurementValidity` was always `None`. Case
+B would have run to completion and proved nothing. That is why the fix was a
+prerequisite rather than a follow-up.
+
+**PASS artifact:**
+
+```text
+external PID set identical across every sample in the window
+external attributed bytes VARY (a constant load proves the weaker property)
+candidate-owned demand attributed separately
+unattributed memory does not grow
+sampling complete — no telemetry gaps
+MeasurementValidity == valid_current_conditions
+the estimate remains blocking-capable under that occupancy
+```
+
+**Bounds**: hard total timeout **10 minutes**; stop the moment the verdict is
+observed. Expected: 2–4 minutes.
+
+**Failure classification:**
+
+| observation | classification |
+|---|---|
+| `valid_current_conditions` with a stable external PID set | **PASS** |
+| `unstable_external_identity` | the load misbehaved — **harness defect**, fix the holder |
+| `unattributed_occupancy_growth` | third-party GPU work present — **environment**, clear and retry |
+| `sampling_incomplete` | telemetry failure — **environment** |
+| verdict absent entirely | **PRODUCT DEFECT** — the FU-C-1 path regressed |
+
+### 21.3 Status
+
+```text
+fixed candidate selected            PASS
+plugin semantic equivalence         PASS (byte-identical)
+historical trial validity           PASS (all three blocking gates, today's thresholds)
+formal-path evidence                PENDING — this is what Case A must produce
+PR D integrated head                14d77eab
+readiness packets                   THIS SECTION — awaiting review
+Gate 2                              NOT LAUNCHED
+```
+
+### 21.4 Final transport audit — four chains, 2026-08-05
+
+Run on the integrated PR D head **after** every prerequisite merged, because
+chains 3 and 4 do not exist on master and auditing there produces a false
+negative (observed and discarded during this work).
+
+Every hop verified by **AST on the real production path**, not by grepping a
+field name — the substring habit that let a misplaced kwarg pass its own test
+in FU-D-12.
+
+**Chain 1 — fixed candidate plan → trial → artifact provenance**
+
+| hop | result |
+|---|---|
+| launcher loads and validates the plan | ✅ |
+| launcher → `run_workflow(validation_fixed_candidate_plan=…)` | ✅ line 1841 |
+| workflow bypasses the proposer ONLY | ✅ |
+| implementor / validator / tuner still run | ✅ all three present, outside the bypass |
+| provenance → `write_manifest` | ✅ **all 6 branches** |
+
+**Chain 2 — workload ceiling → resolved `TrialConfig` → `ExperimentRecord`**
+
+| hop | result |
+|---|---|
+| launcher → `run_workflow` | ✅ |
+| workflow → `local_validated_model` (the protocol) | ✅ line 2560 |
+| protocol accepts **and maps** | ✅ |
+| `HyperparamTuningInput.validation_max_portion` declared | ✅ |
+| `ExperimentRecord.validation_workload_ceiling` declared | ✅ |
+| clamp applied AFTER `_resolve_sample_set_cfg` | ✅ |
+| record stamped every round | ✅ |
+
+**Chain 3 — device identity → occupancy window → validity → decision**
+
+| hop | result |
+|---|---|
+| bootstrap resolves identity via the one permitted adapter | ✅ |
+| bootstrap → `run_bounded_probe(device_identity=…)` | ✅ line 483 |
+| tuner → `build_production_probe_runner(device_identity=…)` | ✅ line 1206 |
+| wiring accepts and forwards | ✅ |
+| probe → sampler passes the device | ✅ |
+| sampler builds the occupancy window | ✅ |
+| `ProbeResult` carries the verdict | ✅ |
+| `extrapolate_probe` → estimate | ✅ |
+| **the decision consumes it** — `blocking = measured and validity == VALID` | ✅ |
+
+**Chain 4 — formal authority → artifact → resume → aggregation**
+
+| hop | result |
+|---|---|
+| tuner writes the verdict onto the formal record | ✅ |
+| `ExperimentRecord.scientific_authority` declared | ✅ |
+| `Output.healthgate_mode` / `result_authority` / `formal_comparison_reference_source` / `best_valid_formal_exp_id` declared | ✅ all four |
+| manifest declarations on every branch | ✅ **all 6** |
+| resume gates the incumbent on authority | ✅ |
+| aggregation consumes the verdict | ✅ |
+
+**Result: no sixth gap. All four chains closed.**
+
+That is what makes paying for full CI and the real Gates justified — the
+expensive layers are now expected to CONFIRM, not to discover.
+
+**Why this audit exists.** The five prerequisite PRs (#175–#179) are not five
+scattered bugs. They are one engineering weakness, stated plainly so it is not
+relearned:
+
+> **Producing a correct value locally is not the same as the production chain
+> delivering it.**
+
+Four of the five were instances of it. Two were caught only by mutation, one
+by a Gate costing ~50 minutes, one by an operator question, and one — the
+last — by a cheap parity guard before any expensive layer ran. The ladder is
+closing the weakness systematically rather than case by case.
+
+---
+
+## 22. Case A reclassified — deterministic acceptance (operator, 2026-08-05)
+
+**Case A is no longer a real-training Gate and is no longer a PR D merge
+blocker.**
+
+### 22.1 The category error
+
+Case A conflated two different things:
+
+| | nature |
+|---|---|
+| is PR D's control logic correct? | a **deterministic** state machine |
+| does a model train well enough on a small data fraction to clear a HealthGate? | a **stochastic** scientific outcome |
+
+Gating the first on the second made PR D's acceptance depend on whether a
+model happened to collapse, whether the data fraction was large enough, and on
+training randomness. **Four attempts, four unrelated causes, none a defect in
+the behaviour under test**:
+
+| attempt | cause |
+|---|---|
+| Gate 2 #1 | probe attribution counted the candidate's own memory as foreign |
+| Case A #1 | a 30-layer WaveNet overran the 120 s inspection budget |
+| Case A #2 | the LLM-proposed model collapsed; gates correctly invalidated it |
+| Case A #3 | **my own ceiling** clamped `train_portion` 0.1 → 0.02, starving training 5× |
+
+Attempt 3 is the sharpest illustration: the harness caused the failure, and
+the artifact would have read as "the candidate failed to reproduce" to any
+later reader.
+
+### 22.2 What Case A actually had to prove
+
+```text
+valid trial fixture -> winner -> -inf bootstrap -> bypass
+  -> formal record -> authority -> resume incumbent -> aggregation
+```
+
+Every step is a deterministic data flow and state machine. None of it becomes
+more true by being driven with real training.
+
+Already established, and unaffected by this change:
+
+* the full producer → artifact → consumer audit (§21.4, four chains);
+* unit, integration and mutation coverage;
+* **real** evidence of the `-inf` bootstrap (`reference=-inf, skip=-inf,
+  bypass=-inf`, `negative_infinity_bootstrap` persisted);
+* **real** evidence that an invalid trial skips formal
+  (`reason=no_valid_trial_winner`);
+* **real** artifacts containing no `Infinity`/`NaN`;
+* **real** evidence that the workload ceiling binds (§21, planned 0.05/0.1/0.05
+  → resolved 0.02/0.02/0.02).
+
+### 22.3 The replacement
+
+`tests/integration/workflows/test_pr_d_positive_path_deterministic.py` — 11
+tests driving the REAL `ScientificAuthority`, `resolve_record_authority`,
+aggregation partition and artifact serialisation, with only the LLM and the
+training substituted. It proves the verdict is derived not asserted, survives
+nesting inside `all_records`, **recomputes** from stored facts, is admitted by
+both consumers, and is refused at both when made diagnostic.
+
+Precedent: `test_chain_incumbent_pseudo.py` established this exact split for
+V19 PR 1, *"so that the downstream Gate 2 smoke does not need to force a
+particular stochastic real-training outcome."*
+
+### 22.4 What remains a real Gate
+
+**Case B only.** Stable, attributable external GPU occupancy must not
+invalidate a calibration — a property synthetic execution cannot establish,
+because it is about a real device with a real foreign process.
+
+### 22.5 Merge criteria, revised
+
+```text
+exact-head CI green
++ deterministic Case A positive-path integration green
++ real Case B green
+-> PR D may merge
+```
+
+A real scientific candidate reaching `valid trial → formal → authoritative
+result` is **V20 campaign evidence**, produced by the campaign at its normal
+portions. It is not a precondition for merging the infrastructure that makes
+such a result interpretable.
+
+### 22.6 Attempt 4 — observational, and it DISPROVED my hypothesis
+
+Launched before this reclassification with the ceiling corrected to 0.1,
+covering the historical passing workload. Outcome:
+
+```text
+round 1   skipped_time_risk          (the trial time gate rejected it)
+round 2   failed_mode_collapse       score -3.076
+ceiling   planned 0.1/0.1/0.1 -> resolved 0.1/0.1/0.1   (at the ceiling)
+result    no valid trial winner -> formal skipped -> status=no_records
+```
+
+**The ceiling was NOT the cause.** At `train_portion=0.1` — the exact value
+the historical passing run used — the candidate collapsed again (-3.076,
+against attempt 3's -3.345 at 0.02). My earlier attribution of attempt 3 to
+"my ceiling starved training 5x" is **withdrawn**: it was a plausible
+mechanism, and the measurement refutes it.
+
+The correct classification stands as the pre-decided one:
+
+> **the candidate failed to reproduce as HealthGate-valid under the current
+> run.** Causes remain unresolved by these artifacts. Not a product defect,
+> not attributable to the ceiling, and not a reason to select another
+> candidate.
+
+Two facts the historical evidence cannot bridge: the framework SHA of that run
+is unrecoverable, and much has changed since (PR A/B/C/E plus five
+prerequisite fixes). A byte-identical model source does not make a
+byte-identical environment.
+
+**This is precisely why §22 reclassifies Case A.** Four real-training attempts
+produced four unrelated failures and never once exercised the state machine
+under test. The deterministic replacement proves that logic in 0.11 seconds,
+every time.
+
+Attempt 4's outcome gates nothing. It is recorded as evidence, and as a
+correction to my own earlier diagnosis.

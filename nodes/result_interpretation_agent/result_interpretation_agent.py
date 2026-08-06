@@ -42,6 +42,7 @@ from agent.schemas.interpretation import (
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.scientific_aggregation import partition_for_aggregation
 from ml_models.model_descriptions import get_model_description
 
 if TYPE_CHECKING:
@@ -1031,6 +1032,29 @@ class ResultInterpretationAgent:
             per_model_worst.setdefault(mt, None)
             per_model_best_config.setdefault(mt, None)
 
+        # --- V20 PR D (D-C5): the scientific aggregate excludes
+        #     non-authoritative formal results, and says so ---
+        # Deterministic and BEFORE any LLM call. `per_model_formal` is the
+        # formal-score aggregate that reaches the synthesis prompt, so a
+        # non-authoritative formal score left in it would inform a
+        # scientific claim — which is exactly what the authority verdict
+        # exists to prevent.
+        #
+        # The excluded results are NOT deleted: they stay on the summaries
+        # and in the typed scope below, which the report renders. §4.7
+        # keeps that rendering deterministic rather than asking the model
+        # to mention it — a model may simply not, and exclusion text inside
+        # a prompt can steer the interpretation it then writes.
+        #
+        # Cached-model entries (from `_stats`, no verdict) resolve to
+        # `unreconstructable_legacy` and are excluded, which is the frozen
+        # rule for anything missing the authority contract.
+        aggregation_scope = partition_for_aggregation(inp.summaries)
+        _authoritative = set(aggregation_scope.included)
+        per_model_formal = {
+            mt: score for mt, score in per_model_formal.items() if mt in _authoritative
+        }
+
         # Serialize expert advice (soft edge input)
         expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
 
@@ -1571,6 +1595,11 @@ class ResultInterpretationAgent:
                     "per_model_best_valid": per_model_best_valid,
                     "per_model_raw_best_health_validity": per_model_raw_best_health_validity,
                     "per_model_worst": per_model_worst,
+                    # D-C5: threaded into BOTH the healthy and the
+                    # degraded dict, so an interpreter LLM failure
+                    # cannot lose the exclusion provenance — the same
+                    # structural rule the health evidence follows.
+                    "scientific_aggregation": aggregation_scope.model_dump(),
                     "best_denoising_score": overall_best_score,
                     "best_valid_denoising_score": overall_best_valid_score,
                     "worst_denoising_score": overall_worst_score,
@@ -1658,6 +1687,11 @@ class ResultInterpretationAgent:
                     "per_model_best_valid": per_model_best_valid,
                     "per_model_raw_best_health_validity": per_model_raw_best_health_validity,
                     "per_model_worst": per_model_worst,
+                    # D-C5: threaded into BOTH the healthy and the
+                    # degraded dict, so an interpreter LLM failure
+                    # cannot lose the exclusion provenance — the same
+                    # structural rule the health evidence follows.
+                    "scientific_aggregation": aggregation_scope.model_dump(),
                     "best_denoising_score": overall_best_score,
                     "best_valid_denoising_score": overall_best_valid_score,
                     "worst_denoising_score": overall_worst_score,
@@ -2078,6 +2112,12 @@ def tuning_output_to_model_run_summary(
         best_file_vector=best_rec.file_vector if best_rec else None,
         formal_score=formal_rec.denoising_score if formal_rec else None,
         best_valid_formal_score=(valid_formal_rec.denoising_score if valid_formal_rec else None),
+        # D-C5: the verdict of the SAME formal record `formal_score` came
+        # from, so the score and its authority cannot describe different
+        # experiments. None when no formal record exists — which excludes
+        # this model from the scientific aggregate rather than admitting it
+        # on an unestablished authority.
+        scientific_authority=(formal_rec.scientific_authority if formal_rec else None),
         formal_file_vector=formal_rec.file_vector if formal_rec else None,
         # Per-file performance (enriched — Phase 4)
         best_score_table=best_score_table,

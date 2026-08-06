@@ -41,6 +41,9 @@ _EXPECTED_KEYS = {
     "agent_cards_block",
     "prior_stage_outputs",
     "recent_gate_block",
+    # V20 PR D (D-C6): the all-trials-invalid block is a prompt component
+    # like any other, so it must be token-accounted too.
+    "recent_trial_validity_block",
 }
 
 
@@ -61,7 +64,7 @@ def _make_input(**overrides: Any) -> ProposalInput:
     return ProposalInput(**base)
 
 
-def test_audit_components_returns_all_10_keys_with_full_payload():
+def test_audit_components_returns_every_key_with_full_payload():
     inp = _make_input(previous_failures=["err one", "err two longer"])
     accumulated: dict[str, Any] = {
         "candidates": [],  # empty list → markdown helper returns ""

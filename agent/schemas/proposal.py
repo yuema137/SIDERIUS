@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
     ExpertAdvice,
     ExpertAdviceInput,
@@ -871,6 +872,18 @@ class ProposalInput(BaseModel):
             "of recent HyperparamTuningOutputs. Replaces K.7.2's "
             "single-slot prior_iteration_gate_exhaustion. See "
             "docs/resource_estimator_implement.md §10.13 + §14.N."
+        ),
+    )
+    recent_trial_validity: list[TrialValidityFeedback] = Field(
+        default_factory=list,
+        description=(
+            "V20 PR D (D-C6) — up to the last K iterations that produced NO "
+            "HealthGate-valid trial winner, oldest first. Sparse: iterations "
+            "with a valid winner contribute nothing, so a healthy chain leaves "
+            "this empty and the prompt block is suppressed. Distinct from "
+            "recent_gate_exhaustions, which reports BUDGET exhaustion — these "
+            "trials ran and succeeded and then failed their scientific gates, "
+            "which calls for a different response."
         ),
     )
 

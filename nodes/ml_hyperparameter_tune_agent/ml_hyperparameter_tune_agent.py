@@ -30,6 +30,10 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.schemas.health_feedback import (
+    InvalidTrialOutcome,
+    TrialValidityFeedback,
+)
 from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     ExperimentRecord,
@@ -66,15 +70,21 @@ from core.run_invariants import (
 from core.runtime_control.failure_attribution import may_recommend_resource_reduction
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
+from core.scientific_authority import ScientificAuthority
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.dataset_config import DataScope, ScopeViolationError
-from execute_tools.health_checks.candidate_eligibility import is_valid_candidate
+from execute_tools.health_checks.candidate_eligibility import (
+    classify_candidate_health,
+    formal_validity_of,
+    is_valid_candidate,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
     BLOCKING_ACTIONS,
+    CandidateHealthValidity,
     GateAction,
     GateResult,
     HealthCheckContext,
@@ -1259,40 +1269,62 @@ def _best_trial_winner(memory_history: list) -> dict | None:
 
 
 def _should_skip_formal(
-    memory_history: list,
+    winner: dict | None,
     *,
     threshold: float | None,
+    gates_enabled: bool,
 ) -> bool:
-    """Return whether the best valid trial falls below the formal threshold.
+    """Whether to skip the formal round.
 
-    ``threshold`` is the RESOLVED value from
-    ``_resolve_formal_comparison_thresholds`` — the single source of the
-    gate arithmetic (V19 PR 1). ``None`` (no chain incumbent) means the
-    gate never fires.
+    Takes the ALREADY-RESOLVED winner so that the skip gate, the bypass
+    gate and the formal plan inheritance all judge the same record. Three
+    independent `_best_trial_winner` calls would agree today only because
+    the history does not change between them — a coincidence, not a
+    guarantee.
+
+    Two reasons to skip, and the first is V20 PR D's correction:
+
+    - **no valid trial winner** — no trial ran, all failed, or none passed
+      its HealthGate. There is no evidence that justifies the cost of a
+      formal round. Previously this returned ``False`` (via
+      ``winner is not None and …``), so *absence of evidence* was
+      indistinguishable from *sufficient evidence* and the round ran
+      anyway. A high-scoring INVALID trial cannot change this: it never
+      becomes the winner.
+    - the winner is below the skip threshold.
+
+    ``gates_enabled`` is the feature switch. With the gates off this
+    behaves exactly as before — including running formal with no valid
+    winner — because the deltas are not consumed at all.
     """
 
+    if not gates_enabled:
+        return False
+    if winner is None:
+        return True
     if threshold is None or threshold == float("-inf"):
         return False
-    winner = _best_trial_winner(memory_history)
-    return winner is not None and winner["denoising_score"] < threshold
+    return winner["denoising_score"] < threshold
 
 
 def _should_bypass_formal_time_budget(
-    memory_history: list,
+    winner: dict | None,
     *,
     threshold: float | None,
 ) -> bool:
-    """Return whether the best valid trial clears the formal bypass threshold.
+    """Whether the winner clears the bypass threshold.
 
-    ``threshold`` is the RESOLVED value from
-    ``_resolve_formal_comparison_thresholds``. ``None`` (no chain
-    incumbent) means the gate never fires.
+    Takes the same resolved winner the skip gate judged. On a chain with
+    no formal incumbent the threshold resolves to ``-inf`` (the
+    ``negative_infinity_bootstrap``), so the first valid trial always
+    clears it and establishes the chain's first formal baseline.
     """
 
+    if winner is None:
+        return False
     if threshold is None or threshold == float("inf"):
         return False
-    winner = _best_trial_winner(memory_history)
-    return winner is not None and winner["denoising_score"] >= threshold
+    return winner["denoising_score"] >= threshold
 
 
 def _resolve_formal_comparison_thresholds(
@@ -1300,10 +1332,12 @@ def _resolve_formal_comparison_thresholds(
     reference_score: float | None,
     skip_min_delta: float,
     bypass_min_delta: float,
-) -> tuple[float | None, float | None, float | None]:
+    gates_enabled: bool,
+) -> tuple[float | None, float | None, float | None, str]:
     """Resolve invocation-wide formal comparison values once.
 
-    The returned tuple is ``(reference, skip_threshold, bypass_threshold)``.
+    The returned tuple is
+    ``(reference, skip_threshold, bypass_threshold, source)``.
     V19 PR 1: this is the SINGLE authoritative computation — the gates,
     the startup banner, and the durable output metadata all consume these
     values, so the persisted thresholds provably equal what the gates
@@ -1312,12 +1346,60 @@ def _resolve_formal_comparison_thresholds(
     """
 
     if reference_score is None:
-        return (None, None, None)
+        if not gates_enabled:
+            # Feature off: the deltas are not consumed, so nothing is
+            # resolved and both gates stay inert — pre-V20 behaviour,
+            # unchanged.
+            return (None, None, None, "gates_disabled")
+        # V20 PR D §16.C — the negative-infinity bootstrap. A chain with
+        # no restored HealthGate-valid formal incumbent has no reference,
+        # and the pre-D behaviour was for both gates to fall silent: a
+        # valid trial of 0.001 proceeded to formal, while an excellent
+        # trial was still budget-blocked because bypass could not fire.
+        # That is the v15 failure the bypass gate was written to fix,
+        # reappearing because the reference is absent.
+        #
+        # -inf arms them instead: the first valid trial is never skipped,
+        # always clears the bypass threshold, and establishes the chain's
+        # first formal baseline. From the next iteration the restored
+        # incumbent takes over and the gates tighten as the chain improves.
+        #
+        # There is no seeded artifact to use instead: every documented
+        # paper baseline is trained-but-collapsed, and the historical seed
+        # (5.5763) is the class-127 phantom.
+        bootstrap = float("-inf")
+        return (bootstrap, bootstrap, bootstrap, "negative_infinity_bootstrap")
     return (
         reference_score,
         reference_score + skip_min_delta,
         reference_score + bypass_min_delta,
+        "restored_valid_formal_incumbent",
     )
+
+
+def _json_safe_reference(value: float | None) -> float | None:
+    """A reference or threshold that JSON can actually carry.
+
+    ``-inf`` is a RESOLVER value, never a stored one (§16.C). Non-standard
+    JSON ``Infinity`` is rejected by strict parsers, and `29ec0542` removed
+    a fixed ``0.0`` default precisely because a stored sentinel became a
+    silent policy — so an infinite bound persists as ``null`` and
+    ``formal_comparison_reference_source`` carries the meaning instead.
+
+    This also covers the pre-existing case of an operator explicitly
+    disabling a gate with ``float("-inf")`` / ``float("inf")``, which could
+    already put ``Infinity`` in an artifact.
+
+    The test is ``math.isfinite``, deliberately, and NOT
+    ``value in (-inf, +inf)``: that form compares by equality, and **NaN is
+    not equal to itself**, so a NaN threshold would slip through and
+    ``json.dump`` (whose ``allow_nan`` defaults to ``True``) would write a
+    bare ``NaN`` into the artifact. One finite check covers all three
+    non-standard values.
+    """
+    if value is None or not math.isfinite(value):
+        return None
+    return value
 
 
 def _fmt_reference(value: float | None) -> str:
@@ -1462,6 +1544,7 @@ def _apply_mode_override_chain(
     force_formal_round: bool,
     formal_round_strategy: str = "full_clone",
     memory_history: list | None = None,
+    trial_winner: dict | None,
 ) -> ExperimentPlan:
     """Apply the run-level + last-round overrides to ``plan``.
 
@@ -1512,6 +1595,23 @@ def _apply_mode_override_chain(
       score=<float> inherited=<comma-list>`` on the inherit path, OR
       a WARNING line on the no-winner path (full_clone / hybrid_params).
 
+    **``trial_winner`` is supplied, never re-derived** (V20 PR D, FU-D-6).
+    The tuner resolves the iteration's HealthGate-valid trial winner ONCE
+    at the formal-round boundary, and the skip gate, the bypass gate, the
+    log line and this inheritance path all judge that same record. This
+    function used to call ``_best_trial_winner(memory_history)`` itself.
+    That agreed with the gates by construction — a formal round forces
+    ``plan.is_trial = False``, so nothing it appends can satisfy the
+    winner filter — but agreement by construction is not the same as one
+    snapshot, and the frozen design (§16.F) requires the snapshot. Keeping
+    the second call would leave a seam where a later state update between
+    the gates and inheritance silently diverges the two.
+
+    ``memory_history`` is still required, and is NOT redundant: the
+    full-clone OOM-recovery branch inspects the LATEST record and the
+    maximum ``round_index`` across the whole history, which a winner alone
+    cannot answer.
+
     Mutates ``plan`` in place and returns it for caller-chaining.
     """
     if not trial_allowed:
@@ -1539,7 +1639,7 @@ def _apply_mode_override_chain(
         + (f" (alias_of:{formal_round_strategy})" if canonical != formal_round_strategy else "")
     )
 
-    winner = _best_trial_winner(memory_history or [])
+    winner = trial_winner
     if winner is None:
         if canonical == "independent":
             # ``independent`` explicitly disclaims inheritance — a missing
@@ -1961,6 +2061,119 @@ def _collect_disallowed_patterns(
         tags.update(tag_architecture(model_type, model_config))
 
     return sorted(tags)
+
+
+def _build_trial_validity_feedback(
+    records: list,
+    *,
+    formal_skipped_for_no_valid_winner: bool,
+    healthgate_mode: str | None,
+) -> TrialValidityFeedback | None:
+    """Report an iteration whose trials produced no valid candidate.
+
+    V20 PR D (D-C6). Fires when trial-mode records exist but
+    :func:`_best_trial_winner` would return ``None`` — the planner
+    otherwise sees an iteration that simply produced no good score, with no
+    way to tell "nothing ran" from "everything collapsed".
+
+    **A separate carrier from `_build_gate_exhaustion`, and the audit is
+    why.** That helper's two triggers both require budget-gated records
+    (``skipped_oom_risk`` / ``skipped_time_risk``); an all-invalid
+    iteration has records that RAN and SUCCEEDED and then failed their
+    scientific gates, so neither trigger fires and the block would be
+    ``None``. Merging them would need a third trigger with unrelated
+    semantics inside a structure whose every field means "budget
+    exhaustion", and would tell the planner to propose something
+    *lighter* when the actual evidence says propose something that does
+    not *collapse*.
+
+    **Facts only, task-generic.** Gate names, reasons and metrics are
+    passed through exactly as the gate system recorded them. Nothing here
+    interprets a metric or suggests a remedy — that is the planner's job,
+    and task-specific advice in workflow code is what §3.3 forbids.
+
+    Returns ``None`` when at least one trial is valid, so a healthy run's
+    downstream prompt is byte-identical to before.
+    """
+    trials = [
+        r
+        for r in records
+        if r.get("is_trial") is True and (r.get("memory") or {}).get("time_mode") == "trial"
+    ]
+    if not trials:
+        return None  # no trial stage at all is a different fact, not this one
+    if any(is_valid_candidate(r) for r in trials):
+        return None  # a valid winner exists; nothing to report
+
+    outcomes: list[InvalidTrialOutcome] = []
+    invalid = unknown = execution_failures = 0
+    evidence_absent: list[str] = []
+
+    for record in trials:
+        exp_id = record.get("exp_id")
+        status = str(record.get("status", "unknown"))
+        validity = classify_candidate_health(record)
+
+        if status != "success":
+            # The evidence is ABSENT, not negative: nothing was scored, so
+            # no gate could have judged it.
+            execution_failures += 1
+        elif validity is CandidateHealthValidity.INVALID:
+            invalid += 1
+        else:
+            unknown += 1
+
+        results = [r for r in (record.get("health_gate_results") or []) if isinstance(r, dict)]
+        if status == "success" and validity is CandidateHealthValidity.UNKNOWN:
+            # UNKNOWN is not a soft "invalid" — it means the gate evidence
+            # was incomplete, and saying WHICH way is the difference
+            # between "the model collapsed" and "we cannot tell". A
+            # partial gate set reads exactly like a pass unless named.
+            evidence_absent.append(
+                f"{exp_id or '<unidentified>'}: validity unknown — "
+                + (
+                    "no gate results persisted"
+                    if not results
+                    else f"only {len(results)} gate result(s) persisted, required set incomplete"
+                )
+            )
+
+        failed_names = sorted(
+            str(r.get("gate_name"))
+            for r in results
+            if r.get("gate_name")
+            and (
+                r.get("check_passed") is False or r.get("would_invalidate_under_production_policy")
+            )
+        )
+        reasons = sorted({str(r["failure_reason"]) for r in results if r.get("failure_reason")})
+        metrics: dict[str, float | int | str] = {}
+        for r in results:
+            for key, value in (r.get("key_metrics") or {}).items():
+                if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                    metrics[f"{r.get('gate_name')}.{key}"] = value
+
+        outcomes.append(
+            InvalidTrialOutcome(
+                exp_id=exp_id,
+                status=status,
+                health_validity=validity,
+                failed_gate_names=failed_names,
+                failure_reasons=reasons,
+                key_metrics=metrics,
+            )
+        )
+
+    return TrialValidityFeedback(
+        trial_records_considered=len(trials),
+        invalid_count=invalid,
+        unknown_validity_count=unknown,
+        execution_failure_count=execution_failures,
+        outcomes=outcomes,
+        formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
+        healthgate_mode=healthgate_mode,
+        evidence_absent=evidence_absent,
+    )
 
 
 def _build_gate_exhaustion(
@@ -3285,8 +3498,10 @@ class HyperparamTuningAgent:
             formal_reference_score,
             resolved_skip_formal_threshold,
             resolved_bypass_formal_threshold,
+            formal_reference_source,
         ) = _resolve_formal_comparison_thresholds(
             reference_score=_consumed_reference,
+            gates_enabled=agent_input.enable_chain_incumbent_formal_gates,
             skip_min_delta=agent_input.skip_formal_min_delta,
             bypass_min_delta=agent_input.bypass_formal_time_budget_min_delta,
         )
@@ -3301,9 +3516,12 @@ class HyperparamTuningAgent:
             "max_rounds": max_rounds,
             "file_index": file_index,
             "trial_allowed": trial_allowed,
-            "formal_reference_score": formal_reference_score,
-            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            "formal_reference_score": _json_safe_reference(formal_reference_score),
+            "formal_comparison_reference_source": formal_reference_source,
+            "resolved_skip_formal_threshold": _json_safe_reference(resolved_skip_formal_threshold),
+            "resolved_bypass_formal_threshold": _json_safe_reference(
+                resolved_bypass_formal_threshold
+            ),
             # V19 PR 1 audit provenance: the provided incumbent and the
             # coupling-flag state, so "provided but not consumed" (flag
             # OFF) is distinguishable from "no incumbent existed".
@@ -3324,6 +3542,11 @@ class HyperparamTuningAgent:
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,
+            # V20 PR D (D-C1a): declared enforcement/authority axes,
+            # echoed from the input so provenance and output cannot
+            # disagree with what the run was launched under.
+            "healthgate_mode": agent_input.healthgate_mode,
+            "result_authority": agent_input.result_authority,
             "health_checks_config_source": health_checks_config_source,
             "health_checks_config_effective": agent_input.health_checks_config
             if agent_input.health_gate_enabled
@@ -3417,6 +3640,11 @@ class HyperparamTuningAgent:
         # any LLM call (the first plan call happens in the round loop below).
         _validate_history_and_lock(workspace, run_invariants, existing_history, _lock_was_present)
         consecutive_fails = 0
+        # D-C6: set at the skip gate itself, so the feedback can state
+        # WHY formal did not run rather than inferring it from the
+        # absence of a formal record — which cannot distinguish a
+        # no-winner skip from a budget skip.
+        _skipped_formal_for_no_valid_winner = False
         # Set to True when a SKIP_ITER gate action breaks the outer while
         # loop before max_rounds. Consumed by _compute_termination_state
         # to distinguish gate-driven aborts from fail-round-driven aborts
@@ -3468,24 +3696,44 @@ class HyperparamTuningAgent:
             # the startup-resolved value (V19 PR 1: single-source
             # arithmetic; ``None`` = no chain incumbent = gate inert).
             # Disabled by ``skip_formal_min_delta=float('-inf')``.
+            # V20 PR D (D-C3): the winner is resolved ONCE here and reused
+            # by the skip gate, the bypass gate and the log line below.
+            # Three independent `_best_trial_winner` calls would agree only
+            # because the history does not change between them — a
+            # coincidence, not a guarantee.
+            formal_trial_winner = _best_trial_winner(sandbox.get_summary() or [])
             if (
                 is_formal_round
                 and agent_input.force_formal_round
                 and _should_skip_formal(
-                    sandbox.get_summary() or [],
+                    formal_trial_winner,
                     threshold=resolved_skip_formal_threshold,
+                    gates_enabled=agent_input.enable_chain_incumbent_formal_gates,
                 )
             ):
-                _winner = _best_trial_winner(sandbox.get_summary() or [])
+                _winner = formal_trial_winner
                 _best_trial_score = _winner.get("denoising_score") if _winner is not None else None
-                print(
-                    f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
-                    f"reference({_fmt_reference(formal_reference_score)}) "
-                    f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
-                    f"{_fmt_reference(resolved_skip_formal_threshold)} — "
-                    "skipping formal round.",
-                    flush=True,
-                )
+                if _best_trial_score is None:
+                    # D-C3's correction: no valid trial winner is no
+                    # evidence, and no evidence does not justify the cost
+                    # of a formal round. Previously this case returned
+                    # False and the round ran anyway.
+                    _skipped_formal_for_no_valid_winner = True
+                    print(
+                        "\n  [SkipFormal] no HealthGate-valid trial winner in this "
+                        "iteration (reason=no_valid_trial_winner) — skipping the "
+                        "formal round rather than spending it on no evidence.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"\n  [SkipFormal] Best trial {_best_trial_score:.4f} < "
+                        f"reference({_fmt_reference(formal_reference_score)}) "
+                        f"+ delta({agent_input.skip_formal_min_delta:.4f}) = "
+                        f"{_fmt_reference(resolved_skip_formal_threshold)} — "
+                        "skipping formal round.",
+                        flush=True,
+                    )
                 break  # exit the while loop; this iter has no formal score
 
             for attempt_in_round in range(1, N + 1):
@@ -3623,6 +3871,10 @@ class HyperparamTuningAgent:
                         force_formal_round=agent_input.force_formal_round,
                         formal_round_strategy=agent_input.formal_round_strategy,
                         memory_history=memory_history,
+                        # FU-D-6: the SAME winner the skip and bypass gates
+                        # judged, resolved once at the formal-round
+                        # boundary above — not re-derived here.
+                        trial_winner=formal_trial_winner,
                     )
 
                     # DataScope DS5 — normalize LLM-planned strategies under a
@@ -4179,12 +4431,14 @@ class HyperparamTuningAgent:
                         if (
                             is_formal_round
                             and not time_check.get("feasible", True)
+                            # D-C3: the SAME winner the skip gate judged,
+                            # resolved once at the formal-round boundary.
                             and _should_bypass_formal_time_budget(
-                                memory_history,
+                                formal_trial_winner,
                                 threshold=resolved_bypass_formal_threshold,
                             )
                         ):
-                            _winner = _best_trial_winner(memory_history)
+                            _winner = formal_trial_winner
                             _best_trial_score = (
                                 _winner.get("denoising_score") if _winner is not None else None
                             )
@@ -4514,6 +4768,13 @@ class HyperparamTuningAgent:
                                                 SIDERIUS_ROOT, "configs", "health_checks.yaml"
                                             ),
                                             gate_ids=_gate_ids,
+                                            # D-C7b: the run's declaration
+                                            # travels onto every gate result,
+                                            # so an external reader never has
+                                            # to infer the posture from a
+                                            # gate id's spelling.
+                                            healthgate_mode=agent_input.healthgate_mode,
+                                            result_authority=agent_input.result_authority,
                                         )
                                     )
                                     is_degenerate, failure_reason, _gate_action_str = (
@@ -5069,6 +5330,34 @@ class HyperparamTuningAgent:
                     final_record["resolved_order_strategy"] = ordering.resolved_strategy
                     final_record["resolved_file_order"] = ordering.resolved_file_order
                     final_record["ordering_resolution_source"] = ordering.resolution_source
+                    # --- V20 PR D (D-C2b): formal authority verdict -----
+                    # Attached to EVERY formal record — valid, invalid,
+                    # diagnostic and validity-unknown alike — because the
+                    # question "may this inform science?" has an answer in
+                    # all four cases, and a field present only on successes
+                    # would make absence ambiguous.
+                    #
+                    # Trial records get NO block at all. Writing
+                    # `authoritative: False` on a trial would conflate
+                    # "formal authority does not apply here" with "this
+                    # formal result was judged untrustworthy".
+                    #
+                    # The verdict comes ONLY from `from_context`; this site
+                    # never assembles `authoritative` / `primary_basis` /
+                    # `blocking_reasons` itself. Validity comes from THIS
+                    # record's own role-aware gate results — never from the
+                    # trial winner, a trial count, the score, the
+                    # skip/bypass decision or `force_formal_round`.
+                    if not trial_config.is_trial:
+                        final_record["scientific_authority"] = ScientificAuthority.from_context(
+                            healthgate_mode=agent_input.healthgate_mode,
+                            declared_result_authority=agent_input.result_authority,
+                            formal_validity=formal_validity_of(
+                                final_record,
+                                config_path=agent_input.health_checks_config,
+                            ),
+                        ).model_dump()
+
                     # Trial context
                     if trial_config.is_trial:
                         final_record["is_trial"] = True
@@ -5352,6 +5641,28 @@ class HyperparamTuningAgent:
             max_fail_rounds=max_fail_rounds_setting,
             completed_rounds=completed_rounds,
         )
+        # V20 PR D (D-C6): the OTHER failure mode — trials ran, succeeded,
+        # and then failed their scientific gates. Distinct carrier because
+        # gate_exhaustion's triggers require budget-gated records and would
+        # stay None here. `_skipped_formal_for_no_valid_winner` is set at
+        # the skip gate itself, so the report states WHY formal did not run
+        # rather than inferring it from the absence of a formal record.
+        trial_validity_feedback = _build_trial_validity_feedback(
+            all_records,
+            formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
+            healthgate_mode=agent_input.healthgate_mode,
+        )
+        if trial_validity_feedback is not None:
+            print(
+                f"[trial-validity] no HealthGate-valid trial winner: "
+                f"{trial_validity_feedback.invalid_count} gate-invalid, "
+                f"{trial_validity_feedback.unknown_validity_count} validity-unknown, "
+                f"{trial_validity_feedback.execution_failure_count} execution failures "
+                f"of {trial_validity_feedback.trial_records_considered} trial(s). "
+                f"Surfacing to next proposer.",
+                flush=True,
+            )
+
         if gate_exhaustion is not None:
             print(
                 f"[gate-exhaustion] iteration ended without ever training; "
@@ -5369,11 +5680,19 @@ class HyperparamTuningAgent:
             # DataScope + HealthGate subsystem stamps (DS5).
             "resolved_data_scope": resolved_data_scope,
             "health_gate_enabled": agent_input.health_gate_enabled,
+            # V20 PR D (D-C1a): declared enforcement/authority axes,
+            # echoed from the input so provenance and output cannot
+            # disagree with what the run was launched under.
+            "healthgate_mode": agent_input.healthgate_mode,
+            "result_authority": agent_input.result_authority,
             "health_checks_config_source": health_checks_config_source,
             "health_config_sha256": health_config_sha256,
-            "formal_reference_score": formal_reference_score,
-            "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-            "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+            "formal_reference_score": _json_safe_reference(formal_reference_score),
+            "formal_comparison_reference_source": formal_reference_source,
+            "resolved_skip_formal_threshold": _json_safe_reference(resolved_skip_formal_threshold),
+            "resolved_bypass_formal_threshold": _json_safe_reference(
+                resolved_bypass_formal_threshold
+            ),
             "status": run_status,
             "completed_rounds": completed_rounds,
             "total_attempts": total_attempts,
@@ -5418,6 +5737,7 @@ class HyperparamTuningAgent:
             "started_at": started_at,
             "finished_at": finished_at,
             "gate_exhaustion": gate_exhaustion,
+            "trial_validity_feedback": trial_validity_feedback,
             # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
             # Empty list when every attempt was feasible. Orchestrator
             # aggregates (worst-offender per architecture) before rendering
@@ -5460,11 +5780,26 @@ class HyperparamTuningAgent:
                 "model_type": model_type_setting,
                 "file_index": file_index,
                 "status": "failed",
+                # V20 PR D — the DECLARATION is a launch fact, validated at
+                # the D-C1b boundary before any work began. It does not stop
+                # existing because the tuner later failed, so every
+                # post-launch branch carries it. Sourced from the validated
+                # input, never echoed back from a healthy output that may
+                # not exist. (Gate 2 attempt 1 found this: a real run
+                # launched with --healthgate_mode blocking wrote
+                # healthgate_mode: null because it failed.)
+                "healthgate_mode": agent_input.healthgate_mode,
+                "result_authority": agent_input.result_authority,
                 "completed_rounds": completed_rounds,
                 "total_attempts": total_attempts,
-                "formal_reference_score": formal_reference_score,
-                "resolved_skip_formal_threshold": resolved_skip_formal_threshold,
-                "resolved_bypass_formal_threshold": resolved_bypass_formal_threshold,
+                "formal_reference_score": _json_safe_reference(formal_reference_score),
+                "formal_comparison_reference_source": formal_reference_source,
+                "resolved_skip_formal_threshold": _json_safe_reference(
+                    resolved_skip_formal_threshold
+                ),
+                "resolved_bypass_formal_threshold": _json_safe_reference(
+                    resolved_bypass_formal_threshold
+                ),
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "termination_reason": termination_reason,
@@ -5931,6 +6266,27 @@ def main() -> int:
         "reference'.",
     )
 
+    parser.add_argument(
+        "--healthgate_mode",
+        choices=["blocking", "observe_only"],
+        default=None,
+        help="V20 PR D: whether HealthGate verdicts ENFORCE (blocking) or "
+        "only record (observe_only). Declared, never inferred from the "
+        "config file. No default: a formal campaign that omits it is "
+        "refused at launch, because defaulting would silently claim "
+        "authority the run may not have.",
+    )
+    parser.add_argument(
+        "--result_authority",
+        choices=["scientific", "diagnostic"],
+        default=None,
+        help="V20 PR D: whether this run's results may inform science "
+        "(scientific) or are for diagnosis only (diagnostic). A SEPARATE "
+        "axis from --healthgate_mode: observe_only+scientific is a "
+        "contradiction and is refused, while blocking+diagnostic is "
+        "coherent — enforced, and deliberately not promoted.",
+    )
+
     args = parser.parse_args()
 
     # Preflight: catch the "plugin model_type without seed file" mistake
@@ -5961,6 +6317,10 @@ def main() -> int:
         if args.data_scope
         else DataScope.default(),
         "health_gate_enabled": args.health_gate_enabled,
+        # V20 PR D (D-C1a): declared, never inferred. No default here —
+        # the launcher refuses omission in D-C1b.
+        "healthgate_mode": args.healthgate_mode,
+        "result_authority": args.result_authority,
         "health_gate_files": DataScope.from_cli(args.health_gate_files).file_indices
         if args.health_gate_files
         else None,

@@ -53,6 +53,10 @@ from core.run_invariants import (
     build_run_invariants,
 )
 from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.health_checks.launch_policy import (
+    FormalLaunchPolicyError,
+    validate_formal_launch,
+)
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 
@@ -441,6 +445,8 @@ def write_manifest(
     results: list,
     *,
     crashed: bool = False,
+    healthgate_mode: str | None = None,
+    result_authority: str | None = None,
     chain_incumbent_used: float | None = None,
     chain_incumbent_source: dict | None = None,
     health_feedback_policy: dict | None = None,
@@ -463,6 +469,12 @@ def write_manifest(
         resolution error, restore_prior_state error). The chain halts.
         Set via ``crashed=True``.
     """
+    # `tune_output` is only bound on the completed branch. The stamps at the
+    # bottom of this function run on EVERY branch, so it is initialised here
+    # rather than guarded there — a crashed or record-less iteration has no
+    # tuner output, and `None` is the honest answer for its declared posture.
+    tune_output = None
+
     if crashed:
         manifest = {
             "status": "failed",
@@ -523,6 +535,13 @@ def write_manifest(
             "health_gate_enabled": getattr(tune_output, "health_gate_enabled", None),
             "health_config_sha256": getattr(tune_output, "health_config_sha256", None),
             "formal_reference_score": getattr(tune_output, "formal_reference_score", None),
+            # V20 PR D §16.C — the provenance travels WITH the reference.
+            # `formal_reference_score: null` alone is ambiguous: it means
+            # "no incumbent", "gates off" or "the bound was infinite", and
+            # those call for different readings of the iteration.
+            "formal_comparison_reference_source": getattr(
+                tune_output, "formal_comparison_reference_source", None
+            ),
             "resolved_skip_formal_threshold": getattr(
                 tune_output, "resolved_skip_formal_threshold", None
             ),
@@ -578,6 +597,36 @@ def write_manifest(
     # mechanism the build ships; that production reaches it is a separate
     # claim, proven by the reachability guardrails.
     manifest["preflight_execution_mode"] = PREFLIGHT_EXECUTION_MODE
+
+    # V20 PR D (D-C1a) — the declared enforcement/authority axes, stamped on
+    # EVERY branch for the same reason as the two above: a crashed iteration
+    # is exactly when "was this run even allowed to be authoritative?" has
+    # to be answerable.
+    #
+    # V20 PR D — the DECLARATION is a validated LAUNCH fact, not a
+    # tuner-result field. D-C1b refuses the launch outright unless both axes
+    # are declared and consistent, so by the time any artifact is written
+    # they exist — whether the iteration completed, produced no records,
+    # degraded, or crashed.
+    #
+    # CORRECTED after Gate 2 attempt 1: this previously read the posture off
+    # `tune_output` and wrote `null` whenever the tuner produced none. A real
+    # chain launched with `--healthgate_mode blocking` therefore recorded
+    # `healthgate_mode: null` because it failed, which makes its records
+    # `unreconstructable_legacy` under D-C4 even though the run DID declare
+    # its posture. The caller's validated declaration is authoritative; the
+    # tuner output is only a fallback for callers that predate this
+    # parameter.
+    manifest["healthgate_mode"] = (
+        healthgate_mode
+        if healthgate_mode is not None
+        else getattr(tune_output, "healthgate_mode", None)
+    )
+    manifest["result_authority"] = (
+        result_authority
+        if result_authority is not None
+        else getattr(tune_output, "result_authority", None)
+    )
 
     manifest_path = os.path.join(iter_dir, "manifest.json")
     with open(manifest_path, "w") as f:
@@ -959,6 +1008,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to a WorkflowLLMConfig JSON file for per-node model routing. "
         "Overrides --llm_model when provided.",
+    )
+    parser.add_argument(
+        "--healthgate_mode",
+        choices=["blocking", "observe_only"],
+        default=None,
+        help="V20 PR D: whether HealthGate verdicts ENFORCE (blocking) or "
+        "only record (observe_only). REQUIRED for a formal launch — there "
+        "is no default, because defaulting would let this run claim "
+        "enforcement nobody configured. Must agree with the HealthGate "
+        "config's actual enforcement or the launch is refused.",
+    )
+    parser.add_argument(
+        "--result_authority",
+        choices=["scientific", "diagnostic"],
+        default=None,
+        help="V20 PR D: whether this run's results may inform science "
+        "(scientific) or are diagnostic only. REQUIRED for a formal "
+        "launch. observe_only+scientific is refused as a contradiction; "
+        "blocking+diagnostic is legal.",
     )
     parser.add_argument(
         "--health_checks_config",
@@ -1466,6 +1534,33 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
 def main():
     args = normalize_args(build_parser().parse_args())
 
+    # --- V20 PR D (D-C1b): formal-launch policy refusal ----------------
+    # THE FIRST thing done with the parsed arguments, and deliberately
+    # before the failure-brake preflight below: a launch whose declared
+    # policy cannot be honoured must not create an iter_dir, touch a
+    # sentinel, call an LLM, construct a model or reach a GPU.
+    #
+    # Enforced HERE rather than in the tuner's schema, because this is the
+    # new-formal-launch boundary. `validate_runtime_config` runs for every
+    # tuner invocation including diagnostic tooling
+    # (`scripts/bg_admission_validation.py` builds a tuner input), and the
+    # permissive schema is what keeps historical artifacts readable —
+    # `core/resume.py` reads manifests directly and never constructs a
+    # HyperparamTuningInput, so tightening the launch path cannot make an
+    # old artifact unopenable.
+    try:
+        validate_formal_launch(
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+            health_checks_config=args.health_checks_config,
+            gates_enabled=args.enable_chain_incumbent_formal_gates,
+            skip_formal_min_delta=args.skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+        )
+    except FormalLaunchPolicyError as exc:
+        print(f"[run_one_iteration] FORMAL LAUNCH REFUSED: {exc}", file=sys.stderr)
+        sys.exit(2)
+
     # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
     # Two cheap on-disk checks before we touch anything else. Runs before
     # iter_dir creation so a halted chain leaves no orphan dirs behind.
@@ -1622,6 +1717,8 @@ def main():
             run_name,
             results=[],
             crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
@@ -1644,6 +1741,8 @@ def main():
             run_name,
             results=[],
             crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
@@ -1662,6 +1761,8 @@ def main():
             run_name,
             results=[],
             crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
@@ -1871,6 +1972,8 @@ def main():
             run_name,
             results=[],
             crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(2)
@@ -1882,6 +1985,8 @@ def main():
             run_name,
             results=[],
             crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
         )
         sys.exit(1)
@@ -1890,6 +1995,9 @@ def main():
         iter_dir,
         run_name,
         results,
+        # V20 PR D: the validated launch declaration, on every branch.
+        healthgate_mode=args.healthgate_mode,
+        result_authority=args.result_authority,
         # V19 PR 1 (Invariant II): the chain incumbent this iteration
         # consumed, stamped under its own keys — never as an
         # iteration-local best_* field. ``used`` reflects the coupling
