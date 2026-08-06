@@ -1,6 +1,7 @@
 # agent/prompts.py
 import inspect
 import json
+from typing import Any
 
 # ==========================================
 # 1. SYSTEM PROMPTS (The Core Logic)
@@ -316,6 +317,43 @@ These efficient configs are strong candidates for the Solidification phase.
 _CHECKLIST_SKIP_FIELDS = {"model_type", "batch_size"}
 
 
+def _canonical_config_value(value: Any) -> Any:
+    """A deterministic, hashable stand-in for a config value.
+
+    The exploration checklist counts DISTINCT values per field and renders
+    them. Config values arrive from JSON, so they may be scalars, lists or
+    nested dicts — and `set.add` on a list raises `TypeError: unhashable
+    type: 'list'`, which is what killed V20 launch attempt 1.
+
+    Required properties, in the order they matter here:
+
+    * **hashable** for every JSON-shaped value, so no input can crash the
+      planner;
+    * **deterministic** — the same value canonicalises identically across
+      records and processes, or the distinct-count is meaningless;
+    * **equal values collapse, different values do not.** Dict key order
+      is normalised by sorting, so `{"a": 1, "b": 2}` and `{"b": 2, "a": 1}`
+      count once rather than twice.
+
+    `str(val)` — the previous `model_config`-only guard — satisfies only
+    the first. It also lets `[1, 2]` collide with the string `"[1, 2]"`,
+    and leaves two semantically identical dicts counting as two distinct
+    values when their key order differs.
+
+    Lists and tuples canonicalise identically: a tuple that survives a JSON
+    round trip comes back a list, so treating them differently would make
+    the same value count twice depending on where it was read from. The
+    tags keep a sequence from ever colliding with a mapping or a scalar.
+    """
+    if isinstance(value, dict):
+        return ("dict", tuple(sorted((k, _canonical_config_value(v)) for k, v in value.items())))
+    if isinstance(value, list | tuple):
+        return ("seq", tuple(_canonical_config_value(v) for v in value))
+    if isinstance(value, set | frozenset):
+        return ("set", tuple(sorted((_canonical_config_value(v) for v in value), key=repr)))
+    return value
+
+
 def build_exploration_checklist(
     config_schema: dict,
     memory_history: list,
@@ -336,29 +374,45 @@ def build_exploration_checklist(
     if not memory_history:
         return ""
 
-    # Collect tried values per parameter from successful + error records
-    model_cfg_tried: dict[str, set] = {}
-    loss_cfg_tried: dict[str, set] = {}
-    train_cfg_tried: dict[str, set] = {}
+    # V20 launch attempt 1 (2026-08-06, SHA d8e21d1a) died here on the very
+    # first iteration: a proposal legitimately produced a LIST-valued
+    # train_config entry, `set.add` raised `TypeError: unhashable type:
+    # 'list'`, and every subsequent planning attempt hit the same line —
+    # three attempts consumed, the round failed, the iteration recorded
+    # `no_records`. The candidate never reached implementation, training or
+    # HealthGate, so an infrastructure crash was being spent as scientific
+    # search budget.
+    #
+    # The guard already existed for `model_config` and for neither of the
+    # other two, which is the whole defect: one of three call sites knew
+    # values could be composite.
+
+    # Collect tried values per parameter from successful + error records.
+    #
+    # Keyed by a CANONICAL hashable form of the value, valued by the
+    # original rendering. `len()` over the keys is the distinct-value count
+    # the checklist markers use; the values are what the prompt displays.
+    model_cfg_tried: dict[str, dict[Any, str]] = {}
+    loss_cfg_tried: dict[str, dict[Any, str]] = {}
+    train_cfg_tried: dict[str, dict[Any, str]] = {}
+
+    def _record(bucket: dict[str, dict[Any, str]], key: str, val: Any) -> None:
+        bucket.setdefault(key, {})[_canonical_config_value(val)] = str(val)
 
     for rec in memory_history:
         params = rec.get("params", {})
         for key, val in params.get("model_config", {}).items():
             if key in _CHECKLIST_SKIP_FIELDS:
                 continue
-            model_cfg_tried.setdefault(key, set())
-            # Convert lists/dicts to string for set storage
-            model_cfg_tried[key].add(str(val) if isinstance(val, (list, dict)) else val)
+            _record(model_cfg_tried, key, val)
 
         for key, val in params.get("loss_config", {}).items():
-            loss_cfg_tried.setdefault(key, set())
-            loss_cfg_tried[key].add(val)
+            _record(loss_cfg_tried, key, val)
 
         for key, val in params.get("train_config", {}).items():
             if key in _CHECKLIST_SKIP_FIELDS:
                 continue
-            train_cfg_tried.setdefault(key, set())
-            train_cfg_tried[key].add(val)
+            _record(train_cfg_tried, key, val)
 
     # Build checklist lines
     lines = ["### EXPLORATION CHECKLIST"]
@@ -405,7 +459,7 @@ def build_exploration_checklist(
     for field, spec in schema_props.items():
         if field in _CHECKLIST_SKIP_FIELDS:
             continue
-        tried = model_cfg_tried.get(field, set())
+        tried = model_cfg_tried.get(field, {})
         default = spec.get("default")
         desc = spec.get("description", "")
         bounds = _format_bounds(spec)
@@ -420,9 +474,11 @@ def build_exploration_checklist(
             status = f"{len(tried)} values tried"
             marker = "[x]"
 
-        # Format tried values concisely
+        # Format tried values concisely. Iterate the VALUES: the keys are
+        # canonical forms and would render as `('seq', (32, 64))` rather
+        # than the `[32, 64]` an operator (and the planner) expects.
         if tried:
-            tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+            tried_str = ", ".join(sorted(tried.values()))
             if len(tried_str) > 80:
                 tried_str = tried_str[:77] + "..."
         else:
@@ -439,17 +495,17 @@ def build_exploration_checklist(
     # Loss config
     lines.append("\n**loss_config:**")
     for key, tried in loss_cfg_tried.items():
-        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        tried_str = ", ".join(sorted(tried.values()))
         marker = "[x]" if len(tried) >= 2 else "[ ]"
         lines.append(f"- {marker} `{key}`: {tried_str}")
 
     # Train config (just lr and epochs — most impactful)
     lines.append("\n**train_config:**")
     for key in ["lr", "epochs", "optimizer_type", "weight_decay"]:
-        tried = train_cfg_tried.get(key, set())
+        tried = train_cfg_tried.get(key, {})
         if not tried:
             continue
-        tried_str = ", ".join(str(v) for v in sorted(tried, key=str))
+        tried_str = ", ".join(sorted(tried.values()))
         marker = "[x]" if len(tried) >= 2 else "[ ]"
         lines.append(f"- {marker} `{key}`: {tried_str}")
 
