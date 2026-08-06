@@ -1476,6 +1476,9 @@ def run_workflow(
     # containing one fails loudly at startup instead of being silently
     # ignored.
     validation_fixed_candidate_plan: dict | None = None,
+    # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on resolved trial
+    # portions. `None` leaves ordinary campaigns unchanged.
+    validation_max_portion: float | None = None,
     # --- V19 PR 1 (P1-C3) — chain formal-incumbent carry-over ---
     # Two-state design (design doc §3.4): the restored chain incumbent
     # seeds ONLY the local ``chain_formal_incumbent_reference`` (consumed
@@ -2577,6 +2580,7 @@ def run_workflow(
             train_base_seed=train_base_seed,
             cleanup_denoised=cleanup_denoised,
             max_epochs=max_epochs,
+            validation_max_portion=validation_max_portion,
             skip_formal_min_delta=skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
             max_retries=tune_llm.get("max_retries"),

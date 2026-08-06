@@ -1010,6 +1010,19 @@ def build_parser() -> argparse.ArgumentParser:
         "Overrides --human_advice_file when provided.",
     )
     parser.add_argument(
+        "--validation_max_portion",
+        type=float,
+        default=None,
+        help="VALIDATION POSTURE ONLY (V20 FU-D-12). Hard ceiling on the "
+        "RESOLVED trial-mode data portions (trial/train/eval), applied as "
+        "min(planned, ceiling) beside the existing max_epochs clamp. Those "
+        "three values come from the LLM PLAN rather than operator input, so "
+        "without this a Gate that requested 0.02 can measure 0.1: time "
+        "budgets bound wall time, not workload. A maximum, never a "
+        "replacement — it can only reduce a planned portion. Omit for "
+        "ordinary campaigns.",
+    )
+    parser.add_argument(
         "--validation_fixed_candidate_plan",
         type=str,
         default=None,
@@ -1758,6 +1771,7 @@ def main():
             degenerate_penalty_score=args.degenerate_penalty_score,
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
+            validation_max_portion=args.validation_max_portion,
             skip_formal_min_delta=args.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
             # Time/VRAM budget gates
