@@ -6932,3 +6932,113 @@ Per PR, since the two are reviewed separately.
 **Both**
 - Mutation proofs per merged family, each against real production source.
 - Follow-ups FU-C-1..FU-C-8 filed with evidence.
+
+---
+
+## 30. Validity separation — the audited path and the frozen semantics (2026-08-05)
+
+**Operator correction.** PR C's occupancy work (#176) implemented T0 at the
+eligibility layer but left a presence-based refusal upstream, and defined
+validity partly in terms of external *stability*. Both are wrong. Governing
+mandate: `v20_prelaunch_completion_mandate.md` §2.4.
+
+### 30.1 Audit — what production actually does today
+
+Traced by reading the call path and by executing it (real-GPU Case B,
+2026-08-05), not inferred from names.
+
+**The refusal**, `core/runtime_control/bootstrap.py`:
+
+```python
+contended = window.classification not in ("single_candidate_idle",
+                                          "pairwise_expected_peer")
+...
+remedy = ("Another process is using this GPU. The measurement would not "
+          "describe an idle baseline — stop the other workload and re-run.")
+if contended:
+    return _finish(False)
+```
+
+Measured consequence — a stable, sole-occupant, 5104 MiB holder:
+
+```text
+bootstrap  ready: False
+           contention window: foreign_contended (5 samples)
+           "known foreign GPU process present (unregistered PIDs [2280629])"
+```
+
+`MeasurementValidity` was **never reached**. Three defects in one gate:
+
+1. **presence decides readiness** — any unregistered PID refuses, regardless
+   of stability or attribution;
+2. **registration is privileged** — `pairwise_expected_peer` passes while an
+   otherwise identical unregistered process is refused. Registration becomes
+   a correctness requirement, which the mandate forbids;
+3. **the remedy is dishonest** — it tells the operator to stop other
+   workloads, i.e. that SIDERIUS requires an empty GPU.
+
+**Producers of `foreign_contended`**: `calibration_policy.classify_contention_window`
+(3 return sites — unregistered PID, peer-held memory over threshold, sustained
+utilisation). **Consumers**: `bootstrap` readiness (above);
+`estimate_types.contended` (2 sites) feeding `derive_decision_eligibility`;
+`decision_policy` for the contended-measurement `REQUEST_PROBE` producer.
+
+**The current `MeasurementValidity` is itself wrong** — mine, from #176:
+
+```python
+"valid_current_conditions" | "unstable_external_identity"
+| "unattributed_occupancy_growth" | "sampling_incomplete"
+```
+
+`unstable_external_identity` makes a changing external PID set an invalidity
+reason. Under the corrected semantics a changing PID set is an
+**observation**. Only `sampling_incomplete` survives as a genuine integrity
+reason; `unattributed_occupancy_growth` survives only where it means
+attribution actually failed, not merely that a neighbour grew.
+
+### 30.2 Frozen semantics — three independent questions
+
+**(1) External activity — CONTEXT, never validity.** Recorded: present or
+absent; registered PIDs; unregistered PIDs; whether the PID set changed;
+external attributed-memory min/max/latest; a descriptive marker
+(`absent` / `stable` / `variable` / `unknown`). Descriptive only.
+
+**(2) Measurement validity — INTEGRITY only.** Valid when the device is known,
+candidate-owned processes and descendants are attributable, samples are
+complete and interpretable, candidate demand is separable from other demand,
+the probe lifecycle completed, and interpretation invariants hold.
+
+Invalid only for a **named integrity failure**: attribution unavailable;
+process tree untrackable; device identity missing or inconsistent; samples
+incomplete or corrupted; telemetry cannot separate candidate usage; probe
+lifecycle incomplete; invariant failed.
+
+**Never invalidity reasons**: an external process exists; it is unregistered;
+its memory changes; the PID set changes; it is bursty; there are several.
+
+Where external change genuinely destroys attribution, the reason is the
+**attribution/telemetry failure**, never the external presence.
+
+**(3) Admission — SEPARATE.** Candidate-attributed demand vs current available
+resources vs configured margin, with external occupancy recorded alongside.
+Both `valid + admit` and `valid + reject_insufficient_current_resources` are
+expected. No hidden stability gate. No registration requirement.
+
+**Registration is metadata.** Given identical measured facts and resources,
+registered and unregistered external workloads must produce identical validity
+and admission outcomes.
+
+**Historical compatibility.** Existing `foreign_contended` records stay
+readable; new records do not emit it as a blocking presence verdict; nothing
+is reconstructed or upgraded.
+
+### 30.3 Decision ledger
+
+| | |
+|---|---|
+| current behaviour | presence refuses readiness before validity is computed; registration privileged; remedy demands an empty GPU |
+| corrected behaviour | presence is observation; validity is integrity; admission is separate; registration is provenance |
+| why the old behaviour is wrong | it asks "is anyone else on the GPU?" — the question T0 was adopted to stop asking — and makes SIDERIUS unusable on a shared device |
+| alternative rejected | register the holder as an expected peer. Rejected: it produces a green result for a *different* property and leaves the real claim untested |
+| alternative rejected | retire `classify_contention_window` entirely. Rejected: it still produces useful observations and is consumed elsewhere; the narrow fix is to stop it *deciding readiness* |
+| compatibility | old vocabulary readable; new records use honest non-blocking terms; no historical upgrade |
