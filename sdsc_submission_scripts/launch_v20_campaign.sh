@@ -44,6 +44,20 @@ RUN_NAME=""
 NUM_ITERATIONS=""
 DRY_RUN=0
 FOREGROUND=0
+# V20 is a BANDED campaign: eight independent chains, one per
+# (band x chain_type), each with its own workspace and its own
+# chain-local incumbent history. These three are the only job-specific
+# inputs; every scientific policy below stays identical across all eight.
+#
+# Corrected 2026-08-06 (operator). An earlier reading froze V20 as a single
+# full-scope campaign and classified `--data_scope` as a validation-only
+# posture. That was wrong on both counts: a production `--data_scope`
+# selecting the authoritative band IS the scientific configuration. What
+# must be absent is a VALIDATION-specific scope override (the Gate-2
+# shrink-the-dataset posture), which this launcher still cannot emit.
+DATA_SCOPE=""
+CHAIN_TYPE=""
+HEALTH_GATE_FILES=""
 # Operator ruling, 2026-08-06: "enable the best ability, advice, and llm
 # config, and the sequenced file training for v20 — we really want a good
 # model beating FCNet." Both V19 features are therefore ON, and the
@@ -56,6 +70,9 @@ while [[ $# -gt 0 ]]; do
         --workspace)       WORKSPACE="$2"; shift 2 ;;
         --run_name)        RUN_NAME="$2"; shift 2 ;;
         --num_iterations)  NUM_ITERATIONS="$2"; shift 2 ;;
+        --data_scope)      DATA_SCOPE="$2"; shift 2 ;;
+        --chain_type)      CHAIN_TYPE="$2"; shift 2 ;;
+        --health_gate_files) HEALTH_GATE_FILES="$2"; shift 2 ;;
         --dry-run)         DRY_RUN=1; shift ;;
         --foreground)      FOREGROUND=1; shift ;;
         --no-ml_lit_review_enabled)             LIT_REVIEW=0; shift ;;
@@ -64,17 +81,41 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [ -z "$WORKSPACE" ] || [ -z "$RUN_NAME" ] || [ -z "$NUM_ITERATIONS" ]; then
-    echo "Required: --workspace DIR --run_name NAME --num_iterations N" >&2
+if [ -z "$WORKSPACE" ] || [ -z "$RUN_NAME" ] || [ -z "$NUM_ITERATIONS" ] \
+   || [ -z "$DATA_SCOPE" ] || [ -z "$CHAIN_TYPE" ]; then
+    echo "Required: --workspace DIR --run_name NAME --num_iterations N \\" >&2
+    echo "          --data_scope BAND --chain_type {loss,arch}" >&2
+    echo "  (--health_gate_files defaults to the band's own file list)" >&2
     exit 1
 fi
 if ! [[ "$NUM_ITERATIONS" =~ ^[0-9]+$ ]] || [ "$NUM_ITERATIONS" -lt 1 ]; then
     echo "--num_iterations must be a positive integer (got '$NUM_ITERATIONS')" >&2
     exit 1
 fi
+case "$CHAIN_TYPE" in
+    loss|arch) ;;
+    *) echo "--chain_type must be 'loss' or 'arch' (got '$CHAIN_TYPE')" >&2; exit 1 ;;
+esac
+
+# The band's authoritative file list, from the V19 roster that defines the
+# bands. HealthGate's evaluation scope MUST equal the run's own scope: a
+# gate monitoring files the chain never trains on is judging a different
+# experiment. `--file_order_override` is deliberately NOT set — with
+# `--order_strategy_override sequential` and no override, the chain visits
+# the resolved scope in ascending order, which IS the band's sequence.
+case "$DATA_SCOPE" in
+    15-19) BAND_FILES="15,16,17,18,19" ;;
+    10-14) BAND_FILES="10,11,12,13,14" ;;
+    4-9)   BAND_FILES="4,5,6,7,8,9" ;;
+    0-3)   BAND_FILES="0,1,2,3" ;;
+    *) echo "unknown band '$DATA_SCOPE' (expected 15-19, 10-14, 4-9 or 0-3)" >&2; exit 1 ;;
+esac
+[ -z "$HEALTH_GATE_FILES" ] && HEALTH_GATE_FILES="$BAND_FILES"
 
 LLM_CONFIG="llm_configs/openai_tiered_pro.json"
-ADVICE_FILE="advice/workflow/v20_arch_explorer.json"
+# One explorer per chain type, mirroring V19's arch/loss separation. Both
+# are the V18r explorers with only their FALSE statements corrected.
+ADVICE_FILE="advice/workflow/v20_${CHAIN_TYPE}_explorer.json"
 for required in "$LLM_CONFIG" "$ADVICE_FILE"; do
     if [ ! -f "${PROJECT_DIR}/${required}" ]; then
         # M4 is the whole point of this launcher: without the LLM config the
@@ -103,6 +144,13 @@ CHAIN_ARGS=(
     # systematic shrinking (2.39M / 4.12M proposals) exists to counter.
     --exploration_mode explore
     --human_advice_file "$ADVICE_FILE"
+
+    # This job's band. Production scope selection, not a validation
+    # posture. The scope is pinned in run_invariants_lock.json, so a
+    # resume cannot silently move this chain to different files, and the
+    # chain's incumbent is meaningful only against this scope.
+    --data_scope "$DATA_SCOPE"
+    --health_gate_files "$HEALTH_GATE_FILES"
 
     # §10.2 scientific policy
     --healthgate_mode blocking
@@ -166,6 +214,9 @@ echo "  SIDERIUS V20 PRODUCTION CAMPAIGN"
 echo "  workspace   : $WORKSPACE"
 echo "  run_name    : $RUN_NAME"
 echo "  iterations  : $NUM_ITERATIONS"
+echo "  band        : $DATA_SCOPE   files $BAND_FILES"
+echo "  chain type  : $CHAIN_TYPE   ($([ "$CHAIN_TYPE" = arch ] && echo "architecture explorer" || echo "loss explorer"))"
+echo "  gate files  : $HEALTH_GATE_FILES"
 echo "  llm_config  : $LLM_CONFIG"
 echo "  advice      : $ADVICE_FILE"
 echo "  logfile     : $LOG_FILE"
