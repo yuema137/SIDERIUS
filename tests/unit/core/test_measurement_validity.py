@@ -657,3 +657,62 @@ class TestIntegrityFailuresSurvive:
         for window in shapes:
             verdict = classify_measurement_validity(window)[0]
             assert verdict not in RETIRED_PRESENCE_REASONS, verdict
+
+
+class TestAdmissionIsSeparateFromValidity:
+    """The third of the three independent questions.
+
+    Validity asks whether the measurement can be trusted. Admission asks
+    whether the candidate may run given current resources. A valid
+    measurement may be REJECTED for insufficient resources, and that is
+    expected — not a measurement defect.
+    """
+
+    def test_a_valid_measurement_under_heavy_external_load_still_blocks(self):
+        """A 20 GiB stable neighbour: measurement valid, and the estimate
+        carries blocking authority. Whether the candidate then FITS is
+        admission's question, asked with the free-memory figure."""
+        from core.runtime_control.estimate_types import make_estimate
+
+        window = [_snap(others={999: 20_000}, own={111: 2_000}, free=5_000) for _ in range(4)]
+        assert classify_measurement_validity(window)[0] == "valid_current_conditions"
+
+        estimate = make_estimate(
+            provenance="bounded_live_probe",
+            confidence="medium",
+            expected_seconds=10.0,
+            concurrency_identity="foreign_contended",
+            measurement_validity="valid_current_conditions",
+        )
+        assert estimate.blocking_eligible is True
+
+    def test_the_window_reports_the_resources_admission_needs(self):
+        """MUTATION TARGET: dropping the conservative aggregates.
+
+        Admission needs the worst case actually observed — minimum free and
+        maximum external — not an average of a moving environment.
+        """
+        window = build_occupancy_window(
+            [
+                _snap(others={999: 4_000}, free=30_000),
+                _snap(others={999: 22_000}, free=8_000),
+                _snap(others={999: 9_000}, free=25_000),
+            ]
+        )
+        assert window.validity == "valid_current_conditions"
+        assert window.min_free_mib == 8_000
+        assert window.max_external_mib == 22_000
+        assert window.blocking_capable is True
+
+    def test_insufficient_resources_is_not_a_measurement_defect(self):
+        """The distinction stated where it can fail: a window that leaves
+        almost no headroom is still a VALID measurement. Rejecting the
+        candidate is admission's job and carries admission's reason."""
+        window = build_occupancy_window(
+            [_snap(others={999: 30_000}, own={111: 500}, free=200) for _ in range(3)]
+        )
+        assert window.validity == "valid_current_conditions"
+        assert window.min_free_mib == 200
+        # No validity reason mentions resources — that vocabulary belongs to
+        # admission, not to measurement integrity.
+        assert window.reasons == ()
