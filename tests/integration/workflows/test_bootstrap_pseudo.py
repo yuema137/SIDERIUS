@@ -74,14 +74,28 @@ def _deps(tmp_path, *, snapshot=IDLE) -> BootstrapDependencies:
             sleep=lambda _s: None,
         )
 
-    def _run_probe(*, model_identity, executors, caps, device_vram_gb, expected_peer_pids):
-        # REAL probe engine.
+    def _run_probe(
+        *,
+        model_identity,
+        executors,
+        caps,
+        device_vram_gb,
+        expected_peer_pids,
+        device_identity=None,
+    ):
+        # REAL probe engine. `device_identity` mirrors the production
+        # injector (V20 FU-C-1): the bootstrap flow names its device so the
+        # probe can build an occupancy window and produce a
+        # `MeasurementValidity`. An injector that does not accept it is an
+        # incomplete implementation of the deps contract — which is exactly
+        # how FU-C-1 broke this suite silently.
         return run_bounded_probe(
             model_identity=model_identity,
             executors=executors,
             caps=ProbeCaps(**caps),
             device_vram_gb=device_vram_gb,
             expected_peer_pids=expected_peer_pids,
+            device_identity=device_identity,
             contention_window=_sample,
         )
 
