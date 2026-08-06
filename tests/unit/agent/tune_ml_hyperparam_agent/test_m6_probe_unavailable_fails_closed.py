@@ -107,6 +107,120 @@ class TestEverythingElseKeepsTheAdvisory:
         assert tc["breakdown"]["probe_resolution_enforced"] is False
 
 
+class TestTheRefusalSurvivesTheDownstreamGates:
+    """Two holes found by tracing the reason to the persisted record.
+
+    Neither was covered by the first version of these tests, and both
+    would have made M6 unreachable or actively misleading in production.
+    """
+
+    def test_the_time_budget_bypass_cannot_clear_an_evidence_refusal(self, unavailable_probe):
+        # The bypass gate runs AFTER this resolver and force-sets
+        # `feasible = True`. On a fresh chain the `-inf` bootstrap makes it
+        # fire unconditionally, so without the guard the refusal would be
+        # erased on the very first formal round of every new campaign —
+        # M6 would never be reached. The mandate is explicit that the
+        # bypass may loosen the TIME decision and nothing else.
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            _should_bypass_formal_time_budget,
+            is_evidence_refusal,
+        )
+
+        # the bootstrap case: no incumbent -> the bypass always fires
+        assert _should_bypass_formal_time_budget(
+            {"denoising_score": -999.0}, threshold=float("-inf")
+        ), "precondition: the -inf bootstrap must make the bypass fire"
+
+        tc = _time_check()
+        _resolve(tc, is_trial=False, result_authority="scientific")
+        assert tc["feasible"] is False
+        assert is_evidence_refusal(tc) is True, (
+            "an attempt refused for missing measurement evidence is not "
+            "time-gated; the bypass must not clear it"
+        )
+
+    def test_a_time_gated_skip_is_still_bypassable(self):
+        # The guard must be narrow: an ordinary time rejection keeps its
+        # pre-M6 bypass behaviour.
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            is_evidence_refusal,
+        )
+
+        assert is_evidence_refusal({"feasible": False, "breakdown": {}}) is False
+        assert is_evidence_refusal({"feasible": False}) is False
+
+    def test_both_production_call_sites_use_the_shared_predicate(self):
+        # Reachability. The first version of this test re-implemented the
+        # condition inline and passed while the production guard was
+        # deleted. Parsed as call nodes, not grepped as a substring.
+        import ast
+        import importlib
+        import inspect
+        import pathlib
+
+        mod = importlib.import_module(
+            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
+        )
+        tree = ast.parse(pathlib.Path(inspect.getfile(mod)).read_text())
+        calls = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "is_evidence_refusal"
+        ]
+        assert len(calls) == 2, (
+            f"expected the bypass guard and the record builder to call "
+            f"is_evidence_refusal, found {len(calls)} call sites"
+        )
+
+    def test_the_record_does_not_blame_wall_time(self, unavailable_probe):
+        # `skipped_time_risk` now carries two causes. A wall-time
+        # conclusion on an evidence refusal tells the interpreter and the
+        # proposer that the CANDIDATE was too slow — the contamination
+        # failure V19 suffered, where an infrastructure condition was read
+        # as evidence about the model.
+        from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+            _build_skip_record,
+        )
+
+        tc = _time_check()
+        _resolve(tc, is_trial=False, result_authority="scientific")
+        evidence_refusal = (tc.get("breakdown") or {}).get("probe_resolution_enforced", False)
+        assert evidence_refusal is True
+
+        conclusion = (
+            "Not admitted: a formal scientific decision requires a bounded probe "
+            "and none could be resolved. This is an infrastructure condition and "
+            "says nothing about the candidate's size, speed or design."
+            if evidence_refusal
+            else "Skipped: estimated wall-time exceeds budget."
+        )
+        record = _build_skip_record(
+            status="skipped_time_risk",
+            exp_id="exp_001",
+            model_type="punet",
+            file_index=0,
+            record_params={},
+            expert_advice_str="",
+            hypothesis="",
+            round_index=1,
+            attempt_in_round=1,
+            conclusion=conclusion,
+            discovery=tc.get("verdict", ""),
+            memory_update=tc.get("suggestion", ""),
+            memory_extra=None,
+        )
+        memory = record["memory"]
+        assert "wall-time" not in memory["conclusion"]
+        assert "says nothing about the candidate" in memory["conclusion"]
+        # The remedy must point at the environment, never at the model.
+        # "Reduce model size / batch_size / segmentation_size" — the
+        # time-gated advice — would be actively wrong here.
+        assert "Restore the measurement capability" in memory["memory_update"]
+        assert "Reduce model size" not in memory["memory_update"]
+
+
 class TestTheGateOnlyFiresOnARealRequest:
     def test_a_non_request_preflight_is_untouched(self, unavailable_probe):
         tc = {"feasible": True, "breakdown": {"runtime_decision": "ALLOW"}}

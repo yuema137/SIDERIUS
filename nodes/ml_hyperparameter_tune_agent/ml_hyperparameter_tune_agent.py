@@ -1293,6 +1293,33 @@ def _resolve_time_check_probe_request(
     return "proceed"
 
 
+def is_evidence_refusal(time_check: dict) -> bool:
+    """Whether an infeasible `time_check` is an EVIDENCE refusal (M6).
+
+    The `skipped_time_risk` lane carries two causes since M6, and three
+    call sites must agree about which one they are looking at:
+
+    * the formal time-budget bypass, which may clear a time rejection and
+      must NOT clear this one;
+    * the skip record's conclusion, which must not blame wall-time;
+    * the operator log line.
+
+    Extracted rather than repeated inline in `run()` because that
+    function already coordinates unrelated concerns, and three copies of
+    a predicate is how they drift apart. A test can call this; it cannot
+    call a condition buried in a 2,000-line orchestrator.
+
+    Args:
+        time_check: the pre-flight result, already known infeasible.
+
+    Returns:
+        True when the attempt was refused because a required bounded
+        probe could not be resolved — an infrastructure condition that
+        says nothing about the candidate.
+    """
+    return bool((time_check.get("breakdown") or {}).get("probe_resolution_enforced", False))
+
+
 def _best_trial_winner(memory_history: list) -> dict | None:
     """Highest-scoring HealthGate-valid trial from ``memory_history``.
 
@@ -4483,9 +4510,18 @@ class HyperparamTuningAgent:
                         # V19 PR 1: consume the startup-resolved
                         # threshold (single-source arithmetic;
                         # ``None`` = no chain incumbent = gate inert).
+                        # M6 (2026-08-06): the bypass may loosen the TIME
+                        # guard and nothing else. An attempt refused because
+                        # its required measurement evidence does not exist is
+                        # not time-gated, and the bypass must not clear it —
+                        # otherwise the `-inf` bootstrap, which makes the
+                        # bypass fire unconditionally on a fresh chain, would
+                        # erase the refusal on the very first formal round and
+                        # M6 would never be reached in a new campaign.
                         if (
                             is_formal_round
                             and not time_check.get("feasible", True)
+                            and not is_evidence_refusal(time_check)
                             # D-C3: the SAME winner the skip gate judged,
                             # resolved once at the formal-round boundary.
                             and _should_bypass_formal_time_budget(
@@ -4518,7 +4554,20 @@ class HyperparamTuningAgent:
                             time_check["feasible"] = True
 
                         if not time_check.get("feasible", True):
-                            print("Time check FAILED — this attempt does NOT count as a round.")
+                            # M6: this lane now carries two different causes,
+                            # and the record must not describe one as the
+                            # other. A wall-time conclusion on an
+                            # evidence refusal would tell the interpreter and
+                            # the proposer that the CANDIDATE was too slow —
+                            # the exact contamination V19 suffered, where an
+                            # infrastructure condition was read as evidence
+                            # about the model.
+                            _evidence_refusal = is_evidence_refusal(time_check)
+                            print(
+                                "Attempt NOT ADMITTED — this attempt does NOT count as a round."
+                                if _evidence_refusal
+                                else "Time check FAILED — this attempt does NOT count as a round."
+                            )
                             print(f"   Verdict   : {time_check.get('verdict', '')}")
                             print(f"   Suggestion: {time_check.get('suggestion', '')}")
 
@@ -4533,11 +4582,23 @@ class HyperparamTuningAgent:
                                 round_index=round_index,
                                 attempt_in_round=attempt_in_round,
                                 conclusion=(
-                                    f"Skipped: estimated wall-time "
-                                    f"({time_check.get('estimated_minutes', '?')} min) "
-                                    f"exceeds budget ({time_check.get('limit_minutes', '?')} min)."
+                                    "Not admitted: a formal scientific decision requires a "
+                                    "bounded probe and none could be resolved. This is an "
+                                    "infrastructure condition and says nothing about the "
+                                    "candidate's size, speed or design."
+                                    if _evidence_refusal
+                                    else (
+                                        f"Skipped: estimated wall-time "
+                                        f"({time_check.get('estimated_minutes', '?')} min) "
+                                        f"exceeds budget "
+                                        f"({time_check.get('limit_minutes', '?')} min)."
+                                    )
                                 ),
                                 discovery=time_check.get("verdict", ""),
+                                # The M6 branch always sets `suggestion`, so
+                                # this default is only ever the time-gated
+                                # one; a second evidence-refusal string here
+                                # would be unreachable.
                                 memory_update=time_check.get(
                                     "suggestion",
                                     "Reduce model size, batch_size, segmentation_size, or train_portion.",
