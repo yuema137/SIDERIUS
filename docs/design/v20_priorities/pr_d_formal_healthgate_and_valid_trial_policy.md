@@ -4380,8 +4380,9 @@ enforcement is **not** written as a ceiling.
 | rounds | 2 | CLI | 2 | tuner loop `while completed_rounds < max_rounds` |
 | proposal attempts | n/a | — | n/a | proposer bypassed entirely |
 | epochs | 1 | CLI | 1 | **clamp** `min(planned, max_epochs)`, logged |
-| **trial portion** | 0.02 | **`plan.trial_portion`** | **NONE** | **nothing — the planner decides** |
-| **trial train/eval portion** | — | **`plan.*`** | **NONE** | **nothing** |
+| **trial portion** | 0.02 | `plan.trial_portion`, then clamped | **0.02** | **FU-D-12** `min(planned, validation_max_portion)` |
+| **trial train portion** | 0.02 | `plan.train_portion`, then clamped | **0.02** | **FU-D-12**, same clamp |
+| **trial eval portion** | 0.02 | `plan.eval_portion`, then clamped | **0.02** | **FU-D-12**, same clamp |
 | formal portion | 0.02 | `agent_input.formal_portion` | 0.02 | tuner reads the CLI value, not the plan |
 | formal train portion | 1.0 | `agent_input.formal_train_portion` | 1.0 | same |
 | formal eval portion | — | `agent_input.formal_eval_portion` | as set | same |
@@ -4392,10 +4393,33 @@ enforcement is **not** written as a ceiling.
 | VRAM inspection per candidate | — | `probe_budgets` | 120 s | `InconclusivePreflight` |
 | VRAM preflight total | — | `probe_budgets` | 1200 s | same |
 
-**The honest consequence**: trial-mode portions have **no hard ceiling**.
-That is the defect that made attempt 2 run 0.1 against a requested 0.02. The
-real bound on the trial phase is therefore the **time budget and the outer
-timeout**, not the portion, and this packet does not pretend otherwise.
+**CLOSED by FU-D-12** (PR #179, merged `ff6a143c`). Trial-mode portions were
+resolved from `plan.*` with no ceiling — the defect that made attempt 2 run
+0.1 against a requested 0.02. They are now clamped at the resolved boundary,
+in the same block as the existing `max_epochs` clamp:
+
+```text
+resolved trial value = min(planned value, validation_max_portion)
+```
+
+A maximum, never a replacement — it can only reduce. Formal-mode portions are
+untouched because they already come from operator input.
+
+**The artifact must prove it.** Every round records, on `ExperimentRecord`:
+
+```text
+validation_workload_ceiling:
+  enabled: true
+  configured_ceiling: 0.02
+  planned:   {trial_portion, train_portion, eval_portion}   # BEFORE the clamp
+  resolved:  {trial_portion, train_portion, eval_portion}   # what actually ran
+```
+
+The planned/resolved **pair** is the point: without it, a clamp that stopped
+firing would be indistinguishable from a planner that happened to choose
+small values, and the Gate could not prove the workload was bounded rather
+than merely requested. **Case A's artifact must contain this block**, and its
+absence is a Gate failure, not a cosmetic gap.
 
 Batch and segmentation are fixed because the plan is frozen and hashed —
 which is a genuine improvement over attempt 2, where the planner chose them.
@@ -4509,3 +4533,77 @@ PR D integrated head                14d77eab
 readiness packets                   THIS SECTION — awaiting review
 Gate 2                              NOT LAUNCHED
 ```
+
+### 21.4 Final transport audit — four chains, 2026-08-05
+
+Run on the integrated PR D head **after** every prerequisite merged, because
+chains 3 and 4 do not exist on master and auditing there produces a false
+negative (observed and discarded during this work).
+
+Every hop verified by **AST on the real production path**, not by grepping a
+field name — the substring habit that let a misplaced kwarg pass its own test
+in FU-D-12.
+
+**Chain 1 — fixed candidate plan → trial → artifact provenance**
+
+| hop | result |
+|---|---|
+| launcher loads and validates the plan | ✅ |
+| launcher → `run_workflow(validation_fixed_candidate_plan=…)` | ✅ line 1841 |
+| workflow bypasses the proposer ONLY | ✅ |
+| implementor / validator / tuner still run | ✅ all three present, outside the bypass |
+| provenance → `write_manifest` | ✅ **all 6 branches** |
+
+**Chain 2 — workload ceiling → resolved `TrialConfig` → `ExperimentRecord`**
+
+| hop | result |
+|---|---|
+| launcher → `run_workflow` | ✅ |
+| workflow → `local_validated_model` (the protocol) | ✅ line 2560 |
+| protocol accepts **and maps** | ✅ |
+| `HyperparamTuningInput.validation_max_portion` declared | ✅ |
+| `ExperimentRecord.validation_workload_ceiling` declared | ✅ |
+| clamp applied AFTER `_resolve_sample_set_cfg` | ✅ |
+| record stamped every round | ✅ |
+
+**Chain 3 — device identity → occupancy window → validity → decision**
+
+| hop | result |
+|---|---|
+| bootstrap resolves identity via the one permitted adapter | ✅ |
+| bootstrap → `run_bounded_probe(device_identity=…)` | ✅ line 483 |
+| tuner → `build_production_probe_runner(device_identity=…)` | ✅ line 1206 |
+| wiring accepts and forwards | ✅ |
+| probe → sampler passes the device | ✅ |
+| sampler builds the occupancy window | ✅ |
+| `ProbeResult` carries the verdict | ✅ |
+| `extrapolate_probe` → estimate | ✅ |
+| **the decision consumes it** — `blocking = measured and validity == VALID` | ✅ |
+
+**Chain 4 — formal authority → artifact → resume → aggregation**
+
+| hop | result |
+|---|---|
+| tuner writes the verdict onto the formal record | ✅ |
+| `ExperimentRecord.scientific_authority` declared | ✅ |
+| `Output.healthgate_mode` / `result_authority` / `formal_comparison_reference_source` / `best_valid_formal_exp_id` declared | ✅ all four |
+| manifest declarations on every branch | ✅ **all 6** |
+| resume gates the incumbent on authority | ✅ |
+| aggregation consumes the verdict | ✅ |
+
+**Result: no sixth gap. All four chains closed.**
+
+That is what makes paying for full CI and the real Gates justified — the
+expensive layers are now expected to CONFIRM, not to discover.
+
+**Why this audit exists.** The five prerequisite PRs (#175–#179) are not five
+scattered bugs. They are one engineering weakness, stated plainly so it is not
+relearned:
+
+> **Producing a correct value locally is not the same as the production chain
+> delivering it.**
+
+Four of the five were instances of it. Two were caught only by mutation, one
+by a Gate costing ~50 minutes, one by an operator question, and one — the
+last — by a cheap parity guard before any expensive layer ran. The ladder is
+closing the weakness systematically rather than case by case.
