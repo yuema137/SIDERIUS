@@ -3702,17 +3702,22 @@ class HyperparamTuningAgent:
                             ("train_portion", cfg_train_portion),
                             ("eval_portion", cfg_eval_portion),
                         ):
-                            if _planned is not None and _planned > _ceiling:
+                            if _planned > _ceiling:
                                 print(
                                     f"  Clamping {_label}: {_planned} → {_ceiling} "
                                     f"(validation_max_portion)"
                                 )
-                        if cfg_trial_portion is not None:
-                            cfg_trial_portion = min(cfg_trial_portion, _ceiling)
-                        if cfg_train_portion is not None:
-                            cfg_train_portion = min(cfg_train_portion, _ceiling)
-                        if cfg_eval_portion is not None:
-                            cfg_eval_portion = min(cfg_eval_portion, _ceiling)
+                        # Assigned unconditionally: BOTH branches of
+                        # `_resolve_sample_set_cfg` yield a non-optional float
+                        # (`ExperimentPlan.trial_portion` and
+                        # `HyperparamTuningInput.formal_*` are both `float`),
+                        # and `TrialConfig` requires `float`. Guarding on
+                        # `is not None` here would widen the inferred type to
+                        # `float | None` and break the TrialConfig contract —
+                        # which is exactly what CI caught.
+                        cfg_trial_portion = min(cfg_trial_portion, _ceiling)
+                        cfg_train_portion = min(cfg_train_portion, _ceiling)
+                        cfg_eval_portion = min(cfg_eval_portion, _ceiling)
 
                     # Generate deterministic seeds for reproducibility.
                     import hashlib
