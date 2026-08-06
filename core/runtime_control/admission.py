@@ -60,6 +60,26 @@ AdmissionReason = Literal[
     "policy_unavailable",
 ]
 
+#: The refusals that are a RESOURCE verdict rather than an evidence gap
+#: (M5, operator-frozen 2026-08-06).
+#:
+#: The frozen model is:
+#:
+#:     current resources + candidate demand + safety policy -> Admission
+#:         enough       -> admit
+#:         insufficient -> reject, and production must not continue
+#:
+#: `insufficient_headroom` IS that rejection. The other two are evidence
+#: gaps — "no trustworthy device fact" and "facts exist but the deciding
+#: input does not" — and an evidence gap is a different disposition, not a
+#: resource verdict. They are guarded where the evidence actually exists:
+#: the formal prephase gate fails closed on both with a real isolated
+#: measurement behind the verdict, and an unresolvable required probe fails
+#: closed in the tuner (M6).
+#:
+#: Consumed by `enforce_resource_limits`, never by `enforce`.
+RESOURCE_REJECTIONS: frozenset[str] = frozenset({"insufficient_headroom"})
+
 #: Finer classification of a refusal, so a record says *how* it failed
 #: and not only that it did.
 #:
@@ -113,13 +133,55 @@ ACCEPTED_MODES: frozenset[str] = frozenset({"formal", "trial"})
 #: repository-wide in the interval. So the compatibility default
 #: evaluates the real decision, records what it *would* have done, and
 #: lets the phase proceed.
-AdmissionEnforcement = Literal["observe_only", "enforce"]
+#: `enforce_resource_limits` is the V20 PRODUCTION posture (M5,
+#: operator-frozen 2026-08-06). It stops the phase on a resource verdict
+#: (`RESOURCE_REJECTIONS`) and records an evidence gap as an observation.
+#:
+#: It is a third value rather than a redefinition of `enforce`, for two
+#: reasons found by the tests when the redefinition was attempted:
+#:
+#:   * `enforce` is the posture the B-G validation harness ran under, and
+#:     B-G1/B-G2 are evidence about *that* behaviour. Narrowing it would
+#:     have silently disarmed the guard those runs demonstrate, while the
+#:     suite still looked green;
+#:   * plain `enforce` cannot be the production posture at all. The
+#:     prephase measurement covers `phase="training"` only, so
+#:     `MeasuredRequirementTable.for_phase("inference")` is structurally
+#:     `(None, None)` and every formal INFERENCE phase would refuse
+#:     `policy_unavailable` — a campaign that produces no formal result.
+#:
+#: So: `enforce` keeps meaning "stop on any adverse decision", and the
+#: production launcher asks for the resource-verdict posture by name.
+AdmissionEnforcement = Literal["observe_only", "enforce", "enforce_resource_limits"]
 
 #: The only accepted enforcement values. An unrecognised one is a
-#: misconfiguration, never silently resolved to either — resolving it to
-#: `observe_only` would disable a guard the operator asked for, and to
-#: `enforce` would stop work they did not ask to stop.
-ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset({"observe_only", "enforce"})
+#: misconfiguration, never silently resolved to any of them — resolving it
+#: to `observe_only` would disable a guard the operator asked for, and to
+#: an enforcing value would stop work they did not ask to stop.
+ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset(
+    {"observe_only", "enforce", "enforce_resource_limits"}
+)
+
+
+def stops_phase(enforcement: str, reason_code: str) -> bool:
+    """Whether an ADVERSE decision stops the phase under this posture.
+
+    One home for the enforcement question, so the executor cannot answer
+    it slightly differently from a test or a future second call site.
+
+    Args:
+        enforcement: the configured posture. An unrecognised value is
+            treated as non-enforcing here **only** because
+            `GpuAdmissionPolicy` already refuses it at construction; this
+            function is not the validation point.
+        reason_code: the refusal's `AdmissionReason`.
+    """
+    if enforcement == "enforce":
+        return True
+    if enforcement == "enforce_resource_limits":
+        return reason_code in RESOURCE_REJECTIONS
+    return False
+
 
 #: Provenance values this module treats as a driver-visible measurement.
 #: Anything else — notably a predicted estimate — is not authoritative,

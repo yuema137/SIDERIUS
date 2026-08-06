@@ -1220,14 +1220,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--gpu_admission_enforcement",
-        choices=["observe_only", "enforce"],
+        choices=["observe_only", "enforce", "enforce_resource_limits"],
         default="observe_only",
         help=(
-            "V20 B-G3/D-B4. Whether an adverse GPU admission decision stops "
-            "the phase (enforce) or is only recorded (observe_only). "
-            "Orthogonal to trial/formal. Default observe_only while PR C "
-            "does not supply authoritative measurements, so a reachable "
-            "gate does not stop formal training everywhere."
+            "V20 B-G3/D-B4/M5. What the run DOES about an adverse GPU "
+            "admission decision. Orthogonal to trial/formal. "
+            "'observe_only' (default, compatibility) records the decision "
+            "and proceeds. 'enforce_resource_limits' is the V20 PRODUCTION "
+            "posture: it stops the phase on a resource verdict "
+            "(insufficient_headroom) and records an evidence gap. "
+            "'enforce' stops on any adverse decision — usable for the B-G "
+            "validation harness, but NOT for a campaign, because the "
+            "prephase measurement covers training only and every formal "
+            "inference phase would refuse policy_unavailable."
         ),
     )
     parser.add_argument(

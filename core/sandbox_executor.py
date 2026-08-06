@@ -632,20 +632,49 @@ def _admission_refusal(sandbox: Any, *, phase: str) -> dict | None:
     # not have; provenance that lies is worse than a guard that does not
     # fire. So the posture stays `formal`, the refusal is recorded as
     # `would_refuse`, and execution continues.
-    if enforcement != "enforce":
+    #
+    # M5 (2026-08-06), frozen by the operator after the pre-launch audit:
+    #
+    #     current resources + candidate demand + safety policy -> Admission
+    #         enough      -> admit
+    #         insufficient -> REJECT, and production must not continue
+    #
+    # `enforce_resource_limits` — the V20 production posture — stops the
+    # phase on that resource verdict. `enforce` still stops on everything.
+    # `admission.stops_phase` owns the distinction so this executor cannot
+    # answer the question differently from the policy module.
+    #
+    # Presence, registration, variability and PID churn of external work
+    # are not consulted anywhere in this decision — `insufficient_headroom`
+    # is a statement about measured headroom, never about who else is on
+    # the card. An empty GPU is not required.
+    from core.runtime_control.admission import stops_phase
+
+    if not stops_phase(enforcement, decision.reason_code):
+        # Why this one was observed rather than enforced is itself a fact
+        # an audit needs: under `enforce`, "observed" now means the refusal
+        # was an evidence gap, not a resource verdict, and a reader must be
+        # able to tell those apart without re-deriving the policy.
+        not_enforced_because = (
+            "reason_code_is_not_a_resource_rejection"
+            if enforcement == "enforce_resource_limits"
+            else "enforcement_observe_only"
+        )
         observation = {
             "phase": phase,
             "enforcement": enforcement,
             "would_refuse": True,
             "mode": mode,
             "reason": decision.reason,
+            "reason_code": decision.reason_code,
+            "not_enforced_because": not_enforced_because,
             "admission": decision.model_dump(mode="json"),
         }
         _record_admission_observation(sandbox, observation)
         print(
-            f"--- [Admission] {phase} WOULD BE REFUSED ({enforcement}): "
-            f"{decision.reason}. Proceeding because enforcement is "
-            f"'{enforcement}'; the phase posture remains '{mode}'."
+            f"--- [Admission] {phase} WOULD BE REFUSED ({enforcement}, "
+            f"{decision.reason_code}): {decision.reason}. Proceeding because "
+            f"{not_enforced_because}; the phase posture remains '{mode}'."
         )
         return None
 

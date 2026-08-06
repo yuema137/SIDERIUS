@@ -1110,6 +1110,7 @@ def _resolve_time_check_probe_request(
     run_name: str,
     exp_id: str,
     device_identity: Any | None = None,
+    result_authority: str | None = None,
 ) -> str:
     """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
 
@@ -1127,9 +1128,34 @@ def _resolve_time_check_probe_request(
 
     When the environment cannot build a real probe runner — CPU box, no
     dataset, pseudo run — the request is recorded as a VISIBLY TYPED
-    advisory rather than resolved. A real formal launch never reaches
-    that branch: the launch guard refuses to start when a production run
-    cannot probe (`require_probe_runner=True`).
+    advisory rather than resolved.
+
+    **M6 (2026-08-06): that advisory must not become a proceed for a
+    production scientific formal decision.** The pre-launch audit found
+    this path failing OPEN: `REQUEST_PROBE -> probe unavailable ->
+    proceed using the prior`, which is exactly the "a formal decision may
+    not rest on a prior" defect C8 exists to remove. The docstring
+    previously claimed the launch guard prevented it — it does not:
+    `run_launch_self_test(require_probe_runner=True)` has one caller,
+    `core.runtime_control.bootstrap.run_bootstrap`, which the chain never
+    executes.
+
+    So the rule is now explicit, and scoped by the two facts that decide
+    whether the evidence is load-bearing:
+
+    * `result_authority == "scientific"` — this run's results may inform
+      science, so an unmeasured formal decision would contaminate it;
+    * `not is_trial` — a trial is the cheap screen and its admission
+      posture already proceeds while recording what it could not prove.
+
+    Both true and the probe is unavailable -> the ATTEMPT is not launched
+    (`"skip"`, the existing attempt-local `skipped_time_risk` lane), with
+    the reason persisted. Anything else keeps the advisory, so diagnostic
+    runs, pseudo runs, CPU boxes and trials are unchanged.
+
+    **Fail closed for this expensive execution, not for the chain.** The
+    campaign continues under normal failure/skip semantics; only the
+    unmeasurable attempt is refused.
     """
     breakdown = time_check.get("breakdown") or {}
     if breakdown.get("runtime_decision") != "REQUEST_PROBE":
@@ -1162,6 +1188,32 @@ def _resolve_time_check_probe_request(
         # persist unnoticed.
         breakdown["probe_capability_task"] = capability.task_identity
         breakdown["probe_capability_reason"] = capability.unavailability_reason
+        # M6. A production scientific formal decision may not rest on a
+        # prior. The three keys below are what resume and diagnostics read
+        # to tell this apart from a resource rejection, a HealthGate
+        # invalidity and a scientific failure.
+        if result_authority == "scientific" and not is_trial:
+            breakdown["probe_resolution_enforced"] = True
+            breakdown["measurement_evidence"] = "not_established"
+            breakdown["admission"] = "not_admitted"
+            time_check["feasible"] = False
+            time_check["verdict"] = (
+                "❌ NOT ADMITTED — a formal scientific decision requires a bounded "
+                f"probe and none could be resolved in this environment ({detail}). "
+                "The prior is not evidence about this candidate."
+            )
+            time_check["suggestion"] = (
+                "Restore the measurement capability (CUDA + the task dataset) and "
+                "re-run. This is an infrastructure condition; it says nothing about "
+                "the candidate."
+            )
+            print(
+                f"  [PROBE] REQUEST_PROBE could not be resolved ({detail}). "
+                f"Formal scientific attempt NOT ADMITTED — refusing to decide "
+                f"from the prior."
+            )
+            return "skip"
+        breakdown["probe_resolution_enforced"] = False
         print(
             f"  [PROBE] REQUEST_PROBE could not be resolved by measurement in this "
             f"environment ({detail}). Recorded as advisory — this is NOT a measured "
@@ -4402,6 +4454,9 @@ class HyperparamTuningAgent:
                                 run_name=run_name,
                                 exp_id=exp_id,
                                 device_identity=device_identity,
+                                # M6: the declared authority decides whether
+                                # an unresolvable probe may fail open.
+                                result_authority=getattr(agent_input, "result_authority", None),
                             )
                             == "abort"
                         ):
