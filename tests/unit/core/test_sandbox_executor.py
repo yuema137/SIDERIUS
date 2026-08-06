@@ -876,3 +876,73 @@ class TestGetLossDir:
         plugin = get_plugin_dir(str(tmp_path), "run_a")
         loss = get_loss_dir(str(tmp_path), "run_a")
         assert plugin != loss
+
+
+class TestBothSandboxesHonourTheDeviceIdentityContract:
+    """`sandbox_factory` may return either sandbox, so both must accept the
+    SAME contract.
+
+    V20 PR B (#153) added `device_identity` to `TidmadSandbox` and to the
+    tuner's factory call, but `StubSandbox` overrides `__init__` and was not
+    updated. Pseudo-training through the tuner therefore raised
+    `TypeError: StubSandbox.__init__() got an unexpected keyword argument
+    'device_identity'` — broken from that merge until V20 PR D's Case A
+    needed the path.
+
+    Nothing caught it: the factory seam is untyped, so no static check sees
+    the mismatch, and only executing the pseudo branch reveals it.
+
+    The stub must FORWARD the identity rather than swallow it — a pseudo run
+    that reports a different device from the one the orchestrator resolved
+    would make its telemetry describe the wrong hardware.
+    """
+
+    IDENTITY = "GPU-c30b6678-ff2a-f8b4-d378-af9681c6ceef"
+
+    def test_the_stub_accepts_and_exposes_what_the_caller_passed(self, tmp_path):
+        """MUTATION TARGET: accepting the argument and dropping it."""
+        from core.sandbox_executor import StubSandbox
+
+        sandbox = StubSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
+        assert sandbox.device_identity == self.IDENTITY
+
+    def test_both_sandboxes_expose_the_same_attribute(self, tmp_path):
+        """The contract is shared, so a caller cannot care which it got."""
+        from core.sandbox_executor import StubSandbox, TidmadSandbox
+
+        stub = StubSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
+        real = TidmadSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
+        assert stub.device_identity == real.device_identity == self.IDENTITY
+
+    def test_absent_identity_stays_none_on_both(self, tmp_path):
+        """A gap is not a default device — neither sandbox may invent one."""
+        from core.sandbox_executor import StubSandbox, TidmadSandbox
+
+        assert StubSandbox(run_name="t", workspace=str(tmp_path)).device_identity is None
+        assert TidmadSandbox(run_name="t", workspace=str(tmp_path)).device_identity is None
+
+    def test_the_tuner_passes_it_to_whatever_the_factory_returns(self):
+        """MUTATION TARGET: the tuner resolving an identity and not passing it.
+
+        Checked per AST call node: the orchestrator resolves the identity
+        ONCE and hands it to the factory, so the sandbox never discovers a
+        device of its own.
+        """
+        import ast
+        from pathlib import Path
+
+        tuner = (
+            Path(__file__).resolve().parents[3]
+            / "nodes"
+            / "ml_hyperparameter_tune_agent"
+            / "ml_hyperparameter_tune_agent.py"
+        )
+        tree = ast.parse(tuner.read_text(encoding="utf-8"))
+        passed = [
+            n.lineno
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and (getattr(n.func, "attr", None) == "_sandbox_factory")
+            and "device_identity" in {kw.arg for kw in n.keywords}
+        ]
+        assert passed, "the tuner calls _sandbox_factory without device_identity"

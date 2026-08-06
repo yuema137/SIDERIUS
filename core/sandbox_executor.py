@@ -1826,7 +1826,15 @@ class StubSandbox(TidmadSandbox):
         file_index: int = 6,
         run_id: str | None = None,
         data_scope: DataScope | None = None,
+        device_identity: Any = None,
     ):
+        # `device_identity` mirrors the parent (V20 PR B, #153). The tuner
+        # resolves the identity ONCE at the orchestration boundary and passes
+        # it to whatever sandbox the factory returns, so a stub that does not
+        # accept it makes pseudo-training unusable through the tuner —
+        # `TypeError: StubSandbox.__init__() got an unexpected keyword
+        # argument 'device_identity'`. It is forwarded rather than dropped so
+        # a pseudo run describes the same device as a real one.
         super().__init__(
             metadata_source=metadata_source,
             mongodb_uri=mongodb_uri,
@@ -1835,6 +1843,7 @@ class StubSandbox(TidmadSandbox):
             progress_bar=progress_bar,
             file_index=file_index,
             data_scope=data_scope,
+            device_identity=device_identity,
         )
         self._run_id: str = run_id or run_name
         self._rng = random.Random(self._run_id)
