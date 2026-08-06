@@ -21,6 +21,7 @@ an explicit ``load_failure`` — never a silent synthetic fallback.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from core.runtime_control.probe import ProbeExecutors, RealizedModelProperties
@@ -56,6 +57,78 @@ def collect_hardware_compatibility_profile() -> HardwareCompatibilityProfile:
         torch_version=torch.__version__,
         dtypes=tuple(sorted(dtypes)),
     )
+
+
+@dataclass(frozen=True)
+class _DiscoveredDevice:
+    """Minimal device record for the identity adapter.
+
+    Deliberately NOT added to `HardwareCompatibilityProfile`: that profile is
+    hashed into `hardware_compatibility_id`, so adding fields would change
+    every historical calibration bucket's identity and silently invalidate
+    accumulated evidence.
+
+    `device_identity_from_hardware` duck-types on these attribute names, so
+    this record satisfies the "one translation point" guardrail without
+    constructing a `DeviceIdentity` here.
+    """
+
+    active_device_uuid: str | None
+    devices: tuple[Any, ...]
+    cuda_visible_devices: str | None
+
+
+@dataclass(frozen=True)
+class _DiscoveredIndex:
+    uuid: str
+    physical_index: int
+    logical_index: int | None
+
+
+def discover_active_device_record() -> _DiscoveredDevice:
+    """Discover the active accelerator's UUID for identity resolution.
+
+    Returns a record whose `active_device_uuid` is ``None`` when the UUID
+    cannot be read — a CPU host, no driver, or an unreadable query. That is a
+    GAP, and the adapter turns it into ``None`` rather than guessing device 0
+    (which would conflate two cards of the same model).
+    """
+    import os
+    import subprocess
+
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout
+    except Exception:
+        return _DiscoveredDevice(None, (), visible)
+
+    rows: list[_DiscoveredIndex] = []
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1]:
+            rows.append(
+                _DiscoveredIndex(uuid=parts[1], physical_index=int(parts[0]), logical_index=None)
+            )
+    if not rows:
+        return _DiscoveredDevice(None, (), visible)
+
+    # The active device is the first VISIBLE one: under CUDA_VISIBLE_DEVICES
+    # the logical ordering starts at that entry.
+    active = rows[0]
+    if visible:
+        first = visible.split(",")[0].strip()
+        if first.isdigit():
+            for r in rows:
+                if r.physical_index == int(first):
+                    active = r
+                    break
+    return _DiscoveredDevice(active.uuid, tuple(rows), visible)
 
 
 def probe_device_vram_gb() -> float:

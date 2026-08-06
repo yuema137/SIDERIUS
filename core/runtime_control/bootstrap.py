@@ -129,6 +129,9 @@ class BootstrapDependencies(BaseModel):
     sample_contention: Callable[..., Any]
     build_executors: Callable[..., Any]
     run_probe: Callable[..., Any]
+    #: Discovers the active device record for identity resolution. Injected
+    #: so the whole sequence stays testable without a GPU.
+    discover_device: Callable[[], Any] = lambda: None
     build_observations: Callable[..., list]
     launch_self_test: Callable[..., Any]
     device_vram_gb: Callable[[], float]
@@ -239,8 +242,17 @@ def run_bootstrap(
     #     decide readiness — see the note below)
     try:
         vram_gb = deps.device_vram_gb()
+        # Resolved BEFORE sampling: without a named device the window builds
+        # no occupancy snapshots, and the external-activity observation can
+        # only honestly report `unknown` — which is what it did until this
+        # ordering was fixed.
+        _identity = device_identity_from_hardware(hardware) or device_identity_from_hardware(
+            deps.discover_device()
+        )
         window = deps.sample_contention(
-            device_vram_gb=vram_gb, expected_peer_pids=expected_peer_pids
+            device_vram_gb=vram_gb,
+            expected_peer_pids=expected_peer_pids,
+            device=_identity,
         )
     except Exception as exc:
         steps.append(
@@ -331,7 +343,12 @@ def run_bootstrap(
     # through the ONE permitted adapter. `None` (CPU host, or a record with
     # no UUID) stays None and fails closed — it is never repaired by
     # assuming device 0, which would conflate two cards of the same model.
-    device_identity = device_identity_from_hardware(hardware)
+    # The hardware COMPATIBILITY profile carries no UUID by design — it is
+    # hashed into `hardware_compatibility_id`, so adding fields there would
+    # invalidate every historical calibration bucket. The identity therefore
+    # comes from a separate discovery record, still through the one permitted
+    # adapter. `None` stays None: a gap, never a guessed device 0.
+    device_identity = _identity
 
     result = deps.run_probe(
         model_identity=model_type,
@@ -488,6 +505,7 @@ def production_dependencies() -> BootstrapDependencies:
     from core.runtime_control.probe_production import (
         collect_execution_environment_profile,
         collect_hardware_compatibility_profile,
+        discover_active_device_record,
         probe_device_vram_gb,
         production_probe_executors,
     )
@@ -545,6 +563,7 @@ def production_dependencies() -> BootstrapDependencies:
         sample_contention=sample_contention_window,
         build_executors=production_probe_executors,
         run_probe=_run_probe,
+        discover_device=discover_active_device_record,
         build_observations=_build_observations,
         launch_self_test=run_launch_self_test,
         device_vram_gb=probe_device_vram_gb,

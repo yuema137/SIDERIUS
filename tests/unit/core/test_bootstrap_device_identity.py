@@ -185,3 +185,98 @@ class TestTheWindowIsActuallyBuiltWhenNamed:
             sleep=lambda _s: None,
         )
         assert window.measurement_validity == expected
+
+
+class TestTheIdentityIsResolvedBeforeTheWindowIsSampled:
+    """Found by real-GPU Case B1, not by a test.
+
+    The first B1 run reported `activity: "unknown"` with empty PID lists
+    while a 5,104 MiB holder was demonstrably present. Two causes, in order:
+
+    1. the hardware COMPATIBILITY profile carries no device UUID, so
+       `device_identity_from_hardware` returned `None`;
+    2. even once discovery supplied one, the contention window was sampled
+       BEFORE the identity was resolved, so no occupancy snapshots were
+       collected and the observation could only honestly say `unknown`.
+
+    The compatibility profile is deliberately NOT extended to carry a UUID:
+    it is hashed into `hardware_compatibility_id`, so adding fields would
+    change every historical calibration bucket's identity and silently
+    invalidate accumulated evidence.
+    """
+
+    def test_discovery_supplies_a_uuid_through_the_one_adapter(self):
+        """MUTATION TARGET: constructing a DeviceIdentity directly.
+
+        The record is duck-typed for `device_identity_from_hardware`, which
+        remains the only translation point.
+        """
+        from core.runtime_control.probe_production import discover_active_device_record
+
+        rec = discover_active_device_record()
+        # On a CPU host or unreadable driver this is None — a gap, never a
+        # guessed device 0.
+        assert hasattr(rec, "active_device_uuid")
+        assert hasattr(rec, "devices")
+        if rec.active_device_uuid is not None:
+            ident = device_identity_from_hardware(rec)
+            assert ident is not None
+            assert ident.uuid == rec.active_device_uuid
+
+    def test_an_unreadable_driver_yields_no_identity(self):
+        """Fail closed: a gap stays a gap."""
+        from types import SimpleNamespace
+
+        assert (
+            device_identity_from_hardware(
+                SimpleNamespace(active_device_uuid=None, devices=(), cuda_visible_devices=None)
+            )
+            is None
+        )
+
+    def test_the_window_is_sampled_WITH_the_device(self):
+        """MUTATION TARGET: sampling the window before resolving identity.
+
+        Ordering is the whole defect: an unnamed device builds no occupancy
+        snapshots, so external activity can only be reported as `unknown`
+        however present a neighbour is.
+        """
+        import ast
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "bootstrap.py"
+        ).read_text(encoding="utf-8")
+
+        resolve_at = src.index("_identity = device_identity_from_hardware(hardware)")
+        sample_at = src.index("window = deps.sample_contention(")
+        assert resolve_at < sample_at, (
+            "the device identity must be resolved BEFORE the contention "
+            "window is sampled, or no occupancy snapshots are collected"
+        )
+
+        tree = ast.parse(src)
+        carried = [
+            n.lineno
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and getattr(n.func, "attr", None) == "sample_contention"
+            and "device" in {kw.arg for kw in n.keywords}
+        ]
+        assert carried, "sample_contention is called without device="
+
+    def test_the_compatibility_profile_is_NOT_extended(self):
+        """Guard the reason the discovery record exists at all.
+
+        Adding a UUID field to `HardwareCompatibilityProfile` would change
+        `hardware_compatibility_id` and invalidate every historical
+        calibration bucket.
+        """
+        from core.runtime_control.registry_schemas import HardwareCompatibilityProfile
+
+        for forbidden in ("active_device_uuid", "devices", "device_uuid"):
+            assert forbidden not in HardwareCompatibilityProfile.model_fields, (
+                f"{forbidden} was added to the hashed compatibility profile; "
+                f"this changes hardware_compatibility_id and invalidates "
+                f"historical calibration buckets"
+            )
