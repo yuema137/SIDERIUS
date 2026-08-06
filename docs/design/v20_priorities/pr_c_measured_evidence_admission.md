@@ -7100,3 +7100,42 @@ production weakened.
 *scientific* design — measure alone, then paired, to derive a contention
 multiplier. That is a legitimate experimental requirement, not a readiness
 gate, and was deliberately left unchanged.
+
+### 30.5 Pre-freeze transport verification, and one honest residue
+
+Run against the candidate head before freezing. Six properties verified by
+execution; the seventh is a documented residue rather than a clean claim.
+
+| # | property | result |
+|---|---|---|
+| 1 | a no-window path does not FABRICATE `VALID` in the persisted field | **OK** — `measurement_validity` stays `None`; only the local eligibility computation treats idle as valid, preserving legacy behaviour without writing a claim |
+| 2 | registered and unregistered produce identical validity and aggregates | **OK** — labels differ (`registered_pids` vs `unregistered_pids`), `activity` and `external_mib_max` identical, same verdict |
+| 3 | an attribution failure names attribution, never resources | **OK** — reason contains none of "insufficient / free memory / headroom / resources" |
+| 4 | `ExternalActivityObservation` round-trips and is strict JSON | **OK** — reload equals the original; no `Infinity`/`NaN` |
+| 5 | the observation is actually attached to the bootstrap step, from the window's REAL snapshots | **OK** — `external.model_dump(mode="json")` on the step; summarised from `window.occupancy.snapshots` |
+| 6 | `decides_readiness: False` is a CONSTRAINT, not decoration | **OK** — the step's `ok=True` is literal, so presence cannot refuse; guarded by a test and by mutation 2 |
+| 7 | `foreign_contended` is read-only for history | **RESIDUE — see below** |
+
+**The residue.** `classify_contention_window` still *produces*
+`foreign_contended` (3 return sites), and `estimate_types` still maps it into
+`contended`, which feeds the no-window eligibility fallback. So on paths that
+name **no device** — and therefore have no occupancy window — external
+presence still influences blocking authority indirectly.
+
+Where it does **not** apply: the bootstrap readiness gate (removed), and every
+path that names its device, which builds a window and is decided by integrity.
+That includes the real Case B bootstrap/probe path after FU-C-1.
+
+**Why it is left.** Removing it means changing the eligibility rule for
+measurements carrying no occupancy evidence at all. That was attempted and
+reverted: it altered behaviour across five modules for paths where nothing had
+been sampled, and granting blocking authority there would rest on no evidence.
+The mandate's narrow-correction rule excludes that scope, and the operator's
+instruction is explicit that a missing-evidence path must not fail OPEN merely
+to retire old vocabulary.
+
+**How to read the residue honestly**: on a no-window path the outcome is
+"validity NOT ESTABLISHED", and `foreign_contended` is the legacy signal that
+happens to carry it. The classification remains useful provenance. Retiring
+the vocabulary entirely belongs to a later change that gives those paths real
+occupancy evidence, not to this one.
