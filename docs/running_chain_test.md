@@ -13,6 +13,40 @@ the next iteration.
 | 2 | **`sdsc_submission_scripts/run_chain.sh --mode {lilab,sdsc}`** | lilab or SDSC Expanse | Unified Bash orchestrator. `--mode lilab` runs `run_one_iteration.py` as foreground subprocess; `--mode sdsc` submits via `sbatch` with `--dependency=afterany`. | **Canonical chain entry point** for any real durable run on either environment (since Phase 6.8 Commit 13.A). |
 | 3 | ~~`sdsc_submission_scripts/run_iteration_chain_lilab.sh`~~ | lilab | **Deprecated** — delegating stub that calls `run_chain.sh --mode lilab "$@"` and prints a `WARNING:` banner. Removal tracked under Commit 15. | Legacy operator muscle memory only. New work should use entry 2. |
 | 4 | ~~`sdsc_submission_scripts/run_iteration_chain.sh`~~ | SDSC Expanse | **Deprecated** — delegating stub that calls `run_chain.sh --mode sdsc "$@"` and prints a `WARNING:` banner. Removal tracked under Commit 15. | Legacy operator muscle memory only. New work should use entry 2. |
+| 5 | **`sdsc_submission_scripts/launch_v20_campaign.sh`** | lilab | Thin wrapper over entry 2 that carries the frozen V20 production posture and wraps it in `screen -L -Logfile`. | **The official V20 scientific campaign.** Use this, not a hand-written entry-2 command. |
+
+### Entry 5 — the V20 production launcher
+
+```bash
+bash sdsc_submission_scripts/launch_v20_campaign.sh \
+    --workspace /home/klz/Data/SIDEREIS_DATA/v20/<RUN> \
+    --run_name <RUN> \
+    --num_iterations <N>
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--workspace DIR` | *required* | Chain workspace root. The logfile is `<DIR>.log`. |
+| `--run_name NAME` | *required* | Chain run name; also the screen session `v20_<NAME>`. |
+| `--num_iterations N` | *required* | Positive integer, validated before launch. |
+| `--dry-run` | off | Print the exact chain command and walk it with no side effects. |
+| `--foreground` | off | Run without `screen`, still `tee`ing to the same logfile. |
+| `--no-ml_lit_review_enabled` | *lit review is ON* | Disable literature review (diagnostic reruns only). |
+| `--no-enable_structured_health_feedback` | *feedback is ON* | Disable structured HealthGate feedback (diagnostic reruns only). |
+
+It exists because the audit of `53a71dca` found the hand-written entry-2
+command dropping every V19 runtime safety control (no time budgets, no
+watchdog, safety factor 1.0, no VRAM budgets), creating no log, and
+falling through to the `gemini-3.1-pro-preview` parser default. The
+frozen posture — LLM config, advice, exploration mode, HealthGate mode,
+result authority, formal gates and deltas, ordering, portions, time and
+VRAM budgets, watchdog factors, and
+`--gpu_admission_enforcement enforce_resource_limits` — lives in the
+script. It has **no** flag that can emit a pseudo or validation posture.
+
+Change the posture in
+`docs/design/v20_priorities/v20_prelaunch_completion_mandate.md` Part II
+§10 first, then here.
 
 **Entry 2 is the single source of truth.** It sources
 `sdsc_submission_scripts/_chain_common.sh` for all shared logic (defaults,

@@ -1,0 +1,225 @@
+"""The V20 production launcher must actually emit the frozen posture.
+
+Audit findings M1/M2/M4 were all the same shape: a posture that existed
+only in an operator's command line, so dropping a flag was invisible.
+Moving it into `launch_v20_campaign.sh` only helps if something fails
+when a line is deleted from that script — which is what these tests are.
+
+They drive the REAL launcher with `--dry-run` and read the argv it would
+hand `run_one_iteration.py`. A static grep of the script would pass on a
+flag that `_chain_common.sh` silently declines to forward; only the
+resolved argv proves delivery.
+
+Portability: the repository root is derived from this file's location, so
+the tests read the checkout they are executed in.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+LAUNCHER = REPO_ROOT / "sdsc_submission_scripts" / "launch_v20_campaign.sh"
+
+
+def _argv_contains(argv: str, expected: str) -> bool:
+    """Exact-token containment, never substring.
+
+    `"--runtime_watchdog" in argv` is True when only
+    `--runtime_watchdog_safety_factor` is present — so deleting the bare
+    watchdog flag passed the first version of this test. Tokenising is
+    what makes the mutation proof meaningful.
+    """
+    tokens = argv.split()
+    wanted = expected.split()
+    return any(tokens[i : i + len(wanted)] == wanted for i in range(len(tokens)))
+
+
+@pytest.fixture(scope="module")
+def runner_argv(tmp_path_factory) -> str:
+    """The argv the launcher would hand the runner, as one string."""
+    workspace = tmp_path_factory.mktemp("v20_launcher") / "ws"
+    proc = subprocess.run(
+        [
+            "bash",
+            str(LAUNCHER),
+            "--workspace",
+            str(workspace),
+            "--run_name",
+            "posture_probe",
+            "--num_iterations",
+            "1",
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, f"launcher dry-run failed:\n{proc.stdout}\n{proc.stderr}"
+    marker = "run_one_iteration.py"
+    lines = [line for line in proc.stdout.splitlines() if marker in line]
+    assert lines, f"no runner invocation in dry-run output:\n{proc.stdout}"
+    assert not workspace.exists(), "a dry run must not create the workspace"
+    return lines[-1]
+
+
+class TestTheFrozenPostureIsDelivered:
+    """Mandate Part II §10, flag by flag, as the runner would see it."""
+
+    @pytest.mark.parametrize(
+        "expected",
+        [
+            # §10.1 LLM — the M4 defect was falling through to Gemini
+            "--llm_config llm_configs/openai_tiered_pro.json",
+            # operator ruling: best ability + advice + sequenced files
+            "--exploration_mode explore",
+            "--human_advice_file advice/workflow/v20_arch_explorer.json",
+            "--order_strategy_override sequential",
+            "--ml_lit_review_enabled",
+            "--enable_structured_health_feedback",
+            # §10.2 scientific policy
+            "--healthgate_mode blocking",
+            "--result_authority scientific",
+            "--enable_chain_incumbent_formal_gates",
+            "--skip_formal_min_delta -1.0",
+            "--bypass_formal_time_budget_min_delta 0.5",
+            # §10.3 runtime safety — the whole of M1
+            "--trial_time_budget_minutes 20",
+            "--formal_time_budget_minutes 120",
+            "--runtime_watchdog",
+            "--runtime_safety_factor 1.5",
+            "--runtime_trial_safety_factor 3.0",
+            "--runtime_formal_safety_factor 2.25",
+            "--runtime_watchdog_safety_factor 3.5",
+            "--runtime_watchdog_floor_seconds 120",
+            "--trial_vram_budget_gb 12",
+            "--formal_vram_budget_gb 12",
+            # §10.4 workload
+            "--max_rounds 3",
+            "--max_epochs 1",
+            "--trial_portion 0.1",
+            "--train_portion 0.1",
+            "--eval_portion 0.1",
+            "--formal_portion 0.1",
+            "--formal_train_portion 1.0",
+            "--formal_eval_portion 1.0",
+            "--formal_round_strategy full_clone",
+            # M5 production admission posture
+            "--gpu_admission_enforcement enforce_resource_limits",
+        ],
+    )
+    def test_flag_reaches_the_runner(self, runner_argv, expected):
+        assert _argv_contains(runner_argv, expected), (
+            f"{expected!r} is missing from the runner argv — the frozen V20 "
+            f"posture is not being delivered"
+        )
+
+
+class TestNoValidationPostureCanLeak:
+    """§10.5. These must be unreachable, not merely unset."""
+
+    @pytest.mark.parametrize(
+        "forbidden",
+        [
+            "--is_pseudo_llm",
+            "--is_pseudo_training",
+            "--validation_fixed_candidate_plan",
+            "--validation_max_portion",
+            "--data_scope",
+            "--debug_dump_prompts",
+        ],
+    )
+    def test_absent_from_the_runner_argv(self, runner_argv, forbidden):
+        assert not _argv_contains(runner_argv, forbidden)
+
+    @pytest.mark.parametrize(
+        "forbidden",
+        [
+            "--is_pseudo_llm",
+            "--is_pseudo_training",
+            "--validation_fixed_candidate_plan",
+            "--validation_max_portion",
+        ],
+    )
+    def test_the_launcher_cannot_even_emit_it(self, forbidden):
+        # Unset-by-default is one edit away from set. Absent-from-the-CODE
+        # is the property that survives a careless change.
+        #
+        # Comments are stripped first: the script explains in prose which
+        # flags it deliberately cannot emit, and a naive substring scan
+        # matches that prose and "passes" for the wrong reason. (It did,
+        # on the first version of this test.)
+        code = "\n".join(
+            line for line in LAUNCHER.read_text().splitlines() if not line.lstrip().startswith("#")
+        )
+        assert forbidden not in code
+
+
+class TestTheOperatorSurface:
+    def test_a_non_positive_iteration_count_is_refused(self, tmp_path):
+        proc = subprocess.run(
+            [
+                "bash",
+                str(LAUNCHER),
+                "--workspace",
+                str(tmp_path / "ws"),
+                "--run_name",
+                "bad",
+                "--num_iterations",
+                "0",
+                "--dry-run",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0
+        assert "positive integer" in proc.stderr
+
+    def test_an_unknown_flag_is_refused(self, tmp_path):
+        proc = subprocess.run(
+            [
+                "bash",
+                str(LAUNCHER),
+                "--workspace",
+                str(tmp_path / "ws"),
+                "--run_name",
+                "bad",
+                "--num_iterations",
+                "1",
+                "--is_pseudo_training",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode != 0
+        assert "Unknown arg" in proc.stderr
+
+    def test_the_logfile_is_derived_from_the_workspace(self, runner_argv):
+        # M2: monitoring documentation pointed at a file nothing created.
+        # The launcher's own banner must name the file it will write.
+        assert re.search(r"--workspace \S+", runner_argv)
+
+
+class TestTheFrozenInputsExist:
+    def test_the_production_llm_config_is_present(self):
+        assert (REPO_ROOT / "llm_configs" / "openai_tiered_pro.json").is_file()
+
+    def test_the_v20_advice_file_is_present(self):
+        assert (REPO_ROOT / "advice" / "workflow" / "v20_arch_explorer.json").is_file()
+
+    def test_the_advice_does_not_claim_healthgate_is_observe_only(self):
+        # It was derived from the V18r explorer, whose HealthGate
+        # statements are false under a blocking campaign. Telling the
+        # proposer that collapse has no consequence is worse than no advice.
+        text = (REPO_ROOT / "advice" / "workflow" / "v20_arch_explorer.json").read_text()
+        assert "observe-only in V18r" not in text
+        assert "HealthGate is BLOCKING in V20" in text

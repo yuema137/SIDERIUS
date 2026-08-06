@@ -44,13 +44,12 @@ RUN_NAME=""
 NUM_ITERATIONS=""
 DRY_RUN=0
 FOREGROUND=0
-# Two V19 production features the operator's frozen §10 list does not
-# mention. Defaulting them ON would silently pick a posture nobody froze;
-# defaulting them OFF and hiding it would do the same. So they are explicit,
-# OFF by default (matching §10 literally), and reported in the V19->V20
-# parity table as needing an operator ruling.
-LIT_REVIEW=0
-STRUCTURED_HEALTH_FEEDBACK=0
+# Operator ruling, 2026-08-06: "enable the best ability, advice, and llm
+# config, and the sequenced file training for v20 — we really want a good
+# model beating FCNet." Both V19 features are therefore ON, and the
+# off-switches exist only so a diagnostic rerun can isolate their effect.
+LIT_REVIEW=1
+STRUCTURED_HEALTH_FEEDBACK=1
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -59,8 +58,8 @@ while [[ $# -gt 0 ]]; do
         --num_iterations)  NUM_ITERATIONS="$2"; shift 2 ;;
         --dry-run)         DRY_RUN=1; shift ;;
         --foreground)      FOREGROUND=1; shift ;;
-        --ml_lit_review_enabled)             LIT_REVIEW=1; shift ;;
-        --enable_structured_health_feedback) STRUCTURED_HEALTH_FEEDBACK=1; shift ;;
+        --no-ml_lit_review_enabled)             LIT_REVIEW=0; shift ;;
+        --no-enable_structured_health_feedback) STRUCTURED_HEALTH_FEEDBACK=0; shift ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -75,12 +74,17 @@ if ! [[ "$NUM_ITERATIONS" =~ ^[0-9]+$ ]] || [ "$NUM_ITERATIONS" -lt 1 ]; then
 fi
 
 LLM_CONFIG="llm_configs/openai_tiered_pro.json"
-if [ ! -f "${PROJECT_DIR}/${LLM_CONFIG}" ]; then
-    # M4 is the whole point of this launcher: without the file the chain
-    # would fall through to the Gemini default, which is the defect.
-    echo "ERROR: frozen production LLM config missing: ${PROJECT_DIR}/${LLM_CONFIG}" >&2
-    exit 1
-fi
+ADVICE_FILE="advice/workflow/v20_arch_explorer.json"
+for required in "$LLM_CONFIG" "$ADVICE_FILE"; do
+    if [ ! -f "${PROJECT_DIR}/${required}" ]; then
+        # M4 is the whole point of this launcher: without the LLM config the
+        # chain falls through to the Gemini default, which is the defect.
+        # Without the advice file the proposer loses the anti-downsizing and
+        # FCNet-scale guidance, which is the campaign's whole objective.
+        echo "ERROR: frozen production input missing: ${PROJECT_DIR}/${required}" >&2
+        exit 1
+    fi
+done
 
 # --- the frozen posture (mandate Part II §10) ------------------------------
 CHAIN_ARGS=(
@@ -92,6 +96,13 @@ CHAIN_ARGS=(
 
     # §10.1 LLM — explicit, never the parser default
     --llm_config "$LLM_CONFIG"
+
+    # Operator ruling: best available ability + advice. `explore` is the
+    # V19 production reasoning mode; the advice file carries the FCNet
+    # 323M reference scale and the anti-downsizing guidance that V19's
+    # systematic shrinking (2.39M / 4.12M proposals) exists to counter.
+    --exploration_mode explore
+    --human_advice_file "$ADVICE_FILE"
 
     # §10.2 scientific policy
     --healthgate_mode blocking
@@ -130,8 +141,17 @@ CHAIN_ARGS=(
     --gpu_admission_enforcement enforce_resource_limits
 )
 
+# V19 production features, both ON by operator ruling. The history window
+# and entry cap are V19's values, restated rather than defaulted so the
+# posture is visible here and not only in a Python default.
 [ "$LIT_REVIEW" -eq 1 ] && CHAIN_ARGS+=(--ml_lit_review_enabled)
-[ "$STRUCTURED_HEALTH_FEEDBACK" -eq 1 ] && CHAIN_ARGS+=(--enable_structured_health_feedback)
+if [ "$STRUCTURED_HEALTH_FEEDBACK" -eq 1 ]; then
+    CHAIN_ARGS+=(
+        --enable_structured_health_feedback
+        --health_feedback_history_window_iterations 3
+        --health_feedback_history_max_entries_per_model 8
+    )
+fi
 
 # §10.5 validation-only features are absent BY CONSTRUCTION: this launcher
 # has no flag that could emit --is_pseudo_llm, --is_pseudo_training,
@@ -147,10 +167,11 @@ echo "  workspace   : $WORKSPACE"
 echo "  run_name    : $RUN_NAME"
 echo "  iterations  : $NUM_ITERATIONS"
 echo "  llm_config  : $LLM_CONFIG"
+echo "  advice      : $ADVICE_FILE"
 echo "  logfile     : $LOG_FILE"
 echo "  lit review  : $([ "$LIT_REVIEW" -eq 1 ] && echo on || echo off)"
 echo "  health fb   : $([ "$STRUCTURED_HEALTH_FEEDBACK" -eq 1 ] && echo on || echo off)"
-echo "  posture     : blocking + scientific, watchdog ON,"
+echo "  posture     : blocking + scientific, watchdog ON, explore mode,"
 echo "                trial<=20min formal<=120min, VRAM 12/12 GB,"
 echo "                admission=enforce_resource_limits, order=sequential"
 echo "############################################################"
