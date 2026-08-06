@@ -7064,3 +7064,39 @@ is reconstructed or upgraded.
 | alternative rejected | register the holder as an expected peer. Rejected: it produces a green result for a *different* property and leaves the real claim untested |
 | alternative rejected | retire `classify_contention_window` entirely. Rejected: it still produces useful observations and is consumed elsewhere; the narrow fix is to stop it *deciding readiness* |
 | compatibility | old vocabulary readable; new records use honest non-blocking terms; no historical upgrade |
+
+### 30.4 Implementation record (2026-08-06)
+
+| checkpoint | commit | what landed |
+|---|---|---|
+| A | `ac0afeed` | `ExternalActivityObservation` + `summarise_external_activity` — activity marker, registered/unregistered PID split, PID-set-change flag, external memory min/max/latest. Pure observation, no verdict. Unreadable telemetry reports `unknown`, never `absent` |
+| B | `ac0afeed` | the presence gate removed from `bootstrap.py`; the window is still sampled and recorded with `decides_readiness: False` |
+| C | `ac0afeed` | validity re-grounded to integrity: `candidate_attribution_failed`, `device_identity_unavailable`, `sampling_incomplete`, `probe_lifecycle_incomplete`, `measurement_invariant_failed`; retired reasons named in `RETIRED_PRESENCE_REASONS` |
+| D | `8c888891` | admission separation asserted; scope narrowed (below) |
+| E | this commit | bootstrap docstrings and the operator doc corrected |
+
+**Scope narrowed, and the attempt recorded.** Widening the no-window fallback
+so `foreign_contended` no longer withheld blocking authority changed behaviour
+across five modules for paths carrying **no occupancy evidence at all**. It
+was reverted. The fallback now reads "validity NOT ESTABLISHED", not "presence
+invalidates", and every path that names its device — including the real
+bootstrap/probe path after FU-C-1 — builds a window and is decided by
+integrity.
+
+**Mutation guards** (all caught): PID-set change invalidating again; presence
+refusing readiness again; registration privileged in the summary; conservative
+aggregates dropped.
+
+**Re-grounded suites**, because they encoded the retired semantics:
+`test_measurement_validity` (identity change now valid),
+`test_c10_bootstrap` and `test_bootstrap_pseudo` (a busy GPU is recorded and
+still measured). A `_Window` fake also needed `occupancy` — the fourth
+instance of the injection-seam class; the fake was fixed rather than
+production weakened.
+
+**Not stale after review**: "idle baseline" in `campaign.py`,
+`runtime_campaign.py`, `running_chain_test.md` and
+`runtime_estimation_and_calibration.md` describes the C12 campaign's
+*scientific* design — measure alone, then paired, to derive a contention
+multiplier. That is a legitimate experimental requirement, not a readiness
+gate, and was deliberately left unchanged.

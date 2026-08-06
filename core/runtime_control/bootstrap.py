@@ -10,7 +10,7 @@ The eleven §12-directive steps, in order:
  2 build the hardware compatibility profile
  3 build the execution environment profile
  4 validate the dataset
- 5 sample the pre-probe contention window
+ 5 sample the pre-probe contention window (recorded as CONTEXT only)
  6 build the probe executors for a real registered model
  7 bounded TRAINING probe
  8 bounded INFERENCE probe (same probe, separate measurement)
@@ -235,7 +235,8 @@ def run_bootstrap(
     if not data_ok:
         return _finish(False)
 
-    # 5 — pre-probe contention window (recorded, and flagged when dirty)
+    # 5 — pre-probe contention window (RECORDED as context; it does not
+    #     decide readiness — see the note below)
     try:
         vram_gb = deps.device_vram_gb()
         window = deps.sample_contention(
