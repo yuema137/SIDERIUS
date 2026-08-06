@@ -17,6 +17,7 @@ the tests read the checkout they are executed in.
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -39,20 +40,46 @@ def _argv_contains(argv: str, expected: str) -> bool:
     return any(tokens[i : i + len(wanted)] == wanted for i in range(len(tokens)))
 
 
-@pytest.fixture(scope="module")
-def runner_argv(tmp_path_factory) -> str:
-    """The argv the launcher would hand the runner, as one string."""
-    workspace = tmp_path_factory.mktemp("v20_launcher") / "ws"
-    proc = subprocess.run(
+def _dry_run_raw(workspace, run_name, band, chain_type, iterations="1"):
+    return subprocess.run(
         [
             "bash",
             str(LAUNCHER),
             "--workspace",
             str(workspace),
             "--run_name",
-            "posture_probe",
+            run_name,
+            "--num_iterations",
+            iterations,
+            "--data_scope",
+            band,
+            "--chain_type",
+            chain_type,
+            "--dry-run",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def _dry_run(workspace, run_name: str, band: str, chain_type: str):
+    """Drive the real launcher for one banded job."""
+    return subprocess.run(
+        [
+            "bash",
+            str(LAUNCHER),
+            "--workspace",
+            str(workspace),
+            "--run_name",
+            run_name,
             "--num_iterations",
             "1",
+            "--data_scope",
+            band,
+            "--chain_type",
+            chain_type,
             "--dry-run",
         ],
         cwd=REPO_ROOT,
@@ -60,12 +87,23 @@ def runner_argv(tmp_path_factory) -> str:
         text=True,
         timeout=120,
     )
+
+
+@pytest.fixture(scope="module")
+def runner_argv(tmp_path_factory) -> str:
+    """The argv the launcher would hand the runner, as one string."""
+    workspace = tmp_path_factory.mktemp("v20_launcher") / "ws"
+    proc = _dry_run(workspace, "posture_probe", "15-19", "loss")
     assert proc.returncode == 0, f"launcher dry-run failed:\n{proc.stdout}\n{proc.stderr}"
     marker = "run_one_iteration.py"
     lines = [line for line in proc.stdout.splitlines() if marker in line]
     assert lines, f"no runner invocation in dry-run output:\n{proc.stdout}"
     assert not workspace.exists(), "a dry run must not create the workspace"
-    return lines[-1]
+    # The dry run renders the command with printf %q, which escapes commas
+    # and the like. shlex un-quotes it back to the argv the runner would
+    # really receive — asserting against the rendering instead would test
+    # the printer, not the launcher.
+    return " ".join(shlex.split(lines[-1]))
 
 
 class TestTheFrozenPostureIsDelivered:
@@ -78,7 +116,7 @@ class TestTheFrozenPostureIsDelivered:
             "--llm_config llm_configs/openai_tiered_pro.json",
             # operator ruling: best ability + advice + sequenced files
             "--exploration_mode explore",
-            "--human_advice_file advice/workflow/v20_arch_explorer.json",
+            "--human_advice_file advice/workflow/v20_loss_explorer.json",
             "--order_strategy_override sequential",
             "--ml_lit_review_enabled",
             "--enable_structured_health_feedback",
@@ -120,6 +158,31 @@ class TestTheFrozenPostureIsDelivered:
         )
 
 
+class TestTheBandIsProductionConfiguration:
+    """`--data_scope` selecting the authoritative band is SCIENCE, not leakage.
+
+    An earlier reading listed `--data_scope` as a validation-only posture
+    and froze V20 as a single full-scope campaign. That was wrong: V20 is
+    banded, and the scope IS the experiment's definition. What must stay
+    absent is a VALIDATION-specific scope override, which this launcher
+    still cannot emit.
+    """
+
+    def test_the_job_carries_its_own_band(self, runner_argv):
+        assert _argv_contains(runner_argv, "--data_scope 15-19")
+
+    def test_healthgate_watches_exactly_the_band_it_trains_on(self, runner_argv):
+        # A gate monitoring files the chain never trains on is judging a
+        # different experiment.
+        assert _argv_contains(runner_argv, "--health_gate_files 15,16,17,18,19")
+
+    def test_no_file_order_override_so_the_band_is_visited_ascending(self, runner_argv):
+        # With `sequential` and no override, the chain visits the resolved
+        # scope in ascending order — that IS the band's sequence. An
+        # override here would silently reorder the science.
+        assert not _argv_contains(runner_argv, "--file_order_override")
+
+
 class TestNoValidationPostureCanLeak:
     """§10.5. These must be unreachable, not merely unset."""
 
@@ -130,7 +193,6 @@ class TestNoValidationPostureCanLeak:
             "--is_pseudo_training",
             "--validation_fixed_candidate_plan",
             "--validation_max_portion",
-            "--data_scope",
             "--debug_dump_prompts",
         ],
     )
@@ -162,6 +224,13 @@ class TestNoValidationPostureCanLeak:
 
 class TestTheOperatorSurface:
     def test_a_non_positive_iteration_count_is_refused(self, tmp_path):
+        proc = _dry_run_raw(tmp_path / "ws", "bad", "15-19", "loss", iterations="0")
+        assert proc.returncode != 0
+        assert "positive integer" in proc.stderr
+
+    def test_a_missing_band_is_refused(self, tmp_path):
+        # A banded job with no scope would silently run the FULL dataset —
+        # a different experiment wearing this job's run name.
         proc = subprocess.run(
             [
                 "bash",
@@ -169,9 +238,11 @@ class TestTheOperatorSurface:
                 "--workspace",
                 str(tmp_path / "ws"),
                 "--run_name",
-                "bad",
+                "nobands",
                 "--num_iterations",
-                "0",
+                "1",
+                "--chain_type",
+                "loss",
                 "--dry-run",
             ],
             cwd=REPO_ROOT,
@@ -180,7 +251,19 @@ class TestTheOperatorSurface:
             timeout=60,
         )
         assert proc.returncode != 0
-        assert "positive integer" in proc.stderr
+        assert "--data_scope" in proc.stderr
+
+    def test_an_unknown_band_is_refused(self, tmp_path):
+        proc = _dry_run_raw(tmp_path / "ws", "badband", "7-9", "loss")
+        assert proc.returncode != 0
+        assert "unknown band" in proc.stderr
+
+    def test_an_unknown_chain_type_is_refused(self, tmp_path):
+        # "arc" is the operator shorthand; the real flavour is "arch", and
+        # accepting the typo would silently pick the wrong explorer advice.
+        proc = _dry_run_raw(tmp_path / "ws", "badtype", "15-19", "arc")
+        assert proc.returncode != 0
+        assert "--chain_type" in proc.stderr
 
     def test_an_unknown_flag_is_refused(self, tmp_path):
         proc = subprocess.run(
@@ -193,6 +276,10 @@ class TestTheOperatorSurface:
                 "bad",
                 "--num_iterations",
                 "1",
+                "--data_scope",
+                "15-19",
+                "--chain_type",
+                "loss",
                 "--is_pseudo_training",
             ],
             cwd=REPO_ROOT,
@@ -223,3 +310,106 @@ class TestTheFrozenInputsExist:
         text = (REPO_ROOT / "advice" / "workflow" / "v20_arch_explorer.json").read_text()
         assert "observe-only in V18r" not in text
         assert "HealthGate is BLOCKING in V20" in text
+
+
+BAND_FILES = {
+    "15-19": "15,16,17,18,19",
+    "10-14": "10,11,12,13,14",
+    "4-9": "4,5,6,7,8,9",
+    "0-3": "0,1,2,3",
+}
+
+
+@pytest.fixture(scope="module")
+def eight_job_argv(tmp_path_factory):
+    """The resolved runner argv for each of the eight V20 chains."""
+    from core.campaign.slot_scheduler import v20_campaign_jobs
+
+    root = tmp_path_factory.mktemp("v20_matrix")
+    out = {}
+    for job in v20_campaign_jobs():
+        proc = _dry_run(root / job.run_name, job.run_name, job.band, job.chain_type)
+        assert proc.returncode == 0, f"{job.run_name}: {proc.stderr}"
+        line = [ln for ln in proc.stdout.splitlines() if "run_one_iteration.py" in ln][-1]
+        out[job.run_name] = " ".join(shlex.split(line))
+    return out
+
+
+class TestTheEightJobsAreEachCorrectlyScoped:
+    """Per-job inputs differ; scientific policy does not."""
+
+    def test_all_eight_resolve(self, eight_job_argv):
+        assert len(eight_job_argv) == 8
+
+    @pytest.mark.parametrize(
+        ("run_name", "band", "chain_type"),
+        [
+            ("v20_loss_15_19", "15-19", "loss"),
+            ("v20_arch_15_19", "15-19", "arch"),
+            ("v20_loss_10_14", "10-14", "loss"),
+            ("v20_arch_10_14", "10-14", "arch"),
+            ("v20_loss_04_09", "4-9", "loss"),
+            ("v20_arch_04_09", "4-9", "arch"),
+            ("v20_loss_00_03", "0-3", "loss"),
+            ("v20_arch_00_03", "0-3", "arch"),
+        ],
+    )
+    def test_band_gate_files_and_advice_all_agree(self, eight_job_argv, run_name, band, chain_type):
+        argv = eight_job_argv[run_name]
+        # scope, HealthGate scope and run identity must describe ONE experiment
+        assert _argv_contains(argv, f"--data_scope {band}")
+        assert _argv_contains(argv, f"--health_gate_files {BAND_FILES[band]}")
+        assert _argv_contains(argv, f"--run_name {run_name}")
+        assert _argv_contains(
+            argv, f"--human_advice_file advice/workflow/v20_{chain_type}_explorer.json"
+        )
+
+    def test_no_job_carries_another_bands_scope(self, eight_job_argv):
+        # The mutation that matters: 10-14 loss accidentally receiving the
+        # 15-19 scope would run a different experiment under this name.
+        for run_name, argv in eight_job_argv.items():
+            tag = run_name.rsplit("_", 2)[-2] + "_" + run_name.rsplit("_", 1)[-1]
+            expected = {"15_19": "15-19", "10_14": "10-14", "04_09": "4-9", "00_03": "0-3"}[tag]
+            for band in BAND_FILES:
+                present = _argv_contains(argv, f"--data_scope {band}")
+                assert present == (band == expected), f"{run_name} scope {band}"
+
+    def test_loss_and_arch_never_swap_advice(self, eight_job_argv):
+        for run_name, argv in eight_job_argv.items():
+            wrong = "arch" if "_loss_" in run_name else "loss"
+            assert not _argv_contains(
+                argv, f"--human_advice_file advice/workflow/v20_{wrong}_explorer.json"
+            )
+
+    def test_every_job_carries_the_identical_scientific_policy(self, eight_job_argv):
+        # Policy has one home. If a job could differ here, the campaign's
+        # posture would depend on which chain you inspected.
+        frozen = [
+            "--llm_config llm_configs/openai_tiered_pro.json",
+            "--healthgate_mode blocking",
+            "--result_authority scientific",
+            "--enable_chain_incumbent_formal_gates",
+            "--skip_formal_min_delta -1.0",
+            "--bypass_formal_time_budget_min_delta 0.5",
+            "--order_strategy_override sequential",
+            "--gpu_admission_enforcement enforce_resource_limits",
+            "--runtime_watchdog",
+            "--trial_time_budget_minutes 20",
+            "--formal_time_budget_minutes 120",
+            "--trial_vram_budget_gb 12",
+            "--formal_vram_budget_gb 12",
+            "--max_epochs 1",
+        ]
+        for run_name, argv in eight_job_argv.items():
+            for flag in frozen:
+                assert _argv_contains(argv, flag), f"{run_name} missing {flag}"
+
+    def test_no_job_can_carry_a_pseudo_or_validation_posture(self, eight_job_argv):
+        for run_name, argv in eight_job_argv.items():
+            for forbidden in (
+                "--is_pseudo_llm",
+                "--is_pseudo_training",
+                "--validation_fixed_candidate_plan",
+                "--validation_max_portion",
+            ):
+                assert not _argv_contains(argv, forbidden), f"{run_name} {forbidden}"
