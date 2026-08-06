@@ -209,16 +209,27 @@ class TestBootstrapPseudo:
         levels = {p.level for p in promotions}
         assert levels == {"validated"}
 
-    def test_a_contended_gpu_refuses_before_measuring(self, tmp_path):
+    def test_a_busy_gpu_is_recorded_and_still_measured(self, tmp_path):
+        """RE-GROUNDED 2026-08-06 (operator).
+
+        This previously asserted that a busy GPU refused BEFORE measuring:
+        `ready is False`, no observations recorded. That was the presence
+        gate, and it made SIDERIUS unusable on a shared device — a stable
+        sole-occupant holder produced `ready=False` on real hardware while
+        `MeasurementValidity` was never even reached.
+
+        External activity is now CONTEXT. The window is recorded, the run
+        proceeds to actual measurement, and trustworthiness is decided by
+        measurement INTEGRITY rather than by whether the device was busy.
+        """
         report = _bootstrap(tmp_path, snapshot=BUSY)
-        assert report.ready is False
-        assert report.observation_ids == ()
-        failure = report.failures[0]
-        assert failure.name == "contention window"
-        assert failure.data["classification"] == "foreign_contended"
-        # Nothing from a dirty baseline reached the registry.
-        registry = CalibrationRegistry(tmp_path / "runtime_calibration")
-        assert registry.load_manifest().observation_ids == []
+        step = {s.name: s for s in report.steps}["contention window"]
+
+        assert step.ok is True, "a busy GPU must not refuse before measuring"
+        assert step.data["classification"] == "foreign_contended"  # still recorded
+        assert step.data["decides_readiness"] is False
+        # The run proceeded past the window into real measurement.
+        assert len(report.steps) > 5
 
     @pytest.mark.parametrize("run_twice", [True])
     def test_bootstrapping_twice_is_safe(self, tmp_path, run_twice):

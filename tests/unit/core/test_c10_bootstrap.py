@@ -44,6 +44,11 @@ class _Window:
         self.classification = classification
         self.samples = (ContentionSnapshot(telemetry_available=True),) * 5
         self.reasons = ("test",)
+        # Part of the ContentionWindow contract (FU-C-1). `None` is the
+        # legitimate value when no device was named — a CPU host or an
+        # unnamed device — and the bootstrap then reports external activity
+        # as `unknown` rather than inventing `absent`.
+        self.occupancy = None
 
     def raw_telemetry(self):
         return {"samples": [], "classification": self.classification}
@@ -201,12 +206,30 @@ class TestRefusals:
         assert failure.name == "dataset"
         assert "TIDMAD" in failure.remedy
 
-    def test_a_contended_gpu_is_flagged_not_averaged_in(self, tmp_path):
+    def test_external_activity_is_recorded_but_does_NOT_refuse(self, tmp_path):
+        """RE-GROUNDED 2026-08-06 (operator).
+
+        This previously asserted that a `foreign_contended` window REFUSED
+        readiness with "another process is using this GPU… stop the other
+        workload". That gate was wrong in three ways, all measured on real
+        hardware: presence decided readiness; a REGISTERED peer was privileged
+        over an identical unregistered process; and the remedy told operators
+        SIDERIUS needs an empty GPU.
+
+        External activity is now CONTEXT. The window is still sampled and
+        still recorded — it is useful provenance — but it no longer decides.
+        Whether the measurement can be trusted is decided downstream by
+        measurement INTEGRITY, and whether the candidate may run is decided
+        separately by admission.
+        """
         report = _run(tmp_path, sample_contention=lambda **kw: _Window("foreign_contended"))
-        failure = self._first_failure(report)
-        assert failure.name == "contention window"
-        assert "another process" in failure.remedy.lower()
-        assert report.observation_ids == ()  # nothing recorded from a dirty baseline
+        step = {s.name: s for s in report.steps}["contention window"]
+
+        assert step.ok is True, "external presence must not refuse readiness"
+        assert step.remedy == "", "no remedy — nothing was wrong"
+        assert step.data["classification"] == "foreign_contended"  # still recorded
+        assert step.data["decides_readiness"] is False
+        assert "external_activity" in step.data
 
     def test_telemetry_failure(self, tmp_path):
         def _boom(**kw):

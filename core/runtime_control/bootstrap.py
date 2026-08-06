@@ -43,6 +43,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
+from core.runtime_control.measurement_validity import summarise_external_activity
 
 #: Bounded by construction: bootstrap must never look like a training run.
 DEFAULT_BOOTSTRAP_CAPS = {
@@ -250,24 +251,52 @@ def run_bootstrap(
             )
         )
         return _finish(False)
-    contended = window.classification not in ("single_candidate_idle", "pairwise_expected_peer")
+    # V20 — external activity is CONTEXT, never readiness (operator,
+    # 2026-08-06). This step used to refuse whenever the window was anything
+    # other than idle-or-registered-peer:
+    #
+    #     contended = classification not in ("single_candidate_idle",
+    #                                        "pairwise_expected_peer")
+    #     if contended: return _finish(False)
+    #
+    # Three defects in one gate, all measured on real hardware (a stable
+    # sole-occupant 5,104 MiB holder produced ready=False):
+    #
+    #   1. PRESENCE decided readiness — any unregistered PID refused,
+    #      however stable, and `MeasurementValidity` was never reached;
+    #   2. REGISTRATION was privileged — `pairwise_expected_peer` passed
+    #      where an identical unregistered process was refused, making
+    #      registration a correctness requirement;
+    #   3. the remedy told operators to stop other workloads, i.e. that
+    #      SIDERIUS requires an empty GPU.
+    #
+    # The window is still SAMPLED and RECORDED — it is useful provenance —
+    # but it no longer decides. Whether the measurement can be trusted is
+    # decided downstream by measurement integrity, and whether the candidate
+    # may run is decided separately by admission.
+    # Summarised from the accounting snapshots the window actually collected.
+    # `occupancy` is present only when the caller named a device (FU-C-1); on
+    # a CPU host or an unnamed device there are no snapshots and the summary
+    # honestly reports `unknown` rather than inventing `absent`.
+    _accounting = window.occupancy.snapshots if window.occupancy is not None else ()
+    external = summarise_external_activity(_accounting, registered_pids=expected_peer_pids)
     steps.append(
         BootstrapStep(
             name="contention window",
-            ok=not contended,
-            detail=f"{window.classification} ({len(window.samples)} samples)",
-            remedy=""
-            if not contended
-            else (
-                "Another process is using this GPU. The measurement would not "
-                "describe an idle baseline — stop the other workload and re-run."
+            ok=True,
+            detail=(
+                f"{window.classification} ({len(window.samples)} samples) — "
+                f"recorded as context; readiness is decided by measurement "
+                f"integrity, not by external presence"
             ),
-            data={"classification": window.classification, "reasons": list(window.reasons)},
+            data={
+                "classification": window.classification,
+                "reasons": list(window.reasons),
+                "external_activity": external.model_dump(mode="json"),
+                "decides_readiness": False,
+            },
         )
     )
-    if contended:
-        # Recorded, never silently folded into the baseline.
-        return _finish(False)
 
     # 6-8 — bounded probe (training and inference measured separately)
     try:
