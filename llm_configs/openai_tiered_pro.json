@@ -6,7 +6,7 @@
   "propose": {
     "comparison": {
       "provider": "openai",
-      "model_id": "gpt-5.5-mini"
+      "model_id": "gpt-5.5"
     },
     "reasoning": {
       "provider": "openai",
@@ -23,7 +23,7 @@
   },
   "validate": {
     "provider": "openai",
-    "model_id": "gpt-5.5-mini"
+    "model_id": "gpt-5.5"
   },
   "tune": {
     "planner": {

@@ -512,3 +512,285 @@ the campaign has not been launched. Then report: final main SHA; merged PRs;
 validation summary; Case B evidence; final launch command; artifact and
 monitoring paths; remaining scientific uncertainties; and an explicit statement
 that the repository is ready for the operator to begin V20.
+
+---
+
+# Part II — Final V20 Pre-Launch Hardening Mandate
+
+**Operator mandate, 2026-08-06, issued after the independent launch audit of
+`53a71dca9b272bafc748f1560530196f523ddb28`.** Part II supersedes Part I's
+stopping rule: the repository reached `V20 READY WITH NON-BLOCKING RISKS`, and
+the operator ruled that the eight audit findings are to be closed *before*
+launch rather than accepted.
+
+**Read this whole document (Parts I and II) first after every compaction.**
+The §7 read order applies unchanged, with this Part now the active mandate.
+
+## 9. Scope and stopping rule
+
+This is the **final pre-launch engineering pass**. It is deliberately narrow.
+
+* Close audit findings **M1–M8** and nothing else.
+* Do **not** reopen general architecture work.
+* Do **not** launch V20.
+* Do **not** begin a fourth audit round after this one closes.
+
+Work autonomously until the hardening PR is implemented and merged, the final
+V20 launch configuration is frozen and revalidated on the merged head, and the
+final report truthfully states **`V20 READY TO START`**.
+
+Do not stop for routine design choices. Audit the actual code path, choose the
+smallest production-safe implementation, record the decision in the V20
+design/readiness documents, validate the semantic checkpoint, continue.
+
+## 10. Frozen production decisions
+
+These are operator decisions. Implement them; do not re-derive them.
+
+### 10.1 LLM
+
+Every formal/official SIDERIUS production campaign must **explicitly** pass:
+
+```text
+--llm_config llm_configs/openai_tiered_pro.json
+```
+
+Never rely on the parser default. The audit proved the bare command falls
+through to `gemini-3.1-pro-preview` for all five nodes.
+
+### 10.2 Scientific policy
+
+```text
+healthgate_mode                        = blocking
+result_authority                       = scientific
+chain-incumbent formal gates           = enabled
+cross-iteration authoritative incumbent= enabled
+file-sequence training                 = enabled
+skip_formal_min_delta                  = -1.0
+bypass_formal_time_budget_min_delta    = +0.5
+```
+
+The incumbent must be the best **authoritative scientific formal** result —
+never a trial, never a diagnostic record. The no-incumbent bootstrap remains
+`-inf` and must bypass the formal time-budget policy regardless of the `+0.5`
+threshold.
+
+**The `+0.5` bypass may bypass the formal time-budget decision and nothing
+else.** It must never bypass HealthGate, authority checks, watchdogs,
+VRAM/resource safety, measurement validity, or admission.
+
+### 10.3 Runtime safety posture (inherited from V19)
+
+```text
+trial_time_budget_minutes              = 20
+formal_time_budget_minutes             = 120
+runtime_watchdog                       = ON
+runtime_safety_factor                  = 1.5
+runtime_trial_safety_factor            = 3.0
+runtime_formal_safety_factor           = 2.25
+runtime_watchdog_safety_factor         = 3.5
+runtime_watchdog_floor_seconds         = 120
+trial_vram_budget_gb                   = 12
+formal_vram_budget_gb                  = 12
+```
+
+These are **operational safety controls, not scientific pass/fail criteria**.
+
+### 10.4 Production workload
+
+```text
+trial_portion / train_portion / eval_portion = 0.1 / 0.1 / 0.1
+formal_portion                               = 0.1
+formal_train_portion                         = 1.0
+formal_eval_portion                          = 1.0
+formal_round_strategy                        = full_clone
+```
+
+Audit the actual V19 manifest/config and perform a parameter-by-parameter
+parity comparison before freezing these.
+
+### 10.5 Validation-only features must be absent
+
+```text
+pseudo LLM                   OFF
+pseudo training              OFF
+fixed validation candidate   OFF
+validation workload ceiling  OFF
+validation-only data overrides OFF
+```
+
+## 11. The eight findings
+
+### M1 — runtime safety belongs to the launch posture, not to operator memory
+
+The official V20 production launcher must carry §10.3 itself. Audit the
+existing wrappers/configuration and implement the smallest
+**repository-controlled** way to do it. Do not move scientific policy into
+unrelated runtime internals. Verify every flag reaches its real production
+consumer and is persisted in effective configuration/provenance.
+
+### M2 — persistent campaign logging
+
+The official launch mechanism must create a disconnect-safe persistent log.
+Use the smallest existing mechanism — preferably the established
+`screen -L -Logfile` posture. Do not redesign logging, and do not put logging
+into the core scientific runtime. Verify: the log exists immediately after
+launch; stdout and stderr are retained; monitoring documentation points at the
+real file; a disconnect does not terminate the campaign. **Do not launch the
+scientific campaign during acceptance.**
+
+### M3 — recovery documentation
+
+Replace every stale `--start_iteration` instruction with the real
+`--start_iter`. Audit every V20 recovery example and verify auto-resume and
+explicit-start against the actual CLI parser.
+
+### M4 — production provider
+
+Freeze the official launcher to pass `--llm_config
+llm_configs/openai_tiered_pro.json` explicitly. Verify by dry-run that the
+effective config is the pro tier and no Gemini/default fallback occurs. Use the
+minimum bounded real API call needed to verify authentication and parsing.
+
+### M5 — resource admission must be real in production
+
+The frozen semantics are:
+
+```text
+external activity                          -> observation / provenance
+measurement integrity                      -> MeasurementValidity
+current resources + demand + safety policy -> Admission
+```
+
+Registration, external-process presence, variability, burstiness and PID churn
+must **never** directly block execution. But once a **valid** measurement
+produces an actual admission rejection for insufficient current resources,
+production execution must not continue:
+
+```text
+MeasurementValidity = valid
++ Admission = rejected_insufficient_current_resources
+-> candidate execution is NOT launched
+```
+
+Persist the structured reason. Do not reinterpret a resource rejection as
+measurement invalidity. **Do not require an empty GPU.** Registered and
+unregistered external workloads must remain semantically equivalent for both
+validity and admission given identical measured facts. Add deterministic tests
+and the minimum real-GPU evidence needed to prove it.
+
+### M6 — a required probe that is unavailable must not fail open
+
+Current unacceptable behaviour on the production path:
+
+```text
+REQUEST_PROBE -> production probe unavailable -> proceed using prior
+```
+
+For a production scientific run, if the decision requires a probe and the
+production probe cannot be resolved or executed, that candidate/formal
+execution must not launch. Use the smallest existing structured outcome that
+honestly represents *required measurement evidence not established / probe
+unavailable / execution not admitted*.
+
+**Fail closed for that expensive execution — not necessarily for the whole
+chain process.** Do not crash the campaign unless existing invariant semantics
+require it. Persist the reason so resume and diagnostics can distinguish it
+from a resource rejection, a HealthGate invalidity and a scientific failure.
+Add a mutation/regression test that fails if `probe unavailable -> proceed`
+returns.
+
+### M7 — repair the final readiness document
+
+Remove the stale claims that PR D is unmerged and that Case A/B are pending.
+Make the document internally consistent **without** a top disclaimer telling
+readers to ignore later sections. Preserve historical evidence as historical
+evidence.
+
+### M8 — correct the dataset inventory
+
+Correct `422 H5 files` to the true source inventory. Audit the exact
+source-file resolver and record the real number of production input files.
+`abra_validation_denoised_*` are historical output artifacts, not source data,
+and the resolver does not ingest them — the audit verified this. Use cheap
+filesystem/config inspection; do not index the whole dataset.
+
+## 12. Three required audits
+
+### 12.1 File-sequence training
+
+A new V20 production feature that must be **explicitly enabled**. Do not guess
+the flag name. Trace: launch config -> typed runtime config -> trial training
+-> formal training -> actual file ordering -> persisted
+`ExperimentRecord`/provenance -> resume behaviour. Verify whether both trial
+and formal training are intended to use the file sequence, and that
+interruption/resume does not silently restart or alter the scientific sequence.
+Use deterministic/pseudo tests — **never a stochastic training outcome as the
+oracle**.
+
+### 12.2 Cross-iteration incumbent
+
+Trace: formal authoritative record -> artifact -> reload -> incumbent
+restoration -> next-iteration delta -> skip/normal/bypass decision. Require
+that diagnostic records, invalid records, trials and historical records without
+established authority are all excluded; that resume restores the same
+incumbent; and that `-inf` is used only when no authoritative incumbent exists.
+
+Test the exact thresholds and confirm the inclusive/exclusive comparisons in
+code match the documented policy:
+
+```text
+delta <= -1.0          skip formal (frozen boundary semantics)
+-1.0 < delta < +0.5    normal formal policy
+delta >= +0.5          bypass the formal TIME-BUDGET decision only
+no incumbent           bootstrap bypass
+```
+
+### 12.3 V19 -> V20 launch parity
+
+Compare the actual V19 production launch manifest/command/config against the
+final V20 configuration. Produce a table of **every** differing parameter, each
+classified as exactly one of:
+
+1. intentional V20 feature;
+2. deliberate production correction/hardening;
+3. inherited V19 value represented differently.
+
+**Any unexplained fourth category is a blocker until understood.** Cover: LLM
+config; portions; iteration/round/attempt limits; epochs; time budgets; VRAM
+budgets; watchdog controls; file-sequence behaviour; cross-iteration incumbent;
+HealthGate mode; result authority; formal gates; formal delta thresholds;
+resume; cleanup; output paths; logging; validation-only flags.
+
+## 13. Validation ladder
+
+Minimum bounded validation, in order:
+
+```text
+focused unit tests
+  -> targeted integration tests
+  -> mutation / reachability tests
+  -> static and type checks
+  -> configured full unit suite
+  -> exact-head CI
+  -> only the real-GPU cases needed for M5 and M6
+  -> production launch dry-run
+  -> final V19/V20 parity check
+```
+
+Do not run real scientific training. If a tracked fix is required after the
+head is frozen, create a new frozen SHA and rerun exact-head acceptance.
+
+After acceptance, merge through the normal repository workflow, audit the
+merged main, and regenerate the exact production launch command.
+
+## 14. Part II stopping rule
+
+Stop only when the final report states **`V20 READY TO START`** and includes:
+final main SHA; the merged hardening PR; the exact LLM config; the exact
+scientific and runtime parameters; the M1-M8 disposition; the exact launch
+command; the logfile path; the recovery command; first-hour monitoring and
+abort rules; the V19->V20 parameter diff; and confirmation that no
+pseudo/validation posture is active.
+
+**Do not launch V20.**

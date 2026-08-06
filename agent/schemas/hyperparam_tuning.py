@@ -1625,14 +1625,16 @@ class HyperparamTuningInput(BaseModel):
     gpu_admission_enforcement: AdmissionEnforcement = Field(
         default="observe_only",
         description=(
-            "V20 B-G3/D-B4. Whether an adverse GPU admission decision "
-            "STOPS the phase (`enforce`) or is only recorded "
-            "(`observe_only`). Orthogonal to trial/formal posture: the "
+            "V20 B-G3/D-B4/M5. What the run DOES about an adverse GPU "
+            "admission decision. Orthogonal to trial/formal posture: the "
             "posture says what the round is, this says what the run does "
             "about a refusal. `observe_only` is the compatibility default "
-            "while PR C does not yet supply authoritative measurements, "
-            "so that a reachable gate does not stop formal training "
-            "everywhere in the interval. The phase is never relabelled."
+            "— it records the decision and proceeds. "
+            "`enforce_resource_limits` is the V20 PRODUCTION posture: a "
+            "resource verdict (`insufficient_headroom`) stops the phase, "
+            "an evidence gap is recorded. `enforce` stops on any adverse "
+            "decision and is the B-G validation-harness posture, not a "
+            "campaign posture. The phase is never relabelled."
         ),
     )
     gpu_pair_ceiling_gib: float | None = Field(
