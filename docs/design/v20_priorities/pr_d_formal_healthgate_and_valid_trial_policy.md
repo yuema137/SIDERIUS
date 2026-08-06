@@ -4607,3 +4607,128 @@ Four of the five were instances of it. Two were caught only by mutation, one
 by a Gate costing ~50 minutes, one by an operator question, and one — the
 last — by a cheap parity guard before any expensive layer ran. The ladder is
 closing the weakness systematically rather than case by case.
+
+---
+
+## 22. Case A reclassified — deterministic acceptance (operator, 2026-08-05)
+
+**Case A is no longer a real-training Gate and is no longer a PR D merge
+blocker.**
+
+### 22.1 The category error
+
+Case A conflated two different things:
+
+| | nature |
+|---|---|
+| is PR D's control logic correct? | a **deterministic** state machine |
+| does a model train well enough on a small data fraction to clear a HealthGate? | a **stochastic** scientific outcome |
+
+Gating the first on the second made PR D's acceptance depend on whether a
+model happened to collapse, whether the data fraction was large enough, and on
+training randomness. **Four attempts, four unrelated causes, none a defect in
+the behaviour under test**:
+
+| attempt | cause |
+|---|---|
+| Gate 2 #1 | probe attribution counted the candidate's own memory as foreign |
+| Case A #1 | a 30-layer WaveNet overran the 120 s inspection budget |
+| Case A #2 | the LLM-proposed model collapsed; gates correctly invalidated it |
+| Case A #3 | **my own ceiling** clamped `train_portion` 0.1 → 0.02, starving training 5× |
+
+Attempt 3 is the sharpest illustration: the harness caused the failure, and
+the artifact would have read as "the candidate failed to reproduce" to any
+later reader.
+
+### 22.2 What Case A actually had to prove
+
+```text
+valid trial fixture -> winner -> -inf bootstrap -> bypass
+  -> formal record -> authority -> resume incumbent -> aggregation
+```
+
+Every step is a deterministic data flow and state machine. None of it becomes
+more true by being driven with real training.
+
+Already established, and unaffected by this change:
+
+* the full producer → artifact → consumer audit (§21.4, four chains);
+* unit, integration and mutation coverage;
+* **real** evidence of the `-inf` bootstrap (`reference=-inf, skip=-inf,
+  bypass=-inf`, `negative_infinity_bootstrap` persisted);
+* **real** evidence that an invalid trial skips formal
+  (`reason=no_valid_trial_winner`);
+* **real** artifacts containing no `Infinity`/`NaN`;
+* **real** evidence that the workload ceiling binds (§21, planned 0.05/0.1/0.05
+  → resolved 0.02/0.02/0.02).
+
+### 22.3 The replacement
+
+`tests/integration/workflows/test_pr_d_positive_path_deterministic.py` — 11
+tests driving the REAL `ScientificAuthority`, `resolve_record_authority`,
+aggregation partition and artifact serialisation, with only the LLM and the
+training substituted. It proves the verdict is derived not asserted, survives
+nesting inside `all_records`, **recomputes** from stored facts, is admitted by
+both consumers, and is refused at both when made diagnostic.
+
+Precedent: `test_chain_incumbent_pseudo.py` established this exact split for
+V19 PR 1, *"so that the downstream Gate 2 smoke does not need to force a
+particular stochastic real-training outcome."*
+
+### 22.4 What remains a real Gate
+
+**Case B only.** Stable, attributable external GPU occupancy must not
+invalidate a calibration — a property synthetic execution cannot establish,
+because it is about a real device with a real foreign process.
+
+### 22.5 Merge criteria, revised
+
+```text
+exact-head CI green
++ deterministic Case A positive-path integration green
++ real Case B green
+-> PR D may merge
+```
+
+A real scientific candidate reaching `valid trial → formal → authoritative
+result` is **V20 campaign evidence**, produced by the campaign at its normal
+portions. It is not a precondition for merging the infrastructure that makes
+such a result interpretable.
+
+### 22.6 Attempt 4 — observational, and it DISPROVED my hypothesis
+
+Launched before this reclassification with the ceiling corrected to 0.1,
+covering the historical passing workload. Outcome:
+
+```text
+round 1   skipped_time_risk          (the trial time gate rejected it)
+round 2   failed_mode_collapse       score -3.076
+ceiling   planned 0.1/0.1/0.1 -> resolved 0.1/0.1/0.1   (at the ceiling)
+result    no valid trial winner -> formal skipped -> status=no_records
+```
+
+**The ceiling was NOT the cause.** At `train_portion=0.1` — the exact value
+the historical passing run used — the candidate collapsed again (-3.076,
+against attempt 3's -3.345 at 0.02). My earlier attribution of attempt 3 to
+"my ceiling starved training 5x" is **withdrawn**: it was a plausible
+mechanism, and the measurement refutes it.
+
+The correct classification stands as the pre-decided one:
+
+> **the candidate failed to reproduce as HealthGate-valid under the current
+> run.** Causes remain unresolved by these artifacts. Not a product defect,
+> not attributable to the ceiling, and not a reason to select another
+> candidate.
+
+Two facts the historical evidence cannot bridge: the framework SHA of that run
+is unrecoverable, and much has changed since (PR A/B/C/E plus five
+prerequisite fixes). A byte-identical model source does not make a
+byte-identical environment.
+
+**This is precisely why §22 reclassifies Case A.** Four real-training attempts
+produced four unrelated failures and never once exercised the state machine
+under test. The deterministic replacement proves that logic in 0.11 seconds,
+every time.
+
+Attempt 4's outcome gates nothing. It is recorded as evidence, and as a
+correction to my own earlier diagnosis.

@@ -53,6 +53,7 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.resume import restore_prior_state
+from core.scientific_authority import ScientificAuthority
 from sdsc_submission_scripts.run_one_iteration import write_manifest
 from workflows.model_exploration import run_workflow
 
@@ -99,6 +100,19 @@ def _formal_record(
         "file_vector": [score] + [None] * 19,
         "health_gate_results": _passing_verdicts(),
         "health_gate_enabled": False,  # DS5 waiver: commit-time VALID
+        # V20 PR D (D-C4): a formal record may become the chain incumbent
+        # ONLY when its scientific authority is established. This fixture
+        # predates that contract, so without a verdict it now resolves to
+        # `unreconstructable_legacy` and is correctly refused — which would
+        # make branch A unable to exercise the threading it exists to test.
+        #
+        # The verdict is DERIVED from the three facts, never asserted, so
+        # this remains a fixture of facts rather than of conclusions.
+        "scientific_authority": ScientificAuthority(
+            healthgate_mode="blocking",
+            declared_result_authority="scientific",
+            formal_validity="valid",
+        ).model_dump(mode="json"),
     }
 
 
