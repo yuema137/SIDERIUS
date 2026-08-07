@@ -242,11 +242,54 @@ def _is_cuda_oom(message: str) -> bool:
 #: that mean something else. Like `gpu_contention` in §B-C3, it says
 #: nothing about the candidate and carries no authority to shrink it.
 RESOURCE_ADMISSION_STATUS = "skipped_resource_admission"
+#: An INFRASTRUCTURE condition, not a resource verdict (V20 attempt 2).
+#:
+#: The status used to be `skipped_resource_admission` for all three reasons
+#: below. `reason_code` did distinguish them, but the top-level status read
+#: as "the candidate was refused for resources" — and V20 attempt 2 wrote
+#: 15 such records while the GPU sat at 1.6 of 32.6 GiB, because the
+#: measurement WORKER had failed. An auditor reading those records would
+#: conclude the campaign hit resource limits.
+#:
+#: Deliberately one extra status, not a new taxonomy: the reason vocabulary
+#: is unchanged and still carries the detail.
+INFRASTRUCTURE_FAILURE_STATUS = "skipped_infrastructure_failure"
 RESOURCE_ADMISSION_REASONS = (
     "insufficient_headroom",
     "measurement_unavailable",
     "policy_unavailable",
 )
+#: reason_code -> top-level status. Only a genuine headroom verdict may
+#: claim a resource refusal; everything else is infrastructure.
+_STATUS_FOR_REASON = {
+    "insufficient_headroom": RESOURCE_ADMISSION_STATUS,
+    "measurement_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
+    "policy_unavailable": INFRASTRUCTURE_FAILURE_STATUS,
+}
+
+
+class PrephaseOutcome(StrEnum):
+    """What `run()` must do after the formal pre-phase measurement.
+
+    A `bool` carried two incompatible meanings — "the candidate does not
+    fit" and "we could not measure at all" — and the caller treated both
+    as an ordinary attempt failure. V20 attempt 2 therefore retried a
+    DETERMINISTIC infrastructure condition 15 times, consuming
+    `attempts_per_round` and the failure counters while the GPU was idle.
+
+    Splitting them is the point: a resource refusal is a fact about this
+    attempt and the next attempt may differ; an infrastructure failure is
+    a fact about the environment and retrying it changes nothing.
+    """
+
+    PROCEED = "proceed"
+    #: Measured, and the environment genuinely cannot hold this candidate.
+    #: Consumes the attempt — a smaller candidate may still fit.
+    TERMINAL_RESOURCE_REFUSAL = "terminal_resource_refusal"
+    #: The measurement itself could not be established. Must NOT consume a
+    #: scientific attempt, and must NOT be retried in place — that is how
+    #: "don't count it" becomes an infinite loop.
+    TERMINAL_INFRASTRUCTURE_FAILURE = "terminal_infrastructure_failure"
 
 
 class AttemptTransition(StrEnum):
@@ -466,7 +509,7 @@ def _build_resource_admission_record(
             f"expected one of {RESOURCE_ADMISSION_REASONS}"
         )
     record = _build_skip_record(
-        status=RESOURCE_ADMISSION_STATUS,
+        status=_STATUS_FOR_REASON[reason_code],
         exp_id=exp_id,
         model_type=model_type,
         file_index=file_index,
@@ -476,8 +519,18 @@ def _build_resource_admission_record(
         round_index=round_index,
         attempt_in_round=attempt_in_round,
         conclusion=(
-            f"Skipped before starting: the environment did not permit this "
-            f"{resource_type} phase ({reason_code}). {detail}"
+            (
+                f"Not started: the {resource_type} MEASUREMENT could not be "
+                f"established ({reason_code}), so no admission decision was "
+                f"possible. This is an infrastructure condition and says "
+                f"nothing about the candidate's size, speed or capacity. "
+                f"{detail}"
+            )
+            if reason_code != "insufficient_headroom"
+            else (
+                f"Skipped before starting: the environment did not permit this "
+                f"{resource_type} phase ({reason_code}). {detail}"
+            )
         ),
         discovery=(
             "This is a statement about the machine at this moment, NOT about "
@@ -633,10 +686,10 @@ def _handle_prephase_gpu_measurement(
     hypothesis: str,
     round_index: int,
     attempt_in_round: int,
-) -> bool:
+) -> PrephaseOutcome:
     """Measure this candidate on this card before a formal GPU launch.
 
-    Returns True when the attempt must stop (O-7).
+    Returns the disposition `run()` must act on (O-7).
 
     **This function delegates; it does not decide.** Identity comparison,
     classification, authority validation and PR B admission all live in
@@ -658,7 +711,7 @@ def _handle_prephase_gpu_measurement(
     decide. Unchanged behaviour there, not a refusal.
     """
     if is_trial:
-        return False
+        return PrephaseOutcome.PROCEED
 
     # TYPE-checked, not merely present. `getattr(sandbox, "device_identity",
     # None)` on a `MagicMock` returns a truthy mock, so a presence test
@@ -670,7 +723,7 @@ def _handle_prephase_gpu_measurement(
 
     device_identity = getattr(sandbox, "device_identity", None)
     if not isinstance(device_identity, DeviceIdentity):
-        return False
+        return PrephaseOutcome.PROCEED
 
     import uuid as _uuid
 
@@ -715,6 +768,12 @@ def _handle_prephase_gpu_measurement(
         loss_config=dict(active_params.get("loss_config") or {}),
         inference_batch_size=_inference_batch,
         data_dir=getattr(agent_input, "data_dir", None),
+        # The worker is a clean process and must rebuild the plugin
+        # registry from these. Read from the SAME sandbox the training and
+        # inference subprocesses use, so the candidate the worker measures
+        # is loaded from the candidate the trainer will run.
+        plugin_dir=getattr(sandbox, "plugin_dir", None),
+        loss_dir=getattr(sandbox, "loss_dir", None),
         result_path=str(workspace / f"{exp_id}_training.json"),
         journal_path=str(workspace / f"{exp_id}_training.phases.ndjson"),
         sampler_ready_path=str(workspace / f"{exp_id}_training.sampler_ready"),
@@ -741,7 +800,7 @@ def _handle_prephase_gpu_measurement(
             f"  Pre-phase GPU measurement: "
             f"{outcome.requirement.driver_tree_peak_mib} MiB (training), admitted"
         )
-        return False
+        return PrephaseOutcome.PROCEED
 
     record = _build_resource_admission_record(
         resource_type="gpu_memory",
@@ -764,8 +823,17 @@ def _handle_prephase_gpu_measurement(
         },
     )
     _emit_record(sandbox, record)
-    print(f"  Pre-phase GPU measurement stopped the attempt: {outcome.disposition}")
-    return True
+    _reason = _PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable")
+    if _reason == "insufficient_headroom":
+        print(f"  Pre-phase GPU measurement stopped the attempt: {outcome.disposition}")
+        return PrephaseOutcome.TERMINAL_RESOURCE_REFUSAL
+    print(
+        f"  Pre-phase GPU MEASUREMENT FAILED ({outcome.disposition}) — the "
+        f"environment could not measure this candidate, so no admission "
+        f"decision was possible. This is infrastructure, not capacity; the "
+        f"round is ended rather than retried."
+    )
+    return PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE
 
 
 def _prephase_worker_memory_limit_bytes() -> int:
@@ -4639,7 +4707,7 @@ class HyperparamTuningAgent:
                     # identity check, classification, authority validation,
                     # PR B admission — lives behind one call; nothing about
                     # it is reimplemented here.
-                    if _handle_prephase_gpu_measurement(
+                    _prephase = _handle_prephase_gpu_measurement(
                         agent_input=agent_input,
                         sandbox=sandbox,
                         is_trial=plan.is_trial,
@@ -4652,7 +4720,26 @@ class HyperparamTuningAgent:
                         hypothesis=hypothesis,
                         round_index=round_index,
                         attempt_in_round=attempt_in_round,
-                    ):
+                    )
+                    if _prephase is PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE:
+                        # The measurement could not be established. Retrying
+                        # re-enters the identical deterministic condition —
+                        # V20 attempt 2 did exactly that 15 times, burning
+                        # attempts_per_round while the GPU was idle. So the
+                        # ROUND ends here. `break` leaves the attempt loop
+                        # without consuming further attempts, and the round's
+                        # own no-success handling records the outcome; it does
+                        # not fabricate a completed round or a score.
+                        print(
+                            "  Ending this round: the pre-phase measurement "
+                            "infrastructure is unavailable, so further attempts "
+                            "would repeat an identical failure."
+                        )
+                        break
+                    if _prephase is PrephaseOutcome.TERMINAL_RESOURCE_REFUSAL:
+                        # Measured, and it genuinely does not fit. A different
+                        # candidate may — so this consumes the attempt as
+                        # before and the loop continues.
                         continue
 
                     failure_stage = "training"

@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from execute_tools.health_checks.schemas import GateAction
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+    INFRASTRUCTURE_FAILURE_STATUS,
     RESOURCE_ADMISSION_REASONS,
     RESOURCE_ADMISSION_STATUS,
     AttemptDecision,
@@ -324,7 +325,16 @@ class TestResourceAdmissionSurface:
         rec = _build_resource_admission_record(
             resource_type="gpu_memory", reason_code=reason, detail="d", **IDENTITY
         )
-        assert rec["status"] == RESOURCE_ADMISSION_STATUS
+        # V20 attempt 2: only a genuine headroom verdict may claim a
+        # resource refusal. A measurement/policy failure is infrastructure,
+        # and filing it as a resource decision is what made 15 records read
+        # as "the GPU was full" while it sat at 1.6 of 32.6 GiB.
+        expected = (
+            RESOURCE_ADMISSION_STATUS
+            if reason == "insufficient_headroom"
+            else INFRASTRUCTURE_FAILURE_STATUS
+        )
+        assert rec["status"] == expected
         assert rec["memory"]["reason_code"] == reason
         assert rec["memory"]["resource_type"] == "gpu_memory"
 

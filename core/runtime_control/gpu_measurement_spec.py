@@ -105,6 +105,20 @@ class GpuMeasurementSpec(BaseModel):
     #: candidate nobody is going to run (F-1a).
     data_dir: str | None = None
 
+    #: Run-scoped plugin directories, transported to the worker's process.
+    #:
+    #: V20 attempt 2 died here. The worker is a CLEAN subprocess: the
+    #: parent's `MODEL_REGISTRY` does not cross the boundary, so without
+    #: these it cannot resolve an agent-generated model and returns
+    #: `CONFIG_REJECTED` — which fail-closes every formal promotion. The
+    #: training and inference sandboxes were already receiving them; only
+    #: this hop was missing.
+    #:
+    #: `None` keeps the legacy global-directory fallback, so built-in
+    #: models and callers outside the sandbox flow are unaffected.
+    plugin_dir: str | None = None
+    loss_dir: str | None = None
+
     #: Enough steps for the allocator to reach steady state. The optimizer
     #: allocates its moments on the FIRST step, so a single step under-reads
     #: every Adam-family candidate; from step 2 the footprint is stable.

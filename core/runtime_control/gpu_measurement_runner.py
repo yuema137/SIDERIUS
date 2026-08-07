@@ -268,11 +268,20 @@ def run_prephase_measurement(
     started = elapsed_clock()
     log_handle = log_path.open("w", encoding="utf-8")
     try:
+        # The worker is a CLEAN process: it rebuilds the plugin registry
+        # from the transported directories, never from inherited parent
+        # memory. Spawning with no `env=` is what made every
+        # agent-generated candidate CONFIG_REJECTED in V20 attempt 2 —
+        # the parent's own environment carries no SIDERIUS_PLUGIN_DIRS,
+        # because that variable is built per-sandbox for its children.
+        from core.subprocess_env import subprocess_env
+
         process = subprocess.Popen(
             argv,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # own group: a kill reaches descendants
+            env=subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir),
         )
     except Exception as exc:
         log_handle.close()

@@ -265,46 +265,17 @@ def _subprocess_env(
     plugin_dir: str | None = None,
     loss_dir: str | None = None,
 ) -> dict:
-    """
-    Returns an env dict for subprocesses with ml_models and execute_tools
-    added to PYTHONPATH, so flat imports in those scripts resolve correctly
-    regardless of the working directory.
+    """Thin alias over the shared builder in `core.subprocess_env`.
 
-    Args:
-        plugin_dir: Optional run-scoped plugin directory. When provided, the
-            returned env sets ``SIDERIUS_PLUGIN_DIRS=<plugin_dir>`` so the
-            training/inference/scoring subprocess scans only this directory
-            instead of the legacy global ``agent_generated/models/``. See
-            docs/run_scoped_plugins.md (Phase 2). When ``None``, the env var
-            is not set and the subprocess falls back to the legacy global
-            dir — this preserves back-compat for any caller outside the
-            tuner sandbox flow.
-        loss_dir: Optional run-scoped loss-plugin directory. When provided,
-            sets ``SIDERIUS_LOSS_DIRS=<loss_dir>`` so the subprocess's
-            ``agent_generated/_loss_loader.py`` scans only this directory
-            instead of the legacy global ``agent_generated/losses/``. Mirror
-            of the ``plugin_dir`` semantics. L1b — see
-            ``docs/design/enable_loss_inventory.md`` § Commit L1.
-            **`SIDERIUS_LOSS_DIRS` is distinct from `SIDERIUS_PLUGIN_DIRS`**
-            on purpose: sharing would silently mask globally-registered
-            losses when only a model-plugin dir is set, and would log-spam
-            on model `.py` files failing the loss required-attr check. See
-            the L1 design's "Rationale" block.
+    Kept as a name because this module's call sites and their tests refer
+    to it. The CONSTRUCTION moved out after V20 attempt 2: the isolated
+    measurement worker needed the identical environment, and two copies of
+    "which variables a SIDERIUS subprocess needs" is precisely how the
+    worker came to be missing `SIDERIUS_PLUGIN_DIRS` in the first place.
     """
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    extra_paths = [
-        project_root,
-        os.path.join(project_root, "ml_models"),
-        os.path.join(project_root, "execute_tools"),
-    ]
-    env = os.environ.copy()
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
-    if plugin_dir:
-        env["SIDERIUS_PLUGIN_DIRS"] = plugin_dir
-    if loss_dir:
-        env["SIDERIUS_LOSS_DIRS"] = loss_dir
-    return env
+    from core.subprocess_env import subprocess_env
+
+    return subprocess_env(plugin_dir=plugin_dir, loss_dir=loss_dir)
 
 
 # --- Storage Strategies ---

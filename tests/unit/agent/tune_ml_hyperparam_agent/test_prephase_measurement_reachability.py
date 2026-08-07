@@ -81,16 +81,31 @@ class TestTheCallSiteExists:
 
     def test_run_consumes_the_disposition(self):
         """Calling the boundary and discarding its answer is the subtler
-        failure: the measurement runs, costs GPU time, and stops nothing."""
+        failure: the measurement runs, costs GPU time, and stops nothing.
+
+        The call was a bare `if` until V20 attempt 2 showed that a single
+        boolean could not distinguish "does not fit" from "could not be
+        measured" — the latter was retried 15 times. It is now bound to a
+        name and branched on, so this asserts BOTH terminal dispositions
+        reach a control-flow statement.
+        """
         source = inspect.getsource(tuner.HyperparamTuningAgent.run)
         index = source.index("_handle_prephase_gpu_measurement(")
-        following = source[index : index + 1200]
-        assert "continue" in following, (
+        following = source[index : index + 2000]
+        # bound, not discarded
+        assert source[:index].rstrip().endswith("="), (
+            "the disposition must be bound to a name, not called for effect"
+        )
+        # and both terminal kinds must alter control flow
+        assert "TERMINAL_INFRASTRUCTURE_FAILURE" in following, (
+            "an unmeasurable candidate must be handled explicitly"
+        )
+        assert "TERMINAL_RESOURCE_REFUSAL" in following, (
+            "a candidate that does not fit must be handled explicitly"
+        )
+        assert "break" in following and "continue" in following, (
             "the disposition must control flow; a call whose result is "
             "ignored measures the candidate and admits it anyway"
-        )
-        assert source[:index].rstrip().endswith("if"), (
-            "the call must be the condition of the guard, not a bare statement beside it"
         )
 
     def test_it_runs_before_training_starts(self):
@@ -106,7 +121,7 @@ class TestApplicability:
     def test_a_trial_round_is_not_measured(self, tmp_path):
         """O-7 governs formal execution; trial already proceeds while
         recording what it could not prove."""
-        assert _call(tmp_path, is_trial=True) is False
+        assert _call(tmp_path, is_trial=True) is tuner.PrephaseOutcome.PROCEED
 
     def test_a_run_with_no_device_is_untouched(self, tmp_path):
         """The same rule `_admission_refusal` already applies: no card
@@ -114,7 +129,7 @@ class TestApplicability:
         A CPU or pseudo run must be unaffected."""
         sandbox = _Sandbox(tmp_path)
         sandbox.device_identity = None
-        assert _call(tmp_path, sandbox=sandbox) is False
+        assert _call(tmp_path, sandbox=sandbox) is tuner.PrephaseOutcome.PROCEED
 
 
 class TestTheDispositionDrivesTheAttempt:
@@ -140,7 +155,9 @@ class TestTheDispositionDrivesTheAttempt:
             "core.runtime_control.prephase_admission.attach_measured_requirements",
             lambda sandbox, o: attached.append(o) or True,
         )
-        assert _call(tmp_path) is False, "PROCEED must let formal execution start"
+        assert _call(tmp_path) is tuner.PrephaseOutcome.PROCEED, (
+            "PROCEED must let formal execution start"
+        )
         assert attached == [outcome]
 
     @pytest.mark.parametrize(
@@ -155,8 +172,18 @@ class TestTheDispositionDrivesTheAttempt:
         ],
     )
     def test_every_stop_ends_the_attempt(self, tmp_path, monkeypatch, disposition):
+        # V20 attempt 2 split this: BOTH still end the attempt, but a
+        # resource refusal consumes it while an infrastructure failure ends
+        # the round instead of being retried 15 times.
         self._stub(monkeypatch, _FakeOutcome(disposition))
-        assert _call(tmp_path) is True
+        got = _call(tmp_path)
+        assert got is not tuner.PrephaseOutcome.PROCEED
+        expected = (
+            tuner.PrephaseOutcome.TERMINAL_RESOURCE_REFUSAL
+            if tuner._PREPHASE_REASON_CODE[disposition] == "insufficient_headroom"
+            else tuner.PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE
+        )
+        assert got is expected
 
     @pytest.mark.parametrize(
         "disposition,lane",
@@ -240,12 +267,12 @@ class TestApplicabilityIsTypeChecked:
 
         sandbox = MagicMock()
         sandbox.base_dir = str(tmp_path)
-        assert _call(tmp_path, sandbox=sandbox) is False
+        assert _call(tmp_path, sandbox=sandbox) is tuner.PrephaseOutcome.PROCEED
 
     def test_a_wrong_typed_device_identity_does_not_activate_the_gate(self, tmp_path):
         sandbox = _Sandbox(tmp_path)
         sandbox.device_identity = "GPU-c30b6678"  # a bare string, not an identity
-        assert _call(tmp_path, sandbox=sandbox) is False
+        assert _call(tmp_path, sandbox=sandbox) is tuner.PrephaseOutcome.PROCEED
 
     def test_a_real_device_identity_does_activate_it(self, tmp_path, monkeypatch):
         """Positive control: the type check must exclude non-identities,
@@ -263,5 +290,5 @@ class TestApplicabilityIsTypeChecked:
             "decide_prephase_admission",
             lambda *a, **k: _FakeOutcome("STOP_INFRASTRUCTURE_FAILURE"),
         )
-        assert _call(tmp_path) is True
+        assert _call(tmp_path) is not tuner.PrephaseOutcome.PROCEED
         assert called == ["ran"]
