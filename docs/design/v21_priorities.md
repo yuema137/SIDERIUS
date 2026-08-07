@@ -306,3 +306,264 @@ collapse on this class-imbalanced data is anticipated by the advice.
 evidence for P1 only in combination with the audit above: the agent
 correctly diagnosed CE as the problem and pivoted to focal, but could not
 have pivoted to regression even if it had reasoned its way there.
+
+---
+
+# Part II — Operator research direction for V21
+
+**Operator, 2026-08-06, written while V20 attempt 2 was running.**
+
+These are **hypotheses and candidate designs**, not findings. They are
+recorded here so the reasoning survives the campaign, and they are
+deliberately kept separate from Part I, which contains only audited
+capability gaps.
+
+Nothing here is evidence. V20 has tested none of it — that is precisely
+the point of P1: the current system cannot test most of it.
+
+## The central bet: fix the task formulation before scaling the model
+
+The most promising route is **not a bigger WaveNet**. It is getting the
+problem statement right.
+
+```text
+FCNet            waveform -> waveform regression        SmoothL1
+V20 WaveNet      waveform -> 256-class classification   CE / focal
+```
+
+For continuous-waveform denoising, the first framing is more plausible.
+Classification artificially discretises a continuous amplitude into 256
+bins, and the near-zero bin dominates overwhelmingly. That creates a
+direct path to the failure V20 is already exhibiting:
+
+```text
+predict the few most common bins
+  -> CE still decreases
+  -> waveform diversity collapses
+```
+
+Two collapsed rounds in `v20_arch_15_19` (`unique_int8` 4, then 2) are
+consistent with this, though they do not establish it.
+
+## V21-1 — Regression + SmoothL1 for non-FCNet models
+
+The first thing to try is not a 300 M WaveNet. It is the **same
+backbone** with the 256-class head replaced by a 1-channel regression
+head emitting the waveform directly, trained with SmoothL1.
+
+This admits an unusually clean experiment:
+
+```text
+same backbone · same data · same optimizer · same receptive field
+
+A: CE classification
+B: focal classification
+C: SmoothL1 regression
+```
+
+which isolates output/loss formulation from architecture. **C is the
+operator's leading hypothesis.**
+
+This depends entirely on Part I P1 being resolved — today the execution
+gate refuses `smooth_l1` for anything not literally named `fcnet`.
+
+## V21-2 — Predict the residual, not the waveform
+
+Possibly stronger than direct regression. Given `x = s + n`, do not train
+
+```text
+x -> clean s
+```
+
+but
+
+```text
+x -> predicted noise n̂,   output = x - n̂
+```
+
+or a learned correction `output = x + Δ(x)`.
+
+For denoising, **identity is already a strong baseline**. The network
+only has to learn what to remove. Consequences:
+
+* whole-signal amplitude collapse becomes much harder;
+* an untrained network sitting near identity already emits a sane output;
+* the model never has to regenerate the waveform from scratch;
+* it suits residual CNN / WaveNet / U-Net backbones naturally;
+* SmoothL1 on a residual is a natural fit.
+
+## V21-3 — Restore long context without FCNet's dense layers
+
+FCNet's segment is **40,000**; the V20 WaveNet uses **8,000**.
+
+This may matter a great deal. FCNet's architecture is unsophisticated but
+it has one large advantage: it sees the entire 40 k waveform at once. If
+the signal or noise carries long-timescale correlation, baseline drift or
+low-frequency structure, an 8 k window is missing the information by
+construction.
+
+Reaching 40 k does **not** require 323 M dense parameters:
+
+```text
+40k input
+  -> strided Conv1D / pooling
+  -> multi-scale encoder
+  -> dilated TCN bottleneck
+  -> upsampling + skip connections
+  -> 40k regression output
+```
+
+i.e. a 1D U-Net / Conv-TasNet-style multiscale regression network.
+Receptive field covers the full 40 k while activations and parameters
+stay controllable — more promising than simply enlarging the WaveNet.
+
+## V21-4 — Add a spectral constraint, do not replace waveform loss
+
+If the metric is sensitive to spectral structure, pointwise SmoothL1
+alone may be insufficient:
+
+```text
+L = SmoothL1(time-domain waveform) + λ · spectral loss
+```
+
+with a multi-resolution FFT/STFT magnitude difference — short windows for
+local/high-frequency structure, long windows for global/low-frequency.
+
+SmoothL1 preserves waveform and amplitude; the spectral term prevents
+flattening the spectrum. Both map onto what HealthGate already measures
+(amplitude collapse, spectral peak ratio).
+
+Start simple: **SmoothL1 + a small-weight multi-resolution spectral
+term.** No perceptual loss initially.
+
+## V21-5 — Optimization budget parity, or the comparison is not about architecture
+
+```text
+FCNet       10 epochs, all 20 files
+V20 trial    1 epoch,  one 5-file band
+```
+
+A candidate collapsing under this budget does not show the architecture
+is inadequate — and a classification model given one epoch is especially
+prone to remaining stuck in the mode-collapse basin.
+
+To genuinely answer "can this beat FCNet?", a promising candidate must
+eventually receive **comparable optimization exposure** — matched
+optimizer steps or seen examples rather than necessarily 10 epochs.
+Otherwise the comparison measures
+
+```text
+architecture + loss + data volume + optimization budget
+```
+
+and attributes the result to architecture alone.
+
+## V21-6 — Do not chase 323 M parameters
+
+FCNet and WaveNet have opposite resource profiles:
+
+```text
+FCNet     parameter-heavy, activation-light, batch = 1
+WaveNet   parameter-light, activation-heavy
+          (long sequence x feature maps x many blocks)
+```
+
+So "FCNet is 323 M, therefore build a 300 M WaveNet" is a category error
+and will likely exhaust VRAM. Explore **10 M / 30 M / 60 M / 100 M**
+while recording, for each:
+
+```text
+params · peak training VRAM · inspection time · throughput · receptive field
+```
+
+A well-designed 30-80 M multiscale regression network could plausibly
+outperform a 323 M FCNet. Parameter count alone is the wrong axis — which
+is also why Part I P4 asks for the full funnel rather than a single
+number.
+
+## The first three V21 candidates, in order
+
+**Candidate A — Residual TCN regression** *(leading bet)*
+
+```text
+40k context · multiscale downsampled dilated TCN
+regression head · predict noise residual · SmoothL1
+```
+
+**Candidate B — 1D U-Net regression**
+
+```text
+40k waveform · encoder/downsampling · multi-scale bottleneck
+skip connections · decoder · direct clean-waveform regression
+SmoothL1 + small spectral loss
+```
+
+Possibly better suited to long context than WaveNet.
+
+**Candidate C — Controlled WaveNet ablation** *(highest scientific value)*
+
+Keep V20's WaveNet backbone entirely unchanged. Change only:
+
+```text
+classification head -> regression head
+CE / focal          -> SmoothL1
+```
+
+Because it answers the question V20 cannot:
+
+> Is the collapse a property of the WaveNet **architecture**, or of the
+> **classification formulation**?
+
+The operator's current suspicion is the latter.
+
+## V21-7 — Training-data parity may be the largest hidden confound
+
+```text
+FCNet   all 20 files
+V20     band 15-19 (5 files)
+```
+
+If the FCNet reference was trained on all 20 files while a candidate is
+permanently restricted to 5, the candidate is at a substantial data
+disadvantage before architecture is considered.
+
+**V20 keeps its frozen band protocol** — this is not a mid-campaign
+change. But once a V21 architecture looks promising on a band, it
+warrants a dedicated **fair full-data confirmation**:
+
+```text
+FCNet  vs  new regression model
+same 20 files · same evaluation · comparable optimization exposure
+```
+
+Only that answers "does the new architecture beat FCNet?"
+
+## The recipe the operator would bet on
+
+```text
+40k full context
+multi-scale residual 1D Conv / TCN
+  -> predict noise residual
+  -> SmoothL1 waveform loss + small multi-resolution spectral loss
+batch 1-4, gradient accumulation if needed
+training exposure comparable to FCNet
+```
+
+rather than
+
+```text
+a deeper 256-class WaveNet + focal
+```
+
+## Why this belongs in the V21 ledger
+
+> **V20's most important contribution may be showing that however
+> intelligently the agent optimises inside the classification search
+> space, it may never reach a fundamentally better formulation.**
+
+That is a statement about the system's capability, not about which loss
+wins — which is exactly what Part I exists to record. The Part I rules
+still apply to everything above: if focal eventually succeeds, these
+hypotheses are not thereby refuted, and if focal keeps failing, they are
+not thereby confirmed. They remain untested until a V21 campaign tests
+them.
