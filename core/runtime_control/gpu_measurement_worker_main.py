@@ -360,9 +360,24 @@ def validate_candidate_configs(spec: GpuMeasurementSpec) -> str | None:
             get_config_class,
         )
 
+        # ``get_config_class`` reads ``PLUGIN_CONFIG_REGISTRY``, which is
+        # populated as an IMPORT SIDE EFFECT of ``models_sandbox``
+        # (models_sandbox.py:750-753 calls ``extend_registries``). Importing
+        # only ``models_format_sandbox`` leaves it empty, so every
+        # agent-generated model resolved to ``None`` here and was reported as
+        # CONFIG_REJECTED — while ``build_production_components`` (which does
+        # import ``models_sandbox``) resolved the same model fine. That
+        # asymmetry cost V20 attempt 3 all 15 formal promotions. The import
+        # must stay; ``MODEL_REGISTRY`` is read below so it cannot be
+        # dropped as unused.
+        from ml_models.models_sandbox import MODEL_REGISTRY
+
         config_cls = get_config_class(spec.request.model_type)
         if config_cls is None:
-            return f"no config class registered for {spec.request.model_type!r}"
+            return (
+                f"no config class registered for {spec.request.model_type!r} "
+                f"({len(MODEL_REGISTRY)} model(s) in the live registry)"
+            )
         config_cls(**spec.model_config_payload)
         TrainConfig(**spec.train_config)
         LossConfig(**spec.loss_config)

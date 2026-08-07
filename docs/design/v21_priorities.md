@@ -3,6 +3,39 @@
 **Status: OPEN, append-only during the V20 campaign.**
 Created 2026-08-06 while V20 attempt 2 was running.
 
+## Campaign state this ledger was written against (2026-08-07)
+
+Three V20 launch attempts have been made. **None completed the campaign**, and
+no band beyond 15-19 has ever been launched.
+
+```text
+attempt 1   SHA d8e21d1a   ABORTED   TypeError: unhashable type: 'list'
+                                     agent/prompts.py:361 — fixed by #183
+            ws /home/klz/Data/SIDEREIS_DATA/v20/                  EXCLUDED
+
+attempt 2   SHA 0b9ec200   ABORTED   measurement worker CONFIG_REJECTED for
+                                     every generated candidate — fixed by #184
+            ws .../v20_attempt2_20260806_165521/                  EXCLUDED
+
+attempt 3   SHA aea6d35e   STOPPED   operator_stop_requested, not a defect
+            launched 2026-08-06 23:33:59, STOP observed 2026-08-07 06:37:57
+            ws .../v20_attempt3_20260806_233242/
+            v20_loss_15_19  6 iterations   stopped before iteration 7, EXIT=99
+            v20_arch_15_19  4 iterations   stopped before iteration 5, EXIT=99
+            chains 3-8 (bands 10-14, 4-9, 0-3) NEVER LAUNCHED
+```
+
+Attempt 3 is the only attempt that produced scored records: 38 at the last
+audit snapshot (`reports/v20_20260806_233242/v21_scan_latest.json`,
+2026-08-07T06:37:24) — 6 `success`, 12 `failed_mode_collapse`, 11
+`skipped_infrastructure_failure`, 7 `error_training_oom`, 1 `error_training`,
+1 `skipped_oom_risk`. Whether those records are scientifically usable is a
+campaign-report question, not a question for this ledger.
+
+P6.3's "three attempts in" and P6.4's OOM observations both come from this
+state. Nothing here retires an entry: an aborted or stopped campaign cannot
+close a capability gap, only fail to exercise it.
+
 ## What this document is
 
 A record of **capability gaps and search-space limitations** exposed by
@@ -567,3 +600,212 @@ still apply to everything above: if focal eventually succeeds, these
 hypotheses are not thereby refuted, and if focal keeps failing, they are
 not thereby confirmed. They remain untested until a V21 campaign tests
 them.
+
+### P6.2 — Agent-generated models fall outside infrastructure that assumes a fixed model set (2026-08-07)
+
+**Observed.** V20 launch attempt 2 aborted at the formal promotion
+boundary. The isolated pre-phase measurement worker returned
+`CONFIG_REJECTED: no config class registered for
+'wavenet40_ce_fullspectrum_control'` for every agent-generated candidate,
+15 consecutive attempts.
+
+**Evidence.** `gpu_measurement_runner.py` spawned the worker with no
+`env=`, so it inherited a parent environment that carries no
+`SIDERIUS_PLUGIN_DIRS` — that variable is built per-sandbox for the
+sandbox's own children. Fixed in PR #184.
+
+**V20 consequence.** None remaining; attempt 3 runs on the fix. But this
+is the **second** instance of one pattern, alongside P5:
+
+| | infrastructure that assumes a known model set | effect on a generated model |
+|---|---|---|
+| P5 | `core/inference_defaults.py` name table | falls back to a conservative inference batch |
+| P6.2 | measurement worker's plugin registry | could not resolve it at all |
+
+Both are cases where a component was written when the model set was
+fixed and finite, and an agent that invents architectures falls outside
+it. P5 degrades performance; P6.2 blocked the campaign.
+
+**Why not changed during V20.** P6.2 was an infrastructure defect and was
+fixed. P5 remains an efficiency issue and stays frozen.
+
+**V21 question.** Which other components enumerate model types by name?
+An audit of name-keyed registries and lookup tables would find the rest of
+this family before a campaign does. The general form: *anything keyed on
+a model name is a latent failure for a system whose job is to invent
+model names.*
+
+### P6.3 — Proposal scale, three attempts in (2026-08-07)
+
+**Observed.** Realized parameter counts across all V20 attempts on band
+15-19:
+
+```text
+attempt 1   —
+attempt 2   663,488 · 7,280,256 · 8,409,280 · 12,772,096
+attempt 3   7,280,256 (x3) · 8,409,280 (x4)
+```
+
+**Evidence.** FCNet's reference is ~323,000,000. Every realized V20
+candidate so far sits between **25x and 487x smaller**, despite advice
+that explicitly encourages the 10M-100M range and states that a 323M
+model fits inside the 12 GiB cap (measured at ~6.04 GiB peak).
+
+**V20 interpretation.** Suggestive, not established. All observations come
+from one band and the first iteration of each attempt, and the LLM
+proposes different architectures each time. What *is* notable is that the
+distribution has not once reached the encouraged range across three
+independent campaign starts.
+
+**Why not changed during V20.** P2-3 (model-scale trend reporting) is
+classified non-blocking in `v20_priorities.md` §13.1, and nothing in the
+run measures the funnel — which is the gap itself.
+
+**V21 question.** Unchanged from P4: instrument
+`proposed -> implemented -> preflight-rejected -> trained -> valid` and
+locate the attrition, rather than inferring a bias from realized counts.
+
+### P6.4 — Two concurrent chains can exceed the card (2026-08-07)
+
+**Observed.** Attempt 3, three OOMs in the first 34 minutes across both
+chains.
+
+**Evidence.** The arch chain's candidate held **20.13 GiB** (18.79 GiB
+PyTorch-allocated) and the loss chain's **13.45 GiB** — together ~33.6 GiB
+against a 31.34 GiB card. A 250 MiB allocation then failed with 9.49 GiB
+nominally free, i.e. fragmentation on top of genuine pressure.
+
+Attribution is correct: these are real candidate allocations, not the V19
+contention mis-attribution. Recording it because the *first* reading of
+the message was wrong — "Process X has 1.43 GiB memory in use" is the
+NON-PyTorch portion, and taken alone it makes a genuine OOM look like a
+phantom one.
+
+**V20 interpretation.** An operational consequence of `max_active = 2`
+meeting candidates that individually approach the card. Both exceeded the
+12 GiB per-chain VRAM budget during training.
+
+**Why not changed during V20.** The concurrency policy and the VRAM budget
+are both frozen.
+
+**V21 question.** Is `--trial_vram_budget_gb` enforced during training, or
+only consulted at admission? A candidate that is admitted under a 12 GiB
+budget and then allocates 20 GiB has escaped the budget it was admitted
+under — which is the same class as the V19 finding that an admission
+estimate does not bound driver-visible reserved memory.
+
+### P6.5 — A candidate score concentrated in one file, verified conformant (2026-08-07)
+
+**This entry is not a metric-redesign proposal.** The metric is part of
+the task definition. It is frozen for V20 and the operator has ruled that
+it stays frozen for V21 as well: a result that looks strange is audited
+for *how it was produced*, never used as an argument to change the
+scorer. Everything below is an observation about one candidate under the
+fixed metric, plus the conformance audit that established the score is
+real.
+
+**Observed.** `wavenet40_progressive_hardness_ce_control_iter_006_001`,
+loss chain, band 15-19, trial round: `denoising_score = 10.708207242030124`
+— a HealthGate-valid trial score, higher than FCNet's 6.9836 on the same
+band, and the highest V20 has produced.
+
+**The by-file structure.**
+
+```text
+ file       linear ratio   log_5.27   GT ceiling    % of band sum
+   15              32.53     2.0952     10.3205           0.0000%
+   16             345.87     3.5174     10.7090           0.0001%
+   17           1,367.91     4.3447     11.2213           0.0005%
+   18           2,321.08     4.6628     11.0215           0.0009%
+   19     268,077,936.73    11.6766     10.5676          99.9985%
+```
+
+File 19 supplies 99.9985% of the linear sum. Within file 19, 3 of 20
+sampled segments supply ~38% each; the other 17 contribute
+`171`–`3,921` against those segments' `~2.5e9`.
+
+**Why the aggregate behaves this way.** The frozen aggregation is
+sum-in-linear-space, then a single `log_5.27`
+(`scoring_utils.py:640-655`). Linear summation is dominated by its
+largest term. This is the specified behaviour, not a deviation from it.
+
+**Why the score exceeds the per-file ceiling.** The per-segment quantity
+is `(snr_gt / s_max) * snr_denoised` (`scoring_utils.py:641`). It is
+unbounded in `snr_denoised`. The "ground-truth ceiling" is the value
+obtained when the denoised channel *equals* ground truth
+(`scripts/compute_ground_truth.py:83`, `anchor²/s_max`) — a reference
+point, **not a cap the scorer applies**. A prediction whose power at the
+matched-filter bin exceeds ground truth's scores above it. Arithmetically
+ordinary; no invariant is violated.
+
+**Conformance audit (the only question that was open).**
+
+| checked | method | result |
+|---|---|---|
+| file identity | `_denoised_fn(fi)` → `..._{file_index:04d}.h5` vs reference `abra_validation_{file_index:04d}.h5` | same key — conformant |
+| reference channel | `_collect_raw_pairs` reads CH2 of the raw validation file | conformant |
+| decoding | `argmax(dim=1) - 128` (`inference_single.py:256,269`) | conformant |
+| index alignment | writer iterates `for psd_idx in psd_segment_indices`; scorer reads `enumerate(segment_indices)` — same list, same order, per file | conformant |
+| normalization | trial `s_max` vs `segment_anchors.json` / ground-truth files: `295715680.14248306` | identical |
+| aggregation + log | independent reimplementation of PSD → SNR → `(sg/s_max)*sq` → sum → `log_5.27` | reproduces the recorded value |
+| scorer vs spec | `tests/unit/nodes/test_scoring_reference.py`, `test_scoring_helpers.py`, plus scorer-wide selection | 146 passed, 2 xfailed |
+
+An independent reproduction from the surviving checkpoint (unseeded
+sampling, so different segments) produced a file-19 mean of
+**333,076,428** against the recorded **268,077,936** — same mechanism,
+same order of magnitude.
+
+**Verdict: `10.7082` is correctly computed under the frozen scorer.** It
+is a real trial score. No implementation defect was found in file
+identity, reference selection, decoding, alignment, normalization,
+aggregation or the log transform.
+
+**What the prediction actually is.** Recorded because it is what makes
+the score interpretable, not because it implicates the metric:
+
+```text
+corr(denoised, ground_truth) : 0.000056, 0.000001, -0.000895, -0.000902
+all-zeros input   -> uniq=111  std=52.116  range=[-74,73]
+uniform-random    -> uniq=123  std=52.091  range=[-74,73]
+                     (first 24 samples differ in 2 of 24 positions)
+```
+
+The output is near-independent of the input and carries a fixed spectral
+line at 3,700,000 Hz with power `1.3252e+02`, identical to five
+significant figures in every segment examined. The scorer measures the
+denoised SNR at the *ground-truth* peak frequency. When the injected
+signal sits at 3.7 MHz — one of the discrete TIDMAD frequencies present
+in this band — the matched-filter bin lands on that line and the signal
+term rises from `1.15e-04` to `1.3252e+02`. The noise window is
+`~2.4e-08` in exploding and non-exploding segments alike, so this is a
+signal-bin effect, not noise collapse, and the v17 subnormal guard
+(`noise <= 1e-10`, written for class-127) does not apply.
+
+Files 15-18 score 2.10-4.66 because their bands never contain 3.7 MHz.
+The bimodality is fully explained by frequency coincidence.
+
+**Why nothing changed during V20.** The metric is the task definition.
+Changing aggregation, clipping a file, switching to a median, reweighting
+files, adding a per-file penalty or altering normalization would change
+the benchmark and destroy comparability with FCNet, with the published
+TIDMAD numbers, and with every prior SIDERIUS campaign. None of that is
+on the table. The candidate was likewise not tuned toward this behaviour.
+
+**V21 question.** Not "how should the metric be fixed" — it should not
+be. The open questions are:
+
+1. Does the same concentration appear in other V20 trial scores, or is
+   `iter_006` isolated? (Per-file contribution is already recorded in
+   `file_vector`; it has never been summarized.)
+2. Would a formal round — full segment coverage rather than a 10%
+   snapshot — reproduce `10.7082`? The infrastructure defect meant this
+   candidate never reached formal, so it is untested.
+3. The per-file ceiling is computed over all 200 segments while a trial
+   score samples 20. Any per-file comparison between the two is
+   **not same-sample**, and past reporting has not said so. A
+   same-sample ceiling is a reporting improvement, not a metric change.
+4. Should the reflector see per-file contribution alongside the scalar?
+   The `iter_006` reflection recorded *"a usable non-collapsed WaveNet40
+   output"* from a scalar whose per-file vector shows otherwise. This is
+   a question about what evidence the agent is shown — it changes no
+   score.

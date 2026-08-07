@@ -10,6 +10,27 @@ merging PR D" instruction.**
 > live diff. Reconstruct actual repository state from evidence. Never resume
 > from a conversation summary alone.
 
+## STATUS: CLOSED — 2026-08-07. This mandate is historical.
+
+Both stopping rules were satisfied and the campaign has since been launched
+three times. **The "Do not launch V20" instruction below is spent, not
+active** — do not act on it, and do not re-derive a pre-launch readiness pass
+from it.
+
+```text
+Part I  stopping rule met   V20 READY TO START at 53a71dca (2026-08-06)
+Part II stopping rule met   M1-M8 closed, hardening merged as #181 (adbd435d)
+launch attempt 1  d8e21d1a  ABORTED  planner crash            fixed by #183
+launch attempt 2  0b9ec200  ABORTED  measurement-worker plugin fixed by #184
+launch attempt 3  aea6d35e  STOPPED  operator_stop_requested 2026-08-07 06:37
+```
+
+Live campaign state, launch packages and per-attempt evidence live in
+`reports/v20_20260806_{145351,165559,233242}/`; findings the campaign exposed
+are recorded in `docs/design/v21_priorities.md`. Read those for current state.
+This document remains authoritative only for the frozen production decisions
+(§10) and the engineering principles (§2) that the campaign runs under.
+
 ---
 
 ## 0. Mandate
