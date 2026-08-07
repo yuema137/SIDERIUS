@@ -131,38 +131,89 @@ risks a reviewer "restoring" it while reading A2.
 
 ### 3. Implementation plan
 
-- [ ] Re-confirm zero production callers immediately before deleting
-      (`grep -rn "check_compatibility" --include=*.py --include=*.sh .`
-      excluding `.venv`); abort and escalate if any non-test caller exists
-- [ ] Delete the method and its docstring
-- [ ] Delete or rewrite the isolated unit test; if rewritten, it must
-      target `validate_architecture_loss_match` instead
-- [ ] Add a short comment on `validate_architecture_loss_match` naming it
-      the single production compatibility authority
-- [ ] Update `ml_models/` docs if the method is referenced
+- [x] Re-confirm zero production callers immediately before deleting —
+      **confirmed 2026-08-07**: only the definition
+      (`models_format_sandbox.py:372`) and three lines in one test
+      (`test_loss_functions.py:268,275,279`). No non-test caller
+- [x] Delete the method and its docstring — replaced with a NOTE recording
+      why it was removed and pointing at the single authority
+- [x] Rewrite the isolated unit test to target the live gate —
+      `TestCheckCompatibilityCustom` → `TestCustomLossDefersToPlugin`,
+      now constructing `ExperimentConfig` instead of calling a dead method
+- [x] Add a comment on `validate_architecture_loss_match` naming it the
+      single production compatibility authority
+- [ ] Update `ml_models/` docs if the method is referenced — **open**:
+      `docs/design/enable_loss_inventory.md:559,576,605` references it as
+      completed historical work. Historical design records are not
+      rewritten; a correction note is pending the §A1b decision below
 
 ### 4. Validation plan
 
 **Unit**
-- [ ] Existing `tests/unit/ml_models/test_model_configs.py` passes
-      unchanged — it already covers the live gate at `:226`, `:240`
-- [ ] Existing `tests/unit/ml_models/test_loss_functions.py` passes after
-      the isolated test is removed/rewritten
+- [x] `tests/unit/ml_models/` — **166 passed in 3.96 s**, zero failures
+- [x] `test_model_configs.py` passes unchanged
+- [x] `test_loss_functions.py` passes after the retarget
 
 **Negative / invalid input**
-- [ ] `classifier + smooth_l1` still raises via the live gate
-- [ ] `regressor + ce` still raises via the live gate
-- [ ] `hybrid` (fcnet) + every loss type still accepted
+- [x] `classifier + smooth_l1` still rejected via the live gate (matrix)
+- [x] `hybrid` (fcnet) + every loss type still accepted (matrix row)
+- [ ] `regressor + ce` — **not assertable for built-ins**: no built-in
+      model declares `regressor` (`BUILTIN_OUTPUT_TYPES` is five
+      classifiers + `fcnet: hybrid`). Deferred to A2/A3 fixtures
 
 **Backward compatibility / default parity**
-- [ ] For all six built-in models × all five loss types, the accept/reject
-      matrix is **identical before and after** this commit — captured as a
-      table and asserted
+- [x] **6 × 5 accept/reject matrix byte-identical before and after** —
+      `diff matrix_before.json matrix_after.json` empty:
+
+      | model | focal | focal_cw | ce | smooth_l1 | custom |
+      |---|---|---|---|---|---|
+      | punet | ACCEPT | ACCEPT | ACCEPT | REJECT | ACCEPT |
+      | fcnet | ACCEPT | ACCEPT | ACCEPT | ACCEPT | ACCEPT |
+      | transformer | ACCEPT | ACCEPT | ACCEPT | REJECT | ACCEPT |
+      | wavenet | ACCEPT | ACCEPT | ACCEPT | REJECT | ACCEPT |
+      | rnn | ACCEPT | ACCEPT | ACCEPT | REJECT | ACCEPT |
+      | gated_fno | ACCEPT | ACCEPT | ACCEPT | REJECT | ACCEPT |
 
 **Static**
-- [ ] `ruff check`, `ruff format --check`, `pyright` clean
+- [x] `ruff check` — All checks passed
+- [x] `ruff format --check` — 12 files already formatted
+- [ ] `pyright` — **cannot run locally** (Node v10.19.0 on lilab). CI is
+      authoritative. Not claimed as passed
 
 **Real-training Gate:** none required.
+
+### 4b. DISCOVERY — plugin models bypass the live compatibility gate
+
+**Found while retargeting the A1 test, 2026-08-07. Material; see the
+operator question at the end of this document.**
+
+`SandboxExecutor._validate_configs` (`core/sandbox_executor.py:1085-1101`)
+branches on registration, and its own docstring states it:
+
+> *"Plugin models bypass ExperimentConfig (which has hardcoded Literals
+> for core model types) and are validated directly against their own
+> config class."*
+
+```python
+if model_type in PLUGIN_CONFIG_REGISTRY:          # :1093
+    validated_m = PLUGIN_CONFIG_REGISTRY[model_type](**m_cfg).model_dump()
+    validated_t = TrainConfig(**t_cfg).model_dump()
+    validated_l = LossConfig(**l_cfg).model_dump()
+    return ...                                     # never touches ExperimentConfig
+# Core model: use the strict ExperimentConfig with cross-validation
+exp_config = ExperimentConfig(**full_payload)      # :1116
+```
+
+**So `validate_architecture_loss_match` never runs for an agent-generated
+model** — the only kind the agent produces. Verified empirically: a
+registered plugin declaring `classifier` paired with `smooth_l1` is
+**ACCEPTED** by the plugin branch (77 plugins in the registry; sampled
+`acausal_dualpath_wavenet`, declared `classifier`).
+
+This contradicts an approved premise of this PR — that the live gate is
+the authority enforcing pair legality for generated models — and it
+affects A5's negative controls, which assume `regressor + ce` is refused
+for generated models. It is **not**.
 
 ### 5. Acceptance criteria
 

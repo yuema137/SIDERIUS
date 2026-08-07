@@ -14,7 +14,7 @@ import torch
 from pydantic import ValidationError
 
 from ml_models.loss_models_sandbox import FocalLoss1D, FocalLoss1DCW, get_criterion
-from ml_models.models_format_sandbox import LossConfig
+from ml_models.models_format_sandbox import ExperimentConfig, LossConfig
 
 # ==========================================
 # Shared fixtures
@@ -265,18 +265,48 @@ class TestEnforceParameterConsistencyCustom:
 
 
 # ---------------------------------------------------------------------------
-# Schema: check_compatibility is a no-op for custom (defers to plugin)
+# Schema: custom loss defers compatibility to the plugin
 # ---------------------------------------------------------------------------
+#
+# V21 PR A retargeted this class. It previously called
+# ``LossConfig.check_compatibility``, which had zero production callers and
+# was deleted. The BEHAVIOUR it described is real and still owned by the
+# single live authority, ``ExperimentConfig.validate_architecture_loss_match``
+# — so the test now exercises that instead. A test that only proved a dead
+# method did not raise was guarding nothing.
 
 
-class TestCheckCompatibilityCustom:
-    @pytest.mark.parametrize("model_type", ["punet", "fcnet", "wavenet", "any_plugin_model"])
-    def test_custom_is_compatible_with_any_model(self, model_type: str):
-        """``check_compatibility`` should not raise for ``loss_type='custom'``
-        regardless of model_type — the plugin's own forward pass will raise
-        at training time if the shape contract is violated."""
-        cfg = LossConfig(loss_type="custom", loss_name="anything")
-        cfg.check_compatibility(model_type)  # must not raise
+class TestCustomLossDefersToPlugin:
+    # Scope note (V21 PR A): the original test also parametrized
+    # ``any_plugin_model``. That case cannot be expressed through
+    # ``ExperimentConfig`` — ``network_config`` is a discriminated union over
+    # the six built-in config classes, so an unregistered name fails union
+    # validation before any compatibility rule runs.
+    #
+    # This is not a gap in the test. Agent-generated plugin models never reach
+    # ``ExperimentConfig`` at all: ``SandboxExecutor._validate_configs``
+    # (``core/sandbox_executor.py:1093-1101``) takes a separate branch for
+    # ``model_type in PLUGIN_CONFIG_REGISTRY`` and validates only the plugin's
+    # own config class plus ``TrainConfig``/``LossConfig``. The built-in
+    # models below are therefore the complete set for which this authority
+    # actually runs.
+    @pytest.mark.parametrize("model_type", ["punet", "fcnet", "wavenet"])
+    def test_custom_is_compatible_with_any_builtin_model(self, model_type: str):
+        """``loss_type='custom'`` must be accepted for every built-in model —
+        the plugin's own forward pass raises at training time if the shape
+        contract is violated.
+
+        Asserted through the production authority: if a future edit made the
+        live gate reject ``custom``, this fails.
+        """
+        ExperimentConfig(
+            exp_id="custom-compat",
+            run_name="custom-compat",
+            model_type=model_type,
+            network_config={"model_type": model_type},
+            train_config={"lr": 5e-4, "epochs": 1, "batch_size": 2},
+            loss_config={"loss_type": "custom", "loss_name": "anything"},
+        )
 
 
 # ---------------------------------------------------------------------------

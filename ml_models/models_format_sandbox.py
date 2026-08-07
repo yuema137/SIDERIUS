@@ -369,17 +369,16 @@ class LossConfig(BaseModel):
         ),
     )
 
-    def check_compatibility(self, model_type: str):
-        """Called by Executor to prevent illegal combinations."""
-        if self.loss_type == "smooth_l1" and model_type != "fcnet":
-            raise ValueError(
-                f"Incompatible Pair: 'smooth_l1' is for waveform regression (AE/fcnet). "
-                f"Model '{model_type}' is a classifier and requires 'ce' or 'focal' ."
-            )
-        # ``custom`` defers compatibility to the plugin itself — LossConfig
-        # has no way to know what shape contract the plugin satisfies. The
-        # plugin's forward pass will raise on shape mismatch at training
-        # time if the combination is illegal.
+    # NOTE (V21 PR A, 2026-08-07): ``check_compatibility`` was deleted here.
+    # It was a name-literal gate (``model_type != "fcnet"``) with ZERO
+    # production callers — only its own definition and one unit test — whose
+    # docstring falsely claimed the Executor called it, and whose rule
+    # CONTRADICTED the live authority: it rejected ``regressor + smooth_l1``,
+    # which ``ExperimentConfig.validate_architecture_loss_match`` correctly
+    # permits. Model/loss compatibility is decided in exactly one place; see
+    # that validator. ``custom`` still defers to the plugin, which the live
+    # gate expresses by falling through for any non-classification,
+    # non-``smooth_l1`` loss type.
 
     @model_validator(mode="after")
     def enforce_custom_loss_name(self) -> "LossConfig":
@@ -484,6 +483,14 @@ class ExperimentConfig(BaseModel):
     def validate_architecture_loss_match(self) -> "ExperimentConfig":
         """
         Enforce the physical constraint: loss type must match model output type.
+
+        **This is the SINGLE production authority for model/loss
+        compatibility.** Do not add a second compatibility rule elsewhere —
+        V21 PR A deleted exactly such a duplicate (``LossConfig.
+        check_compatibility``), which had no production callers and whose
+        name-keyed rule contradicted this one. Two answers to the same
+        question is not a doubled safeguard; it guarantees one of them is
+        wrong and nobody knows which.
 
         - Classifiers ([B, 256, T] output) use ce, focal, focal_cw.
         - Regressors ([B, T] output) use smooth_l1.
