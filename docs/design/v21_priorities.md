@@ -116,6 +116,52 @@ Every other layer already supports regression:
 So the agent may *propose* `smooth_l1`, the schema accepts it, the loss
 layer implements it — and execution rejects it on a model-name literal.
 
+> ### Correction, 2026-08-07 — the root-cause attribution above is wrong
+>
+> **The conclusion stands; the causal explanation does not.** Regression
+> remains unreachable for agent-generated models, but not for the reason
+> given above. Audited during PR A scoping:
+>
+> **1. The cited gate is not production-reachable.**
+> `LossConfig.check_compatibility` (`models_format_sandbox.py:372`) has
+> **zero production callers** — only its own definition and one unit test
+> (`tests/unit/ml_models/test_loss_functions.py:279`). Its docstring
+> claims *"Called by Executor to prevent illegal combinations."* That
+> claim is false.
+>
+> **2. A capability-based contract already exists and is live.**
+> `ExperimentConfig.validate_architecture_loss_match`
+> (`models_format_sandbox.py:484-515`), constructed in production at
+> `core/sandbox_executor.py:1116`, resolves `get_output_type(model_type)`
+> from `BUILTIN_OUTPUT_TYPES` / `PLUGIN_OUTPUT_TYPE_REGISTRY` and rejects
+> `classifier + smooth_l1` and `regressor + ce/focal`, with `hybrid`
+> (fcnet) accepting any loss. `plugin_loader` already reads
+> `PLUGIN_OUTPUT_TYPE` from a plugin module (`:81`) and registers it
+> (`:151`, `:237`). Verified empirically: after registration,
+> `get_output_type("my_generated_regressor")` returns `regressor`.
+>
+> **3. The real blockers are upstream — metadata that can never be
+> produced or validated:**
+>
+> ```text
+> implementor hardcodes PLUGIN_OUTPUT_TYPE = "classifier"
+>     (ml_model_implementor.py:264, inside PLUGIN_TEMPLATE)
+>   -> no regressor plugin is ever emitted
+>   -> and the validator would reject one anyway: the (1,256,64) shape
+>      gate (ml_code_validator_agent.py:346-355) runs BEFORE the declared
+>      type is read (:359), making the regressor branch (:375) unreachable
+>   -> nothing ever registers as "regressor"
+>   -> get_output_type falls through to its "classifier" DEFAULT
+>   -> the live gate CORRECTLY rejects smooth_l1
+> ```
+>
+> The live gate is not the defect. It is behaving correctly on metadata
+> that the producer chain can never generate.
+>
+> **Consequence for the plan.** PR A is **not** "build a capability
+> contract". It is **"make the existing contract reachable"** — a smaller
+> and better-targeted change. See Part III PR A.
+
 **V20 consequence.** Non-FCNet regression hypotheses are unreachable. The
 agent can discover that CE is wrong (it did, within one round), but it
 cannot reach the paper's actual answer. Its only available recovery is
@@ -809,3 +855,997 @@ be. The open questions are:
    output"* from a scalar whose per-file vector shows otherwise. This is
    a question about what evidence the agent is shown — it changes no
    score.
+
+---
+
+# Part III — V21 execution plan (PR division, requirements, validation)
+
+**Operator triage, 2026-08-07.** Sections P1-P6 above record what running
+V20 exposed. They are **not** a uniform "fix before V21" list: they mix
+capability blockers, runtime-reliability defects, and research questions
+that must be measured before anything is changed. This section performs
+that split and translates only the first class into reviewable PRs.
+
+**This section authorizes no implementation.** It defines how each PR
+must be audited, built, validated and merged.
+
+## E.1 Triage
+
+| Tier | Items | Action before V21 |
+|---|---|---|
+| **LAUNCH BLOCKER** | P1 + P2, P6.4, P6.2 family | V21 cannot start — PRs A, B, C |
+| **BEFORE V21** | P6.5 (evidence only) | Not a hard blocker, but done first — PR D |
+| **BEFORE FIRST V21 DATA** | P4 instrumentation | Observability prerequisite: without it the first results cannot be interpreted — PR E |
+| **MEASURE FIRST** | P3, P4/P6.3 downsizing funnel | Instrument and measure; **do not tune** — PR F |
+| **NICE TO FIX** | P5 | Real design debt, not a launch blocker — PR G |
+| **V21 SCIENCE** | Part II candidates (V21-1 … V21-7) | Hypotheses to test, **not** infrastructure prerequisites |
+
+The governing judgement: **V21 must not begin by adding more models. It
+must begin by making the hypothesis space the agent can explore real,
+symmetric and executable.** P1 + P2 is the highest-priority item in this
+document.
+
+Part II candidates are deliberately excluded from this plan. They are
+what V21 *studies*; implementing A/B/C simultaneously would repeat V20's
+error of changing several variables at once.
+
+## E.2 Planning principles
+
+Inherited verbatim from `v20_priorities.md` §20.1 and binding here:
+gradual genericization (§1.4), minimal change, **one causal problem per
+PR**, evidence before expansion, a per-PR design document reviewed and
+operator-approved **before implementation**, and the **reachability
+requirement** — every production feature ships with a test proving the
+production call path reaches it.
+
+Per-PR documents live in `docs/design/v21_priorities/`.
+
+### Binding principle 1 — gradual genericization
+
+**Operator decision, 2026-08-01, carried forward from
+`v20_priorities.md` §1.4 and binding on every V21 PR.** This is not
+background. It is a design, scope, review and acceptance constraint.
+
+**Direction.** Reshape SIDERIUS from a TIDMAD-only repository into a
+generic framework that can accommodate different datasets, scientific
+tasks, metrics, execution environments and hardware configurations. This
+happens by gradually separating TIDMAD-specific behaviour from generic
+infrastructure and moving task-specific behaviour into explicit,
+replaceable components.
+
+**Mechanism — in-passing refactoring, never a big-bang rewrite.**
+Whenever a module is touched for new development, that PR must also move
+the touched surface toward the generic design **where doing so is
+reasonably bounded and directly related to the touched code**. There is
+no repository-wide mega-refactor PR. Genericization rides the normal
+development ladder.
+
+The standing review question for every PR:
+
+> **Does the code this change touches still treat TIDMAD, the current
+> task, or the current machine as the framework itself? If so, can that
+> be moved outside the configuration or plugin boundary within this
+> PR's reasonable scope?**
+
+**V21 note.** PR A is the sharpest instance in this plan: the output
+contract, the class count and the loss family are exactly the place
+where the current task is currently *the framework*. But "reasonably
+bounded" governs — see PR A's scope note on `num_classes`.
+
+### Binding principle 2 — complete transport contract (V21 upgrade)
+
+V20's reachability requirement was necessary and **not sufficient**. It
+was satisfied, and the campaign still died twice at a process boundary.
+
+> **Every V21 capability that crosses a schema, artifact, CLI, environment
+> or subprocess boundary must declare and test its complete transport
+> contract. Parent-process reachability is never evidence of subprocess
+> reachability.**
+
+Each such capability declares the full chain, and every hop is tested:
+
+```text
+producer
+  -> typed schema
+  -> caller
+  -> CLI / env / subprocess boundary
+  -> child reconstruction
+  -> record
+  -> artifact
+  -> real production consumer
+```
+
+For a generated model specifically:
+
+```text
+generated plugin
+  -> plugin dir
+  -> worker spec
+  -> subprocess env
+  -> child import
+  -> registry reconstruction
+  -> config lookup
+  -> measurement executor
+```
+
+**Testing that the environment variable arrives is not testing the
+contract.** The V20 evidence is exact: PR #184 delivered
+`SIDERIUS_PLUGIN_DIRS` to the worker and its tests proved a clean
+subprocess *could* resolve the plugin — but the worker's own validation
+path never imported the module whose import populates the registry, so
+`get_config_class` returned `None` for every generated model and the
+attempt produced 0 formal records. Closed only by PR #185 (`996a52ef`),
+whose test calls the function the worker actually calls. Its docstring
+states the rule: *"Both are required; neither implies the other."*
+
+Corollary, binding on every PR below: a transport test must **fail when
+any single hop is removed**, and a child process must never be permitted
+to satisfy a test using an in-memory registry inherited from the parent.
+
+### Binding principle 3 — the metric is frozen
+
+> **The metric is frozen.** No PR in this plan may change the score
+> formula, aggregation, normalization, anchoring or weighting. `10.7082`
+> was proven correctly computed under the frozen scorer (P6.5). A result
+> that looks strange is audited for *how it was produced* — never used
+> as an argument to change the scorer. PR D changes **what the agent is
+> shown**, nothing else.
+
+## E.3 PR overview
+
+The three blocking PRs answer three different questions, and the search
+space the operator wants exists only when all three hold:
+
+```text
+PR A   "I can invent both kinds of model correctly."
+PR C   "Anything I invent can execute everywhere it needs to."
+PR B   "If it executes, resource control remains correct."
+```
+
+| PR | Title | Fixes | Depends on | Gate |
+|---|---|---|---|---|
+| **A** | Make the existing output contract reachable | P1 + P2 | none | **V21 launch blocker** |
+| **B** | Resource-budget semantics and enforcement | P6.4 | none | **V21 launch blocker** |
+| **C** | Generated-model production compatibility | P6.2 family | none | **V21 launch blocker** |
+| **D** | Per-file evidence to reflector and planner | P6.5 | none | Before V21 |
+| **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data |
+| **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
+| **G** | Capability-derived inference batch | P5 | B | Non-blocking |
+
+---
+
+## PR A — Make the existing output contract reachable
+
+> **Scope corrected 2026-08-07 after code audit.** This PR was originally
+> written as "build a capability-based compatibility contract". That
+> contract **already exists and is live**. See the Correction block in
+> Part I §P1. The corrected objective is smaller: make the producer chain
+> able to emit and validate the metadata the existing contract consumes.
+
+### Objective
+
+Make `backbone`, `output contract` and `loss family` three independent
+design dimensions **by making the existing contract reachable**, so a
+generated regression model can be emitted, validated, registered, and
+accepted by the live gate.
+
+### Confirmed evidence (audited 2026-08-07)
+
+**Already correct, and not to be rebuilt:**
+
+- `ExperimentConfig.validate_architecture_loss_match`
+  (`models_format_sandbox.py:484-515`) is the **single live production
+  compatibility authority**, constructed at `core/sandbox_executor.py:1116`.
+- `plugin_loader` reads `PLUGIN_OUTPUT_TYPE` (`:81`) and registers it
+  (`:151`, `:237`); `get_output_type` (`:158`) resolves
+  `BUILTIN_OUTPUT_TYPES` → `PLUGIN_OUTPUT_TYPE_REGISTRY`.
+- `LossConfig.loss_type` accepts `smooth_l1`; target dtype resolution
+  maps `smooth_l1 → float32`; `proposing_stage.md:65` already offers it.
+
+**The three defects this PR fixes:**
+
+1. **Dead, contradictory rule.** `LossConfig.check_compatibility`
+   (`models_format_sandbox.py:372`) is a name-literal gate with **zero
+   production callers**, whose logic *conflicts* with the live gate (it
+   would reject `regressor + smooth_l1`, which the live gate permits) and
+   whose docstring falsely claims the Executor calls it. Left in place it
+   is an invitation for a future implementer to re-wire the wrong rule.
+
+2. **Producer cannot emit regressor metadata.**
+   `ml_model_implementor.py:264` hardcodes
+   `PLUGIN_OUTPUT_TYPE = "classifier"` inside `PLUGIN_TEMPLATE` (`:232`,
+   applied at `:1220`), and the forward contract is restated as a literal
+   at `:259` and `:1726`.
+
+3. **Validator cannot accept regressor metadata.**
+   `_check_instantiation_and_gradient`
+   (`ml_code_validator_agent.py:313`, called at `:452`) probes with
+   `torch.randint(0, 256, (1, 64))` and fails unless
+   `out.shape == (1, 256, 64)` (`:346-355`) — **before** the declared
+   type is read at `:359`. The `regressor` branch at `:375` is therefore
+   unreachable: if the shape gate passes, the output is 3-dim and the
+   regressor branch raises "expected 2 dims". **No plugin declaring
+   `regressor` can pass validation today.**
+
+### Scope
+
+```text
+1. delete dead contradictory LossConfig.check_compatibility (+ its test)
+2. validator reads PLUGIN_OUTPUT_TYPE before applying shape expectations
+3. classifier fixture [B,256,T] -> PASS   (parity, unchanged behaviour)
+4. regressor  fixture [B,T]     -> PASS   (fails on current main)
+5. proposal schema carries an EXPLICIT typed output contract
+   (Literal["classifier","regressor"]) transported
+   proposal -> protocol -> implementor -> generated PLUGIN_OUTPUT_TYPE
+            -> validator -> registry -> live gate
+6. ExperimentConfig.validate_architecture_loss_match remains the single
+   production compatibility authority — unchanged
+7. fixed typed regressor proposal + smooth_l1 reaches a scored bounded
+   trial (deterministic; the LLM is never the acceptance oracle)
+8. scorer untouched
+```
+
+**Operator decision, 2026-08-07 — do not infer the output contract from
+the loss family.** `smooth_l1 -> regressor` / `ce -> classifier` would
+re-couple output representation to loss, relocating the very binding this
+PR removes. The two are declared independently and the live gate checks
+the pair.
+
+### The real requirement — four layers must agree
+
+Supporting two losses in code is not the goal. The goal is that a
+proposal's **scientific intent survives, unaltered, all the way to the
+model that actually trains**:
+
+```text
+Proposer
+  declares three INDEPENDENT dimensions
+      backbone     = WaveNet
+      output_type  = regressor        <- never inferred from loss
+      loss_type    = smooth_l1
+  ↓
+Implementor
+  generates the matching HEAD, not just the metadata
+  ↓
+Validator
+  three separate checks (below)
+  ↓
+Plugin registry
+  records the declared contract
+  ↓
+ExperimentConfig live compatibility gate
+  ↓
+training
+```
+
+The failure mode this replaces:
+
+```text
+agent says regression
+  -> implementor silently generates a classifier
+  -> validator only accepts classifier shape
+  -> runtime sees a classifier
+  -> smooth_l1 rejected
+```
+
+### Defence in depth — the proposer is not trusted to be correct
+
+The prompt must state the legal combinations plainly:
+
+```text
+classifier   output [B,C,T]   losses: ce / focal / focal_cw
+regressor    output [B,T]     losses: smooth_l1
+```
+
+so the agent proposes legal pairs **by design**. But an LLM may always
+err, so legality is **enforced**, never assumed:
+
+```text
+Proposer          proposes a legal combination
+Validator/runtime GUARANTEES the combination is legal
+```
+
+### The validator checks three distinct things
+
+These are different questions and must not be collapsed:
+
+| # | Question | Owner |
+|---|---|---|
+| 1 | Is the declaration itself legal? (`output_type ∈ {classifier, regressor}`) | validator |
+| 2 | Does the built model match **its own declaration**? declared `regressor` must emit `[B,T]`; declared `classifier` must emit `[B,C,T]` | validator |
+| 3 | Is the (output contract, loss) **pair** legal? | **existing live gate** — `ExperimentConfig.validate_architecture_loss_match`. Do **not** duplicate this table in the validator |
+
+Check 2 is what catches the dangerous case: `PLUGIN_OUTPUT_TYPE =
+"regressor"` on a model whose forward still returns `[B,256,T]`.
+
+### Acceptance — a 2 × production-path matrix, plus negatives
+
+PR A is accepted only if **both** formulations traverse the full
+production path from a fixed typed proposal to a scored bounded trial:
+
+```text
+PATH 1   backbone=WaveNet  output_type=classifier  loss=focal
+PATH 2   backbone=WaveNet  output_type=regressor   loss=smooth_l1
+
+each:  proposal -> implementor -> generated plugin -> validator PASS
+       -> registry reports the declared contract -> live gate PASS
+       -> bounded scored trial
+```
+
+and these are **refused**:
+
+```text
+classifier + smooth_l1   REFUSE
+regressor  + ce          REFUSE
+regressor  + focal       REFUSE
+```
+
+Path 1 proves opening regression did not break classification. Path 2
+proves regression is genuinely executable rather than merely present in a
+schema. The negatives prove the live gate still holds.
+
+**Capability after PR A:**
+
+```text
+                 ┌─ classification   CE / focal
+any backbone ────┤
+                 └─ regression       SmoothL1
+```
+
+Full commit-level plan: `v21_priorities/pr_a_reachable_output_contract.md`.
+
+Reorder the validator so the declared contract is read **first** and the
+shape probe is derived from it. Make the implementor template and the
+proposer prompt state both contracts symmetrically.
+
+**Class count — bounded, not a redesign.** `configs/task_config.yaml:25`
+already declares `num_classes: 256`, but it is consumed only for prompt
+rendering (`workflows/task_config.py:209`); execution derives the class
+count from tensor shape (`inputs.shape[1]`). Wiring the existing field
+into the validator's shape probe is therefore **in scope and bounded**.
+Introducing a new generic class-count abstraction is **not** — do not
+force a class-count redesign in order to obtain regression capability.
+
+### Division of labour with PR C — do not let this PR grow
+
+```text
+PR A proves the regression hypothesis is EXPRESSIBLE
+       in the agent and runtime contract
+PR C proves a novel regression model is EXECUTABLE
+       across every production subprocess
+```
+
+PR A must not expand into a general infrastructure audit. If a name-keyed
+or process-boundary defect is found while doing PR A, record it for PR C
+rather than fixing it here.
+
+### Out of scope
+
+Changing the metric; changing FCNet's baseline configuration; adding new
+loss implementations; deciding which formulation wins; a generic
+class-count redesign; any name-keyed sweep beyond the dead predicate
+(that is PR C); **rebuilding the live compatibility gate**; and — by
+operator decision, 2026-08-07 — **changing what `get_output_type` does
+for an unknown model**. Today it silently defaults to `"classifier"`.
+That default should eventually fail closed, but it affects every model
+absent from both registries, so the audit and the change belong to
+**PR C** (registration integrity), not here.
+
+### Requirements
+
+- The minimum reachable set becomes
+  `WaveNet + classifier + CE/focal` **and** `WaveNet + regressor + SmoothL1`.
+- No production path decides loss/model compatibility from a model name.
+- The proposer prompt presents classification and regression as
+  symmetric options, with neither as an unexamined default.
+
+### Validation
+
+- **Deterministic:** a compatibility matrix test over
+  `{classifier, regressor} × {ce, focal, smooth_l1}` asserting the
+  legal/illegal set, with the name-keyed predicate proven absent by an
+  AST/token guardrail (extend
+  `tests/unit/guardrails/test_no_model_name_branches.py`).
+- **Reachability:** a generated-plugin fixture declaring `regressor` and
+  emitting `[B, T]` passes `ml_code_validator_agent` end to end. This
+  test **fails on current main** — that is the acceptance signal.
+- **Real, bounded:** one cold-start trial round on band 15-19 training a
+  regression WaveNet to a scored result. Success = a scored round, not a
+  good score.
+- **Parity:** an existing FCNet + `smooth_l1` run and a classifier +
+  `focal` run produce byte-identical records to pre-PR.
+
+### Merge criteria
+
+All three blocker sites closed; the regressor reachability test passing;
+FCNet parity byte-identical; no name-keyed compatibility predicate
+remaining in production.
+
+---
+
+## PR B — Resource-budget semantics and enforcement
+
+### Objective
+
+Make the VRAM budget mean one stated thing, and make a sustained breach
+of it detectable.
+
+### Confirmed evidence
+
+P6.4: attempt 3 observed ~20.13 GiB (arch) and ~13.45 GiB (loss) on a
+31.34 GiB card, with three OOMs in 34 minutes, while every chain declared
+a 12 GiB budget. `core/runtime_control/pair_admission.py:45` defines
+`DEFAULT_PAIR_CEILING_GIB = 28.0` with an env override
+(`SIDERIUS_PAIR_VRAM_CEILING_GIB`); `max_active = 2` bounds **chains**,
+not GPU phases.
+
+### The question this PR must answer first
+
+Is the per-chain 12 GiB figure an **enforced cap** or an **admission
+estimate**? Today it behaves as the latter while being named like the
+former. The audit decides which it should be; the PR then makes the name,
+the schema field and the runtime behaviour agree.
+
+### Required sequence — no design before the audit
+
+```text
+audit semantics
+  -> freeze semantics (operator decision, written)
+  -> implement enforcement consistent with THAT semantics
+```
+
+**This PR must not pre-commit to an enforcement mechanism.** Whether the
+answer is dynamic enforcement, a watchdog, re-measurement, pair/aggregate
+accounting over concurrent phases, or admission-envelope semantics with
+honest reporting is an **output** of the audit, not an input. The plan
+deliberately states no preferred mechanism.
+
+### Scope
+
+Unambiguous budget semantics in schema and manifest; detection when
+realized phase memory exceeds what was admitted; enforcement consistent
+with the frozen semantics.
+
+### Out of scope
+
+Raising or lowering any threshold without measured justification;
+changing `max_active` policy before the audit; per-candidate rejection
+based on peer pressure (P6.4 is explicit that contention is not candidate
+evidence); choosing the enforcement mechanism before the semantics are
+frozen.
+
+### Requirements
+
+- A candidate's realized phase memory cannot persistently exceed its
+  admitted budget without the system recording it.
+- A breach is attributed to the **process that caused it**, never to a
+  peer candidate.
+- Whatever the chosen semantics, the manifest states it in words.
+
+### Validation
+
+**Escalation ladder — real training is never the discovery tool.** Each
+rung must pass before the next is attempted:
+
+```text
+1. synthetic accounting        replay attempt-3 numbers, no GPU
+2. controlled allocator holder deliberate CUDA reservation, no training
+3. production admission path   reachability under the real code path
+4. minimal real GPU confirm    smallest run that can demonstrate it
+```
+
+- **Rung 1:** synthetic two-chain accounting tests over the observed
+  attempt-3 numbers (17.46 + 13.45 GiB, 149 MiB free) asserting the
+  intended admit/refuse decision under the frozen semantics.
+- **Rung 2:** a controlled process holding a known CUDA reservation —
+  no model, no training — confirming detection and attribution.
+- **Rung 3:** a test proving the production admission path consults the
+  aggregate, failing if a future edit bypasses it.
+- **Rung 4:** the **smallest** real co-residency run that demonstrates
+  the behaviour. Not two full scientific chains, and not a deliberate
+  card-exhaustion campaign.
+
+### Merge criteria
+
+Semantics documented and implemented consistently; breach detected and
+correctly attributed in a live two-chain run; no peer-caused rejection.
+
+---
+
+## PR C — Generated-model production compatibility
+
+### Objective
+
+Find and close the places where infrastructure written for a **fixed
+model set** breaks a system whose job is to **invent model names**.
+
+### Confirmed evidence
+
+**The P6.2 defect took two PRs to close, and the first one looked
+complete.** This history is the specification for this PR:
+
+```text
+#184 (db688c48)  worker spawned without env= -> SIDERIUS_PLUGIN_DIRS absent
+                 FIXED THE TRANSPORT. Tests proved a clean subprocess
+                 COULD resolve the plugin. Attempt 3 still produced
+                 0 formal records.
+
+#185 (996a52ef)  get_config_class reads PLUGIN_CONFIG_REGISTRY, populated
+                 as an IMPORT SIDE EFFECT of ml_models.models_sandbox.
+                 build_production_components imported it -> resolved
+                 validate_candidate_configs did not      -> returned None
+                 Two paths in one file, one import apart, disagreeing
+                 about whether a model exists.
+```
+
+So the environment arrived and **the consumer never used it**. The
+generated-model path was closed only when a test called the function the
+worker actually calls.
+
+The **pattern** remains live and is already tracked:
+`tests/unit/guardrails/test_no_model_name_branches.py` carries **three
+xfail groups = nine pending violations** —
+`agent/skills/training_skill/estimator.py` (4),
+`agent/skills/inference_skill/estimator.py` (3, including
+`if model_type == "transformer"`), and `core/inference_defaults.py` (2).
+
+### Scope
+
+A **bounded, targeted** audit of six surfaces: model-name lookup tables;
+config registries; inference defaults; hardcoded compatibility
+predicates; subprocess plugin loading and environment propagation;
+model-specific branching. Close only what makes a generated model
+**non-executable**.
+
+Sweep specifically for the `#185` shape — **state reconstructed by import
+side effect, where two paths in the same process disagree** — since that
+class is invisible to both transport tests and parent-process tests.
+
+**Additionally in scope (operator decision, 2026-08-07):**
+
+**(a) Unknown output type must not silently acquire classifier
+semantics.** `get_output_type` (`plugin_loader.py:158`) returns
+`"classifier"` for any model in neither registry. That default is exactly
+why a *registration failure* is silently converted into *wrong scientific
+semantics* rather than an error. The target semantics are:
+
+```text
+known classifier  -> classifier
+known regressor   -> regressor
+unknown           -> explicit unknown / fail closed
+```
+
+This PR must **audit before changing**: which built-in or historical
+models rely on the fallback; whether legacy artifacts exist with no
+registered output type; which subprocess/reload paths can produce
+`unknown`; and at which layer `unknown` should be refused. Then implement
+the minimal compatible change.
+
+**(b) Restore formal promotion, and prove it.** PR A makes regression
+*expressible*; PR C must make a generated model *executable across the
+process boundary* — which is what actually blocked formal promotion in
+V20 attempt 3. Code that merely looks correct is not evidence. Required:
+a **deterministic generated-model fixture** traversing
+
+```text
+generated plugin
+  -> clean measurement worker
+  -> config registration
+  -> measurement succeeds
+  -> formal phase becomes reachable
+```
+
+**No good score and no real training are required** — only that the
+formal phase becomes reachable for a generated model.
+
+### What is NOT forbidden
+
+A model name as **identity, logging key, registry key or artifact
+provenance** is legitimate and stays. `registry[model_name]` and
+`artifact.model_name` are not defects.
+
+What is forbidden is an unknown model name changing **correctness,
+reachability or scientific semantics**:
+
+```text
+FORBIDDEN   if model_type == "transformer": correctness_behaviour = X
+            else:                           correctness_behaviour = Y
+
+FINE        registry[model_name]
+            artifact.model_name
+```
+
+Throughput-only consequences of a missing name entry belong to PR G, not
+here.
+
+### Out of scope
+
+Repository-wide refactor; renaming schemas; rewriting the estimators
+beyond removing name-keyed branching; anything that only affects
+throughput (that is PR G).
+
+### Requirements
+
+- A newly generated model name reaches every production stage —
+  registry, measurement worker, estimators, inference defaults — without
+  requiring a pre-registered name entry for **correctness or
+  reachability**.
+- Each of the nine tracked violations is either closed or carries a
+  written follow-up ID with a stated reason.
+- The full generated-model transport chain (Binding principle 2) is
+  declared and tested hop by hop.
+
+### Validation
+
+- **Deterministic:** the three xfail groups convert to passing, or the
+  remainder is explicitly re-scoped in the guardrail with a follow-up ID.
+- **Transport, clean subprocess — the primary gate:** a fixture with a
+  never-before-seen generated model traverses
+  plugin dir → worker spec → subprocess env → child import → registry
+  reconstruction → config lookup → measurement executor, **in a real
+  spawned subprocess**. Two non-negotiable properties:
+  1. the child must **not** be able to satisfy the test using an
+     in-memory registry inherited from the parent;
+  2. **removing any single hop must fail the test** — including the
+     import whose side effect populates the registry.
+- **Real, bounded:** one cold-start iteration whose generated name is
+  novel, reaching a scored trial round **and** a formal promotion
+  boundary (the exact point where attempt 3 died).
+
+### Merge criteria
+
+Clean-subprocess transport test passes and fails on every hop deletion;
+novel-name fixture reaches formal promotion; **no unexplained name-keyed
+correctness or reachability dependency remains on the generated-model
+production path.**
+
+---
+
+## PR D — Per-file evidence to reflector and planner
+
+### Objective
+
+Give the agent the per-file evidence it already produces, so it stops
+drawing bad scientific conclusions from a legal scalar.
+
+### Confirmed evidence
+
+P6.5: `iter_006_001` scored `10.7082` with file 19 supplying **99.9985%**
+of the linear sum, and the reflection called it *"a usable non-collapsed
+WaveNet40 output"*. The per-file vector is **already recorded** —
+`file_vector` on `ExperimentRecord`
+(`agent/schemas/hyperparam_tuning.py:381`, `:611`) and
+`best_valid_file_vector` (`:2532`). It has never been summarized to the
+agent.
+
+### Scope
+
+Surface per-file contribution share (and, where meaningful, a same-sample
+per-file reference) to the reflector and planner prompts. Add a
+concentration summary to the interpretation record.
+
+### Out of scope — **absolutely**
+
+```text
+score            unchanged
+aggregation      unchanged
+normalization    unchanged
+weighting        unchanged
+anchoring        unchanged
+```
+
+This PR changes **what the agent sees**, not what is computed. A diff
+touching the scorer is out of scope by definition.
+
+**The same-sample per-file reference is reporting and evidence ONLY.** It
+must never become any of the following, in this PR or a later one that
+cites it:
+
+```text
+NOT a HealthGate input
+NOT a filter
+NOT a penalty
+NOT a reweighting
+NOT a new score input
+```
+
+The goal is narrow and worth stating exactly: **stop the agent from
+seeing the single scalar `10.7082` and concluding the whole waveform is
+good.** It is not to tell the metric that `10.7082` should not exist —
+P6.5 proved it is correctly computed under the frozen scorer.
+
+### Requirements
+
+- The agent sees per-file contribution alongside every aggregate it is
+  asked to interpret.
+- Trial-vs-formal sampling differences are labelled where a per-file
+  comparison is shown — a 20-segment trial and a 200-segment ceiling are
+  **not same-sample**, and past reporting did not say so.
+
+### Validation
+
+- **Frozen-metric proof:** replay the full V20 attempt-3 record set
+  before and after; every `denoising_score` and `file_vector`
+  **byte-identical**. This is the primary merge gate.
+- **Deterministic:** a rendering test on the real `iter_006` vector
+  asserting the concentration is stated in the prompt.
+- **Layer-2 (optional, dual-mode):** does the reflector's characterization
+  change when concentration is shown? Descriptive only — no behavioural
+  claim is required for merge.
+
+### Merge criteria
+
+Byte-identical scores; concentration visible in the reflector prompt on
+the real `iter_006` fixture; no scorer file in the diff.
+
+---
+
+## PR E — Proposal-scale funnel instrumentation
+
+### Objective
+
+Convert "the agent seems to systematically undersize" from an impression
+into measurable data — **without** attempting to correct it.
+
+### Confirmed evidence
+
+P4/P6.3: realized candidates span 663,488 - 12,772,096 parameters against
+FCNet's ~323 M, across three independent campaign starts, never entering
+the advice-encouraged 10M-100M range. But **parameter count is not a VRAM
+proxy**, so the causal claim is not yet supportable. One known
+mechanical contributor: `parameter_count_estimate` is not forwarded to
+the tuner (V18r §13g — the implementor thinned a compliant 348k proposal
+to 88,672 and the validator passed it in prose).
+
+**Correction, 2026-08-07.** An earlier draft of this plan called
+`ml_model_proposal_agent.py:283` (*"keep `parameter_count_estimate` under
+~100M"*) a **contradiction** of the advice files' encouraged 10M-100M
+range. It is not: an encouraged range of 10-100M and an upper bound of
+~100M are consistent. The real question is a **search-space policy**
+question, and it is not this PR's to answer:
+
+> Why is there a hard-ish ~100M proposal prior when the reference FCNet
+> is ~323M and the system separately tells the agent that 323M fits in
+> the VRAM budget (measured ~6.04 GiB)?
+
+That question is answered **after** the funnel data exists — not by
+editing a prompt inside an instrumentation PR.
+
+### Scope
+
+Record the full funnel per candidate:
+
+```text
+proposed params
+  -> implemented params
+  -> preflight disposition (admitted / rejected + typed reason)
+  -> trained
+  -> HealthGate valid
+```
+
+### Candidate identity — required, and it does not exist today
+
+The funnel **cannot** be joined on `model_name`. Generated identity and
+registration are precisely the fragile region (P6.2), and a name is not
+guaranteed stable or unique across the five stages. Verified 2026-08-07:
+no `proposal_id`, `candidate_id` or `lineage_id` field exists anywhere in
+`agent/schemas/`.
+
+This PR therefore adds a **minimal immutable candidate identity**,
+transported end to end:
+
+```text
+proposal -> implementation -> validation -> preflight -> trial
+         -> ExperimentRecord
+```
+
+subject to Binding principle 2 (every hop tested; deleting a hop fails
+the test). Without it the outcome is the familiar one: five stages of
+data that cannot be reliably joined — *produced but not delivered*.
+
+### Out of scope
+
+**Any corrective action.** Do not change advice text to push size, do not
+alter admission thresholds, do not add a size floor, **and do not edit
+the `~100M` proposal prior.** The purpose is measurement; every
+correction is decided after the data exists.
+
+### Requirements
+
+- Every candidate carries all five funnel stages with param counts.
+- Where a stage drops a candidate, the typed reason is recorded.
+- The funnel is queryable across iterations without log parsing.
+- All five stages join on the immutable candidate identity, not on name.
+
+### Validation
+
+- **Deterministic:** funnel-completeness test — no candidate reaches a
+  terminal state with a missing stage.
+- **Backfill check:** the instrumentation reproduces the known
+  attempt-3 distribution from stored records.
+- **Real, bounded:** one iteration produces a complete funnel record.
+
+### Merge criteria
+
+Complete funnel on a live iteration; prompt contradiction resolved; no
+corrective change to advice or thresholds in the diff.
+
+---
+
+## PR F — Inspection-cost scaling study (measure only)
+
+### Objective
+
+Decide whether the 120 s inspection budget censors large candidates —
+**before** changing it.
+
+### Confirmed evidence
+
+P3: large candidates time out more often, and the current behaviour is
+already honest (a timeout reports *inconclusive*, never "model too big" —
+that repair landed in V19). So there is no correctness defect to fix,
+only an unquantified censoring risk.
+
+### Scope
+
+A deterministic, **no-LLM** sweep:
+
+```text
+architecture x params x batch x segment
+  -> inspection wall time
+  -> peak VRAM
+```
+
+### Out of scope
+
+**Changing the budget.** `120 → 300` is explicitly forbidden until the
+curve exists. Adaptive budgets, staged inspection, analytical estimates
+and size-aware budgets are all candidate *outcomes*, not inputs.
+
+### Requirements
+
+- Reproducible, seeded, no LLM calls, no scientific records produced.
+- Output is a curve plus a written recommendation, not a code change.
+
+### Validation
+
+Deterministic re-run reproduces the curve; the report states which
+candidate classes the current budget would censor, with the P6.3
+distribution overlaid.
+
+### Merge criteria
+
+Study merged as evidence + recommendation. **A budget change is a
+separate, later PR** justified by this data.
+
+### Gate status — explicitly not a V21 launch blocker
+
+P3 has **no correctness defect today**: a 120 s timeout already reports
+*inconclusive* and never tells the planner the model is too big. So V21
+may start without this study. What it blocks is narrower and absolute:
+
+```text
+PR F is a PREREQUISITE FOR CHANGING THE INSPECTION BUDGET,
+not a prerequisite for launching V21.
+```
+
+---
+
+## PR G — Capability-derived inference batch
+
+### Objective
+
+Derive the inference batch from a candidate's **measured** memory profile
+rather than a name-keyed table.
+
+### Confirmed evidence
+
+P5: generated models have no name-table entry and fall back to a
+conservative batch, slowing inference. `core/inference_defaults.py`
+carries two of the nine tracked name-keyed violations.
+
+### Why not a launch blocker
+
+It does not change any score, does not change hypothesis reachability,
+and does not produce a wrong scientific conclusion. It costs throughput.
+
+### Scope / Out of scope
+
+Derive batch from measured phase requirements; remove the name-keyed
+fallback. Do not change inference numerics or scoring.
+
+### Validation
+
+Deterministic equivalence on the six shipped models (same batch chosen as
+the table would give); one bounded real inference on a generated model
+showing improved throughput at unchanged output — outputs byte-identical.
+
+### Merge criteria
+
+Byte-identical inference outputs; name table removed from the path.
+
+---
+
+## E.4 Global checkpoints before V21 launch
+
+| # | Checkpoint | Satisfied by |
+|---|---|---|
+| 1 | Regression hypothesis reachable end to end by a generated model | PR A |
+| 2 | Budget semantics frozen in writing, and breaches detected + attributed | PR B |
+| 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C |
+| 4 | Agent sees per-file evidence; scores byte-identical | PR D |
+| 5 | Scale funnel measurable across all five stages, joined on candidate identity | PR E |
+| 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all |
+
+**PR F and PR G are explicitly NOT launch checkpoints.** PR F blocks only
+a future change to the inspection budget — P3 has no correctness defect
+today (a timeout already reports *inconclusive* and never claims the
+model is too big), so it cannot block V21 from starting.
+
+### What "acceptance evidence complete" means
+
+**Not** "CI is green." SIDERIUS's configured full CI is **unit + static
+by design** — `ruff check`, `ruff format --check`, `pyright`, and
+`pytest tests/unit/ -m "not real_run"`. The workflow step is literally
+named *"Unit tests — pytest (no real_run, no integration)"*. A green CI
+therefore proves **nothing** about any production seam, which is the
+exact assumption that let V20's two process-boundary defects reach a
+campaign.
+
+Acceptance for every V21 PR is:
+
+```text
+configured full CI green
+  +
+that PR's targeted production-reachability / transport tests green
+  +
+that PR's bounded real validation, where the plan requires one
+```
+
+Never the first line alone.
+
+## E.5 Execution order
+
+```text
+A, B, C, E   independent — may proceed in parallel after design review
+D            independent, but merge after A (record shape settles)
+F            after E (funnel data makes the sweep interpretable)
+G            after B (needs measured phase requirements)
+```
+
+Recommended serialization if capacity is limited: **A → C → B → D → E**,
+then F, then G. A is first because every V21 scientific question depends
+on the hypothesis space being open; C is second because a generated model
+that cannot execute makes every later validation ambiguous.
+
+## E.6 First V21 experiment, once A-E are merged
+
+The cleanest first experiment remains Part II's Candidate C, unchanged:
+
+```text
+same WaveNet backbone · same data · same optimizer · same budget
+
+A: classification + CE
+B: classification + focal
+C: regression + SmoothL1
+```
+
+It answers V20's largest open question directly: **is collapse a property
+of the WaveNet architecture, or of the classification formulation?** V20
+never tested regression, so no V20 result bears on it (see "Two inference
+errors this document must not make", above).
+
+Do not implement Part II Candidates A/B/C simultaneously.
+
+## E.7 PR review template
+
+Every V21 PR fills in the `v20_priorities.md` §20.11 template verbatim,
+plus two V21-specific lines:
+
+```
+Metric-frozen proof:            <- byte-identical score replay, or "does not touch scoring"
+Name-keyed dependency added:    <- correctness/reachability only; must be "none"
+Transport contract:             <- full chain per Binding principle 2, each hop tested
+Subprocess evidence:            <- clean-spawn proof, or "crosses no process boundary"
+Acceptance evidence:            <- full CI + this PR's reachability/transport tests
+```
