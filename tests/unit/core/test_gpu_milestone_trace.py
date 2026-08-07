@@ -152,11 +152,31 @@ class TestItIsInertWithoutTheEnvironmentVariable:
         that started passing a curated `env=` would silently drop the trace
         and the audit would come back empty.
         """
-        runner = (REPO_ROOT / "core" / "runtime_control" / "gpu_measurement_runner.py").read_text(
-            encoding="utf-8"
+        # V20 attempt 2: the worker launcher now DOES pass `env=`, because
+        # it must transport SIDERIUS_PLUGIN_DIRS — without it no
+        # agent-generated candidate could be measured at all.
+        #
+        # The property this test protects is unchanged and is asserted
+        # directly rather than through "no env= appears in the source":
+        # the curated env must be a COPY of the environment, so the trace
+        # variable still reaches the worker. A launcher that built an env
+        # from scratch would silently drop it and the audit would come
+        # back empty — which is what the old proxy was guarding against.
+        import os as _os
+
+        from core.subprocess_env import subprocess_env
+
+        sentinel = '{"channel": "test"}'
+        _os.environ[TRACE_ENV_VAR] = sentinel
+        try:
+            built = subprocess_env(plugin_dir="/tmp/plugins")
+        finally:
+            _os.environ.pop(TRACE_ENV_VAR, None)
+        assert built.get(TRACE_ENV_VAR) == sentinel, (
+            "the worker's curated env must preserve the inherited milestone "
+            "trace; building an env from scratch would lose it"
         )
-        popen = runner[runner.index("subprocess.Popen(") :][:400]
-        assert "env=" not in popen, "the worker launcher now curates env; the trace would be lost"
+        assert built.get("SIDERIUS_PLUGIN_DIRS") == "/tmp/plugins"
 
     def test_no_production_module_sets_the_variable(self):
         """Reachability, inverted: production must never turn this on.

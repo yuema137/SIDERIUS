@@ -313,6 +313,15 @@ class ExperimentRecord(BaseModel):
         # status says nothing about the candidate and carries no authority
         # to shrink it. No production emitter yet — that is B-C4.
         "skipped_resource_admission",
+        # V20 attempt 2 — the phase was not started because the MEASUREMENT
+        # could not be established, so no admission decision was possible.
+        #
+        # Split out from `skipped_resource_admission` after that campaign
+        # wrote 15 records under it while the GPU held 1.6 of 32.6 GiB: the
+        # isolated measurement worker had failed, and the status made it
+        # read as a resource refusal. Says nothing about the candidate's
+        # size, speed or capacity, and carries no authority to shrink it.
+        "skipped_infrastructure_failure",
     ]
     model_type: str
     timestamp: str
