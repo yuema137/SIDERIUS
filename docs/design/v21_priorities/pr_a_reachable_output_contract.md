@@ -59,18 +59,59 @@ validate the metadata the existing contract already consumes.
 
 | # | Commit | Touches | Independently reviewable |
 |---|---|---|---|
-| **A1** | Delete the dead, contradictory `check_compatibility` | `models_format_sandbox.py`, one test | Yes |
+| **A1** | Delete the dead, contradictory `check_compatibility` — **DONE** (`452b1022`) | `models_format_sandbox.py`, one test | Yes |
 | **A2** | Validator reads the declared contract before applying shape expectations | `ml_code_validator_agent.py`, tests | Yes |
+| **A2b** | Shared pair-compatibility rule reaches the **plugin** production branch | `models_format_sandbox.py`, `sandbox_executor.py`, tests | Yes |
 | **A3** | Explicit output contract, proposal → live gate | `proposal.py`, protocol, `ml_model_implementor.py`, tests | Yes |
 | **A4** | Symmetric contract in the proposer-facing prompt surface | prompt templates, docs | Yes |
 | **A5a** | **Gate 1** — real LLM, no expensive training: both formulations expressible and implementable | gate advice fixtures (evidence only) | Yes |
 | **A5b** | **Gate 2** — real training: both formulations reach a scored trial | none (evidence only) | Yes |
 
-Ordering rationale: **A2 before A3.** If the implementor could emit a
-regressor before the validator accepted one, every generated regressor
-would fail validation and consume a retry — a live regression. A1 is
-independent and first because it removes a rule that contradicts the one
-A2 relies on.
+Ordering rationale: **A2 and A2b before A3.** If the implementor could
+emit a regressor before the validator accepted one, every generated
+regressor would fail validation and consume a retry — a live regression.
+And **before the implementor starts generating regressors at all, an
+illegal pair must already be cleanly refusable on the production path**;
+otherwise PR A would open the hypothesis space while the one rule
+separating legal from illegal pairs still did not run for generated
+models. A1 is independent and first because it removes a rule that
+contradicts the one A2 relies on.
+
+### Binding principle — audit BOTH production branches
+
+**Added 2026-08-07 after the §4b discovery.**
+
+> **When production branches on built-in vs generated plugin, acceptance
+> must audit both branches independently. A rule existing on one branch is
+> never evidence that it governs the other.**
+
+This is the same shape as the V20 lesson, one level up:
+
+```text
+V20   parent can load the plugin   != subprocess can load the plugin
+V21   built-in path has the check  != generated-plugin path has the check
+```
+
+Both were invisible to a green test suite because the test exercised the
+branch that already worked.
+
+### Correction to "single authority"
+
+The §0 audit said `ExperimentConfig.validate_architecture_loss_match` is
+"the single production compatibility authority". §4b shows that is wrong:
+it governs **built-ins only**. The corrected model, implemented by A2b:
+
+```text
+shared output/loss compatibility rule      <- THE authority
+        ↑                        ↑
+ExperimentConfig            plugin branch
+(built-in consumer)         (generated-model consumer)
+```
+
+The authority is the **rule**, not either consumer. A2b extracts it once
+and gives the plugin branch a call site — it must **not** re-implement
+`if regressor and ce: ...` in `sandbox_executor.py`, which would recreate
+the two-authorities defect A1 just deleted.
 
 ### Acceptance ladder
 
@@ -304,8 +345,8 @@ fail validation and burn retries.
 
 ### 3. Implementation plan
 
-- [ ] Read the full function and its caller before editing; record the
-      exact current control flow in this document
+- [x] Read the full function and its caller before editing — control flow
+      recorded in §3b below
 - [ ] **Class-count source — conditional rule (operator decision,
       2026-08-07).** Apply this test and record which branch was taken:
 
@@ -321,31 +362,74 @@ fail validation and burn retries.
       > clarity of "regression reachability" outweighs an opportunistic
       > genericization of the class count.
 
-- [ ] Record the branch taken and the evidence for it in §7
-- [ ] Read `PLUGIN_OUTPUT_TYPE` (default `"classifier"`) before the
+- [x] **Branch taken: KEEP the `256` literal.** Evidence:
+      `ml_code_validator_agent.py` contains **zero** references to
+      `task_config` / `TaskConfig` / `num_classes`, and its production
+      caller (`:452`) passes only `inp.model_file_path`. Threading the
+      config would be a **new transport**, not "one existing typed
+      boundary" — the conditional rule's "otherwise" branch. Recorded in
+      code as follow-up **FU-A-1** on `_PROBE_NUM_CLASSES`
+- [x] Read `PLUGIN_OUTPUT_TYPE` (default `"classifier"`) before the
       forward probe
-- [ ] Derive the expected shape from the declared contract:
-      `classifier -> (1, C, 64)`, `regressor -> (1, 64)`
-- [ ] Keep a declared-vs-actual mismatch as a **typed, specific** error
-      (it must not silently pass)
-- [ ] Leave the gradient check and its warning path untouched
+- [x] Derive the expected shape from the declared contract:
+      `classifier -> (1, 256, 64)`, `regressor -> (1, 64)`
+- [x] Keep a declared-vs-actual mismatch as a **typed, specific** error —
+      names both the actual shape and the shape the declaration requires
+- [x] Leave the gradient check and its warning path untouched
+- [x] Additive: fail closed on an unknown declaration; typed failure on a
+      non-tensor output
+
+### 3b. Control flow, before and after
+
+```text
+BEFORE                                AFTER
+  probe with randint(0,256,(1,64))      read PLUGIN_OUTPUT_TYPE
+  require shape == (1,256,64)  <-.      reject if not in {classifier,regressor}
+  ...only then read declaration   |     derive expected shape from it
+  check declared vs actual dims --'     probe
+                                        reject non-tensor
+                                        require shape == expected
+```
+
+**Discovery: BOTH arms of the old declared-vs-actual check were dead
+code.** The `regressor` arm was unreachable because a `[B, T]` output was
+rejected by the shape gate first — the defect this PR exists to fix. But
+the `classifier` arm was equally unreachable: a shape equal to
+`(1, 256, 64)` is 3-dimensional by construction, so `actual_dims != 3`
+could never be true once the gate had passed. The check appeared to
+enforce declaration/reality agreement and enforced nothing in either
+direction. The new derivation is the first version that actually does.
+
+**Error-string parity is exact.** For a declared classifier the message
+formats `expected_shape = (1, 256, 64)` as `"(1, 256, 64)"` — byte-identical
+to the previous hardcoded text, so existing failure-path expectations are
+unchanged.
 
 ### 4. Validation plan
 
-**Unit**
-- [ ] Classifier fixture emitting `[1, 256, 64]` → PASS (parity)
-- [ ] Regressor fixture emitting `[1, 64]` → **PASS. Fails on current
-      main — this is the acceptance signal for the whole PR**
-- [ ] Classifier declared but emitting `[1, 64]` → FAIL, specific error
-- [ ] Regressor declared but emitting `[1, 256, 64]` → FAIL, specific error
-- [ ] Plugin with **no** `PLUGIN_OUTPUT_TYPE` → treated as classifier
-      (backward compatibility)
+**Unit** — new class `TestDeclaredOutputContract`, 7 cases
+- [x] Classifier fixture emitting `[1, 256, 64]` → PASS (parity)
+- [x] Regressor fixture emitting `[1, 64]` → **PASS**
+- [x] Classifier declared but emitting `[1, 64]` → FAIL, specific error
+- [x] Regressor declared but emitting `[1, 256, 64]` → FAIL, specific error
+- [x] Plugin with **no** `PLUGIN_OUTPUT_TYPE` → treated as classifier
+      (legacy-read compatibility)
+
+**Mutation proof — the acceptance signal, recorded**
+- [x] With the production change stashed and the tests kept, **3 of 7 fail**:
+      `test_declared_regressor_with_2d_output_passes`,
+      `test_declared_regressor_but_3d_output_is_refused`,
+      `test_unknown_declaration_fails_closed`.
+      Pre-change error recorded verbatim:
+      `Forward output shape (1, 64) does not match expected (1, 256, 64)`.
+      Restored, re-verified green. This proves the tests bind to the
+      production change rather than passing vacuously
 
 **Negative / invalid input**
-- [ ] `PLUGIN_OUTPUT_TYPE = "nonsense"` → rejected with a specific error,
-      never silently coerced
-- [ ] Forward raises → existing "Forward pass failed" path unchanged
-- [ ] Model returns a non-tensor → typed failure, no traceback escape
+- [x] `PLUGIN_OUTPUT_TYPE = "nonsense"` → rejected with a specific error
+      naming the bad value and both legal values; never coerced
+- [x] Forward raises → existing "Forward pass failed" path unchanged
+- [x] Model returns a non-tensor → typed failure, no traceback escape
 
 **Backward compatibility / default parity**
 - [ ] Every plugin currently in `agent_generated/models/` that validates
@@ -414,6 +498,121 @@ fail validation and burn retries.
 - [ ] No implementor changes (that is A3), no prompt changes (that is A4)
 - [ ] Diff summary, staged files, test output, deviations shown before
       committing
+
+---
+
+## Commit A2b — Shared pair rule reaches the plugin production branch
+
+### 1. Goal
+
+Give the **generated-model** production branch a call site for the
+model/loss compatibility rule. Without it, PR A would open regression
+while the rule separating legal from illegal pairs still did not run for
+the only kind of model the agent invents.
+
+**Why this commit, before A3:** the implementor must not start emitting
+regressors until an illegal pair can be cleanly refused on the production
+path.
+
+### 2. Scope
+
+**Changes**
+- `ml_models/models_format_sandbox.py` — extract
+  `validate_output_loss_compatibility(output_type, loss_type, *, model_type)`
+  plus `CLASSIFICATION_LOSSES` / `REGRESSION_LOSSES`.
+- `ExperimentConfig.validate_architecture_loss_match` — delegate to it.
+- `core/sandbox_executor.py` — the plugin branch of `_validate_configs`
+  calls it.
+- `tests/unit/core/test_plugin_loss_compatibility.py` — new.
+
+**Must remain unchanged**
+- The 6 × 5 built-in matrix, and the exact error strings.
+- `custom` remains permitted for every contract.
+
+**Dependencies:** A1 (one rule), A2 (declaration is trustworthy).
+
+### 3. Implementation plan
+
+- [x] Extract the rule as a module-level function, documented as **the**
+      authority with both consumers named in its docstring
+- [x] `ExperimentConfig` delegates — inline logic removed
+- [x] Plugin branch resolves `get_output_type(model_type)` and calls the
+      shared function **before** returning
+- [x] No pair logic re-implemented in `sandbox_executor.py`
+
+### 4. Validation plan
+
+**Unit — 9 cases, all passing**
+- [x] classifier plugin + `ce` / `focal` / `focal_cw` → ACCEPT
+- [x] classifier plugin + `smooth_l1` → **REFUSE** (the case silently
+      accepted before A2b)
+- [x] regressor plugin + `smooth_l1` → ACCEPT
+- [x] regressor plugin + `ce` / `focal` / `focal_cw` → **REFUSE**
+- [x] `custom` still permitted for both contracts
+- [x] Refusal happens at **config validation** — asserted via the
+      `"Plugin Experiment Configuration Rejected"` wrapper, not a deep
+      training/broadcast error
+
+**Reachability + single authority**
+- [x] Tests call the real `TidmadSandbox._validate_configs`, not the
+      helper, so they exercise the production branch
+- [x] Guardrail: the executor source (comments/docstrings stripped by
+      `tokenize`, mirroring `test_runtime_authority_audit.py`) must
+      contain the call and **no** inlined loss literals
+- [x] Both-branch parity: `classifier + smooth_l1` refused on the
+      built-in path **and** the plugin path
+
+**Mutation proof**
+- [x] Removing the call from the plugin branch turns **6 tests red**
+      (3 regressor REFUSE cases, the classifier REFUSE case, the
+      reachability guardrail, the both-branch parity test). Restored and
+      re-verified green. This is the evidence the rule is *delivered*,
+      not merely defined
+
+**Backward compatibility**
+- [x] 6 × 5 built-in matrix re-captured after A2b — still **identical to
+      the pre-A1 baseline**
+- [x] `tests/unit/core/` + `ml_models/` + validator: **280 passed**
+
+**Static**
+- [x] `ruff check` — All checks passed (one RUF059 found and fixed)
+- [x] `ruff format --check` — clean
+- [ ] `pyright` — cannot run locally (Node v10.19.0); CI authoritative
+
+### 5. Acceptance criteria
+
+- [x] The compatibility rule exists **once**; both branches are consumers.
+- [x] Every illegal pair is refused on the generated-model branch at
+      config-validation time.
+- [x] Mutation proof recorded.
+- [x] Built-in behaviour byte-identical.
+
+### 6. Failure and edge cases
+
+| Case | Behaviour |
+|---|---|
+| `custom` loss | Permitted for every contract — in neither loss family, so the rule falls through by construction. Deferral to the plugin preserved |
+| Unregistered model name | `get_output_type` returns its `"classifier"` default. **Known gap, deferred to PR C** by operator decision — a registration failure still silently acquires classifier semantics |
+| `hybrid` (fcnet) | Accepts any loss, unchanged |
+| Plugin config invalid | Existing `"Plugin Experiment Configuration Rejected"` path, unchanged |
+
+### 7. Verification commands and evidence
+
+```bash
+.venv/bin/python -m pytest tests/unit/core/test_plugin_loss_compatibility.py -q
+.venv/bin/python -m pytest tests/unit/core/ tests/unit/ml_models/ \
+                          tests/unit/agent/ml_code_validator_agent/ -q
+```
+
+- [x] New tests: **9 passed in 0.96 s**
+- [x] Combined targeted: **280 passed in 4.78 s**
+- [x] Mutation: **6 failed** with the call removed; restored green
+- [x] Matrix: `diff matrix_before.json matrix_after_a2b.json` empty
+
+### 8. Commit boundary
+
+- [x] Touches the shared rule, its two consumers, and one new test file
+- [x] No A3 work (no schema, no implementor changes)
 
 ---
 
