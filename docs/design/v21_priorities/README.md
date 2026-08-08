@@ -18,8 +18,10 @@ Plan approved in principle 2026-08-07, with six design corrections
 applied. **PR A is MERGED** (PR #186, `b9f88ae5`) and **PR C is MERGED**
 (PR #187, `cac86c94`), both operator-merged 2026-08-08 with CI green.
 
-**PR B is the next unit** and is not started; it needs its own design
-document first. PR C's merge gave PR B a second sub-item — **B-2**, the
+**PR B is the next unit.** Its design document is **drafted and awaiting
+approval**; nothing is implemented. One question in it (**Q-B-1**, which
+budget semantics to freeze) is genuinely blocking, because Part III forbids
+pre-committing to an enforcement mechanism before the semantics is frozen. PR C's merge gave PR B a second sub-item — **B-2**, the
 reassigned **FU-C-1** — and promoted the authority-stamp defect to a V21
 scientific-campaign launch blocker under **PR D**. PRs D-G are not
 started.
@@ -65,7 +67,7 @@ Two consequences for other PRs:
 | PR | Document | Gate | Status |
 |---|---|---|---|
 | **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **MERGED** — PR #186, `b9f88ae5` |
-| **B** | `pr_b_resource_budget_semantics.md` | V21 launch blocker | **NEXT UNIT** — design doc required first; now covers B-1 semantics **and** B-2 (FU-C-1) |
+| **B** | [`pr_b_resource_budget_semantics.md`](./pr_b_resource_budget_semantics.md) | V21 launch blocker | **DESIGN DRAFTED** — 3 open questions, **Q-B-1 blocking**; covers B-1 semantics **and** B-2 (FU-C-1) |
 | **C** | [`pr_c_generated_model_production_compat.md`](./pr_c_generated_model_production_compat.md) | V21 launch blocker | **MERGED** — PR #187, `cac86c94` |
 | **D** | `pr_d_per_file_evidence.md` | Before V21 | not started |
 | **E** | `pr_e_scale_funnel_instrumentation.md` | Before first V21 data | not started |
