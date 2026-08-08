@@ -1771,10 +1771,112 @@ evidence for S2.** This is why B0 sits after B1 and B2.
 Make the runtime behaviour, the schema field and the operator-facing name
 agree with whichever semantics B0 froze.
 
+### 0. B3 AUDIT — performed 2026-08-08, after the S3 freeze
+
+**The mechanism was not invented; it was found.** Auditing the real
+control path under S3 turned up something that changes B3 from "build an
+enforcement mechanism" into "connect one that already exists".
+
+#### 0.1 The frozen S3 admission rule is ALREADY IMPLEMENTED — and inert
+
+`core/runtime_control/decision_policy.py:285-301`:
+
+```python
+if (budget.vram_gb is not None
+        and estimate.peak_vram_gb is not None
+        and estimate.peak_vram_gb > budget.vram_gb):
+    if estimate.blocking_eligible:
+        reasons.append(f"measured peak VRAM ... exceeds budget ...")
+        return _decision("REJECT")
+    reasons.append(f"projected peak VRAM ... exceeds budget "
+                   f"(non-blocking provenance — advisory)")
+    return _decision("ADVISORY")
+```
+
+Read that against the operator's frozen wording: *"Admission may enforce
+the threshold against the strongest available candidate-specific
+pre-phase evidence, including a forecast or a bounded measured probe."*
+A **measured** peak may REJECT; a **projected** one is ADVISORY. That is
+S3's admission half, already evidence-graded, already written.
+
+**And no production caller ever populates `budget.vram_gb`.** Every
+production `RuntimeBudget(...)` construction passes `time_seconds` only —
+`launch_guard.py` ×6, `probe_lifecycle`, `evaluate_time_skill`,
+`proposer_preflight`. The single site that sets `vram_gb` is
+`tests/unit/core/test_runtime_decision_policy.py:45`.
+
+```text
+the machinery      exists, typed, evidence-graded, unit-tested
+the production wire  absent
+```
+
+`RuntimeBudget` even declares the field beside `time_seconds`
+(`:72-76`), so the memory dimension was designed in and left unconnected.
+
+#### 0.2 This explains §B0.E.1's "two consumers disagree"
+
+There is a **third** consumer, dormant, which already unifies them
+correctly. `evaluate_vram_skill` (forecast → refuse) and
+`isolated_probe` (measured → refuse) look like rival semantics only
+because each implements its own comparison; the graded policy expresses
+both as one rule over two evidence strengths. The disagreement is not a
+design conflict to arbitrate — it is **duplication of a decision the
+policy already knows how to make**.
+
+#### 0.3 The `_POLICY_MATRIX` already grades the evidence
+
+`decision_policy.py:123-160` is a declarative provenance × phase matrix:
+`static_prior → cannot_block`, `live_probe_clean_uncalibrated →
+may_block_on_measured_oom_or_hard_cap`, `calibrated_live_probe →
+may_support_blocking`. It governs **time** today. S3's admission half is
+the same question asked about memory, and the matrix is where the answer
+already lives — including the operator decision recorded at `:278-283`
+that *"VRAM authority is post-implementation"*.
+
+#### 0.4 A concept overlap B3 must reconcile, not extend
+
+`core/runtime_control/campaign.py:303-339` (`CalibrationCell`) already
+carries `predicted_peak_vram_gb`, `actual_peak_vram_gb` and
+`vram_underprediction_gb`. It is **not** a duplicate of B2: it belongs to
+the offline calibration campaign (`scripts/runtime_campaign.py`), which
+is not the production chain — the production chain genuinely had nothing,
+which is what §0.7.1 found. But B3 must reconcile the vocabulary rather
+than let a third naming grow beside `RealizedVsAdmittedMemory` and
+`CalibrationCell`.
+
+#### 0.5 What is genuinely missing for S3
+
+```text
+ALREADY THERE   graded admission rule                decision_policy:285
+ALREADY THERE   evidence grading                     _POLICY_MATRIX
+ALREADY THERE   realized measurement + comparison    B2
+MISSING         budget.vram_gb ever populated        production wiring
+MISSING         post-admission operator-visible escalation
+```
+
+Only the last is a genuinely new capability. Note also that the codebase
+uses "escalation" for two *other* things — TERM→KILL
+(`session.py:91`) and escalate-to-live-verification
+(`total_assembly.py:82`). B3 must not overload the word a third time.
+
+#### 0.6 Candidate surface for the escalation half
+
+`RuntimeEstimate.warnings` is the strongest existing candidate, and
+PR C's C3b already proved the property S3 needs of it: every use in the
+runtime-control package is a **producer**, none is a predicate
+(`test_inference_batch_absence_is_observability_only.py`). A channel that
+is already provably decision-free is exactly what "operator-visible but
+never auto-terminating" requires. **To be confirmed by B3's own consumer
+audit, not assumed here.**
+
+---
+
 ### 2. Scope
 
-**Unknown until Q-B-1 is answered**, and stating it now would be the
-pre-commitment Part III forbids. What *is* fixed:
+**Shaped by §0 above.** B3 is now expected to be *wiring plus one new
+surface*, not a new enforcement mechanism — but the plan below is written
+as §3's checklist to confirm that, and the operator reviews it before any
+code. What *is* fixed:
 
 **Must remain unchanged regardless of the answer**
 - The metric, the scorer, every score.
@@ -1784,17 +1886,157 @@ pre-commitment Part III forbids. What *is* fixed:
 
 **Dependencies:** B0's written decision. **B3 is not written until then.**
 
+**Changes, provisional on §3's confirmations**
+- `core/runtime_control/decision_policy.py` — expected **unchanged**; the
+  rule is already correct. Any edit here is a finding, not a plan.
+- The production `RuntimeBudget(...)` construction sites that govern a
+  candidate phase — populate `vram_gb`.
+- `evaluate_vram_skill/wrapper.py` and `isolated_probe.py` — express
+  their comparison as the graded rule rather than as two private ones.
+  **Behaviour-preserving**: both already refuse; the change is where the
+  decision is made, not what it decides.
+- One new operator-visible surface for post-admission exceedance.
+
+**Must remain unchanged regardless**
+- The metric, the scorer, every score.
+- Retry, phase order, signal and timeout semantics.
+- B1's corrected forecasts and C3's property-derived predicates.
+- B2's stored row stays measured facts; S3 is interpretation above it.
+- Attribution: a breach belongs to the process that caused it.
+
+**Explicit non-goals**
+- No automatic phase termination on exceedance. S3 forbids it.
+- No `reset_process_peak()` in passing (§B0.E acceptance).
+- No new concurrency or pair-ceiling policy — that is P6.4/B4 territory.
+
+**Dependencies:** B0's decision (done). **Implementation is blocked on
+operator review of this plan.**
+
 ### 3. Implementation plan
 
-- [ ] Receive the frozen semantics from B0
-- [ ] **Return to this document and write B3's real §2-§8** to the same
-      standard as B1 and B2, with its own audit performed first
-- [ ] Obtain approval for that plan before implementing
+**Stage A — confirm the audit before changing anything**
 
-### 4-8
+- [ ] Confirm `decision_policy:285-301` is reached for a candidate phase
+      once `vram_gb` is supplied — by execution, not by reading. If some
+      earlier branch returns first, the plan changes
+- [ ] Enumerate **every** production `RuntimeBudget(...)` site and
+      classify each: governs a candidate phase (should carry `vram_gb`)
+      vs governs infrastructure (`launch_guard`'s 60 s probes — should
+      not). Record the classification **including the sites deliberately
+      left alone**
+- [ ] Establish which value is the threshold at each site — `limit_gb`
+      (the effective `min(physical, budget)`) rather than the raw
+      `vram_budget_gb`, per §0.2's distinction
+- [ ] Confirm `estimate.peak_vram_gb` and `blocking_eligible` are
+      populated on the estimates those sites carry. **If `peak_vram_gb`
+      is never set, wiring the budget alone changes nothing** and the
+      plan must say so rather than ship an inert connection
+- [ ] Audit the escalation surface: confirm `RuntimeEstimate.warnings`
+      reaches an operator artifact, and re-prove no consumer branches on
+      it (C3b's property, re-verified rather than assumed)
 
-**Deliberately empty.** Filling them now would be inventing the mechanism
-the operator has not yet chosen.
+**Stage B — connect, without changing the rule**
+
+- [ ] Populate `vram_gb` at the classified candidate-phase sites
+- [ ] Prove parity: for every case the two bespoke comparisons refuse
+      today, the graded policy refuses too, and vice versa. **A
+      divergence is a finding to report, not to fix silently** — it means
+      one of the three had a different threshold all along
+- [ ] Route the bespoke comparisons through the policy only where parity
+      is proven
+
+**Stage C — the escalation half**
+
+- [ ] Surface B2's `realized_above_threshold` on an operator artifact,
+      with `measurement_completeness` and `realized_peak_source` attached
+      so a cumulative training HWM is never presented as a precise
+      phase-local peak (B0.E acceptance)
+- [ ] Pick a name that is **not** "escalation" — the codebase already
+      uses it for TERM→KILL and for escalate-to-live-verification (§0.5)
+- [ ] Reconcile vocabulary with `CalibrationCell` (§0.4): one naming for
+      predicted-vs-realized memory, or an explicit statement of why two
+
+### 4. Validation plan
+
+**Unit**
+- [ ] A candidate phase whose measured peak exceeds the threshold →
+      `REJECT`; the same phase with a *projected* peak → `ADVISORY`.
+      This is the S3 rule and must be asserted as one test naming it
+- [ ] An unpopulated `vram_gb` still yields today's behaviour (so the
+      wiring is provably the thing that activates it)
+- [ ] Post-admission exceedance produces the operator surface **and no
+      admission change**
+
+**Reachability**
+- [ ] A test that fails if a production site stops passing `vram_gb` —
+      the §0.1 defect was precisely a correct rule nobody called
+- [ ] A test that fails if any admission path starts reading B2's
+      realized row (B2's guard, re-run under B3)
+
+**Non-behavioural parity**
+- [ ] The full admit/refuse matrix before vs after Stage B, enumerated.
+      **Any cell that moves is reported, with its cause**
+
+**Negative**
+- [ ] Exceedance with `measurement_completeness="unavailable"` → surfaced
+      as unknown, never as compliant
+- [ ] Exceedance by a peer process → **not** attributed to the candidate
+- [ ] No budget configured → no surface, no error
+
+**Real-training Gate:** none for B3 itself. B4a/B4b own that ladder.
+
+### 5. Acceptance criteria
+
+- The frozen S3 sentence is true of the code, checkable line by line:
+  admission enforces the threshold against the strongest available
+  candidate-specific evidence; post-admission exceedance is recorded and
+  operator-visible; exceedance alone terminates nothing, invalidates
+  nothing, rescores nothing.
+- **One rule, not three.** `evaluate_vram_skill`, `isolated_probe` and
+  `decision_policy` no longer hold three private answers to "does this
+  exceed the budget".
+- Every production `RuntimeBudget` site is classified, including those
+  deliberately left without `vram_gb`.
+- Parity table published; every moved cell explained.
+- **Mutation:** removing `vram_gb` from a production site turns a test
+  red; making exceedance terminate a phase turns a test red.
+
+### 6. Failure and edge cases
+
+| Case | Required behaviour |
+|---|---|
+| `peak_vram_gb` is never populated on production estimates | **Stop and report.** Wiring the budget would be an inert connection that *looks* like enforcement — worse than not wiring it |
+| The graded policy and a bespoke comparison disagree | A finding. Report both thresholds and their provenance; do not silently adopt either |
+| An earlier `decide()` branch returns before `:285` | The audit was wrong; re-plan rather than reorder branches to force the path |
+| Exceedance with an incomplete measurement | Surface as unknown. Never "within budget" |
+| Peer process caused the usage | Context only. Never the candidate's exceedance |
+| A consumer starts branching on the new surface | It has stopped being observability; that is a policy change needing its own decision |
+| The operator budget exceeds the physical cap | Already classified as `PHYSICAL VETO`; the threshold is the physical cap, and the surface must say which bound was binding |
+
+### 7. Verification commands and evidence
+
+```bash
+.venv/bin/python -m pytest tests/unit/core/ -q -k "decision or admission or realized"
+.venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
+.venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
+PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
+```
+
+- [ ] `RuntimeBudget` site classification — **to record**
+- [ ] Admit/refuse parity matrix, before vs after — **to record**
+- [ ] Mutation results — **to record**
+
+### 8. Commit boundary
+
+- [ ] Stage A is an audit and lands as documentation
+- [ ] Stage B (wiring + parity) and Stage C (surface) are separate
+      commits — one changes where a decision is made, the other adds an
+      artifact, and they fail for different reasons
+- [ ] No estimator changes (B1), no change to B2's stored facts
+- [ ] No Gate work (B4)
+
+> **STOP. This plan is for operator review.** Implementation begins only
+> after approval, per the same rule that governed B1 and B2.
 
 ---
 
