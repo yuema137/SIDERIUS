@@ -1348,6 +1348,113 @@ pyright                                               0 errors, 4 warnings
 
 ---
 
+## Commit B1b — The harness epoch cap applies to the resolved configuration
+
+**Approved by the operator 2026-08-08 alongside the S3 freeze.** Promoted
+out of §0.6.5a, where B1 had recorded it as out-of-scope and escalated it.
+
+### 1. Goal
+
+```text
+resolved_epochs  = what TrainConfig would actually use
+effective_epochs = min(resolved_epochs, max_epochs)
+```
+
+and the effective value must **reach the trainer** — not merely be seen by
+the clamp.
+
+### 2. The defect
+
+```text
+plan omits `epochs`
+  -> tuner:4092  planned = .get("epochs", 1)   -> 1 > 1 is False, no clamp
+  -> trainer     TrainConfig(**t_data)          -> its declared 10
+  -> ten epochs run under `--max_epochs 1`
+```
+
+No single line is wrong. The bound was compared against the *planner's
+dict* while the run was configured from the *schema's declaration*, so an
+absent key let the planner's **silence** decide a bound the operator owns
+— a direct violation of "the harness owns the bounds, not the planner".
+
+### 3. Bounded sibling audit — one more instance, same shape
+
+Scope was explicitly **only** harness-owned hard bounds, not a repository
+default sweep.
+
+| bound | resolution | verdict |
+|---|---|---|
+| `max_epochs` | `.get("epochs", 1)` vs `TrainConfig` `10` | **DEFECT** — fixed |
+| `max_steps_per_attempt` | `_resolve_guardrail_steps` used `.get("epochs", 1)` and `.get("segmentation_size", 1000)` | **DEFECT** — fixed |
+| `min_formal_batch_size` | `.get("batch_size", 1)` vs `TrainConfig` `1` | matches — not a defect |
+| `validation_max_portion` (trial/train/eval) | typed `float` schema fields, `min()` applied unconditionally | correct already — the dict-`.get` divergence cannot arise |
+
+The `max_steps_per_attempt` instance is worth stating for its direction:
+
+```text
+epochs   1 vs 10      -> n_steps 10x LOW  -> the bound UNDER-triggers, i.e.
+                                             is bypassed  (dangerous)
+seg_size 1000 vs 40000 -> n_steps 40x HIGH -> spurious rejection (wrong the
+                                             other way)
+```
+
+### 4. Implementation
+
+- `_resolve_effective_epochs(train_cfg)` — delegates to B1's
+  `resolve_train_field`, so there is one answer to "what will this run as".
+- `_apply_epoch_bound(train_cfg, max_epochs)` — **extracted from `run()`**,
+  applies the bound and writes the effective value back in place.
+- `_resolve_guardrail_steps(..., model_type=...)` — resolves both inputs
+  from declarations.
+
+**Absent is resolved; explicitly-invalid is refused.** An explicit
+`segmentation_size: 0` or `epochs: 0` returns `None` (the documented
+best-effort contract), rather than being substituted. B1's own rule
+requires it — *"an explicitly invalid value must not silently become a
+fallback"* — and the consequence is sharper here than in an estimator:
+substituting would have the guardrail judge a workload no run could
+produce.
+
+### 5. Validation
+
+```text
+test_harness_bounds_apply_to_resolved_config.py   20 passed (new)
+tune_ml_hyperparam_agent + core                   3256 passed, 2 skipped,
+                                                  pytest rc=0, 0 FAILED/ERROR
+mutations                                         7/7 caught
+ruff / format / pyright                           clean / clean / 0 errors
+```
+
+**Two mutations survived first and both were my tests' fault, not gaps in
+luck** — recorded because each names a distinct way a test can be
+decoration:
+
+- **P2 (write-back deleted) SURVIVED** because the test drove a *local
+  reimplementation* of the clamp rather than production. It proved the
+  test's own arithmetic worked. Fixed by extracting `_apply_epoch_bound`
+  from `run()` so the test could call the real function — the mutation
+  forced a decomposition that was correct anyway.
+- **P1 (resolver bypassed) SURVIVED** because every omitted-key case used
+  `max_epochs=1`, where the wrong resolution (1) and the right one (10)
+  both clamp to 1. Any assertion of the form `effective <= bound` passes
+  either way. Fixed by
+  `test_a_non_binding_bound_preserves_the_RESOLVED_value`: with
+  `max_epochs=50` and no planned epochs, the trainer's 10 must survive.
+
+**One regression caught by an existing test**, and it was right to fail:
+`test_rt5_guardrails::test_resolver_failure_returns_none` pinned
+`segmentation_size: 0 → None`. The first B1b draft made it return a
+substituted step count. That is the "explicitly invalid" rule above, and
+the old behaviour was preserved rather than the test rewritten.
+
+### 6. Commit boundary
+
+- [x] Harness-bound resolution only; no estimator formula, no B2/B3 work
+- [x] Sibling audit bounded to harness-owned hard bounds, result recorded
+      **including the three non-defects**
+
+---
+
 ## Commit B0 — Semantics audit and options → OPERATOR FREEZES
 
 > **This commit produces a written operator decision, not code.** It is

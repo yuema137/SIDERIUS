@@ -2790,21 +2790,63 @@ def _resolve_guardrail_steps(
     model_config: dict,
     train_cfg: dict,
     train_portion: float | None,
+    model_type: str = "",
 ) -> int | None:
     """Resolved step count for the §5 guardrails. Best-effort: a
     resolver failure returns None (the guardrail is defense-in-depth —
-    the primary runtime criterion still protects the attempt)."""
+    the primary runtime criterion still protects the attempt).
+
+    V21 PR B1b — the sibling the bounded audit found. ``n_steps`` feeds
+    ``max_steps_per_attempt``, a harness-owned hard bound, and it was
+    resolved from literals that contradicted what the run would use:
+
+    ```text
+    epochs    .get(..., 1)    vs TrainConfig's 10    -> 10x LOW  -> the bound
+                                                        UNDER-triggers, i.e.
+                                                        is bypassed
+    seg_size  .get(..., 1000) vs the class default   -> 40x HIGH -> spurious
+                                                        rejection
+    ```
+
+    Same shape as the ``--max_epochs`` bypass and the same fix: resolve
+    against the declaration, so the bound is evaluated on the workload
+    that will actually run.
+
+    ``model_type`` defaults to ``""`` so legacy callers keep working; an
+    unknown type simply falls through to the documented safety margins.
+    """
     if train_sample_set is None:
         return None  # single-file legacy mode — no scoped workload to resolve
     try:
+        from agent.skills.training_skill.estimator import (
+            _usable,
+            resolve_model_field,
+            resolve_train_field,
+        )
         from execute_tools.workload_resolvers import resolve_training_workload
+
+        # B1b: resolve an ABSENT key from the declaration, but never
+        # substitute for one the plan states and states impossibly. B1's
+        # rule is explicit — "an explicitly invalid value must not
+        # silently become a fallback" — and here the consequence is
+        # sharper than in an estimator: inventing a workload for a config
+        # that cannot run would have the guardrail judge a fiction. An
+        # unresolvable plan keeps the documented best-effort contract and
+        # returns None, leaving the primary runtime criterion to protect
+        # the attempt.
+        for _cfg, _key in ((model_config, "segmentation_size"), (train_cfg, "epochs")):
+            _supplied = _cfg.get(_key)
+            if _supplied is not None and not _usable(_supplied):
+                return None
 
         return resolve_training_workload(
             train_sample_set,
-            seg_size=int(model_config.get("segmentation_size", 1000)),
+            seg_size=resolve_model_field(
+                model_type, model_config, "segmentation_size", safety_margin=1000
+            ),
             batch_size=int(train_cfg.get("batch_size", 1)),
             train_portion=train_portion,
-            epochs=int(train_cfg.get("epochs", 1)),
+            epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
         ).unit_count
     except Exception as exc:
         print(f"[guardrails] step resolution failed (non-fatal): {exc}")
@@ -2992,7 +3034,11 @@ def _check_and_record_guardrail_skip(
     record and return True (the attempt loop `continue`s). Single call
     site keeps run() under the analyzer's complexity ceiling."""
     n_steps = _resolve_guardrail_steps(
-        train_sample_set, model_config, plan.train_cfg, trial_config.train_portion
+        train_sample_set,
+        model_config,
+        plan.train_cfg,
+        trial_config.train_portion,
+        model_type=model_type,
     )
     violations = _evaluate_step_guardrails(
         n_steps=n_steps,
@@ -3185,6 +3231,57 @@ def _build_in_subprocess_rejection_record(
         },
         "runtime_verification": rv_block or None,
     }
+
+
+def _resolve_effective_epochs(train_cfg: dict) -> int:
+    """The epoch count the trainer will ACTUALLY use for this plan.
+
+    V21 PR B1b. A harness-owned hard bound must be applied to what will
+    run, not to what the planner happened to write down. ``TrainConfig``
+    declares ``epochs=10`` and the trainer builds ``TrainConfig(**t_data)``
+    (`train_engine_sandbox.py:1211`), so an absent key resolves to ten —
+    while the clamp used to read it as one.
+
+    Delegates to B1's resolver so there is exactly one answer to "what
+    will this config actually run as". Duplicating the resolution here is
+    how the 40000/1000/0 split for ``segmentation_size`` arose.
+
+    Layering note: ``resolve_train_field`` currently lives in the training
+    estimator because that is where B1 needed it. It is really a config
+    resolution utility rather than an estimator concern, and a later
+    genericization pass may move it beside the config classes; importing
+    it is preferred over a second implementation in the meantime.
+    """
+    from agent.skills.training_skill.estimator import resolve_train_field
+
+    return resolve_train_field(train_cfg, "epochs", safety_margin=1)
+
+
+def _apply_epoch_bound(train_cfg: dict, max_epochs: int | None) -> int | None:
+    """Apply the harness's epoch bound to the RESOLVED configuration.
+
+    V21 PR B1b. Extracted rather than left inline for two reasons: the
+    tuner's ``run()`` is the orchestrator the decomposition rule names,
+    and — the reason that actually forced it — a mutation removing the
+    write-back SURVIVED while the clamp lived inline, because no test
+    could reach production's copy of it. A boundary that cannot be driven
+    cannot be guarded.
+
+    Mutates ``train_cfg`` in place so the effective value travels onward
+    to the trainer. That write-back is the whole point: a clamp that only
+    informs the admission decision leaves the trainer free to resolve an
+    absent key to ``TrainConfig``'s declared 10, which is the bypass.
+
+    Returns the effective epoch count, or ``None`` when no bound is set.
+    """
+    if max_epochs is None:
+        return None
+    resolved = _resolve_effective_epochs(train_cfg)
+    effective = min(resolved, max_epochs)
+    if effective != train_cfg.get("epochs"):
+        print(f"  Clamping epochs: {resolved} → {effective} (max_epochs)")
+    train_cfg["epochs"] = effective
+    return effective
 
 
 def _attach_realized_memory(
@@ -4087,14 +4184,21 @@ class HyperparamTuningAgent:
                         plan.eval_strategy = "snapshot"
                         strategy_normalization_reason = "partial_data_scope"
 
-                    # Enforce max_epochs hard cap (prevents LLM from choosing excessively long training)
-                    if agent_input.max_epochs is not None:
-                        planned_epochs = plan.train_cfg.get("epochs", 1)
-                        if planned_epochs > agent_input.max_epochs:
-                            print(
-                                f"  Clamping epochs: {planned_epochs} → {agent_input.max_epochs} (max_epochs)"
-                            )
-                            plan.train_cfg["epochs"] = agent_input.max_epochs
+                    # Enforce max_epochs hard cap (prevents LLM from choosing
+                    # excessively long training).
+                    #
+                    # V21 PR B1b — the cap applies to the RESOLVED training
+                    # configuration, and the effective value is written back so
+                    # it reaches the trainer.
+                    #
+                    # The bypass this closes: the clamp read
+                    # ``.get("epochs", 1)`` while the trainer builds
+                    # ``TrainConfig(**t_data)`` and gets its declared **10**.
+                    # A plan that simply omitted the key therefore trained ten
+                    # epochs under ``--max_epochs 1`` — the clamp compared
+                    # 1 > 1, declined to act, and the bound the harness owns
+                    # was decided by the planner's silence.
+                    _apply_epoch_bound(plan.train_cfg, agent_input.max_epochs)
 
                     # Build and validate TrialConfig from plan + overrides
                     if plan.is_trial:
