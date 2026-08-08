@@ -155,14 +155,54 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
     return loaded
 
 
+class UnknownOutputContractError(LookupError):
+    """A model's output contract is not established in either registry.
+
+    V21 PR C1. This is deliberately an exception and not a return value.
+    Reaching a site that *needs* a concrete output contract while the model
+    is registered nowhere is a **registration / transport invariant
+    failure**, not an expected workflow outcome — the model was supposed to
+    be registered before anything asked for its contract.
+
+    Before C1 this case silently returned ``"classifier"``. That converted
+    an infrastructure failure into *wrong scientific semantics*: a
+    regressor whose declaration was dropped anywhere upstream was trained,
+    inferred and scored as a classifier, with nothing in the record to say
+    so.
+
+    Callers must translate this into their own layer's typed refusal — see
+    the five production consumers listed in the PR C design document. It
+    must never reach campaign level as a raw exception, and it must never
+    be caught and converted back into a default contract.
+
+    Attributes:
+        model_type: the name whose contract could not be established.
+    """
+
+    def __init__(self, model_type: str) -> None:
+        self.model_type = model_type
+        super().__init__(
+            f"Output contract not established for model_type {model_type!r}: "
+            f"registered in neither BUILTIN_OUTPUT_TYPES nor "
+            f"PLUGIN_OUTPUT_TYPE_REGISTRY. This means REGISTRATION FAILED "
+            f"for this model — it does NOT mean the model is a classifier."
+        )
+
+
 def get_output_type(model_type: str) -> str:
     """
-    Return 'classifier' or 'regressor' for any model (built-in or plugin).
+    Return the declared output contract for a model (built-in or plugin).
 
     Lookup order:
       1. BUILTIN_OUTPUT_TYPES (from models_sandbox.py)
       2. PLUGIN_OUTPUT_TYPE_REGISTRY (loaded at import time)
-      3. Default: 'classifier' (the standard forward contract)
+
+    Returns:
+        ``"classifier"``, ``"regressor"`` or ``"hybrid"``.
+
+    Raises:
+        UnknownOutputContractError: the model is in neither registry.
+            **Fails closed by design (V21 PR C1)** — there is no default.
     """
     # Lazy import to avoid circular dependency (models_sandbox imports plugin_loader)
     from ml_models.models_sandbox import BUILTIN_OUTPUT_TYPES
@@ -171,8 +211,7 @@ def get_output_type(model_type: str) -> str:
         return BUILTIN_OUTPUT_TYPES[model_type]
     if model_type in PLUGIN_OUTPUT_TYPE_REGISTRY:
         return PLUGIN_OUTPUT_TYPE_REGISTRY[model_type]
-    # Unknown model — default to classifier (the standard [B, 256, T] contract)
-    return "classifier"
+    raise UnknownOutputContractError(model_type)
 
 
 # ---------------------------------------------------------------------------

@@ -57,11 +57,21 @@ _SCAN_TARGETS: list[tuple[str, str]] = [
 # entry here. The test still scans them and prints any violations as xfail
 # output so a regression (new violation in a file we thought we'd only
 # shrink) is still visible.
-_PENDING_CLEANUP = {
-    "training_estimator": "A.6 rewrites training_skill/estimator.py",
-    "inference_estimator": "A.7 rewrites inference_skill/estimator.py",
-    "inference_defaults": "A.9 deletes core/inference_defaults.py",
-}
+#
+# V21 PR C3 — EMPTIED. All three entries were removed once their groups came
+# clean, and emptying it is the point rather than a tidy-up: while a label sat
+# here, a REINTRODUCED name branch was reported as ``xfail`` instead of
+# ``failed``, so the guard detected the regression and then tolerated it.
+# Verified by mutation: re-adding ``if model_type == "transformer":`` produced
+# "3 passed, 1 xfailed" with the entry present, and a hard failure without it.
+#
+# The three reasons here were also stale in the way the operator flagged
+# during PR A's merge — they named an "A.6 / A.7 / A.9" plan that V21
+# superseded, pointing a future reader at work nobody was going to do.
+#
+# Re-add an entry only for a group that is genuinely dirty and genuinely
+# blocked, and name the CURRENT owning PR.
+_PENDING_CLEANUP: dict[str, str] = {}
 
 
 def _is_allowed_example(line: str) -> bool:
@@ -86,17 +96,61 @@ def _is_allowed_example(line: str) -> bool:
     return False
 
 
+def _code_only_lines(text: str) -> list[str]:
+    """Return the file's lines with ``#`` comment text blanked out.
+
+    V21 PR C3. The guard exists to catch model-name branching in **live
+    code**; a comment cannot branch on anything. Before this, ``#`` comments
+    were scanned like code while docstrings were exempt, which is an
+    inconsistency that cost real accuracy in both directions:
+
+      * false positives — the pre-existing calibration note
+        "calibrated on seed models (punet, wavenet)" counted as a
+        violation, so the tracked "9 violations" were never 9 code
+        branches, and the only way to reach zero was to delete truthful
+        documentation;
+      * a perverse incentive — the cheapest way to clear the guard was to
+        stop *explaining* which model a formula came from.
+
+    Only the comment token's text is removed, never the code preceding it,
+    so ``foo("transformer")  # note`` is still a violation. Docstrings
+    continue to be handled by the caller's existing block scan.
+
+    Falls back to the raw lines if the file does not tokenize (syntax error
+    mid-edit): failing loud is better than silently scanning nothing.
+    """
+    import io
+    import tokenize
+
+    lines = text.splitlines()
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return lines
+
+    for tok in tokens:
+        if tok.type != tokenize.COMMENT:
+            continue
+        row = tok.start[0] - 1
+        if 0 <= row < len(lines):
+            # Keep everything before the ``#`` so trailing comments do not
+            # exempt the code on the same line.
+            lines[row] = lines[row][: tok.start[1]]
+    return lines
+
+
 def _scan_file(path: Path) -> list[tuple[int, str]]:
     """Return ``[(lineno, line_text), ...]`` for every violation in the file.
 
     A line is a violation when:
-      * it contains at least one model-name token, AND
+      * its **code** contains at least one model-name token (``#`` comment
+        text is stripped first — see :func:`_code_only_lines`), AND
       * it is not inside a fenced code block that itself is inside a
         triple-quoted docstring (which we treat as documentation), AND
       * it is not marked as an explicit example on the line itself.
     """
     text = path.read_text()
-    lines = text.splitlines()
+    lines = _code_only_lines(text)
 
     # Pass 1 — find docstring / fenced-code regions to exclude.
     in_fenced_block = False

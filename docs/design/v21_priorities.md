@@ -1038,10 +1038,11 @@ the PR A document, so a later PR planning against this ledger sees them.
 
 ## PR A — Make the existing output contract reachable
 
-> ## STATUS: DELIVERED 2026-08-07 — awaiting operator merge
+> ## STATUS: MERGED 2026-08-08 — PR #186, merge commit `b9f88ae5`
 >
-> Branch `feat/pr-a-reachable-output-contract`, head `0c4eb33e`
-> (production tree `79d7071ab68c9d84`). Full record:
+> Operator-merged from `feat/pr-a-reachable-output-contract` (validated
+> head `0c4eb33e`, final PR head `88aafd8b`, production tree
+> `79d7071ab68c9d84`); CI SUCCESS on the merge commit. Full record:
 > [`v21_priorities/pr_a_reachable_output_contract.md`](./v21_priorities/pr_a_reachable_output_contract.md).
 >
 > ### What PR A actually did
@@ -1434,6 +1435,77 @@ correctly attributed in a live two-chain run; no peer-caused rejection.
 
 ## PR C — Generated-model production compatibility
 
+> ## STATUS: READY FOR OPERATOR REVIEW 2026-08-08 — head `1bf697bf`, DO NOT MERGE
+>
+> Eight commits on `feat/pr-c-generated-model-production-compat`. Unit
+> suite 7951 passed, pyright 0 errors, **15/15 mutations caught**, zero
+> scorer files touched.
+>
+> **Delivered:** an unestablished output contract fails closed with five
+> consumers translating it (C1); `get_config_class` no longer returns
+> `None` silently for a registered plugin — #185 fixed only its call site,
+> never the function (C2); the five estimator name branches are replaced
+> by truthful properties with built-in estimates identical across 18
+> parity cells (C3); a missing inference-batch entry is proven harmless
+> and pinned (C3b); the transport chain is enforced hop by hop in a real
+> subprocess for both contracts (C4); a valid trial winner is proven to
+> drive the formal plan (C5a); and a generated **regressor** was measured,
+> admitted, run formally and persisted a formal record with
+> `formal_validity: "valid"` on real hardware (C5b).
+>
+> **Escalated, not decided — FU-C-1:** the shipped transformer estimate
+> under-counts attention by 2x (`TransformerConfig` declares `nhead=4`,
+> the code reads `.get("nhead", 2)`). Correcting it is more accurate *and*
+> more conservative, but it moves a calibrated built-in estimate, so it
+> was pinned by test and handed to the operator.
+>
+> **Reproduced for PR D:** a second independent run confirms the declared
+> `healthgate_mode` / `result_authority` reach the manifest but not the
+> record stamp (`legacy_authority_unknown`).
+>
+> Three operator decisions resolved at approval: **O-C-1** rescope the
+> formal objective to the unproven head (*"prove authoritative formal
+> promotion from a valid generated-model trial winner"*); **O-C-2** split
+> `inference_defaults` by causal responsibility, not by file — the
+> admission/reachability consequence of `is_inference_batch_registered`
+> is PR C's, actual batch selection stays PR G's; **O-C-3**
+> `get_output_type` raises a dedicated `UnknownOutputContractError` and
+> every consumer maps it to that layer's typed refusal — loud internally,
+> typed externally, no ignorable sentinel.
+>
+> Two corrections applied with the approval: **C5a may not tune a
+> workload to obtain a HealthGate-valid trial** (validity is dictated by
+> the harness; a scientific outcome is never a state-machine oracle), and
+> **C1 must audit the historical-replay boundary before implementing**.
+>
+> Full plan, per-commit:
+> [`v21_priorities/pr_c_generated_model_production_compat.md`](./v21_priorities/pr_c_generated_model_production_compat.md).
+> Six commits (C1 fail-closed contract, C2 import-side-effect sweep,
+> C3 estimator name-branches, C4 clean-subprocess fixture, C5a/C5b
+> Gates). **Nothing is implemented.**
+>
+> **Two audit findings that change this section**, both measured at
+> `b9f88ae5`:
+>
+> 1. **Scope (b) needs a different verb than "restore".** PR A's Gate 2C
+>    persisted a *formal* record for a generated model
+>    (`scientific_authority` present, `is_trial` absent — the stamp is
+>    `if not trial_config.is_trial`, `ml_hyperparameter_tune_agent.py:5554`),
+>    score `-2.727240835313264`. So measurement → admission → formal →
+>    record already works. But it ran on the **planner's unvalidated
+>    plan**: the run logged *"no successful trial round is
+>    HealthGate-valid in this iteration"* (`:1798`), meaning no trial
+>    winner existed. The untested segment is the **head**, `valid trial →
+>    winner → formal`, not the tail. Open question **O-C-1**.
+>    *(Note for whoever writes the Gate: `[FORMAL OVERRIDE]` is a
+>    misnomer — `:1834` prints it on the healthy winner path too. Only
+>    the `:1798` WARNING variant is the pathology.)*
+> 2. **Scope (a) is far smaller than assumed.** The `get_output_type`
+>    fallback has **zero** current dependants: 88 registered models =
+>    6 `BUILTIN_OUTPUT_TYPES` + 82 `PLUGIN_OUTPUT_TYPE_REGISTRY`, none
+>    relying on `unknown → "classifier"`. Failing closed cannot affect a
+>    healthy path; it fires only where registration already failed.
+>
 > **Inherited from PR A (2026-08-07) — read before scoping.** See the
 > follow-up register in §E.3b. Two items land directly here:
 >

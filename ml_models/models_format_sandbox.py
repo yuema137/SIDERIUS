@@ -309,7 +309,32 @@ type ModelConfigUnion = (
 
 
 def get_config_class(model_type: str) -> type[BaseConfig] | None:
-    """Helper for the Orchestrator to map strings to Pydantic classes."""
+    """Helper for the Orchestrator to map strings to Pydantic classes.
+
+    Returns the built-in config class, else the plugin's, else ``None``.
+
+    **V21 PR C2 — the plugin branch guarantees the registry is populated
+    before reading it.** ``PLUGIN_CONFIG_REGISTRY`` is filled as an *import
+    side effect* of ``ml_models.models_sandbox`` (its module tail calls
+    ``extend_registries``). Importing *this* module does not trigger that,
+    so before C2 any caller who had not separately imported
+    ``models_sandbox`` read an **empty** registry and got ``None`` back for
+    a plugin that was registered perfectly well on disk — silently, with no
+    warning and no exception.
+
+    That is the defect behind V20's ``CONFIG_REJECTED``. PR #185 fixed the
+    *one* call site that had been caught (the measurement worker's
+    ``validate_candidate_configs``) by adding an explicit ``models_sandbox``
+    import there; the function itself was left vulnerable, so every other
+    caller still depended on some unrelated module happening to import
+    ``models_sandbox`` first. Measured at C2 time, a clean process
+    importing only this module saw **0 of 82** plugins.
+
+    The lazy import below is the same self-healing pattern
+    ``plugin_loader.get_output_type`` already uses, and it must stay lazy:
+    ``models_sandbox`` imports *this* module, so a module-level import here
+    would be circular.
+    """
     mapping = {
         "punet": PUNetConfig,
         "fcnet": AEConfig,
@@ -318,7 +343,16 @@ def get_config_class(model_type: str) -> type[BaseConfig] | None:
         "rnn": RNNSeq2SeqConfig,
         "gated_fno": GatedFNOConfig,
     }
-    return mapping.get(model_type) or PLUGIN_CONFIG_REGISTRY.get(model_type)
+    builtin = mapping.get(model_type)
+    if builtin is not None:
+        return builtin
+
+    # Trigger the populating import. If ``models_sandbox`` is already in
+    # sys.modules (including mid-import, when this is called from inside its
+    # own import) this is a cheap no-op and behaviour is exactly as before.
+    import ml_models.models_sandbox  # noqa: F401  (imported for side effect)
+
+    return PLUGIN_CONFIG_REGISTRY.get(model_type)
 
 
 # Plugin config registry — populated at runtime by ml_models/plugin_loader.py.
@@ -572,16 +606,34 @@ class ExperimentConfig(BaseModel):
         - Regressors ([B, T] output) use smooth_l1.
 
         Output type is looked up from BUILTIN_OUTPUT_TYPES (built-in models)
-        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). Unknown models
-        default to 'classifier'.
+        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). A model in
+        neither registry is a **validation failure** (V21 PR C1) — it is not
+        assumed to be a classifier.
+
+        Raises:
+            ValueError: the model's output contract is not established.
+                Pydantic surfaces this as a ``ValidationError`` on the model,
+                which is this layer's typed refusal.
         """
-        from ml_models.plugin_loader import get_output_type
+        from ml_models.plugin_loader import (
+            UnknownOutputContractError,
+            get_output_type,
+        )
 
         # Delegate to the shared authority — do not inline the rule here.
         # This is the BUILT-IN consumer; the generated-plugin consumer is
         # SandboxExecutor._validate_configs. Both must call the same function.
+        try:
+            output_type = get_output_type(self.model_type)
+        except UnknownOutputContractError as e:
+            # V21 PR C1 — translate the invariant failure into this layer's
+            # idiom. A validator raising ValueError becomes a Pydantic
+            # ValidationError, so the caller sees a typed config refusal
+            # rather than a LookupError escaping from a registry.
+            raise ValueError(str(e)) from e
+
         validate_output_loss_compatibility(
-            get_output_type(self.model_type),
+            output_type,
             self.loss_config.loss_type,
             model_type=self.model_type,
         )

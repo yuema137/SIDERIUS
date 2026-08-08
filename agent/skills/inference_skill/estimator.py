@@ -123,10 +123,21 @@ def estimate_peak_bytes(
     output_logits = inf_batch * 256 * seg_size * _BYTES_F32
     activations = output_logits  # 1× at inference (no backward storage)
 
+    # V21 PR C3 — was ``if model_type == "transformer"``. The term models
+    # attention matrices, which exist iff the architecture HAS attention, so
+    # the truthful predicate is whether the model's own config declares
+    # attention parameters. Byte-identical for the six built-ins
+    # (``transformer`` is the only one declaring ``nhead``), and strictly
+    # MORE conservative for a generated attention model, which previously
+    # received a zero attention term purely for not being named
+    # "transformer" — an optimistic estimate that could admit a candidate
+    # which then OOMs. See the training estimator for the same change.
+    from agent.skills.training_skill.estimator import attention_shape
+
     transformer_attn = 0
-    if model_type == "transformer":
-        nhead = model_config.get("nhead", 2)
-        num_layers = model_config.get("num_layers", 2)
+    _attn = attention_shape(model_type, model_config)
+    if _attn is not None:
+        nhead, num_layers = _attn
         transformer_attn = inf_batch * nhead * seg_size * seg_size * _BYTES_F32 * num_layers
 
     total = weights + output_logits + activations + transformer_attn
@@ -173,7 +184,6 @@ def _static_inference_ms_per_step(
 def _count_params(model_type: str, model_config: dict) -> int:
     """Instantiate the model on CPU. Module-level for monkeypatching."""
     from ml_models.models_format_sandbox import get_config_class
-    from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
     if config_cls is None:
@@ -182,12 +192,14 @@ def _count_params(model_type: str, model_config: dict) -> int:
             f"get_config_class returned None (no plugin or built-in config registered)."
         )
     config_obj = config_cls(**model_config)
-    if model_type == "fcnet":
-        # fcnet takes loss_type at construction; num_params is invariant
-        # under the choice for a parameter count, so pass a safe default.
-        model = MODEL_REGISTRY[model_type](config_obj, loss_type="ce")
-    else:
-        model = MODEL_REGISTRY[model_type](config_obj)
+    # V21 PR C3 — was ``if model_type == "fcnet"``. Some model classes take
+    # ``loss_type`` at construction because their head shape depends on it;
+    # that is a real constructor API difference, detected by introspecting
+    # the signature rather than by matching a name. ``num_params`` is
+    # invariant under the choice, so the safe default is still passed.
+    from agent.skills.training_skill.estimator import _instantiate_for_param_count
+
+    model = _instantiate_for_param_count(model_type, config_obj, "ce")
     return sum(p.numel() for p in model.parameters())
 
 

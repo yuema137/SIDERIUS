@@ -15,8 +15,12 @@ design, so a PR must not be implemented from Part III alone.
 ## Status
 
 Plan approved in principle 2026-08-07, with six design corrections
-applied. **PR A is implemented, Gate-validated and awaiting operator
-merge** (head `0c4eb33e`); PRs B-G are not started.
+applied. **PR A is MERGED** — PR #186, merge commit `b9f88ae5`,
+operator-merged 2026-08-08, CI green on the merge commit. **PR C is
+implemented, validated and READY FOR OPERATOR REVIEW** — head `1bf697bf`
+on `feat/pr-c-generated-model-production-compat`, **not merged**. Its
+three operator decisions (O-C-1/2/3) and one escalation (**FU-C-1**) are
+recorded in its own document. PRs B, D-G are not started.
 
 PR A's open follow-ups (**FU-A-1/2/3**) and the findings it produced for
 PR B, PR C, PR D and PR G are registered in `v21_priorities.md` §E.3b, so
@@ -41,16 +45,26 @@ Two consequences for other PRs:
 - **PR C** additionally owns `get_output_type`'s silent
   `unknown → "classifier"` fallback, and owns restoring **formal
   promotion** with a deterministic generated-model fixture through a
-  clean measurement worker.
+  clean measurement worker. **Refined by PR C's own audit
+  (2026-08-08):** the *tail* of that chain — measurement → admission →
+  formal → record — was already demonstrated by PR A's Gate 2C; the
+  untested segment is the *head*, `valid trial → winner → formal`,
+  because Gate 2C reached formal with **no HealthGate-valid trial
+  winner** — formal ran on the planner's unvalidated plan. See the PR C
+  doc §0.1 (which also corrects a misreading: `[FORMAL OVERRIDE]` prints
+  on the *healthy* path too, so only its `WARNING` variant is the
+  pathology). **Resolved by O-C-1**, and delivered: the head is proven
+  deterministically by C5a, the tail live by PR A (classifier) and C5b
+  (regressor).
 - **PR A does not fix formal promotion.** It makes regression
   *expressible*; PR C makes a generated model *executable* across the
   process boundary.
 
 | PR | Document | Gate | Status |
 |---|---|---|---|
-| **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **DELIVERED `0c4eb33e`** — awaiting operator merge |
+| **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **MERGED** — PR #186, `b9f88ae5` |
 | **B** | `pr_b_resource_budget_semantics.md` | V21 launch blocker | not started |
-| **C** | `pr_c_generated_model_production_compat.md` | V21 launch blocker | not started |
+| **C** | [`pr_c_generated_model_production_compat.md`](./pr_c_generated_model_production_compat.md) | V21 launch blocker | **READY FOR OPERATOR REVIEW** — head `1bf697bf`, 8 commits, not merged |
 | **D** | `pr_d_per_file_evidence.md` | Before V21 | not started |
 | **E** | `pr_e_scale_funnel_instrumentation.md` | Before first V21 data | not started |
 | **F** | `pr_f_inspection_cost_study.md` | Blocks only a budget change | not started |

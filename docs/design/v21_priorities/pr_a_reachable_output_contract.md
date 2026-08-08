@@ -1,6 +1,10 @@
 # PR A — Make the existing output contract reachable
 
-**Status: IMPLEMENTED AND VALIDATED — READY FOR OPERATOR MERGE.**
+**Status: MERGED — PR #186, merge commit `b9f88ae5`, operator-merged
+2026-08-08 07:37 UTC, CI SUCCESS on the merge commit.** The
+"READY FOR OPERATOR MERGE" state below is preserved as the record the
+merge decision was made against; the "do not merge" instruction at the
+end of this header is discharged.
 
 | | |
 |---|---|

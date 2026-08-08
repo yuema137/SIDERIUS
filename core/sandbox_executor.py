@@ -11,6 +11,28 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+# V21 PR C2 — imported for its SIDE EFFECT, deliberately.
+#
+# This module reads ``PLUGIN_CONFIG_REGISTRY`` directly at two sites
+# (``_validate_configs`` and ``execute_training``'s config validation),
+# testing membership rather than going through ``get_config_class``. That
+# registry is populated by ``models_sandbox``'s module tail; importing
+# ``models_format_sandbox`` alone does NOT populate it. Measured before this
+# import: a process importing only ``core.sandbox_executor`` saw 0 of 82
+# plugins, so a plugin model would have failed the membership test and
+# fallen through to the built-in branch, producing a confusing config error
+# instead of using its own config class.
+#
+# In today's chain the parent process always registers the current model
+# explicitly (``model_exploration`` on generation, ``resume`` on restore),
+# so the fall-through was not observed in production. "Not observed" is
+# precisely what was believed about the same shape before V20 spent two PRs
+# on it (#184, #185), which is why this is closed rather than argued away.
+#
+# A one-line side-effect import is used instead of rewriting the two
+# membership tests, because changing which branch a model takes is a
+# behavioural risk and this is not.
+import ml_models.models_sandbox  # noqa: F401  (import side effect: plugin registry)
 from core.inference_defaults import inference_batch_for
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
@@ -25,6 +47,7 @@ from ml_models.models_format_sandbox import (
     get_config_class,
     validate_output_loss_compatibility,
 )
+from ml_models.plugin_loader import UnknownOutputContractError
 
 
 def _tidmad_data_dir() -> str:
@@ -1120,6 +1143,23 @@ class TidmadSandbox:
 
                 validated_l = loss_cfg.model_dump()
                 return validated_m, validated_t, validated_l
+            except UnknownOutputContractError as e:
+                # V21 PR C1 — typed INFRASTRUCTURE refusal, deliberately
+                # worded apart from "Configuration Rejected" below.
+                #
+                # Reaching here means the model IS in PLUGIN_CONFIG_REGISTRY
+                # but NOT in PLUGIN_OUTPUT_TYPE_REGISTRY: the registries have
+                # diverged, which is a partial-registration bug, not a bad
+                # config the agent could fix by proposing different values.
+                #
+                # V20 burned two PRs on a `CONFIG_REJECTED` that was really a
+                # registry-reconstruction failure (#184 then #185). Letting
+                # this fall into the generic branch below would reproduce
+                # exactly that misdiagnosis.
+                raise ValueError(
+                    f"Plugin Output Contract Unavailable (registration defect, "
+                    f"not a config error): {e!s}"
+                ) from e
             except Exception as e:
                 raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}") from e
 
