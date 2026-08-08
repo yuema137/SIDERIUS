@@ -578,86 +578,159 @@ the same behaviour PR A saw.
 
 ## Commit C2 — Sweep the import-side-effect / two-paths-disagree class
 
+**STATUS: DONE 2026-08-08. One production-reachable defect found and fixed
+at its source, plus one latent site closed. Loss registry audited clean.**
+
 ### 1. Goal
 
-Find and close remaining instances of the shape that produced V20's
-`CONFIG_REJECTED`: **state reconstructed by import side effect, where two
-paths in the same process disagree about whether a model exists.**
+Find and close the shape that produced V20's `CONFIG_REJECTED`: **state
+reconstructed by import side effect, where a path reads the registry
+without executing the populating import.**
 
-### 2. Scope
+### 2. Audit — enumeration and verdicts
 
-**Bounded audit** of the six surfaces Part III names — model-name lookup
-tables, config registries, inference defaults, hardcoded compatibility
-predicates, subprocess plugin loading and environment propagation,
-model-specific branching — looking **only** for what makes a generated
-model non-executable or silently mis-resolved.
+**Exactly one import-side-effect site exists.** `ml_models/models_sandbox.py:749-755`
+calls `extend_registries(MODEL_REGISTRY, PLUGIN_CONFIG_REGISTRY)` in its
+module tail, populating all three registries. `plugin_loader` itself only
+declares the empty dicts — importing it populates nothing.
 
-**Must remain unchanged**
-- Registration timing and ordering unless a defect requires it.
-- `core/subprocess_env.py` as the single source of the child environment.
+Reader verdicts, each **measured** in a clean subprocess rather than read:
 
-**Out of scope**
-- Repository-wide refactor; renaming schemas; anything affecting only
-  throughput (PR G).
+| reader | sees plugins without importing `models_sandbox`? | verdict |
+|---|---|---|
+| `models_sandbox.MODEL_REGISTRY` | 88 — it *is* the populating module | fine |
+| `plugin_loader.get_output_type` | **yes, self-heals** 0 → 82 via its lazy `BUILTIN_OUTPUT_TYPES` import | fine, and now pinned |
+| `models_format_sandbox.get_config_class` | **NO — 0 of 82, returns `None` silently** | **PRODUCTION DEFECT — fixed** |
+| `core.sandbox_executor` (2 direct membership reads) | **NO — 0 of 82** | **latent — closed** |
+| `loss_models_sandbox._load_custom_loss` | n/a — no import side effect | **audited clean** |
 
-**Dependencies:** C1 (so a mis-resolution surfaces as an error the audit
-can see, rather than a silent default).
+#### Finding 1 — `get_config_class` was never actually fixed
+
+PR #185 is recorded as closing the V20 defect. It closed the **call site**:
+`validate_candidate_configs` gained an explicit `models_sandbox` import.
+The **function** was left vulnerable, so every other caller still depended
+on some unrelated module happening to import `models_sandbox` first.
+
+Measured at `f16f02fd`, a clean process importing only
+`models_format_sandbox`:
+
+```text
+get_config_class("<a real plugin on disk>")  ->  None
+PLUGIN_CONFIG_REGISTRY                       ->  0 entries (of 82 on disk)
+```
+
+Silently. No warning, no exception — the same silent-default class C1 had
+just eliminated for output contracts, in the sibling lookup function.
+
+**Fix:** `get_config_class` triggers the populating import before reading
+the plugin registry, mirroring the pattern `get_output_type` already used.
+It must stay a *lazy* import: `models_sandbox` imports
+`models_format_sandbox`, so a module-level import would be circular.
+Built-in lookup is returned first and is untouched.
+
+#### Finding 2 — `sandbox_executor`'s two direct reads
+
+`_validate_configs` (`:1096`) and the training-side validation (`:1463`)
+test `model_type in PLUGIN_CONFIG_REGISTRY` **directly**, so Finding 1's
+fix does not cover them. With an empty registry a plugin model fails the
+membership test and falls through to the **built-in** branch, producing a
+confusing config error instead of using its own config class.
+
+**Honest reachability:** not observed in production. The parent process
+always registers the current model explicitly —
+`workflows/model_exploration.py:829` on generation and
+`core/resume.py::_add_plugin_to_registries` on restore — so the import
+side effect is a *backstop*, and the genuinely exposed case is the clean
+subprocess, which is what #185 hit. Closed anyway, because "not observed"
+is precisely what was believed about this shape before it cost two PRs.
+
+**Fix:** one module-level side-effect import in `sandbox_executor`, chosen
+over rewriting the two membership tests because changing which branch a
+model takes is a behavioural risk and an import is not.
+
+#### Audited and clean — recorded so it is not re-audited
+
+`loss_models_sandbox._load_custom_loss` resolves in two explicit tiers
+(in-memory `LOSS_REGISTRY`, then a filesystem fallback reading
+`SIDERIUS_LOSS_DIRS` **at call time**) and raises `ValueError` naming both
+surfaces on failure. It never depends on an import side effect. Not a
+finding.
+
+#### No mechanical guardrail was added — and why
+
+C2's plan allowed one if a sound mechanical check existed. It does not:
+deciding statically whether "a registry read is reachable without its
+populating import" is a whole-program reachability question over lazy
+imports, and any grep-level approximation would be both noisy and
+bypassable. Per the plan's own instruction, this is stated rather than
+faked, and the property is enforced instead by the real-subprocess tests
+below and by C4's transport fixture.
 
 ### 3. Implementation plan
 
-- [ ] Enumerate every module whose import has a **registry-mutating side
-      effect**; record the list before changing anything
-- [ ] For each, identify all paths that read that registry and check
-      whether any can run without the populating import — the exact #185
-      shape
-- [ ] Record each finding as: reachable-in-production / unreachable /
-      test-only, with evidence
-- [ ] Fix only the reachable ones, smallest scope each
-- [ ] Add a guardrail that fails when a registry read is reachable without
-      its populating import, if a mechanical form of that check exists —
-      **inspect first; if no sound mechanical check exists, say so and
-      rely on the C4 fixture instead**
+- [x] Enumerate registry-mutating imports — exactly one (`models_sandbox` tail)
+- [x] Identify every reader and measure each in a clean subprocess
+- [x] Record each finding as production-reachable / latent / clean
+- [x] Fix Finding 1 at the function, not at another call site
+- [x] Close Finding 2 with a bounded side-effect import
+- [x] Guardrail question answered explicitly (none sound; see above)
 
-### 4. Validation plan
+### 4. Validation plan — RESULTS
 
-**Unit**
-- [ ] One regression test per reachable finding, each naming the defect
+`tests/unit/ml_models/test_registry_population_is_self_healing.py`, all in
+**real spawned subprocesses** with a plugin written to `tmp_path` and
+exposed via `SIDERIUS_PLUGIN_DIRS`. An in-process test cannot express this
+property: by collection time the session has already imported
+`models_sandbox`, so every assertion would pass vacuously. Nothing reads
+`agent_generated/models`, which is gitignored and empty on CI.
 
-**Transport**
-- [ ] Covered by C4's clean-subprocess fixture
+- [x] `get_config_class` resolves a plugin with only `models_format_sandbox` imported
+- [x] importing `core.sandbox_executor` populates the registry
+- [x] `get_output_type`'s pre-existing immunity is pinned as intentional,
+      asserting `"regressor"` so the value provably came from the plugin
+      file rather than a built-in or a default
+- [x] C1 and C2 compose: population is automatic, absence is still loud
+- [x] Full unit suite `7909 passed, 2 skipped, 4 xfailed in 442.37s`
+- [x] ruff clean; ruff format 753 files; pyright `0 errors, 4 warnings`
 
-**Backward compatibility**
-- [ ] Full unit suite unchanged; no registration-order behaviour altered
+#### Mutation battery — 2 applied, **2/2 caught**
 
-**Real-training Gate:** none.
+| # | mutation | result |
+|---|---|---|
+| M5 | remove `get_config_class`'s self-healing import — i.e. restore #185 at its source | **1 failed** |
+| M6 | delete `sandbox_executor`'s side-effect import as "unused", which is exactly how it looks to a reader or an autofixer | **1 failed** |
 
-### 5. Acceptance criteria
+### 5. Acceptance criteria — MET
 
-- A written enumeration of import-side-effect registries and their readers,
-  with a reachability verdict for each.
-- Every reachable finding either fixed with a regression test, or recorded
-  with a follow-up ID and a reason it is not reachable in production.
-- **Zero silent fixes:** anything changed has a test that fails without it.
+- [x] Written enumeration of import-side-effect registries and readers,
+      with a measured verdict per reader
+- [x] Every reachable finding fixed with a regression test that fails
+      without it (M5, M6)
+- [x] Zero silent fixes
 
 ### 6. Failure and edge cases
 
-| Case | Required behaviour |
+| Case | Behaviour |
 |---|---|
-| No further findings | A legitimate outcome — record the audit and its negative result rather than manufacturing a fix |
-| A finding is test-only | Record, do not fix production for it |
-| A finding belongs to PR B/PR D | Record and defer; do not widen PR C |
-| Fixing one would reorder registration globally | **Stop and ask** — that is an architecture change, not a bounded fix |
+| No further findings | Was a legal outcome; not the outcome — two were found |
+| `models_sandbox` mid-import when `get_config_class` runs | Import is a no-op; behaviour exactly as before, no worse |
+| Import fails outright | `models_sandbox` already wraps `extend_registries` in try/except with a printed warning, so a bad plugin cannot break the import |
+| A finding belonging to PR B/D/G | None arose |
+| Global import-order redesign required | Not required — both fixes are one line each |
 
 ### 7. Verification commands and evidence
 
-- [ ] Registry/reader enumeration — **to record**
-- [ ] Findings with verdicts — **to record**
-- [ ] Tests: counts + wall time — **to record**
+```bash
+.venv/bin/python -m pytest tests/unit/ml_models/test_registry_population_is_self_healing.py -q
+.venv/bin/python -m pytest tests/unit -q -m "not real_run"
+```
+
+Recorded in §4 above.
 
 ### 8. Commit boundary
 
-- [ ] Audit record plus only the fixes it justifies
-- [ ] No C1 or C3 work
+- [x] Two one-line production fixes, their tests, and this audit record
+- [x] No C1 rework, no estimator changes (C3), no Gate evidence
 
 ---
 
