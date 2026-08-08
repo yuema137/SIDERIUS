@@ -20,7 +20,7 @@ from ml_models.models_format_sandbox import LossConfig, get_config_class
 
 # Import your sandboxed components for Agent Mode
 from ml_models.models_sandbox import MODEL_REGISTRY
-from ml_models.plugin_loader import get_output_type
+from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -240,7 +240,22 @@ def process_batch(
         # is "hybrid" — it adjusts its own forward shape based on
         # ``loss_type`` at construction time, so hybrid + float-target
         # loss is treated as regression.
-        output_type = get_output_type(args.denoising_model)
+        try:
+            output_type = get_output_type(args.denoising_model)
+        except UnknownOutputContractError as e:
+            # V21 PR C1 — typed EXECUTION refusal in this module's idiom
+            # (an `error_<category>:` prefix tags the failure class; see the
+            # checkpoint-sentinel check above). `error_inference` is used
+            # deliberately rather than a new category, because an
+            # unrecognised status would not be handled downstream.
+            #
+            # Unreachable by construction today: `--denoising_model` is the
+            # live `model_type` passed by `sandbox_executor.execute_inference`
+            # AFTER `_validate_configs` has already resolved the contract for
+            # that same model. Kept as defence in depth, because "currently
+            # unreachable" is exactly what was believed about the registry
+            # divergence that cost V20 two PRs.
+            raise RuntimeError(f"error_inference: output contract unavailable — {e!s}") from e
         target_dtype = get_target_torch_dtype(
             LossConfig(loss_type=current_loss_type, loss_name=current_loss_name)
         )

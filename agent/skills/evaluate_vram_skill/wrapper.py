@@ -220,9 +220,24 @@ def _build_probe_tensors(
     # Float target: the shape follows the declared output contract.
     output_type = None
     if model_type is not None:
-        from ml_models.plugin_loader import get_output_type
+        from ml_models.plugin_loader import (
+            UnknownOutputContractError,
+            get_output_type,
+        )
 
-        output_type = get_output_type(model_type)
+        try:
+            output_type = get_output_type(model_type)
+        except UnknownOutputContractError as e:
+            # V21 PR C1 — typed MEASUREMENT refusal, in this module's idiom
+            # (`ValueError`, as at :160 and :250).
+            #
+            # Falling through with `output_type = None` would be the worst
+            # possible handling here: the else-branch below builds a
+            # [B, 256, T] target, so an unregistered regressor would be
+            # probed against the classifier shape and the VRAM forecast
+            # would silently describe a different model. A3c fixed exactly
+            # this class of shape error during PR A.
+            raise ValueError(f"Cannot build a probe target: {e!s}") from e
 
     if output_type == "regressor":
         tgt = torch.zeros((batch_size, seg_size), dtype=target_dtype)

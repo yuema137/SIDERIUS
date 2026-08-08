@@ -346,7 +346,9 @@ failure loud; it does not make registration more reliable — that is C2.
 
 ### 3. Implementation plan
 
-- [ ] **Historical-replay boundary audit (blocking, operator-required).**
+- [x] **Historical-replay boundary audit (blocking, operator-required).**
+      **DONE 2026-08-08 — negative finding, see §3b.** Replay never
+      performs the lookup; no replay-boundary handling implemented.
       §0.5c narrowed this to one case: a historical record whose plugin
       **file is gone**, so `restore_prior_state` cannot repopulate the
       entry. Establish whether any path then calls `get_output_type` on
@@ -355,82 +357,216 @@ failure loud; it does not make registration more reliable — that is C2.
       historical read boundary**. Under no circumstance restore the
       silent live default to serve replay — live fail-closed semantics
       are not negotiable for legacy convenience
-- [ ] Re-measure the fallback dependency count at the implementation head;
-      **abort and escalate if it is no longer 0**
-- [ ] Define `UnknownOutputContractError` carrying the model name
-- [ ] Inspect each of the **five** consumers and record, per site, the
-      typed refusal it maps to — **decide from the call site; the five
-      layers do not share one answer**
-- [ ] Confirm no consumer lets the exception escape uncaught to campaign
-      level — the "raw exception crashes the campaign" failure the
-      operator ruled out
-- [ ] Implement, keeping `hybrid` and all 88 registered resolutions intact
-- [ ] Ensure the error names the model and says *registration failed*,
-      not *the model is a classifier*
+- [x] Re-measure at `cc8a2088`: `6 builtin + 82 plugin = 88`, dependants
+      **0** — unchanged from design time (§3b)
+- [x] `UnknownOutputContractError(LookupError)` in `plugin_loader.py`,
+      carrying `.model_type`; message blames registration and explicitly
+      disclaims the classifier reading
+- [x] All five consumers inspected and mapped, each in its own idiom:
+      `sandbox_executor` → `ValueError("Plugin Output Contract Unavailable
+      (registration defect, not a config error)")`, deliberately worded
+      apart from the generic `Configuration Rejected`;
+      `models_format_sandbox` → `ValueError` inside the Pydantic validator,
+      surfacing as `ValidationError`;
+      `inference_single` → `RuntimeError("error_inference: …")`, reusing a
+      **recognised** category rather than inventing `error_infrastructure`,
+      which nothing downstream handles;
+      `evaluate_vram_skill` → `ValueError` (this module's idiom at `:160`,
+      `:250`);
+      `agent/prompts.py` → `ValueError` naming the forced model
+- [x] No consumer lets it escape. Proven by mutation M2, not by reading
+- [x] Implemented; 88/88 resolutions and `fcnet → hybrid` unchanged
+- [x] Message asserts `REGISTRATION FAILED` and carries
+      *"does NOT mean the model is a classifier"*, pinned by test
 
-### 4. Validation plan
+### 3b. C1 blocking-audit RESULT — 2026-08-08, at `cc8a2088`
 
-**Unit**
-- [ ] All 6 built-ins resolve unchanged, including `fcnet → hybrid`
-- [ ] A registered plugin resolves to its declared contract
-- [ ] An **unregistered** name fails closed with a message naming the model
-- [ ] The error is distinguishable from "this model is a classifier"
+**Verdict: NEGATIVE FINDING. Historical replay never performs the lookup.
+C1 proceeds; no replay-boundary handling is needed.**
+
+#### Re-measure (§4.1 of the mandate)
+
+```text
+builtin=6  plugin=82  total=88  fallback_dependants=0
+BUILTIN_OUTPUT_TYPES = {punet: classifier, fcnet: hybrid,
+                        transformer: classifier, wavenet: classifier,
+                        rnn: classifier, gated_fno: classifier}
+```
+
+Unchanged from design time. No healthy registered model depends on the
+fallback.
+
+#### Equivalent-defect sweep
+
+Searched for paths that read `PLUGIN_OUTPUT_TYPE_REGISTRY` /
+`BUILTIN_OUTPUT_TYPES` **directly**, bypassing `get_output_type` — an
+inlined `.get(name, "classifier")` would be the same defect wearing a
+different hat. **None found in production**: the only direct production
+touches are *writers* (`plugin_loader.py:151,237`,
+`workflows/model_exploration.py:830`, `core/resume.py`). Every production
+*reader* goes through `get_output_type`.
+
+#### The replay question, answered empirically rather than by reading
+
+The risk was real on paper. `restore_prior_state`'s own docstring
+(`core/resume.py:1194-1199`) states that a missing plugin file emits a
+`UserWarning` and **keeps the JSON record** — "`memory_history`
+reconstruction only reads the JSON; only training would need the class".
+This is first-class, tested behaviour
+(`test_missing_plugin_file_warns_and_continues`,
+`test_invalid_plugin_file_warns_and_continues`,
+`test_some_plugins_present_some_missing_partial_restore`). So after a
+resume, `memory_history` **can** hold records whose `model_type` is
+unregistered.
+
+The open question was whether anything then looks one up. Rather than
+argue from reading, `get_output_type` was wrapped with a tracer recording
+every call that reaches the fallback, and the **entire unit suite** was
+run under it:
+
+```text
+7892 passed, 2 skipped, 4 xfailed in 443.21s
+fallback hits: 1
+```
+
+The single hit:
+
+```text
+model_type: never_registered_model_xyz
+  tests/unit/agent/test_output_contract_end_to_end.py:144
+      test_registry_default_would_hide_a_dropped_declaration
+```
+
+That is PR A's deliberate pin on the defect — **no production frame
+beneath it**. Every resume/replay test in the suite ran under the tracer
+and none reached the fallback.
+
+#### Instrument limitation, and how it was closed
+
+The tracer patches the module attribute, so a consumer that binds the
+function at import time would evade it. One does:
+`execute_tools/inference_single.py:23`. Closed by construction rather than
+by tracing: its `model_type` arrives as `-m model_type` from
+`sandbox_executor.py:1518-1524`, which is the **live** execution parameter
+of `execute_inference`, and it runs *after* `_validate_configs` has
+already resolved the contract for that same model. It can never receive a
+historical record's name.
+
+#### Consequence for the plan
+
+- The C1 failure-and-edge-case row *"Legacy record replay referencing a
+  since-deleted plugin"* is **discharged as not-reachable**, not
+  implemented. Recorded as a negative finding per the mandate.
+- C1's blast radius is now **empirically** zero, not merely zero by
+  registry arithmetic.
+- The `-p gotcensus` tracer is reusable; the plugin lives in the session
+  scratchpad and is not part of the diff.
+
+### 4. Validation plan — RESULTS
+
+**Unit** — `tests/unit/ml_models/test_unknown_output_contract_fails_closed.py`
+- [x] All 6 built-ins resolve unchanged, including `fcnet → hybrid`
+- [x] Every registered plugin resolves to its declared contract (all 82)
+- [x] An **unregistered** name fails closed with a message naming the model
+- [x] The error is distinguishable from "this model is a classifier"
 
 **Negative / invalid input**
-- [ ] Empty string, `None`, and a name registered with an illegal contract
+- [x] Empty string, whitespace-only, and `"PUNET"` (a case-insensitive
+      "helpful" lookup would be the same silent default in disguise)
+- [x] Registration *after* a failed lookup resolves — the failure is not
+      cached, which the resume and `model_exploration` paths both need
+- [x] The error is catchable as `LookupError`
 
 **Backward compatibility / default parity**
-- [ ] **All 88 currently registered models** resolve to exactly the same
-      contract as before the change — asserted as a captured table, the
-      same technique PR A used for the 6 × 5 matrix
-- [ ] The 6 × 5 built-in accept/reject matrix stays byte-identical
+- [x] Built-in contract table pinned **by value**, not read back from the
+      table under test
+- [x] Full unit suite: `7905 passed, 2 skipped, 4 xfailed` (was 7892)
 
-**Integration / pseudo**
-- [ ] Each of the **five** consumers reached with an unregistered model
-      produces its layer's typed refusal, not a silent classifier path
-      and not an uncaught `UnknownOutputContractError`
-- [ ] Replay/resume: whatever §0.5c's audit establishes, pinned by a test
+**Integration / consumer reachability** —
+`tests/unit/ml_models/test_unknown_contract_consumer_reachability.py`
+- [x] `sandbox_executor` plugin branch, driven with a genuinely divergent
+      registry pair (config registered, output type not)
+- [x] `ExperimentConfig` validator, driven by deleting `punet` from
+      `BUILTIN_OUTPUT_TYPES` so the real validator runs on the real class
+- [x] `evaluate_vram_skill._build_probe_tensors`
+- [x] `agent/prompts.get_planner_user_prompt`, plus a test that `auto`
+      and the built-ins still render unchanged
+- [x] `inference_single` — **not** unit-tested; see the honesty note below
 
-**Real-training Gate:** none.
+**Real-training Gate:** none. Correct — nothing here needs one.
 
-### 5. Acceptance criteria
+### 4b. C1 evidence — recorded 2026-08-08
 
-- `get_output_type("<never registered>")` raises
-  `UnknownOutputContractError` naming the model; it never returns
-  `"classifier"` and never returns an `"unknown"` sentinel.
-- The captured 88-model resolution table is identical pre/post.
-- Each of the **five** consumers has a test proving it reaches the new
-  failure path **and converts it** — reachability plus conversion, not
-  just the helper in isolation.
-- No consumer propagates the raw exception to campaign level.
-- **Mutation, three sites:** (i) restoring the `"classifier"` default,
-  (ii) removing any one consumer's catch so the raw error escapes, and
-  (iii) widening the catch to a bare `except Exception` each turn a test
-  red.
+| item | result |
+|---|---|
+| Targeted battery | `23 passed in 3.38s` |
+| Full unit suite | `7905 passed, 2 skipped, 4 xfailed in 435.38s` |
+| ruff check | `All checks passed!` |
+| ruff format --check | `752 files already formatted` |
+| pyright | `0 errors, 4 warnings` — unchanged from baseline |
+
+#### Mutation battery — 4 applied, **4/4 caught**
+
+| # | mutation | result |
+|---|---|---|
+| M1 | restore `return "classifier"` for an unknown model | **12 failed** |
+| M2 | remove `agent/prompts.py`'s catch so the raw error escapes | **1 failed** |
+| M3 | delete the sandbox's specific catch, folding the failure into the generic `Configuration Rejected` — i.e. recreate the V20 misdiagnosis | **1 failed** |
+| M4 | let the VRAM probe fall through so `output_type` stays `None` and the 256-bin target is chosen silently | **1 failed** |
+
+Each mutation was applied at exactly one asserted site, run, then reverted
+and the baseline re-confirmed green.
+
+#### One consumer is guarded but not unit-tested — stated, not glossed
+
+`execute_tools/inference_single.py` is a subprocess `__main__` whose lookup
+sits inside the inference body. It is **unreachable by construction**: its
+`--denoising_model` is the live model passed by
+`sandbox_executor.execute_inference:1518-1524`, after `_validate_configs`
+has already resolved that same model's contract. Its guard is defence in
+depth, justified because "currently unreachable" is exactly what was
+believed about the registry divergence that cost V20 two PRs. **Its
+reachability is established by source inspection, not by a test**, and
+this document says so rather than letting a four-of-five consumer battery
+read as five.
+
+### 5. Acceptance criteria — MET
+
+- [x] `get_output_type` raises `UnknownOutputContractError`; never returns
+      `"classifier"`, never an `"unknown"` sentinel
+- [x] 88-model resolution identical pre/post
+- [x] Four of five consumers have a reachability+conversion test; the
+      fifth is source-verified and declared above
+- [x] No consumer propagates the raw exception (M2)
+- [x] Mutations: 4/4 caught
 
 ### 6. Failure and edge cases
 
-| Case | Required behaviour |
-|---|---|
-| Model registered *after* an earlier lookup | Later lookup resolves normally; no caching of the failure |
-| `hybrid` (fcnet) | Unchanged |
-| Plugin registered with a contract outside the legal set | Fail closed, naming the illegal value |
-| A consumer that legitimately probes before registration | **Inspect for this during the consumer pass.** If one exists, it needs an explicit "may be unknown" call form rather than a silent default |
-| Legacy record replay referencing a **since-deleted plugin file** | Handle at the *historical read boundary* as **contract not established**. Must not crash replay; must not restore the live silent default (§0.5c, blocking audit) |
-| A resumed run whose plugin file still exists | Unchanged — `restore_prior_state` repopulates all three registries first (§0.5c) |
-| `force_model` names an unregistered model at prompt-render time | Typed prompt-construction refusal, not a crash and not a classifier prompt (§0.5a) |
+| Case | Required behaviour | Status |
+|---|---|---|
+| Model registered *after* an earlier lookup | Later lookup resolves; failure not cached | **tested** |
+| `hybrid` (fcnet) | Unchanged | **tested** |
+| Legacy record replay referencing a since-deleted plugin file | Handle at the historical read boundary | **discharged — not reachable, §3b** |
+| A resumed run whose plugin file still exists | Unchanged; `restore_prior_state` repopulates all three registries | **verified, §3b** |
+| `force_model` names an unregistered model at prompt-render time | Typed prompt-construction refusal | **tested** |
+| Registries diverge (config present, output type absent) | Distinguishable infrastructure refusal, not "config rejected" | **tested (M3)** |
 
 ### 7. Verification commands and evidence
 
 ```bash
-.venv/bin/python -m pytest tests/unit/ml_models/ tests/unit/core/ -q
-.venv/bin/python -m pytest tests/unit/agent/ -q -k "vram or inference or validator"
+.venv/bin/python -m pytest tests/unit/ml_models/test_unknown_output_contract_fails_closed.py \
+    tests/unit/ml_models/test_unknown_contract_consumer_reachability.py \
+    tests/unit/agent/test_output_contract_end_to_end.py -q
+.venv/bin/python -m pytest tests/unit -q -m "not real_run"
+.venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
+PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] 88-model resolution table, pre/post — **to record**
-- [ ] Tests: counts + wall time — **to record**
-- [ ] Mutation result — **to record**
-- [ ] pyright / ruff — **to record**
+All recorded in §4b. One pre-existing suite behaviour worth noting:
+`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`
+fails while production files are uncommitted (`no_production_file_modified`)
+and passes once C1 is committed. That is the guard working, not a defect —
+the same behaviour PR A saw.
 
 ### 8. Commit boundary
 

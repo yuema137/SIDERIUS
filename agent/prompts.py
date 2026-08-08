@@ -1009,9 +1009,29 @@ def get_planner_user_prompt(
     # Handle the model constraint message + output type / valid losses
     model_constraint = ""
     if force_model != "auto":
-        from ml_models.plugin_loader import get_output_type
+        from ml_models.plugin_loader import (
+            UnknownOutputContractError,
+            get_output_type,
+        )
 
-        output_type = get_output_type(force_model)
+        try:
+            output_type = get_output_type(force_model)
+        except UnknownOutputContractError as e:
+            # V21 PR C1 — typed PROMPT-CONSTRUCTION refusal.
+            #
+            # This consumer was missed by C1's first census, which was built
+            # from the execution path; prompt rendering is not on it. See the
+            # PR C design doc §0.5a.
+            #
+            # Deliberately NOT swallowed like the custom-loss probe above.
+            # That one degrades to "no custom losses", which costs the agent
+            # an option. This one decides which loss families the planner is
+            # told are legal, so guessing would hand the agent a prompt that
+            # contradicts the live compatibility rule and make every plan it
+            # produces invalid.
+            raise ValueError(
+                f"Cannot render the planner prompt for force_model={force_model!r}: {e!s}"
+            ) from e
         if output_type == "classifier":
             loss_note = (
                 "- This model is a **CLASSIFIER** (output [B, 256, T]). "

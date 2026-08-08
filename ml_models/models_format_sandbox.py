@@ -572,16 +572,34 @@ class ExperimentConfig(BaseModel):
         - Regressors ([B, T] output) use smooth_l1.
 
         Output type is looked up from BUILTIN_OUTPUT_TYPES (built-in models)
-        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). Unknown models
-        default to 'classifier'.
+        or PLUGIN_OUTPUT_TYPE_REGISTRY (agent-generated plugins). A model in
+        neither registry is a **validation failure** (V21 PR C1) — it is not
+        assumed to be a classifier.
+
+        Raises:
+            ValueError: the model's output contract is not established.
+                Pydantic surfaces this as a ``ValidationError`` on the model,
+                which is this layer's typed refusal.
         """
-        from ml_models.plugin_loader import get_output_type
+        from ml_models.plugin_loader import (
+            UnknownOutputContractError,
+            get_output_type,
+        )
 
         # Delegate to the shared authority — do not inline the rule here.
         # This is the BUILT-IN consumer; the generated-plugin consumer is
         # SandboxExecutor._validate_configs. Both must call the same function.
+        try:
+            output_type = get_output_type(self.model_type)
+        except UnknownOutputContractError as e:
+            # V21 PR C1 — translate the invariant failure into this layer's
+            # idiom. A validator raising ValueError becomes a Pydantic
+            # ValidationError, so the caller sees a typed config refusal
+            # rather than a LookupError escaping from a registry.
+            raise ValueError(str(e)) from e
+
         validate_output_loss_compatibility(
-            get_output_type(self.model_type),
+            output_type,
             self.loss_config.loss_type,
             model_type=self.model_type,
         )

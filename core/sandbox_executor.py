@@ -25,6 +25,7 @@ from ml_models.models_format_sandbox import (
     get_config_class,
     validate_output_loss_compatibility,
 )
+from ml_models.plugin_loader import UnknownOutputContractError
 
 
 def _tidmad_data_dir() -> str:
@@ -1120,6 +1121,23 @@ class TidmadSandbox:
 
                 validated_l = loss_cfg.model_dump()
                 return validated_m, validated_t, validated_l
+            except UnknownOutputContractError as e:
+                # V21 PR C1 — typed INFRASTRUCTURE refusal, deliberately
+                # worded apart from "Configuration Rejected" below.
+                #
+                # Reaching here means the model IS in PLUGIN_CONFIG_REGISTRY
+                # but NOT in PLUGIN_OUTPUT_TYPE_REGISTRY: the registries have
+                # diverged, which is a partial-registration bug, not a bad
+                # config the agent could fix by proposing different values.
+                #
+                # V20 burned two PRs on a `CONFIG_REJECTED` that was really a
+                # registry-reconstruction failure (#184 then #185). Letting
+                # this fall into the generic branch below would reproduce
+                # exactly that misdiagnosis.
+                raise ValueError(
+                    f"Plugin Output Contract Unavailable (registration defect, "
+                    f"not a config error): {e!s}"
+                ) from e
             except Exception as e:
                 raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}") from e
 

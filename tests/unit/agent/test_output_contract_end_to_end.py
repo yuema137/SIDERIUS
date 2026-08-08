@@ -133,15 +133,37 @@ def test_declared_contract_survives_every_hop(tmp_path, output_type):
 
 
 def test_registry_default_would_hide_a_dropped_declaration(tmp_path):
-    """Why the chain above is asserted hop by hop rather than end to end only.
+    """A dropped declaration must FAIL CLOSED, not acquire classifier semantics.
 
-    ``get_output_type`` returns ``"classifier"`` for an unregistered model, so a
-    regressor whose declaration is lost anywhere upstream does not raise — it
-    silently acquires classifier semantics and the illegal pair becomes legal.
-    That silent-default behaviour is a known gap deferred to PR C; this test
-    pins the reason the intermediate assertions exist.
+    **Inverted by V21 PR C1 (2026-08-08). Kept, not deleted** — this test is
+    the historical record of the exact defect C1 closes.
+
+    PR A wrote it as an assertion that the defect was *present*:
+
+        assert get_output_type("never_registered_model_xyz") == "classifier"
+
+    That silent default is why the chain above is asserted hop by hop rather
+    than end to end only: a regressor whose declaration was lost anywhere
+    upstream did not raise, it silently became a classifier, and the illegal
+    loss pair became legal.
+
+    C1 replaced the default with ``UnknownOutputContractError``. The
+    hop-by-hop assertions above are still correct and still valuable, but the
+    reason has changed: they now localise *where* a declaration was dropped,
+    rather than compensating for the fact that nothing would notice.
+
+    Fails if: anyone restores a default return value for an unregistered
+    model, in any form — ``"classifier"``, ``"unknown"``, or ``None``.
     """
-    assert plugin_loader.get_output_type("never_registered_model_xyz") == "classifier"
+    with pytest.raises(plugin_loader.UnknownOutputContractError) as exc:
+        plugin_loader.get_output_type("never_registered_model_xyz")
+
+    # The message must blame registration, not describe the model. A message
+    # that reads "defaulting to classifier" would mean the semantics leaked
+    # back in as prose.
+    assert exc.value.model_type == "never_registered_model_xyz"
+    assert "never_registered_model_xyz" in str(exc.value)
+    assert "REGISTRATION FAILED" in str(exc.value)
 
 
 @pytest.mark.parametrize("output_type", ["classifier", "regressor"])
