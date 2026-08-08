@@ -2,8 +2,21 @@
 
 **Status: READY FOR OPERATOR REVIEW — 2026-08-08. DO NOT MERGE.**
 
-Branch `feat/pr-c-generated-model-production-compat`, head **`1bf697bf`**,
-8 commits from master `b9f88ae5`.
+Branch `feat/pr-c-generated-model-production-compat`, **validated code
+head `1bf697bf`**, 8 commits from master `b9f88ae5`, plus documentation
+commits after it.
+
+**Production-tree identity, proven not asserted.** Every commit after
+`1bf697bf` is documentation only, so the validation below still describes
+the code being reviewed:
+
+```text
+1bf697bf  production tree  b079f66539f91560
+8536625a  production tree  b079f66539f91560   (docs reconciliation)
+```
+
+(`git ls-tree -r <rev>` over every path outside `docs/`, `advice/` and
+`slide/`.)
 
 ```text
 FINAL VALIDATION AT 1bf697bf
