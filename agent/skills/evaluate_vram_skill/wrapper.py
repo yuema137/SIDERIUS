@@ -178,15 +178,34 @@ def _build_probe_tensors(
     seg_size: int,
     loss_type: str,
     loss_name: str | None = None,
+    model_type: str | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero-valued ``(input, target)`` pair matching the SIDERIUS forward
     contract. Both tensors live on CPU; the probe will ``.to(device)`` them
     if the caller asks for CUDA (we don't, here).
 
-    I14 — target dtype is read from the loss plugin's declared
-    ``PLUGIN_LOSS_TARGET_DTYPE`` (via ``get_target_torch_dtype``), with the
-    shape derived from the dtype: long-targets are class-index ``[B, T]``;
-    float-targets broadcast against the model's ``[B, 256, T]`` logits.
+    Two INDEPENDENT questions decide the target, and conflating them was a
+    real defect (V21 PR A, found by Gate 2R on real hardware):
+
+    * **dtype** comes from the loss — ``PLUGIN_LOSS_TARGET_DTYPE`` via
+      ``get_target_torch_dtype`` (I14).
+    * **shape** comes from the model's declared OUTPUT CONTRACT, because the
+      target has to be comparable with what the model actually emits.
+
+    Previously the shape was derived from the dtype: any float target was
+    built as ``[B, 256, T]``. That is right for ``fcnet`` (``hybrid``), which
+    emits ``[B, 256, T]`` and broadcasts a float target against its logits —
+    and wrong for a ``regressor``, which emits ``[B, T]``. A generated
+    regressor + ``smooth_l1`` therefore died in the VRAM pre-flight with
+    ``size of tensor a (4) must match tensor b (256) at dimension 1``, before
+    any capacity question was reached.
+
+        classifier -> [B, T]        (class indices, long)
+        regressor  -> [B, T]        (continuous target, float)
+        hybrid      -> [B, 256, T]  (float broadcast against logits)
+
+    ``model_type=None`` keeps the historical dtype-derived shape so callers
+    that predate the contract are unaffected.
     """
     inp = torch.zeros((batch_size, seg_size), dtype=torch.long)
     # Dict-unpack to mirror the existing ``LossConfig(**loss_cfg)`` pattern
@@ -196,8 +215,19 @@ def _build_probe_tensors(
         LossConfig(**{"loss_type": loss_type, "loss_name": loss_name})
     )
     if target_dtype == torch.long:
-        tgt = torch.zeros((batch_size, seg_size), dtype=torch.long)
+        return inp, torch.zeros((batch_size, seg_size), dtype=torch.long)
+
+    # Float target: the shape follows the declared output contract.
+    output_type = None
+    if model_type is not None:
+        from ml_models.plugin_loader import get_output_type
+
+        output_type = get_output_type(model_type)
+
+    if output_type == "regressor":
+        tgt = torch.zeros((batch_size, seg_size), dtype=target_dtype)
     else:
+        # "hybrid" (fcnet) and the legacy model_type=None path.
         tgt = torch.zeros((batch_size, 256, seg_size), dtype=target_dtype)
     return inp, tgt
 
@@ -538,7 +568,9 @@ def run_skill(sandbox, **kwargs):
 
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
-        x_train, y_train = _build_probe_tensors(batch_size, seg_size, loss_type, loss_name)
+        x_train, y_train = _build_probe_tensors(
+            batch_size, seg_size, loss_type, loss_name, model_type=model_type
+        )
         with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "training_probe"):
             training_probe = probe_activation_footprint(
                 model=model_for_train,
