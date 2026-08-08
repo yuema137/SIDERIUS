@@ -970,67 +970,97 @@ Both facts are one edit away from becoming false, so they are pinned:
 
 ## Commit C4 — Clean-subprocess transport fixture for generated models
 
+**STATUS: DONE 2026-08-08. Both contracts traverse a real spawned
+subprocess; hop-deletion matrix complete; two production mutations caught.**
+
 ### 1. Goal
 
 Make the generated-model transport contract **mechanically enforced**, so
-the V20 class cannot return: a fixture that spawns a real subprocess and
-drives the full reconstruction chain, failing if any hop is removed.
-
-**Why a separate commit:** it is test infrastructure that outlives PR C
-and must be reviewable on its own. It also becomes the standing artifact
-Binding principle 2 requires.
+the V20 class cannot return. This is PR C's primary hard-acceptance layer
+and the enforcement of Binding Principle 2: *parent-process reachability is
+never evidence of subprocess reachability.*
 
 ### 2. Scope
 
-**Changes:** tests only. No production code.
+`tests/unit/core/test_generated_model_transport_chain.py`. **Tests only —
+no production code.**
 
-**Dependencies:** C1 (assert fail-closed, not the silent default).
+### 3. Implementation — what was built
 
-### 3. Implementation plan
+A fixture writing two **never-before-seen** plugins (one classifier, one
+regressor) to `tmp_path`, then driving in a **real spawned interpreter**:
 
-- [ ] Build a fixture that writes a never-before-seen generated plugin to
-      a temp dir and drives, **in a real spawned subprocess**:
-      ```text
-      generated plugin -> plugin dir -> worker spec -> subprocess env
-        -> child import -> registry reconstruction -> config lookup
-        -> measurement executor
-      ```
-- [ ] Assert the child cannot satisfy the test using a registry inherited
-      from the parent — verify by construction, not by hope
-- [ ] Add a hop-deletion matrix: removing each hop must fail
-- [ ] Cover **both** output contracts, per PR A's lesson
+```text
+generated plugin -> plugin dir -> worker spec (plugin_dir)
+  -> subprocess env (SIDERIUS_PLUGIN_DIRS + PYTHONPATH) -> child startup
+  -> child import -> registry reconstruction -> output/config lookup
+  -> the measurement executor's own validate_candidate_configs
+```
 
-### 4. Validation plan
+- [x] Spec built through the **real** `GpuMeasurementSpec` +
+      `CandidateMeasurementRequest`, so a schema change breaks the fixture
+      loudly instead of letting it drift into asserting a shape production
+      no longer uses. (The first draft hand-rolled a payload dict and was
+      rejected by the model with 9 missing fields — the intended outcome.)
+- [x] Both output contracts, per PR A's lesson
+- [x] Hop-deletion matrix
+- [x] Parent-contamination test
 
-- [ ] Fixture passes for a novel classifier and a novel regressor
-- [ ] **Hop-deletion matrix**: every hop, removed one at a time, fails
-- [ ] Parent-registry contamination is impossible in the fixture
-- [ ] Runtime bounded — this runs in the normal unit suite or is marked so
-      it does not slow it unacceptably; **measure and record**
+### 4. Coverage is COMPOSED with the existing module — stated, not implied
 
-### 5. Acceptance criteria
+`tests/unit/core/test_measurement_worker_plugin_transport.py` already owns
+the **#184 runner-spawn** hop
+(`test_the_measurement_runner_spawns_with_the_transported_env`) and the
+single-source property (`test_env_construction_has_exactly_one_home`).
+C4's fixture builds its own child environment, so **it would not catch a
+regression of the runner spawning without `env=`**. That hop is covered
+there, not here, and this document says so rather than letting a
+"complete chain" claim absorb a hop C4 never touches.
 
-- Every hop in the declared chain has a deletion case that fails.
-- The fixture spawns a real subprocess; an in-process approximation is not
-  acceptable evidence.
-- Both contracts covered.
+C4 adds what that module does not: both contracts, the executor's own
+config-validation hop, the C1 fail-closed contract **across** the
+boundary, and an explicit deletion matrix.
+
+### 5. Validation — RESULTS
+
+- [x] A novel **classifier** survives the whole chain; `rejection is None`
+- [x] A novel **regressor** survives the whole chain
+- [x] **Hop deleted — env var absent:** `config_registered False`,
+      rejection is `"no config class registered"` (the V20 signature)
+- [x] **Hop deleted — plugin dir empty:** distinguishes "the pipe is
+      broken" from "nothing was put in the pipe"; both fail closed
+- [x] **Hop deleted — contract unresolvable:** the child **raises**
+      instead of returning `"classifier"`. Before C1 a regressor whose
+      plugin failed to load was silently measured, trained and scored as a
+      classifier, in the one place a parent-only test cannot see
+- [x] **Parent contamination:** the parent's registry is deliberately
+      poisoned with the test's own model name, and the child must still
+      fail. Without this the deletion cases could pass for the wrong
+      reason and the whole matrix would be theatre
+- [x] `6 passed in 5.81s`; `tests/unit/core/` `2234 passed`; ruff clean
+
+#### Mutation battery — 2 production mutations, **2/2 caught**
+
+| # | mutation | result |
+|---|---|---|
+| M12 | make `_resolve_plugin_dirs` ignore `SIDERIUS_PLUGIN_DIRS`, so the child cannot reconstruct the registry | **2 failed** |
+| M13 | restore C1's silent `"classifier"` default | **1 failed** |
+
+M12 and M13 are mutations of **production**, not of the fixture — the
+fixture's own deletion cases prove it *detects* a missing hop, and these
+prove it detects a *broken* one.
 
 ### 6. Failure and edge cases
 
-| Case | Required behaviour |
+| Case | Behaviour |
 |---|---|
-| Fixture passes with a hop deleted | The fixture is wrong — fix it before trusting any PR C claim |
-| Subprocess unavailable in CI | Skip **loudly** with a reason; never silently pass |
-| Fixture slow enough to hurt the suite | Mark and record the cost; do not delete coverage to save seconds |
+| Fixture passes with a hop deleted | Would mean the fixture is wrong; the deletion matrix is what rules it out |
+| Subprocess unavailable | `subprocess.run` raises; the helper asserts with full stdout/stderr rather than skipping quietly |
+| Fixture cost | `5.81s` for six real interpreters. Recorded, kept in the normal unit suite |
 
-### 7. Verification commands and evidence
+### 7. Commit boundary
 
-- [ ] Hop-deletion matrix results — **to record**
-- [ ] Fixture wall time — **to record**
-
-### 8. Commit boundary
-
-- [ ] Tests only, no production code
+- [x] One test module, no production code
 
 ---
 
