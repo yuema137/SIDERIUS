@@ -1064,101 +1064,104 @@ prove it detects a *broken* one.
 
 ---
 
-## Commit C5a — HARD ACCEPTANCE: the valid-trial head, fully deterministic
+## Commit C5a — HARD ACCEPTANCE: the valid-trial head, deterministic
+
+**STATUS: DONE 2026-08-08. The head is proven deterministically, with no
+training of any kind. 9 tests, 2/2 mutations caught.**
 
 ### 1. Goal
 
-Prove the segment PR A did **not** prove (§0.1): **given that a
-HealthGate-valid trial exists, the winner really becomes the formal
-plan** — the `:1798` no-valid-winner WARNING never fires and the `:1834`
-winner line names it.
-
-**This is a state-machine proof, not a model-quality proof.** The
-proposition under test is:
+Prove the segment PR A did not (§0.1): **given that a HealthGate-valid
+trial exists, the winner really becomes the formal plan.**
 
 ```text
-PROVE      "if a valid trial exists, the winner drives formal"
-NOT        "this model trains well enough to produce a valid trial"
+PROVE   "if a valid trial exists, the winner drives formal"
+NOT     "this model trains well enough to produce a valid trial"
 ```
 
-> **Corrected by operator decision, 2026-08-08.** The previous draft said
-> *"choose the smallest workload that reliably produces a valid trial"*
-> and allowed *"increase workload once"* on failure. **Both are deleted.**
-> That is the V20 Case A error: whether a real model happens to train to
-> HealthGate-valid is a **scientific outcome**, and a scientific outcome
-> must never be a state-machine acceptance oracle. Tuning the workload
-> until the science cooperates would make this Gate meaningless.
+### 2. How determinism was achieved without new machinery
 
-### 2. Scope
+§0.5b's audit made this possible: `_best_trial_winner` selects via
+`is_valid_candidate`, a **pure predicate over a record dict**, so a valid
+trial is *constructed*, never trained for. The operator's correction —
+delete "increase workload once", validity is the harness's responsibility —
+is satisfied by construction rather than by discipline.
 
-The trial's validity is **dictated by the harness**, not earned by
-training. §0.5b establishes this is possible with no new machinery:
-`_best_trial_winner` selects via `is_valid_candidate`, a pure predicate
-over a record dict, so a valid trial record is **constructed**.
+The fixture reads its gate list from `required_blocking_gate_ids()` rather
+than hardcoding it, so adding a blocking gate to the shipped policy makes
+the fixture follow instead of silently ceasing to be valid.
 
-**Dependencies:** C1–C4 green on the candidate head.
+### 3. Validation — RESULTS (`9 passed in 1.15s`)
 
-**Non-goal:** any statement about whether a real generated model tends to
-produce valid trials. That is C5b's observation, and it is not acceptance.
+**The fixture is valid for a REASON**
+- [x] The constructed record passes production's own `is_valid_candidate`
+- [x] Flipping one blocking gate to `check_passed: False` makes it invalid
+      — without this, a fixture valid for some unrelated reason would make
+      the module pass while proving nothing about HealthGate validity
 
-### 3. Implementation plan
+**Winner selection**
+- [x] The highest-scoring **valid** trial wins
+- [x] A higher-scoring but gate-INVALID record does **not** win — the
+      V19/V20 pathology in miniature: a good-looking scalar from a
+      collapsed run outranking a legitimate one
+- [x] No valid trial → no winner (the precondition of the `:1798` state)
 
-- [ ] Audit the existing seam first: extend
-      `tests/unit/agent/tune_ml_hyperparam_agent/test_force_formal_round.py`,
-      which already drives `_apply_formal_round_strategy` and asserts on
-      the `[FORMAL OVERRIDE]` lines. **Add a test-only mechanism only if
-      the audit proves the existing seam cannot express a deterministic
-      HealthGate-valid record for a generated model**
-- [ ] Construct a valid trial record for a **generated** model name:
-      `is_valid_candidate` true, `is_trial=True`,
-      `memory.time_mode == "trial"`, numeric `denoising_score`
-- [ ] Drive the head and assert the two-line rule
-- [ ] Extend as far down the chain as the deterministic seam reaches —
-      winner inheritance, pre-formal path, formal record — **recording
-      exactly where determinism ends**, rather than overstating coverage
+**The winner drives the formal plan**
+- [x] `:1798` WARNING **absent** and the `:1834` line **present** with
+      `winner='c5a_iter_001_002'`, no `winner=none`, no `inherited=(none)`
+- [x] **The inherited values are the winner's own.** Naming a winner in a
+      log line is not the same as using it, so the plan starts with
+      deliberately absurd hyperparameters (`batch_size=1`, `lr=1e-9`) and
+      must end up with the winner's (`8`, `3e-4`)
+- [x] No winner → WARNING fires and the planner's plan is left untouched
+- [x] `independent` inherits nothing — pinned because a Gate asserting
+      only on the `[FORMAL OVERRIDE]` tag would pass under `independent`
+      while proving the opposite of the intended property
 
-### 4. Validation plan
+#### Mutation battery — 2 applied, **2/2 caught**
 
-- [ ] At least one trial round is HealthGate-**valid**
-- [ ] A winner is selected from it
-- [ ] The `:1798` `WARNING: no successful trial round is HealthGate-valid`
-      line is **absent**
-- [ ] The `:1834` line is **present**, with `winner=` naming the valid
-      trial's `exp_id`, a numeric `score=`, and a non-empty `inherited=`
-- [ ] `formal_round_strategy` is **not** `independent` (that strategy
-      disclaims inheritance and would make the assertion vacuous)
-- [ ] Formal is entered on the winner's plan
-- [ ] Pre-formal measurement succeeds for the generated model
-- [ ] Admission succeeds
-- [ ] A **formal** record is persisted — `scientific_authority` present and
-      `is_trial` absent, per the stamping contract in §0.1
+| # | mutation | result |
+|---|---|---|
+| M14 | winner filter ignores HealthGate validity (`is_valid_candidate` → `True`) | **2 failed** |
+| M15 | `full_clone` stops inheriting `lr` — winner named in the log but not used | **1 failed** |
 
-### 5. Acceptance criteria
+> **Mutation-hygiene note.** The first attempt at both mutations **failed
+> to apply** (the anchor strings matched 2-3 sites, not 1) and the suite
+> stayed green. That green was *not* evidence and was not recorded as
+> such; the mutations were re-targeted by line number with an asserted
+> content check and only then produced the results above. This is the
+> exact trap `feedback_mutation_proof_hygiene` names — a mutation that
+> silently no-ops looks identical to a mutation that survives.
 
-- The `:1798` WARNING is absent **and** the `:1834` winner line is present
-  naming the valid trial's `exp_id` — both conditions, not either.
-- The formal record's provenance traces to that winner.
-- Every assertion recorded with observed values, not "as expected".
+### 4. WHERE DETERMINISM ENDS — stated, not glossed
 
-### 6. Failure and edge cases
+The plan required recording the exact boundary rather than overstating
+coverage.
 
-| Case | Required behaviour |
-|---|---|
-| **The controlled valid trial is not produced** | **HARNESS DEFECT — stop and audit.** Never "increase the workload". The trial's validity is dictated, so failure to produce one means the fixture is wrong, not that the model underperformed |
-| The `:1798` WARNING fires despite a constructed valid trial | **Gate FAILS** — this is exactly the property under test |
-| Determinism runs out partway down the chain | Legitimate; record the exact boundary and let C5b observe past it. Do **not** paper over it with a stochastic step |
-| Measurement fails | Preserve evidence and diagnose; likely in-scope |
+```text
+PROVEN DETERMINISTICALLY by C5a
+    valid trial record
+      -> _best_trial_winner selects it
+      -> _apply_mode_override_chain
+      -> winner's params inherited into the formal plan
+      -> plan.is_trial == False
 
-### 7. Verification commands and evidence
+NOT PROVEN BY C5a — requires a real subprocess / real training
+      -> pre-formal GPU measurement
+      -> admission
+      -> formal round executes
+      -> formal ExperimentRecord persisted
+```
 
-- [ ] Command — **to record, shown before running**
-- [ ] Log excerpt: `:1798` absent, `:1834` present with the winner's
-      `exp_id` — **to record verbatim, both lines**
-- [ ] Formal record fields — **to record**
+**C5a did not produce a persisted formal record, and must not be quoted as
+if it had.** The untested tail is not unevidenced, though — it is the part
+PR A's Gate 2C already demonstrated live for a generated model (§0.1). PR
+C's acceptance for the head+tail is therefore an explicit **composition**,
+set out in C5b, not a single run.
 
-### 8. Commit boundary
+### 5. Commit boundary
 
-- [ ] Evidence only
+- [x] One test module, no production code
 
 ---
 
