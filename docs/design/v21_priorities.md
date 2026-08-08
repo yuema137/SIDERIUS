@@ -1435,7 +1435,33 @@ correctly attributed in a live two-chain run; no peer-caused rejection.
 
 ## PR C — Generated-model production compatibility
 
-> ## STATUS: DESIGN APPROVED 2026-08-08 — cleared to begin C1
+> ## STATUS: READY FOR OPERATOR REVIEW 2026-08-08 — head `1bf697bf`, DO NOT MERGE
+>
+> Eight commits on `feat/pr-c-generated-model-production-compat`. Unit
+> suite 7951 passed, pyright 0 errors, **15/15 mutations caught**, zero
+> scorer files touched.
+>
+> **Delivered:** an unestablished output contract fails closed with five
+> consumers translating it (C1); `get_config_class` no longer returns
+> `None` silently for a registered plugin — #185 fixed only its call site,
+> never the function (C2); the five estimator name branches are replaced
+> by truthful properties with built-in estimates identical across 18
+> parity cells (C3); a missing inference-batch entry is proven harmless
+> and pinned (C3b); the transport chain is enforced hop by hop in a real
+> subprocess for both contracts (C4); a valid trial winner is proven to
+> drive the formal plan (C5a); and a generated **regressor** was measured,
+> admitted, run formally and persisted a formal record with
+> `formal_validity: "valid"` on real hardware (C5b).
+>
+> **Escalated, not decided — FU-C-1:** the shipped transformer estimate
+> under-counts attention by 2x (`TransformerConfig` declares `nhead=4`,
+> the code reads `.get("nhead", 2)`). Correcting it is more accurate *and*
+> more conservative, but it moves a calibrated built-in estimate, so it
+> was pinned by test and handed to the operator.
+>
+> **Reproduced for PR D:** a second independent run confirms the declared
+> `healthgate_mode` / `result_authority` reach the manifest but not the
+> record stamp (`legacy_authority_unknown`).
 >
 > Three operator decisions resolved at approval: **O-C-1** rescope the
 > formal objective to the unproven head (*"prove authoritative formal

@@ -1,7 +1,40 @@
 # PR C — Generated-model production compatibility
 
-**Status: DESIGN APPROVED 2026-08-08 (operator), corrections applied.
-Cleared to begin C1. No implementation has begun.**
+**Status: READY FOR OPERATOR REVIEW — 2026-08-08. DO NOT MERGE.**
+
+Branch `feat/pr-c-generated-model-production-compat`, head **`1bf697bf`**,
+8 commits from master `b9f88ae5`.
+
+```text
+FINAL VALIDATION AT 1bf697bf
+  unit suite      7951 passed, 2 skipped, 1 xfailed   (baseline 7892)
+  PR C battery      69 passed
+  ruff check      All checks passed
+  ruff format     757 files already formatted
+  pyright         0 errors, 4 warnings   (unchanged from baseline)
+  mutations       15 applied / 15 caught
+  scorer files    0 changed  (git diff --name-only b9f88ae5..HEAD)
+  working tree    clean except untracked slide/ (operator's own artifacts)
+```
+
+| commit | unit |
+|---|---|
+| `cc8a2088` | approved design + PR A merged-status sync |
+| `f16f02fd` | **C1** unestablished output contract fails closed |
+| `6335c7cb` | **C2** plugin lookup no longer depends on someone else's import |
+| `2b53fe8e` | **C3** admission keys on model properties, not names |
+| `5e7365f3` | **C3b** a missing inference-batch entry stays harmless |
+| `019f440a` | **C4** the transport chain, hop by hop |
+| `0d5616bf` | **C5a** a valid trial winner drives the formal plan |
+| `1bf697bf` | **C5b** live confirmation on real hardware |
+
+**The claim, no stronger than the evidence:** generated models are
+first-class citizens across the production compatibility and
+isolated-subprocess surfaces, and a valid trial winner correctly drives the
+formal strategy. The head is proven **deterministically** (C5a) and the
+tail **live** (PR A's classifier, C5b's regressor); **no single live run
+traversed both**, because C5b's real trial collapsed — a scientific
+outcome, not an infrastructure defect. See C5b §8.
 
 | | |
 |---|---|
