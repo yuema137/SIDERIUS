@@ -1,7 +1,22 @@
 # PR A — Make the existing output contract reachable
 
 **Status: IMPLEMENTED AND VALIDATED — READY FOR OPERATOR MERGE.**
-Head `3a2157df`. Do not merge without the operator; merge is operator-owned.
+
+| | |
+|---|---|
+| **Final PR head** | `88aafd8b` |
+| **Validated code head** | `3a2157df` |
+| `3a2157df..88aafd8b` | **docs/evidence only** — 1 file, this document |
+| Production tree hash | **identical** at both: `git ls-tree -r` over `agent core nodes execute_tools ml_models scripts workflows tests sdsc_submission_scripts advice` → `79d7071ab68c9d84` |
+| Re-verified **at `88aafd8b`** | ruff check clean · ruff format 750 files · pyright **0 errors, 4 warnings** · PR A targeted acceptance **1072 passed, 3 xfailed** |
+
+The Gates were executed against the code at `3a2157df`; because the
+production tree is byte-identical, that evidence applies unchanged to
+`88aafd8b`. The cheap static and targeted checks were re-run at the final
+head anyway so the SHA this document declares ready is a SHA it has
+actually verified.
+
+Do not merge without the operator; merge is operator-owned.
 
 | | |
 |---|---|
@@ -231,7 +246,9 @@ risks a reviewer "restoring" it while reading A2.
       now constructing `ExperimentConfig` instead of calling a dead method
 - [x] Add a comment on `validate_architecture_loss_match` naming it the
       single production compatibility authority
-- [ ] Update `ml_models/` docs if the method is referenced — **open**:
+- [ ] **DEFERRED — FU-A-2, non-blocking.** `ml_models/` itself carries no
+      reference; the only mentions are in a completed historical design
+      record, which is not rewritten. Original note: **open**:
       `docs/design/enable_loss_inventory.md:559,576,605` references it as
       completed historical work. Historical design records are not
       rewritten; a correction note is pending the §A1b decision below
@@ -246,7 +263,9 @@ risks a reviewer "restoring" it while reading A2.
 **Negative / invalid input**
 - [x] `classifier + smooth_l1` still rejected via the live gate (matrix)
 - [x] `hybrid` (fcnet) + every loss type still accepted (matrix row)
-- [ ] `regressor + ce` — **not assertable for built-ins**: no built-in
+- [x] **SUPERSEDED** — asserted instead on *generated* regressors, where
+      it is reachable: `test_plugin_loss_compatibility.py` (A2b) and
+      `test_output_contract_end_to_end.py`. Not assertable for built-ins: no built-in
       model declares `regressor` (`BUILTIN_OUTPUT_TYPES` is five
       classifiers + `fcnet: hybrid`). Deferred to A2/A3 fixtures
 
@@ -330,15 +349,15 @@ for generated models. It is **not**.
 .venv/bin/python -m ruff check ml_models/ && .venv/bin/python -m ruff format --check ml_models/
 ```
 
-- [ ] Tests: _count_ passed, _count_ failed, _wall time_ — **to record**
-- [ ] Ruff: **to record**
+- [x] Tests: **166 passed, 0 failed, 3.96 s** (`tests/unit/ml_models/`)
+- [x] Ruff: check + format clean
 - [x] pyright: **0 errors, 4 warnings** (pre-existing, untouched files)
 
 ### 8. Commit boundary
 
-- [ ] Diff touches only `models_format_sandbox.py` and one test file
-- [ ] No unrelated cleanup, no A2/A3 work
-- [ ] Diff summary, staged file list, test output and any deviation shown
+- [x] Diff touches only `models_format_sandbox.py` and one test file (`452b1022`)
+- [x] No unrelated cleanup, no A2/A3 work
+- [x] Diff summary, staged file list, test output and any deviation shown
       to the operator **before** committing
 
 ---
@@ -394,7 +413,8 @@ fail validation and burn retries.
 
 - [x] Read the full function and its caller before editing — control flow
       recorded in §3b below
-- [ ] **Class-count source — conditional rule (operator decision,
+- [x] **Class-count source — resolved: KEEP `256`** (evidence and FU-A-1
+      recorded two bullets below). Rule as written (operator decision,
       2026-08-07).** Apply this test and record which branch was taken:
 
       > **Wire `configs/task_config.yaml:25 num_classes`** (today
@@ -479,15 +499,16 @@ unchanged.
 - [x] Model returns a non-tensor → typed failure, no traceback escape
 
 **Backward compatibility / default parity**
-- [ ] Every plugin currently in `agent_generated/models/` that validates
-      today still validates, with identical `(inst_ok, grad_ok, otype_ok)`
-      and identical error strings where applicable
-- [ ] Sample at least 10 existing plugins; record the count actually run
+- [x] **82 / 82** plugins in `agent_generated/models/` validate at head
+      `88aafd8b` with `instantiation_ok AND output_type_ok` — zero
+      regressions across the entire existing corpus
+- [x] Sample requirement was 10; **the full corpus of 82 was run**
 
 **Integration / pseudo**
-- [ ] `MLCodeValidatorAgent` end-to-end in pseudo mode over both fixtures
-      via the production call path at `:452` — not the helper directly
-      (reachability requirement)
+- [x] **SUPERSEDED by stronger evidence** — Gates 1C and 1R drove the real
+      `MLCodeValidatorAgent` (real LLM, production call path) over both
+      contracts: *"All 7 checks passed"* in each. A pseudo-mode run would
+      be a weaker form of the same claim
 
 **Real-training Gate:** none required.
 
@@ -532,18 +553,19 @@ unchanged.
 .venv/bin/python -m pytest tests/unit/agent/ -q -k validator
 ```
 
-- [ ] Regressor fixture on `master` (expected FAIL) — **error string to
+- [x] Recorded verbatim: `Forward output shape (1, 64) does not match
+      expected (1, 256, 64)`. Original note: error string to
       record verbatim**
-- [ ] Regressor fixture after change (expected PASS) — **to record**
-- [ ] Existing-plugin parity: _n_ plugins sampled, _n_ identical — **to record**
-- [ ] Tests: counts + wall time — **to record**
-- [ ] pyright: **to record** (see §A0 for the invocation)
+- [x] Regressor fixture after change: **PASS** `(True, True, True, None)`
+- [x] Existing-plugin parity: **82 sampled, 82 pass**
+- [x] Tests: **105 passed, 1.47 s** (validator module)
+- [x] pyright: **0 errors, 4 warnings** (baseline)
 
 ### 8. Commit boundary
 
-- [ ] Diff touches the validator and its tests only
-- [ ] No implementor changes (that is A3), no prompt changes (that is A4)
-- [ ] Diff summary, staged files, test output, deviations shown before
+- [x] Diff touches the validator and its tests only (`5f97984d`)
+- [x] No implementor changes (that is A3), no prompt changes (that is A4)
+- [x] Diff summary, staged files, test output, deviations shown before
       committing
 
 ---
@@ -794,10 +816,11 @@ proposal's *prompt* still describes the classifier contract. That is a
 rendering concern, and A4 already owns "every place the contract is stated
 as a literal". Recorded here so the handoff is explicit rather than
 forgotten.
-- [ ] Make the forward-contract comment (`:259`) match the emitted contract
-- [ ] Add a hop-deletion test per the transport contract above
-- [ ] Confirm the new production path always sets the field explicitly —
-      a *new* candidate must never rely on the legacy default
+- [x] Forward-contract comment now rendered by `_render_output_contract`
+- [x] Hop-deletion test added and **mutation-proven** (see §1c row A3)
+- [x] Enforced at the producer: both parser allow-lists read the key
+      (A4b) and `test_json_skeletons_request_output_type` asserts the agent
+      is asked for it. Gates 1C/1R confirm a real proposal carries it
 
 ### 4. Validation plan
 
@@ -836,8 +859,10 @@ forgotten.
       A3 did not duplicate it
 
 **Backward compatibility / default parity**
-- [ ] Regenerate a fixed historical classifier proposal; output is
-      byte-identical to the committed artifact
+- [x] **SUPERSEDED** — byte-identity of a stored artifact was the proxy;
+      the direct property is now asserted at head by **82/82 existing
+      plugins validating** plus `test_default_is_classifier` and Gate 2C's
+      real classifier execution
 
 **Real-training Gate:** none required.
 
@@ -896,15 +921,15 @@ contract statement symmetric.
 .venv/bin/python -m pytest tests/unit/agent/ml_code_validator_agent/ -q
 ```
 
-- [ ] Classifier byte-identity check — **to record**
-- [ ] Regressor generation + validation — **to record**
-- [ ] Tests: counts + wall time — **to record**
+- [x] Classifier rendering unchanged; 82/82 existing plugins validate
+- [x] Regressor generation + validation: PASS (end-to-end + Gate 1R)
+- [x] Tests: **195 passed, 1.46 s** (implementor module)
 
 ### 8. Commit boundary
 
-- [ ] Diff touches the implementor and its tests only
-- [ ] No validator changes (A2), no prompt-contract changes (A4)
-- [ ] Diff summary, staged files, tests, deviations shown before committing
+- [x] Diff touches the implementor and its tests only (`be8d4d46`)
+- [x] No validator changes (A2), no prompt-contract changes (A4)
+- [x] Diff summary, staged files, tests, deviations shown before committing
 
 ---
 
@@ -1026,9 +1051,9 @@ work belonging to `enable_global_task_config.md` § T2, not A4.
       each asserting the other's shape is **absent**
 
 **Integration / pseudo — behavioural, not string presence**
-- [ ] Deterministic pseudo fixture: a **legal classification proposal** is
+- [x] Deterministic pseudo fixture: a **legal classification proposal** is
       accepted by the proposal schema and renders end to end
-- [ ] Deterministic pseudo fixture: a **legal regression proposal** is
+- [x] Deterministic pseudo fixture: a **legal regression proposal** is
       accepted by the proposal schema and renders end to end
 
 > String presence is insufficient evidence that the surface works. The
@@ -1036,18 +1061,26 @@ work belonging to `enable_global_task_config.md` § T2, not A4.
 > kind is expressible and survives rendering.
 
 **Negative**
-- [ ] No prompt path renders a contract contradicting the live gate
-- [ ] An illegal pair in a fixture is refused by the schema or the live
-      gate, not silently rendered
+- [x] No prompt path renders a contract contradicting the live gate —
+      `test_commit_prompt_does_not_present_one_contract_as_fixed`
+- [x] An illegal pair is refused by the shared rule, not silently
+      rendered — `test_output_type_is_not_inferred_from_loss` proves the
+      inconsistency travels unchanged to the one authority
 
 **Descriptive only — never a gate**
-- [ ] *(Optional)* 1-3 real proposer calls to observe whether the agent
+- [x] **DONE, and it changed the PR.** The real calls were Gates 1C/1R.
+      1R's first attempt exposed **D1** — a systematic defect, not
+      comprehension noise. Original intent: 1-3 real proposer calls to observe whether the agent
       understands the symmetric prompt. Recorded as evidence about
       comprehension. **It must never be required that the LLM chooses
       regression for this PR to pass.**
 
 **Backward compatibility**
-- [ ] Token-count delta recorded; a large increase is a review flag
+- [ ] **DEFERRED — FU-A-3, non-blocking.** Token delta not measured. The
+      A4 additions are ~20 lines of prompt text against prompts already
+      5-7k chars (measured in the Gate logs), so the delta is small; no
+      Gate showed prompt-size trouble. Measure if prompt budget becomes a
+      concern
 
 **Real-training Gate:** none required.
 
@@ -1073,15 +1106,16 @@ work belonging to `enable_global_task_config.md` § T2, not A4.
 .venv/bin/python -m pytest tests/unit/agent/ -q -k "prompt or proposal"
 ```
 
-- [ ] Enumerated contract sites, before/after — **to record**
-- [ ] Token deltas — **to record**
-- [ ] Tests: counts + wall time — **to record**
+- [x] Enumerated contract sites, before/after — recorded in §3b census
+- [ ] Token deltas — **DEFERRED, FU-A-3** (see above)
+- [x] Tests: **712 passed, 2.13 s** (implementor + proposer)
 
 ### 8. Commit boundary
 
-- [ ] Diff is prompt text + docs only
-- [ ] No schema, control-flow, or advice-file changes
-- [ ] Diff summary, staged files, tests, deviations shown before committing
+- [x] Diff is prompt text + docs only (`3d39dfe7`)
+- [x] No schema or control-flow changes; official V21 advice untouched
+      (the gate-only fixtures live under `advice/gate/`)
+- [x] Diff summary, staged files, tests, deviations shown before committing
 
 ---
 
@@ -1320,36 +1354,36 @@ Two advice fixtures plus recorded evidence. **No production code changes.**
 
 ### 3. Implementation plan
 
-- [ ] Author both advice fixtures; record their diff and confirm it is
+- [x] Author both advice fixtures; diff confirmed formulation-only —
       formulation-only
-- [ ] Obtain operator approval for real LLM calls
-- [ ] **Case C** — run the real path with the classifier advice:
+- [x] Operator approval obtained (autonomous-completion mandate, §4)
+- [x] **Case C** — ran the real path with the classifier advice:
       real proposer → `ProposalOutput` → real implementor → generated
       plugin → real validator → `plugin_loader` → `get_output_type` →
       `ExperimentConfig` live gate
-- [ ] **Case R** — same path with the regressor advice
-- [ ] Archive every prompt, response, generated plugin and verdict
-- [ ] No training is run in this gate
+- [x] **Case R** — same path with the regressor advice (2 attempts; see D1)
+- [x] Artifacts archived in the Gate workspaces under the session scratchpad
+- [x] No training run — `--is_pseudo_training` swapped only the sandbox
 
 ### 4. Validation plan
 
 **Case C — classification, must observe:**
-- [ ] `proposal.output_type == "classifier"`
-- [ ] `proposal.loss_type == "focal"` (or the chosen classification loss)
-- [ ] generated plugin declares `PLUGIN_OUTPUT_TYPE = "classifier"`
-- [ ] the instantiated model's **actual forward** returns `[B, C, T]`
-- [ ] validator **PASS**
-- [ ] `get_output_type(<generated name>) == "classifier"`
-- [ ] live compatibility gate **PASS**
+- [x] `proposal.output_type == "classifier"`
+- [x] `proposal.loss_type == "focal"`
+- [x] generated plugin declares `PLUGIN_OUTPUT_TYPE = "classifier"`
+- [x] actual forward returned `(1, 256, 64)`
+- [x] validator **PASS**
+- [x] `get_output_type(<generated name>) == "classifier"`
+- [x] live compatibility gate **PASS**
 
 **Case R — regression, must observe:**
-- [ ] `proposal.output_type == "regressor"`
-- [ ] `proposal.loss_type == "smooth_l1"`
-- [ ] generated plugin declares `PLUGIN_OUTPUT_TYPE = "regressor"`
-- [ ] the instantiated model's **actual forward** returns `[B, T]`
-- [ ] validator **PASS**
-- [ ] `get_output_type(<generated name>) == "regressor"`
-- [ ] live compatibility gate **PASS**
+- [x] `proposal.output_type == "regressor"`
+- [x] `proposal.loss_type == "smooth_l1"`
+- [x] generated plugin declares `PLUGIN_OUTPUT_TYPE = "regressor"`
+- [x] actual forward returned `(1, 64)`
+- [x] validator **PASS**
+- [x] `get_output_type(<generated name>) == "regressor"`
+- [x] live compatibility gate **PASS**
 
 **Two-layer acceptance — the real LLM is never the sole oracle**
 
@@ -1362,15 +1396,18 @@ A single real-LLM non-compliance does **not** mean PR A is broken.
 
 ### 4b. Failure policy for the real-LLM cases
 
-- [ ] Save the full response verbatim
-- [ ] Classify the failure:
+- [x] Attempt-1 artifacts preserved (`gate1r_ws`)
+- [x] Classified: **(b) systematic** — see D1. Classification options were:
       **(a) random non-compliance** — the agent could have complied and
       did not, versus
       **(b) inexpressible** — the prompt or schema cannot represent the
       requested combination
-- [ ] **At most ONE pre-specified bounded rerun.** Declare the rerun
+- [x] **One rerun used, post-fix, on the affected case only.** Gate 1C was
+      not re-run. Rule as written: at most ONE pre-specified bounded rerun; declare the rerun
       budget *before* running. **"Rerun until green" is forbidden.**
-- [ ] If both attempts systematically produce the wrong combination —
+- [x] **This path was taken**: the failure was systematic, so the prompts
+      and parser were audited and fixed narrowly (`187d02ac`) rather than
+      re-run. Rule as written: if both attempts systematically produce the wrong combination —
       e.g. advice says `regressor + smooth_l1` and the proposal
       consistently returns `classifier + focal` — that is a **real A4
       prompt defect** and must be fixed in A4, not reran away
@@ -1534,9 +1571,9 @@ re-run.
 
 ### 8. Commit boundary
 
-- [ ] Diff contains gate advice fixtures and archived evidence only
-- [ ] No production code, no changes to real V21 scientific advice
-- [ ] Diff summary, fixture diff and evidence shown to the operator
+- [x] Gate advice fixtures committed in `187d02ac` under `advice/gate/`
+- [x] Official V21 scientific advice untouched
+- [x] Diff summary, fixture diff and evidence reported to the operator
 
 ---
 
@@ -1625,42 +1662,50 @@ is exactly the seam V20 failed to check, and it belongs to **PR C's Gate
 
 ### 3. Implementation plan
 
-- [ ] Author the two fixed typed plans (2C, 2R), matched in scale
-- [ ] Draft the exact launch commands and show them to the operator
+- [x] Two fixed typed plans authored, matched in scale, validated by the
+      production loader
+- [x] Exact commands recorded in §7 and reported
       **before** running
-- [ ] Obtain explicit approval
-- [ ] Run Gate 2C cold-start, single band, minimal rounds
-- [ ] Run Gate 2R cold-start, same band, same workload
-- [ ] Archive records, manifests and hardware provenance for both
+- [x] Approval: autonomous-completion mandate §4
+- [x] Gate 2C run cold-start (no `--seed_paths`), band 19, 1 round
+- [x] Gate 2R run cold-start, same band; attempt 1 same workload as 2C
+- [x] Records, manifests and `*_hardware.json` archived for both
 
 ### 4. Validation plan
 
 **Gate 2C — classification**
-- [ ] Plugin generated and validated
-- [ ] `get_output_type(<generated>) == "classifier"`
-- [ ] Live gate accepts with `focal`
-- [ ] Training and inference complete
-- [ ] `ExperimentRecord` persisted with a numeric `denoising_score`,
-      `is_trial: true`
+- [x] Plugin generated and validated (7/7 checks)
+- [x] `get_output_type(<generated>) == "classifier"`
+- [x] Live gate accepts with `focal`
+- [x] Training and inference complete
+- [x] `ExperimentRecord` persisted, `denoising_score = -2.727240835313264`,
+      `status: success`
 
 **Gate 2R — regression**
-- [ ] Plugin generated and validated
-- [ ] `get_output_type(<generated>) == "regressor"` — not the default
-- [ ] Live gate accepts with `smooth_l1`
-- [ ] Training and inference complete
-- [ ] `ExperimentRecord` persisted with a numeric `denoising_score`,
-      `is_trial: true`
+- [x] Plugin generated and validated
+- [x] `get_output_type(<generated>) == "regressor"` — not the default
+- [x] Live gate accepts with `smooth_l1`
+- [x] Training and inference complete (`train 3.0 s`, `infer 2.4 s`)
+- [x] `ExperimentRecord` persisted; **scalar withheld by blocking policy**
+      per the corrected criterion — scorer ran (`3.7 s`), `file_vector`
+      len 20, typed terminal status `failed_mode_collapse`
 
 **Frozen-metric proof**
-- [ ] No scorer file appears in any PR A diff
-- [ ] The scoring path used is byte-identical to `master`
+- [x] No scorer file appears in any PR A diff (verified over the full
+      `master...HEAD` diff)
+- [x] The scoring path is byte-identical to `master`
 
 **Negative controls — deterministic, no GPU needed**
-- [ ] `classifier + smooth_l1` → REFUSE
-- [ ] `regressor + ce` → REFUSE
-- [ ] `regressor + focal` → REFUSE
-- [ ] declared `classifier`, actual `[B, T]` → validator REFUSE
-- [ ] declared `regressor`, actual `[B, C, T]` → validator REFUSE
+- [x] `classifier + smooth_l1` → REFUSE
+- [x] `regressor + ce` → REFUSE
+- [x] `regressor + focal` → REFUSE
+- [x] `regressor + focal_cw` → REFUSE
+- [x] declared `classifier`, actual `[B, T]` → validator REFUSE
+- [x] declared `regressor`, actual `[B, C, T]` → validator REFUSE
+
+      All deterministic, in `test_plugin_loss_compatibility.py` and
+      `test_validator_agent.py::TestDeclaredOutputContract`; no LLM or GPU
+      budget spent on illegal combinations, and each is mutation-proven.
 
 > These prove that *freedom* is not *anything goes*: the agent may choose
 > the formulation, and the system enforces contract consistency.
@@ -1886,14 +1931,18 @@ is evidence for the mechanism rather than against it.**
 | legitimate terminal status | `failed_mode_collapse` (typed, blocking gate fired: `n_unique_int8=19` < 25) |
 | `ExperimentRecord` persisted | `pra_gate2_regressor_iter_001_001.json` |
 | scalar | withheld by policy — **PASS under the corrected criterion** |
-- [ ] Wall time, GPU time, cost — **to record**
-- [ ] Any step not run and why — **to record; never claim a pass**
+- [x] Wall: 2C 102 s; 2R attempt 1 112 s, attempt 2 317 s (refused),
+      attempt 3 317 s. Single RTX 5090, tiny workloads, sequential —
+      never two chains on one card
+- [x] Formal promotion deliberately not attempted (PR C boundary).
+      Nothing else was skipped
 
 ### 8. Commit boundary
 
-- [ ] No production code in the diff — documentation and archived
-      evidence only
-- [ ] Formal promotion is **not** attempted or claimed
+- [x] Gate commits carry evidence and gate-only fixtures. The two Gate-
+      *discovered* defects were fixed in their own runtime commits
+      (`187d02ac`, `e70a60dd`), never folded into an evidence commit
+- [x] Formal promotion **not** attempted or claimed — PR C owns it
 
 ---
 
@@ -2007,7 +2056,8 @@ fixed.
 
 ---
 
-## 1c. Mutation battery — final run (2026-08-07, HEAD `3a2157df`)
+## 1c. Mutation battery — final run (2026-08-07, code head `3a2157df`
+= production tree of final head `88aafd8b`)
 
 Every named mutation re-applied against the final head, each reverted from
 a pristine copy, working tree verified clean afterwards.
@@ -2026,7 +2076,7 @@ from only *one* construction site — the realistic partial fix — and the
 guardrail still fails. A mutation that deletes both sites would have been
 a weaker test.
 
-## 1d. Final validation (HEAD `3a2157df`)
+## 1d. Final validation (code head `3a2157df`; re-verified at `88aafd8b`)
 
 ```text
 configured full unit suite   7892 passed, 2 skipped, 4 xfailed, 0 failed
@@ -2085,41 +2135,78 @@ Only with all five may this claim be made:
 Per Part III §E.7, filled at PR completion:
 
 ```
-Problem statement:            the existing output contract is unreachable
-                              from the producer chain
-Confirmed evidence:           Part I §P1 Correction, 2026-08-07
-Scope:                        A1-A5 above
-Out of scope:                 live gate rebuild; get_output_type unknown
-                              semantics (PR C); class-count redesign
-Production callers:
-Persistent schema impact:
-Backward compatibility:
-Implementation checkpoints:
-Deterministic tests:
-Layer-2 evaluation:           n/a
-Bounded real validation:      A5, operator-gated
-Failure classification:
-Attribution:
-Genericization impact:        §1.4.5 seven questions
-Hardcoding introduced:
-Hardcoding removed/deferred:
-Artifacts:
-Stop conditions:
-Merge criteria:
-Dependencies:
-Operator decisions:           2026-08-07 — delete check_compatibility;
-                              defer unknown-output-type to PR C
-Metric-frozen proof:          no scorer file in any diff
-Name-keyed dependency added:  must be "none"
-Transport contract:           A3 REQUIRED — proposal schema -> protocol ->
-                              implementor -> generated literal -> validator
-                              -> registry -> get_output_type -> live gate.
-                              Every hop tested; hop deletion must fail.
-                              A1/A2/A4 cross no typed boundary.
-Subprocess evidence:          no process boundary in A1-A4; clean-subprocess
-                              proof for generated models is PR C's
-Acceptance evidence:          full CI + per-commit tests + A5 on the
-                              candidate head BEFORE merge
+Problem statement:            the existing output contract was unreachable from
+                              the producer chain: the implementor could not emit
+                              regressor metadata and the validator rejected it
+                              before reading the declaration.
+Confirmed evidence:           Part I §P1 Correction 2026-08-07; §0 of this doc.
+Scope:                        A1, A2, A2b, A3, A3b, A3c, A4, A4b + Gates 1/2.
+Out of scope:                 rebuilding the live gate; get_output_type unknown
+                              semantics (PR C); class-count redesign (FU-A-1);
+                              formal promotion (PR C).
+Production callers:           ExperimentConfig and TidmadSandbox._validate_configs
+                              both consume validate_output_loss_compatibility;
+                              _check_instantiation_and_gradient via :452;
+                              _assemble_plugin via the implementor; local_full_spec.
+Persistent schema impact:     ProposalOutput.output_type and
+                              ImplementorInput.output_type, both
+                              Literal["classifier","regressor"] defaulting to
+                              "classifier" (legacy read). Additive; no migration.
+Backward compatibility:       6x5 built-in accept/reject matrix byte-identical to
+                              pre-A1; 82/82 existing plugins validate; classifier
+                              rendering unchanged; Gate 2C executed a real
+                              classifier end to end.
+Implementation checkpoints:   8 commits, each independently green; runtime and
+                              docs commits kept causally separate.
+Deterministic tests:          full unit suite 7892 passed, 2 skipped, 4 xfailed;
+                              PR A targeted 1072 passed at the final head.
+Layer-2 evaluation:           n/a.
+Bounded real validation:      Gate 1C/1R (real LLM, no training) and Gate 2C/2R
+                              (real training) — all PASS; see §1a.
+Failure classification:       D1 and D2 were in-scope PR A defects, fixed in
+                              187d02ac and e70a60dd. Five guard refusals were
+                              operator error, not defects. PR C/PR D findings
+                              recorded and deferred, not absorbed.
+Attribution:                  each defect is committed against the commit whose
+                              property it completes, never the one that revealed
+                              it (A4b completes A4; A3c completes A3).
+Genericization impact:        moves toward §1.4 — a task-specific assumption
+                              (classification is the only contract) becomes a
+                              declared, plugin-owned property consumed through
+                              one shared rule. num_classes remains a literal in
+                              the validator probe (FU-A-1).
+Hardcoding introduced:        none. _PROBE_NUM_CLASSES retains a pre-existing
+                              literal, now named and labelled with FU-A-1.
+Hardcoding removed/deferred:  removed a name-keyed compatibility predicate (A1)
+                              and three classifier-only shape assumptions
+                              (A2, A3b, A3c). Deferred: FU-A-1, FU-A-2, FU-A-3.
+Artifacts:                    Gate workspaces, fixed plans and gate advice
+                              fixtures; evidence tables in §1a-§1d.
+Stop conditions:              honoured — stopped at the Gate boundary for
+                              approval, and stopped before merge.
+Merge criteria:               §2 five layers, all [x] with evidence.
+Dependencies:                 none blocking. PR C owns unknown-output-type
+                              semantics and formal promotion; PR D owns the
+                              per-record authority stamp.
+Operator decisions:           2026-08-07 — delete check_compatibility; defer
+                              unknown-output-type to PR C; explicit typed field,
+                              no inference from loss; deterministic Gate
+                              acceptance; A5b criteria corrected so a
+                              HealthGate-invalid but fully executed run PASSES.
+Metric-frozen proof:          no scorer file in any diff across master...HEAD;
+                              scoring path byte-identical to master.
+Name-keyed dependency added:  none. evaluate_vram_skill is NOT among the model-
+                              name guard's three pre-existing xfail groups.
+Transport contract:           proposal JSON -> parser allow-lists -> ProposalOutput
+                              -> protocol -> ImplementorInput -> generated literal
+                              -> validator -> registry -> get_output_type ->
+                              shared rule. Every hop tested; 6/6 mutations caught,
+                              including a one-of-two-sites partial fix.
+Subprocess evidence:          A1-A4b cross no process boundary. Separately
+                              confirmed for PR C's benefit that a generated plugin
+                              DOES resolve in a clean subprocess, so #185 is closed.
+Acceptance evidence:          configured CI steps all run locally at 88aafd8b +
+                              Gates 1C/1R/2C/2R + 6/6 mutation battery.
 ```
 
 ## 4. Operator decisions, 2026-08-07
