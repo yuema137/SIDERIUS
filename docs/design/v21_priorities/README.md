@@ -15,8 +15,13 @@ design, so a PR must not be implemented from Part III alone.
 ## Status
 
 Plan approved in principle 2026-08-07, with six design corrections
-applied. **PR A's design document is written and awaiting approval; no
-implementation has begun.**
+applied. **PR A is implemented, Gate-validated and awaiting operator
+merge** (head `0c4eb33e`); PRs B-G are not started.
+
+PR A's open follow-ups (**FU-A-1/2/3**) and the findings it produced for
+PR B, PR C, PR D and PR G are registered in `v21_priorities.md` §E.3b, so
+they are visible when scoping those PRs rather than buried in PR A's
+record.
 
 ### Scope correction recorded 2026-08-07
 
@@ -43,7 +48,7 @@ Two consequences for other PRs:
 
 | PR | Document | Gate | Status |
 |---|---|---|---|
-| **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **DESIGN — awaiting operator approval** |
+| **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **DELIVERED `0c4eb33e`** — awaiting operator merge |
 | **B** | `pr_b_resource_budget_semantics.md` | V21 launch blocker | not started |
 | **C** | `pr_c_generated_model_production_compat.md` | V21 launch blocker | not started |
 | **D** | `pr_d_per_file_evidence.md` | Before V21 | not started |

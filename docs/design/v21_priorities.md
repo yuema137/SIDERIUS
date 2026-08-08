@@ -1004,7 +1004,7 @@ PR B   "If it executes, resource control remains correct."
 
 | PR | Title | Fixes | Depends on | Gate |
 |---|---|---|---|---|
-| **A** | Make the existing output contract reachable | P1 + P2 | none | **V21 launch blocker** |
+| **A** | Make the existing output contract reachable | P1 + P2 | none | **DELIVERED `0c4eb33e`** — awaiting merge |
 | **B** | Resource-budget semantics and enforcement | P6.4 | none | **V21 launch blocker** |
 | **C** | Generated-model production compatibility | P6.2 family | none | **V21 launch blocker** |
 | **D** | Per-file evidence to reflector and planner | P6.5 | none | Before V21 |
@@ -1014,7 +1014,87 @@ PR B   "If it executes, resource control remains correct."
 
 ---
 
+## E.3b Follow-up register — open items PR A deliberately deferred
+
+Every item below was found and deferred **during PR A**, each with a
+stated reason for being non-blocking. They are recorded here, not only in
+the PR A document, so a later PR planning against this ledger sees them.
+
+| ID | Item | Owner | Why deferred | Blocking? |
+|---|---|---|---|---|
+| **FU-A-1** | The validator's shape probe keeps the literal `256`. `configs/task_config.yaml:25` already declares `num_classes`, but it is consumed only for prompt rendering; the validator holds no task config and its caller passes only a file path | task-config genericization (`enable_global_task_config.md` § T2 territory) | Wiring it needs a **new transport**, not one existing typed boundary — the A2 conditional rule's "otherwise" branch | No |
+| **FU-A-2** | `docs/design/enable_loss_inventory.md:559,576,605` still describes `check_compatibility`, deleted in A1 | doc hygiene | It is a *completed historical* design record. Historical records are not rewritten; `ml_models/` itself carries no stale reference | No |
+| **FU-A-3** | A4's prompt token delta was never measured | prompt-budget work | ~20 lines added against prompts already 5-7k chars in the Gate logs; no Gate showed prompt-size trouble | No |
+
+### Findings PR A produced for OTHER PRs — recorded, not absorbed
+
+| Finding | Owner | Detail |
+|---|---|---|
+| `get_output_type` returns `"classifier"` for an unregistered model, so a **registration failure silently acquires classifier semantics** | **PR C** | Confirmed live in `test_registry_default_would_hide_a_dropped_declaration`. This is why PR A asserts its transport hop by hop rather than end to end only — a dropped declaration does not raise |
+| **V20's `CONFIG_REJECTED` defect is genuinely CLOSED** | **PR C** | Verified during Gate 2: with `SIDERIUS_PLUGIN_DIRS` set, a generated plugin resolves in a clean subprocess (`get_config_class` returns its class). PR #185's fix holds. **`STOP_INFRASTRUCTURE_FAILURE` has multiple causes** — do not re-chase a fixed bug on the signature alone |
+| Generated models have **no `core/inference_defaults.py` entry**, so inference batch falls back to 25 and the wall-time estimate is uncalibrated | **PR G** (P5) | Observed live in Gate 2C/2R, correctly reported as best-effort rather than silently guessed |
+| The iteration **manifest** carries the declared `healthgate_mode` / `result_authority`, but the tuner's per-experiment record stamps `scientific_authority` with `None/None` → `legacy_authority_unknown` | **PR D** | Declaration reaches the manifest, not the record stamp. Does not affect PR A's boundary. Observed at `gate2c_ws3/iter_001` |
+| `max_active` bounds chains, not GPU phases | **PR B** (P6.4) | PR A ran its Gates **sequentially** for this reason; it did not test concurrency |
+
 ## PR A — Make the existing output contract reachable
+
+> ## STATUS: DELIVERED 2026-08-07 — awaiting operator merge
+>
+> Branch `feat/pr-a-reachable-output-contract`, head `0c4eb33e`
+> (production tree `79d7071ab68c9d84`). Full record:
+> [`v21_priorities/pr_a_reachable_output_contract.md`](./v21_priorities/pr_a_reachable_output_contract.md).
+>
+> ### What PR A actually did
+>
+> An agent can now propose, implement, validate, register and **execute**
+> either formulation, and the choice is a declared field rather than an
+> assumption:
+>
+> ```text
+> proposal.output_type : Literal["classifier","regressor"]   independent of loss_type
+>   -> protocol -> implementor -> generated PLUGIN_OUTPUT_TYPE
+>   -> validator (expected shape DERIVED from the declaration)
+>   -> plugin registry -> get_output_type
+>   -> ONE shared rule: validate_output_loss_compatibility(...)
+> ```
+>
+> | commit | what it changed |
+> |---|---|
+> | `452b1022` A1 | deleted `LossConfig.check_compatibility` — a name-keyed rule with **zero** production callers whose logic *contradicted* the live one |
+> | `5f97984d` A2 | validator reads `PLUGIN_OUTPUT_TYPE` **before** applying a shape expectation (both arms of the old check were dead code) |
+> | `625b0159` A2b | the pair rule now governs the **generated-plugin** branch too — `_validate_configs` bypassed `ExperimentConfig`, so the only kind of model the agent invents was governed by no rule at all |
+> | `be8d4d46` A3 | explicit typed `output_type` transported proposal → live rule |
+> | `a4bede52` A3b | the producer's own smoke check and generated test artifact honour the declaration |
+> | `187d02ac` A4b | the proposer is *asked* for `output_type` and the parser *reads* it — **found by Gate 1R** |
+> | `3d39dfe7` A4 | proposer-facing contract is symmetric, not classifier-only |
+> | `e70a60dd` A3c | VRAM probe target shape follows the contract — **found by Gate 2R** |
+>
+> ### Proven by real Gates, not only unit tests
+>
+> ```text
+> Gate 1C  real LLM   classifier + focal      -> forward (1,256,64), validator PASS
+> Gate 1R  real LLM   regressor  + smooth_l1  -> forward (1,64),     validator PASS
+> Gate 2C  real GPU   classifier              -> denoising_score -2.727240835313264
+> Gate 2R  real GPU   regressor               -> train+infer+frozen scorer executed,
+>                                                file_vector persisted, scalar withheld
+>                                                by blocking HealthGate (PASS)
+> ```
+>
+> **The first regression model in SIDERIUS history to traverse the
+> production path.** 7892 unit tests pass, 6/6 mutations caught, 82/82
+> existing plugins still validate, pyright unchanged at 0 errors.
+>
+> ### The lesson worth carrying into PR B and PR C
+>
+> Every deterministic checkpoint was green while **three** consumers still
+> treated the classifier contract as universal — the validator (A2), the
+> producer's own test artifacts (A3b) and the VRAM probe (A3c). Two of the
+> three were found only by running real Gates.
+>
+> > A rule, a schema or a contract existing in source is not evidence that
+> > every production consumer honours it. Audit consumers as consumers, not
+> > as prose — and a transport contract must start at the **real producer**,
+> > not at the first typed object in the chain.
 
 > **Scope corrected 2026-08-07 after code audit.** This PR was originally
 > written as "build a capability-based compatibility contract". That
@@ -1353,6 +1433,23 @@ correctly attributed in a live two-chain run; no peer-caused rejection.
 ---
 
 ## PR C — Generated-model production compatibility
+
+> **Inherited from PR A (2026-08-07) — read before scoping.** See the
+> follow-up register in §E.3b. Two items land directly here:
+>
+> 1. `get_output_type` returning `"classifier"` for an unregistered model
+>    is now a **demonstrated** silent-default, pinned by a test, not a
+>    hypothesis.
+> 2. **V20's `CONFIG_REJECTED` defect is CLOSED** — PR A verified a
+>    generated plugin resolves in a clean subprocess. Do not re-chase it:
+>    `STOP_INFRASTRUCTURE_FAILURE` has several distinct causes, and PR A
+>    hit a different one (an unset `data_dir`, correctly refused with
+>    *"no silent synthetic fallback"*).
+>
+> PR A also supplies a reusable pattern for PR C's own Gate: a
+> deterministic fixture that writes a generated plugin to disk and drives
+> the **real** production path over it, rather than asserting on template
+> strings.
 
 ### Objective
 
