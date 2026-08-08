@@ -1,6 +1,16 @@
 # PR C — Generated-model production compatibility
 
-**Status: READY FOR OPERATOR REVIEW — 2026-08-08. DO NOT MERGE.**
+**Status: MERGED — PR #187, merge commit `cac86c94`, operator-merged
+2026-08-08, CI *Lint + Type + Unit Tests* SUCCESS.** The
+"READY FOR OPERATOR REVIEW" record below is preserved as the state the
+merge decision was made against; the "DO NOT MERGE" instruction in it is
+**discharged**.
+
+**Follow-ups assigned at merge:** FU-C-1 → **PR B** (sub-item B-2,
+resource-estimation correctness — *not* PR G); the authority-stamp defect →
+**PR D**, promoted to a **V21 scientific-campaign launch blocker** on the
+strength of two independent observations; `inference_batch_for` → **PR G**,
+throughput only.
 
 Branch `feat/pr-c-generated-model-production-compat`, **validated code
 head `1bf697bf`**, 8 commits from master `b9f88ae5`, plus documentation

@@ -1026,6 +1026,15 @@ the PR A document, so a later PR planning against this ledger sees them.
 | **FU-A-2** | `docs/design/enable_loss_inventory.md:559,576,605` still describes `check_compatibility`, deleted in A1 | doc hygiene | It is a *completed historical* design record. Historical records are not rewritten; `ml_models/` itself carries no stale reference | No |
 | **FU-A-3** | A4's prompt token delta was never measured | prompt-budget work | ~20 lines added against prompts already 5-7k chars in the Gate logs; no Gate showed prompt-size trouble | No |
 
+### Findings PR C produced for OTHER PRs — assigned at merge, 2026-08-08
+
+| finding | routed to | reason |
+|---|---|---|
+| **FU-C-1** — `TransformerConfig` declares `nhead=4` but the estimator falls back to `2`, under-counting attention memory ~2x whenever the config dict omits the key (train 536,592,000 → 1,048,592,000 bytes at C3's parity shape) | **PR B**, as sub-item **B-2** | *Resource-estimation / admission correctness*, not throughput: `wrong estimate → admission too optimistic → possible OOM`. **Not PR G.** Not reopened in PR C either — C3's parity claim is that built-ins are byte-identical, and `2 → 4` would force that claim to be redefined. Currently **pinned by test** so it cannot drift |
+| **Authority stamp never reaches the record** — CLI `--healthgate_mode blocking --result_authority diagnostic`, record stamps `null / null → legacy_authority_unknown`, `authoritative: false` | **PR D** (its existing owner) — and **promoted to a V21 scientific-campaign LAUNCH BLOCKER** | **Two independent observations** now (PR A Gate 2C, PR C C5b), so this is causal evidence rather than an artifact oddity. Without it, a formal round that runs correctly still produces a record whose authority is unknown, breaking incumbent-selection and aggregation semantics downstream. That is more than the ordinary observability improvement PR D was scoped as |
+| `inference_batch_for`'s actual batch selection | **PR G** | Inference **throughput only**, confirmed by C3b's audit: planning and runtime call the same function, so the forecast never diverges from what runs |
+| **No mechanical guardrail exists** for the import-side-effect defect class | none — recorded | Deciding statically whether a registry read is reachable without its populating import is a whole-program reachability question over lazy imports. Stated rather than faked; enforced by C4's real-subprocess fixture instead |
+
 ### Findings PR A produced for OTHER PRs — recorded, not absorbed
 
 | Finding | Owner | Detail |
@@ -1346,6 +1355,82 @@ remaining in production.
 
 ## PR B — Resource-budget semantics and enforcement
 
+> ## STATUS: NEXT UNIT — not started. Design document required before any code.
+>
+> Operator serialization **A → C → B → D → E**. PR A (`b9f88ae5`) and PR C
+> (`cac86c94`) are merged; PR B is next.
+>
+> Per the standing rule, PR B gets its own document under
+> `docs/design/v21_priorities/` — `pr_b_resource_budget_semantics.md` —
+> written to the 8-section per-commit standard, with its audits **already
+> performed and evidence-cited**, and reviewed before implementation
+> begins. Part III is scope-level only.
+>
+> ### PR B gained a second, independent sub-item at PR C's merge
+>
+> PR B now covers **two** resource-correctness problems. They are related
+> in kind and must not be merged into one commit:
+>
+> ```text
+> B-1  budget SEMANTICS      is 12 GiB an enforced cap or an admission
+>                            estimate? (the original scope, below)
+>
+> B-2  FU-C-1                a built-in resource model uses the wrong
+>                            fallback, so admission is too optimistic
+> ```
+>
+> ### B-2 — FU-C-1, reassigned from PR C by operator decision 2026-08-08
+>
+> ```text
+> TransformerConfig.nhead = 4
+> estimator fallback      = 2      -> attention memory under-counted ~2x
+> ```
+>
+> **Owner: PR B.** Classification: *resource-estimator correctness*. Its
+> consequence is not throughput —
+>
+> ```text
+> wrong estimate -> admission too optimistic -> admit -> possible OOM
+> ```
+>
+> — so it is emphatically **not PR G**, and its only relationship to PR C
+> is that C3's 18-cell parity capture is what discovered it.
+>
+> **It was deliberately not fixed inside PR C.** C3's backward-compatibility
+> claim is that built-in estimates are byte-identical; changing `2 → 4`
+> there would have forced that claim to be redefined mid-PR. The wrong
+> value is currently **pinned by a test** asserting `(2, 2)` in
+> `tests/unit/agent/test_estimator_predicates_not_names.py`, so it cannot
+> drift silently before PR B corrects it — **that test must be updated as
+> part of B-2, not deleted.**
+>
+> **Current state:** a conservative invariant is violated in the
+> *optimistic* direction.
+>
+> **Required audit (before any change):**
+>
+> - determine the canonical source of `nhead`
+> - distinguish an **absent** value from an **explicit override**
+> - update the training **and** inference estimators consistently — both
+>   read the shared `attention_shape` helper introduced by C3
+> - sweep for any **other** config-default vs estimator-fallback mismatch;
+>   `nhead` is unlikely to be the only one
+>
+> **Acceptance:**
+>
+> - `TransformerConfig` default `nhead=4` → the estimator uses **4**
+> - an explicit `nhead=N` → the estimator uses **N**
+> - a generated attention model remains **property-derived**, not
+>   name-keyed (C3's guarantee must survive)
+> - admission becomes **no more optimistic** anywhere; every changed cell
+>   is recorded with its before/after value, as C3 did
+>
+> ### Also inherited from PR C
+>
+> `max_active` bounds **chains, not GPU phases** — recorded in §E.3b during
+> PR A, and the reason PR A and PR C both ran their Gates **sequentially**.
+> Neither PR tested concurrency; PR B is where that is answered.
+
 ### Objective
 
 Make the VRAM budget mean one stated thing, and make a sustained breach
@@ -1435,55 +1520,91 @@ correctly attributed in a live two-chain run; no peer-caused rejection.
 
 ## PR C — Generated-model production compatibility
 
-> ## STATUS: READY FOR OPERATOR REVIEW 2026-08-08 — head `1bf697bf`, DO NOT MERGE
+> ## STATUS: MERGED 2026-08-08 — PR #187, merge commit `cac86c94`
 >
-> Eight commits on `feat/pr-c-generated-model-production-compat`. Unit
-> suite 7951 passed, pyright 0 errors, **15/15 mutations caught**, zero
-> scorer files touched.
->
-> **Delivered:** an unestablished output contract fails closed with five
-> consumers translating it (C1); `get_config_class` no longer returns
-> `None` silently for a registered plugin — #185 fixed only its call site,
-> never the function (C2); the five estimator name branches are replaced
-> by truthful properties with built-in estimates identical across 18
-> parity cells (C3); a missing inference-batch entry is proven harmless
-> and pinned (C3b); the transport chain is enforced hop by hop in a real
-> subprocess for both contracts (C4); a valid trial winner is proven to
-> drive the formal plan (C5a); and a generated **regressor** was measured,
-> admitted, run formally and persisted a formal record with
-> `formal_validity: "valid"` on real hardware (C5b).
->
-> **Escalated, not decided — FU-C-1:** the shipped transformer estimate
-> under-counts attention by 2x (`TransformerConfig` declares `nhead=4`,
-> the code reads `.get("nhead", 2)`). Correcting it is more accurate *and*
-> more conservative, but it moves a calibrated built-in estimate, so it
-> was pinned by test and handed to the operator.
->
-> **Reproduced for PR D:** a second independent run confirms the declared
-> `healthgate_mode` / `result_authority` reach the manifest but not the
-> record stamp (`legacy_authority_unknown`).
->
-> Three operator decisions resolved at approval: **O-C-1** rescope the
-> formal objective to the unproven head (*"prove authoritative formal
-> promotion from a valid generated-model trial winner"*); **O-C-2** split
-> `inference_defaults` by causal responsibility, not by file — the
-> admission/reachability consequence of `is_inference_batch_registered`
-> is PR C's, actual batch selection stays PR G's; **O-C-3**
-> `get_output_type` raises a dedicated `UnknownOutputContractError` and
-> every consumer maps it to that layer's typed refusal — loud internally,
-> typed externally, no ignorable sentinel.
->
-> Two corrections applied with the approval: **C5a may not tune a
-> workload to obtain a HealthGate-valid trial** (validity is dictated by
-> the harness; a scientific outcome is never a state-machine oracle), and
-> **C1 must audit the historical-replay boundary before implementing**.
->
-> Full plan, per-commit:
+> Operator-merged from `feat/pr-c-generated-model-production-compat`
+> (validated code head `1bf697bf`, 10 commits); CI *Lint + Type + Unit
+> Tests* SUCCESS. Production tree `b079f66539f91560` identical at the
+> validated head and on master — every commit after `1bf697bf` was
+> documentation only. Full record:
 > [`v21_priorities/pr_c_generated_model_production_compat.md`](./v21_priorities/pr_c_generated_model_production_compat.md).
-> Six commits (C1 fail-closed contract, C2 import-side-effect sweep,
-> C3 estimator name-branches, C4 clean-subprocess fixture, C5a/C5b
-> Gates). **Nothing is implemented.**
 >
+> ### What PR C actually did
+>
+> A generated model no longer depends on any of the four things that
+> silently decided its fate:
+>
+> ```text
+> BEFORE                                   AFTER
+> a silent output default                  UnknownOutputContractError, C1
+> lucky import order                       self-healing lookup, C2
+> hardcoded built-in estimator names       model properties, C3
+> parent-process registry contamination    real-subprocess proof, C4
+>
+> and: valid trial winner -> formal plan is mechanically proven, C5a
+> ```
+>
+> | commit | what it changed |
+> |---|---|
+> | `f16f02fd` C1 | an unestablished contract **fails closed**; five consumers each translate it into their own layer's typed refusal. A *fifth* consumer (`agent/prompts.py`) existed that the first census missed — it was built from the execution path, and prompt rendering is not on it |
+> | `6335c7cb` C2 | **#185 never fixed `get_config_class`** — it fixed one *call site*. The function still returned `None` **silently** for a plugin valid on disk (measured 0 of 82 in a clean process). Fixed at the lookup authority; `sandbox_executor`'s two direct reads closed too |
+> | `2b53fe8e` C3 | the five estimator name branches are **three different kinds of thing**, and only the `transformer` attention branch ever harmed a generated model — it charged **zero**, the *optimistic* direction. Replaced by declared contract / declared attention params / constructor signature |
+> | `5e7365f3` C3b | O-C-2 answered: a missing inference-batch entry is **already harmless** (planning and runtime call the same function; the flag reaches only `warnings`, which nothing branches on). Pinned rather than rewritten |
+> | `019f440a` C4 | the transport chain enforced hop by hop in a **real spawned subprocess**, both contracts, with a deletion matrix and a parent-contamination test |
+> | `0d5616bf` C5a | the head PR A never exercised, proven **deterministically** — `is_valid_candidate` is a pure predicate, so a valid trial is *constructed*, never trained for |
+> | `1bf697bf` C5b | live on RTX 5090: a generated **regressor** measured (1824 MiB), **admitted**, run formally, formal record persisted with `formal_validity: "valid"` |
+>
+> ### Evidence composition — never claimed as one run
+>
+> ```text
+> C5a   valid trial -> winner -> params inherited      DETERMINISTIC
+> C4    novel plugin -> clean subprocess -> resolution REAL SUBPROCESS
+> PR A  measurement -> admission -> formal -> record   REAL GPU (classifier)
+> C5b   the same tail                                  REAL GPU (regressor)
+>
+> NOT PROVEN LIVE BY ANY RUN: valid trial -> formal in one execution.
+> ```
+>
+> C5b's real trial **collapsed** (diversity 7, std 0.092 mV). Per the
+> operator's rule that is a **scientific outcome, not a PR C failure**, and
+> the workload was not changed to obtain a better one.
+>
+> ### Validation at `1bf697bf`
+>
+> ```text
+> unit suite   7951 passed, 2 skipped, 1 xfailed   (baseline 7892)
+> PR C battery   69 passed
+> ruff / format  clean / 757 files
+> pyright      0 errors, 4 warnings   (unchanged)
+> mutations    15 applied / 15 caught
+> scorer files 0 changed
+> ```
+>
+> ### The guardrail's "9 violations" were never 9 code branches
+>
+> It exempted docstrings but scanned `#` comments, so the tracked count
+> mixed real branches with prose (`inference_defaults`' two were **both**
+> comments). Explaining a removed branch *raised* the count, making "stop
+> explaining which model a formula came from" the cheapest way to pass.
+> Made precise via `tokenize`. `_PENDING_CLEANUP` is now **empty**, because
+> a listed label downgraded a *reintroduced* branch from `failed` to
+> `xfail` — the guard detected the regression and then tolerated it.
+>
+> ### Follow-ups assigned at merge (operator, 2026-08-08)
+>
+> | finding | owner | why |
+> |---|---|---|
+> | **FU-C-1** transformer attention under-counted ~2x | **PR B** | It is *resource-estimation / admission correctness*, not throughput, so **not PR G**. Its consequence is `wrong estimate -> admission too optimistic -> possible OOM`. Not reopened in PR C either: C3 proved 18-cell built-in parity, and changing `2 -> 4` now would force that backward-compatibility claim to be redefined |
+> | **Authority-stamp defect** | its existing designated follow-up (**PR D**) | Two independent observations now, so this is causal evidence rather than an artifact oddity. Promoted to a **V21 scientific-campaign launch blocker**: without it a correct formal run still stamps `legacy_authority_unknown`, breaking incumbent/aggregation authority semantics downstream |
+> | `inference_batch_for` | **PR G** | Inference **throughput only** |
+>
+> ### The two PRs together
+>
+> ```text
+> PR A   the agent can invent classification AND regression correctly
+> PR C   what it invents is a production first-class citizen
+> ```
+
 > **Two audit findings that change this section**, both measured at
 > `b9f88ae5`:
 >
