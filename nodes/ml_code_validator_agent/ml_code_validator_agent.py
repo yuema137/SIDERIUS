@@ -69,7 +69,10 @@ mathematical fidelity to the spec.
     - Shape mismatches that cause a runtime error
     - Broken gradient path (detached tensors, non-differentiable ops where needed)
     - Missing operations that prevent the model from running at all
-    - Wrong output shape that breaks the [B, 256, T] contract
+    - Wrong output shape for the contract the plugin DECLARES in
+      PLUGIN_OUTPUT_TYPE: "classifier" must emit [B, 256, T],
+      "regressor" must emit [B, T]. Judge against the declared contract,
+      not against classification by default.
   Implementation details that differ from the spec but still produce a valid,
   trainable model do NOT set passed=false. A model that is "structurally close
   and should run" MUST have passed=true.
@@ -310,19 +313,48 @@ def _check_config_fields(config_fields: dict) -> tuple[bool, str | None]:
 # ---------------------------------------------------------------------------
 
 
+#: Output contracts a plugin may declare. An unrecognised value fails closed
+#: rather than defaulting — see ``_check_instantiation_and_gradient``.
+_LEGAL_OUTPUT_TYPES: tuple[str, ...] = ("classifier", "regressor")
+
+#: Legacy-read default for plugins predating the declaration (V21 PR A).
+#: A NEWLY generated plugin must always declare its contract explicitly;
+#: relying on this default is a producer defect, not a convenience.
+_DEFAULT_OUTPUT_TYPE: str = "classifier"
+
+#: Class count used by the in-process shape probe.
+#: FOLLOW-UP (FU-A-1): ``configs/task_config.yaml`` already declares
+#: ``num_classes: 256``, but it is consumed only for prompt rendering
+#: (``workflows/task_config.py:209``). This agent holds no task config and its
+#: caller passes only a file path, so threading it here would mean a NEW
+#: transport rather than reusing one existing typed boundary. Per the A2
+#: conditional rule in the PR A design doc, the literal is retained and the
+#: genericization deferred.
+_PROBE_NUM_CLASSES: int = 256
+
+
 def _check_instantiation_and_gradient(
     model_file_path: str,
 ) -> tuple[bool, bool, bool, str | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
-    and verify output type consistency.
+    and verify the model matches its own declared output contract.
 
     Returns (instantiation_ok, gradient_ok, output_type_ok, error_message_or_None).
       - instantiation_ok: config instantiated, model instantiated, forward pass
-                          produced the correct output shape [1, 256, 64].
+                          produced the shape required by its DECLARED contract
+                          ([1, 256, 64] for ``classifier``, [1, 64] for
+                          ``regressor``).
       - gradient_ok:      backward pass succeeded and all trainable parameters
                           received non-None gradients.
-      - output_type_ok:   PLUGIN_OUTPUT_TYPE matches the actual forward output dims.
+      - output_type_ok:   the declaration is legal and the actual output matches
+                          it.
+
+    This function answers two of the three compatibility questions: is the
+    declaration legal, and does the model honour its own declaration. The
+    third — is the (output contract, loss) PAIR legal — belongs to the shared
+    rule in ``ml_models.models_format_sandbox`` and is deliberately not
+    duplicated here.
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
     if spec is None or spec.loader is None:
@@ -341,43 +373,59 @@ def _check_instantiation_and_gradient(
     except Exception as e:
         return False, False, False, f"Model instantiation failed: {e}"
 
+    # ---- Output contract is read BEFORE the shape probe (V21 PR A2) -------
+    #
+    # Previously the probe hard-required (1, 256, 64) and only afterwards
+    # looked at PLUGIN_OUTPUT_TYPE. That ordering made a regressor
+    # unvalidatable: a [B, T] output was rejected by the shape gate before
+    # its declaration was ever read, so the `regressor` branch below was
+    # unreachable. (The `classifier` branch was dead too: a shape equal to
+    # (1, 256, 64) is 3-dim by construction, so `actual_dims != 3` could
+    # never be true there either.)
+    #
+    # The expected shape is now DERIVED from the plugin's own declaration,
+    # which is what makes both contracts reachable.
+    declared_type = getattr(module, "PLUGIN_OUTPUT_TYPE", _DEFAULT_OUTPUT_TYPE)
+    if declared_type not in _LEGAL_OUTPUT_TYPES:
+        # Fail closed. Never coerce an unrecognised declaration to classifier:
+        # that is exactly how a metadata defect becomes wrong semantics.
+        return (
+            False,
+            False,
+            False,
+            (
+                f"PLUGIN_OUTPUT_TYPE={declared_type!r} is not a legal output contract "
+                f"(expected one of: {', '.join(_LEGAL_OUTPUT_TYPES)})"
+            ),
+        )
+
+    expected_shape: tuple[int, ...] = (
+        (1, _PROBE_NUM_CLASSES, 64) if declared_type == "classifier" else (1, 64)
+    )
+
     # Forward pass with small dummy input
     try:
-        x = torch.randint(0, 256, (1, 64))
+        x = torch.randint(0, _PROBE_NUM_CLASSES, (1, 64))
         out = model(x)
-        if tuple(out.shape) != (1, 256, 64):
-            return (
-                False,
-                False,
-                False,
-                (f"Forward output shape {tuple(out.shape)} does not match expected (1, 256, 64)"),
-            )
     except Exception as e:
         return False, False, False, f"Forward pass failed: {e}"
 
-    # Output type consistency check
-    declared_type = getattr(module, "PLUGIN_OUTPUT_TYPE", "classifier")
-    actual_dims = len(out.shape)
-    if declared_type == "classifier" and actual_dims != 3:
+    if not isinstance(out, torch.Tensor):
         return (
-            True,
             False,
             False,
-            (
-                f"PLUGIN_OUTPUT_TYPE='classifier' but output has {actual_dims} dims "
-                f"(expected 3: [B, 256, T])"
-            ),
+            False,
+            f"Forward returned {type(out).__name__}, expected a torch.Tensor",
         )
-    if declared_type == "regressor" and actual_dims != 2:
+
+    if tuple(out.shape) != expected_shape:
         return (
-            True,
             False,
             False,
-            (
-                f"PLUGIN_OUTPUT_TYPE='regressor' but output has {actual_dims} dims "
-                f"(expected 2: [B, T])"
-            ),
+            False,
+            (f"Forward output shape {tuple(out.shape)} does not match expected {expected_shape}"),
         )
+
     output_type_ok = True
 
     # Gradient flow check

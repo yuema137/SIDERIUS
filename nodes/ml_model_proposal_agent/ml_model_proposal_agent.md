@@ -57,6 +57,7 @@
 | Field | Type | Description |
 |---|---|---|
 | `model_name` | `str` | Short, unique, snake_case identifier for the proposed model (e.g. `attn_unet`, `dilated_rnn`). MUST NOT clash with `existing_model_types`. |
+| `output_type` | `Literal["classifier", "regressor"]` | The output representation this proposal commits to — an **independent design dimension** from the backbone and the loss family (V21 PR A). `classifier` → `[B, 256, T]`, legal losses `ce`/`focal`/`focal_cw`. `regressor` → `[B, T]`, legal loss `smooth_l1`. **Never inferred from `loss_type`** — the pair is checked by `validate_output_loss_compatibility` in `ml_models/models_format_sandbox.py`, which is the single production authority and is consumed by both the built-in path (`ExperimentConfig`) and the generated-plugin path (`TidmadSandbox._validate_configs`). Transported verbatim to `ImplementorInput.output_type`, which decides the emitted `PLUGIN_OUTPUT_TYPE`. Defaults to `classifier` for legacy reads only. |
 | `model_description` | `str` | One paragraph plain-English description of the architecture and why it is expected to improve on the current best. Read by `ml_model_implementor`. |
 | `mathematical_definition` | `str` | Precise layer-by-layer specification: layer types, dimensions, activation functions, skip connections, etc. Must be concrete enough for an LLM to implement directly. Read by `ml_model_implementor`. |
 | `motivation` | `str` | Why this specific architecture addresses the bottlenecks. References `take_home_message` directly. |

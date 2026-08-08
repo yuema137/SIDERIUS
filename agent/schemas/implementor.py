@@ -180,6 +180,16 @@ class ImplementorInput(BaseModel):
     model_name: str = Field(
         description="snake_case model type key. Used as the filename and PLUGIN_MODEL_TYPE constant.",
     )
+    output_type: Literal["classifier", "regressor"] = Field(
+        default="classifier",
+        description="Output representation the proposal committed to, carried "
+        "verbatim from ``ProposalOutput.output_type``. Decides the emitted "
+        "``PLUGIN_OUTPUT_TYPE`` constant and the forward-contract comment, and "
+        "therefore which shape the generated head must produce "
+        "(``classifier`` -> [B, C, T], ``regressor`` -> [B, T]).\n"
+        "Never inferred from the loss family. The default is a legacy read for "
+        "fixtures; the production protocol always sets it explicitly.",
+    )
     model_description: str = Field(
         description="Plain-English description of the architecture. Injected into the LLM prompt.",
     )

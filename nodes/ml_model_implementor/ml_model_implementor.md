@@ -139,7 +139,14 @@ The plugin + description + test paths are **deliberately independent of `storage
 - **Self-correction repair loop.** On any validation failure, the implementor calls `bridge.generate(IMPLEMENTOR_REPAIR_PROMPT, ...)` with the previous code + the validation error message — up to `inp.max_retries` times (default 2). Total worst-case LLM calls per run: 1 reasoning + 1 commit + 2 repairs = 4.
 - **Common-mistake patching** (`_patch_common_mistakes`). Before validation, known LLM quirks get rewritten in-place: `self.embedding(input)` → `self.embedding(x)` (Python keyword collision), trailing `$` artefacts stripped, etc. This avoids burning a repair slot on cosmetic LLM errors.
 - **Plugin contract enforced by `PLUGIN_TEMPLATE`.** Every generated plugin defines exactly four module-level attributes — `PLUGIN_MODEL_TYPE`, `PLUGIN_CONFIG_CLASS`, `PLUGIN_MODEL_CLASS`, `PLUGIN_OUTPUT_TYPE` — in that order. The plugin loader (`core/plugin_loader.py`) refuses to register a plugin missing any of these. The LLM never writes the contract; only the section bodies.
-- **Forward-pass shape contract**: `[B, T] int → [B, 256, T] float` (256-class per-timestep classification head). Hardcoded into `TEST_TEMPLATE.test_forward_shape` and asserted in `_smoke_test_plugin`. Any architecture that fails this shape contract fails the smoke test and triggers a repair.
+- **Forward-pass shape contract follows the declared `output_type`** (V21 PR A). The input is always `[B, T] int`; the output depends on the contract the proposal committed to:
+
+  | `ImplementorInput.output_type` | emitted `PLUGIN_OUTPUT_TYPE` | forward output |
+  |---|---|---|
+  | `classifier` (default) | `"classifier"` | `[B, 256, T]` float — per-timestep class logits |
+  | `regressor` | `"regressor"` | `[B, T]` float — the denoised waveform |
+
+  Derived once by `_render_output_contract` and used in three places, which must stay in step: the emitted `PLUGIN_OUTPUT_TYPE` constant and forward-contract comment, `TEST_TEMPLATE.test_forward_shape` (which reads `PLUGIN_OUTPUT_TYPE` from the generated plugin), and `_smoke_test_plugin`. An architecture that fails the shape its own declaration requires fails the smoke test and triggers a repair. The default is a legacy read; a production proposal always sets `output_type` explicitly.
 - **`reference_code` carries ancestor source verbatim.** When `inherited_components` claims a primitive from a prior model (e.g. "spectral_conv from gated_fno"), the workflow loads the source of `gated_fno.py` into `reference_code["gated_fno"]` and injects it into the reasoning prompt. The downstream validator's inheritance check verifies the claimed primitive's regex actually matches the new plugin's source.
 
 ## Dependencies

@@ -38,6 +38,7 @@ A JSON object with these fields:
 ```json
 {
   "model_name": "short_snake_case_key (must NOT be any existing model type)",
+  "output_type": "classifier | regressor — REQUIRED. See 'Output contract' above. classifier -> [B, 256, T] with ce/focal/focal_cw; regressor -> [B, T] with smooth_l1. Independent of loss_type: state it explicitly, never infer it.",
   "model_description": "One paragraph describing the architecture and why it addresses the DiscoveryMemo's hypothesis.",
   "mathematical_definition": "Abstract architectural framework: key computational stages, mathematical operations, data flow. Do NOT include concrete dimensions — those belong in baseline_config.",
   "motivation": "Why this architecture addresses the bottleneck identified in the DiscoveryMemo. Must reference proposed_change and causal_hypothesis verbatim.",
@@ -58,6 +59,26 @@ A JSON object with these fields:
   "custom_loss_spec": null   // ⚠ SHAPE-CRITICAL — see "Loss field shapes" below
 }
 ```
+
+### Output contract — an independent design dimension
+
+`output_type` and `loss_type` are **two separate decisions**. Choose the output
+representation your architecture actually needs, then a loss compatible with it:
+
+| `output_type`  | forward output      | legal `loss_type`        |
+|----------------|---------------------|--------------------------|
+| `"classifier"` | `[B, 256, T]` float | `ce`, `focal`, `focal_cw` |
+| `"regressor"`  | `[B, T]` float      | `smooth_l1`               |
+
+Both are fully supported. Regression predicts the denoised waveform directly;
+classification predicts a distribution over 256 amplitude bins per timestep.
+Neither is the default choice — pick the one your mechanism argues for, and say
+why in `motivation`.
+
+The pair is checked before training: an inconsistent combination
+(e.g. `"regressor"` with `focal`) is rejected, and the generated model must
+actually emit the shape it declares. `custom` losses are compatible with either
+contract — the loss plugin itself must respect the shape.
 
 ### Loss field shapes — read carefully before emitting
 

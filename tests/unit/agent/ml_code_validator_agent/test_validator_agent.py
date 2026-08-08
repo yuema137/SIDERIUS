@@ -463,6 +463,153 @@ class TestCheckInstantiationAndGradient:
 
 
 # ---------------------------------------------------------------------------
+# Declared output contract (V21 PR A2)
+# ---------------------------------------------------------------------------
+#
+# MUTATION TARGET: the expected forward shape must be DERIVED from the
+# plugin's declared PLUGIN_OUTPUT_TYPE, not hardcoded to the classifier
+# contract. Before PR A2 the probe required (1, 256, 64) unconditionally and
+# only then read the declaration, so:
+#
+#   * a regressor emitting [B, T] was rejected before its declaration was
+#     read  -> ``test_declared_regressor_with_2d_output_passes`` FAILS on the
+#     pre-PR-A2 code with
+#     "Forward output shape (1, 64) does not match expected (1, 256, 64)";
+#   * BOTH arms of the old declared-vs-actual check were unreachable — a
+#     shape equal to (1, 256, 64) is 3-dim by construction, so the
+#     classifier arm could never fire either.
+#
+# Reverting the derivation turns the regressor test red. That is the
+# acceptance signal for the whole of PR A.
+
+
+def _regressor_plugin_src(declared: str = '"regressor"') -> str:
+    """A plugin whose forward returns [B, T] — the regression contract."""
+    return textwrap.dedent(f"""\
+        import torch
+        import torch.nn as nn
+        from pydantic import BaseModel, Field
+
+        PLUGIN_MODEL_TYPE = "regressor_model"
+        PLUGIN_OUTPUT_TYPE = {declared}
+
+        class RegressorConfig(BaseModel):
+            depth: int = Field(default=2, ge=1)
+
+        class RegressorModel(nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.emb = nn.Embedding(256, 32)
+                self.proj = nn.Conv1d(32, 1, kernel_size=1)
+
+            def forward(self, x):
+                out = self.emb(x).permute(0, 2, 1)   # [B, 32, T]
+                return self.proj(out).squeeze(1)      # [B, T]
+
+        PLUGIN_CONFIG_CLASS = RegressorConfig
+        PLUGIN_MODEL_CLASS = RegressorModel
+    """)
+
+
+class TestDeclaredOutputContract:
+    def test_declared_regressor_with_2d_output_passes(self, tmp_path):
+        """THE acceptance signal for PR A: a plugin declaring ``regressor``
+        and emitting [B, T] validates. This test fails on pre-PR-A2 code."""
+        path = tmp_path / "regressor_plugin.py"
+        path.write_text(_regressor_plugin_src())
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
+
+    def test_declared_classifier_with_3d_output_passes(self, tmp_path):
+        """Parity: the classifier contract is unaffected by PR A2."""
+        path = tmp_path / "classifier_plugin.py"
+        path.write_text(
+            VALID_PLUGIN_SRC.replace(
+                'PLUGIN_MODEL_TYPE = "test_model"',
+                'PLUGIN_MODEL_TYPE = "test_model"\nPLUGIN_OUTPUT_TYPE = "classifier"',
+            )
+        )
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
+
+    def test_missing_declaration_is_read_as_classifier(self, tmp_path):
+        """Legacy-read compatibility: plugins predating the declaration keep
+        validating. A NEW plugin must declare explicitly — that is enforced on
+        the producer side, not here."""
+        path = tmp_path / "legacy_plugin.py"
+        path.write_text(VALID_PLUGIN_SRC)  # no PLUGIN_OUTPUT_TYPE at all
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
+
+    def test_declared_regressor_but_3d_output_is_refused(self, tmp_path):
+        """Declaration and reality must agree — the dangerous case: metadata
+        says regressor, the model still emits the classifier shape."""
+        src = VALID_PLUGIN_SRC.replace(
+            'PLUGIN_MODEL_TYPE = "test_model"',
+            'PLUGIN_MODEL_TYPE = "test_model"\nPLUGIN_OUTPUT_TYPE = "regressor"',
+        )
+        path = tmp_path / "lying_regressor.py"
+        path.write_text(src)
+        inst_ok, _grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert inst_ok is False
+        assert otype_ok is False
+        assert err is not None
+        # names the actual shape and the shape its own declaration requires
+        assert "(1, 256, 64)" in err and "(1, 64)" in err
+
+    def test_declared_classifier_but_2d_output_is_refused(self, tmp_path):
+        """The mirror case."""
+        path = tmp_path / "lying_classifier.py"
+        path.write_text(_regressor_plugin_src(declared='"classifier"'))
+        inst_ok, _grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert inst_ok is False
+        assert otype_ok is False
+        assert err is not None
+        assert "(1, 64)" in err and "(1, 256, 64)" in err
+
+    def test_unknown_declaration_fails_closed(self, tmp_path):
+        """An unrecognised contract must NOT be coerced to classifier — that
+        is how a metadata defect becomes wrong scientific semantics."""
+        path = tmp_path / "nonsense_contract.py"
+        path.write_text(_regressor_plugin_src(declared='"nonsense"'))
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
+        assert err is not None
+        assert "nonsense" in err
+        assert "classifier" in err and "regressor" in err
+
+    def test_non_tensor_output_is_refused(self, tmp_path):
+        """A model returning a non-tensor must fail with a typed message
+        rather than raising out of the validator."""
+        src = textwrap.dedent("""\
+            import torch.nn as nn
+            from pydantic import BaseModel
+
+            PLUGIN_MODEL_TYPE = "tuple_model"
+
+            class TupleConfig(BaseModel):
+                pass
+
+            class TupleModel(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.lin = nn.Linear(4, 4)
+
+                def forward(self, x):
+                    return ("not", "a", "tensor")
+
+            PLUGIN_CONFIG_CLASS = TupleConfig
+            PLUGIN_MODEL_CLASS = TupleModel
+        """)
+        path = tmp_path / "tuple_out.py"
+        path.write_text(src)
+        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
+        assert err is not None
+        assert "tuple" in err.lower()
+
+
+# ---------------------------------------------------------------------------
 # Fixtures for full run tests
 # ---------------------------------------------------------------------------
 

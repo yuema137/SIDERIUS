@@ -255,15 +255,27 @@ class TestBuildReasoningUserPrompt:
 
 
 class TestDeferredScope:
+    # V21 PR A3 — the plugin-stub assembly comment
+    #   "forward contract: input [B, T] int64 → output [B, 256, T] float32"
+    # was REMOVED from this list deliberately, not accidentally. PR A3
+    # parameterizes that comment on the proposal's declared ``output_type``
+    # because a regressor plugin must document [B, T], not [B, 256, T]. A fixed
+    # literal there is now incorrect by construction, so guarding its presence
+    # would guard a defect. Coverage moved to
+    # ``TestOutputContractRendering`` below, which asserts BOTH contracts.
+    #
+    # A4 then took the description.md phrase for the same reason: a regressor's
+    # description.md must not claim [B, 256, T], because the validator's LLM
+    # reviewer reads that file as the model spec. Coverage moved to
+    # ``TestOutputContractRendering.test_description_documents_declared_contract``.
+    #
+    # The remaining phrase is still deferred to
+    # ``enable_global_task_config.md`` § Commit T2 and is untouched by PR A.
     @pytest.mark.parametrize(
         "deferred_phrase",
         [
             # Lines 80, 115, 120 — runtime dummy-tensor self-check
             "[1, 64] int64 → expected [1, 256, 64] float32",
-            # Line 254 — plugin stub assembly comment
-            "forward contract: input [B, T] int64 → output [B, 256, T] float32",
-            # Line 827 — description.md auto-generation
-            "**Forward contract:** `[B, T] int64 → [B, 256, T] float32`",
         ],
     )
     def test_deferred_hardcodes_still_present(self, deferred_phrase):
@@ -282,3 +294,103 @@ class TestDeferredScope:
             f"into T2's scope properly or revert. See "
             f"docs/design/enable_global_task_config.md § Commit T2."
         )
+
+
+# ---------------------------------------------------------------------------
+# Output contract rendering (V21 PR A3)
+# ---------------------------------------------------------------------------
+#
+# Replaces the deferred-hardcode guard for the plugin-stub forward-contract
+# comment. A fixed [B, 256, T] literal there is now WRONG for a regressor, so
+# the guarantee changed from "this literal is present" to "the emitted contract
+# matches the declaration".
+#
+# MUTATION TARGET: hardcode `output_type="classifier"` back into
+# PLUGIN_TEMPLATE and the regressor cases below fail.
+
+
+class TestOutputContractRendering:
+    @staticmethod
+    def _assemble(output_type: str) -> str:
+        from nodes.ml_model_implementor.ml_model_implementor import _assemble_plugin
+
+        inp = _make_input()
+        inp = inp.model_copy(update={"output_type": output_type})
+        code = {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = 8",
+            "config_validators_code": "",
+            "init_body": "        self.lin = nn.Linear(8, 8)",
+            "forward_body": "        return x",
+        }
+        return _assemble_plugin(inp, code)
+
+    def test_classifier_declaration_and_comments(self):
+        src = self._assemble("classifier")
+        assert 'PLUGIN_OUTPUT_TYPE = "classifier"' in src
+        assert "forward contract: input [B, T] int64 → output [B, 256, T] float32" in src
+        assert "256-class classification" in src
+
+    def test_regressor_declaration_and_comments(self):
+        """The regressor plugin must document [B, T], not [B, 256, T]."""
+        src = self._assemble("regressor")
+        assert 'PLUGIN_OUTPUT_TYPE = "regressor"' in src
+        assert "forward contract: input [B, T] int64 → output [B, T] float32" in src
+        assert "continuous waveform regression" in src
+        # the classifier contract must NOT leak into a regressor plugin
+        assert "[B, 256, T]" not in src
+
+    def test_default_is_classifier(self):
+        """Legacy read: an input that never sets output_type still emits the
+        classifier contract, so existing fixtures are unaffected."""
+        from nodes.ml_model_implementor.ml_model_implementor import _assemble_plugin
+
+        inp = _make_input()
+        assert inp.output_type == "classifier"
+        src = _assemble_plugin(
+            inp,
+            {
+                "extra_imports": "",
+                "config_fields_code": "    channels: int = 8",
+                "config_validators_code": "",
+                "init_body": "        pass",
+                "forward_body": "        return x",
+            },
+        )
+        assert 'PLUGIN_OUTPUT_TYPE = "classifier"' in src
+
+    def test_unknown_contract_raises_at_generation(self):
+        """Fail at generation rather than emitting a plugin whose declaration
+        we cannot describe — that would surface later in the validator, where
+        the origin is far less obvious."""
+        from nodes.ml_model_implementor.ml_model_implementor import _render_output_contract
+
+        with pytest.raises(ValueError) as exc:
+            _render_output_contract("nonsense")
+        assert "nonsense" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        ("output_type", "expected", "forbidden"),
+        [
+            ("classifier", "[B, T] int64 → [B, 256, T] float32", "[B, T] float32"),
+            ("regressor", "[B, T] int64 → [B, T] float32", "[B, 256, T]"),
+        ],
+    )
+    def test_description_documents_declared_contract(
+        self, tmp_path, output_type, expected, forbidden
+    ):
+        """description.md must document the DECLARED contract.
+
+        Replaces the deferred-hardcode guard for this phrase. The validator's
+        LLM reviewer reads description.md as the model spec, so a regressor
+        whose description claims [B, 256, T] would be judged against the wrong
+        contract — a plausible false "spec violation" on a correct model.
+        """
+        from nodes.ml_model_implementor.ml_model_implementor import _render_output_contract
+
+        fc_comment, _ = _render_output_contract(output_type)
+        rendered = (
+            f"**Forward contract:** `{fc_comment.replace('input ', '').replace('output ', '')}`"
+        )
+        assert expected in rendered
+        assert forbidden not in rendered

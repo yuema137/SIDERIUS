@@ -121,10 +121,17 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
         with torch.no_grad():
             out = model(x)
 
-        # Shape check
-        expected = (1, 256, T)
+        # Shape check — against the plugin's DECLARED contract (V21 PR A3).
+        # A regressor must not be judged against the classifier shape; that
+        # would reject a correct model in the implementor's own self-check,
+        # before the validator ever sees it.
+        declared = getattr(mod, "PLUGIN_OUTPUT_TYPE", "classifier")
+        expected = (1, 256, T) if declared == "classifier" else (1, T)
         if out.shape != expected:
-            return f"Forward pass shape mismatch: expected {expected}, got {tuple(out.shape)}"
+            return (
+                f"Forward pass shape mismatch for PLUGIN_OUTPUT_TYPE={declared!r}: "
+                f"expected {expected}, got {tuple(out.shape)}"
+            )
 
         # NaN check
         if torch.isnan(out).any():
@@ -256,13 +263,48 @@ class {ModelClass}(nn.Module):
 {init_body}
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # forward contract: input [B, T] int64 → output [B, 256, T] float32
+        # forward contract: {forward_contract_comment}
 {forward_body}
 
 
 PLUGIN_MODEL_CLASS = {ModelClass}
-PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification
+PLUGIN_OUTPUT_TYPE = "{output_type}"  # {output_type_comment}
 """
+
+#: Per-contract comment text rendered into the generated plugin (V21 PR A3).
+#: Keyed by ``ImplementorInput.output_type``. Both entries must stay in step
+#: with the shapes ``ml_code_validator_agent`` derives from the same
+#: declaration, or a generated plugin would document one contract and be
+#: validated against another.
+_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
+    "classifier": (
+        "input [B, T] int64 → output [B, 256, T] float32",
+        "[B, 256, T] → 256-class classification",
+    ),
+    "regressor": (
+        "input [B, T] int64 → output [B, T] float32",
+        "[B, T] → continuous waveform regression",
+    ),
+}
+
+
+def _render_output_contract(output_type: str) -> tuple[str, str]:
+    """Return (forward-contract comment, PLUGIN_OUTPUT_TYPE comment).
+
+    Raises:
+        ValueError: on an unrecognised contract. Failing here is deliberate —
+            emitting a plugin whose declaration we cannot describe would push
+            the defect downstream into the validator, where its origin is far
+            less obvious.
+    """
+    try:
+        return _OUTPUT_CONTRACT_COMMENTS[output_type]
+    except KeyError:
+        raise ValueError(
+            f"Unknown output_type {output_type!r}; expected one of "
+            f"{sorted(_OUTPUT_CONTRACT_COMMENTS)}"
+        ) from None
+
 
 TEST_TEMPLATE = """\
 import torch
@@ -271,7 +313,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
-from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS
+from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_TYPE
 
 
 def test_forward_shape():
@@ -281,9 +323,14 @@ def test_forward_shape():
     x = torch.randint(0, 256, (2, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
-    assert out.shape == (2, 256, config.segmentation_size), (
-        f"Expected (2, 256, {{config.segmentation_size}}), got {{out.shape}}"
+    # Expected shape follows the plugin's DECLARED contract, so a regressor
+    # is not judged against the classifier shape (V21 PR A3).
+    expected = (
+        (2, 256, config.segmentation_size)
+        if PLUGIN_OUTPUT_TYPE == "classifier"
+        else (2, config.segmentation_size)
     )
+    assert out.shape == expected, f"Expected {{expected}}, got {{out.shape}}"
 
 
 def test_forward_no_nan():
@@ -1217,6 +1264,11 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     if config_validators_code.strip():
         config_validators_code = textwrap.indent(textwrap.dedent(config_validators_code), "    ")
 
+    # V21 PR A3: the emitted contract follows the proposal's declared
+    # output_type. It is NEVER inferred from the loss family — that would
+    # re-couple the two design dimensions this PR separates.
+    forward_contract_comment, output_type_comment = _render_output_contract(inp.output_type)
+
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
         ModelClass=model_cls,
@@ -1227,6 +1279,9 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
         config_validators_code=config_validators_code,
         init_body=init_body,
         forward_body=forward_body,
+        output_type=inp.output_type,
+        forward_contract_comment=forward_contract_comment,
+        output_type_comment=output_type_comment,
     )
 
 
@@ -1720,10 +1775,15 @@ class MLModelImplementor:
         desc_dir = os.path.join(inp.plugin_dir, inp.model_name)
         desc_path = os.path.join(desc_dir, "description.md")
         os.makedirs(desc_dir, exist_ok=True)
+        # V21 PR A3/A4: the documented contract follows the declared output_type.
+        # A regressor's description.md claiming [B, 256, T] would mislead the
+        # validator's LLM reviewer, which reads this file as the model spec.
+        _fc_comment, _ = _render_output_contract(inp.output_type)
         description_md = (
             f"# {_class_name(inp.model_name)}\n\n"
             f"## Overview\n\n{inp.model_description}\n\n"
-            f"**Forward contract:** `[B, T] int64 → [B, 256, T] float32`\n\n"
+            f"**Forward contract:** `{_fc_comment.replace('input ', '').replace('output ', '')}`"
+            f" ({inp.output_type})\n\n"
             f"## Architecture\n\n{inp.mathematical_definition}\n\n"
             f"## Baseline Configuration\n\n"
             f"```json\n{json.dumps(inp.baseline_config, indent=2)}\n```\n"

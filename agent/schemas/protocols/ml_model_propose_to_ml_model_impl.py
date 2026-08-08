@@ -35,6 +35,11 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
     """
     return ImplementorInput(
         model_name=output.model_name,
+        # V21 PR A3: the output contract must survive this hop. If it is dropped
+        # here, a proposal declaring `regressor` silently produces a classifier
+        # plugin — "produced but not delivered", the exact failure class V20
+        # kept hitting. tests/unit/agent/protocols/ asserts this hop explicitly.
+        output_type=output.output_type,
         model_description=output.model_description,
         mathematical_definition=output.mathematical_definition,
         baseline_config=output.baseline_config,

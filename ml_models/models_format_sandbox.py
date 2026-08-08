@@ -325,6 +325,82 @@ def get_config_class(model_type: str) -> type[BaseConfig] | None:
 # Agents must not modify this dict directly; use extend_registries() instead.
 PLUGIN_CONFIG_REGISTRY: dict = {}
 
+
+# ==========================================
+# Output-contract / loss compatibility — THE single authority
+# ==========================================
+
+#: Losses that consume per-timestep class logits, [B, C, T].
+CLASSIFICATION_LOSSES: frozenset[str] = frozenset({"ce", "focal", "focal_cw"})
+
+#: Losses that consume a continuous waveform, [B, T].
+REGRESSION_LOSSES: frozenset[str] = frozenset({"smooth_l1"})
+
+
+def validate_output_loss_compatibility(
+    output_type: str,
+    loss_type: str,
+    *,
+    model_type: str,
+) -> None:
+    """Raise ``ValueError`` if an output contract and a loss are incompatible.
+
+    **This function is THE production authority for model/loss compatibility.**
+    Both production paths are its consumers and neither may re-implement the
+    rule:
+
+    ==========================  =========================================
+    consumer                    path
+    ==========================  =========================================
+    ``ExperimentConfig``        built-in models
+    ``SandboxExecutor.
+    _validate_configs``         agent-generated plugin models
+    ==========================  =========================================
+
+    History (V21 PR A). Two defects motivated this shape:
+
+    * ``LossConfig.check_compatibility`` was a SECOND, contradictory rule
+      keyed on a model-name literal. It had no production callers and was
+      deleted in A1.
+    * The surviving rule lived inside ``ExperimentConfig``, which
+      ``_validate_configs`` **bypasses for plugin models** — so the only kind
+      of model the agent actually invents was governed by no rule at all. A
+      registered plugin declaring ``classifier`` paired with ``smooth_l1``
+      was accepted. A2b extracted this function and gave that branch a call
+      site.
+
+    The lesson generalises: a rule existing on one production branch is never
+    evidence that it governs the other.
+
+    ``hybrid`` (e.g. ``fcnet``) accepts any loss. Loss types in neither set —
+    notably ``custom`` — are deliberately permitted for every contract: the
+    plugin's own forward pass raises at training time if its shape contract is
+    violated, which ``LossConfig`` cannot know in advance.
+
+    Args:
+        output_type: ``"classifier"``, ``"regressor"`` or ``"hybrid"``.
+        loss_type: a ``LossConfig.loss_type`` value.
+        model_type: used only to build a readable error message.
+
+    Raises:
+        ValueError: if the pair is incompatible.
+    """
+    if output_type == "hybrid":
+        return
+
+    if loss_type in REGRESSION_LOSSES and output_type == "classifier":
+        raise ValueError(
+            f"Incompatible: '{model_type}' is a classifier (output [B, 256, T]) "
+            f"— use 'ce' or 'focal', not 'smooth_l1'."
+        )
+
+    if loss_type in CLASSIFICATION_LOSSES and output_type == "regressor":
+        raise ValueError(
+            f"Incompatible: '{model_type}' is a regressor (output [B, T]) "
+            f"— use 'smooth_l1', not '{loss_type}'."
+        )
+
+
 # ==========================================
 # Loss Configs
 # ==========================================
@@ -369,17 +445,16 @@ class LossConfig(BaseModel):
         ),
     )
 
-    def check_compatibility(self, model_type: str):
-        """Called by Executor to prevent illegal combinations."""
-        if self.loss_type == "smooth_l1" and model_type != "fcnet":
-            raise ValueError(
-                f"Incompatible Pair: 'smooth_l1' is for waveform regression (AE/fcnet). "
-                f"Model '{model_type}' is a classifier and requires 'ce' or 'focal' ."
-            )
-        # ``custom`` defers compatibility to the plugin itself — LossConfig
-        # has no way to know what shape contract the plugin satisfies. The
-        # plugin's forward pass will raise on shape mismatch at training
-        # time if the combination is illegal.
+    # NOTE (V21 PR A, 2026-08-07): ``check_compatibility`` was deleted here.
+    # It was a name-literal gate (``model_type != "fcnet"``) with ZERO
+    # production callers — only its own definition and one unit test — whose
+    # docstring falsely claimed the Executor called it, and whose rule
+    # CONTRADICTED the live authority: it rejected ``regressor + smooth_l1``,
+    # which ``ExperimentConfig.validate_architecture_loss_match`` correctly
+    # permits. Model/loss compatibility is decided in exactly one place; see
+    # that validator. ``custom`` still defers to the plugin, which the live
+    # gate expresses by falling through for any non-classification,
+    # non-``smooth_l1`` loss type.
 
     @model_validator(mode="after")
     def enforce_custom_loss_name(self) -> "LossConfig":
@@ -485,6 +560,14 @@ class ExperimentConfig(BaseModel):
         """
         Enforce the physical constraint: loss type must match model output type.
 
+        **This is the SINGLE production authority for model/loss
+        compatibility.** Do not add a second compatibility rule elsewhere —
+        V21 PR A deleted exactly such a duplicate (``LossConfig.
+        check_compatibility``), which had no production callers and whose
+        name-keyed rule contradicted this one. Two answers to the same
+        question is not a doubled safeguard; it guarantees one of them is
+        wrong and nobody knows which.
+
         - Classifiers ([B, 256, T] output) use ce, focal, focal_cw.
         - Regressors ([B, T] output) use smooth_l1.
 
@@ -494,23 +577,12 @@ class ExperimentConfig(BaseModel):
         """
         from ml_models.plugin_loader import get_output_type
 
-        output_type = get_output_type(self.model_type)
-        l_type = self.loss_config.loss_type
-
-        # "hybrid" models (e.g. fcnet) accept any loss type
-        if output_type == "hybrid":
-            return self
-
-        if l_type == "smooth_l1" and output_type == "classifier":
-            raise ValueError(
-                f"Incompatible: '{self.model_type}' is a classifier (output [B, 256, T]) "
-                f"— use 'ce' or 'focal', not 'smooth_l1'."
-            )
-
-        if l_type in ["ce", "focal", "focal_cw"] and output_type == "regressor":
-            raise ValueError(
-                f"Incompatible: '{self.model_type}' is a regressor (output [B, T]) "
-                f"— use 'smooth_l1', not '{l_type}'."
-            )
-
+        # Delegate to the shared authority — do not inline the rule here.
+        # This is the BUILT-IN consumer; the generated-plugin consumer is
+        # SandboxExecutor._validate_configs. Both must call the same function.
+        validate_output_loss_compatibility(
+            get_output_type(self.model_type),
+            self.loss_config.loss_type,
+            model_type=self.model_type,
+        )
         return self

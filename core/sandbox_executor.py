@@ -23,6 +23,7 @@ from ml_models.models_format_sandbox import (
     LossConfig,
     TrainConfig,
     get_config_class,
+    validate_output_loss_compatibility,
 )
 
 
@@ -1098,7 +1099,26 @@ class TidmadSandbox:
                 # subprocess can look up the correct model class.
                 validated_m["model_type"] = model_type
                 validated_t = TrainConfig(**t_cfg).model_dump()
-                validated_l = LossConfig(**l_cfg).model_dump()
+                loss_cfg = LossConfig(**l_cfg)
+
+                # V21 PR A2b — model/loss compatibility on the GENERATED-MODEL
+                # branch. Before this call, ExperimentConfig (which carries the
+                # rule) was bypassed here, so the only kind of model the agent
+                # actually invents was governed by no compatibility rule at
+                # all: a plugin declaring `classifier` paired with `smooth_l1`
+                # was accepted and failed later, deep in the loss.
+                #
+                # This calls the SHARED authority. Do not inline the rule —
+                # a second copy is the defect A1 deleted.
+                from ml_models.plugin_loader import get_output_type
+
+                validate_output_loss_compatibility(
+                    get_output_type(model_type),
+                    loss_cfg.loss_type,
+                    model_type=model_type,
+                )
+
+                validated_l = loss_cfg.model_dump()
                 return validated_m, validated_t, validated_l
             except Exception as e:
                 raise ValueError(f"Plugin Experiment Configuration Rejected: {e!s}") from e
