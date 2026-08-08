@@ -164,7 +164,7 @@ def estimate_proposal_time(
     if sample_set is None:
         sample_set = _synthesise_default_sample_set(trial_portion=trial_portion, scope=data_scope)
 
-    loss_type = loss_config.get("loss_type", "ce")
+    loss_type = _training_est.resolve_loss_type(loss_config)
 
     # All three estimators run in static-formula mode: ms_per_step=None
     # + gpu_name=None → training estimator skips MODEL_REGISTRY.

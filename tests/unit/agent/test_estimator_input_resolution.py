@@ -80,6 +80,83 @@ class TestResolutionOrder:
         assert resolve_train_field({"epochs": 3}, "epochs", safety_margin=1) == 3
 
 
+class TestLossType:
+    """The last member of the defect class, found by the §22 final audit.
+
+    ``LossConfig`` declares ``"focal"``; every estimator substituted
+    ``"ce"``. Unlike the VRAM sites this one is **reachable**: the warm-up
+    builds the real criterion and the real model from it, and ``fcnet``'s
+    head shape depends on it, so both the measured ms/step and the
+    parameter count were taken for a configuration the run would not use.
+    """
+
+    def test_an_absent_loss_type_resolves_to_the_declared_default(self):
+        from agent.skills.training_skill.estimator import resolve_loss_type
+        from ml_models.models_format_sandbox import LossConfig
+
+        assert LossConfig.model_fields["loss_type"].default == "focal"
+        assert resolve_loss_type({}) == "focal"
+        assert resolve_loss_type({"loss_type": None}) == "focal"
+        assert resolve_loss_type({"loss_type": ""}) == "focal"
+
+    def test_the_local_literal_matches_LossConfigs_declaration(self):
+        """The estimator restates the legal set; it must not drift from it.
+
+        ``LossTypeName`` is declared in the estimator rather than imported,
+        to keep the module's lazy-import discipline. That is a duplicated
+        fact, so it needs the test that duplication always needs — the
+        alternative is a loss the schema accepts and the resolver silently
+        rejects into the ``"ce"`` margin.
+        """
+        from typing import get_args
+
+        from agent.skills.training_skill.estimator import _LEGAL_LOSS_TYPES
+        from ml_models.models_format_sandbox import LossConfig
+
+        declared = LossConfig.model_fields["loss_type"].annotation
+        assert set(_LEGAL_LOSS_TYPES) == set(get_args(declared))
+
+    def test_an_explicit_loss_type_wins(self):
+        from agent.skills.training_skill.estimator import resolve_loss_type
+
+        assert resolve_loss_type({"loss_type": "ce"}) == "ce"
+        assert resolve_loss_type({"loss_type": "smooth_l1"}) == "smooth_l1"
+
+    def test_the_correction_is_the_conservative_direction(self):
+        """``focal`` adds the one-hot term that ``ce`` omits.
+
+        Asserted through the public estimate, so it tracks what production
+        computes rather than a private helper.
+        """
+        from agent.skills.training_skill.estimator import estimate_peak_bytes
+
+        absent = estimate_peak_bytes("punet", {}, {"batch_size": 1}, {}, 10**6)
+        as_ce = estimate_peak_bytes("punet", {}, {"batch_size": 1}, {"loss_type": "ce"}, 10**6)
+        assert absent["breakdown"]["focal_onehot_bytes"] > 0
+        assert as_ce["breakdown"]["focal_onehot_bytes"] == 0
+        assert absent["total_bytes"] > as_ce["total_bytes"]
+
+    def test_every_estimator_entry_point_resolves_it_the_same_way(self):
+        """Reachability across all four sites, by source.
+
+        A per-site literal is exactly how the 40000/1000/0 split for
+        ``segmentation_size`` arose; this fails if one site drifts back.
+        """
+        import pathlib
+
+        repo = pathlib.Path(__file__).resolve().parents[3]
+        for rel in (
+            "agent/skills/training_skill/estimator.py",
+            "agent/skills/evaluate_time_skill/wrapper.py",
+            "agent/utils/proposer_preflight.py",
+        ):
+            text = (repo / rel).read_text(encoding="utf-8")
+            assert 'loss_config.get("loss_type", "ce")' not in text, (
+                f"{rel} still substitutes 'ce' for an absent loss_type, which "
+                "contradicts LossConfig's declared 'focal'"
+            )
+
+
 class TestUnusableValues:
     """Invalid input must not silently become the margin, and must not crash.
 

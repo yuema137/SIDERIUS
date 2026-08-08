@@ -338,7 +338,7 @@ def _measure_ms_per_step(
 
         seg_size = int(model_config["segmentation_size"])
         batch_size = int(train_config.get("batch_size", 1))
-        loss_type = loss_config.get("loss_type", "ce")
+        loss_type = _training_est.resolve_loss_type(loss_config)
 
         # Pick a minimal slice of the sample_set large enough for the required batches.
         # Both early returns must obey the declared ``tuple[float | None, dict]``
@@ -638,7 +638,7 @@ def run_skill(sandbox, **kwargs) -> dict:
     )
     batch_size = int(train_config.get("batch_size", 1))
     epochs = _training_est.resolve_train_field(train_config, "epochs", safety_margin=1)
-    loss_type = loss_config.get("loss_type", "ce")
+    loss_type = _training_est.resolve_loss_type(loss_config)
 
     print(
         f"\n>>> [Skill: TimeEval] Checking wall-time for {str(model_type).upper()} "

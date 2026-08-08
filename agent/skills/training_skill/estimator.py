@@ -41,7 +41,7 @@ See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 2.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -55,6 +55,19 @@ import torch
 
 _BYTES_F32 = 4
 _BYTES_I64 = 8
+
+# Mirrors ``LossConfig.loss_type`` (models_format_sandbox.py:458). Declared
+# here rather than imported so this module keeps its lazy-import discipline
+# — a top-level import of the sandbox config module would pull torch model
+# code into every estimator caller.
+LossTypeName = Literal["focal", "focal_cw", "ce", "smooth_l1", "custom"]
+_LEGAL_LOSS_TYPES: tuple[LossTypeName, ...] = (
+    "focal",
+    "focal_cw",
+    "ce",
+    "smooth_l1",
+    "custom",
+)
 
 
 def _output_contract(model_type: str) -> str:
@@ -177,6 +190,43 @@ def resolve_train_field(train_config: dict[str, Any], field: str, *, safety_marg
     if declared is not None and _usable(declared):
         return int(declared)
     return safety_margin
+
+
+def resolve_loss_type(loss_config: dict[str, Any]) -> LossTypeName:
+    """The loss the run will actually use, for an absent ``loss_type``.
+
+    V21 PR B1, closing the last member of the config-default vs
+    estimator-fallback class found by the §22 final audit.
+    ``LossConfig`` declares ``"focal"``; every estimator substituted
+    ``"ce"``, so a plan omitting the key was priced — and warmed up — for
+    a different loss than the one it would train with.
+
+    Reachable at three sites, not merely latent: the warm-up builds the
+    real criterion and the real model from this value
+    (``evaluate_time_skill/wrapper.py:385``), and ``fcnet``'s head shape
+    depends on it, so both the measured ms/step and the parameter count
+    were being taken for the wrong configuration.
+
+    Direction: ``"focal"`` adds the ``[B, 256, T] × 8 B`` one-hot term to
+    the memory estimate that ``"ce"`` omits, so the correction is the
+    conservative one.
+
+    The literal ``"ce"`` remains only as a last-resort margin for the
+    case where ``LossConfig`` declares nothing — it is a margin, not a
+    claim about the default.
+    """
+    supplied = loss_config.get("loss_type")
+    for name in _LEGAL_LOSS_TYPES:
+        if supplied == name:
+            return name
+
+    from ml_models.models_format_sandbox import LossConfig
+
+    declared = _declared_default(LossConfig, "loss_type")
+    for name in _LEGAL_LOSS_TYPES:
+        if declared == name:
+            return name
+    return "ce"
 
 
 def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int, int] | None:
@@ -344,7 +394,7 @@ def estimate_peak_bytes(
         model_type, model_config, "segmentation_size", safety_margin=40000
     )
     batch_size = train_config.get("batch_size", 1)  # B1: matches TrainConfig's declared 1
-    loss_type = loss_config.get("loss_type", "ce")
+    loss_type = resolve_loss_type(loss_config)
 
     # weights (4) + grads (4) + Adam m (4) + Adam v (4) = 16 bytes per param.
     model_overhead = num_params * 16 * _BYTES_F32 // 4

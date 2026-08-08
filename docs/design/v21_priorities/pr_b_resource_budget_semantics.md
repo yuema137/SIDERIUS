@@ -1408,6 +1408,68 @@ branch has fired yet**: B1 left the VRAM forecast untouched, so it
 neither "left no meaningful under-prediction" nor "left a large one". The
 rule needs B2 data to discriminate, and B2 has not run.
 
+#### E.4b Final narrow audits (mandate §22)
+
+**B1 — every remaining literal in the estimators, classified.**
+
+| literal | canonical source | verdict |
+|---|---|---|
+| `batch_size, 1` (×3) | `TrainConfig` declares `1` | **matches — not a defect** |
+| `optimizer_type, "adamw"` | `TrainConfig` declares `"adamw"` | **matches — not a defect** |
+| `loss_type, "ce"` (×3) | `LossConfig` declares **`"focal"`** | **MISMATCH — see below** |
+| `kwargs.get(...)` plumbing defaults | not config-class stand-ins | out of class |
+
+`loss_type` is the one remaining member of the defect class, and unlike
+the VRAM sites it is **reachable**:
+
+```text
+training/estimator.py:347   focal one_hot term          LATENT (orphaned fn)
+wrapper.py:341              the warm-up's criterion     ACTIVE
+wrapper.py:641              _count_params -> fcnet head ACTIVE (fcnet only)
+```
+
+Closing it is in-class under Q-B-3 and is done in the follow-up commit
+rather than left recorded — declaring the class closed while a known
+member survives is precisely the "fix the instance, leave the class
+alive" outcome the sweep was ordered to prevent.
+
+**Closed by `resolve_loss_type`**, wired at all four sites (the two
+above plus `training/estimator.py:380` and
+`proposer_preflight.py:167`). Direction: `"focal"` adds the
+`[B, 256, T] × 8 B` one-hot term that `"ce"` omits, so the correction is
+**conservative**. Mutations M11, M12a, M12b, M13 — all CAUGHT.
+
+Two implementation notes worth recording, because both were fixed rather
+than papered over:
+
+- `LossTypeName` is restated in the estimator instead of imported, to
+  keep the module's lazy-import discipline. That is a duplicated fact, so
+  `test_the_local_literal_matches_LossConfigs_declaration` asserts it
+  against `LossConfig`'s annotation — otherwise a loss the schema accepts
+  could be silently rejected into the `"ce"` margin.
+- A first attempt returned `str` and drew two pyright errors, and a
+  second used `# type: ignore`. **The ignore was removed**, not kept:
+  iterating a `tuple[LossTypeName, ...]` makes the returned value
+  genuinely typed with no suppression. Disabling a checker to make a
+  green build is exactly the practice the project rules forbid.
+
+**Mutation-harness note.** M12's first run reported `NOT-APPLIED` rather
+than a false pass, because the 4-space anchor is a *substring* of the
+8-space one and matched twice. That is the `count == 1` assertion doing
+its job — without it the harness would have mutated both sites while
+claiming to test one.
+
+**B2 — every phase admitted against a resource forecast.**
+
+| phase | realized memory | status |
+|---|---|---|
+| training | `record_phase_peak_memory("training")` | persisted, or explicit `unavailable` |
+| inference | `record_phase_peak_memory("inference")` | persisted, or explicit `unavailable` |
+| scoring | none | **not admitted against a memory forecast** — `denoising_score_skill/estimator.estimate_peak_bytes()` returns 0 VRAM by construction, so there is no forecast to compare against |
+
+No silent missing category: every phase is persisted, explicitly
+unavailable, or demonstrably not measured against a forecast.
+
 #### E.5 The three options, re-evaluated
 
 | | Semantics | What B1/B2 changed about the case for it | Cost |
