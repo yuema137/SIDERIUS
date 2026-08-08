@@ -43,19 +43,102 @@ class TestAttentionPredicate:
         charged = {mt for mt in _BUILTINS if attention_shape(mt, {}) is not None}
         assert charged == {"transformer"}
 
-    def test_builtin_attention_values_are_the_pre_c3_literals(self):
-        """Pins the fallback at ``(2, 2)`` — knowingly wrong, deliberately.
+    def test_builtin_attention_comes_from_the_declaration(self):
+        """Pins the fallback at ``(4, 2)`` — the declared value. **FU-C-1.**
 
-        ``TransformerConfig`` declares ``nhead=4``, so the shipped
-        ``.get("nhead", 2)`` under-counts attention memory by 2x when the
-        caller's dict omits the key. C3 preserved that rather than silently
-        improving it, because changing a calibrated built-in estimate is an
-        operator decision. Tracked as **FU-C-1**.
+        **Updated by V21 PR B1, not deleted.** C3 wrote this to pin the
+        defect at ``(2, 2)``: ``TransformerConfig`` declares ``nhead=4``,
+        so ``.get("nhead", 2)`` under-counted attention memory by 2x
+        whenever the caller's dict omitted the key. C3 preserved the wrong
+        value deliberately, because changing a calibrated built-in estimate
+        needed operator approval. Q-B-2 granted it, and B1 made the value
+        come from the declaration.
 
-        Fails if: someone "fixes" the under-count without the operator, or
-        the fallback drifts to some third value.
+        The guard survives the fix because the defect it protects against
+        is *drift*, not any one number: it now fails if the resolution
+        stops consulting ``TransformerConfig``, or regresses to the old
+        literal, or lands on some third value.
         """
-        assert attention_shape("transformer", {}) == (2, 2)
+        from ml_models.models_format_sandbox import get_config_class
+
+        assert attention_shape("transformer", {}) == (4, 2)
+
+        # ...and (4, 2) is not a second hardcoded literal: it is what the
+        # config class declares. A test asserting only the tuple would pass
+        # if someone re-hardcoded it and the class later changed.
+        declared = get_config_class("transformer").model_fields
+        assert (declared["nhead"].default, declared["num_layers"].default) == (4, 2)
+
+    def test_an_absent_key_estimates_exactly_as_the_declared_value_does(self):
+        """B1's central property: omission must not change the forecast.
+
+        Before B1 the same function resolved one absent key two ways —
+        ``_count_params`` instantiated the model through Pydantic (getting
+        the class default) while the step count used a literal. So a plan
+        that simply left ``segmentation_size`` out was priced for a model
+        nobody would run.
+
+        Fails if: any estimator input reverts to a literal that disagrees
+        with the declaration.
+        """
+        from agent.skills.inference_skill.estimator import (
+            estimate_wall_time_seconds as inf_time,
+        )
+        from agent.skills.training_skill.estimator import (
+            estimate_wall_time_seconds as train_time,
+        )
+        from ml_models.models_format_sandbox import get_config_class
+
+        sample = {"0": list(range(20)), "1": list(range(20))}
+        for mt in _BUILTINS:
+            declared = get_config_class(mt).model_fields["segmentation_size"].default
+            explicit = {"segmentation_size": declared}
+            tc = {"batch_size": 1, "epochs": 1}
+
+            absent_t = train_time(mt, {}, tc, sample, ms_per_step=44.3, num_params=10**6)
+            explicit_t = train_time(mt, explicit, tc, sample, ms_per_step=44.3, num_params=10**6)
+            assert absent_t["seconds"] == explicit_t["seconds"], mt
+
+            absent_i = inf_time(mt, {}, sample, inference_ms_per_step=1.0, num_params=10**6)
+            explicit_i = inf_time(mt, explicit, sample, inference_ms_per_step=1.0, num_params=10**6)
+            assert absent_i["seconds"] == explicit_i["seconds"], mt
+
+    def test_an_absent_epochs_is_priced_at_what_will_actually_run(self):
+        """The one ACTIVE optimistic defect B1 closes.
+
+        ``TrainConfig`` declares ``epochs=10`` and the trainer builds
+        ``TrainConfig(**train_config)``, so an omitted key runs **ten**
+        epochs. The estimator priced **one** — linear in epochs with
+        nothing to cancel it, so a 10x optimistic forecast feeding
+        ``skipped_time_risk`` and the formal time budget.
+
+        Fails if: the fallback returns to ``1``, or stops consulting
+        ``TrainConfig``.
+        """
+        from agent.skills.training_skill.estimator import estimate_wall_time_seconds
+        from ml_models.models_format_sandbox import TrainConfig
+
+        sample = {"0": list(range(20))}
+        declared = TrainConfig.model_fields["epochs"].default
+        assert declared == 10
+
+        absent = estimate_wall_time_seconds(
+            "punet", {}, {"batch_size": 1}, sample, ms_per_step=10.0, num_params=10**6
+        )
+        explicit = estimate_wall_time_seconds(
+            "punet",
+            {},
+            {"batch_size": 1, "epochs": declared},
+            sample,
+            ms_per_step=10.0,
+            num_params=10**6,
+        )
+        assert absent["seconds"] == explicit["seconds"]
+
+        one = estimate_wall_time_seconds(
+            "punet", {}, {"batch_size": 1, "epochs": 1}, sample, ms_per_step=10.0, num_params=10**6
+        )
+        assert absent["seconds"] == 10 * one["seconds"]
 
     def test_caller_supplied_values_win_over_the_fallback(self):
         assert attention_shape("transformer", {"nhead": 8, "num_layers": 6}) == (8, 6)

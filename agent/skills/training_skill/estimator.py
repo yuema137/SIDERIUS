@@ -80,6 +80,105 @@ def _output_contract(model_type: str) -> str:
         return "classifier"
 
 
+def _declared_default(config_cls: Any, field: str) -> Any | None:
+    """The default a Pydantic config class declares for ``field``.
+
+    ``None`` when the class is unknown, does not declare the field, or
+    declares it as required (a required field has no default to stand in
+    for an absent key).
+    """
+    fields = getattr(config_cls, "model_fields", None) or {}
+    declared = fields.get(field)
+    if declared is None or declared.is_required():
+        return None
+    return declared.default
+
+
+def _usable(value: Any) -> bool:
+    """Whether a **non-None** value can be used as a resolved input.
+
+    Callers do the ``is not None`` check themselves so the narrowing is
+    visible to the type checker; this predicate answers only the second
+    question.
+
+    A non-positive number is unusable: every field served here is
+    declared ``ge=1``, so such a config cannot train. Treating it as
+    absent keeps the estimate finite instead of silently pricing a
+    zero-sized attention term — while an explicit ``None`` is likewise
+    treated as absent rather than as a crash, because a refused estimate
+    at planning time becomes a rejected candidate (C3's precedent).
+
+    ``bool`` is excluded deliberately: ``True`` is an ``int`` in Python
+    and is not a segmentation size.
+    """
+    return not (isinstance(value, int | float) and not isinstance(value, bool) and value <= 0)
+
+
+def resolve_model_field(
+    model_type: str,
+    model_config: dict[str, Any],
+    field: str,
+    *,
+    safety_margin: int,
+) -> int:
+    """Resolve a model-config input the way the model itself will resolve it.
+
+    V21 PR B1. The resolution order is the one the *production run*
+    already follows, and that is the whole point:
+
+    ```text
+    caller's dict          the explicit value, including one equal to the default
+    config class default   what Pydantic will substitute for the absent key
+    safety_margin          only when nothing declares the field
+    ```
+
+    **Why the class default is canonical, proven rather than assumed.**
+    ``estimate_wall_time_seconds`` already calls ``_count_params`` →
+    ``config_cls(**model_config)``, so Pydantic resolves the *same absent
+    key* to the class default in the *same call* in which ``.get()``
+    resolved it to a literal. Before B1 the function contradicted itself:
+    the model whose parameters were counted at ``seg=40000`` had its steps
+    priced at ``seg=1000``. See the PR B design doc §0.6.6.
+
+    ``safety_margin`` is reached only for a model whose config class
+    declares nothing — a generated plugin, typically. It is deliberately
+    **phase-specific** and is a margin, NOT a claim about the model's
+    default: memory is conservative when ``seg`` is over-stated, wall
+    time when it is under-stated, so the two phases pass opposite values.
+    Forcing them equal would necessarily make one phase more optimistic.
+    """
+    supplied = model_config.get(field)
+    if supplied is not None and _usable(supplied):
+        return int(supplied)
+
+    from ml_models.models_format_sandbox import get_config_class
+
+    declared = _declared_default(get_config_class(model_type), field)
+    if declared is not None and _usable(declared):
+        return int(declared)
+    return safety_margin
+
+
+def resolve_train_field(train_config: dict[str, Any], field: str, *, safety_margin: int) -> int:
+    """``resolve_model_field`` for the training config.
+
+    Same contract, against ``TrainConfig`` — the class
+    ``sandbox_executor`` and ``train_engine_sandbox`` build from this
+    very dict, so its declared default is what an absent key will
+    actually run as.
+    """
+    supplied = train_config.get(field)
+    if supplied is not None and _usable(supplied):
+        return int(supplied)
+
+    from ml_models.models_format_sandbox import TrainConfig
+
+    declared = _declared_default(TrainConfig, field)
+    if declared is not None and _usable(declared):
+        return int(declared)
+    return safety_margin
+
+
 def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int, int] | None:
     """``(nhead, num_layers)`` if the architecture has attention, else ``None``.
 
@@ -102,15 +201,20 @@ def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int,
     caller: a model whose config class declares ``nhead`` has attention even
     if this particular dict omits it.
 
-    **The omitted-value fallback stays at 2, which is knowingly wrong, and
-    that is deliberate — see FU-C-1.** ``TransformerConfig`` declares
-    ``nhead=4``, so the shipped ``.get("nhead", 2)`` under-counts built-in
-    transformer attention by 2× whenever the dict omits the key
+    **FU-C-1, closed by V21 PR B1.** C3 deliberately pinned the
+    omitted-value fallback at the pre-C3 literal ``2`` while
+    ``TransformerConfig`` declares ``nhead=4`` — a 2× under-count of
+    built-in transformer attention whenever the dict omits the key
     (536,592,000 → 1,048,592,000 bytes at the parity fixture's shape).
-    Using the class default would be more accurate *and* more conservative,
-    but it changes a calibrated built-in estimate, which is an operator
-    decision rather than a refactor's prerogative. C3 is therefore a pure
-    behaviour-preserving change and the correction is filed separately.
+    Correcting a calibrated built-in estimate needed operator approval,
+    which Q-B-2 granted. The value now comes from the declaration.
+
+    B1's audit also established that this correction is **latent**: the
+    only callers of ``attention_shape`` are the two ``estimate_peak_bytes``
+    functions, and neither has had a production caller since commit
+    ``8b6c4ba8`` replaced the analytic VRAM estimate with a probe. The
+    under-count was real arithmetic that reached no admission decision.
+    See the PR B design doc §0.6.2.
 
     Returns ``None`` for the five non-attention built-ins and for any
     generated model that declares no attention parameters.
@@ -126,10 +230,13 @@ def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int,
     if not declares_attention:
         return None
 
-    # Fallbacks pinned to the pre-C3 literals (see FU-C-1 above).
-    nhead = model_config.get("nhead") or 2
-    num_layers = model_config.get("num_layers") or 2
-    return int(nhead), int(num_layers)
+    # Safety margins apply only to a model declaring `nhead` with no
+    # class-level default — a generated attention plugin. They keep the
+    # pre-B1 literals, now honestly labelled as margins rather than as
+    # "the model default".
+    nhead = resolve_model_field(model_type, model_config, "nhead", safety_margin=2)
+    num_layers = resolve_model_field(model_type, model_config, "num_layers", safety_margin=2)
+    return nhead, num_layers
 
 
 def _instantiate_for_param_count(model_type: str, config_obj: Any, loss_type: str) -> Any:
@@ -230,8 +337,13 @@ def estimate_peak_bytes(
     Returns:
         ``{"phase": "training", "total_bytes": int, "breakdown": {...}}``.
     """
-    seg_size = model_config.get("segmentation_size", 40000)
-    batch_size = train_config.get("batch_size", 1)
+    # V21 PR B1 — resolved against the model's own declaration. The
+    # margin is the memory-conservative direction (a larger `seg` costs
+    # more), and applies only where nothing declares the field.
+    seg_size = resolve_model_field(
+        model_type, model_config, "segmentation_size", safety_margin=40000
+    )
+    batch_size = train_config.get("batch_size", 1)  # B1: matches TrainConfig's declared 1
     loss_type = loss_config.get("loss_type", "ce")
 
     # weights (4) + grads (4) + Adam m (4) + Adam v (4) = 16 bytes per param.
@@ -411,9 +523,25 @@ def estimate_wall_time_seconds(
     Returns:
         ``{"phase": "training", "seconds": float, "breakdown": {...}}``.
     """
-    seg_size = int(model_config.get("segmentation_size", 1000))
+    # V21 PR B1. Both were resolved against literals that contradicted the
+    # declarations this same function instantiates the model from:
+    #
+    #   segmentation_size  1000 vs the class default (40000, or 20000 for
+    #                      transformer) — neutral-to-40x CONSERVATIVE, never
+    #                      optimistic (design doc §0.6.3)
+    #   epochs             1 vs TrainConfig's declared 10 — a 10x OPTIMISTIC
+    #                      forecast, linear in epochs with nothing to cancel
+    #                      it, and the one active optimistic defect in this
+    #                      class (§0.6.4)
+    #
+    # The margin here is the time-conservative direction (a smaller `seg`
+    # means more steps), opposite to the VRAM phase's, and is reached only
+    # for a model whose config class declares nothing.
+    seg_size = resolve_model_field(
+        model_type, model_config, "segmentation_size", safety_margin=1000
+    )
     batch_size = int(train_config.get("batch_size", 1))
-    epochs = int(train_config.get("epochs", 1))
+    epochs = resolve_train_field(train_config, "epochs", safety_margin=1)
 
     total_steps = _total_train_steps(sample_set, seg_size, batch_size, train_portion, epochs)
 

@@ -1,8 +1,15 @@
 # PR B — Resource-budget semantics and estimator correctness
 
 **Status: APPROVED 2026-08-08 (operator) with four corrections applied.
-Cleared to begin B1, then B2. STOP for operator review at B0 before writing
-B3. No implementation has begun.**
+B1 IMPLEMENTED; B2 next. STOP for operator review at B0 before writing B3.**
+
+> **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
+> not survive contact with the code, and the corrections are attached in
+> place rather than edited away: the headline `segmentation_size` defect
+> had its **direction backwards**, FU-C-1 turned out to be **latent**
+> because the analytic VRAM estimator has had no production caller since
+> April, and the sweep found the one genuinely optimistic defect —
+> **`epochs`** — that §0.4 had missed entirely. §0.6 records all of it.
 
 > **Q-B-1 is DEFERRED BY DESIGN, not unresolved.** It blocks **B3 only** —
 > it does **not** block B1 or B2. Part III's sequence is *audit semantics →
@@ -167,6 +174,27 @@ Two fallbacks for the same field, 40x apart, live in the same file
 > per site before changing any value** — that is the same discipline C3
 > applied when it pinned `nhead` rather than guessing.
 
+> ### ⚠ CORRECTION 2026-08-08 — §0.4 item 2 states the direction BACKWARDS
+>
+> Written before the reachability audit, on reasoning rather than
+> measurement. **B1's audit (§0.6) measured it and item 2 is wrong.**
+>
+> Smaller `seg_size` produces **more** steps, not fewer
+> (`ml_per_psd = 10_000_000 // seg`), and the static ms/step is
+> **proportional** to `seg_size`, so the two cancel exactly. Measured
+> across a six-decade parameter sweep, the `1000` fallback is **never
+> optimistic**: ratio `1.000` in the un-floored regime and up to **40x
+> CONSERVATIVE** once `_MIN_MS_PER_STEP` binds (§0.6.3).
+>
+> Item 2's "40x optimistic, an order of magnitude larger than FU-C-1" is
+> retracted. The real active optimistic defect in this class is
+> **`epochs`**, which §0.4 missed entirely (§0.6.4).
+>
+> Items 1 and 3 are arithmetically correct but describe an **orphaned**
+> function — see §0.6.2. The table above stays as written, with this
+> correction attached, per the mandate's rule against silently rewriting
+> the record.
+
 ### 0.5 `max_active` bounds chains, not GPU phases
 
 Inherited from PR A's §E.3b and unchanged. PR A and PR C both ran their
@@ -175,6 +203,208 @@ PR B is where that is answered — and note 0.1: V20 attempt 3 was itself
 sequential, so concurrency is not required to reproduce the P6.4 evidence.
 
 ---
+
+## 0.6 B1 reachability audit — performed 2026-08-08 at `8cb604d8`
+
+Required by B1's §3 first checkbox and by the mandate's §4.1: classify
+every site **before** changing a value. The audit changed the shape of
+B1 substantially, so it is recorded in full rather than summarised.
+
+Method: static producer→consumer tracing, git archaeology on the call
+sites, config-class introspection, and a measured parameter sweep
+(`estimate_wall_time_seconds` / `estimate_peak_bytes` driven directly).
+No GPU, no training.
+
+### 0.6.1 Nothing requires these keys — every fallback is genuinely reachable
+
+`ExperimentPlan` (`agent/schemas/hyperparam_tuning.py:795-809`) declares
+
+```python
+model_cfg: dict[str, Any] = Field(default_factory=dict, alias="model_config")
+train_cfg: dict[str, Any] = Field(default_factory=dict, alias="train_config")
+```
+
+with **no required keys and no validator** forcing `segmentation_size` or
+`epochs`. `ProposalOutput._validate_baseline_segmentation_size`
+(`proposal.py:1084`) explicitly no-ops when the key is absent — *"some
+architectures don't have one"*. Both production entry points then pass the
+dict through untouched:
+
+```text
+nodes/ml_model_proposal_agent:186   model_config=baseline.get("model_config") or {}
+tuner:1328                          model_config=active_params.get("model_config") or {}
+```
+
+So an LLM plan omitting the key is legal at every hop, and reaches the
+fallback. **Reachability is established for the wall-time sites.**
+
+### 0.6.2 The VRAM estimator has had NO production caller since 2026-04-23
+
+The finding that most changes B1. `estimate_peak_bytes` — in **both**
+estimators — is called only from tests.
+
+```text
+grep estimate_peak_bytes  --> definitions, docstrings, tests. No production caller.
+grep attention_shape      --> defined + called ONLY inside the two estimate_peak_bytes
+```
+
+Cause, from git: commit `8b6c4ba8` *"feat(evaluate_vram_skill): A.8 —
+deterministic wrapper rewrite"* (2026-04-23) replaced the analytic
+estimate with a **deterministic probe**
+(`probe_activation_footprint` → `_compose_training_peak`). Its diff
+removes exactly these three lines:
+
+```diff
+-        training_phase  = _training_est.estimate_peak_bytes(
+-        inference_phase = _inference_est.estimate_peak_bytes(
+-        scoring_phase   = _scoring_est.estimate_peak_bytes()
+```
+
+Ruled out as well: string/`getattr` dispatch (none), and any probe-failure
+path falling back to the analytic estimate (`evaluate_vram_skill` contains
+no reference to it at all).
+
+**Three consequences.**
+
+1. **FU-C-1 is LATENT, not active.** `attention_shape`'s only callers are
+   the two orphaned functions, so the `nhead` 4→2 under-count reaches no
+   admission decision. It is still wrong and B1 still corrects it, but
+   this document must stop implying it cost V20 anything.
+2. **§0.2's leading hypothesis is FALSIFIED for VRAM.** The 12 GiB
+   admission number comes from a probe, not from these fallbacks.
+   **B1 cannot explain P6.4's OOMs**, and B0 must not be written as
+   though it might. What B1 fixes is the *time* forecast and a set of
+   latent VRAM-estimator inputs.
+3. B1's parity table splits in two: **ACTIVE** sites, where a change
+   moves a real production forecast, and **LATENT** sites, where it does
+   not. Reporting one number for both would overclaim.
+
+### 0.6.3 Measured direction — the `1000` fallback is never optimistic
+
+`punet`, sample set of 40 PSD segments, `batch_size=1`, `epochs=1`,
+static path, fallback `1000` vs canonical `40000`:
+
+| num_params | ms/step @1000 | ms/step @canon | sec @1000 | sec @canon | fallback ÷ canonical | direction |
+|---|---|---|---|---|---|---|
+| 1,000 | 2.000 | 2.000 | 1040.0 | 26.0 | **40.000** | CONSERVATIVE |
+| 10,000 | 2.000 | 2.000 | 1040.0 | 26.0 | **40.000** | CONSERVATIVE |
+| 100,000 | 2.000 | 12.000 | 1040.0 | 156.0 | **6.667** | CONSERVATIVE |
+| 1,000,000 | 3.000 | 120.000 | 1560.0 | 1560.0 | 1.000 | neutral |
+| 10,000,000 | 30.0 | 1200.0 | 15600.0 | 15600.0 | 1.000 | neutral |
+| 100,000,000 | 300.0 | 12000.0 | 156000.0 | 156000.0 | 1.000 | neutral |
+
+Lowest ratio anywhere in the sweep: **1.0000**. Inference static path:
+`1.0000` throughout.
+
+Why: `total_steps ∝ 1/seg` and `_static_ms_per_step ∝ seg`, so the product
+is invariant — until `_MIN_MS_PER_STEP = 2.0` floors the small-model end
+and breaks the cancellation in the **conservative** direction.
+
+**Correcting this site therefore makes the estimate SMALLER** (up to 40x)
+for small models. That is a move in the optimistic direction and is
+permitted only on §1.1's terms, which are met and recorded in §0.6.6.
+
+### 0.6.4 The sweep found an ACTIVE OPTIMISTIC defect §0.4 missed: `epochs`
+
+Q-B-3 bounded the sweep to config/default inputs consumed by the two
+estimators. Extending it past `segmentation_size` as instructed:
+
+| field | estimator fallback | config-class default | verdict |
+|---|---|---|---|
+| `batch_size` | `1` | `TrainConfig` `1` | **NOT A DEFECT** — matches |
+| `optimizer_type` | `"adamw"` | `TrainConfig` `"adamw"` | **NOT A DEFECT** — matches |
+| `epochs` | **`1`** | `TrainConfig` **`10`** | **ACTIVE, OPTIMISTIC, 10x** |
+| `loss_type` | `"ce"` | `LossConfig` `"focal"` | latent (orphaned path) |
+
+`epochs` is the defect §0.4 was looking for and mis-attributed to
+`segmentation_size`: time scales **linearly** in epochs with no
+cancelling term, so an omitted `epochs` makes the forecast **10x
+optimistic** — the dangerous direction, in a reachable path, feeding
+`skipped_time_risk` and the formal time budget.
+
+### 0.6.5 Two findings OUTSIDE B1's scope — reported, not fixed here
+
+**(a) An omitted `epochs` defeats the `--max_epochs` hard cap.**
+`tuner:4052`
+
+```python
+planned_epochs = plan.train_cfg.get("epochs", 1)
+if planned_epochs > agent_input.max_epochs:      # 1 > 1 is False -> no clamp
+```
+
+while the trainer builds `TrainConfig(**t_data)`
+(`train_engine_sandbox.py:1211`) and gets **10**. So a plan omitting
+`epochs` runs **10 epochs under `--max_epochs 1`**.
+
+```text
+plan omits epochs
+  -> clamp sees 1, does not clamp        (--max_epochs defeated)
+  -> time estimator prices 1 epoch       (10x optimistic)
+  -> trainer actually runs 10 epochs
+```
+
+This violates the binding rule that **the harness owns the bounds, not
+the planner**. It is a training-behaviour defect, not an estimator input
+fact, so B1 does not touch it — fixing it would change what production
+trains. **Escalated to the operator** (§0.6.7).
+
+**(b) The observation-store key is built from the fallback.**
+`evaluate_time_skill/wrapper.py:628` resolves `seg_size` with the same
+`1000` default and passes it to `calibration_key(..., seg_size=seg_size)`
+(`:501`). A run whose model really runs at 40000 would read and write a
+store bucket labelled 1000, mixing incomparable measurements. Correcting
+the resolution at `:628` fixes this as a side effect; the keying question
+itself belongs with B2's provenance work.
+
+Also recorded, not actioned: `tuner:1310` uses a **third** default for the
+same field, `.get("segmentation_size", 0)`, feeding
+`ProbeRequest.workload["segment_length"]`. A bucket key of `0` collides
+every unlabelled run into one bucket. Routed to B2.
+
+### 0.6.6 Site inventory and verdicts
+
+`A` = active (a production forecast moves), `L` = latent (correct but
+unreachable today).
+
+| # | Site | Field | Fallback | Canonical | Reach | Direction if corrected |
+|---|---|---|---|---|---|---|
+| S1 | `training/estimator.py:130` | `nhead` | `2` | `4` (transformer) | **L** | larger (conservative) |
+| S2 | `training/estimator.py:131` | `num_layers` | `2` | `2` | L | **none — not a defect** |
+| S3 | `training/estimator.py:233` | `segmentation_size` | `40000` | class default | **L** | smaller for transformer |
+| S4 | `training/estimator.py:414` | `segmentation_size` | `1000` | class default | **A** | smaller (up to 40x) |
+| S5 | `inference/estimator.py:120` | `segmentation_size` | `40000` | class default | **L** | smaller for transformer |
+| S6 | `inference/estimator.py:236` | `segmentation_size` | `1000` | class default | **A** | neutral |
+| S7 | `evaluate_time_skill/wrapper.py:628` | `segmentation_size` | `1000` | class default | **A** | fixes the store key |
+| S8 | `training/estimator.py:416` | `epochs` | `1` | `10` | **A** | **larger — closes a 10x optimism** |
+
+**The canonical source, proven rather than assumed.** For every one of
+these fields it is the **config class default**, and the proof is
+internal to the estimator: `estimate_wall_time_seconds` already calls
+`_count_params` → `config_cls(**model_config)`, so Pydantic resolves the
+*same absent key* to the class default in the *same call* that `.get()`
+resolves it to `1000`. The function contradicts itself. The model whose
+parameters are counted at `seg=40000` has its steps priced at `seg=1000`.
+
+### 0.6.7 Corrections this audit forces on the approved design
+
+- [x] **§0.4 item 2's direction is retracted** — correction attached in
+      place, evidence in §0.6.3.
+- [x] **B1's acceptance criterion "the VRAM and wall-time paths agree on
+      `segmentation_size` for identical input — the 40x split cannot
+      return" is UNSAFE AS WRITTEN and is amended.** The two phases have
+      *opposite* conservative directions: for VRAM a larger `seg` is the
+      safe error, for wall time a smaller `seg` is. Forcing the two
+      literals to one value necessarily makes one phase more optimistic,
+      which §1.1 forbids. **Amended to:** where a canonical source
+      exists the two paths must resolve to *the same canonical value*,
+      which removes the split for every model that declares the field;
+      only where no declaration exists may a phase-appropriate value
+      remain, documented as a **safety margin**.
+- [x] **§0.2's leading hypothesis is falsified for VRAM** (§0.6.2).
+      B0 must not present B1 as a candidate explanation for P6.4.
+- [ ] **OPERATOR DECISION REQUESTED — the `--max_epochs` bypass
+      (§0.6.5a).** Out of B1's scope, changes training behaviour, and
+      defeats a bound the operator rules call binding. Not fixed here.
 
 ## 1.1 Operator rulings, 2026-08-08 — read before B1
 
@@ -374,27 +604,33 @@ cell must be recorded with its before/after value and its direction.
 
 ### 3. Implementation plan
 
-- [ ] **Reachability audit first, per site.** For each of the five
-      fallbacks in §0.4, establish whether production callers actually
-      omit the key. Record `reached` / `not reached` / `unknown` with
-      evidence. **A fallback that is never reached is a latent defect, not
-      an active one** — say which each is rather than implying all five
-      were firing
-- [ ] Determine the **canonical source** of each field. Candidates seen so
-      far: the config class's `model_fields` default, the validated config
-      object, or the plan's dict. **Inspect before choosing; do not assume
-      the class default is always right** — a plan that legitimately omits
-      a field may mean something different from a plan that never had it
-- [ ] Distinguish an **absent** value from an **explicit override**,
+- [x] **Reachability audit first, per site.** Done — §0.6, with the site
+      inventory and A/L verdicts in §0.6.6. It found that three of the
+      six sites are **latent** (the VRAM estimator has had no production
+      caller since `8b6c4ba8`) and that the one **active optimistic**
+      defect is `epochs`, which §0.4 had missed
+- [x] Determine the **canonical source** of each field. It is the config
+      class default, and the proof is internal rather than assumed:
+      `estimate_wall_time_seconds` already resolves the same absent key
+      through `config_cls(**model_config)` one line from where `.get()`
+      resolved it differently (§0.6.6)
+- [x] Distinguish an **absent** value from an **explicit override**,
       including an explicit value equal to the default, and from an
-      explicit `None`
-- [ ] Correct `attention_shape`'s `nhead` / `num_layers` fallbacks
-- [ ] Correct the `segmentation_size` fallbacks in **all four** estimator
-      entry points, resolving the 40000-vs-1000 split
-- [ ] Sweep for any remaining config-default vs fallback mismatch across
-      both estimators and record the result **even if empty**
-- [ ] Capture the built-in parity table before and after, extending C3's
-      18-cell fixture; every changed cell justified in writing
+      explicit `None`. Implemented in `_usable` / `resolve_model_field`;
+      tested in `TestResolutionOrder` and `TestUnusableValues`
+- [x] Correct `attention_shape`'s `nhead` / `num_layers` fallbacks —
+      FU-C-1 closed, `(2, 2)` → `(4, 2)` for `transformer`
+- [x] Correct the `segmentation_size` fallbacks in **all four** estimator
+      entry points. The 40000-vs-1000 split is resolved **by making both
+      consult the declaration**, not by picking one literal — see
+      §0.6.7, which records why picking one would have been unsafe
+- [x] Sweep for any remaining config-default vs fallback mismatch across
+      both estimators — §0.6.4. `batch_size` and `optimizer_type` match
+      and are **not** defects; `epochs` does not; `loss_type` differs but
+      only on the orphaned path
+- [x] Capture the built-in parity table before and after (§B1.R), split
+      into ACTIVE and LATENT so a latent correction is not reported as a
+      production change
 
 ### 4. Validation plan
 
@@ -478,10 +714,165 @@ whether a fallback matches a declaration.
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Reachability verdict per fallback site — **to record**
-- [ ] Before/after parity table — **to record**
-- [ ] Mutation results, one per corrected site — **to record**
-- [ ] Test counts + wall time — **to record**
+- [x] Reachability verdict per fallback site — §0.6.6
+- [x] Before/after parity table — §B1.R below
+- [x] Mutation results, one per corrected site — §B1.R
+- [x] Test counts + wall time — §B1.R
+
+### B1.R — Implementation record, 2026-08-08
+
+**Changed files**
+
+```text
+agent/skills/training_skill/estimator.py     + resolve_model_field / resolve_train_field
+                                               / _declared_default / _usable; 5 sites
+agent/skills/inference_skill/estimator.py    2 sites
+agent/skills/evaluate_time_skill/wrapper.py  3 sites
+tests/unit/agent/test_estimator_predicates_not_names.py   C3 guard UPDATED, +2 cases
+tests/unit/agent/test_estimator_input_resolution.py       new, 19 cases
+```
+
+**The formulas are untouched.** No coefficient, term or safety factor was
+added, removed or changed. `SAFETY_MULTIPLIER`, `_STATIC_MS_PER_FLOP`,
+`_MIN_MS_PER_STEP`, `_INFERENCE_VS_TRAINING_RATIO` and every arithmetic
+expression are byte-identical. B1 changed only how three input facts are
+*resolved* — Q-B-2's boundary.
+
+#### ACTIVE sites — what a production forecast actually does now
+
+Driven through `evaluate_time_skill.run_skill`, the entry point the tuner
+calls. `rnn`, 400 PSD segments, 1M params, static path. "Before" is
+reproduced by passing the old literal explicitly, which is arithmetically
+identical to the pre-B1 absent-key behaviour.
+
+| absent key | quantity | before | after | Δ | direction |
+|---|---|---|---|---|---|
+| `segmentation_size` | `total_train_steps` | 4,000,000 | **100,000** | ÷40 | corrected |
+| `segmentation_size` | `estimated_minutes` | 369.84 | **369.84** | ×1.00 | **unchanged** |
+| `epochs` | `total_train_steps` | 250,000 | **2,500,000** | ×10 | corrected |
+| `epochs` | `estimated_minutes` | 369.84 | **2709.84** | **×7.33** | **more conservative** |
+
+Two results worth stating plainly rather than averaging away.
+
+**`segmentation_size` moves the step count 40x and the forecast not at
+all.** The static path cancels exactly (§0.6.3). So this correction buys
+no accuracy in the static forecast — its value is that the *step count*
+is now right, and the step count is what reaches the observation-store
+calibration key (§0.6.5b) and the RT1 workload resolver. On the measured
+ms/step path, where no cancellation occurs, the same correction changes
+the forecast by up to 40x. **No production forecast became more
+optimistic:** the static case is exactly neutral and the measured case
+was the 40x-conservative one §0.6.3 measured.
+
+**`epochs` is the one that closes real optimism**, and by 7.33x rather
+than 10x because only the training phase scales with epochs — inference
+and scoring do not. A candidate previously forecast at 369.84 min against
+a 60 min budget is now forecast at 2709.84 min. This estimate is
+**larger**, which is the routine direction under §1.1.
+
+#### LATENT sites — corrected, but reaching nothing
+
+The VRAM estimator has no production caller (§0.6.2), so these change no
+decision. Reported separately so the ACTIVE table is not inflated.
+
+| model | quantity | before | after | note |
+|---|---|---|---|---|
+| `transformer` | `attention_shape(mt, {})` | `(2, 2)` | **`(4, 2)`** | FU-C-1 closed |
+| `transformer` | training peak, absent `seg` | 25,738,880,000 B | **12,877,440,000 B** | `seg` 40000→20000 (÷4 in the quadratic attention term) and `nhead` 2→4 (×2) |
+| other five | training peak, absent `seg` | unchanged | unchanged | their declaration already equalled the literal |
+
+#### The property, stated once
+
+For **every** built-in and **both** estimators, an absent key and the
+explicitly-declared value now produce byte-identical estimates — measured
+ratio `1.0000` across all six models, both phases, both the static and
+measured paths. Before B1 that ratio was `0.0250` on the measured
+training path and `0.2517` for transformer VRAM.
+
+#### Mutation results
+
+One realistic mutation per corrected site: revert that site to its
+pre-B1 literal, alone, and require a test to fail. Anchors are exact
+strings asserted to occur exactly once; `__pycache__` is cleared around
+every run; the baseline is re-verified after restore.
+
+| # | Site reverted to its pre-B1 literal | round 1 | round 2 |
+|---|---|---|---|
+| M1 | `attention_shape` `nhead` | CAUGHT | CAUGHT |
+| M2 | `attention_shape` `num_layers` | **SURVIVED** | CAUGHT |
+| M3 | training VRAM `segmentation_size` | CAUGHT | CAUGHT |
+| M4 | training wall-time `segmentation_size` | CAUGHT | CAUGHT |
+| M5 | training wall-time `epochs` | CAUGHT | CAUGHT |
+| M6 | inference VRAM `segmentation_size` | CAUGHT | CAUGHT |
+| M7 | inference wall-time `segmentation_size` | CAUGHT | CAUGHT |
+| M8 | wrapper store-reuse `epochs` | **SURVIVED** | CAUGHT |
+| M9 | wrapper `segmentation_size` | **SURVIVED** | CAUGHT |
+| M10 | wrapper banner `epochs` | **SURVIVED** | CAUGHT |
+
+**Round 1 left four survivors, and they are recorded rather than
+quietly re-run.** Each was classified before any test was written —
+"add assertions until it goes green" is how a mutation suite stops
+meaning anything.
+
+- **M2 — equivalent for built-ins, real gap beyond them.** All three
+  config classes declaring `num_layers` declare it as `2`, which is also
+  the safety margin, so the mutant is *indistinguishable across the
+  entire built-in matrix*. It is only detectable on a generated plugin
+  declaring a different depth — which is exactly PR C's constituency,
+  and a 6-layer attention model would have been priced at 2. Closed by
+  `TestGeneratedPluginDeclarations`, which registers a plugin config
+  declaring `nhead=8, num_layers=6`.
+- **M8, M9 — real gap.** The wrapper's `seg_size` / `epochs` locals do
+  not feed the returned estimate at all (the estimators resolve the
+  dicts themselves), so no assertion on `estimated_minutes` or
+  `total_train_steps` could ever see them. They feed the
+  **observation-store calibration key** and the trigger policy's step
+  count. Closed by two tests that capture what the wrapper hands to
+  those boundaries.
+- **M10 — observability only, pinned anyway.** The wrapper's `epochs`
+  local reaches nothing but the printed banner. Classified honestly as
+  guarding a **log, not a decision**, and kept because a banner reading
+  `epochs=1` for a run that will do ten is the quiet mis-report that
+  makes post-mortems expensive.
+
+Round 2: **10 of 10 caught**, baseline green before and after
+(`42 passed`). Hygiene: exact-string anchors asserted to occur exactly
+once, write-landed assertion, `__pycache__` cleared around every run,
+originals restored in a `finally`.
+
+#### Validation at this commit
+
+```text
+tests/unit/agent/test_estimator_input_resolution.py     25 passed   (new)
+tests/unit/agent/test_estimator_predicates_not_names.py 17 passed   (C3, updated)
+tests/unit/agent + core + guardrails + execute_tools    6374 passed, 2 skipped,
+                                                        1 xfailed, 290s
+ruff check .                                            All checks passed
+ruff format --check .                                   758 files already formatted
+pyright                                                 0 errors, 4 warnings
+```
+
+`0 errors, 4 warnings` matches the `ece24a02` baseline exactly. An
+earlier iteration of the resolver produced **8 pyright errors** —
+`_usable()` did not narrow `Any | None` for the checker — fixed by
+moving the `is not None` test to the call sites, which is clearer than
+a `TypeGuard` and needed no `# type: ignore`.
+
+#### Deviations from the approved B1 plan
+
+1. **Scope grew by one file.** `evaluate_time_skill/wrapper.py` was not
+   in B1's §2 change list, which named only the two estimators. Its
+   three sites belong to the same defect class and one of them corrupts
+   the observation-store key, so excluding them would have left the
+   class alive — the exact failure Q-B-3 was written to prevent.
+2. **`epochs` was not in the approved scope either**, because §0.4 had
+   not found it. It is in-class (a config-default vs literal mismatch
+   consumed by a resource estimator) and it is the *only* active
+   optimistic defect, so omitting it would have made B1 pointless.
+3. **The "two paths agree on one literal" criterion was amended**, with
+   reasons, in §0.6.7.
+4. **No stop-and-escalate was triggered** — a canonical source exists
+   for every corrected field.
 
 ### 8. Commit boundary
 
