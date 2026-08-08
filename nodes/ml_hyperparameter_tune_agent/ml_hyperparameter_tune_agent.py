@@ -3187,6 +3187,46 @@ def _build_in_subprocess_rejection_record(
     }
 
 
+def _attach_realized_memory(
+    final_record: dict,
+    resource_check: dict | None,
+    rv_block: dict | None,
+) -> None:
+    """Persist realized-vs-admitted memory, per phase (V21 PR B2).
+
+    Extracted rather than inlined: the tuner's ``run()`` is the giant
+    orchestrator the decomposition rule names, and this is a new
+    responsibility with its own inputs and its own tests, not another
+    branch for that scope to carry.
+
+    **Observation only.** This runs after every admission decision has
+    already been made and writes into ``final_record`` alone; no admit,
+    refuse, retry or resize path reads what it stores. It also chooses no
+    semantics — Q-B-1 is unfrozen until B0, so the stored row is measured
+    facts that S1, S2 and S3 must all remain able to interpret.
+
+    Best-effort, like ``_append_runtime_observation`` beside it: this is
+    evidence, and a defect in evidence collection must never break the
+    attempt loop.
+    """
+    try:
+        from core.runtime_control.realized_memory import realized_vs_admitted
+
+        rows = {}
+        for phase in ("training", "inference"):
+            row = realized_vs_admitted(
+                phase,
+                resource_check=resource_check,
+                runtime_verification=rv_block,
+            )
+            if row is not None:
+                rows[phase] = row.model_dump(mode="json")
+        if rows:
+            final_record.setdefault("memory", {})["realized_vs_admitted"] = rows
+    except Exception as exc:  # pragma: no cover — defensive
+        print(f"  [B2] realized-vs-admitted attach failed (non-fatal): {exc}")
+
+
 def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -> None:
     """Append a finalized runtime observation to the run's store (RT2-G).
 
@@ -5585,6 +5625,13 @@ class HyperparamTuningAgent:
                         (inf_status or {}).get("runtime_verification")
                         or train_status.get("runtime_verification")
                         or None
+                    )
+
+                    # V21 PR B2 — join the admission forecast to the realized
+                    # peak before the record is emitted. One call; the logic
+                    # and its tests live in the extracted boundary.
+                    _attach_realized_memory(
+                        final_record, resource_check, final_record["runtime_verification"]
                     )
 
                     _emit_record(sandbox, final_record)

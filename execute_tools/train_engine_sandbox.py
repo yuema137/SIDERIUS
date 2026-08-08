@@ -1061,6 +1061,27 @@ def run_experiment_streaming(
         # what training costs in this engine (audit finding, §12 RT2-B).
         runtime_session.record_phase_actual("training", time.perf_counter() - t_train_start)
 
+        # V21 PR B2 — realized peak memory, the analogue of the ACTUAL
+        # above. Read here, in the training subprocess, so the counters
+        # are this candidate's and a peer on the same card cannot be
+        # blamed for them. Observation only: no admission path reads it.
+        from core.runtime_control.realized_memory import read_process_peak_mib
+
+        _alloc, _reserved, _device = read_process_peak_mib()
+        runtime_session.record_phase_peak_memory(
+            "training",
+            allocator_peak_mib=_alloc,
+            reserved_peak_mib=_reserved,
+            # Reached only after the training loop completed, so a value
+            # read here is the phase's true peak. A process killed mid-loop
+            # never arrives, and its record stays 'unavailable' rather than
+            # acquiring a fabricated number.
+            completeness="complete"
+            if _alloc is not None or _reserved is not None
+            else ("unavailable"),
+            device_index=_device,
+        )
+
     # Result summary
     summary = {
         "final_loss": history[-1] if history else float("nan"),

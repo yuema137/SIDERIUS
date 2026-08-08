@@ -251,6 +251,98 @@ class PredictionError(BaseModel):
 # ── Component-first observation schema (§6.1) ────────────────────────────────
 
 
+MemoryCompleteness = Literal["complete", "lower_bound", "unavailable"]
+
+
+class RealizedPhaseMemory(BaseModel):
+    """What a phase's process ACTUALLY used, measured inside that process.
+
+    V21 PR B2. The analogue of ``actual_seconds`` for memory: the runtime
+    framework already recorded a phase's realized *time* and compared it
+    to the prediction, while realized *memory* was never measured at all
+    (PR B design doc §0.7.1). An under-prediction was therefore invisible
+    unless it happened to OOM — and an OOM reports as an OOM, not as a
+    broken forecast.
+
+    **These are measured facts and carry no policy verdict.** Q-B-1 —
+    whether the operator's VRAM budget is an admission estimate, an
+    enforced cap, or an estimate plus recorded exceedance — is
+    deliberately not frozen until B0, so nothing here may presume an
+    answer. There is no ``budget_breach``, no ``cap_violation``, no
+    ``over_budget``: those are *interpretations* of this row, and all
+    three candidate semantics must remain expressible from it.
+
+    ``measurement_completeness`` is the field that keeps missing evidence
+    missing:
+
+    ```text
+    complete     the process finished the phase and read its own peak
+    lower_bound  the last value observed before the process died; the true
+                 peak is AT LEAST this. Never rounded up into a number
+    unavailable  no measurement (no CUDA, phase never ran, read failed)
+    ```
+
+    An ``unavailable`` peak must never be read as "within budget" — that
+    is inferring compliance from the absence of data, which is how a
+    silent regression looks exactly like a healthy run.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    allocator_peak_mib: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "torch.cuda.max_memory_allocated for THIS process, MiB. Tensor "
+            "memory only — excludes the caching allocator's reserved-but-free "
+            "blocks and the CUDA context, so it is a floor on driver-visible use."
+        ),
+    )
+    reserved_peak_mib: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "torch.cuda.max_memory_reserved for THIS process, MiB. Includes "
+            "allocator blocks held but not in use; closer to what the driver "
+            "attributes to the process, still excluding the CUDA context."
+        ),
+    )
+    measurement_completeness: MemoryCompleteness = Field(
+        default="unavailable",
+        description="complete / lower_bound / unavailable — never inferred from silence.",
+    )
+    owning_process_pid: int | None = Field(
+        default=None,
+        description=(
+            "The PID whose peak this is. Attribution is binding: a peer "
+            "process sharing the card is context, never this candidate's usage."
+        ),
+    )
+    device_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _completeness_matches_the_evidence(self) -> RealizedPhaseMemory:
+        """A completeness claim must be backed by an actual number.
+
+        Without this, ``complete`` with no peak would be constructible and
+        would read downstream as a measured zero.
+        """
+        has_value = self.allocator_peak_mib is not None or self.reserved_peak_mib is not None
+        if self.measurement_completeness in ("complete", "lower_bound") and not has_value:
+            raise ValueError(
+                f"measurement_completeness={self.measurement_completeness!r} claims a "
+                "measurement, but neither allocator_peak_mib nor reserved_peak_mib is "
+                "set. Absent evidence must be recorded as 'unavailable'."
+            )
+        if self.measurement_completeness == "unavailable" and has_value:
+            raise ValueError(
+                "measurement_completeness='unavailable' contradicts a recorded peak. "
+                "A value that was read is 'complete', or 'lower_bound' if the phase "
+                "did not finish."
+            )
+        return self
+
+
 class PhaseComponentRecord(BaseModel):
     """One phase's {prediction, measurement, actual, error} quartet."""
 
@@ -261,6 +353,14 @@ class PhaseComponentRecord(BaseModel):
     measurement: PhaseMeasurement | None = None
     actual_seconds: float | None = Field(default=None, gt=0.0)
     prediction_error: PredictionError | None = None
+    realized_memory: RealizedPhaseMemory | None = Field(
+        default=None,
+        description=(
+            "V21 PR B2 — realized peak memory for this phase, measured in the "
+            "phase's own process. Observation only: no admission or refusal "
+            "path reads it (asserted by test_realized_memory_is_observation_only)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _error_requires_both(self) -> PhaseComponentRecord:
@@ -291,6 +391,19 @@ class PhaseComponentRecord(BaseModel):
             else None
         )
         return self.model_copy(update={"actual_seconds": actual_seconds, "prediction_error": error})
+
+    def with_realized_memory(self, realized: RealizedPhaseMemory) -> PhaseComponentRecord:
+        """Attach this phase's realized peak memory.
+
+        V21 PR B2, mirroring ``with_actual``. Deliberately derives
+        **nothing**: the time path computes a ``PredictionError`` here
+        because prediction and actual are both times on the same record,
+        whereas the memory *forecast* lives in the parent's admission
+        result, not in this subprocess record. Joining them is the
+        parent's job (``realized_vs_admitted``), which keeps this object a
+        pure measurement.
+        """
+        return self.model_copy(update={"realized_memory": realized})
 
 
 class TotalRecord(BaseModel):

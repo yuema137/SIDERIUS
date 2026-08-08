@@ -1,7 +1,8 @@
 # PR B — Resource-budget semantics and estimator correctness
 
 **Status: APPROVED 2026-08-08 (operator) with four corrections applied.
-B1 IMPLEMENTED; B2 next. STOP for operator review at B0 before writing B3.**
+B1 + B2 IMPLEMENTED; B0 evidence packet next. STOP for operator review at
+B0 before writing B3.**
 
 > **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
 > not survive contact with the code, and the corrections are attached in
@@ -1051,22 +1052,25 @@ first is preferred so the recorded breaches reflect corrected forecasts.
 
 ### 3. Implementation plan
 
-- [ ] Audit where realized peak is **already** captured per phase, and
-      where it is not. Record the gaps rather than assuming symmetry
-      between training and inference
-- [ ] Establish where the **admitted** budget for that phase is available
-      at the point the realized peak is known — the two may not currently
-      meet in one scope, and if they do not, that is a decomposition
-      question to record, not to solve by threading state
-- [ ] Add the comparison and a typed record carrying the **neutral field
-      set above** — both deltas kept separate, plus which cap was binding
-      (physical vs operator budget vs pair ceiling; `wrapper.py:534-545`
-      already classifies this on the admission side)
-- [ ] **Name every field for what was measured, not for what it means.**
-      A reviewer must not be able to infer S1/S2/S3 from the schema
-- [ ] Attribute the breach to **the process that caused it**, never to a
-      peer. Part III is explicit: contention is not candidate evidence
-- [ ] Surface it in the record and the manifest in words, not only numbers
+- [x] Audit where realized peak is **already** captured per phase — §0.7.
+      Answer: **nowhere**. §0.3's premise was half wrong; B2 must add the
+      measurement, not only the comparison
+- [x] Establish where the **admitted** budget is available at the point
+      the realized peak is known — §0.7.3/§0.7.4. Both already meet in
+      one scope at the tuner's final-record assembly, so **no state
+      threading was needed** and the §12 escalation was not triggered
+- [x] Add the comparison and a typed record carrying the **neutral field
+      set** — `RealizedVsAdmittedMemory`, both deltas separate, plus
+      `binding_constraint`
+- [x] **Name every field for what was measured, not for what it means** —
+      enforced by a test that fails on any policy-flavoured field name,
+      not merely by convention
+- [x] Attribute to **the process that caused it** — structurally: the
+      counters are read inside the phase's own subprocess and are
+      per-process, so a peer cannot inflate them. The recorder accepts no
+      PID argument, which is asserted
+- [x] Surface it in the record — `final_record["memory"]["realized_vs_admitted"]`,
+      per phase
 
 ### 4. Validation plan
 
@@ -1134,9 +1138,152 @@ first is preferred so the recorded breaches reflect corrected forecasts.
 .venv/bin/python -m pytest tests/unit -q -m "not real_run"
 ```
 
-- [ ] Capture-point audit — **to record**
-- [ ] Test counts + wall time — **to record**
-- [ ] Mutation results — **to record**
+- [x] Capture-point audit — §0.7
+- [x] Test counts + wall time — §B2.R
+- [x] Mutation results — §B2.R
+
+### B2.R — Implementation record, 2026-08-08
+
+**The transport already existed.** §0.7.4 flagged one escalation risk —
+that measuring inside the training and inference subprocesses might
+require a material architecture change. It does not. The runtime-control
+framework already carries a typed, atomic subprocess→parent channel, and
+already records a phase's realized **time**; realized **memory** is its
+exact analogue and rides the same rails:
+
+```text
+train_engine_sandbox.py / inference_single.py
+  read_process_peak_mib()                    per-process CUDA counters
+  session.record_phase_peak_memory(phase)    mirrors record_phase_actual
+    -> PhaseComponentRecord.realized_memory  mirrors .actual_seconds
+    -> _write_sidecar()                      atomic, already existed
+  -> sandbox_executor._read_runtime_observation_sidecar()   already existed
+  -> tuner final_record["runtime_verification"]             already existed
+  -> _attach_realized_memory()               ONE new call, extracted
+  -> final_record["memory"]["realized_vs_admitted"]
+```
+
+No state threading, no singleton, no new runtime mechanism. **§12's
+stop-and-escalate was not triggered**, and the phase-6.6 note's "blast
+radius" concern turns out to cost two call sites.
+
+**Changed files**
+
+```text
+core/runtime_control/records.py          + RealizedPhaseMemory, MemoryCompleteness,
+                                           PhaseComponentRecord.realized_memory,
+                                           with_realized_memory
+core/runtime_control/session.py          + record_phase_peak_memory
+core/runtime_control/realized_memory.py  NEW — RealizedVsAdmittedMemory,
+                                           realized_vs_admitted,
+                                           read_process_peak_mib, reset_process_peak
+execute_tools/train_engine_sandbox.py    + capture beside record_phase_actual
+execute_tools/inference_single.py        + capture beside record_phase_actual
+nodes/.../ml_hyperparameter_tune_agent.py + _attach_realized_memory (extracted)
+                                           + one call before _emit_record
+tests/unit/core/test_realized_vs_admitted_memory.py   NEW — 24 cases
+```
+
+**The tuner's `run()` gained exactly one call.** The decomposition rule
+names that function explicitly (2,487 lines, on pyright's complexity
+ceiling), so the logic lives in `_attach_realized_memory`, which has its
+own inputs, its own failure containment and its own tests.
+
+#### Semantics neutrality, and how it is enforced rather than promised
+
+```text
+PERSISTED (measured)                    ABSENT (would freeze Q-B-1)
+  admission_estimated_peak_mib            budget_breach
+  effective_admission_threshold_mib       cap_violation
+  operator_budget_mib / physical_cap_mib  over_budget
+  binding_constraint                      penalty / reject
+  realized_peak_mib + realized_peak_source
+  realized_minus_estimated_mib   FORECAST ERROR
+  realized_minus_threshold_mib   HEADROOM CONSUMED
+  realized_above_threshold: bool | None
+  measurement_completeness
+  owning_process_pid
+```
+
+`test_no_field_name_encodes_a_verdict` scans both models for
+policy vocabulary, so a later `budget_breach` field fails the suite
+rather than passing review. `test_all_three_semantics_remain_expressible_from_one_row`
+reads the same row three ways (S1 forecast error, S2 cap violation, S3
+exceedance magnitude) to show none has been foreclosed.
+
+**The two deltas are separate and a mutation proves it matters** — N3
+collapses them and three tests fail. They diverge exactly when the
+physical cap rather than the operator budget was binding, which is the
+distinction B0 needs to tell "the forecast was wrong" from "the budget
+was tight".
+
+#### Missing evidence stays missing
+
+`realized_above_threshold` is `bool | None`, and **`None` means unknown —
+never `False`**. A model validator refuses the combination
+`realized_peak_mib=None` with any non-null verdict, so the safe reading
+cannot be constructed even by accident. `RealizedPhaseMemory` likewise
+refuses a `complete` claim with no number, and refuses `unavailable` with
+one.
+
+Three completeness states, distinguished rather than merged:
+`complete` / `lower_bound` (the last value before the process died; the
+true peak is *at least* this) / `unavailable`.
+
+#### Mutation results — 8 of 8 caught, first pass
+
+| # | Mutation | Result |
+|---|---|---|
+| N1 | remove the production `_attach_realized_memory` call | CAUGHT |
+| N2 | let an unavailable measurement read as "within threshold" | CAUGHT |
+| N3 | collapse the two deltas into one | CAUGHT |
+| N4 | attribute the peak to a peer PID | CAUGHT |
+| N5 | drop the training-subprocess capture | CAUGHT |
+| N6 | drop the inference-subprocess capture | CAUGHT |
+| N7 | rename the comparison to `budget_breach` | CAUGHT |
+| N8 | allow a completeness claim with no measurement | CAUGHT |
+
+No survivors, so nothing needed classification. Same hygiene as B1:
+exact-string anchors asserted to occur exactly once, write-landed
+assertion, `__pycache__` cleared around every run, restore in a `finally`,
+baseline green before and after.
+
+#### Validation at this commit
+
+```text
+tests/unit/core/test_realized_vs_admitted_memory.py   24 passed  (new)
+ruff check . / ruff format --check .                  clean / 760 formatted
+pyright                                               0 errors, 4 warnings
+```
+
+#### What B2 deliberately did NOT do
+
+- **No policy.** Nothing admits, refuses, retries, resizes or reranks on
+  the new field. Asserted two ways: the decision-bearing modules are
+  scanned for the name, and `decide_admission` / `assess_total` /
+  `complete_setup` are scanned individually.
+- **No semantics.** S1, S2 and S3 all remain expressible.
+- **No `reset_peak_memory_stats` call in production yet.** The helper
+  exists and is documented, but inserting a reset changes what an
+  existing counter means for any other reader, so it is left for the
+  commit that can prove no other consumer depends on the cumulative
+  value. **Consequence, stated rather than hidden:** a recorded phase
+  peak is currently the process high-water mark up to the end of that
+  phase, which for training includes setup and warm-up. That is an
+  over-estimate of the phase's own peak, i.e. the conservative
+  direction, and it is exact for the inference subprocess, which does
+  one phase. Recorded as a known limitation for B0.
+
+#### Deviations from the approved B2 plan
+
+1. **B2 had to add the measurement, not just the comparison** (§0.7.1).
+2. **`physical_cap_gb` is accepted but not yet supplied by the tuner** —
+   the admission side does not return the physical cap as a field
+   (§0.7.3), so `binding_constraint` resolves to `physical_cap` /
+   `operator_budget` from the budget alone and reports `unknown` when
+   neither is known. Promoting `cap_note` from a log string to a typed
+   field is the clean fix and is left to B3/B0 follow-up rather than
+   widened into B2.
 
 ### 8. Commit boundary
 

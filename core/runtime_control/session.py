@@ -51,9 +51,11 @@ from core.runtime_control.provenance import (
 )
 from core.runtime_control.records import (
     AdmissionRecord,
+    MemoryCompleteness,
     PhaseComponentRecord,
     PhaseMeasurement,
     PredictionSource,
+    RealizedPhaseMemory,
     RuntimeObservation,
     RuntimePrediction,
     TotalRecord,
@@ -666,6 +668,45 @@ class RuntimeVerificationSession:
         """
         existing = self._components.get(phase, PhaseComponentRecord())
         self._components[phase] = existing.with_actual(max(actual_seconds, 1e-9))
+        self._write_sidecar()
+
+    def record_phase_peak_memory(
+        self,
+        phase: RuntimePhase,
+        *,
+        allocator_peak_mib: int | None,
+        reserved_peak_mib: int | None,
+        completeness: MemoryCompleteness,
+        device_index: int | None = None,
+    ) -> None:
+        """Attach a phase's realized peak memory to the observation.
+
+        V21 PR B2, the memory analogue of ``record_phase_actual``. Called
+        from inside the phase's own subprocess, so the PID recorded here
+        is by construction the process that caused the usage — attribution
+        is structural rather than inferred, and a peer sharing the card
+        can never be blamed for this candidate.
+
+        **Observation only.** Nothing in the admission path reads
+        ``realized_memory``; the sidecar is rewritten so the parent can
+        persist the number, and no decision changes. Q-B-1 is not frozen,
+        so this records what was measured and leaves what it *means* to
+        B0.
+
+        Writes the sidecar immediately rather than at finalize: if the
+        process is OOM-killed a moment later, the last value survives as a
+        ``lower_bound`` instead of being lost with the process.
+        """
+        existing = self._components.get(phase, PhaseComponentRecord())
+        self._components[phase] = existing.with_realized_memory(
+            RealizedPhaseMemory(
+                allocator_peak_mib=allocator_peak_mib,
+                reserved_peak_mib=reserved_peak_mib,
+                measurement_completeness=completeness,
+                owning_process_pid=os.getpid(),
+                device_index=device_index,
+            )
+        )
         self._write_sidecar()
 
     def finalize(self, final_status: str) -> RuntimeObservation:
