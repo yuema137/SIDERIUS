@@ -406,6 +406,111 @@ parameters are counted at `seg=40000` has its steps priced at `seg=1000`.
       (§0.6.5a).** Out of B1's scope, changes training behaviour, and
       defeats a bound the operator rules call binding. Not fixed here.
 
+## 0.7 B2 capture-point audit — performed 2026-08-08
+
+Required by B2's §3 first checkbox. Read-only; no code changed.
+
+### 0.7.1 §0.3's premise is half wrong: there is no realized peak to compare
+
+§0.3 stated *"the production training and inference phases record
+`allocator_peak_mib` / `driver_tree_peak_mib`, but no code path compares
+those to the budget."* The first clause is false.
+
+Both field names exist **only** in `core/runtime_control/gpu_measurement_*`
+— the pre-phase measurement worker — plus `scripts/`. A sweep of every
+CUDA memory API across the repository finds **nothing** in
+`execute_tools/`, `core/sandbox_executor.py`, `nodes/`, or either phase
+skill:
+
+```text
+grep max_memory_allocated|max_memory_reserved|memory_allocated
+     |memory_reserved|mem_get_info
+  execute_tools/ core/sandbox_executor.py nodes/
+  agent/skills/training_skill/ agent/skills/inference_skill/
+  -> no matches
+```
+
+The only production callers anywhere are
+`core/runtime_control/probe_production.py:296` (the bounded probe) and
+`gpu_milestone_trace.py:577` (tracing), neither of which is the
+production training or inference phase.
+
+**So B2 is larger than "add a comparison": the realized quantity is not
+measured at all.** B2 must add the measurement *and* the comparison. It
+remains observation-only — nothing decides on it — so the commit's
+character is unchanged, but its scope is not what §0.3 assumed.
+
+### 0.7.2 The omission was deliberate, and its stated reason has expired
+
+`docs/phase66_telemetry/capture_stage2_vram_telemetry.py:20-26` records
+the decision explicitly:
+
+> *"this is a one-off measurement artefact. It does NOT modify any
+> production code path. The alternative — wiring `max_memory_allocated`
+> into sandbox_executor — would require touching the subprocess entry
+> points for a single one-time reading; not worth the blast radius."*
+
+That reasoning was correct for a one-time reading. It does not survive
+P6.4: the realized peak is no longer a curiosity, it is the evidence
+Q-B-1 turns on, and §0.3's finding is that an under-prediction is
+invisible unless it happens to OOM. The cost/benefit has inverted.
+
+The note is also a useful warning about *where* the work lands — the
+subprocess entry points — which is the boundary B2 must justify touching
+and the reason B2 audits before writing.
+
+### 0.7.3 The ADMITTED half already exists and is already persisted
+
+`evaluate_vram_skill.run_skill` returns, on both the feasible and the
+infeasible path:
+
+| returned key | B2 neutral field it supplies |
+|---|---|
+| `estimated_gb` | `admission_estimated_peak_mib` |
+| `limit_gb` (`cap_bytes`) | `effective_admission_threshold_mib` |
+| `vram_budget_gb` | operator-budget context |
+| `dominant_phase`, `phase_breakdown` | phase attribution |
+
+So B2 does **not** need to invent the admitted half or thread it
+anywhere new. Two gaps remain on this side, both small:
+
+- **The physical cap is not a returned field** — it exists as
+  `hardware_context.usable_cap_bytes` and reaches the record only inside
+  the `verdict` prose.
+- **The binding-cap classification is a print, not a fact.**
+  `wrapper.py:538-545` already computes exactly the three regimes B2
+  needs (`PHYSICAL` / `PHYSICAL VETO` / `BUDGET`) and assigns them to
+  `cap_note`, a **log string**. This is precisely the "value that is only
+  printed" pattern the mandate rejects as evidence. B2 should promote the
+  existing classification to a typed field rather than write a second
+  one — a second implementation could disagree with the log.
+
+### 0.7.4 The shape of B2, and the one escalation risk
+
+```text
+ADMITTED   exists, typed, persisted          -> reuse
+REALIZED   does not exist anywhere           -> B2 must capture it
+TRANSPORT  the two do not meet in any scope  -> the real design question
+```
+
+The realized peak has to be read inside the **training and inference
+subprocesses**, which is the boundary the phase-6.6 note called "blast
+radius". Whether that is a *bounded* addition at an existing typed
+subprocess boundary or a *material* architecture change is the question
+B2 answers first. If it turns out to require broad state threading, a
+new singleton, or a new runtime-control mechanism, the mandate's §12
+rule applies: **STOP AND ESCALATE** rather than build it.
+
+### 0.7.5 Consequence for B0
+
+Until B2 lands and runs, **there is no measured realized-vs-admitted
+distribution at all**, and none can be reconstructed from V20 artifacts
+that never recorded one. B0 must say so plainly rather than infer a
+distribution from three OOMs. Recorded here so the B0 packet cannot
+quietly overclaim.
+
+---
+
 ## 1.1 Operator rulings, 2026-08-08 — read before B1
 
 Four corrections to this document, two of which fix defects in it.
