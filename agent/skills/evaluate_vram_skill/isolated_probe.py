@@ -181,20 +181,59 @@ class IsolatedProbeSpec(BaseModel):
     hardware: HardwareSnapshot | None = None
 
     def effective_cap_gb(self) -> float | None:
-        """The cap the worker must apply: operator ceiling, else the
-        parent's frozen defensive cap, else nothing to enforce."""
-        if self.vram_budget_gb is not None:
-            return self.vram_budget_gb
+        """The cap the worker must apply: the LOWER of the operator ceiling
+        and the parent's frozen defensive cap; either alone if only one is
+        known; nothing to enforce if neither is.
+
+        **V21 PR B3 Stage B — corrected from `operator else defensive`.**
+        The two were treated as alternatives with operator priority, so an
+        operator budget ABOVE the card silently raised the worker's ceiling
+        past the physical one:
+
+        ```text
+        physical usable 25 GB, operator budget 40 GB, measured peak 30 GB
+          parent  evaluate_vram_skill  cap = min(25, 40) = 25  -> VIOLATION
+          worker  effective_cap_gb     cap = 40                -> allowed
+        ```
+
+        The parent names that regime `PHYSICAL VETO` (`wrapper.py:540`)
+        precisely because an operator budget may only *lower* the 80%
+        safety ceiling, never raise it. Under the frozen S3 semantics the
+        admission threshold is the **effective** one, and the tuner already
+        records it as such (`final_record["memory"]["vram_budget_gb"] =
+        resource_check["limit_gb"]`). Taking the minimum makes the worker,
+        the parent gate and the shared decision policy agree on one number.
+
+        Reachable on any legal configuration where the budget exceeds
+        0.80 x VRAM; not exercised by V20, which ran 12 GiB on a larger
+        card. Direction of the correction is conservative — the worker can
+        now only refuse *more*, never less. Recorded in the PR B design doc
+        §B3.B.1 rather than changed silently.
+        """
+        caps = [c for c in (self.vram_budget_gb, self._defensive_cap_gb()) if c is not None]
+        return min(caps) if caps else None
+
+    def _defensive_cap_gb(self) -> float | None:
         return self.hardware.usable_cap_gb if self.hardware is not None else None
 
     def effective_limit_source(self) -> str:
-        return (
-            "operator_vram_budget"
-            if self.vram_budget_gb is not None
-            else "hardware_snapshot_defensive_cap"
-            if self.hardware is not None
-            else "unbounded_no_snapshot"
-        )
+        """Which bound actually set ``effective_cap_gb`` — named, not guessed.
+
+        Now that the cap is a minimum, the source is whichever bound won;
+        ``physical_veto_defensive_cap`` is the case the old code could not
+        express, and is the one an operator most needs to see.
+        """
+        operator = self.vram_budget_gb
+        defensive = self._defensive_cap_gb()
+        if operator is None and defensive is None:
+            return "unbounded_no_snapshot"
+        if operator is None:
+            return "hardware_snapshot_defensive_cap"
+        if defensive is None:
+            return "operator_vram_budget"
+        if defensive < operator:
+            return "physical_veto_defensive_cap"
+        return "operator_vram_budget"
 
 
 class HostMemoryEvidence(BaseModel):

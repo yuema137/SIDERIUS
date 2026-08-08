@@ -1179,8 +1179,18 @@ def _resolve_time_check_probe_request(
     exp_id: str,
     device_identity: Any | None = None,
     result_authority: str | None = None,
+    vram_threshold_gb: float | None = None,
 ) -> str:
     """C9d: turn a REQUEST_PROBE pre-flight into a terminal decision.
+
+    V21 PR B3 Stage B — ``vram_threshold_gb`` arms the frozen S3 admission
+    rule for memory. It must be the EFFECTIVE threshold
+    (``resource_check["limit_gb"]`` = ``min(physical usable, operator
+    budget)``), never the raw operator budget, which differs exactly in
+    the ``PHYSICAL VETO`` regime. ``None`` leaves the pre-B3 behaviour
+    untouched. Stage A established this is the only production
+    ``RuntimeBudget`` site whose estimate carries a measured
+    ``peak_vram_gb``; the others would be inert.
 
     This is the production edge the C8 closure audit found missing. When
     the shared policy asks for a measurement, we take one:
@@ -1317,7 +1327,14 @@ def _resolve_time_check_probe_request(
 
     resolution = resolve_request_probe(
         request=request,
-        budget=RuntimeBudget(time_seconds=max(time_budget_minutes, 1e-9) * 60.0),
+        budget=RuntimeBudget(
+            time_seconds=max(time_budget_minutes, 1e-9) * 60.0,
+            # V21 PR B3 Stage B. The policy already grades this correctly
+            # (decision_policy:285): a MEASURED peak above the threshold
+            # REJECTs, a projected one is ADVISORY. It was inert only
+            # because nothing supplied the budget.
+            vram_gb=vram_threshold_gb if (vram_threshold_gb or 0) > 0 else None,
+        ),
         mode=RuntimeMode(
             phase="trial" if is_trial else "formal",
             candidate_stage="post_implementation",
@@ -3310,6 +3327,7 @@ def _attach_realized_memory(
         from core.runtime_control.realized_memory import realized_vs_admitted
 
         rows = {}
+        typed = {}
         for phase in ("training", "inference"):
             row = realized_vs_admitted(
                 phase,
@@ -3318,10 +3336,14 @@ def _attach_realized_memory(
             )
             if row is not None:
                 rows[phase] = row.model_dump(mode="json")
-        if rows:
-            final_record.setdefault("memory", {})["realized_vs_admitted"] = rows
+                typed[phase] = row
+        if not rows:
+            return
+        memory = final_record.setdefault("memory", {})
+        memory["realized_vs_admitted"] = rows
+
     except Exception as exc:  # pragma: no cover — defensive
-        print(f"  [B2] realized-vs-admitted attach failed (non-fatal): {exc}")
+        print(f"  [B2/B3] realized-vs-admitted attach failed (non-fatal): {exc}")
 
 
 def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -> None:
@@ -4696,6 +4718,11 @@ class HyperparamTuningAgent:
                                 # M6: the declared authority decides whether
                                 # an unresolvable probe may fail open.
                                 result_authority=getattr(agent_input, "result_authority", None),
+                                # B3 Stage B: the EFFECTIVE admission
+                                # threshold — min(physical, operator budget),
+                                # already computed by the VRAM gate and
+                                # already recorded as vram_budget_gb.
+                                vram_threshold_gb=(resource_check or {}).get("limit_gb"),
                             )
                             == "abort"
                         ):
