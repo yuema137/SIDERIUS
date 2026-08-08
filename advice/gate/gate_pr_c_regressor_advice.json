@@ -1,0 +1,24 @@
+{
+ "mindset": [
+  "# PR C Gate C5b \u2014 live confirmation fixture (NOT a scientific campaign)",
+  "This run validates that the system can express and implement a specific output/loss formulation end to end. Scientific quality is NOT under test: a low score, a collapsed model, or a failed HealthGate does not make this run wrong.",
+  "Propose ONE small, conservative, obviously-trainable model. Do not optimise for accuracy. Prefer the smallest architecture that honestly implements the requested contract.",
+  "This run confirms on real hardware what C5a proved deterministically and what PR A's Gate 2C proved for the tail. A collapsed model or a failed HealthGate is a SCIENTIFIC OUTCOME and does not make this run wrong; the candidate and workload will NOT be changed to obtain a better outcome."
+ ],
+ "propose": [
+  "REQUIRED OUTPUT CONTRACT: set `output_type` to \"regressor\" in your proposal. This is mandatory for this validation run.",
+  "REQUIRED LOSS: set `loss_config.loss_type` to \"smooth_l1\" (Branch A, built-in). Do not use a custom loss.",
+  "The model's forward pass MUST return [B, T] float32. Use a final Conv1d(channels, 1, kernel_size=1) head followed by squeeze(1) so each timestep carries one continuous value.",
+  "`output_type` and `loss_type` are independent proposal dimensions. State the output contract explicitly; do not infer it from the loss.",
+  "Keep the model small: roughly 10k-500k parameters is appropriate for this validation. Batch size must be at least 4.",
+  "Do not propose a custom_loss_spec. Do not reuse an existing plugin (Branch B); propose a new small model."
+ ],
+ "implement": [
+  "Implement exactly the requested output contract. The final layer must produce the declared shape.",
+  "Keep the implementation minimal and vectorised. No Python loops over the time dimension.",
+  "The forward pass must return [B, T] float32."
+ ],
+ "tune": [
+  "Use conservative hyperparameters. This is a wiring validation, not a tuning study."
+ ]
+}

@@ -570,9 +570,9 @@ the same behaviour PR A saw.
 
 ### 8. Commit boundary
 
-- [ ] Diff touches `plugin_loader.py`, the **five** consumers and their tests
-- [ ] No estimator changes (C3), no Gate evidence (C5)
-- [ ] Diff summary, staged files, tests and deviations shown before commit
+- [x] Diff touched `plugin_loader.py`, the five consumers and their tests
+- [x] No estimator changes (C3), no Gate evidence (C5)
+- [x] Diff summary and staged file list shown before committing (`f16f02fd`)
 
 ---
 
@@ -1212,80 +1212,215 @@ training* would control the head while genuinely exercising the tail.
 
 **Dependencies:** C5a passed.
 
-### 3. Implementation plan
+### 2b. READINESS PACKET — recorded BEFORE the run (2026-08-08)
 
-- [ ] Audit for an existing controlled-head / real-tail seam; record the
-      finding either way, and **do not construct one if absent**
-- [ ] Reuse PR A's fixed typed plans
-- [ ] Draft exact commands with the paired `--data_scope` /
-      `--health_gate_files`, `--data_dir`, and a declared launch posture —
-      the three refusals PR A hit are avoidable by construction
-- [ ] Obtain explicit approval, then run cold-start **once**
-- [ ] Archive records, manifests and hardware provenance
+The mandate requires this written down first, so the run cannot be
+retro-fitted to whatever it produced.
 
-### 4. Validation plan
+**Environment, verified now**
 
-Observations to record — **not** pass/fail conditions unless marked:
+```text
+GPU        NVIDIA GeForce RTX 5090, 31.3 GB, no compute processes running
+data       /home/klz/Data/TIDMAD/  present
+head       0d5616bf  (C5a)
+```
 
-- [ ] Whether a real trial round reached HealthGate-valid — **observation**
-- [ ] If it did: the §0.1 two-line rule holds live (`:1798` absent,
-      `:1834` present with the winner's `exp_id`) — **observation**
-- [ ] Real training and inference complete — **required**
-- [ ] Frozen scorer executed; `file_vector` persisted — **required**
-- [ ] Terminal scientific status is legitimate — **required**
-- [ ] No scorer file in any PR C diff — **required**
+**Exact command** — PR A's Gate 2 form, with the one change that matters:
 
-### 5. Acceptance criteria
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 timeout 5400 .venv/bin/python \
+  sdsc_submission_scripts/run_one_iteration.py \
+  --workspace "$WS" --run_name prc_gate5b --start_iteration 1 \
+  --max_rounds 2 --max_epochs 1 \
+  --data_dir /home/klz/Data/TIDMAD/ \
+  --data_scope 19 --health_gate_files 19 \
+  --trial_portion 0.02 --train_portion 0.02 --eval_portion 0.02 \
+  --formal_portion 0.02 --formal_train_portion 0.02 --formal_eval_portion 0.02 \
+  --healthgate_mode blocking --result_authority diagnostic \
+  --advice advice/gate/gate_pr_c_regressor_advice.json \
+  --validation_max_portion 0.02 \
+  --llm_config llm_configs/openai_tiered_v1.json \
+  --trial_time_budget_minutes 20 --formal_time_budget_minutes 30
+```
 
-- Real training and inference ran, the frozen scorer executed, and
-  `file_vector` was persisted for a generated model.
-- The run reached a **legitimate terminal scientific status**, whatever
-  that status is.
-- **Not acceptance criteria:** score quality; whether the real trial
-  happened to be HealthGate-valid; whether formal was reached live.
+**`--max_rounds 2`, and that is the whole point.** PR A's Gate 2 used
+`--max_rounds 1`, so its single round *was* the formal round — there was no
+preceding trial that could become HealthGate-valid, which is exactly why
+the `:1798` WARNING fired and formal ran on the planner's plan. Two rounds
+gives round 1 the chance to be a valid trial and round 2 the chance to
+inherit from it.
 
-### 6. Failure and edge cases
+**Declared bounds**
 
-| Case | Required behaviour |
+| | |
 |---|---|
-| **Real trial collapses; never HealthGate-valid** | **NOT a PR C failure.** Record the scientific outcome. Acceptance stands on C5a + C4 + PR A's tail. **Do not rerun with a different workload** |
-| Formal HealthGate invalidates the formal round | **PASS**, if the scorer ran |
-| Formal never reached because no valid winner existed | Record it; acceptance is unaffected (see the evidence hierarchy in §2) |
-| `skipped_time_risk` | Diagnose against C3; if the estimate is the cause, that is an in-scope defect |
-| PR B resource contention | Record and defer; run Gates sequentially |
-| Poor score | Not a failure. Record it |
+| data scope | file 19 only, paired `--health_gate_files 19` (DS8 rule) |
+| portions | 0.02 everywhere, matching PR A's measured 78 train steps |
+| epochs | 1 (paper spec) |
+| rounds | 2 (one trial, one formal) |
+| budgets | trial 20 min, formal 30 min |
+| outer timeout | 5400 s |
+| posture | `blocking` / `diagnostic` — declared, never defaulted |
+| cold start | no `--seed_paths` |
+| attempts | **ONE**. No rerun with a different workload |
+| expected GPU | well under 31 GB at these portions |
+| artifacts | records under `$WS/iter_001/...`, iteration manifest, plugin dir |
 
-### 7. Verification commands and evidence
+**Stop conditions**
 
-- [ ] Commands — **to record, approved before running**
-- [ ] Formal record ID and fields — **to record**
-- [ ] Wall time, GPU time — **to record**
-- [ ] Any step not run and why — **to record; never claim a pass**
+- Outer `timeout` expires → record and stop; do not relaunch.
+- Any guard refuses → the guard is right; record it as positive evidence.
+- Real trial collapses / never becomes HealthGate-valid → **record the
+  scientific outcome and STOP.** Do not change candidate or workload.
 
-### 8. Commit boundary
+**Regressor chosen** because PR A's Gate 2R was the harder case and the one
+that exposed the VRAM-probe shape defect; if only one live confirmation is
+run, it should be the contract with the shorter history.
 
-- [ ] Evidence only; any defect found gets its own runtime commit
+### 3. Implementation — RESULTS (2026-08-08, one run, as declared)
+
+- [x] Audited for a controlled-head / real-tail seam. **None exists**, and
+      none was built — the plan forbids inventing production machinery for
+      a Gate. Recorded as a negative finding
+- [x] Ran the readiness-packet command verbatim, cold start, **once**
+- [x] Archived records, manifest and plugin under
+      `<scratchpad>/c5b_ws/iter_001/`
+
+Novel model invented by the proposer:
+**`small_residual_conv_regressor_contract_v1`** — a name that had never
+existed, which is the point.
+
+### 4. What actually happened
+
+```text
+ROUND 1  TRIAL   real training + inference + frozen scorer
+                 status failed_mode_collapse, score -2.5406368051691524
+                 file_vector persisted (file 19 = 0.014660250279300686)
+                 HealthGate INVALIDATED: n_unique_int8=7 (<< 25),
+                                         output_std_mv=0.092 (<< 1 mV)
+
+ROUND 2  FORMAL  :1798 WARNING fired -- no HealthGate-valid trial exists
+                 pre-phase GPU measurement 1824 MiB -> ADMITTED
+                 real training + inference + frozen scorer
+                 status success, score -1.778556101574009
+                 file_vector persisted (file 19 = 0.05202586697170025)
+                 scientific_authority present, is_trial ABSENT -> FORMAL
+                 formal_validity: "valid"
+```
+
+Timing for the formal round: train 3.3 s, inference 3.6 s, scoring 3.4 s.
+
+### 5. Verdict against the acceptance criteria
+
+**Required — all MET**
+
+- [x] Real training and inference completed, twice
+- [x] Frozen scorer executed; `file_vector` persisted on **both** records
+- [x] Legitimate terminal scientific status — `failed_mode_collapse` for
+      the trial, `success` for the formal round
+- [x] **A FORMAL record persisted for a generated model**, with
+      `formal_validity: "valid"`
+- [x] No scorer file in the PR C diff — verified by
+      `git diff --name-only b9f88ae5..HEAD`
+
+**Observations — not pass/fail**
+
+- [x] **Did a real trial reach HealthGate-valid? NO.** The candidate
+      collapsed to near-constant output. **This is a scientific outcome
+      and NOT a PR C failure.** The candidate and workload were *not*
+      changed to obtain a better one; that loop is explicitly forbidden
+      and is the V20 Case A error.
+- [x] The live head was therefore **not** exercised: with no valid winner,
+      the `:1798` WARNING fired and formal ran on the planner's plan —
+      exactly the state PR A's Gate 2C was in.
+
+### 6. What C5b DID add, beyond repeating PR A
+
+PR A's live tail evidence was for a **classifier**. C5b confirms the same
+tail for a **regressor**, on a freshly invented architecture:
+
+```text
+generated regressor -> clean measurement worker -> 1824 MiB measured
+  -> ADMITTED -> formal executes -> formal record persisted, validity valid
+```
+
+That is the first time a generated **regression** model has been measured,
+admitted, run formally and had a formal record persisted. It also
+exercises C1/C2/C3 in production: the run resolved a novel model's config
+and contract across the process boundary and was admitted on an estimate
+computed from its properties rather than its name.
+
+### 7. A PR D data point, reproduced independently
+
+The run declared `--healthgate_mode blocking --result_authority
+diagnostic`, yet the formal record stamps:
+
+```json
+{"healthgate_mode": null, "declared_result_authority": null,
+ "blocking_reasons": ["legacy_authority_unknown"],
+ "primary_basis": "legacy_authority_unknown", "authoritative": false}
+```
+
+PR A observed this once; C5b reproduces it on an independent run. The
+declaration reaches the manifest and not the record stamp. **Out of scope
+for PR C** — recorded for **PR D** (already registered in §E.3b), not
+absorbed here.
+
+### 8. Evidence composition — stated explicitly, never as one run
+
+```text
+HARD ACCEPTANCE
+  C5a   valid trial -> winner -> winner's params inherited   DETERMINISTIC
+  C4    novel plugin -> clean subprocess -> config + contract  REAL SUBPROCESS
+  PR A  measurement -> admission -> formal -> record (classifier)  REAL GPU
+  C5b   the same tail for a REGRESSOR                        REAL GPU
+
+NOT PROVEN LIVE BY ANY RUN
+  valid trial -> formal, end to end in one execution
+  (blocked by a scientific outcome, not by an infrastructure defect)
+```
+
+**No claim in this document says PR C proved the head and tail in a single
+live run.** It did not.
+
+### 9. Commit boundary
+
+- [x] Evidence and the advice fixture only; no production change
 
 ---
 
 ## 2. Merge checklist — what PR C must prove
 
-- [ ] **1. NO SILENT DEFAULT** — an unknown output contract fails closed;
-      88/88 registered models resolve unchanged
-- [ ] **2. NO NAME-KEYED REACHABILITY** — the estimator branches that gate
-      admission are gone; built-in estimates unchanged
-- [ ] **3. SUBPROCESS TRANSPORT ENFORCED** — a real spawned subprocess
-      reconstructs a novel generated plugin, and every hop deletion fails
-- [ ] **4. IMPORT-SIDE-EFFECT CLASS SWEPT** — enumerated, with a
-      reachability verdict per finding
-- [ ] **5. AUTHORITATIVE FORMAL PROMOTION FROM A VALID TRIAL WINNER** —
-      proven **deterministically by C5a** (`:1798` absent, `:1834` present
-      naming the constructed winner's `exp_id`), *not* by C5b's live
-      outcome. C5b confirms on real hardware and cannot fail this item by
-      producing a collapsed model (§C5b evidence hierarchy)
-- [ ] **6. NINE VIOLATIONS ACCOUNTED FOR** — each of the nine tracked
-      name-keyed violations is either closed (C3: 7) or carries a written
-      follow-up ID and a stated reason (C3: 2 → PR G, see §0.4)
+- [x] **1. NO SILENT DEFAULT** — `UnknownOutputContractError` replaces the
+      unknown → `"classifier"` fallback; all 88 registered models resolve
+      unchanged; five consumers translate it; 4/4 mutations caught (C1)
+- [x] **2. NO NAME-KEYED REACHABILITY** — the five estimator branches are
+      replaced by truthful properties; built-in estimates identical across
+      18 parity cells; 3/3 mutations caught (C3). The
+      `is_inference_batch_registered` question is answered and pinned
+      (C3b), with `inference_batch_for` left to PR G per O-C-2
+- [x] **3. SUBPROCESS TRANSPORT ENFORCED** — a real spawned subprocess
+      reconstructs two never-before-seen plugins, one per contract; every
+      hop deletion fails; 2/2 production mutations caught (C4). Coverage
+      is **composed** with `test_measurement_worker_plugin_transport.py`,
+      which owns the #184 runner-spawn hop — stated in C4 §4
+- [x] **4. IMPORT-SIDE-EFFECT CLASS SWEPT** — one populating site, every
+      reader measured in a clean subprocess, two closed and one recorded
+      clean; 2/2 mutations caught (C2)
+- [x] **5. AUTHORITATIVE FORMAL PROMOTION FROM A VALID TRIAL WINNER** —
+      **proven deterministically by C5a** (9 tests, 2/2 mutations caught).
+      C5b's live run produced a **formal record for a generated regressor**
+      with `formal_validity: "valid"`, confirming the tail on real
+      hardware for the first time on a regression model. Its real trial
+      **collapsed**, so the head was not exercised live — a scientific
+      outcome, which by operator decision cannot fail this item. The
+      head+tail claim is an explicit **composition** (C5b §8) and this
+      document nowhere claims a single end-to-end live run.
+- [x] **6. NINE VIOLATIONS ACCOUNTED FOR** — all three guardrail groups
+      converted to passing and `_PENDING_CLEANUP` emptied. The audit also
+      found the tracked count was never nine *code branches*: the guard
+      scanned `#` comments, and `inference_defaults`' two were both prose
+      (C3 §5)
 
 ### What PR C is explicitly NOT required to prove
 
@@ -1320,10 +1455,51 @@ Only with all six may this be claimed:
 
 ---
 
-## 3. PR-level review template
+## 3. PR-level review — filled at completion
 
-Filled at completion, per Part III §E.7 (the `v20_priorities.md` §20.11
-fields plus the five V21-specific lines).
+Per Part III §E.7.
+
+| field | value |
+|---|---|
+| PR | C — generated-model production compatibility |
+| Branch | `feat/pr-c-generated-model-production-compat` |
+| Base | master `b9f88ae5` (PR A's merge commit) |
+| Commits | `cc8a2088` design, `f16f02fd` C1, `6335c7cb` C2, `2b53fe8e` C3, `5e7365f3` C3b, `019f440a` C4, `0d5616bf` C5a, + C5b evidence |
+| Production files changed | 6 (`plugin_loader`, `models_format_sandbox`, `sandbox_executor`, `inference_single`, `evaluate_vram_skill/wrapper`, `prompts`) + 2 estimators |
+| Scorer / metric files changed | **0 — verified by `git diff --name-only b9f88ae5..HEAD`** |
+| New test modules | 6 |
+| Mutations applied / caught | **15 / 15** |
+| Deterministic proofs | C1, C2, C3, C3b, C4, C5a |
+| Real-hardware evidence | C5b (this run) + PR A's Gate 2C tail |
+
+### The five V21-specific lines
+
+1. **What was assumed and turned out false.** Three things. #185 was
+   recorded as fixing the V20 config defect; it fixed one *call site* and
+   the function stayed broken (C2). The guardrail's "9 tracked violations"
+   were never nine code branches — it scanned comments (C3 §5). And C1's
+   consumer census, built from the execution path, missed the prompt path
+   entirely (§0.5a).
+2. **What a generated model can now do that it could not.** Be *seen* by
+   any registry reader without a lucky import (C2); be estimated on its own
+   properties instead of its name, including being charged for attention it
+   actually has (C3); and fail *loudly* instead of silently acquiring
+   classifier semantics when its registration breaks (C1), across a process
+   boundary (C4).
+3. **What is enforced mechanically rather than by discipline.** The
+   transport chain, hop by hop, in a real subprocess (C4); the fail-closed
+   contract (C1); the absence of name-keyed admission branches (C3 +
+   guardrail, with `_PENDING_CLEANUP` emptied so a regression *fails*
+   instead of being tolerated as xfail).
+4. **What is still true only by construction.** `inference_single`'s C1
+   guard is unreachable today and proven by source inspection, not a test.
+   The `is_inference_batch_registered` flag is harmless only while nothing
+   reads `warnings` to decide — pinned by C3b, not prevented by the type
+   system.
+5. **What was escalated rather than decided.** FU-C-1: the shipped
+   transformer estimate under-counts attention by 2x. Correcting it is more
+   accurate *and* more conservative, but it moves a calibrated built-in
+   estimate, so it was pinned and handed to the operator.
 
 ---
 
