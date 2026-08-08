@@ -227,7 +227,9 @@ def _build_probe_tensors(
     if output_type == "regressor":
         tgt = torch.zeros((batch_size, seg_size), dtype=target_dtype)
     else:
-        # "hybrid" (fcnet) and the legacy model_type=None path.
+        # The "hybrid" contract, plus the legacy model_type=None path.
+        # Note this is a branch on the DECLARED CONTRACT, never on a model
+        # name — the name only ever reaches get_output_type as a registry key.
         tgt = torch.zeros((batch_size, 256, seg_size), dtype=target_dtype)
     return inp, tgt
 

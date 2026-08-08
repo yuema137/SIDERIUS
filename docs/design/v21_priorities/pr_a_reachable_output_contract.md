@@ -89,12 +89,21 @@ validate the metadata the existing contract already consumes.
 
 | # | Commit | Touches | Independently reviewable |
 |---|---|---|---|
-| **A1** | Delete the dead, contradictory `check_compatibility` — **DONE** (`452b1022`) | `models_format_sandbox.py`, one test | Yes |
-| **A2** | Validator reads the declared contract before applying shape expectations | `ml_code_validator_agent.py`, tests | Yes |
-| **A2b** | Shared pair-compatibility rule reaches the **plugin** production branch | `models_format_sandbox.py`, `sandbox_executor.py`, tests | Yes |
-| **A3** | Explicit output contract, proposal → live gate | `proposal.py`, protocol, `ml_model_implementor.py`, tests | Yes |
-| **A3b** | Producer's own smoke test and generated test honour the declaration | `ml_model_implementor.py`, tests | Yes |
-| **A4** | Symmetric contract in the proposer-facing prompt surface | prompt templates, docs | Yes |
+| **A1** | Delete the dead, contradictory `check_compatibility` | `models_format_sandbox.py`, one test | **DONE** `452b1022` |
+| **A2** | Validator reads the declared contract before applying shape expectations | `ml_code_validator_agent.py`, tests | **DONE** `5f97984d` |
+| **A2b** | Shared pair-compatibility rule reaches the **plugin** production branch | `models_format_sandbox.py`, `sandbox_executor.py`, tests | **DONE** `625b0159` |
+| **A3** | Explicit output contract, proposal → live gate | `proposal.py`, protocol, `ml_model_implementor.py`, tests | **DONE** `be8d4d46` |
+| **A3b** | Producer's own smoke test and generated test honour the declaration | `ml_model_implementor.py`, tests | **DONE** `a4bede52` |
+| **A4** | Symmetric contract in the proposer-facing prompt surface | prompt templates, docs | **DONE** `3d39dfe7` |
+| **A4b** | The proposer is *asked* for `output_type`, and the parser *reads* it | `ml_model_proposal_agent.py`, `proposing_stage.md`, tests, gate advice | **DONE** `187d02ac` — **found by Gate 1R** |
+| **A3c** | VRAM probe target shape follows the declared contract | `evaluate_vram_skill/wrapper.py`, tests | **DONE** `e70a60dd` — **found by Gate 2R** |
+
+**Two commits were added mid-PR because the Gates found real defects.**
+Both are numbered against the commit whose property they complete (A4b
+completes A4's prompt surface; A3c completes A3's transport), not against
+the Gate that exposed them — a defect belongs to the commit that fixes it.
+Neither was foreseeable from the deterministic suite; see their entries
+below.
 
 > **Commit-boundary rule (operator, 2026-08-07).** A3b exists as its own
 > commit because it changes **runtime behaviour**, and it was discovered
@@ -1075,6 +1084,190 @@ work belonging to `enable_global_task_config.md` § T2, not A4.
 
 ---
 
+## A5-0 — Gate-harness discovery pass (pseudo LLM + pseudo training)
+
+**Operator-authorized 2026-08-07.** Zero API cost, zero GPU training. This is
+**discovery of the Gate harness, not acceptance of PR A.**
+
+Recorded **before** running, per the mandate:
+
+| field | value |
+|---|---|
+| **Property** | Which production components a bounded single iteration actually invokes, in what order, and what it emits |
+| **Expected call path** | `run_one_iteration.py` → workflow → interpretation → proposal → implementor → validator → tuner (StubSandbox) → records |
+| **Why static evidence is insufficient** | Unit tests exercise each node in isolation. Neither the *ordering*, the *real* per-stage LLM call count, nor the emitted artifact set can be read reliably from source — and Gate 1/2 bounds must be grounded in measurement, not estimate. V20's lesson is that source-level reasoning about production paths is exactly what failed |
+| **Max iterations** | 1 |
+| **Max rounds** | 1 |
+| **Max epochs** | 1 |
+| **Data fraction** | trial/train/eval 0.02, formal 0.02 (smallest that still exercises the path) |
+| **Outer timeout** | 900 s hard kill |
+| **Pseudo flags** | `--is_pseudo_llm --is_pseudo_training` (no API, no GPU training) |
+| **Expected artifacts** | `{workspace}/iter_001/...` manifest, generated plugin + test under the run's plugin dir, `validation_*.json`, experiment records, `*_hardware.json` |
+| **Baseline** | HEAD `1b391cf7`, tree `66d37db9`, working tree clean apart from untracked `slide/` |
+
+**Stop condition.** If this pass exposes a wiring defect that source
+inspection should have caught, stop, audit why the readiness review missed
+it, fix the audit, then continue.
+
+### A5-0 RESULTS (executed 2026-08-07, HEAD `1b391cf7`)
+
+Three runs. **No PR A defect found.** Total cost: $0, no GPU training.
+
+| run | posture | wall | exit | outcome |
+|---|---|---|---|---|
+| 1 | (none declared) | — | **2** | **REFUSED** by launch policy |
+| 2 | `observe_only` + `diagnostic` | — | **2** | **REFUSED** by launch policy |
+| 3 | `blocking` + `diagnostic` | 7 s | 0 | ran; stub-name collision |
+| 4 | same, stale artifact moved aside | 5 s | 0 | reached the tuner |
+| 5 | same + relaxed §5 guardrails | 21 s | 0 | tuner ran 5 attempts |
+
+**Two launch-policy refusals, both correct** — PR D's fail-closed guard
+working, and worth recording as positive evidence:
+
+1. *"a formal launch must declare `--healthgate_mode` and
+   `--result_authority`. There is no default: defaulting to
+   blocking/scientific would let this run claim enforcement and scientific
+   standing that nobody configured."*
+2. *"healthgate_mode=observe_only, but these gates still invalidate:
+   `['amplitude_collapse_blocking', 'output_diversity_blocking',
+   'output_std_blocking']`. An observe-only run must not be able to
+   invalidate a round."* — i.e. the declared posture must match the
+   **effective** config, not merely be a legal enum value.
+
+**Measured stage ordering** (the production call path Gate 1 will drive):
+
+```text
+interpretation
+  -> proposal   stage 'comparison'        1 LLM call
+                stage 'causal_reasoning'  1 LLM call
+                stage 'proposing'         1-3 LLM calls (structural retry)
+  -> implementor  reasoning + code        2 LLM calls (+ up to 3 repairs)
+  -> validator    7 deterministic checks + 1 LLM review
+  -> tuner        1 planner LLM call per attempt (max 5/round)
+  -> records / manifest
+```
+
+**Artifacts emitted per attempt** (Gate PASS evidence comes from these):
+
+```text
+{ws}/iter_NNN/iteration_NNN/attempt_NNN/proposal_iter_NNN.json
+{ws}/iter_NNN/iteration_NNN/attempt_NNN_<model>/models/<model>.py
+{ws}/iter_NNN/.../models/<model>/description.md
+{ws}/iter_NNN/.../tests/test_<model>.py
+{ws}/iter_NNN/.../implementor_iter_NNN.json
+{ws}/plugin_source_sentinel/<model>.py
+{ws}/plugins/iter_NNN/<model>.py
+{ws}/iter_NNN/manifest.json , workflow_iter_NNN.json , *_hardware.json
+```
+
+**Runtime-control bounds discovered — these bind Gate 2:**
+
+```text
+min_formal_batch_size    4        (default; batch 1 is REFUSED)
+max_steps_per_attempt    150_000  (default; 200_000 was REFUSED)
+```
+
+The stub plan proposes `batch_size=1`, so every attempt was refused with
+*"[Guardrails §5] SKIPPED"*. **Not a PR A defect** — V18 runtime-control
+doing its job. Gate 2's fixed plan must satisfy both, or the run produces
+no records.
+
+**Non-defect classified: stub-name collision.** `stub_arch_001_a` is a
+**gitignored local artifact dated 2026-08-02** left by an earlier pseudo
+run, and the stub proposer always emits that fixed name, so registration
+collides. Reproduced and removed by moving the file aside; restored
+afterwards, so the environment is as found. Real-LLM and fixed-plan paths
+generate unique names and cannot hit this. **No fix made** — changing a
+stub fixture would not improve any production property.
+
+**Positive PR A evidence from this pass:** the validator reported
+*"All 7 checks passed"* on the generated classifier plugin through the
+real production path. A2/A3/A3b did not regress classifier validation.
+
+**Environment confirmed for Gate 2:** RTX 5090, 32607 MiB total; TIDMAD
+data present at `/home/klz/Data/TIDMAD/`; `OPENAI_API_KEY` supplied via
+`.env`, which `agent/llm_bridge.py:323` loads through `load_dotenv()`.
+
+---
+
+## Commit A3c — VRAM probe target shape follows the declared contract
+
+**Found by Gate 2R on real hardware (2026-08-07). Committed `e70a60dd`.**
+
+### The defect
+
+`_build_probe_tensors` (`agent/skills/evaluate_vram_skill/wrapper.py`)
+derived the target **shape** from the target **dtype**:
+
+```python
+long  -> [B, T]
+float -> [B, 256, T]
+```
+
+Right for `fcnet` (`hybrid`), which emits `[B, 256, T]` and broadcasts a
+float target against its logits. Wrong for a `regressor`, which emits
+`[B, T]`. A generated regressor + `smooth_l1` therefore died in the VRAM
+pre-flight with
+
+```text
+RuntimeError: The size of tensor a (4) must match the size of tensor b (256)
+              at non-singleton dimension 1
+```
+
+**before any capacity question was reached** — a contract defect wearing a
+resource-error costume.
+
+### The fix
+
+Shape and dtype are independent questions:
+
+```text
+dtype  <- the loss   (PLUGIN_LOSS_TARGET_DTYPE, unchanged)
+shape  <- the model's declared output contract
+
+classifier      -> [B, T]       long        unchanged
+regressor       -> [B, T]       float       WAS [B, 256, T]
+hybrid          -> [B, 256, T]  float       unchanged
+model_type=None -> legacy dtype-derived shape, unchanged
+```
+
+### Scope audit — is this systemic?
+
+`grep` for a hardcoded `(batch_size, 256, seg)` target across `agent/`,
+`execute_tools/` and `core/` returns **only this site**. The **training**
+path was already correct: `train_engine_sandbox:626,985` casts a `[B, T]`
+target to the loss's dtype, so `smooth_l1` receives `[B, T]` float against
+a `[B, T]` prediction.
+
+### Why the A4 census missed it — dated correction
+
+`wrapper.py:90` and `:189` **were** inspected during A4's census and
+classified *"internal VRAM arithmetic, not agent-facing"*. That was correct
+about the **text** and wrong about the **behaviour**: the lines were read
+as comments rather than asking whether the code was contract-aware.
+
+**This is the same blind spot as `TEST_TEMPLATE` in A3b — a consumer
+audited as prose instead of as a consumer.** Two instances of one mistake,
+both caught by Gates rather than by the census.
+
+> **Rule added:** when auditing a contract change, every site that
+> *constructs a tensor whose shape must match the model's output* is a
+> consumer, whatever file it lives in. Reading its comments is not
+> auditing it.
+
+### Validation
+
+- [x] 4 shape cases + 2 loss-compatibility cases, `273 passed` in
+      `tests/unit/agent/evaluate_vram_skill/`
+- [x] **Mutation:** reverting to the dtype-derived shape fails exactly the
+      two regressor cases; hybrid, classifier and legacy stay green
+- [x] The loss-compatibility test actually runs
+      `smooth_l1_loss(pred, target).backward()`, so it fails on the real
+      shape error rather than on an assertion about shapes
+- [x] ruff check + format clean
+
+---
+
 ## Commit A5a — Gate 1: real LLM, no expensive training
 
 ### 1. Goal
@@ -1202,12 +1395,141 @@ A single real-LLM non-compliance does **not** mean PR A is broken.
 
 ### 7. Verification commands and evidence
 
-- [ ] Advice fixture diff — **to record**
-- [ ] Case C: prompts, `ProposalOutput`, generated plugin, verdicts — **to record**
-- [ ] Case R: same — **to record**
-- [ ] Rerun budget declared, and whether used — **to record**
-- [ ] LLM call count and cost — **to record**
-- [ ] Any step not run and why — **to record; never claim a pass**
+**Advice fixtures** (new, gate-only; official V21 advice untouched):
+
+```text
+advice/gate/gate_pr_a_classifier_advice.json
+advice/gate/gate_pr_a_regressor_advice.json
+```
+
+- [x] **Diff is formulation-only** — 4 differing lines, all naming the
+      contract, the loss, the required forward shape and the head note.
+      `mindset`, `tune`, scale bounds and "this is not a scientific test"
+      framing are byte-identical.
+
+**Exact command** (both cases identical except the advice file):
+
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 timeout 1800 .venv/bin/python \
+  sdsc_submission_scripts/run_one_iteration.py \
+  --workspace "$WS" --run_name pra_gate1{c,r} --start_iteration 1 \
+  --max_rounds 1 --max_epochs 1 \
+  --trial_portion 0.02 --train_portion 0.02 --eval_portion 0.02 \
+  --formal_portion 0.02 --formal_train_portion 0.02 --formal_eval_portion 0.02 \
+  --healthgate_mode blocking --result_authority diagnostic \
+  --min_formal_batch_size 1 --max_steps_per_attempt 500000 \
+  --advice advice/gate/gate_pr_a_{classifier,regressor}_advice.json \
+  --llm_config llm_configs/openai_tiered_v1.json \
+  --is_pseudo_training
+```
+
+`--is_pseudo_training` swaps **only** the sandbox: every LLM call is real,
+no GPU training occurs, so no scientific outcome can decide acceptance.
+
+#### Gate 1C — classification: **PASS** (2026-08-07)
+
+Real proposer chose `small_wavenet_classifier_focal_coldstart`. Evidence
+extracted from the on-disk artifacts by
+`scratchpad/gate_evidence.py`:
+
+| assertion | observed |
+|---|---|
+| `proposal.output_type` | `classifier` |
+| proposal `loss_type` | `focal` |
+| generated `PLUGIN_OUTPUT_TYPE` | `classifier` |
+| **actual forward shape** | `(1, 256, 64)` — 3-dim |
+| validator `passed` | `True` |
+| validator `output_type_valid` | `True` |
+| `get_output_type(<generated>)` | `classifier` |
+| shared rule, legal pair | **accepts** `classifier + focal` |
+| shared rule, illegal pair | **refuses** `classifier + smooth_l1` |
+
+No rerun needed; the first attempt complied with the advice.
+
+#### Gate 1R attempt 1 — **FAIL**, and it found a real defect (2026-08-07)
+
+Real proposer chose `small_residual_conv_regressor_v1`, set
+`loss_type=smooth_l1` — and still produced `output_type=classifier` with a
+`(1, 256, 64)` head.
+
+| assertion | observed | expected |
+|---|---|---|
+| `proposal.output_type` | **`classifier`** | `regressor` |
+| proposal `loss_type` | `smooth_l1` | `smooth_l1` ✓ |
+| generated `PLUGIN_OUTPUT_TYPE` | **`classifier`** | `regressor` |
+| actual forward shape | **`(1, 256, 64)`** | `(1, T)` |
+| validator | PASS | — (correctly consistent: declared classifier, built classifier) |
+| shared rule | **refused** `classifier + smooth_l1` | — (correct) |
+
+**Classified: systematic defect, NOT stochastic noncompliance.** The agent
+did comply with everything it was actually asked for. Two causes, both in
+PR A's own work:
+
+1. **`output_type` was absent from BOTH JSON skeletons** the proposer must
+   emit (`ml_model_proposal_agent.py:328`, `proposing_stage.md:40`). A4
+   added the constraint *prose* but never added the *field* to the object
+   the model is told to return.
+
+2. **Worse — the parser would have dropped it anyway.** Both
+   `ProposalOutput.model_validate({...})` sites (`:1388`, `:1977`) build
+   from an **explicit key allow-list**. `output_type` was not in either
+   list, so a fully compliant LLM response would still have been silently
+   discarded and the schema default `"classifier"` applied.
+
+**Why the A3 transport contract missed this hop — the honest audit.**
+A3 declared the chain as starting at `ProposalOutput.output_type` and
+treated that as the source. It is not. The real producer is the **LLM's
+raw JSON**, with a lossy parse step before any typed object exists. I
+audited *downstream from the schema* instead of *upstream to the
+producer*, so the one genuinely lossy hop sat outside the contract I
+wrote — inside the PR whose entire purpose is to close that class of hole.
+
+> **Rule added: a transport contract must start at the REAL producer, not
+> at the first typed object in the chain.**
+
+This is also why Gate 1 exists. Every deterministic test passed; only a
+real LLM driving the real prompt surface could expose it, because the
+defect lived precisely in the gap between "the schema supports it" and
+"the agent is asked for it, and the parser reads it".
+
+**Fix (narrow):** add `output_type` to both parser allow-lists and both
+JSON skeletons. No schema, protocol or runtime change.
+
+**New tests** (`TestRawProposalJsonCarriesOutputContract`):
+- a `ProposalOutput` built the way the agent builds it preserves a
+  declared contract;
+- **both** construction sites read the key — one fixed and one missed is
+  the same silent-default defect;
+- both JSON skeletons request the field, since the agent cannot emit what
+  it is never asked for.
+
+Fixed in `187d02ac` (**A4b**), committed as runtime/prompt work separate
+from the docs commit, per the standing commit-boundary rule.
+
+#### Gate 1R attempt 2 — **PASS** (2026-08-07, after `187d02ac`)
+
+Real proposer chose `small_dilated_residual_regressor_v2`.
+
+| assertion | observed |
+|---|---|
+| `proposal.output_type` | `regressor` |
+| proposal `loss_type` | `smooth_l1` |
+| generated `PLUGIN_OUTPUT_TYPE` | `regressor` |
+| **actual forward shape** | `(1, 64)` — 2-dim |
+| validator `passed` | `True` |
+| validator `output_type_valid` | `True` |
+| `get_output_type(<generated>)` | `regressor` |
+| shared rule, legal pair | **accepts** `regressor + smooth_l1` |
+| shared rule, illegal pair | **refuses** `regressor + focal` |
+
+**This is the first regression model to traverse the SIDERIUS production
+path.** One rerun used, and it was a post-fix repeat of the affected case
+— not a rerun-until-green: attempt 1's failure was classified as a
+systematic defect, fixed, and only Gate 1R was repeated. Gate 1C was not
+re-run.
+
+**Gate 1 verdict: PASS (both cases).** LLM cost: 2 completed runs +
+1 failed run, ~132 s wall each, `openai_tiered_v1` (gpt-5.4 tier).
 
 ### 8. Commit boundary
 
@@ -1365,10 +1687,204 @@ is exactly the seam V20 failed to check, and it belongs to **PR C's Gate
 
 ### 7. Verification commands and evidence
 
-- [ ] Launch commands — **to record, operator-approved before running**
-- [ ] Gate 2C record ID, score, output type — **to record**
-- [ ] Gate 2R record ID, score, output type — **to record**
-- [ ] Negative-control results — **to record**
+**Fixed typed plans** (validated against the production loader; the seam
+accepts `output_type` because A3 added it to `ProposalOutput.model_fields`,
+so **no new injection mechanism was needed**):
+
+```text
+scratchpad/gate2_plans/pra_gate2_classifier.json   output_type=classifier  loss=focal
+scratchpad/gate2_plans/pra_gate2_regressor.json    output_type=regressor   loss=smooth_l1
+```
+
+Both use the same tiny backbone (Embedding(256,32) -> 2 dilated residual
+blocks -> head), `batch_size=8`, `segmentation_size=16000`, 1 epoch, so the
+output/loss contract is the principal changed variable.
+
+**Exact command** (differs only in the plan file):
+
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 timeout 3600 .venv/bin/python \
+  sdsc_submission_scripts/run_one_iteration.py \
+  --workspace "$WS" --run_name pra_gate2{c,r} --start_iteration 1 \
+  --max_rounds 1 --max_epochs 1 \
+  --data_dir /home/klz/Data/TIDMAD/ \
+  --data_scope 19 --health_gate_files 19 \
+  --trial_portion P --train_portion P --eval_portion P \
+  --formal_portion P --formal_train_portion P --formal_eval_portion P \
+  --healthgate_mode blocking --result_authority diagnostic \
+  --validation_fixed_candidate_plan "$PLAN" --validation_max_portion P \
+  --llm_config llm_configs/openai_tiered_v1.json \
+  --trial_time_budget_minutes 20 --formal_time_budget_minutes 30
+```
+
+#### Three refusals before the first successful launch — all correct
+
+Every one was an operator error in my command, none a defect. Recorded as
+positive evidence that the guards work:
+
+| # | My error | The refusal |
+|---|---|---|
+| 1 | no posture declared | *"a formal launch must declare `--healthgate_mode` and `--result_authority`. There is no default: defaulting to blocking/scientific would let this run claim enforcement and scientific standing that nobody configured."* |
+| 2 | `--data_scope 19` without `--health_gate_files 19` | DS8 paired-scope rule, naming all six offending gates **and** the exact remediation |
+| 3 | `data_dir` unset | worker: *"dataset directory unavailable for the measurement: None (no silent synthetic fallback — F-1a)"* |
+
+Refusal 3 deserves emphasis: the worker could trivially have fallen back to
+synthetic data and produced a plausible measurement. It refused instead.
+
+#### A V20 defect confirmed CLOSED (evidence for PR C)
+
+Refusal 3 surfaced as `STOP_INFRASTRUCTURE_FAILURE` — the **same signature**
+as V20 attempt 3. Checked whether PR #185's fix was incomplete. It is not:
+
+```bash
+SIDERIUS_PLUGIN_DIRS=<run plugin dir> python -c "..."
+  registry has it: True
+  get_config_class: <class '...PraGate2ClassifierConfig'>
+```
+
+A generated plugin resolves correctly in a clean subprocess. Recorded so
+PR C does not re-chase a fixed bug; the surface signature is shared by
+several distinct causes.
+
+#### Gate 2C — classification: **PASS** (2026-08-07, 102 s)
+
+| requirement | observed |
+|---|---|
+| generated plugin | PASS (fixed plan; proposer bypassed, `candidate_source=fixed_validation_plan`, sha256 `1aac07d853ae…`) |
+| validator | **All 7 checks passed** |
+| real training | completed |
+| real inference | completed |
+| frozen scorer | executed |
+| `ExperimentRecord` persisted | `pra_gate2_classifier_iter_001_001.json` |
+| **numeric `denoising_score`** | **`-2.727240835313264`** |
+| `status` | `success` |
+| `file_vector` | present, length 20 |
+| HealthGate | passed — `n_unique_int8=130`, `output_std_mv=17.64`, `dominant_mode_fraction=0.175` |
+
+Score quality is **not** an acceptance criterion; the run's own reflection
+attributes it to `training_psd_segments=4`.
+
+#### Gate 2R — regression, attempt 1: execution established, score withheld
+
+After `e70a60dd` the pre-flight passed and the regressor **trained**:
+
+```text
+train_time_s 3.0 | inference_time_s 2.4 | scoring_time_s 3.7
+file_vector present (len 20)   status failed_mode_collapse
+denoising_score None   final_loss 124.95 (smooth_l1)
+```
+
+The whole chain executed — train, infer, **frozen scorer**, record
+persisted. `denoising_score` is null **by gate policy**: blocking
+`output_diversity_blocking` fired (`n_unique_int8=19` vs threshold 25) and
+discarded the score.
+
+**Not a defect, and verified as such.** `train_engine_sandbox:626,985`
+casts a `[B, T]` target to the loss dtype, so `smooth_l1` received
+`[B, T]` float against a `[B, T]` prediction — the training path is
+contract-correct. `final_loss=124.95` on targets spanning 0-255 is a
+near-constant prediction, i.e. genuine undertraining on 4 PSD segments.
+
+Under the Gate 2 outcome rule this already passes: *"HealthGate-invalid
+scientific output after a correctly completed scored run"* does not fail
+the Gate, and *"do not reroll a candidate because the score is poor"*.
+
+#### Gate 2R attempt 2 — same plan, adequate data
+
+Because the acceptance list also asks for a **numeric** score, one further
+run of the **identical fixed plan** at `portion=0.30`,
+`train_portion=1.0`. **This is a workload correction, not a candidate
+reroll** — the candidate, contract, loss, backbone and epochs are
+unchanged; only the data volume differs. The forbidden move would be
+swapping the model to chase a better number.
+
+Declared in advance: **one** attempt. If it collapses again, the §7 outcome
+rule is accepted and the result reported as-is rather than escalating data
+until green.
+
+**Attempt 2 result: REFUSED at admission, no evidence produced.** All 15
+attempts returned `skipped_time_risk` — runtime control judged
+`portion=0.30, train_portion=1.0` (a 50x step multiplier over attempt 1)
+unaffordable inside the 30-minute formal budget. Wall 317 s, zero training.
+
+Not a defect: this is V18 runtime control doing its job, and the third
+independent guard to refuse me in this Gate.
+
+**An admission refusal is not a result.** Attempt 2 never trained, so it
+produced no evidence about whether more data avoids collapse — the
+question it was run to answer. It is therefore *replaced*, not
+supplemented: attempt 3 is the one properly-sized run of the same fixed
+plan, `portion=0.10` with a 60-minute formal budget, sized from attempt
+1's measured 78 train steps at `portion=0.02`.
+
+Declared before running: **this is the last Gate 2R execution attempt,
+whatever the outcome.** If it collapses, the §7 outcome rule is accepted
+and reported as-is.
+
+**Attempt 3 (supplementary): completed, 317 s.** Same fixed plan,
+`portion=0.10`, 60-minute budget.
+
+```text
+denoising_score  -2.478960664489376
+HealthGate       PASSED (n_unique_int8=225, output_std_mv=10.08,
+                 dominant_mode_fraction=0.018)
+```
+
+**This is NOT what made Gate 2R pass.** Attempt 1 already did, under the
+corrected criterion below. Attempt 3 is recorded as additional evidence
+that a regressor can also reach a *gate-valid* numeric score; it is
+explicitly not the basis of the verdict, and no further attempt was made.
+
+---
+
+### OPERATOR CORRECTION, 2026-08-07 — A5b acceptance was self-contradictory
+
+The Gate 2 criteria as originally written demanded two incompatible things:
+
+```text
+§7 outcome rule:  HealthGate-invalid output does NOT fail the Gate
+acceptance list:  a numeric denoising_score MUST be present
+```
+
+Under a **blocking** HealthGate those cannot both hold: invalidation
+withholds the scalar *by design*. Chasing a non-null score would mean
+adding data, changing the model, or repeating training until the gate
+happened to pass — precisely the behaviour the mandate forbids.
+
+**Corrected Gate 2 hard requirement:**
+
+```text
+scorer actually executed
++ per-file scoring evidence (file_vector) persisted
++ record reached a legitimate terminal scientific status
+```
+
+Both outcomes are a **PASS for the PR A mechanism**:
+
+| HealthGate | expected record |
+|---|---|
+| valid | numeric `denoising_score` present |
+| invalid | scalar withheld by blocking policy; scorer evidence + `file_vector` present; typed terminal status |
+
+`denoising_score = null` on attempt 1 was never a scorer failure — the
+scorer ran (`scoring_time_s=3.7`, `file_vector` len 20) and the blocking
+gate then withheld the scalar. **That is production policy working, and it
+is evidence for the mechanism rather than against it.**
+
+#### Gate 2R — regression: **PASS** (attempt 1, 2026-08-07)
+
+| corrected requirement | observed |
+|---|---|
+| generated plugin | PASS (fixed plan, proposer bypassed) |
+| validator | PASS |
+| real pre-flight | passed after `e70a60dd` |
+| real training | completed — `train_time_s=3.0`, `final_loss=124.95` (smooth_l1) |
+| real inference | completed — `inference_time_s=2.4` |
+| **frozen scorer executed** | **yes — `scoring_time_s=3.7`** |
+| **`file_vector` persisted** | **yes, length 20** |
+| legitimate terminal status | `failed_mode_collapse` (typed, blocking gate fired: `n_unique_int8=19` < 25) |
+| `ExperimentRecord` persisted | `pra_gate2_regressor_iter_001_001.json` |
+| scalar | withheld by policy — **PASS under the corrected criterion** |
 - [ ] Wall time, GPU time, cost — **to record**
 - [ ] Any step not run and why — **to record; never claim a pass**
 
@@ -1377,6 +1893,116 @@ is exactly the seam V20 failed to check, and it belongs to **PR C's Gate
 - [ ] No production code in the diff — documentation and archived
       evidence only
 - [ ] Formal promotion is **not** attempted or claimed
+
+---
+
+## 1a. Gate results summary (2026-08-07)
+
+```text
+Gate 1C   PASS   real LLM, classifier advice
+                 small_wavenet_classifier_focal_coldstart
+                 output_type=classifier, forward (1,256,64),
+                 validator PASS, registry classifier,
+                 rule accepts focal / refuses smooth_l1
+
+Gate 1R   PASS   real LLM, regressor advice (after D1 fix)
+                 small_dilated_residual_regressor_v2
+                 output_type=regressor, forward (1,64),
+                 validator PASS, registry regressor,
+                 rule accepts smooth_l1 / refuses focal
+
+Gate 2C   PASS   real classifier execution
+                 denoising_score = -2.727240835313264
+                 HealthGate valid (n_unique_int8=130)
+
+Gate 2R   PASS   real regression execution (after D2 fix)
+                 scorer executed (scoring_time_s=3.7)
+                 file_vector persisted (len 20)
+                 HealthGate correctly invalidated a collapse
+                 final scalar withheld by policy
+                 [supplementary attempt 3: score -2.478960664489376,
+                  HealthGate valid — NOT the basis of the verdict]
+```
+
+### The two defects the Gates found — both real, both PR A's own
+
+**D1 — the proposal path could not carry the output contract.**
+Fixed `187d02ac`. Root cause, in full: `output_type` was absent from
+**both** JSON skeletons the proposer must emit
+(`ml_model_proposal_agent.py:328`, `proposing_stage.md:40`), *and* both
+`ProposalOutput.model_validate({...})` sites (`:1388`, `:1977`) build from
+an **explicit key allow-list** that omitted it — so even a fully compliant
+LLM response would have been silently discarded and the schema default
+`"classifier"` applied. Gate 1R exposed it: the agent set
+`loss_type=smooth_l1` and named its model `..._regressor_v1`, and the
+proposal still arrived as `classifier`. The deeper audit finding is that
+A3's transport contract **started at `ProposalOutput` and treated it as
+the source**; the real producer is the LLM's raw JSON, with a lossy parse
+step before any typed object exists.
+
+**D2 — the VRAM probe retained a classifier-only target shape.**
+Fixed `e70a60dd`. `_build_probe_tensors` derived target **shape** from
+**dtype**, so every float target became `[B, 256, T]` — correct for
+`fcnet` (hybrid), wrong for a regressor emitting `[B, T]`. The regressor
+died in pre-flight with a tensor mismatch **before any capacity question**,
+i.e. a contract defect wearing a resource-error costume, which would
+easily be misread as "the model is too large".
+
+Both are the same species: **after adding an output contract, a downstream
+consumer still treated the classifier contract as universal.** A3b's
+`TEST_TEMPLATE` / `_smoke_test_plugin` was the third instance, found by
+doc-sync rather than by a Gate.
+
+> **The conclusion that matters:** the deterministic checkpoints proved the
+> contract's trunk, and the real Gates still found two production consumers
+> the census had missed. Unit and integration evidence was necessary and
+> not sufficient — which is the argument for Gate 1 and Gate 2 existing.
+
+### Guard refusals encountered — five, all correct, none a defect
+
+Every one was an operator error in a Gate command, and each is recorded as
+positive evidence that the production guards work: undeclared launch
+posture; `observe_only` contradicting a blocking config; `--data_scope`
+without the paired `--health_gate_files`; `data_dir` unset (refused with
+*"no silent synthetic fallback — F-1a"* rather than measuring against
+synthetic data); and a `skipped_time_risk` admission refusal at an
+oversized workload.
+
+---
+
+## 1b. Final consumer audit on the `output_type` axis (2026-08-07)
+
+**Operator-scoped: not a general code review.** One question only — for
+every production surface that consumes a tensor *shape* or *target dtype*,
+is classifier-specific shape confined to a classifier branch, regressor
+shape to a regressor branch, and shared code branching on the **declared**
+contract?
+
+| surface | contract-aware? | evidence |
+|---|---|---|
+| proposal | **yes** | `output_type` typed field; both parser allow-lists read it (A3, A4b) |
+| implementor template | **yes** | `_render_output_contract` drives the declaration and comment (A3) |
+| producer smoke check | **yes** | reads `PLUGIN_OUTPUT_TYPE` off the module (A3b) |
+| generated test artifact | **yes** | imports `PLUGIN_OUTPUT_TYPE` and branches (A3b) |
+| external validator | **yes** | expected shape derived from the declaration (A2) |
+| VRAM / pre-flight probe | **yes** | target shape from contract, dtype from loss (A3c) |
+| training target construction | **yes** | `train_engine_sandbox:626,985` casts a `[B, T]` target to the loss dtype — `smooth_l1` gets `[B, T]` float |
+| inference output decoding | **yes, pre-existing** | `inference_single.py:243-256` resolves `get_output_type` and branches `is_regression` vs `argmax` |
+| scorer input | **n/a** | reads the decoded waveform from HDF5 channels; never sees a class-shaped prediction |
+
+Two sites deliberately left as-is, verified non-contract:
+
+- `train_engine_sandbox:126,196` — `np.bincount(target + 128, minlength=256)`
+  builds `class_count`, consumed **only** by `FocalLoss1DCW`
+  (`loss_models_sandbox.py:176`). Class-frequency bookkeeping, not target
+  shaping; harmless for a regressor, which never requests class weights.
+- `evaluate_vram_skill/{wrapper:210,387, batch_resolver:89}` and
+  `ml_model_implementor:120,323` — all construct the **input** `[B, T]`
+  int64, which is fixed for both contracts.
+
+**Result: no further in-scope defect.** The only contract-dependent target
+construction in `agent/`, `execute_tools/` and `core/` is the one A3c
+fixed.
 
 ---
 
