@@ -1,14 +1,23 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: DESIGN, awaiting operator approval. No implementation has begun.**
+**Status: APPROVED 2026-08-08 (operator) with four corrections applied.
+Cleared to begin B1, then B2. STOP for operator review at B0 before writing
+B3. No implementation has begun.**
 
-> **One question in this document is genuinely blocking (Q-B-1) and must be
-> answered by the operator before B3 is written, let alone implemented.**
-> Part III states the required sequence explicitly: *audit semantics →
-> freeze semantics (operator decision, written) → implement enforcement
-> consistent with THAT semantics.* This document performs the audit and
-> presents the options. It deliberately proposes **no enforcement
-> mechanism**.
+> **Q-B-1 is DEFERRED BY DESIGN, not unresolved.** It blocks **B3 only** —
+> it does **not** block B1 or B2. Part III's sequence is *audit semantics →
+> freeze semantics (operator decision, written) → implement enforcement*,
+> and the audit is strongest when it can cite corrected forecasts (B1) and
+> measured forecast error (B2) rather than V20's three OOMs alone.
+>
+> ```text
+> B1 → B2 → B0 evidence review → operator freezes S1/S2/S3 → write B3
+> ```
+>
+> The operator's current prior is **S3**, recorded and **explicitly not
+> frozen**. B1/B2 evidence decides whether corrected forecasting suffices
+> or whether stronger runtime enforcement is justified. This document
+> proposes **no enforcement mechanism**.
 
 | | |
 |---|---|
@@ -167,14 +176,121 @@ sequential, so concurrency is not required to reproduce the P6.4 evidence.
 
 ---
 
+## 1.1 Operator rulings, 2026-08-08 — read before B1
+
+Four corrections to this document, two of which fix defects in it.
+
+### Q-B-1 — DEFERRED BY DESIGN, not unresolved scope
+
+**Do not choose S1/S2/S3 yet.** Q-B-1 blocks **B3 only**. Proceed
+`B1 → B2 → B0 evidence review → operator freezes → write B3`.
+
+The operator's prior is **S3**, explicitly **not frozen**:
+
+```text
+B1 leaves no meaningful under-prediction   -> S1 or S3 more reasonable
+B1 leaves large under-prediction, enough
+  to OOM                                   -> the case for S2 strengthens
+```
+
+> PR B's real value is that we no longer have to reason backwards from
+> three OOMs to what "12 GiB" ought to mean. We fix the forecast first,
+> measure forecast-to-realization error second, and let data choose the
+> semantics third.
+
+### Q-B-2 — YES, B1 may change built-in estimates
+
+C3's byte-parity constraint is **lifted for this bounded, audited defect
+class only**. Per changed cell, record: canonical source, previous value,
+corrected value, magnitude, direction, **production reachability**.
+
+```text
+ALLOWED      declaration says X, estimator substitutes unrelated Y
+             -> correct Y to the audited canonical value
+
+NOT ALLOWED  "this estimate seems wrong"
+             -> invent a coefficient, formula or safety factor
+```
+
+**B1 may change the estimator's input FACTS. It may not change the
+estimator's MODEL.** Update C3's guard to assert the corrected value;
+do not delete it.
+
+### Q-B-3 — YES, the `segmentation_size` mismatches are in B1
+
+Same defect class as FU-C-1 and larger in effect. Fixing `nhead` alone
+would fix the reported instance and leave the class alive. Sweep bounded
+to **config/default inputs consumed by the training and inference resource
+estimators** — not a repository-wide config-default cleanup.
+
+### CORRECTION — the "never more optimistic" rule contradicted itself
+
+The first draft of this document required **both** that every fallback
+match its canonical source **and** that no estimate ever become more
+optimistic. Those conflict on a case §0.4 itself found: if the canonical
+`segmentation_size` for `transformer` is 20000, correcting `40000 → 20000`
+makes the estimate **smaller**.
+
+Held absolutely, the rule would force keeping a value known to be false
+while calling it a config fallback — less safe *and* less honest. Replaced
+with:
+
+> **No estimate may become more optimistic accidentally, silently, or
+> without evidence.**
+
+```text
+correction makes the estimate LARGER
+  -> routine audited correction
+
+correction makes the estimate SMALLER
+  -> prove the canonical source
+  -> record the exact before/after magnitude
+  -> explain why the old value was semantically wrong
+  -> preserve the estimator formula
+  -> validate the consequence with B2 / B4 evidence
+
+canonical source UNCERTAIN
+  -> do not guess. Keep the conservative value and document it honestly
+     as a SAFETY MARGIN, never as "the model default"
+```
+
+### CORRECTION — B2 must be semantics-neutral
+
+Because Q-B-1 is not frozen until B0, B2 may not encode a policy verdict as
+a primitive fact. `budget_breach = true` would already have chosen a
+semantics.
+
+B2 persists **measured facts**:
+
+```text
+admission_estimated_peak_mib
+effective_admission_threshold_mib
+realized_peak_mib
+realized_minus_estimated_mib
+realized_minus_threshold_mib
+realized_above_threshold: bool
+measurement_completeness
+owning_process
+```
+
+After B0, the frozen semantics **interprets** the same observation:
+
+```text
+S1 -> forecast error / threshold exceedance
+S2 -> cap violation
+S3 -> recorded budget breach / escalation event
+```
+
+---
+
 ## 1. Commit plan
 
 | # | Commit | Blocked on | Independently reviewable |
 |---|---|---|---|
-| **B1** | Config-default vs estimator-fallback sweep (FU-C-1 + siblings) | nothing | Yes |
-| **B2** | Record realized phase memory against the admitted budget | nothing | Yes |
+| **B1** | Config-default vs estimator-fallback sweep (FU-C-1 + siblings) | nothing — **explicitly not Q-B-1** | Yes |
+| **B2** | Record realized-vs-admitted, **semantics-neutral** | nothing — **explicitly not Q-B-1** | Yes |
 | **B0** | **Semantics audit + options → OPERATOR FREEZES** | B1, B2 evidence | Yes (document) |
-| **B3** | Enforcement consistent with the frozen semantics | **Q-B-1** | Yes |
+| **B3** | Enforcement consistent with the frozen semantics | **Q-B-1** — the only commit it blocks | Yes |
 | **B4a** | Gate rung 1-2: synthetic accounting + controlled allocator holder | B3 | Yes |
 | **B4b** | Gate rung 3-4: production admission path + minimal real confirm | B4a | Yes |
 
@@ -195,7 +311,9 @@ deliberately contains a plan for **producing** the plan, not the plan.
 2. **Complete transport contract** — parent reachability is never evidence
    of subprocess reachability.
 3. **The metric is frozen.**
-4. **No estimate may become more optimistic**, silently or otherwise.
+4. **No estimate may become more optimistic accidentally, silently, or
+   without evidence.** *(Corrected by the operator, 2026-08-08 — see §1.1;
+   the absolute form contradicted B1's own goal.)*
 5. **Built-in estimates change only with written justification and
    operator approval** (this is what made C3 pin FU-C-1 rather than fix
    it; B1 is where the approval is sought).
@@ -301,8 +419,11 @@ cell must be recorded with its before/after value and its direction.
 **Backward compatibility / default parity**
 - [ ] The extended built-in parity table, before vs after, with **every**
       difference enumerated and its direction stated
-- [ ] **No cell may move in the optimistic direction.** A cell that does
-      is a stop-and-escalate, not a finding to note
+- [ ] Every cell that moves in the optimistic (smaller) direction carries
+      its §1.1 justification — canonical source, magnitude, why the old
+      value was wrong. A cell that moves without one is a stop-and-escalate
+- [ ] The estimator formulas are byte-identical; only input resolution
+      changed
 - [ ] Full unit suite; C3's and PR C's batteries unchanged
 
 **Real-training Gate:** none. B1 is arithmetic; a GPU cannot tell you
@@ -315,9 +436,17 @@ whether a fallback matches a declaration.
 - `transformer` `nhead` default → estimator uses `4`; explicit `N` → `N`.
 - The VRAM and wall-time paths agree on `segmentation_size` for identical
   input.
-- The before/after parity table is published in this document with every
-  changed cell, its magnitude and its direction.
-- **No estimate is more optimistic anywhere.**
+- The before/after parity table is published in this document, and every
+  changed cell records **canonical source, previous value, corrected
+  value, magnitude, direction, and production reachability** (Q-B-2's
+  required fields).
+- **No estimate is more optimistic accidentally, silently, or without
+  evidence.** A correction that makes an estimate *smaller* is permitted
+  only with the canonical source proven, the magnitude recorded, and a
+  written explanation of why the old value was semantically wrong — see
+  §1.1. A correction that makes it larger is routine.
+- **The estimator's formulas are unchanged.** B1 corrects input facts; it
+  does not add a coefficient, a term or a safety factor.
 - C3's property-derived guarantee holds — C3's tests pass **unmodified**.
 - `test_builtin_attention_values_are_the_pre_c3_literals` is **updated to
   assert the corrected value**, still present, still failing if the value
@@ -331,7 +460,9 @@ whether a fallback matches a declaration.
 |---|---|
 | A fallback is **never reached** in production | Correct it anyway (it is still wrong), but record it as latent and do **not** claim a production defect was fixed |
 | No canonical source exists for a field | **STOP AND ASK.** Inventing one is the surrogate-predicate error C3's plan forbade |
-| A correction makes an estimate **more optimistic** | **STOP AND ESCALATE.** This is the one direction that is never a routine fix |
+| A correction makes an estimate **smaller** | Permitted, but only on the §1.1 terms: canonical source proven, magnitude recorded, old value shown to be semantically wrong, formula untouched. Never as a judgement call |
+| An estimate would shrink but the canonical source is **uncertain** | **Do not guess.** Keep the conservative value and document it as a **safety margin**, explicitly not as "the model default" |
+| A change is motivated by "this estimate seems wrong" rather than a proven mismatch | **Out of scope.** That is a formula change, which Q-B-2 does not authorise |
 | Explicit value equals the class default | Must be indistinguishable in outcome, but the resolution path must not depend on the coincidence |
 | `get_config_class` returns `None` (unregistered) | Conservative estimate, never a raise, never optimistic — C3's `_output_contract` precedent |
 | A correction changes a **generated** model's estimate | Expected and fine, provided it is property-derived and not more optimistic |
@@ -361,7 +492,7 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 
 ---
 
-## Commit B2 — Record realized phase memory against the admitted budget
+## Commit B2 — Record realized vs admitted, **semantics-neutral**
 
 ### 1. Goal
 
@@ -384,6 +515,34 @@ Q-B-1. It also supplies B0 with real breach data.
 - The record/manifest surface that will carry the comparison.
 - Tests.
 
+**The persisted facts are NEUTRAL — operator correction, §1.1.** Because
+Q-B-1 is not frozen until B0, B2 must not encode a policy verdict as a
+primitive fact. `budget_breach = true` would already have chosen a
+semantics, and B2's whole claim is that it chooses none.
+
+```text
+PERSIST (measured facts)          NOT AS A PRIMITIVE FIELD
+  admission_estimated_peak_mib      budget_breach
+  effective_admission_threshold_mib cap_violation
+  realized_peak_mib                 over_budget
+  realized_minus_estimated_mib
+  realized_minus_threshold_mib
+  realized_above_threshold: bool
+  measurement_completeness
+  owning_process
+```
+
+`realized_above_threshold` is a **comparison**, not a verdict — it states
+that one measured number exceeded another. After B0 the frozen semantics
+interprets the same row as a forecast error (S1), a cap violation (S2), or
+a recorded breach/escalation event (S3). **The interpretation belongs in
+the human-readable layer, never in the stored fact.**
+
+Note the two deltas are deliberately separate: `realized - estimated` is
+**forecast error**, and `realized - threshold` is **headroom consumed**.
+They differ whenever the physical cap rather than the operator budget was
+binding, and collapsing them would destroy the evidence B0 needs.
+
 **Must remain unchanged**
 - **Nothing may be blocked, retried, resized or rejected by this commit.**
   B2 observes. If it changes any admit/refuse outcome, it has become B3
@@ -403,10 +562,12 @@ first is preferred so the recorded breaches reflect corrected forecasts.
       at the point the realized peak is known — the two may not currently
       meet in one scope, and if they do not, that is a decomposition
       question to record, not to solve by threading state
-- [ ] Add the comparison and a typed record of it: admitted, realized,
-      delta, and which cap was binding (physical vs operator budget vs
-      pair ceiling — `wrapper.py:534-545` already classifies this for the
-      admission side)
+- [ ] Add the comparison and a typed record carrying the **neutral field
+      set above** — both deltas kept separate, plus which cap was binding
+      (physical vs operator budget vs pair ceiling; `wrapper.py:534-545`
+      already classifies this on the admission side)
+- [ ] **Name every field for what was measured, not for what it means.**
+      A reviewer must not be able to infer S1/S2/S3 from the schema
 - [ ] Attribute the breach to **the process that caused it**, never to a
       peer. Part III is explicit: contention is not candidate evidence
 - [ ] Surface it in the record and the manifest in words, not only numbers
@@ -414,8 +575,13 @@ first is preferred so the recorded breaches reflect corrected forecasts.
 ### 4. Validation plan
 
 **Unit**
-- [ ] A realized peak below the admitted budget records no breach
-- [ ] A realized peak above it records a breach with the correct delta
+- [ ] A realized peak below the threshold records
+      `realized_above_threshold: False` and correct deltas
+- [ ] A realized peak above it records `True` and correct deltas
+- [ ] `realized - estimated` and `realized - threshold` differ when the
+      physical cap, not the operator budget, was binding
+- [ ] **No stored field encodes a policy verdict** — asserted against the
+      schema, so a later `budget_breach` field fails the test
 - [ ] The binding cap is identified correctly in each of the three regimes
 - [ ] Attribution names the owning process/candidate
 
@@ -441,14 +607,18 @@ first is preferred so the recorded breaches reflect corrected forecasts.
 
 ### 5. Acceptance criteria
 
-- For every phase that admits against a budget, the record carries
-  admitted, realized, delta and binding cap — or an explicit `unknown`.
+- For every phase that admits against a budget, the record carries the
+  neutral field set — both deltas, the binding cap, completeness and the
+  owning process — or an explicit `unknown`.
+- **The schema contains no policy term.** S1, S2 and S3 must all be
+  expressible as interpretations of the same stored row.
 - A synthetic over-budget phase produces a breach record naming the owning
   process.
 - **Zero behavioural change to admission**, proven by a test that fails if
   any decision path reads the new field.
-- **Mutation:** removing the comparison, or letting an unavailable
-  measurement read as "within budget", turns a test red.
+- **Mutation, three sites:** removing the comparison; letting an
+  unavailable measurement read as "within budget"; and collapsing the two
+  deltas into one — each turns a test red.
 
 ### 6. Failure and edge cases
 
@@ -750,26 +920,41 @@ fields plus the five V21-specific lines.
 
 ---
 
-## 4. Open questions for the operator
+## 4. Operator rulings — RESOLVED 2026-08-08
 
-- [ ] **Q-B-1 — BLOCKING. Which semantics?** S1 (admission estimate,
-      honestly renamed), S2 (enforced cap), or S3 (admission estimate plus
-      recorded breach and escalation)? **B3 cannot be written until this
-      is answered**, and Part III forbids me proposing a mechanism first.
-      My reading of the audit, offered as input and not a recommendation:
-      §0.1 and §0.2 show V20 enforced a *forecast that was wrong*, so if
-      B1 closes the gap, S2 may be solving the wrong problem — but that is
-      exactly what B1 and B2 are sequenced to find out.
-- [ ] **Q-B-2 — may B1 change built-in estimates?** It must, to do its
-      job, and that is why FU-C-1 was reassigned here. Confirming
-      explicitly because C3 was required to keep them byte-identical and
-      this reverses that constraint for a bounded set of values, each
-      recorded with magnitude and direction.
-- [ ] **Q-B-3 — is the `segmentation_size` 40000-vs-1000 split in scope?**
-      §0.4 found it while sweeping for FU-C-1's siblings. It is the same
-      defect class, in the same direction, and **40x rather than 2x**. I
-      have planned it into B1. Say if you would rather it were separated,
-      since it is larger than the item that was actually reassigned.
+Full text in §1.1. Summary and status:
 
-**No implementation begins until Q-B-1 and Q-B-2 are resolved.** Q-B-3
-changes B1's size but not its shape.
+- [x] **Q-B-1 — DEFERRED BY DESIGN.** Do not choose S1/S2/S3 yet. It
+      blocks **B3 only**, not B1 or B2. Order:
+      `B1 → B2 → B0 evidence review → operator freezes → write B3`.
+      Operator's prior is **S3**, explicitly not frozen; B1/B2 evidence
+      decides. **The earlier line "no implementation begins until Q-B-1 is
+      resolved" was wrong and is removed.**
+- [x] **Q-B-2 — YES.** B1 is authorised to change built-in estimates where
+      audit proves a fallback contradicts the canonical value. C3's
+      byte-parity constraint is lifted **for this bounded class only**.
+      Per changed cell: canonical source, previous value, corrected value,
+      magnitude, direction, production reachability. **Input facts may
+      change; the estimator's model may not.** C3's guard is updated, not
+      deleted.
+- [x] **Q-B-3 — YES.** The `segmentation_size` mismatches are in B1.
+      Sweep bounded to config/default inputs consumed by the two resource
+      estimators; not a repository-wide cleanup.
+
+### Two defects in this document, fixed
+
+- [x] **The "never more optimistic" rule contradicted B1's own goal.** It
+      required every fallback to match its canonical source *and* no
+      estimate ever to shrink — impossible for `transformer`
+      `segmentation_size` 40000 → 20000. Held absolutely it would have
+      preserved a value known to be false while calling it a config
+      fallback. Replaced with *"no estimate may become more optimistic
+      accidentally, silently, or without evidence"*, plus the explicit
+      procedure for a justified decrease (§1.1).
+- [x] **B2 was not actually semantics-neutral.** It spoke of recording a
+      *breach*, which presumes S2/S3. Rewritten to persist measured facts
+      only, with `realized_above_threshold` as a comparison rather than a
+      verdict, and the two deltas kept separate.
+
+**Cleared to begin B1, then B2. STOP for operator review at B0 before
+writing B3.**
