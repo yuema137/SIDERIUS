@@ -3324,7 +3324,11 @@ def _attach_realized_memory(
     attempt loop.
     """
     try:
-        from core.runtime_control.realized_memory import realized_vs_admitted
+        from core.runtime_control.realized_memory import (
+            realized_vs_admitted,
+            render_exceedance_notice,
+            threshold_exceedance_notices,
+        )
 
         rows = {}
         typed = {}
@@ -3341,6 +3345,21 @@ def _attach_realized_memory(
             return
         memory = final_record.setdefault("memory", {})
         memory["realized_vs_admitted"] = rows
+
+        # V21 PR B3 Stage C — the operator-visible half of S3. Derived
+        # AFTER every decision; nothing reads it back. Silent when the
+        # measurement is unknown, because `realized_above_threshold` is
+        # None there and None is not True — an unmeasured phase must not
+        # produce a reassuring absence of notice OR a false one.
+        notices = threshold_exceedance_notices(
+            typed,
+            model_identity=final_record.get("model_type"),
+            exp_id=final_record.get("exp_id"),
+        )
+        if notices:
+            memory["threshold_exceedance_notices"] = [n.model_dump(mode="json") for n in notices]
+            for notice in notices:
+                print(render_exceedance_notice(notice))
 
     except Exception as exc:  # pragma: no cover — defensive
         print(f"  [B2/B3] realized-vs-admitted attach failed (non-fatal): {exc}")

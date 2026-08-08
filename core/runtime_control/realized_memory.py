@@ -121,6 +121,147 @@ class RealizedVsAdmittedMemory(BaseModel):
         return self
 
 
+class ThresholdExceedanceNotice(BaseModel):
+    """An operator-visible statement that realized memory passed the threshold.
+
+    V21 PR B3 Stage C — the second half of the frozen S3 semantics:
+
+    > After admission, realized threshold exceedance is recorded and
+    > surfaced as an operator-visible condition, but exceedance alone does
+    > not automatically terminate the phase, invalidate the scientific
+    > result, or alter the score.
+
+    **This is presentation, not policy.** It is derived from
+    ``RealizedVsAdmittedMemory`` after every decision has already been
+    made, and nothing reads it back. B2's stored row remains the measured
+    fact; this is the human-facing reading of it.
+
+    **Naming.** Deliberately not "escalation": the codebase already uses
+    that word for the TERM→KILL sequence (`session.py`) and for
+    escalate-to-live-verification (`total_assembly.py`), and a third
+    meaning would make all three ambiguous. "Threshold" and "exceedance"
+    are reused from B2's own vocabulary (`realized_above_threshold`) and
+    from the operator's frozen wording. Not "breach", "violation" or
+    "over budget" — those read as verdicts.
+
+    ``measurement_completeness`` and ``peak_source`` are carried into the
+    notice rather than dropped in rendering, because a training peak is
+    currently a process high-water mark through end of phase (setup and
+    warm-up included) and must never be presented as a precise
+    phase-local peak.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    phase: str = Field(min_length=1)
+    model_identity: str | None = None
+    exp_id: str | None = None
+
+    realized_peak_mib: int = Field(ge=0)
+    effective_threshold_mib: int = Field(ge=0)
+    realized_minus_threshold_mib: int
+    realized_minus_estimated_mib: int | None = None
+    binding_constraint: BindingConstraint = "unknown"
+    measurement_completeness: MemoryCompleteness = "unavailable"
+    peak_source: Literal["reserved", "allocator", "none"] = "none"
+    owning_process_pid: int | None = None
+
+    #: Restates the S3 guarantee on the artifact itself, so a reader who
+    #: finds only this row still knows nothing was killed on its account.
+    action_taken: Literal["none_recorded_only"] = "none_recorded_only"
+
+
+_COMPLETENESS_PHRASE: dict[str, str] = {
+    "complete": "measured to completion",
+    "lower_bound": "a LOWER BOUND — the process did not finish, so the true peak is at least this",
+    "unavailable": "unavailable",
+}
+
+_SOURCE_PHRASE: dict[str, str] = {
+    "reserved": "allocator-reserved (closest to driver-visible use)",
+    "allocator": "tensor-allocated only (a floor on driver-visible use)",
+    "none": "no counter",
+}
+
+
+def threshold_exceedance_notices(
+    rows: dict[str, RealizedVsAdmittedMemory],
+    *,
+    model_identity: str | None = None,
+    exp_id: str | None = None,
+) -> list[ThresholdExceedanceNotice]:
+    """Build a notice for each phase whose realized peak passed the threshold.
+
+    Silent for phases within the threshold and — importantly — for phases
+    whose measurement is **unknown**. ``realized_above_threshold`` is
+    ``None`` in that case, and `None is not True`, so an unmeasured phase
+    produces no notice rather than a reassuring one.
+    """
+    notices: list[ThresholdExceedanceNotice] = []
+    for phase, row in sorted(rows.items()):
+        if row.realized_above_threshold is not True:
+            continue
+        if row.realized_peak_mib is None or row.effective_admission_threshold_mib is None:
+            continue  # unreachable while the validator holds; not worth a crash
+        notices.append(
+            ThresholdExceedanceNotice(
+                phase=phase,
+                model_identity=model_identity,
+                exp_id=exp_id,
+                realized_peak_mib=row.realized_peak_mib,
+                effective_threshold_mib=row.effective_admission_threshold_mib,
+                realized_minus_threshold_mib=row.realized_minus_threshold_mib or 0,
+                realized_minus_estimated_mib=row.realized_minus_estimated_mib,
+                binding_constraint=row.binding_constraint,
+                measurement_completeness=row.measurement_completeness,
+                peak_source=row.realized_peak_source,
+                owning_process_pid=row.owning_process_pid,
+            )
+        )
+    return notices
+
+
+def render_exceedance_notice(notice: ThresholdExceedanceNotice) -> str:
+    """One operator-readable block. Says what happened AND what did not."""
+    gb = 1024.0
+    lines = [
+        f"  [RESOURCE] {notice.phase.upper()} realized memory passed its admission "
+        f"threshold for {notice.model_identity or 'this candidate'}"
+        + (f" ({notice.exp_id})" if notice.exp_id else ""),
+        f"    realized peak    : {notice.realized_peak_mib / gb:.2f} GiB "
+        f"({_SOURCE_PHRASE.get(notice.peak_source, notice.peak_source)})",
+        f"    threshold        : {notice.effective_threshold_mib / gb:.2f} GiB "
+        f"(binding: {notice.binding_constraint})",
+        f"    over threshold by: {notice.realized_minus_threshold_mib / gb:+.2f} GiB",
+    ]
+    if notice.realized_minus_estimated_mib is not None:
+        lines.append(
+            f"    forecast error   : {notice.realized_minus_estimated_mib / gb:+.2f} GiB "
+            f"vs the admitted estimate"
+        )
+    lines.append(
+        f"    measurement      : "
+        f"{_COMPLETENESS_PHRASE.get(notice.measurement_completeness, 'unknown')}"
+    )
+    if notice.phase == "training":
+        lines.append(
+            "    NOTE             : the training figure is a process high-water mark "
+            "through end of phase (setup and warm-up included), so it is an UPPER "
+            "BOUND on the training-only peak."
+        )
+    if notice.owning_process_pid is not None:
+        lines.append(
+            f"    attributed to    : pid {notice.owning_process_pid} "
+            f"(this candidate's own process; peer usage is never counted here)"
+        )
+    lines.append(
+        "    ACTION           : none. Under the frozen S3 semantics this is recorded "
+        "and surfaced only — the phase was not terminated, the scientific result "
+        "stands, and the score is unchanged."
+    )
+    return "\n".join(lines)
+
+
 def read_process_peak_mib() -> tuple[int | None, int | None, int | None]:
     """This process's peak CUDA memory, as ``(allocator, reserved, device)``.
 
