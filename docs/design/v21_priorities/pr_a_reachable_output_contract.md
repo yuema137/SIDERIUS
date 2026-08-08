@@ -920,21 +920,56 @@ proposals is attributable to this commit alone.
 
 ### 3. Implementation plan
 
-- [ ] Enumerate every place the forward contract is stated as a literal;
-      record the full list before editing
-- [ ] Restate the contract symmetrically: classification **and**
-      regression, neither presented as the unexamined default
-- [ ] Keep the change textual — no schema or control-flow edits
-- [ ] Update the affected node/skill `.md` files as the last step
+- [x] Enumerate every place the forward contract is stated as a literal —
+      full census in §3b below
+- [x] Restate the contract symmetrically on the **agent-facing** surfaces
+- [x] Keep the change textual — no schema or control-flow edits
+- [ ] Update the affected node/skill `.md` files — **pre-merge step**, per
+      the repo's doc-sync rule (done last, so docs describe merged code)
+
+### 3b. Census of literal contract statements, and what A4 changed
+
+`grep -rn "B, 256, T"` over `agent/ nodes/ workflows/ configs/`, classified:
+
+**Changed — agent-facing, would mislead a regression proposal**
+
+| site | what it said |
+|---|---|
+| `ml_model_proposal_agent.py:363` | *"The forward contract is fixed: … [B, 256, T]"* — a **hard constraint** in the proposal prompt |
+| `ml_model_proposal_agent.py:330` | Golden-Paragraph spec: cite the contract verbatim; *"256 denoising bins … contract-fixed"* |
+| `agent/schemas/proposal.py` | `mathematical_definition` field description |
+| `proposing_stage.md` | new **Output contract** section: the two contracts, their legal losses, and that neither is the default |
+| `ml_model_implementor.py` description.md | the validator's LLM reviewer reads this file as the model spec |
+| `ml_code_validator_agent.py:72` | LLM review prompt: *"Wrong output shape that breaks the [B, 256, T] contract"* → judge against the **declared** contract |
+
+**Already symmetric — no change needed**
+
+- `agent/prompts.py:1010-1030` — the **tuner** prompt already branches on
+  `get_output_type` and states both contracts with their legal losses.
+  Evidence that the tuner surface was contract-aware all along; only the
+  *proposer* surface hardcoded classification.
+- `agent/schemas/validator.py:163` — already documents both.
+
+**Deliberately left alone — not agent-facing**
+
+Internal comments in `training_skill/estimator.py`,
+`evaluate_vram_skill/{batch_resolver,wrapper}.py`, and stub-mode fixtures
+in `llm_bridge.py`. These describe VRAM arithmetic for the current task,
+not the contract offered to the agent. Changing them is genericization
+work belonging to `enable_global_task_config.md` § T2, not A4.
 
 ### 4. Validation plan
 
 **Unit**
-- [ ] Prompt-render tests assert both contracts appear, **with their legal
-      loss families** — `classifier: ce/focal/focal_cw`,
-      `regressor: smooth_l1`
-- [ ] A guardrail test asserts the contract is not restated as a
-      hardcoded classifier-only literal in production code
+- [x] `test_commit_prompt_still_carries_io_contract_line` **broadened**:
+      asserts the input contract, **both** output contracts, and both legal
+      loss families. Strictly stronger than the single sentence it replaced
+- [x] New `test_commit_prompt_does_not_present_one_contract_as_fixed` —
+      fails if *"forward contract is fixed"* returns, which would silently
+      close the regression space at the prompt layer while schema and
+      runtime still permit it
+- [x] `test_description_documents_declared_contract` — both contracts,
+      each asserting the other's shape is **absent**
 
 **Integration / pseudo — behavioural, not string presence**
 - [ ] Deterministic pseudo fixture: a **legal classification proposal** is

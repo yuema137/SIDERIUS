@@ -69,7 +69,10 @@ mathematical fidelity to the spec.
     - Shape mismatches that cause a runtime error
     - Broken gradient path (detached tensors, non-differentiable ops where needed)
     - Missing operations that prevent the model from running at all
-    - Wrong output shape that breaks the [B, 256, T] contract
+    - Wrong output shape for the contract the plugin DECLARES in
+      PLUGIN_OUTPUT_TYPE: "classifier" must emit [B, 256, T],
+      "regressor" must emit [B, T]. Judge against the declared contract,
+      not against classification by default.
   Implementation details that differ from the spec but still produce a valid,
   trainable model do NOT set passed=false. A model that is "structurally close
   and should run" MUST have passed=true.

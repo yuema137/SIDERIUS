@@ -59,6 +59,26 @@ A JSON object with these fields:
 }
 ```
 
+### Output contract — an independent design dimension
+
+`output_type` and `loss_type` are **two separate decisions**. Choose the output
+representation your architecture actually needs, then a loss compatible with it:
+
+| `output_type`  | forward output      | legal `loss_type`        |
+|----------------|---------------------|--------------------------|
+| `"classifier"` | `[B, 256, T]` float | `ce`, `focal`, `focal_cw` |
+| `"regressor"`  | `[B, T]` float      | `smooth_l1`               |
+
+Both are fully supported. Regression predicts the denoised waveform directly;
+classification predicts a distribution over 256 amplitude bins per timestep.
+Neither is the default choice — pick the one your mechanism argues for, and say
+why in `motivation`.
+
+The pair is checked before training: an inconsistent combination
+(e.g. `"regressor"` with `focal`) is rejected, and the generated model must
+actually emit the shape it declares. `custom` losses are compatible with either
+contract — the loss plugin itself must respect the shape.
+
 ### Loss field shapes — read carefully before emitting
 
 The `loss_config.loss_type` slot accepts five values: `focal`, `focal_cw`, `ce`,

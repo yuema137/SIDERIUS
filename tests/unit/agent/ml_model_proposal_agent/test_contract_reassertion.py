@@ -127,6 +127,33 @@ class TestFieldSpecPresence:
         )
 
     def test_commit_prompt_still_carries_io_contract_line(self):
-        """Hard-constraint block — separate from the field spec — must
-        still carry the I/O contract statement."""
-        assert "The forward contract is fixed: input [B, T] int64" in PROPOSAL_COMMIT_PROMPT
+        """Hard-constraint block — separate from the field spec — must still
+        carry the I/O contract statement.
+
+        V21 PR A4 broadened this. The block previously asserted one fixed
+        sentence ("The forward contract is fixed: input [B, T] int64 → output
+        [B, 256, T] float32"). That sentence is now WRONG for a regressor
+        proposal, so pinning it would pin a defect.
+
+        The guard's intent — the agent is never left without the I/O contract —
+        is unchanged and now stricter: the input must still be stated, and
+        BOTH output contracts must be present with their legal loss families.
+        A refactor that drops either contract, or that silently reverts to
+        classification-only, still flips this red.
+        """
+        # input side, unchanged
+        assert "[B, T] int64" in PROPOSAL_COMMIT_PROMPT
+
+        # both output contracts, each with its legal losses
+        assert "[B, 256, T] float32" in PROPOSAL_COMMIT_PROMPT
+        assert "[B, T] float32" in PROPOSAL_COMMIT_PROMPT
+        assert '`"classifier"`' in PROPOSAL_COMMIT_PROMPT
+        assert '`"regressor"`' in PROPOSAL_COMMIT_PROMPT
+        assert "smooth_l1" in PROPOSAL_COMMIT_PROMPT
+        assert "focal_cw" in PROPOSAL_COMMIT_PROMPT
+
+    def test_commit_prompt_does_not_present_one_contract_as_fixed(self):
+        """The old wording asserted a single fixed output contract. If it
+        returns, the regression hypothesis space silently closes again at the
+        prompt layer even though the schema and runtime still permit it."""
+        assert "forward contract is fixed" not in PROPOSAL_COMMIT_PROMPT.lower()

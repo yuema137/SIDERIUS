@@ -327,7 +327,7 @@ Output a JSON object with exactly these fields:
 {
   "model_name": "short_snake_case_key",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
-  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract verbatim — 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, 256, T] float32 (per-timestep logits over 256 denoising classes)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the fixed dimension '256 denoising bins per time step is contract-fixed, not a hyperparameter'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
+  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, 256, T] float32 (per-timestep logits over 256 denoising classes)'; for 'regressor': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, T] float32 (the denoised waveform directly)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '256 denoising bins per time step is contract-fixed, not a hyperparameter'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
@@ -360,7 +360,15 @@ Output a JSON object with exactly these fields:
 Hard constraints — violating any of these makes the proposal invalid:
 - model_name must NOT be any of the existing model types listed in the context
 - model_name must be snake_case: lowercase letters, digits, and underscores only
-- The forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32
+- The input is fixed: [B, T] int64. The OUTPUT depends on the `output_type` you
+  choose — it is a design decision, not a fixed constant:
+    * `"classifier"` → output [B, 256, T] float32 (per-timestep class logits);
+      legal `loss_type`: `ce`, `focal`, `focal_cw`
+    * `"regressor"`  → output [B, T] float32 (the denoised waveform directly);
+      legal `loss_type`: `smooth_l1`
+  Choose the pair deliberately and state it in `output_type`. Do NOT pick a loss
+  first and let the output follow — they are independent choices, and an
+  inconsistent pair is rejected before training.
 - baseline_config must be conservative: fits comfortably within the effective cap shown in the [HARDWARE CONTEXT] (the VRAM gate rejects anything above it)
 - expert_advice.constraints must include at least one VRAM limit (relative to
   the effective cap shown in the [HARDWARE CONTEXT]). Capacity constraints such

@@ -264,17 +264,18 @@ class TestDeferredScope:
     # would guard a defect. Coverage moved to
     # ``TestOutputContractRendering`` below, which asserts BOTH contracts.
     #
-    # The two phrases still listed remain deferred to
-    # ``enable_global_task_config.md`` § Commit T2 and are untouched by PR A.
-    # The description.md phrase is a known PR A3 -> A4 handoff: A4 owns making
-    # every rendered contract statement symmetric.
+    # A4 then took the description.md phrase for the same reason: a regressor's
+    # description.md must not claim [B, 256, T], because the validator's LLM
+    # reviewer reads that file as the model spec. Coverage moved to
+    # ``TestOutputContractRendering.test_description_documents_declared_contract``.
+    #
+    # The remaining phrase is still deferred to
+    # ``enable_global_task_config.md`` § Commit T2 and is untouched by PR A.
     @pytest.mark.parametrize(
         "deferred_phrase",
         [
             # Lines 80, 115, 120 — runtime dummy-tensor self-check
             "[1, 64] int64 → expected [1, 256, 64] float32",
-            # description.md auto-generation — symmetric rendering is A4's scope
-            "**Forward contract:** `[B, T] int64 → [B, 256, T] float32`",
         ],
     )
     def test_deferred_hardcodes_still_present(self, deferred_phrase):
@@ -367,3 +368,29 @@ class TestOutputContractRendering:
         with pytest.raises(ValueError) as exc:
             _render_output_contract("nonsense")
         assert "nonsense" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        ("output_type", "expected", "forbidden"),
+        [
+            ("classifier", "[B, T] int64 → [B, 256, T] float32", "[B, T] float32"),
+            ("regressor", "[B, T] int64 → [B, T] float32", "[B, 256, T]"),
+        ],
+    )
+    def test_description_documents_declared_contract(
+        self, tmp_path, output_type, expected, forbidden
+    ):
+        """description.md must document the DECLARED contract.
+
+        Replaces the deferred-hardcode guard for this phrase. The validator's
+        LLM reviewer reads description.md as the model spec, so a regressor
+        whose description claims [B, 256, T] would be judged against the wrong
+        contract — a plausible false "spec violation" on a correct model.
+        """
+        from nodes.ml_model_implementor.ml_model_implementor import _render_output_contract
+
+        fc_comment, _ = _render_output_contract(output_type)
+        rendered = (
+            f"**Forward contract:** `{fc_comment.replace('input ', '').replace('output ', '')}`"
+        )
+        assert expected in rendered
+        assert forbidden not in rendered

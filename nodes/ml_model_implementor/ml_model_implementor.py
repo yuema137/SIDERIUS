@@ -1763,10 +1763,15 @@ class MLModelImplementor:
         desc_dir = os.path.join(inp.plugin_dir, inp.model_name)
         desc_path = os.path.join(desc_dir, "description.md")
         os.makedirs(desc_dir, exist_ok=True)
+        # V21 PR A3/A4: the documented contract follows the declared output_type.
+        # A regressor's description.md claiming [B, 256, T] would mislead the
+        # validator's LLM reviewer, which reads this file as the model spec.
+        _fc_comment, _ = _render_output_contract(inp.output_type)
         description_md = (
             f"# {_class_name(inp.model_name)}\n\n"
             f"## Overview\n\n{inp.model_description}\n\n"
-            f"**Forward contract:** `[B, T] int64 → [B, 256, T] float32`\n\n"
+            f"**Forward contract:** `{_fc_comment.replace('input ', '').replace('output ', '')}`"
+            f" ({inp.output_type})\n\n"
             f"## Architecture\n\n{inp.mathematical_definition}\n\n"
             f"## Baseline Configuration\n\n"
             f"```json\n{json.dumps(inp.baseline_config, indent=2)}\n```\n"

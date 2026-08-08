@@ -976,7 +976,8 @@ class ProposalOutput(BaseModel):
         "Must be concrete enough for an LLM to implement directly: "
         "include layer types, dimensions, activation functions, skip connections, "
         "and the forward pass data flow. "
-        "Forward contract is fixed: input [B, T] int64 → output [B, 256, T] float32.",
+        "The input is fixed at [B, T] int64; the OUTPUT follows ``output_type`` — "
+        "[B, 256, T] float32 for ``classifier``, [B, T] float32 for ``regressor``.",
     )
     motivation: str = Field(
         description="Why this specific architecture addresses the bottlenecks identified "
