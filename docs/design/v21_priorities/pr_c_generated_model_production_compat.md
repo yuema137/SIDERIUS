@@ -879,6 +879,95 @@ exactly the way the operator flagged during PR A's merge: they named an
 
 ---
 
+## Commit C3b — `is_inference_batch_registered` (O-C-2)
+
+**STATUS: DONE 2026-08-08. NEGATIVE FINDING — the invariant O-C-2 asked PR C
+to establish is already true. No production code changed; the property is
+now pinned so it cannot quietly stop being true.**
+
+### 1. Goal
+
+Establish, per operator decision O-C-2:
+
+```text
+generated model has no hand-maintained name-table entry
+     !=  uncalibrated or degraded admission semantics
+```
+
+O-C-2 also said PR C **need not delete** the predicate and that keeping it
+for logging is fine — audit consumers first. That instruction is what made
+the outcome a test rather than a rewrite.
+
+### 2. Audit — measured, and the answer is "already harmless"
+
+Two facts make the invariant hold today:
+
+**(a) The forecast and the run use the same function.** `execute_inference`
+falls back to `inference_batch_for(model_type)`
+(`sandbox_executor.py:1543`) and the planning estimator calls the same
+function, so an unregistered model is forecast with exactly the batch it
+will run with:
+
+```text
+registered      : False
+runtime batch   : 25
+estimator batch : 25
+CONSISTENT      : True
+```
+
+The forecast is *unhand-tuned*, not *wrong*. The flag's name overstates the
+problem.
+
+**(b) The flag reaches only observability surfaces.** It becomes a
+`RuntimeEstimate.warnings` entry (`estimate_types.py:416`) and a record
+field. Every use of `warnings` across `core/runtime_control/` is a
+**producer** — `warnings=(...)`, `(*estimate.warnings, note)` — and none is
+a predicate. Nothing decides on it.
+
+So absence from the table changes throughput, not admission, and the whole
+module stays **PR G's**.
+
+### 3. What C3b actually did
+
+Both facts are one edit away from becoming false, so they are pinned:
+
+- [x] planning batch == runtime batch for an unregistered model
+- [x] the flag is raised but does not change the estimate — a "safety"
+      multiplier on uncalibrated models would be a name-keyed admission
+      penalty wearing a different hat
+- [x] the flag lands in `warnings` and leaves `provenance`, `confidence`
+      and `expected_seconds` untouched
+- [x] registered built-ins still report as calibrated — guards the lazy
+      over-fix of deleting the table to silence the flag, which would make
+      every model "calibrated" by making none of them calibrated **and**
+      silently change five built-ins' real batch, including `transformer`,
+      whose entry is 1 rather than 25 for a memory reason
+
+### 4. Validation — RESULTS
+
+- [x] `8 passed`; ruff clean; ruff format unchanged
+
+#### Mutation battery — 2 applied, **2/2 caught**
+
+| # | mutation | result |
+|---|---|---|
+| M10 | give the estimator its own fallback so the forecast diverges from what runs | **1 failed** |
+| M11 | make the flag price the estimate (`total * 1.5` when uncalibrated) | **1 failed** |
+
+### 5. Acceptance criteria — MET
+
+- [x] The O-C-2 invariant is established **and** pinned
+- [x] `inference_batch_for`'s throughput choice untouched — PR G's
+- [x] The predicate was not deleted; consumers were audited first
+
+### 6. Commit boundary
+
+- [x] One test module. **No production change** — the finding was negative
+      and manufacturing a refactor to justify the commit is exactly what
+      the plan forbids
+
+---
+
 ## Commit C4 — Clean-subprocess transport fixture for generated models
 
 ### 1. Goal
