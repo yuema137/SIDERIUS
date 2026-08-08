@@ -1,10 +1,9 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: B1 + B2 IMPLEMENTED AND VALIDATED. B0 complete — Q-B-1 FROZEN as
-S3 by the operator, 2026-08-08. B1b (the `--max_epochs` bypass) approved.
-B3's design is to be written from a fresh audit under S3 and reviewed
-before any implementation; its mechanism remains an OUTPUT of that audit,
-not something this decision specifies.**
+**Status: B1 + B1b + B2 + B0 COMPLETE (Q-B-1 frozen as S3, 2026-08-08).
+B3 Stage A EXECUTED — premises hold and the scope narrowed to ONE wiring
+site (§0.7). Stage B/C in progress under the autonomous completion
+mandate. B4a/B4b pending. NOT MERGED.**
 
 > **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
 > not survive contact with the code, and the corrections are attached in
@@ -1871,12 +1870,119 @@ audit, not assumed here.**
 
 ---
 
+### 0.7 STAGE A RESULT — executed 2026-08-08. Premises hold; scope shrinks.
+
+Stage A confirmed the §0 audit and narrowed B3 from "wire the candidate
+sites" to **wire exactly one site**. Every premise was tested, and the
+per-site application of §3.4's stop condition is what did the narrowing.
+
+#### A.1 The VRAM branch is reached — proven by EXECUTION, not reading
+
+Driving the real `RuntimeDecisionPolicy.decide()`:
+
+| estimate | budget | `blocking_eligible` | decision | reason |
+|---|---|---|---|---|
+| measured probe, 20 GB | 12 GB | `True` | **REJECT** | `measured peak VRAM 20.00 GB exceeds budget 12.00 GB` |
+| measured probe, 8 GB | 12 GB | `True` | ALLOW | — |
+| measured probe, 20 GB | **unset** | `True` | ALLOW | — ← **today's production state** |
+| `static_uncalibrated`, 20 GB | 12 GB | `False` | **ADVISORY** | `projected peak VRAM ... (non-blocking provenance — advisory)` |
+| measured probe, peak **unset** | 12 GB | `True` | ALLOW | — |
+
+That is the frozen S3 rule, executing. Row 3 is the whole defect: the
+rule is correct and never armed.
+
+Branch order verified: the three earlier returns are
+`evidence_channel == "infrastructure_failure"`, `measured_failure is not
+None`, and an *impossible* `capacity_check`. None fires on a healthy
+probe, so nothing shadows `:285`. **No branch reordering is needed** —
+the §6 failure case does not apply.
+
+#### A.2 `RuntimeBudget` census — 9 production sites, ONE to wire
+
+| site | context | class | wire `vram_gb`? |
+|---|---|---|---|
+| `launch_guard.py` ×6 (`:145 :158 :171 :229 :261 :286`) | C9d startup self-test, **fake** probe runner | INFRASTRUCTURE | **no** — these assert policy invariants; adding a budget changes what the self-test exercises |
+| `ml_model_proposal_agent.py:215` | proposer pre-flight advisory | CANDIDATE_PHASE (proposal) | **no** — three independent reasons below |
+| `evaluate_time_skill/wrapper.py:574` | time gate | CANDIDATE_PHASE | **no** — its estimate carries no peak |
+| `ml_hyperparameter_tune_agent.py:1320` | `_resolve_time_check_probe_request` → `resolve_request_probe` → bounded probe | **CANDIDATE_PHASE, post-implementation** | **YES — the only one** |
+
+#### A.3 Why the two other candidate sites are excluded — §3.4 per-site
+
+§3.4's stop condition is not a single global gate; applied per site it is
+what eliminates them. Measured, not assumed:
+
+```text
+from_proposer_preflight(...).peak_vram_gb  ->  None
+from_time_eval_result(...).peak_vram_gb    ->  None
+```
+
+None of the four adapters in `estimate_types.py` ever sets the field.
+Only the probe path does:
+
+```text
+probe.py:554-563          extrapolate_probe        peak_vram_gb=result.peak_vram_gb
+probe_lifecycle.py:253    _unpriced_probe_estimate peak_vram_gb=result.peak_vram_gb
+                                                   (OOM / wall_cap path)
+```
+
+So wiring `vram_gb` at the proposer or time-gate sites would produce
+**exactly the inert connection §3.4 forbids** — a budget compared against
+a `None` peak, which the policy skips, while the code reads as
+enforcement. They are excluded on evidence, not on taste.
+
+The proposer site is additionally excluded twice over: `_POLICY_MATRIX`
+gives `static_prior → proposal → advisory_only`, and the policy records
+the operator decision that **"VRAM authority is post-implementation"**
+(`decision_policy.py:278-283`).
+
+#### A.4 The threshold source — already computed, already in scope
+
+Not the raw operator budget. The effective threshold is
+`resource_check["limit_gb"]` — `min(physical usable cap, operator
+budget)` as computed by `evaluate_vram_skill` — which matters precisely
+in the `PHYSICAL VETO` regime where the operator budget exceeds the
+card.
+
+Corroboration that this is the established meaning: the tuner already
+records `final_record["memory"]["vram_budget_gb"] = resource_check.get("limit_gb")`
+(`:5598`).
+
+Availability: `resource_check` is assigned at `:4485` and the probe call
+is at `:4686`, same scope. **No new plumbing** — one keyword argument on
+`_resolve_time_check_probe_request`, which currently takes
+`time_budget_minutes` and no VRAM threshold.
+
+#### A.5 Operator surface — `warnings` REJECTED, the record is the home
+
+| candidate | verdict |
+|---|---|
+| `RuntimeEstimate.warnings` | **rejected.** It is a **pre-admission** object; §3.5 forbids forcing a post-admission fact into one for code reuse. §0.6 proposed it; Stage A overrules that proposal |
+| `campaign_manifest.json` | **rejected.** A Phase-1 baseline artifact (`run_comparison.py:1416`), not a per-round resource surface |
+| `final_record["memory"]` | **accepted.** The established home for resource facts — already carries `vram_estimate_gb`, `vram_budget_gb`, `time_*`, and B2's `realized_vs_admitted` |
+
+So **persistence already exists** (B2). What S3 still lacks is the
+*visible* half: a human-readable, typed notice an operator encounters
+rather than has to go looking for in JSON. Stage C is therefore smaller
+than §0.6 assumed, and lands where the other resource facts already live.
+
+#### A.6 Corrections Stage A forces on the B3 plan
+
+- [x] **§0.6's surface proposal is overruled.** `warnings` is
+      pre-admission; recorded rather than quietly swapped.
+- [x] **Stage B is one site, not a class.** §5.1's "audited
+      candidate-phase sites" resolves to exactly one, and the two
+      exclusions are evidence-backed.
+- [x] **No branch reordering needed** (A.1).
+- [x] **§3.4's hard stop did not fire** — but it *did* fire per-site, and
+      that is what shrank the scope. Recorded so the narrowing is not
+      mistaken for scope-cutting.
+
+---
+
 ### 2. Scope
 
-**Shaped by §0 above.** B3 is now expected to be *wiring plus one new
-surface*, not a new enforcement mechanism — but the plan below is written
-as §3's checklist to confirm that, and the operator reviews it before any
-code. What *is* fixed:
+**Shaped by §0 and narrowed by Stage A (§0.7).** B3 is *one wiring site
+plus one operator-visible surface*, not a new enforcement mechanism.
 
 **Must remain unchanged regardless of the answer**
 - The metric, the scorer, every score.
