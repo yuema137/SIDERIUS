@@ -121,10 +121,17 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
         with torch.no_grad():
             out = model(x)
 
-        # Shape check
-        expected = (1, 256, T)
+        # Shape check — against the plugin's DECLARED contract (V21 PR A3).
+        # A regressor must not be judged against the classifier shape; that
+        # would reject a correct model in the implementor's own self-check,
+        # before the validator ever sees it.
+        declared = getattr(mod, "PLUGIN_OUTPUT_TYPE", "classifier")
+        expected = (1, 256, T) if declared == "classifier" else (1, T)
         if out.shape != expected:
-            return f"Forward pass shape mismatch: expected {expected}, got {tuple(out.shape)}"
+            return (
+                f"Forward pass shape mismatch for PLUGIN_OUTPUT_TYPE={declared!r}: "
+                f"expected {expected}, got {tuple(out.shape)}"
+            )
 
         # NaN check
         if torch.isnan(out).any():
@@ -306,7 +313,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
-from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS
+from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_TYPE
 
 
 def test_forward_shape():
@@ -316,9 +323,14 @@ def test_forward_shape():
     x = torch.randint(0, 256, (2, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
-    assert out.shape == (2, 256, config.segmentation_size), (
-        f"Expected (2, 256, {{config.segmentation_size}}), got {{out.shape}}"
+    # Expected shape follows the plugin's DECLARED contract, so a regressor
+    # is not judged against the classifier shape (V21 PR A3).
+    expected = (
+        (2, 256, config.segmentation_size)
+        if PLUGIN_OUTPUT_TYPE == "classifier"
+        else (2, config.segmentation_size)
     )
+    assert out.shape == expected, f"Expected {{expected}}, got {{out.shape}}"
 
 
 def test_forward_no_nan():

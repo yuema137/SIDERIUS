@@ -142,3 +142,51 @@ def test_registry_default_would_hide_a_dropped_declaration(tmp_path):
     pins the reason the intermediate assertions exist.
     """
     assert plugin_loader.get_output_type("never_registered_model_xyz") == "classifier"
+
+
+@pytest.mark.parametrize("output_type", ["classifier", "regressor"])
+def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type):
+    """The plugin's OWN generated test must accept its declared contract.
+
+    Found during A4 doc-sync: ``TEST_TEMPLATE.test_forward_shape`` asserted
+    ``(2, 256, seg)`` unconditionally, and the implementor's ``_smoke_test_plugin``
+    asserted ``(1, 256, T)``. Both would have rejected a correct regressor —
+    the implementor emitting a plugin its own test then fails.
+
+    This runs the generated test file with pytest, so the assertion is that the
+    real artifact passes, not that the template contains some string.
+    """
+    import subprocess
+    import sys
+
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from nodes.ml_model_implementor.ml_model_implementor import TEST_TEMPLATE
+
+    model_name = f"gen_test_{output_type}"
+    storage = StorageConfig(
+        backend="local",
+        local=LocalStorageConfig(workspace=str(tmp_path), run_name="r1"),
+    )
+    impl_input = local_full_spec(_proposal(output_type, model_name), storage)
+    plugin_src = _assemble_plugin(
+        impl_input,
+        {
+            "extra_imports": "",
+            "config_fields_code": "    channels: int = 16",
+            "config_validators_code": "",
+            "init_body": _INIT_BODIES[output_type],
+            "forward_body": _FORWARD_BODIES[output_type],
+        },
+    )
+    (tmp_path / f"{model_name}.py").write_text(plugin_src)
+    (tmp_path / f"test_{model_name}.py").write_text(TEST_TEMPLATE.format(model_name=model_name))
+
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", f"test_{model_name}.py", "-q"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"generated test file failed for {output_type}:\n{result.stdout}\n{result.stderr}"
+    )
