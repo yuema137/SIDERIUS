@@ -1,8 +1,8 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: APPROVED 2026-08-08 (operator) with four corrections applied.
-B1 + B2 IMPLEMENTED; B0 evidence packet next. STOP for operator review at
-B0 before writing B3.**
+**Status: B1 + B2 IMPLEMENTED AND VALIDATED. B0 evidence packet complete
+(§B0.E). STOPPED — awaiting the operator's Q-B-1 semantics decision.
+B3 is not written and must not be.**
 
 > **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
 > not survive contact with the code, and the corrections are attached in
@@ -1314,16 +1314,121 @@ behaviour rather than V20's three OOMs alone.
 
 ### 3. Implementation plan
 
-- [ ] Re-run §0.1's determination against the current head: which
-      enforcement posture do the production launchers actually set, and
-      what does each value do
-- [ ] Enumerate every consumer of `vram_budget_gb`,
-      `gpu_pair_ceiling_gib` and `gpu_admission_enforcement`, and state
-      for each whether it treats the number as a forecast bound or a usage
-      bound
-- [ ] Present B2's measured breach distribution — how often, how far, and
-      whether B1's corrections removed the breaches or merely shrank them
-- [ ] Write the options with their consequences (below), and **stop**
+- [x] Re-run §0.1's determination against the current head — unchanged;
+      `launch_v20_campaign.sh:189` sets `enforce_resource_limits`
+- [x] Enumerate every consumer and state whether it treats the number as
+      a forecast bound or a usage bound — **§B0.E below. They disagree.**
+- [x] Present B2's measured distribution — **§B0.E: there is none yet,
+      and none can be reconstructed.** Stated rather than fabricated
+- [x] Write the options with their consequences, and **stop**
+
+### B0.E — Evidence packet, 2026-08-08
+
+> **This is evidence, not a recommendation. The operator freezes Q-B-1.**
+
+#### E.1 The consumers already disagree — this is the central finding
+
+B0's §6 anticipated it as a possibility: *"Consumers disagree about the
+meaning today → That IS the finding."* They do.
+
+| consumer | what it compares the budget against | semantics it implements |
+|---|---|---|
+| `evaluate_vram_skill/wrapper.py:531` | the **estimated** peak (`cap_bytes = min(physical, budget)`) | **S1** — a forecast bound |
+| `evaluate_vram_skill/isolated_probe.py:338` | the **measured** peak — *"Measured peak VRAM exceeded the {cap} GB cap"* | **S2** — a usage bound |
+| `ml_model_proposal_agent.py:483` | nothing; renders the cap into the `[HARDWARE CONTEXT]` prompt | a design constraint told to the agent |
+
+So "12 GiB" already means two different things in one run: the bounded
+pre-phase probe **enforces it against a measurement**, and the admission
+gate **enforces it against a forecast**. Q-B-1 is therefore not a naming
+question — the codebase contains both answers, and whichever the operator
+freezes, one of these two sites changes.
+
+Worth noting which one V20 actually ran into: the probe's usage bound
+applies to a bounded probe, not to the production phase, so the phase
+that OOMed was admitted by the *forecast* bound alone.
+
+#### E.2 B1's forecast corrections
+
+| finding | reach | canonical source | before → after | direction |
+|---|---|---|---|---|
+| `epochs` | **ACTIVE** | `TrainConfig` declares 10 | `1` → `10`; 369.84 → **2709.84 min** on one candidate | closes a 7.33x optimism |
+| `segmentation_size`, wall-time | **ACTIVE** | config class (40000 / 20000) | steps 4,000,000 → **100,000**; minutes **unchanged** | neutral in the static path (exact cancellation); up to 40x on the measured path, conservative |
+| `segmentation_size`, VRAM | LATENT | config class | transformer 25.74 GB → 12.88 GB | no decision reached |
+| `nhead` (FU-C-1) | LATENT | `TransformerConfig` declares 4 | `(2,2)` → `(4,2)` | no decision reached |
+| `num_layers` | — | declares 2 | unchanged | **not a defect** |
+| `batch_size`, `optimizer_type` | — | match | unchanged | **not a defect** |
+
+**The load-bearing negative result: B1 cannot explain the P6.4 OOMs.**
+The VRAM admission number comes from a probe (`8b6c4ba8`), not from any
+corrected fallback. §0.2's leading hypothesis — "enforcement enforced a
+number that was wrong" — is **false for VRAM**. Whatever caused ~20.13 GiB
+against a 12 GiB budget, it was not these mismatches.
+
+#### E.3 B2's measured distribution — THERE IS NONE YET
+
+Stated plainly because the packet must not overclaim:
+
+```text
+observations of realized vs admitted memory to date:  0
+reconstructable from V20 artifacts:                   0
+```
+
+Nothing measured a realized peak before B2, so no V20 artifact contains
+one, and no amount of re-reading them will produce a distribution. The
+three OOMs remain three OOMs — they establish that under-prediction
+happened at least three times, not how often or how far.
+
+**What B2 changes:** from the next chain onward every admitted phase
+records `realized_minus_estimated_mib` (forecast error) and
+`realized_minus_threshold_mib` (headroom consumed) separately, with a
+completeness flag, attributed to the owning process. **A decision made
+today is made on three anecdotes; a decision made after one campaign is
+made on a distribution.**
+
+Known limitation to carry into the reading (§B2.R): `reset_process_peak`
+is not called in production, so a training peak currently includes setup
+and warm-up — an over-estimate in the conservative direction, exact for
+inference.
+
+#### E.4 What the evidence does and does not support
+
+```text
+SUPPORTED   the forecast inputs were wrong, and are now right (B1)
+SUPPORTED   forecast error was unobservable, and now is not (B2)
+SUPPORTED   two consumers implement two different semantics TODAY (E.1)
+
+NOT SUPPORTED  that corrected forecasting removes the OOMs
+               -- B1 does not touch the VRAM admission number at all
+NOT SUPPORTED  any claim about how often or how far the forecast errs
+               -- zero observations exist
+```
+
+Against §1.1's own decision rule, the honest position is that **neither
+branch has fired yet**: B1 left the VRAM forecast untouched, so it
+neither "left no meaningful under-prediction" nor "left a large one". The
+rule needs B2 data to discriminate, and B2 has not run.
+
+#### E.5 The three options, re-evaluated
+
+| | Semantics | What B1/B2 changed about the case for it | Cost |
+|---|---|---|---|
+| **S1** | admission estimate, honestly named | **Weakened as a complete answer.** It is already what the admission gate does, and it did not prevent three OOMs. Choosing it means accepting OOMs as normal and renaming the field to say so | Cheapest; requires the schema/CLI wording to stop implying a cap |
+| **S2** | enforced usage cap | **Strengthened by E.1** — `isolated_probe` already implements exactly this against a measured peak, so the mechanism is not hypothetical and a precedent exists in-tree. Still the highest risk of killing legitimate work on an imprecise forecast | Needs a production-phase mechanism (B3's output) |
+| **S3** | estimate + recorded exceedance | **B2 has already built the measurement half.** What remains is the escalation half. Also the only option that produces the distribution the other two would want before committing | Middle; makes forecast error a tracked quantity |
+
+**The operator's recorded prior is S3, explicitly not frozen.** Nothing in
+B1/B2 contradicts it, and E.1 adds an argument neither the prior nor the
+original options table had: whichever is chosen, the
+`wrapper.py`/`isolated_probe.py` disagreement must be resolved as part of
+B3, because leaving two live definitions of "the cap" is how this
+ambiguity survived into V20 in the first place.
+
+**One sequencing option the operator may want.** Because E.3 has no
+distribution, freezing now is a decision on three anecdotes. Running one
+bounded campaign with B2 in place would make it a decision on data. That
+is the operator's call on urgency, not a technical blocker — and it is
+not a recommendation, only the observation that B2's value is realised
+only after it has run.
 
 ### 4. The options, stated now so the operator can see the shape
 
