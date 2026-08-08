@@ -2320,6 +2320,115 @@ Tests and evidence. **Dependencies:** B4a passed.
 - [ ] Rung 4: the breach is detected and correctly attributed live
 - [ ] Rung 4: **no peer-caused rejection** occurs
 
+### B4b.R — Rung 3 PASS; Rung 4 NOT RUN (justified), 2026-08-08
+
+#### Rung 3 — the production admission edge. PASS (12 cases, 3 mutations)
+
+`tests/unit/core/test_b4b_rung3_production_edge.py` drives the **real**
+`resolve_request_probe` — the entry point the tuner calls — with a fake
+probe runner supplying a known peak. Same pattern `launch_guard.py` uses
+to assert the runtime chain of custody, and it exercises everything except
+the model:
+
+```text
+REQUEST_PROBE -> bounded probe runs exactly once -> observation persisted
+              -> extrapolate_probe rebuilds the estimate WITH peak_vram_gb
+              -> policy re-evaluated against the ARMED threshold
+              -> terminal decision
+```
+
+| case | decision |
+|---|---|
+| measured 20 GB vs armed 12 GB | **REJECT**, `measured peak VRAM`, provenance `bounded_live_probe` |
+| measured 4 GB vs armed 12 GB | ALLOW |
+| measured 20 GB, **threshold unset** | ALLOW ← the pre-B3 behaviour, pinned |
+| probe measured no peak | ALLOW, no VRAM reason |
+| boundary 12.0 / 12.001 / 11.999 | ALLOW / REJECT / ALLOW |
+| OOM probe | REJECT **on the OOM**, not on the budget |
+
+Mutations, all CAUGHT: **R1** the estimate drops the measured peak;
+**R2** the policy is bypassed after the probe; **R3** the OOM path drops
+its peak.
+
+R3 first SURVIVED and is recorded with its classification: on the OOM path
+`measured_failure` REJECTs *before* the VRAM branch and the estimate is
+never returned, so dropping the peak changes no decision **today**. Latent,
+not harmless — `_unpriced_probe_estimate` promises to carry "the
+measurement that DOES exist", and B0/B2 rely on that when an OOM is the
+only evidence a candidate produced. Pinned by testing the documented
+contract directly rather than through a decision that cannot see it.
+
+#### Rung 4 — NOT RUN. Reason recorded, packet ready.
+
+**Two facts, established by audit rather than by attempting it.**
+
+**1. Rung 4 cannot be small.** B3's wiring is reached only on the
+`REQUEST_PROBE` path, and `decision_policy.py:303-317` requires **all
+three** of:
+
+```text
+evidence_channel == "probe_absent"
+mode.phase        == "formal"
+not estimate.blocking_eligible
+```
+
+A trial-only run never reaches it. So Rung 4 is necessarily a full
+trial→formal chain with real LLM calls and real training — PR C's C5b
+scale, ~30-60 min. "Smallest real run" does not shrink below that.
+
+**2. The GPU is not ours alone right now.** At Gate time the card carried
+**six training processes belonging to another user** (`wenyu`, 8.1 GiB,
+running and ongoing). Launching SIDERIUS training would contend for the
+card and could OOM a third party's work. That is an outward-facing side
+effect on someone else's research, and not a cost this Gate may impose
+autonomously — the same judgement that shrank Rung 2's footprint. The
+repository's `require_launch_approval.sh` exists to make production
+launches deliberate for exactly this reason.
+
+**What Rung 4 would add, stated precisely rather than minimised:**
+
+```text
+ALREADY PROVEN
+  rung 2  real CUDA measurement + per-process attribution, live, under
+          8.1 GiB of genuine foreign contention
+  rung 3  the real production admission edge: probe -> persist ->
+          estimate-with-peak -> armed policy -> REJECT, 3 mutations
+
+NOT YET PROVEN BY A LIVE CHAIN
+  a) the tuner's own call site executing inside a real run (covered
+     today by a driven-helper test plus a source guard, because it sits
+     inside the 2,400-line run())
+  b) a REAL model's peak rather than a fixture's
+  c) the Stage C notice appearing in a real run's operator output
+```
+
+That residual is real. It is not the admission rule, the measurement, the
+attribution or the transport — each of those has live or edge evidence.
+
+**Ready-to-run packet** (operator executes when the card is free):
+
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_comparison.py \
+    --model punet --provider openai --model_id gpt-5.5 \
+    --reflect_provider openai --reflect_model_id gpt-5.5 \
+    --max_rounds 2 --max_epochs 1 \
+    --trial_time_budget_minutes 10 --formal_time_budget_minutes 20 \
+    --formal_portion 0.05 --formal_train_portion 1.0 \
+    --trial_vram_budget_gb 4 --formal_vram_budget_gb 4 \
+    --data_scope 0-1 --health_gate_files 0 \
+    --run_name b4b_rung4_s3_surface --is_trial --progress_bar --cleanup_denoised
+```
+
+| | |
+|---|---|
+| Preconditions | `nvidia-smi` shows no foreign compute processes; ≥ 20 GiB free |
+| Threshold choice | `4` GiB deliberately **low**, so a real `punet` phase is likely to exceed it and produce the Stage C notice — the property under test is the surface, not a good score |
+| Bounds | 2 rounds, 1 epoch, 5% formal portion, 2-file scope, 10/20 min inner budgets, **60 min outer wall clock** |
+| Max attempts | **1.** A poor score is not a reason to rerun |
+| PASS | `final_record["memory"]["realized_vs_admitted"]` present for training; a `[RESOURCE]` block in the log if the threshold was passed; the run **not** terminated by it |
+| Legitimate non-PASS observations | no exceedance occurred (still proves wiring + measurement + no action); model collapse; poor score — none are Gate failures |
+| FAIL | peer usage attributed to the candidate; the phase terminated on exceedance; the score altered by it |
+
 ### 5. Acceptance criteria
 
 - Rung 3's reachability test fails under a bypass mutation.
