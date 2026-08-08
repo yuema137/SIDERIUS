@@ -2168,6 +2168,25 @@ Tests and evidence. **Dependencies:** B3.
       and attribution. The reservation is the independent variable, which
       a training run can never be
 
+### B4a.P — Rung 2 readiness packet, written BEFORE the run (2026-08-08)
+
+| | |
+|---|---|
+| **Property** | A real CUDA allocation is measured by the in-subprocess capture, attributed to the owning process, transported by the sidecar, joined by B2, and surfaced by Stage C — with a **peer** process holding memory at the same time and never being charged to the candidate |
+| **Why synthetic evidence is insufficient** | Rung 1 proves the *arithmetic*. It cannot prove that `torch.cuda.max_memory_allocated` is read in the right process, that the counters are per-process rather than per-device, or that a concurrent holder does not inflate them |
+| **GPU state at packet time** | RTX 5090, 31.34 GiB total, **30.58 GiB free**, 274 MiB in use |
+| **Workload** | `torch.empty` allocations only. **No model, no training, no dataset.** The reservation is the independent variable, which a training run can never be |
+| **Candidate allocation** | 4 GiB |
+| **Peer allocation** | 3 GiB, in a separate process, held concurrently |
+| **Expected measurement** | candidate reserved peak ≈ 4 GiB ± allocator granularity; **not** ≈ 7 GiB |
+| **Threshold for the surface** | 2 GiB, chosen so the 4 GiB candidate exceeds it and a notice is produced |
+| **Hard timeout** | 120 s wall clock for the whole rung |
+| **Max attempts** | 1. No rerun-until-green |
+| **Cleanup** | processes exit on completion; `torch.cuda.empty_cache()` in each; verify with `nvidia-smi` afterwards |
+| **PASS artifacts** | candidate peak within tolerance of 4 GiB; peer peak absent from the candidate's row; `owning_process_pid` equals the candidate subprocess PID; sidecar JSON on disk; one exceedance notice |
+| **Stop conditions** | free memory < 10 GiB at start → NOT RUN; any attribution of peer memory to the candidate → **Gate FAIL**, fix before B4b |
+| **Not being tested** | any scientific outcome; concurrency policy; pair/aggregate ceilings (P6.4 / out of PR B scope) |
+
 ### 4. Validation plan
 
 - [ ] Rung 1: the decision matches the frozen semantics for each replayed
@@ -2175,6 +2194,74 @@ Tests and evidence. **Dependencies:** B3.
 - [ ] Rung 2: the breach is detected, and attributed to the holder
 - [ ] Rung 2: a **peer** process is not blamed — the explicit P6.4 rule
 - [ ] Each rung passes **before** the next is attempted
+
+### B4a.R — Result, executed 2026-08-08
+
+#### Rung 1 — deterministic, no GPU. PASS (15 cases)
+
+`tests/unit/core/test_b4a_rung1_s3_accounting.py`. The eight cases §11
+requires, each asserted on decision **and** evidence grade **and** reason,
+plus the V20 replay and the non-retroactivity property.
+
+The V20 replay uses only figures the ledger actually records — declared
+budget `12.0` GiB, realized `20.13` GiB, co-resident `17.46`/`13.45` GiB,
+`149` MiB free — at the precision recorded. Nothing interpolated.
+
+What it establishes, stated narrowly: **had the threshold been armed and
+had a bounded probe measured the true peak, admission would have
+refused** (`measured peak VRAM 20.13 GB exceeds budget 12.00 GB`). It does
+**not** establish that V20 would have avoided the OOM — V20's admission
+never had a measured peak to judge, which is §B0.E's finding, and the
+same number as a *forecast* is correctly only ADVISORY.
+
+Also recorded: each co-resident peak (17.46, 13.45) exceeds the declared
+12 GiB **on its own**, so the pair's failure is not purely a concurrency
+effect. Aggregate/pair accounting remains P6.4, outside PR B.
+
+#### Rung 2 — live controlled allocator. PASS
+
+**Deviation from the packet, and why.** The packet planned a 4 GiB
+candidate plus a 3 GiB synthetic peer. At run time the card had acquired
+**six training processes belonging to another user** (8.1 GiB, 23.9 GiB
+free). Two consequences, both recorded rather than absorbed:
+
+1. The synthetic peer was **dropped** — six genuine foreign processes are
+   a *stronger* peer-attribution condition than one process we control.
+2. The candidate allocation was cut **4 GiB → 2 GiB**. Holding 7 GiB on a
+   card another person is training on risks causing *their* OOM, which is
+   not a cost this Gate may impose. 2 GiB for ~5 s against 23.9 GiB free
+   is negligible.
+
+Neither change weakens the property; the peer condition got stronger.
+
+```text
+requested                    2.0 GiB
+foreign usage, concurrent    8.1 GiB across 6 processes (another user)
+candidate allocator peak     2048 MiB
+candidate reserved peak      2048 MiB     <- NOT ~10 GiB
+owning_process_pid           2079586      (the candidate subprocess)
+measurement_completeness     complete
+device_index                 0
+GPU after                    8147 MiB used — the candidate released cleanly
+```
+
+**The attribution property is proven live**: 8.1 GiB of concurrent
+foreign usage did not enter the candidate's measurement by a single MiB.
+This is structural, not filtered — the counters are per-process and are
+read inside the candidate's own subprocess.
+
+Full chain, driven from the sidecar the subprocess actually wrote:
+
+| threshold | `realized_above_threshold` | Δ threshold | notices |
+|---|---|---|---|
+| 4 GiB | `False` | −2048 MiB | 0 |
+| 1 GiB | `True` | +1024 MiB | 1 |
+
+The rendered notice carried every required caveat — the training
+high-water-mark warning, the completeness phrase, the attribution line,
+and the `ACTION: none` statement.
+
+Wall time: ~10 s. One attempt. No rerun.
 
 ### 5. Acceptance criteria
 
