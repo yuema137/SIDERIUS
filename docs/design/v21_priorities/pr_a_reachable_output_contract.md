@@ -1,6 +1,7 @@
 # PR A — Make the existing output contract reachable
 
-**Status: DESIGN, awaiting operator approval. No implementation has begun.**
+**Status: IMPLEMENTED AND VALIDATED — READY FOR OPERATOR MERGE.**
+Head `3a2157df`. Do not merge without the operator; merge is operator-owned.
 
 | | |
 |---|---|
@@ -2006,25 +2007,72 @@ fixed.
 
 ---
 
+## 1c. Mutation battery — final run (2026-08-07, HEAD `3a2157df`)
+
+Every named mutation re-applied against the final head, each reverted from
+a pristine copy, working tree verified clean afterwards.
+
+| mutation | reverted behaviour | result |
+|---|---|---|
+| **A2** | validator expected-shape hardcoded to classifier | **CAUGHT** — 2 failed, 5 passed |
+| **A2b** | plugin branch no longer calls the shared rule | **CAUGHT** — 6 failed, 3 passed |
+| **A3** | protocol drops `output_type` | **CAUGHT** — 3 failed, 13 passed |
+| **A3b** | `TEST_TEMPLATE` back to classifier-only shape | **CAUGHT** — 1 failed, 1 passed |
+| **A3c** | VRAM target shape back to dtype-derived | **CAUGHT** — 2 failed, 5 passed |
+| **A4b** | `output_type` removed from **one of two** parser sites | **CAUGHT** — `test_both_construction_sites_read_output_type` |
+
+**6 / 6 caught.** A4b's is the strongest of the set: it removes the field
+from only *one* construction site — the realistic partial fix — and the
+guardrail still fails. A mutation that deletes both sites would have been
+a weaker test.
+
+## 1d. Final validation (HEAD `3a2157df`)
+
+```text
+configured full unit suite   7892 passed, 2 skipped, 4 xfailed, 0 failed
+ruff check                   All checks passed
+ruff format --check          750 files already formatted
+pyright                      0 errors, 4 warnings
+                             (identical to the pre-PR baseline; all four
+                              pre-existing, in files this PR never touches)
+mutation battery             6 / 6 caught
+working tree                 clean apart from untracked slide/ (unrelated)
+```
+
+**On CI:** the configured CI is `ruff check`, `ruff format --check`,
+`pyright`, `pytest tests/unit -m "not real_run"` — every one of which was
+run locally above at the exact head. Per §A0 and the acceptance rule, that
+is necessary and **not sufficient**: the PR-specific production-reachability
+evidence is Gates 1C/1R/2C/2R in §1a, which CI cannot produce.
+
+---
+
 ## 2. Merge checklist — the five layers PR A must prove
 
 PR A is complete only when all five hold. Each layer proves a different
 property; none substitutes for another.
 
-- [ ] **1. SCHEMA** — a proposal can explicitly express
-      `classifier | regressor`, with `output_type` independent of
-      `loss_type`
-- [ ] **2. PROPOSER** — both real advice cases traverse the real
-      LLM-facing proposal path, and a legal combination is expressible
+- [x] **1. SCHEMA** — `ProposalOutput.output_type:
+      Literal["classifier","regressor"]`, declared independently of
+      `loss_type`; inference from the loss is forbidden and tested
+      (A3, A4b)
+- [x] **2. PROPOSER** — both real advice cases traversed the real
+      LLM-facing path: Gate 1C `classifier`+`focal`, Gate 1R
+      `regressor`+`smooth_l1`, each verified through to the shared rule
       (A5a)
-- [ ] **3. IMPLEMENTOR + VALIDATOR** — `classifier → [B,C,T]`,
-      `regressor → [B,T]`; declared metadata matches the actual forward;
-      mismatches in **both** directions are refused
-- [ ] **4. RUNTIME** — plugin registry, `get_output_type` and the
-      `ExperimentConfig` live gate all see the correct contract
-- [ ] **5. REAL EXECUTION** — classification Gate 2C and regression
-      Gate 2R each reach a scored trial; scorer untouched and
-      byte-identical
+- [x] **3. IMPLEMENTOR + VALIDATOR** — expected shape derived from the
+      declaration; `classifier → [B,256,T]`, `regressor → [B,T]`;
+      mismatches refused in **both** directions; the producer's own smoke
+      check and generated test artifact honour it too (A2, A3, A3b)
+- [x] **4. RUNTIME** — registry and `get_output_type` return the declared
+      contract for a generated plugin; the shared pair rule governs
+      **both** the built-in and generated-plugin branches; the VRAM
+      pre-flight builds a contract-shaped target (A2b, A3c)
+- [x] **5. REAL EXECUTION** — Gate 2C scored `-2.727240835313264`
+      (HealthGate valid); Gate 2R executed train → infer → **frozen
+      scorer** → record with `file_vector` persisted, scalar withheld by
+      blocking policy per the corrected criterion. **No scorer file
+      appears in any PR A diff.**
 
 Only with all five may this claim be made:
 
