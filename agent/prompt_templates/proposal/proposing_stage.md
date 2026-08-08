@@ -38,6 +38,7 @@ A JSON object with these fields:
 ```json
 {
   "model_name": "short_snake_case_key (must NOT be any existing model type)",
+  "output_type": "classifier | regressor — REQUIRED. See 'Output contract' above. classifier -> [B, 256, T] with ce/focal/focal_cw; regressor -> [B, T] with smooth_l1. Independent of loss_type: state it explicitly, never infer it.",
   "model_description": "One paragraph describing the architecture and why it addresses the DiscoveryMemo's hypothesis.",
   "mathematical_definition": "Abstract architectural framework: key computational stages, mathematical operations, data flow. Do NOT include concrete dimensions — those belong in baseline_config.",
   "motivation": "Why this architecture addresses the bottleneck identified in the DiscoveryMemo. Must reference proposed_change and causal_hypothesis verbatim.",

@@ -1,0 +1,23 @@
+{
+  "mindset": [
+    "# PR A Gate 1 \u2014 capability validation fixture (NOT a scientific campaign)",
+    "This run validates that the system can express and implement a specific output/loss formulation end to end. Scientific quality is NOT under test: a low score, a collapsed model, or a failed HealthGate does not make this run wrong.",
+    "Propose ONE small, conservative, obviously-trainable model. Do not optimise for accuracy. Prefer the smallest architecture that honestly implements the requested contract."
+  ],
+  "propose": [
+    "REQUIRED OUTPUT CONTRACT: set `output_type` to \"classifier\" in your proposal. This is mandatory for this validation run.",
+    "REQUIRED LOSS: set `loss_config.loss_type` to \"focal\" (Branch A, built-in). Do not use a custom loss.",
+    "The model's forward pass MUST return [B, 256, T] float32. Use a final Conv1d(channels, 256, kernel_size=1) head so each timestep carries 256 class logits.",
+    "`output_type` and `loss_type` are independent proposal dimensions. State the output contract explicitly; do not infer it from the loss.",
+    "Keep the model small: roughly 10k-500k parameters is appropriate for this validation. Batch size must be at least 4.",
+    "Do not propose a custom_loss_spec. Do not reuse an existing plugin (Branch B); propose a new small model."
+  ],
+  "implement": [
+    "Implement exactly the requested output contract. The final layer must produce the declared shape.",
+    "Keep the implementation minimal and vectorised. No Python loops over the time dimension.",
+    "The forward pass must return [B, 256, T] float32."
+  ],
+  "tune": [
+    "Use conservative hyperparameters. This is a wiring validation, not a tuning study."
+  ]
+}

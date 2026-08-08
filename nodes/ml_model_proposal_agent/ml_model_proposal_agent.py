@@ -326,6 +326,7 @@ Output a JSON object with exactly these fields:
 
 {
   "model_name": "short_snake_case_key",
+  "output_type": "classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits [B, 256, T] per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits [B, T] the denoised waveform directly and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training.",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
   "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, 256, T] float32 (per-timestep logits over 256 denoising classes)'; for 'regressor': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, T] float32 (the denoised waveform directly)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '256 denoising bins per time step is contract-fixed, not a hyperparameter'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
@@ -1388,6 +1389,10 @@ class MLModelProposalAgent:
         output = ProposalOutput.model_validate(
             {
                 "model_name": proposed_name,
+                # V21 PR A: the allow-list is explicit, so a field absent here is
+                # SILENTLY dropped and the schema default applies. Gate 1R caught
+                # exactly that: the agent complied, and output_type never arrived.
+                "output_type": raw.get("output_type", "classifier"),
                 "model_description": raw.get("model_description", ""),
                 "mathematical_definition": raw.get("mathematical_definition", ""),
                 "motivation": raw.get("motivation", ""),
@@ -1977,6 +1982,8 @@ class MLModelProposalAgent:
                 output = ProposalOutput.model_validate(
                     {
                         "model_name": proposed_name,
+                        # V21 PR A — see the note at the other construction site.
+                        "output_type": raw.get("output_type", "classifier"),
                         "model_description": raw.get("model_description", ""),
                         "mathematical_definition": raw.get("mathematical_definition", ""),
                         "motivation": raw.get("motivation", ""),

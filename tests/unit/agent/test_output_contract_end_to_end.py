@@ -190,3 +190,95 @@ def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type
     assert result.returncode == 0, (
         f"generated test file failed for {output_type}:\n{result.stdout}\n{result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The hop the A3 transport contract missed (found by Gate 1R, 2026-08-07)
+# ---------------------------------------------------------------------------
+#
+# A3 declared the chain starting at ``ProposalOutput.output_type`` and treated
+# that as the source. The REAL source is the LLM's raw JSON, and there is a
+# lossy parse step before a ProposalOutput exists: both construction sites in
+# ml_model_proposal_agent build from an EXPLICIT key allow-list, so a field
+# absent from that list is silently dropped and the schema default applies.
+#
+# Gate 1R caught it in production. The agent followed the regression advice
+# (loss_type=smooth_l1, model named "..._regressor_v1") and the proposal still
+# arrived as output_type="classifier", because the parser never read the key.
+#
+# Lesson recorded in the ledger: a transport contract must start at the real
+# PRODUCER, not at the first typed object in the chain.
+#
+# MUTATION TARGET: drop `"output_type": raw.get(...)` from either construction
+# site and the matching case below fails.
+
+
+class TestRawProposalJsonCarriesOutputContract:
+    @staticmethod
+    def _sites() -> str:
+        import inspect
+
+        from nodes import ml_model_proposal_agent as mod
+
+        return inspect.getsource(mod)
+
+    @pytest.mark.parametrize("declared", ["classifier", "regressor"])
+    def test_parser_allowlist_reads_output_type(self, declared):
+        """A ProposalOutput built the way the agent builds it must preserve a
+        declared output_type rather than silently defaulting."""
+        from agent.schemas.proposal import ProposalOutput
+
+        raw = {
+            "model_name": "raw_probe",
+            "output_type": declared,
+            "model_description": "probe",
+            "mathematical_definition": "probe",
+            "motivation": "probe",
+            "expert_advice": {
+                "focus_areas": ["x"],
+                "constraints": ["y"],
+                "known_failures": [],
+                "suggested_directions": ["z"],
+                "rationale": "probe",
+            },
+            "baseline_config": {
+                "model_config": {},
+                "train_config": {},
+                "loss_config": {"loss_type": "focal"},
+            },
+        }
+        built = ProposalOutput.model_validate(
+            {
+                "model_name": raw["model_name"],
+                "output_type": raw.get("output_type", "classifier"),
+                "model_description": raw["model_description"],
+                "mathematical_definition": raw["mathematical_definition"],
+                "motivation": raw["motivation"],
+                "expert_advice": raw["expert_advice"],
+                "baseline_config": raw["baseline_config"],
+            }
+        )
+        assert built.output_type == declared
+
+    def test_both_construction_sites_read_output_type(self):
+        """Reachability: BOTH allow-lists in the proposal agent must read the
+        key. One site fixed and one missed is the same silent-default defect."""
+        src = self._sites()
+        assert src.count('"output_type": raw.get(') == 2, (
+            "every ProposalOutput construction site must read output_type from "
+            "the raw LLM JSON; an omitted site silently defaults to classifier"
+        )
+
+    def test_json_skeletons_request_output_type(self):
+        """The agent cannot emit a field it is never asked for."""
+        from pathlib import Path
+
+        from nodes.ml_model_proposal_agent import PROPOSAL_COMMIT_PROMPT
+
+        assert '"output_type"' in PROPOSAL_COMMIT_PROMPT
+
+        template = (
+            Path(__file__).resolve().parents[3]
+            / "agent/prompt_templates/proposal/proposing_stage.md"
+        )
+        assert '"output_type"' in template.read_text(encoding="utf-8")
