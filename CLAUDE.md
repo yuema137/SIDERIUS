@@ -288,6 +288,43 @@ validate.
   last step before merging the PR (so docs describe the merged code),
   written into the PR's plan as its own checklist stage, and verified
   by quoting each documented flag/default against the merged source.
+- **Final validation runs from a clean tree, and the verdict comes from
+  the log (binding, operator decision 2026-08-08)**: two near-misses in
+  one PR B session, both promoted from incident to standing rule.
+
+  **1. Commit the semantic checkpoint BEFORE running the full suite.**
+  `tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`
+  runs `git diff --name-only`
+  (`scripts/pr3_l2_calibration/preflight.py:287`) and fails when **any**
+  uncommitted file outside `scripts/pr3_l2_calibration/`, `tests/`,
+  `docs/`, `reports/` or `*.md` is modified — the PR3-L2 calibration
+  protocol requires production untouched at launch. Run the full suite
+  on a work-in-progress tree and it reports a failure naming the files
+  you are editing. That is the guard working.
+
+  ```text
+  full suite red, no_production_file_modified
+    -> commit the checkpoint, re-run
+    -> NEVER relax the guard to make an in-progress tree green
+  ```
+
+  Targeted and subsystem runs during development are fine; it is the
+  **full** suite whose result is meaningless from a dirty tree.
+
+  **2. Never take a pytest verdict from a wrapper's exit status.**
+  `pytest ... | tail -5` reports **`tail`'s** exit code, so a run can be
+  announced as exit 0 while the log says `1 failed`. Redirect, capture
+  pytest's own status, then show the tail:
+
+  ```bash
+  pytest <args> > /tmp/pytest.log 2>&1
+  rc=$?
+  tail -n 20 /tmp/pytest.log
+  exit $rc
+  ```
+
+  or set `-o pipefail` explicitly. A background-task notification's
+  "exit code 0" is **not** evidence that pytest passed; read the log.
 
 **Nodes communicate exclusively through three mechanisms — schema, storage, and
 protocols. No other form of inter-node communication is permitted.**

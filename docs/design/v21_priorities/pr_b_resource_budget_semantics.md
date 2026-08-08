@@ -1,8 +1,10 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: B1 + B2 IMPLEMENTED AND VALIDATED. B0 evidence packet complete
-(§B0.E). STOPPED — awaiting the operator's Q-B-1 semantics decision.
-B3 is not written and must not be.**
+**Status: B1 + B2 IMPLEMENTED AND VALIDATED. B0 complete — Q-B-1 FROZEN as
+S3 by the operator, 2026-08-08. B1b (the `--max_epochs` bypass) approved.
+B3's design is to be written from a fresh audit under S3 and reviewed
+before any implementation; its mechanism remains an OUTPUT of that audit,
+not something this decision specifies.**
 
 > **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
 > not survive contact with the code, and the corrections are attached in
@@ -12,20 +14,74 @@ B3 is not written and must not be.**
 > April, and the sweep found the one genuinely optimistic defect —
 > **`epochs`** — that §0.4 had missed entirely. §0.6 records all of it.
 
-> **Q-B-1 is DEFERRED BY DESIGN, not unresolved.** It blocks **B3 only** —
-> it does **not** block B1 or B2. Part III's sequence is *audit semantics →
-> freeze semantics (operator decision, written) → implement enforcement*,
-> and the audit is strongest when it can cite corrected forecasts (B1) and
-> measured forecast error (B2) rather than V20's three OOMs alone.
+> ## Q-B-1 — FROZEN 2026-08-08 (operator). The answer is **S3**.
+>
+> Recorded verbatim, and binding on everything below:
+>
+> > **Q-B-1 FROZEN — S3. `vram_budget_gb` denotes an admission threshold,
+> > not a guaranteed production runtime usage cap. Admission may enforce
+> > the threshold against the strongest available candidate-specific
+> > pre-phase evidence, including a forecast or a bounded measured probe.
+> > After admission, realized threshold exceedance is recorded and
+> > surfaced as an operator-visible escalation, but exceedance alone does
+> > not automatically terminate the phase, invalidate the scientific
+> > result, or alter the score. Peer usage remains context, never
+> > candidate evidence.**
+>
+> **This dissolves B0's central finding rather than picking a winner.**
+> §B0.E.1 showed two consumers implementing two semantics —
+> `evaluate_vram_skill` comparing the threshold to a *forecast* (S1-like)
+> and `isolated_probe` comparing it to a *measured* peak (S2-like). Under
+> the frozen S3 they are **the same rule applied to different evidence**:
 >
 > ```text
-> B1 → B2 → B0 evidence review → operator freezes S1/S2/S3 → write B3
+>                     ADMISSION THRESHOLD
+>              ┌─────────────┴─────────────┐
+>       forecast available        bounded measurement available
+>              │                           │
+>       compare forecast          compare measured evidence
+>              └─────────────┬─────────────┘
+>                            ↓
+>                       admit / refuse
+>
+>                     AFTER ADMISSION
+>                            ↓
+>                    realized measurement
+>                            ↓
+>                  threshold exceeded?
+>                       /          \
+>                     no            yes
+>                  record        record + escalation
+>                       \          /
+>                            ↓
+>               NO automatic scientific invalidation
 > ```
 >
-> The operator's current prior is **S3**, recorded and **explicitly not
-> frozen**. B1/B2 evidence decides whether corrected forecasting suffices
-> or whether stronger runtime enforcement is justified. This document
-> proposes **no enforcement mechanism**.
+> So a bounded pre-phase probe exceeding 12 GiB **may still refuse
+> admission** — that is not runtime hard-cap enforcement, it is admission
+> acting on measured evidence stronger than a forecast. Once the
+> production phase has begun, `realized_peak > threshold` obliges the
+> system to leave the fact, the forecast error, the exceedance and an
+> operator-visible escalation — and obliges it *not* to kill, invalidate
+> or rescore.
+>
+> **Why not S1.** Too weak as a final answer: V20 proved an admission
+> forecast threshold can produce a real OOM with enforcement enabled.
+> §B0.E already graded S1 as weakened.
+>
+> **Why not S2 yet.** There is still **no realized-vs-admitted
+> distribution** — not a small sample, but zero observations, because no
+> telemetry existed before B2 and V20 cannot be reconstructed. Promising
+> "candidate usage never exceeds 12 GiB" today would pick the strongest
+> mechanism while ignorant of the forecast-error distribution,
+> phase-local peak semantics, and runtime-enforcement cost. S3 lets the
+> data be collected safely and leaves an evidence-backed upgrade to S2
+> available if severe exceedances actually appear. **S3 is the reasoned
+> production semantics, not a deferral.**
+>
+> B2's stored row is unaffected: it remains measured facts only, and S3
+> is an *interpretation* layered above it — exactly the property
+> `test_all_three_semantics_remain_expressible_from_one_row` protects.
 
 | | |
 |---|---|
@@ -1459,6 +1515,36 @@ than a false pass, because the 4-space anchor is a *substring* of the
 its job — without it the harness would have mutated both sites while
 claiming to test one.
 
+**Process finding — the full unit suite requires a CLEAN TREE, and will
+report a false regression without one.**
+`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`
+runs `git diff --name-only` (`scripts/pr3_l2_calibration/preflight.py:287`)
+and fails if **any** uncommitted file outside
+`scripts/pr3_l2_calibration/`, `tests/`, `docs/`, `reports/` or `*.md`
+is modified. The PR3-L2 calibration protocol requires production to be
+untouched at launch, so this is the guard working, not a defect.
+
+It cost one confusing red run here: the suite was run mid-work with three
+uncommitted production files and reported
+
+```text
+1 failed, 8006 passed  -- no_production_file_modified
+  (['agent/skills/evaluate_time_skill/wrapper.py',
+    'agent/skills/training_skill/estimator.py',
+    'agent/utils/proposer_preflight.py'])
+```
+
+naming exactly the three files being edited. The same suite passed
+`8002 passed` at `6923fbcb` with a clean tree, and passes again after
+committing. **Commit before running the full suite** — the operator rule
+already says "full local suite green *from a clean tree*", and this is
+the mechanism that enforces it. Do not "fix" the guard.
+
+Second trap, worth naming because it nearly hid the first: the run was
+launched as `pytest ... | tail -5`, so the reported exit code was
+**`tail`'s, not pytest's** — exit 0 alongside a real failure. Verdicts
+come from the log, never from the wrapper's status.
+
 **B2 — every phase admitted against a resource forecast.**
 
 | phase | realized memory | status |
@@ -1512,10 +1598,37 @@ evidence for S2.** This is why B0 sits after B1 and B2.
 
 ### 5. Acceptance criteria
 
-- A written operator decision naming **one** of S1/S2/S3, recorded in this
-  document and in the V21 ledger with its date.
-- Every consumer enumerated with its current interpretation.
-- B2's breach data presented with counts and magnitudes, not adjectives.
+- [x] A written operator decision naming **one** of S1/S2/S3, recorded in
+      this document and in the V21 ledger with its date — **S3, frozen
+      2026-08-08**, verbatim in the header block above and in
+      `v21_priorities.md` §E.3c.
+- [x] Every consumer enumerated with its current interpretation — §B0.E.1.
+      They disagreed; S3 unifies them as one rule over two grades of
+      evidence.
+- [x] B2's data presented with counts and magnitudes, not adjectives —
+      §B0.E.3: **zero observations**, stated as zero rather than dressed
+      up. B1's before/after table carries the numbers that do exist.
+
+**Consequences of the frozen S3, carried into B3:**
+
+- `reset_process_peak()` **stays uncalled.** S3 requires *record + expose*,
+  and the current training measurement — a process high-water mark through
+  end of training, including setup and warm-up — is already a valid
+  conservative upper bound on the phase-local peak. Inference is a
+  single-phase subprocess and is closer to exact. B3 must not reset the
+  counter in passing; that needs a full audit of every counter consumer
+  first. Escalation presentation **must** carry
+  `measurement_completeness` and `realized_peak_source`, so a cumulative
+  training HWM is never described as a precise training-only peak.
+- The `evaluate_vram_skill` / `isolated_probe` disagreement is **resolved
+  by S3, not by editing one of them**: both are admission-time
+  comparisons against the threshold, differing only in evidence strength.
+  B3 should make that explicit in the code's own language rather than
+  leaving two apparently rival implementations.
+- **B3's mechanism is still an output of B3's audit.** Freezing the
+  semantics does not authorise a watchdog, a kill path, a warning flag or
+  any other specific device. §4-§8 are to be written from a fresh audit of
+  the real control path under S3, then reviewed before implementation.
 
 ### 6. Failure and edge cases
 

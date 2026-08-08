@@ -1045,6 +1045,38 @@ the PR A document, so a later PR planning against this ledger sees them.
 | The iteration **manifest** carries the declared `healthgate_mode` / `result_authority`, but the tuner's per-experiment record stamps `scientific_authority` with `None/None` → `legacy_authority_unknown` | **PR D** | Declaration reaches the manifest, not the record stamp. Does not affect PR A's boundary. Observed at `gate2c_ws3/iter_001` |
 | `max_active` bounds chains, not GPU phases | **PR B** (P6.4) | PR A ran its Gates **sequentially** for this reason; it did not test concurrency |
 
+## E.3c Q-B-1 FROZEN — resource-budget semantics, operator decision 2026-08-08
+
+Recorded here because it governs more than PR B: every future consumer of
+`vram_budget_gb` inherits it. Full reasoning and the evidence it rests on
+are in `v21_priorities/pr_b_resource_budget_semantics.md` (§B0.E).
+
+> **Q-B-1 FROZEN — S3. `vram_budget_gb` denotes an admission threshold,
+> not a guaranteed production runtime usage cap. Admission may enforce the
+> threshold against the strongest available candidate-specific pre-phase
+> evidence, including a forecast or a bounded measured probe. After
+> admission, realized threshold exceedance is recorded and surfaced as an
+> operator-visible escalation, but exceedance alone does not automatically
+> terminate the phase, invalidate the scientific result, or alter the
+> score. Peer usage remains context, never candidate evidence.**
+
+What this settles, and what it deliberately does not:
+
+| | |
+|---|---|
+| **Settled** | The threshold is an *admission* concept. A bounded pre-phase probe exceeding it may still refuse admission — that is admission acting on measured evidence, not runtime hard-cap enforcement |
+| **Settled** | `evaluate_vram_skill` (forecast) and `isolated_probe` (measured) are **not** rival semantics; they are one rule over two grades of evidence |
+| **Settled** | After admission: record + expose. Never auto-kill, auto-invalidate or rescore on exceedance alone |
+| **NOT settled** | The escalation *mechanism*. It remains an output of PR B's B3 audit — freezing the semantics authorises no watchdog, kill path or flag |
+| **NOT settled** | Any upgrade to S2. Available later **with evidence**, once B2's telemetry has produced a real exceedance distribution |
+
+Two findings promoted out of PR B by this decision:
+
+| Finding | Owner | Detail |
+|---|---|---|
+| An omitted `epochs` **defeats the `--max_epochs` hard bound** — `tuner:4052` reads `.get("epochs", 1)` before the clamp while the trainer's `TrainConfig(**t_data)` yields `10`, so a plan omitting the key trains 10 epochs under `--max_epochs 1` | **PR B / B1b** (approved 2026-08-08) | Violates "the harness owns the bounds, not the planner". Fixed on the *resolved* configuration, with the effective value reaching the trainer — not only the clamp |
+| **No realized-vs-admitted distribution exists**, and none can be reconstructed from V20 | **PR B → V21 campaign** | Zero observations, because no telemetry existed before B2. Any future budget-policy argument must cite post-B2 data, not the three V20 OOMs |
+
 ## PR A — Make the existing output contract reachable
 
 > ## STATUS: MERGED 2026-08-08 — PR #186, merge commit `b9f88ae5`
