@@ -12,6 +12,36 @@
 
 ---
 
+## A0. Verification toolchain (established 2026-08-07)
+
+**pyright DOES run on this machine.** An earlier draft of this document
+recorded it as unrunnable because the *system* Node is v10.19.0. That was
+wrong: the project's own pyright/nodeenv path works, and the V20 hardening
+already used it.
+
+```bash
+PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright     # pyright 1.1.409
+```
+
+**Baseline on the PR A candidate head: `0 errors, 4 warnings`.** All four
+warnings are pre-existing and in files this PR does not touch
+(`core/runtime_control/bootstrap.py` ×2,
+`core/runtime_control/gpu_requirement.py`,
+`scripts/legacy_fcnet_timing.py`).
+
+Type checking must therefore be run **locally before the final
+checkpoint**, not deferred to CI — A3 changes a schema, and a typing
+defect there should not first surface in CI.
+
+Other commands used throughout:
+
+```bash
+.venv/bin/python -m pytest tests/unit/ -q -m "not real_run"
+.venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
+```
+
+---
+
 ## 0. Scope correction that produced this document
 
 This PR was originally scoped as *"build a capability-based output/loss
@@ -218,8 +248,8 @@ risks a reviewer "restoring" it while reading A2.
 **Static**
 - [x] `ruff check` — All checks passed
 - [x] `ruff format --check` — 12 files already formatted
-- [ ] `pyright` — **cannot run locally** (Node v10.19.0 on lilab). CI is
-      authoritative. Not claimed as passed
+- [x] `pyright` — **0 errors, 4 warnings** (all pre-existing, in files this
+      PR does not touch). See §A0 for the correct invocation
 
 **Real-training Gate:** none required.
 
@@ -284,8 +314,7 @@ for generated models. It is **not**.
 
 - [ ] Tests: _count_ passed, _count_ failed, _wall time_ — **to record**
 - [ ] Ruff: **to record**
-- [ ] pyright: **to record**, or record that it could not run locally
-      (Node v10.19.0 on lilab cannot execute pyright; CI is authoritative)
+- [x] pyright: **0 errors, 4 warnings** (pre-existing, untouched files)
 
 ### 8. Commit boundary
 
@@ -490,7 +519,7 @@ unchanged.
 - [ ] Regressor fixture after change (expected PASS) — **to record**
 - [ ] Existing-plugin parity: _n_ plugins sampled, _n_ identical — **to record**
 - [ ] Tests: counts + wall time — **to record**
-- [ ] pyright: **to record or record as unrunnable locally**
+- [ ] pyright: **to record** (see §A0 for the invocation)
 
 ### 8. Commit boundary
 
@@ -577,7 +606,7 @@ path.
 **Static**
 - [x] `ruff check` — All checks passed (one RUF059 found and fixed)
 - [x] `ruff format --check` — clean
-- [ ] `pyright` — cannot run locally (Node v10.19.0); CI authoritative
+- [x] `pyright` — **0 errors, 4 warnings** (pre-existing, untouched files)
 
 ### 5. Acceptance criteria
 
