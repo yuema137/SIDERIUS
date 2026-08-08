@@ -56,6 +56,112 @@ import torch
 _BYTES_F32 = 4
 _BYTES_I64 = 8
 
+
+def _output_contract(model_type: str) -> str:
+    """The model's declared output contract, or ``"classifier"`` if unknown.
+
+    V21 PR C3. Estimators run at **planning** time, sometimes for a model
+    that is not registered yet (proposer-side pre-flight), so unlike the
+    execution path this helper must not fail closed — a refusal here would
+    turn a missing estimate into a rejected candidate.
+
+    The fallback is safe in the only direction that matters: ``"classifier"``
+    reproduces the pre-C3 behaviour exactly, and the classifier contract is
+    the memory-heavier of the two, so an unresolvable model is estimated
+    conservatively rather than optimistically. This is deliberately NOT the
+    silent default C1 removed from ``get_output_type`` — there, the value
+    decided scientific semantics; here it only widens a forecast.
+    """
+    from ml_models.plugin_loader import UnknownOutputContractError, get_output_type
+
+    try:
+        return get_output_type(model_type)
+    except UnknownOutputContractError:
+        return "classifier"
+
+
+def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int, int] | None:
+    """``(nhead, num_layers)`` if the architecture has attention, else ``None``.
+
+    V21 PR C3 — replaces ``if model_type == "transformer"`` in both the
+    training and inference estimators. The attention term models the
+    ``[B, nhead, T, T]`` score matrices, which exist iff the architecture
+    HAS attention, so the truthful predicate is whether the model declares
+    attention parameters.
+
+    **Why the config CLASS is consulted and not only the passed dict.** A
+    first attempt read ``model_config.get("nhead")`` alone and silently
+    dropped the attention term whenever a caller passed a partial dict —
+    the old code used ``.get("nhead", 2)`` and so still charged for
+    attention. That made the estimate *more optimistic* for a built-in
+    transformer, which is the one direction an estimator must never move
+    by accident. It was caught by the built-in parity capture, not by a
+    unit test, which is why that capture exists.
+
+    So the *declaration* comes from the class and the *value* from the
+    caller: a model whose config class declares ``nhead`` has attention even
+    if this particular dict omits it.
+
+    **The omitted-value fallback stays at 2, which is knowingly wrong, and
+    that is deliberate — see FU-C-1.** ``TransformerConfig`` declares
+    ``nhead=4``, so the shipped ``.get("nhead", 2)`` under-counts built-in
+    transformer attention by 2× whenever the dict omits the key
+    (536,592,000 → 1,048,592,000 bytes at the parity fixture's shape).
+    Using the class default would be more accurate *and* more conservative,
+    but it changes a calibrated built-in estimate, which is an operator
+    decision rather than a refactor's prerogative. C3 is therefore a pure
+    behaviour-preserving change and the correction is filed separately.
+
+    Returns ``None`` for the five non-attention built-ins and for any
+    generated model that declares no attention parameters.
+    """
+    from ml_models.models_format_sandbox import get_config_class
+
+    declares_attention = "nhead" in model_config
+    if not declares_attention:
+        config_cls = get_config_class(model_type)
+        fields = getattr(config_cls, "model_fields", None) or {}
+        declares_attention = "nhead" in fields
+
+    if not declares_attention:
+        return None
+
+    # Fallbacks pinned to the pre-C3 literals (see FU-C-1 above).
+    nhead = model_config.get("nhead") or 2
+    num_layers = model_config.get("num_layers") or 2
+    return int(nhead), int(num_layers)
+
+
+def _instantiate_for_param_count(model_type: str, config_obj: Any, loss_type: str) -> Any:
+    """Build a model purely to count parameters.
+
+    V21 PR C3 — replaces ``if model_type == "fcnet"``. Some model classes
+    take ``loss_type`` at construction because their head shape depends on
+    it (``fcnet``, the one hybrid built-in). That is a real constructor API
+    difference, not a calibration, so it is detected by **introspecting the
+    signature** rather than by matching a name.
+
+    Byte-identical for all six built-ins, and correct by construction for
+    generated plugins, whose contract is ``__init__(self, config)`` and
+    which therefore take the single-argument form exactly as before.
+    """
+    import inspect
+
+    from ml_models.models_sandbox import MODEL_REGISTRY
+
+    model_cls = MODEL_REGISTRY[model_type]
+    try:
+        takes_loss_type = "loss_type" in inspect.signature(model_cls.__init__).parameters
+    except (TypeError, ValueError):
+        # Un-introspectable callable (C-extension, exotic wrapper). Fall back
+        # to the single-argument form, which is the plugin contract.
+        takes_loss_type = False
+
+    if takes_loss_type:
+        return model_cls(config_obj, loss_type=loss_type)
+    return model_cls(config_obj)
+
+
 # Safety margin applied on top of ms/step. Raised from 1.1 to 2.0 for the
 # static fallback path (Phase 6.8 §4.2): the original 1.1 was calibrated for
 # warmup variance (~10%), but the static formula itself is 2-5x wrong for novel
@@ -133,7 +239,14 @@ def estimate_peak_bytes(
 
     output_logits = batch_size * 256 * seg_size * _BYTES_F32
 
-    act_factor = 1 if model_type == "fcnet" else 2
+    # V21 PR C3 — the branch this replaced read ``1 if model_type == "fcnet"
+    # else 2``. The name was standing in for the model's OUTPUT CONTRACT:
+    # ``fcnet`` is the only "hybrid" model, and it stores one activation
+    # tensor rather than two because its head adapts to the loss. Asking the
+    # contract directly is the same question without the hardcoded name, and
+    # it is byte-identical for all six built-ins (fcnet is hybrid, the other
+    # five are classifiers).
+    act_factor = 1 if _output_contract(model_type) == "hybrid" else 2
     activations = act_factor * output_logits
 
     # I16 — focal one_hot allocation also covers classifier-style custom
@@ -160,10 +273,23 @@ def estimate_peak_bytes(
     _one_hot_loss = loss_type == "focal" or (loss_type == "custom" and _uses_long_targets)
     focal_onehot = batch_size * 256 * seg_size * _BYTES_I64 if _one_hot_loss else 0
 
+    # V21 PR C3 — the branch this replaced read ``if model_type ==
+    # "transformer"``. The term models the attention matrices, which exist
+    # iff the architecture HAS attention, so the truthful predicate is
+    # whether the model's own config declares attention parameters.
+    #
+    # Built-in parity: ``transformer`` is the only built-in declaring
+    # ``nhead``, so all six estimates are unchanged.
+    #
+    # Direction of change for generated models: strictly MORE conservative.
+    # Before, an agent-invented attention model was not named "transformer"
+    # and so received a **zero** attention term — an optimistic estimate
+    # that could admit a candidate which then OOMs. It can now only gain the
+    # term, never lose it.
     transformer_attn = 0
-    if model_type == "transformer":
-        nhead = model_config.get("nhead", 2)
-        num_layers = model_config.get("num_layers", 2)
+    _attn = attention_shape(model_type, model_config)
+    if _attn is not None:
+        nhead, num_layers = _attn
         transformer_attn = batch_size * nhead * seg_size * seg_size * _BYTES_F32 * num_layers
 
     total = model_overhead + output_logits + activations + focal_onehot + transformer_attn
@@ -232,7 +358,6 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
     without duplicating the instantiation.
     """
     from ml_models.models_format_sandbox import get_config_class
-    from ml_models.models_sandbox import MODEL_REGISTRY
 
     config_cls = get_config_class(model_type)
     if config_cls is None:
@@ -241,10 +366,7 @@ def _count_params(model_type: str, model_config: dict, loss_type: str) -> int:
             f"get_config_class returned None (no plugin or built-in config registered)."
         )
     config_obj = config_cls(**model_config)
-    if model_type == "fcnet":
-        model = MODEL_REGISTRY[model_type](config_obj, loss_type=loss_type)
-    else:
-        model = MODEL_REGISTRY[model_type](config_obj)
+    model = _instantiate_for_param_count(model_type, config_obj, loss_type)
     return sum(p.numel() for p in model.parameters())
 
 

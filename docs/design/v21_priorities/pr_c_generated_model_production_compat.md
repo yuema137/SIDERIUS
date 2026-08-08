@@ -736,132 +736,146 @@ Recorded in §4 above.
 
 ## Commit C3 — Estimator name-branches that gate admission
 
+**STATUS: DONE 2026-08-08. Five name branches replaced by truthful
+predicates; built-in estimates byte-identical across all 18 parity cells;
+all three guardrail xfail groups converted to passing.**
+
 ### 1. Goal
 
-Remove the five model-name branches in the training and inference
-estimators (§0.3), because they feed the **time estimate that gates
-admission** — so a generated model's reachability currently depends on
-matching a hardcoded name.
+Remove the model-name branches in the training and inference estimators,
+because they feed the **time and VRAM estimates that gate admission** — so
+a generated model's reachability depended on matching a hardcoded name.
 
-**Why this commit:** it is the only remaining tracked name-keyed group
-that changes reachability rather than throughput, and it must land before
-C5b so a Gate failure cannot be ambiguous between "the chain is broken"
-and "the estimate was wrong".
+### 2. What the five branches actually encoded — they are NOT one thing
 
-### 2. Scope
+The plan required reading each before replacing it. They fall into three
+kinds, and only two of them ever harmed a generated model:
 
-**Changes**
-- `agent/skills/training_skill/estimator.py` (`:136`, `:164`, `:244`)
-- `agent/skills/inference_skill/estimator.py` (`:127`, `:185`)
-- `tests/unit/guardrails/test_no_model_name_branches.py` — the
-  `training_estimator` and `inference_estimator` xfail groups
-- Tests.
-
-**Must remain unchanged**
-- Estimates for the six built-ins must not move — these are calibrated
-  numbers and changing them silently would alter admission for existing
-  models.
-- The runtime-control authority model: static estimates remain **prior
-  producers**, never verdicts.
-
-**`inference_defaults` — split by causal responsibility (O-C-2, decided).**
-The same module is touched by two PRs, and that is correct: **PR
-boundaries follow causal problems, not files.**
-
-| surface | causal question | owner |
+| site | encodes | harm to a generated model |
 |---|---|---|
-| `is_inference_batch_registered` | does absence from a hand-maintained name table degrade the **admission** estimate? | **PR C** |
-| `inference_batch_for` | what is the **best actual** inference batch? | **PR G** |
+| `training:136` `act_factor = 1 if fcnet else 2` | the **output contract** (fcnet is the one hybrid) | none — a plugin took the 2x branch, same as five of six built-ins |
+| `training:164`, `inference:127` `if model_type == "transformer"` | **attention matrices exist** | **REAL: charged 0** for an invented attention model — the *optimistic* direction, admit-then-OOM |
+| `training:244`, `inference:185` `if fcnet: cls(cfg, loss_type=...)` | a **constructor API difference** | none — plugins take `__init__(self, config)`, so the else-branch was already right |
 
-The invariant PR C must establish:
-
-```text
-generated model has no hand-maintained name-table entry
-        !=
-uncalibrated or degraded admission semantics
-```
-
-**PR C need not delete `is_inference_batch_registered`** — audit its
-consumers first. Keeping it for **logging** (`registered = false`) is
-fine. What is forbidden is:
+Replacements, each a property the model actually has:
 
 ```text
-unknown name -> admission estimate degraded -> skipped_time_risk
+act_factor        -> _output_contract(model_type) == "hybrid"
+attention term    -> attention_shape(model_type, model_config) is not None
+constructor       -> inspect.signature(cls.__init__) accepts "loss_type"
 ```
-
-**Dependencies:** none, but sequenced before C5b.
 
 ### 3. Implementation plan
 
-- [ ] Read both estimators fully and record what each branch actually
-      encodes — an activation-memory factor, a step-time model, or
-      something else. **Do not assume the five are the same kind of thing**
-- [ ] For each, determine the generic predicate the name is standing in
-      for (measured parameter count, declared output contract, module
-      introspection, or a plugin-declared hint)
-- [ ] Replace name equality with that predicate
-- [ ] Capture built-in estimates before and after; they must be identical
-      or the difference must be justified in writing
-- [ ] Convert the two guardrail xfail groups to passing
+- [x] Read both estimators in full and classify each branch (table above)
+- [x] Capture an 18-cell built-in parity baseline **before** touching code
+- [x] Replace each name predicate with the property it stood for
+- [x] Verify parity; investigate and resolve every difference
+- [x] Convert the guardrail xfail groups
 
-### 4. Validation plan
+### 4. Two implementation-time findings that changed the work
 
-**Unit**
-- [ ] Built-in estimate parity: all six models, both estimators, identical
-      values pre/post — captured as a table
-- [ ] A generated model gets an estimate derived from its own properties,
-      not the generic fallback
-- [ ] `fcnet`'s hybrid-specific behaviour preserved
+#### FU-C-1 — the shipped transformer estimate under-counts by 2x
 
-**Negative**
-- [ ] A model with no usable properties still produces a typed,
-      conservative estimate — never a crash and never an optimistic one
+The parity capture caught this, not a unit test, which is why the capture
+existed. `TransformerConfig` declares `nhead=4`, but the shipped code reads
+`model_config.get("nhead", 2)`. So whenever the caller's dict omits the
+key, production charges for **half** the attention memory the model
+actually builds:
 
-**Backward compatibility**
-- [ ] `test_no_model_name_branches` — `training_estimator` and
-      `inference_estimator` groups pass; `inference_defaults` remains
-      xfail (PR G)
-
-**Real-training Gate:** none. Real behaviour is observed in C5b.
-
-### 5. Acceptance criteria
-
-- Built-in estimates byte-identical, recorded as a table.
-- Two of the three xfail groups converted to passing (7 of the 9 tracked
-  violations closed).
-- The remaining `inference_defaults` group (2 violations) is **re-scoped
-  in the guardrail itself** — its xfail reason must be rewritten from
-  *"A.9 deletes core/inference_defaults"* to a **PR G follow-up ID** with
-  the throughput-vs-reachability reason from §0.4. An xfail left pointing
-  at a superseded plan is a stale directive, which is the failure mode
-  PR A's merged-header fix addressed.
-- **Mutation:** restoring any one name branch turns a test red.
-- No estimate becomes *more* optimistic for any model — an estimator that
-  under-predicts is the V18 failure class.
-
-### 6. Failure and edge cases
-
-| Case | Required behaviour |
-|---|---|
-| No generic predicate exists for a branch | **Stop and ask.** Deleting a calibration without a replacement would change admission silently |
-| A built-in estimate does move | Justify in writing or revert; never accept a silent shift |
-| Generated model has no parameter count yet | Conservative estimate, typed, never optimistic |
-
-### 7. Verification commands and evidence
-
-```bash
-.venv/bin/python -m pytest tests/unit/agent/ -q -k "estimator or time or vram"
-.venv/bin/python -m pytest tests/unit/guardrails/ -q
+```text
+train  536,592,000  ->  1,048,592,000 bytes   (at the parity fixture's shape)
+infer  264,196,000  ->    520,196,000 bytes
 ```
 
-- [ ] Built-in estimate parity table — **to record**
-- [ ] Tests: counts + wall time — **to record**
-- [ ] Mutation results — **to record**
+Using the class default would be both more accurate **and** more
+conservative. C3 did **not** make that change: the mandate requires
+built-in estimates to stay value-identical unless a change is explicitly
+justified *and approved*, and a calibrated built-in estimate is an operator
+decision, not a refactor's prerogative. The fallback is pinned at the
+pre-C3 literals with a test asserting `(2, 2)` so it cannot drift silently.
+
+> **FU-C-1 — needs an operator decision.** Owner: PR C or PR G. Direction
+> is conservative (a larger estimate), so the risk of adopting it is
+> spurious rejection, and the risk of leaving it is admit-then-OOM for
+> built-in transformer runs with a partial config dict.
+
+#### The first attention predicate was wrong, and parity caught it
+
+The initial replacement read `model_config.get("nhead")` alone. That
+*dropped* the attention term whenever a caller passed a partial dict —
+making the built-in estimate **more optimistic**, the one direction an
+estimator must never move by accident. Corrected so the **declaration**
+comes from the config class and the **value** from the caller.
+
+### 5. The guardrail scanned comments, so "9 violations" was never 9 branches
+
+Converting the xfail groups surfaced a defect in the guard itself. It
+exempted docstrings but scanned `#` comments as live code, so the tracked
+count mixed real branches with prose — `inference_defaults`' two
+"violations" were **both comments** (its dict *keys* were already exempt,
+correctly, since a registry keyed by name is explicitly allowed). Writing
+comments that explain *which* branch was removed pushed the counts up,
+4 -> 7 and 3 -> 4.
+
+The cheapest way to clear the guard was therefore to stop explaining which
+model a formula came from. That is a perverse incentive, so the guard was
+made precise instead: `_code_only_lines` strips `#` comment text via
+`tokenize`, keeping the code before a trailing comment so
+`foo("transformer")  # note` is still caught.
+
+**`_PENDING_CLEANUP` is now empty, and that mattered more than it looks.**
+With a label present, a *reintroduced* name branch was reported `xfail`
+instead of `failed` — the guard detected the regression and then tolerated
+it. Verified by mutation both ways. The three reasons were also stale in
+exactly the way the operator flagged during PR A's merge: they named an
+"A.6 / A.7 / A.9" plan that V21 superseded.
+
+### 6. Validation plan — RESULTS
+
+- [x] **Built-in parity: identical across all 18 cells** (6 models x 3
+      losses x {params, training estimate, inference estimate})
+- [x] Exactly one built-in is charged for attention, found by property
+- [x] A generated attention model is charged **without being named**
+- [x] A generated model without attention is not charged — guards the lazy
+      over-fix of inflating every unregistered model into `skipped_time_risk`
+- [x] Only the hybrid contract gets the 1x activation factor, asserted
+      through the public estimate rather than a private helper
+- [x] An unresolvable model is estimated conservatively, not refused —
+      C1 made `get_output_type` raise, so without this a *missing* estimate
+      would become a *rejected* candidate
+- [x] `loss_type` is passed only to classes whose signature accepts it
+- [x] All six built-ins still instantiate for a param count
+- [x] Guardrail: `4 passed`, xfail groups gone
+- [x] Full unit suite `7927 passed, 2 skipped, 1 xfailed` (xfailed 4 -> 1)
+- [x] ruff clean; ruff format 753 files; pyright `0 errors, 4 warnings`
+
+#### Mutation battery — 3 applied, **3/3 caught**
+
+| # | mutation | result |
+|---|---|---|
+| M7 | reintroduce `if model_type == "transformer":` in live code | guardrail **failed** (with `_PENDING_CLEANUP` emptied; **xfail-tolerated** before, which is why it was emptied) |
+| M8 | reintroduce `1 if model_type == "fcnet" else 2` | guardrail **failed** |
+| M9 | attention predicate reading only the caller's dict | built-in parity **CHANGED** on all 3 transformer cells |
+
+### 7. Acceptance criteria — MET
+
+- [x] Built-in estimates byte-identical, recorded as a captured table
+- [x] Two of three xfail groups converted — in fact **all three**
+- [x] No estimate became more optimistic; the attention change is strictly
+      more conservative for generated models (0 -> charged)
+- [x] No surrogate predicate invented. Each replacement is a property the
+      model genuinely has: its declared contract, its declared attention
+      parameters, its constructor signature
+- [x] The one case where no truthful generic value existed (FU-C-1's
+      `nhead` fallback) was **not guessed** — it was pinned to the shipped
+      literal and escalated
 
 ### 8. Commit boundary
 
-- [ ] Diff touches the two estimators, the guardrail and tests
-- [ ] No `inference_defaults` changes (PR G)
+- [x] Both estimators, the guardrail's precision fix, and their tests
+- [x] No `inference_defaults` change — that is C3b (O-C-2)
+- [x] No C1/C2 rework, no Gate evidence
 
 ---
 
