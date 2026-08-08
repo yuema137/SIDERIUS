@@ -955,6 +955,18 @@ class ProposalOutput(BaseModel):
         description="Short, unique, snake_case identifier for the proposed model "
         "(e.g. 'attn_unet', 'dilated_rnn'). Must not clash with existing model types.",
     )
+    output_type: Literal["classifier", "regressor"] = Field(
+        default="classifier",
+        description="The output representation this proposal commits to — an "
+        "INDEPENDENT design dimension from the backbone and the loss family.\n"
+        "  classifier: per-timestep class logits, [B, C, T]; losses ce/focal/focal_cw\n"
+        "  regressor:  a continuous waveform,   [B, T];      loss  smooth_l1\n"
+        "It is NEVER inferred from loss_type. Deriving it (smooth_l1 -> regressor) "
+        "would re-couple the two dimensions V21 PR A exists to separate; the "
+        "shared compatibility rule checks the PAIR instead. The default exists "
+        "for legacy reads only — a newly generated proposal must set it "
+        "explicitly.",
+    )
     model_description: str = Field(
         description="One paragraph plain-English description of the architecture "
         "and why it is expected to improve on the current best.",

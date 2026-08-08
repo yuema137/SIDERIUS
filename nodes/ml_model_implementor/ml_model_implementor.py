@@ -256,13 +256,48 @@ class {ModelClass}(nn.Module):
 {init_body}
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # forward contract: input [B, T] int64 → output [B, 256, T] float32
+        # forward contract: {forward_contract_comment}
 {forward_body}
 
 
 PLUGIN_MODEL_CLASS = {ModelClass}
-PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification
+PLUGIN_OUTPUT_TYPE = "{output_type}"  # {output_type_comment}
 """
+
+#: Per-contract comment text rendered into the generated plugin (V21 PR A3).
+#: Keyed by ``ImplementorInput.output_type``. Both entries must stay in step
+#: with the shapes ``ml_code_validator_agent`` derives from the same
+#: declaration, or a generated plugin would document one contract and be
+#: validated against another.
+_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
+    "classifier": (
+        "input [B, T] int64 → output [B, 256, T] float32",
+        "[B, 256, T] → 256-class classification",
+    ),
+    "regressor": (
+        "input [B, T] int64 → output [B, T] float32",
+        "[B, T] → continuous waveform regression",
+    ),
+}
+
+
+def _render_output_contract(output_type: str) -> tuple[str, str]:
+    """Return (forward-contract comment, PLUGIN_OUTPUT_TYPE comment).
+
+    Raises:
+        ValueError: on an unrecognised contract. Failing here is deliberate —
+            emitting a plugin whose declaration we cannot describe would push
+            the defect downstream into the validator, where its origin is far
+            less obvious.
+    """
+    try:
+        return _OUTPUT_CONTRACT_COMMENTS[output_type]
+    except KeyError:
+        raise ValueError(
+            f"Unknown output_type {output_type!r}; expected one of "
+            f"{sorted(_OUTPUT_CONTRACT_COMMENTS)}"
+        ) from None
+
 
 TEST_TEMPLATE = """\
 import torch
@@ -1217,6 +1252,11 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     if config_validators_code.strip():
         config_validators_code = textwrap.indent(textwrap.dedent(config_validators_code), "    ")
 
+    # V21 PR A3: the emitted contract follows the proposal's declared
+    # output_type. It is NEVER inferred from the loss family — that would
+    # re-couple the two design dimensions this PR separates.
+    forward_contract_comment, output_type_comment = _render_output_contract(inp.output_type)
+
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
         ModelClass=model_cls,
@@ -1227,6 +1267,9 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
         config_validators_code=config_validators_code,
         init_body=init_body,
         forward_body=forward_body,
+        output_type=inp.output_type,
+        forward_contract_comment=forward_contract_comment,
+        output_type_comment=output_type_comment,
     )
 
 

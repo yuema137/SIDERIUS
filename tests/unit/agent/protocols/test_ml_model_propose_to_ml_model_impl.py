@@ -153,3 +153,59 @@ class TestDatabaseFullSpec:
     def test_raises_not_implemented(self, proposal_output, storage):
         with pytest.raises(NotImplementedError):
             database_full_spec(proposal_output, storage)
+
+
+# ---------------------------------------------------------------------------
+# Output contract transport (V21 PR A3)
+# ---------------------------------------------------------------------------
+#
+# MUTATION TARGET: delete `output_type=output.output_type` from
+# `local_full_spec` and `test_declared_output_type_survives_the_hop[regressor]`
+# fails. Without that assertion a proposal declaring `regressor` would silently
+# yield a classifier plugin — the "produced but not delivered" class that
+# repeatedly bit V20. The schema default makes this hop SILENTLY lossy if
+# untested, which is exactly why it is tested here rather than inferred.
+
+
+class TestOutputContractTransport:
+    @pytest.mark.parametrize("declared", ["classifier", "regressor"])
+    def test_declared_output_type_survives_the_hop(self, valid_expert_advice, storage, declared):
+        proposal = ProposalOutput(
+            model_name="contract_probe",
+            output_type=declared,
+            model_description="Probe model for output-contract transport.",
+            mathematical_definition="Identity-ish stack; contract under test.",
+            motivation="Verify the declared contract reaches the implementor.",
+            expert_advice=valid_expert_advice,
+            baseline_config={
+                "model_config": {"channels": 8},
+                "train_config": {"lr": 1e-4, "epochs": 1, "batch_size": 1},
+                "loss_config": {"loss_type": "focal"},
+            },
+        )
+        impl_input = local_full_spec(proposal, storage)
+        assert impl_input.output_type == declared
+
+    def test_output_type_is_not_inferred_from_loss(self, valid_expert_advice, storage):
+        """A regression loss must NOT silently imply a regression contract.
+
+        Inference would re-couple the two design dimensions PR A separates.
+        The pair is checked by the shared compatibility rule instead, so an
+        inconsistent proposal must travel unchanged and be refused there —
+        not be quietly "fixed" in transit.
+        """
+        proposal = ProposalOutput(
+            model_name="mismatch_probe",
+            output_type="classifier",
+            model_description="Declares classifier but names a regression loss.",
+            mathematical_definition="Contract/loss mismatch under test.",
+            motivation="Transport must not rewrite the declaration.",
+            expert_advice=valid_expert_advice,
+            baseline_config={
+                "model_config": {"channels": 8},
+                "train_config": {"lr": 1e-4, "epochs": 1, "batch_size": 1},
+                "loss_config": {"loss_type": "smooth_l1"},
+            },
+        )
+        impl_input = local_full_spec(proposal, storage)
+        assert impl_input.output_type == "classifier"

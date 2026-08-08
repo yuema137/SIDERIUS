@@ -726,19 +726,56 @@ proof is required for A3.
 
 ### 3. Implementation plan
 
-- [ ] Read `PLUGIN_TEMPLATE` and its `.format(...)` call site fully;
-      record the current parameter set before editing
-- [ ] Inspect `agent/schemas/proposal.py` and the proposal → implementor
-      protocol; record the exact insertion points **before** editing
-- [ ] Add the typed field with a `Literal["classifier", "regressor"]`
+- [x] Read `PLUGIN_TEMPLATE` (`:232`) and its `.format(...)` call site
+      (`_assemble_plugin`, `:1211`) fully before editing
+- [x] Inspect `agent/schemas/proposal.py` and the proposal → implementor
+      protocol; insertion points recorded in §3b below
+- [x] Add the typed field with a `Literal["classifier", "regressor"]`
       annotation; **legacy read only:** absent → `"classifier"`
-- [ ] Thread it through the protocol to the implementor input
-- [ ] Parameterize `PLUGIN_OUTPUT_TYPE` in the template
-- [ ] **Generate the matching HEAD, not only the metadata.** The emitted
-      network's forward must actually return `[B, T]` for `regressor` and
-      `[B, C, T]` for `classifier`. A plugin declaring `regressor` whose
-      forward still returns `[B, 256, T]` is the defect A2 check 2 exists
-      to catch — this commit must not produce it in the first place
+- [x] Thread it through `local_full_spec` to `ImplementorInput`
+- [x] Parameterize `PLUGIN_OUTPUT_TYPE` in the template, plus the
+      forward-contract comment, via `_render_output_contract`
+- [x] **Generate the matching HEAD, not only the metadata.** Resolved by
+      inspection: `PLUGIN_TEMPLATE` carries `{init_body}`/`{forward_body}`
+      placeholders — the *LLM* writes the head, the template wraps it. So
+      this commit owns the **declaration and the documented contract**;
+      that the head actually matches is (a) driven by the prompt in A4 and
+      (b) **enforced** by A2's declared-vs-actual check. Defence in depth,
+      as designed — the producer states the contract, the validator
+      refuses a model that does not honour it
+
+### 3b. Insertion points and the discovery about ForwardContract
+
+```text
+agent/schemas/proposal.py        ProposalOutput.output_type      (new)
+agent/schemas/implementor.py     ImplementorInput.output_type    (new)
+protocols/ml_model_propose_to_ml_model_impl.py
+                                 local_full_spec: one mapped hop
+ml_model_implementor.py:232      PLUGIN_TEMPLATE parameterized
+ml_model_implementor.py:1211     _assemble_plugin passes the contract
+ml_model_implementor.py          _render_output_contract (new helper)
+```
+
+**Discovery — `ImplementorInput` already carries a typed `ForwardContract`**
+(`agent/schemas/task_config.py:31`), sourced from `configs/task_config.yaml`
+with fields `input_shape`, `output_shape`, `num_classes`, `task_type`.
+
+It is **not** the right home for `output_type`, and the distinction matters:
+
+```text
+ForwardContract   TASK-level, from config      "what this task looks like"
+output_type       PER-PROPOSAL agent decision  "what THIS model commits to"
+```
+
+Putting a per-proposal choice into the task contract would make one
+proposal's decision look like a property of the task. They stay separate.
+
+**Known tension, handed to A4:** `ForwardContract.output_shape` currently
+renders `"[B, 256, T] float32"` for every proposal, so a regressor
+proposal's *prompt* still describes the classifier contract. That is a
+rendering concern, and A4 already owns "every place the contract is stated
+as a literal". Recorded here so the handoff is explicit rather than
+forgotten.
 - [ ] Make the forward-contract comment (`:259`) match the emitted contract
 - [ ] Add a hop-deletion test per the transport contract above
 - [ ] Confirm the new production path always sets the field explicitly —
@@ -746,33 +783,39 @@ proof is required for A3.
 
 ### 4. Validation plan
 
-**Unit**
-- [ ] Classifier generation is byte-identical to pre-change for a fixed
-      proposal fixture (**string equality on the generated file**)
-- [ ] Regressor generation emits `PLUGIN_OUTPUT_TYPE = "regressor"` and a
-      matching forward-contract comment
-- [ ] Unspecified contract → classifier (legacy read)
+**Unit** — `TestOutputContractRendering`, 4 cases
+- [x] Classifier rendering: declaration + contract comment unchanged
+- [x] Regressor rendering: `PLUGIN_OUTPUT_TYPE = "regressor"`, comment
+      states `[B, T]`, and **`[B, 256, T]` does not appear at all**
+- [x] Unspecified contract → classifier (legacy read)
+- [x] Unknown contract → `ValueError` at generation, not downstream
 
-**Transport (required — Binding principle 2)**
-- [ ] `output_type` survives proposal → protocol → implementor input
-- [ ] Dropping the field at the protocol hop **fails** a test rather than
-      silently yielding a classifier plugin
-- [ ] The generated literal matches the declared field for both contracts
-- [ ] The registered `PLUGIN_OUTPUT_TYPE_REGISTRY` entry matches the
-      declared field after `plugin_loader` registration
-- [ ] `get_output_type(<generated>)` returns the declared contract — not
-      the `"classifier"` default
-
-**Integration / pseudo**
-- [ ] Implementor → validator in pseudo mode: a generated regressor
-      passes A2's validator through the production path
-- [ ] Implementor → validator: a generated classifier passes, unchanged
+**Transport (Binding principle 2)** — `TestOutputContractTransport` +
+`test_output_contract_end_to_end.py`
+- [x] `output_type` survives proposal → protocol → implementor input
+- [x] **Mutation: deleting `output_type=output.output_type` from
+      `local_full_spec` fails `…survives_the_hop[regressor]`.** Note the
+      classifier case still passes — the schema default makes this hop
+      *silently lossy*, which is precisely why it is asserted rather than
+      assumed
+- [x] Transport must not "fix" an inconsistent proposal in transit:
+      `output_type=classifier` + `smooth_l1` arrives unchanged, to be
+      refused by the shared rule rather than quietly rewritten
+- [x] End-to-end, **both contracts**, no LLM and no GPU:
+      proposal → protocol → implementor → generated literal → **validator
+      PASS** → `register_model_in_memory` → `get_output_type` returns the
+      declared contract → shared rule accepts the legal pair and refuses
+      the illegal one
+- [x] A companion test pins *why* each hop is asserted individually:
+      `get_output_type` returns `"classifier"` for an unregistered model,
+      so a declaration dropped anywhere upstream would not raise — it
+      would silently acquire classifier semantics
 
 **Negative / invalid input**
-- [ ] Unknown/invalid contract value → rejected by the `Literal`
-      annotation at schema construction, never reaching generation
-- [ ] `output_type=regressor` + `loss_type=ce` → rejected by the **live
-      gate**, unchanged, proving A3 did not duplicate that rule
+- [x] Invalid contract value rejected by the `Literal` annotation at
+      schema construction
+- [x] `regressor + focal/ce` refused by the **shared rule**, unchanged —
+      A3 did not duplicate it
 
 **Backward compatibility / default parity**
 - [ ] Regenerate a fixed historical classifier proposal; output is
@@ -804,11 +847,29 @@ proof is required for A3.
 | Case | Required behaviour |
 |---|---|
 | Legacy proposal with no output-contract field | Default classifier — **legacy read only**; a new production proposal must set it explicitly |
-| New production proposal omits the field | Treat as a defect: assert in test that the production path always sets it |
-| Proposal declares regression but a classification loss | **Leave it to the live gate.** Do not duplicate the rule in the implementor — one authority only |
-| Protocol drops the field | Test must fail (transport contract) |
-| Template placeholder collision | Generation-time error, never a malformed plugin |
-| Historical proposal fixture | Byte-identical regeneration |
+| Proposal declares regression but a classification loss | **Left to the shared rule.** The implementor does not duplicate it; transport carries the inconsistency through unchanged so one authority refuses it |
+| Protocol drops the field | Test fails — mutation-proven |
+| Unknown contract reaches the implementor | `ValueError` at generation, before a plugin is written |
+| Historical proposal fixture | Default keeps existing fixtures working; classifier rendering unchanged |
+
+### 6b. Collision with an existing deferral guard — resolved
+
+`test_implementor_prompt.py::TestDeferredScope` guards three hardcoded
+contract strings against **accidental** removal, deferring them to
+`enable_global_task_config.md` § Commit T2. A3 legitimately removes one of
+them: the plugin-stub comment
+`"forward contract: input [B, T] int64 → output [B, 256, T] float32"`.
+
+Resolution, recorded in the test itself: that phrase was dropped from the
+guard list because **a fixed literal there is now incorrect by
+construction** — a regressor plugin must document `[B, T]`. Guarding its
+presence would guard a defect. Coverage moved to
+`TestOutputContractRendering`, which asserts *both* contracts render
+correctly.
+
+The other two phrases remain guarded and untouched. The `description.md`
+one is an explicit **A3 → A4 handoff**: A4 owns making every rendered
+contract statement symmetric.
 
 ### 7. Verification commands and evidence
 
