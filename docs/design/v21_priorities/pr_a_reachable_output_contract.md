@@ -93,7 +93,15 @@ validate the metadata the existing contract already consumes.
 | **A2** | Validator reads the declared contract before applying shape expectations | `ml_code_validator_agent.py`, tests | Yes |
 | **A2b** | Shared pair-compatibility rule reaches the **plugin** production branch | `models_format_sandbox.py`, `sandbox_executor.py`, tests | Yes |
 | **A3** | Explicit output contract, proposal → live gate | `proposal.py`, protocol, `ml_model_implementor.py`, tests | Yes |
+| **A3b** | Producer's own smoke test and generated test honour the declaration | `ml_model_implementor.py`, tests | Yes |
 | **A4** | Symmetric contract in the proposer-facing prompt surface | prompt templates, docs | Yes |
+
+> **Commit-boundary rule (operator, 2026-08-07).** A3b exists as its own
+> commit because it changes **runtime behaviour**, and it was discovered
+> during A4's doc-sync. A defect must be attributed to the commit that
+> fixes it, never to the commit that happened to reveal it. Git history
+> must answer cleanly: *which commit changed runtime behaviour, and which
+> only changed what the agent is told?* A4 stays prompt-and-docs only.
 | **A5a** | **Gate 1** — real LLM, no expensive training: both formulations expressible and implementable | gate advice fixtures (evidence only) | Yes |
 | **A5b** | **Gate 2** — real training: both formulations reach a scored trial | none (evidence only) | Yes |
 
@@ -924,8 +932,44 @@ proposals is attributable to this commit alone.
       full census in §3b below
 - [x] Restate the contract symmetrically on the **agent-facing** surfaces
 - [x] Keep the change textual — no schema or control-flow edits
-- [ ] Update the affected node/skill `.md` files — **pre-merge step**, per
-      the repo's doc-sync rule (done last, so docs describe merged code)
+- [x] Update the affected node/skill `.md` files (doc-sync rule):
+      `ml_model_implementor.md` — the shape-contract bullet now shows the
+      per-`output_type` table and names the three sites that must stay in
+      step; `ml_model_proposal_agent.md` — new `output_type` row in the
+      Output table naming the single authority and the transport.
+      `ml_code_validator_agent.md:52` was **already** symmetric and needed
+      no change
+
+### 3a. Defect found during A4's census — the plugin's own tests
+
+The doc-sync step surfaced a real A3 gap, not a documentation one.
+`ml_model_implementor.md` claimed the shape contract was *"hardcoded into
+`TEST_TEMPLATE.test_forward_shape` and asserted in `_smoke_test_plugin`"*.
+It was, and both would have **rejected a correct regressor**:
+
+```text
+TEST_TEMPLATE.test_forward_shape   assert out.shape == (2, 256, seg)
+_smoke_test_plugin                 expected = (1, 256, T)
+```
+
+So A3 could emit a plugin declaring `regressor`, and then the implementor's
+own smoke check — and the plugin's own generated test file, which the
+validator runs — would fail it. The producer would have been generating
+artifacts it then rejected.
+
+Both now derive the expected shape from the declaration:
+`TEST_TEMPLATE` imports `PLUGIN_OUTPUT_TYPE` from the generated plugin and
+branches on it; `_smoke_test_plugin` reads it off the module.
+
+**This is the "audit both branches" principle applying to a surface I had
+not counted as a branch.** A2 fixed the validator's shape check; the
+producer had two more shape checks of its own.
+
+Covered by `test_generated_test_file_matches_the_declared_contract`, which
+writes the plugin and its generated test to disk and **runs pytest on
+them** — the assertion is that the real artifact passes, not that a
+template contains a string. Mutation-proven: reverting `TEST_TEMPLATE` to
+the classifier-only shape fails the regressor case.
 
 ### 3b. Census of literal contract statements, and what A4 changed
 
