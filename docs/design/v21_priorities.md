@@ -1891,13 +1891,13 @@ production path.**
 
 ---
 
-## E.4 What A, B and C proved — binding on every remaining PR
+## E.3d What A, B and C proved — binding on every remaining PR
 
 Written 2026-08-08, after all three launch blockers merged (`b9f88ae5`,
 `cac86c94`, `0aae3f4b`). These are not style notes; each is a defect that
 actually shipped and was found by audit.
 
-### E.4.1 The recurring defect shape: a correct rule that nothing calls
+### E.3d.1 The recurring defect shape: a correct rule that nothing calls
 
 Three PRs, three instances, same shape:
 
@@ -1917,7 +1917,7 @@ commit into a one-line wiring change by asking it.
 The corollary is PR A's rule, restated: **audit consumers as consumers.**
 A rule existing in source is not evidence that any consumer honours it.
 
-### E.4.2 Establish reachability before calling a defect active
+### E.3d.2 Establish reachability before calling a defect active
 
 Two findings were downgraded by audit, not by opinion:
 
@@ -1929,14 +1929,14 @@ Two findings were downgraded by audit, not by opinion:
 Classify each finding `ACTIVE` / `LATENT` / `NOT A DEFECT` / `UNKNOWN`
 with evidence. Do not imply a latent defect caused observed behaviour.
 
-### E.4.3 A value that is only printed is not evidence
+### E.3d.3 A value that is only printed is not evidence
 
 `cap_note` (`wrapper.py:538-545`) computes exactly the three cap regimes
 B3 needed — into a **log string**. Same class as PR C's finding that a
 guardrail scanned `#` comments as live code. If a fact matters, it must be
 typed and persisted, not rendered.
 
-### E.4.4 Absent, explicit-default, explicit-override and explicit-invalid
+### E.3d.4 Absent, explicit-default, explicit-override and explicit-invalid
 are four different states
 
 B1's resolver exists because they were being collapsed. B1b showed the
@@ -1945,7 +1945,7 @@ harness-owned bound** — a plan without `epochs` trained ten under
 `--max_epochs 1`. An explicitly *invalid* value must not silently become
 a fallback either.
 
-### E.4.5 Observation must be provably decision-free
+### E.3d.5 Observation must be provably decision-free
 
 B2's template, reusable by any PR adding evidence: a typed model,
 **semantics-neutral field names** (a test fails on `breach` / `violation`
@@ -1953,12 +1953,12 @@ B2's template, reusable by any PR adding evidence: a typed model,
 compliant**, attribution to the owning process, and a guard test that
 fails if any decision path reads the new field.
 
-### E.4.6 Do not claim a distribution you have not collected
+### E.3d.6 Do not claim a distribution you have not collected
 
 B0 froze S3 on **zero** realized-vs-admitted observations, and said so.
 The capability to measure is not the measurement.
 
-### E.4.7 Mutation results are reported by category, not as a percentage
+### E.3d.7 Mutation results are reported by category, not as a percentage
 
 ```text
 N attempted
@@ -1971,7 +1971,7 @@ wrong fixture) **before** any test is written for it. Two of PR B's own
 mutations turned out invalid — one was semantically equivalent, one
 targeted a harness that reimplemented production instead of calling it.
 
-### E.4.8 Validation hygiene, now in CLAUDE.md
+### E.3d.8 Validation hygiene, now in CLAUDE.md
 
 Commit before the full suite (the PR3-L2 preflight refuses uncommitted
 production edits, by design), and never take a pytest verdict from a
@@ -1979,9 +1979,219 @@ pipe's exit code.
 
 ---
 
-## PR D — Per-file evidence to reflector and planner
+## E.3e Correction, 2026-08-08 — PR D's premise withdrawn after a code-grounded audit
 
-> **Updated 2026-08-08 from A/B/C (§E.4).** PR D is **B2-shaped**: it adds
+Append-only: nothing below is deleted. P6.5 and the original PR D section
+are preserved as the historical record; this block states what a
+code-and-artifact audit of `master @ 667ab359` established instead.
+
+**1. The claimed per-file-evidence gap is not real.**
+`ScoreComparisonTable` already computes a per-file `linear_weight` and
+renders it as a **`Weight %`** column, and `{SCORE_COMPARISON_TABLE}` is
+substituted into **both** the planner and reflector prompts. This has been
+live since `5c8f76c4` (**2026-05-01**), three months before V20 ran.
+
+```text
+file_vector -> build_score_table          execute_tools/scoring_helpers.py:106
+            -> PerFileRow.linear_weight   agent/schemas/score_table.py:82
+            -> "Weight %" column          scoring_helpers.py:478, :496
+            -> {SCORE_COMPARISON_TABLE}   agent/prompts.py:215, :267
+            -> planner + reflector        agent/llm_bridge.py:866, :950
+```
+
+**2. The cited artifact refutes the causal claim.** The real
+`iter_006_001` record carries both `file_vector` and a `score_table`; its
+stored `linear_weight` for file 19 is `0.999984827817748`, matching the
+ledger's 99.9985% exactly, and its rendered markdown shows file 19 at
+`100.0%`. The reflection's "non-collapsed" phrase originates in
+`all_records[0].memory.discovery` and is grounded in **per-file** evidence
+("unique int8 values stayed high across files 15-19"), while the next
+record's hypothesis names **"over-focus risk"** on file 19 and says
+improvement "should be judged by both aggregate score and per-file
+changes". The agent saw the concentration and reasoned about it.
+
+```text
+"per-file evidence was not shown to the agent"   FALSE
+"the scalar alone misled the reflector"          NOT SUPPORTED
+```
+
+**3. The original PR D causal premise is therefore WITHDRAWN.** This is
+not "PR D was partially implemented" — the problem statement was wrong.
+
+**4. The authority-transport defect assigned to PR D is ACTIVE and
+launch-blocking, and PR D is re-scoped around it.** Second audit narrowed
+it beyond the multi-iteration chain:
+
+```text
+run_one_iteration        NO      run_one_iteration.py:1846 (run_workflow)
+run_comparison           NO      scripts/run_comparison.py:690
+run_exploration_test     NO      run_exploration_test.py:151
+model_exploration main   NO      model_exploration.py:2994
+bg_admission_validation  NO      scripts/bg_admission_validation.py:571
+manual tuner CLI         YES     ml_hyperparameter_tune_agent.py:6722-6723
+```
+
+> **No formal record produced through any current SIDERIUS launcher can
+> become authoritative, because every production launcher omits
+> `healthgate_mode` and `result_authority` when constructing or invoking
+> the tuner. The authority mechanism itself is live and correct; only the
+> hand-invoked tuner CLI currently supplies it.**
+
+The same defect shape as A/B/C (§E.3d.1): correct mechanism, correct
+schema, correct consumer, **nobody on the production path supplies it**.
+
+**5. Frozen-scorer clarification — documentation only, no behaviour
+changes.** The production aggregation (`execute_tools/scoring_utils.py:638-655`)
+is the **grand mean over sampled segments in linear space, then one
+`log_5.27`** — not an unnormalised sum:
+
+```text
+v_f    = (1/|S_f|) * Σ_{i∈S_f} (snr_sg[f,i] / s_max) * snr_squid[f,i]      :645-646
+score  = log_5.27( Σ_f |S_f|·v_f  /  Σ_f |S_f| )                            :653-655
+```
+
+The ledger's "sum-in-linear-space, then a single log" is classified
+**IMPRECISE BUT SEMANTICALLY CONSISTENT**: the omitted divisions are
+constants that cancel in any contribution ratio, so the 99.9985%
+concentration conclusion stands. It would become *incorrect* only if used
+to describe the aggregate's magnitude.
+
+**Assumption worth recording permanently** — the displayed share is
+
+```text
+linear_weight_f = v_f / Σ_j v_j            scoring_helpers.py:305
+```
+
+which equals the true contribution to the pre-log aggregate **only while
+every sampled file has the same segment count**. That invariant holds
+today (`scoring_helpers.py:258-264` documents it; `iter_006_001` confirms
+it empirically), so `99.9985%` is exact. The general form weights by
+`|S_f| · v_f`. **This is a genericization assumption to carry forward, not
+a reason to touch the frozen metric.**
+
+---
+
+## PR D — Make the existing scientific-authority contract reachable
+
+> **RE-SCOPED 2026-08-08 by operator decision, after the audit in §E.3e.**
+> The former scope ("Per-file evidence to reflector and planner") is
+> **SUPERSEDED BY AUDIT** and preserved verbatim below for the record.
+>
+> Naming follows PR A deliberately, because the defect is the same shape:
+>
+> ```text
+> PR A   Make the existing output contract reachable
+> PR D   Make the existing scientific-authority contract reachable
+> ```
+
+### Objective
+
+Make a launcher's **declared** scientific authority reach the formal
+record, so that authority-bearing downstream decisions act on the
+declaration instead of on `legacy_authority_unknown`.
+
+**Not** to design authority semantics — `core/scientific_authority.py`
+already exists, is correct, and is unit-tested. PR D adds no rule and
+changes no verdict table.
+
+### The defect (§E.3e.4)
+
+```text
+launcher declares  --healthgate_mode blocking --result_authority scientific
+  -> validated at launch                      run_one_iteration.py:1557
+  -> written to the manifest                  :620-629        PRESERVED
+  -> run_workflow(...)                        :1846           ** DROPPED **
+  -> HyperparamTuningInput defaults to None   hyperparam_tuning.py:1749, :1761
+  -> ScientificAuthority.from_context(None, None, ...)
+                                              tuner:5745-5752
+  -> formal record: authoritative=False, primary_basis=legacy_authority_unknown
+```
+
+Deterministically reproduced with production objects, no LLM/GPU:
+`blocking + scientific + valid` is the **only** combination yielding
+`authoritative=True`, and no launcher supplies it.
+
+**Decision-bearing consequences, both confirmed reachable in code:**
+
+| Consumer | Effect today | Evidence |
+|---|---|---|
+| chain incumbent admission | returns `False` — the record *"cannot become the chain incumbent"* | `core/resume.py:678-694` |
+| scientific aggregation | `included=0`; `per_model_formal` filtered to **empty** | `result_interpretation_agent.py:1052-1056`, populated from the record at `:2120` |
+
+### Scope
+
+```text
+IN    make the declaration reach ScientificAuthority.from_context on every
+      launcher-driven production path
+IN    reachability + mutation evidence at each transport hop
+IN    the launcher census as a published artifact, including paths
+      deliberately left unchanged and why
+
+OUT   authority SEMANTICS — the verdict table is frozen for this PR
+OUT   the metric, scorer, aggregation, HealthGate semantics
+OUT   per-file evidence work (withdrawn premise, §E.3e.1-3)
+OUT   trial records — they carry no authority block by design
+      (tuner:5744 `if not trial_config.is_trial`)
+```
+
+### Requirements
+
+1. A launcher-declared posture reaches `from_context` unchanged on every
+   production path that can create a formal record.
+2. Every path in the §E.3e.4 census is either wired or **explicitly
+   recorded as deliberately not wired, with the reason** — the standard
+   B3 Stage A set for itself.
+3. The existing verdict table is preserved exactly:
+   `blocking+scientific+valid → authoritative`; every other declared
+   posture keeps its current `ScientificAuthority` semantics.
+4. An **undeclared** posture must remain distinguishable from a declared
+   one. `legacy_authority_unknown` stays the honest answer for a run that
+   genuinely declared nothing — this PR must not manufacture a default.
+
+### Validation
+
+- **Deterministic, no LLM/GPU:** a launcher-shaped declaration produces a
+  formal record with the matching verdict; the undeclared case still
+  produces `legacy_authority_unknown`.
+- **Reachability/mutation — each must turn a test red:**
+
+  ```text
+  drop the field at the launcher
+  drop it at the workflow transport
+  drop it at the protocol / tuner input
+  ```
+
+- **Downstream behaviour:** with a declared `blocking+scientific+valid`
+  record, the incumbent predicate admits and `partition_for_aggregation`
+  includes it; both currently refuse.
+- **Non-behavioural:** no change to trial records, to the verdict table,
+  or to any score.
+
+### Merge criteria
+
+Declared authority reaches the formal record on every launcher-driven
+path; the census is published including deliberate exclusions; all three
+transport mutations are caught; the verdict table and every score are
+unchanged.
+
+### Follow-ups reclassified out of PR D (none launch-blocking)
+
+| Item | Status |
+|---|---|
+| `ml_model_proposal_agent.py:866` strips `score_table`; `:882` drops `per_model_score_tables` — so the **proposer** does not receive per-file evidence | **OPEN DESIGN QUESTION.** Unknown whether this is a deliberate context-budget decision, and unknown whether the proposer already receives sufficient synthesised evidence via `result_interpretation_agent`. Not called a defect |
+| `0.999984827817748` renders as `100.0%`, `8.66e-06` as `0.0%` (`_fmt_pct`) | Reporting-precision issue. Not launch-blocking |
+| A 5-file, 10%-portion trial is compared against a **full-file** ground-truth ceiling and rendered as "Recovery: 98.7% of ceiling" with no not-same-sample label | The most real of the three. Candidate for a small, separately designed **evidence-labelling** PR; may need only an honest scope label, not a same-sample reference |
+| Trial segment indices are **not** persisted (only strategy/portion/count) | Recorded. Blocks any future same-sample reference; `UNKNOWN` whether the sampling seed makes them regenerable |
+
+---
+
+## SUPERSEDED BY AUDIT — original PR D (Per-file evidence to reflector and planner)
+
+> Retained per the append-only rule. Its causal premise was withdrawn on
+> 2026-08-08 (§E.3e); do not implement from this section.
+
+
+> **Updated 2026-08-08 from A/B/C (§E.3d).** PR D is **B2-shaped**: it adds
 > an observation that must change no decision. Reuse B2's template rather
 > than inventing one — typed model, semantics-neutral names, and a guard
 > test that fails if any decision path reads the new field
@@ -2005,7 +2215,7 @@ pipe's exit code.
 >   is *reporting*, and the aggregate it sits beside must be
 >   byte-identical.
 >
-> Also inherited: **§E.4.2** — before claiming the scalar misled the
+> Also inherited: **§E.3d.2** — before claiming the scalar misled the
 > agent, establish that the reflector actually read it, rather than
 > inferring from the text it produced.
 
@@ -2088,17 +2298,17 @@ the real `iter_006` fixture; no scorer file in the diff.
 
 ## PR E — Proposal-scale funnel instrumentation
 
-> **Updated 2026-08-08 from A/B/C (§E.4).** PR E's whole purpose —
+> **Updated 2026-08-08 from A/B/C (§E.3d).** PR E's whole purpose —
 > "convert an impression into measurable data **without** correcting it" —
 > is the property B2 had to defend, so B2 is the template.
 >
-> - **§E.4.6 is the binding constraint here.** B0 froze a semantics on
+> - **§E.3d.6 is the binding constraint here.** B0 froze a semantics on
 >   *zero* observations and said so plainly. PR E may ship the
 >   instrumentation and claim the capability; it may **not** report a
 >   funnel distribution until one has been collected. The same sentence
 >   that governs PR B governs PR E: *the capability to measure is not the
 >   measurement.*
-> - **Check what already exists first (§E.4.1).** PR E's own note says
+> - **Check what already exists first (§E.3d.1).** PR E's own note says
 >   `parameter_count_estimate` is not forwarded. Before building new
 >   instrumentation, audit whether the value already reaches a boundary
 >   and is dropped — that was true in all three merged PRs.
@@ -2200,7 +2410,7 @@ corrective change to advice or thresholds in the diff.
 
 ## PR F — Inspection-cost scaling study (measure only)
 
-> **Updated 2026-08-08 from A/B/C (§E.4).** A measure-only study is
+> **Updated 2026-08-08 from A/B/C (§E.3d).** A measure-only study is
 > governed by the minimum-bounded-validation rule, and by one practical
 > fact PR B hit at Gate time:
 >
@@ -2209,7 +2419,7 @@ corrective change to advice or thresholds in the diff.
 >   partly for that reason. A scaling study must plan around foreign
 >   occupancy rather than assume the card — and must never enlarge a
 >   workload to force an effect.
-> - **Attribution (§E.4.5).** If inspection cost is measured on a shared
+> - **Attribution (§E.3d.5).** If inspection cost is measured on a shared
 >   card, peer usage is context. B2's per-process counters and
 >   `owning_process_pid` are the existing mechanism; do not re-derive one.
 > - **Honest absence.** PR F's premise is already that a timeout reports
@@ -2275,10 +2485,10 @@ not a prerequisite for launching V21.
 
 ## PR G — Capability-derived inference batch
 
-> **Updated 2026-08-08 from A/B/C (§E.4). This is the PR most changed by
+> **Updated 2026-08-08 from A/B/C (§E.3d). This is the PR most changed by
 > what B and C found.**
 >
-> - **The measurement PR G wants may already exist (§E.4.1).** PR G's
+> - **The measurement PR G wants may already exist (§E.3d.1).** PR G's
 >   objective is to derive the batch from a candidate's **measured**
 >   memory profile. PR B established that `ProbeResult.peak_vram_gb` is
 >   populated by the bounded probe (`probe.py:554`), survives into
@@ -2292,7 +2502,7 @@ not a prerequisite for launching V21.
 >   — never a predicate. If PR G makes the batch capability-derived, that
 >   flag must not become a pricing or admission input.
 > - **Prove parity per built-in before switching off the name table
->   (§E.4.7 discipline).** B3's parity matrix caught a real divergence in
+>   (§E.3d.7 discipline).** B3's parity matrix caught a real divergence in
 >   the PHYSICAL VETO regime that source reading had missed. The
 >   `_INFERENCE_BATCH_SIZES` entries are calibrated — `transformer` is 1
 >   rather than 25 *for a memory reason* — so a derived batch must be
@@ -2337,14 +2547,21 @@ Byte-identical inference outputs; name table removed from the path.
 
 ## E.4 Global checkpoints before V21 launch
 
-| # | Checkpoint | Satisfied by |
-|---|---|---|
-| 1 | Regression hypothesis reachable end to end by a generated model | PR A |
-| 2 | Budget semantics frozen in writing, and breaches detected + attributed | PR B |
-| 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C |
-| 4 | Agent sees per-file evidence; scores byte-identical | PR D |
-| 5 | Scale funnel measurable across all five stages, joined on candidate identity | PR E |
-| 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all |
+| # | Checkpoint | Satisfied by | Status |
+|---|---|---|---|
+| 1 | Regression hypothesis reachable end to end by a generated model | PR A | **DONE** `b9f88ae5` |
+| 2 | Resource semantics correct — S3 frozen, admission graded, realization observable | PR B | **DONE** `0aae3f4b` |
+| 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
+| 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **TODO** |
+| 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **TODO** |
+| 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
+
+> **Checkpoint 4 replaced 2026-08-08** (§E.3e). It formerly read *"Agent
+> sees per-file evidence; scores byte-identical"*, which the audit showed
+> is **already the state of master** — per-file `Weight %` has reached the
+> planner and reflector prompts since 2026-05-01. A checkpoint that is
+> already satisfied cannot gate a launch, and the real launch-blocking
+> defect on PR D's plate is the authority-transport break.
 
 **PR F and PR G are explicitly NOT launch checkpoints.** PR F blocks only
 a future change to the inspection budget — P3 has no correctness defect

@@ -31,7 +31,7 @@ consumer of `vram_budget_gb`, not only PR B — recorded in
 `v21_priorities.md` §E.3c.
 
 **PRs D-G are not started, and each now carries an update block** derived
-from what A/B/C actually proved — see `v21_priorities.md` §E.4, which is
+from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
 binding on all of them. The single most reusable finding: three PRs in a
 row found **a correct rule that nothing called**, so every remaining PR
 must first ask whether the mechanism it wants already exists and lies
@@ -80,12 +80,35 @@ Two consequences for other PRs:
 | **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **MERGED** — PR #186, `b9f88ae5` |
 | **B** | [`pr_b_resource_budget_semantics.md`](./pr_b_resource_budget_semantics.md) | V21 launch blocker | **MERGED** — PR #188, `0aae3f4b`; Q-B-1 frozen as S3 |
 | **C** | [`pr_c_generated_model_production_compat.md`](./pr_c_generated_model_production_compat.md) | V21 launch blocker | **MERGED** — PR #187, `cac86c94` |
-| **D** | `pr_d_per_file_evidence.md` | Before V21 | not started |
+| **D** | `pr_d_scientific_authority_reachable.md` | **V21 launch blocker** | **RE-SCOPED 2026-08-08** (ledger §E.3e) — design doc not yet written |
 | **E** | `pr_e_scale_funnel_instrumentation.md` | Before first V21 data | not started |
 | **F** | `pr_f_inspection_cost_study.md` | Blocks only a budget change | not started |
 | **G** | `pr_g_capability_derived_inference_batch.md` | Non-blocking | not started |
 
 Recommended serialization: **A → C → B → D → E**, then F, then G.
+
+### PR D re-scoped 2026-08-08 — read §E.3e before designing it
+
+A code-and-artifact audit **withdrew PR D's original causal premise**. The
+per-file evidence PR D was meant to add is **already live**: per-file
+`Weight %` has reached the planner and reflector prompts since
+`5c8f76c4` (2026-05-01), and the very record the ledger cited
+(`iter_006_001`) carries it — the agent named the file-19 "over-focus
+risk" itself. So *"per-file evidence was not shown"* is **false** and
+*"the scalar misled the reflector"* is **not supported**.
+
+PR D is re-scoped around the defect that *is* active and launch-blocking:
+
+> No formal record produced through any current SIDERIUS launcher can
+> become authoritative, because every production launcher omits
+> `healthgate_mode` / `result_authority` when constructing or invoking the
+> tuner. The mechanism is live and correct; only the hand-invoked tuner
+> CLI supplies it.
+
+Same shape as A/B/C (§E.3d.1) for the fourth time. Consequences are
+decision-bearing: the record cannot become the chain incumbent
+(`core/resume.py:678`) and is excluded from the scientific aggregate
+(`result_interpretation_agent.py:1052`).
 
 ## Binding principles every document in this folder inherits
 
