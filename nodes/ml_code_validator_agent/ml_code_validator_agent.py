@@ -335,12 +335,23 @@ _PROBE_NUM_CLASSES: int = 256
 
 def _check_instantiation_and_gradient(
     model_file_path: str,
-) -> tuple[bool, bool, bool, str | None]:
+) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
     and verify the model matches its own declared output contract.
 
-    Returns (instantiation_ok, gradient_ok, output_type_ok, error_message_or_None).
+    Returns (instantiation_ok, gradient_ok, output_type_ok,
+    error_message_or_None, realized_total_parameter_count,
+    realized_trainable_parameter_count).
+
+    V21 PR E (O-E-6 FINAL): the two counts are measured from the SAME model
+    instance this check already instantiates — no extra instantiation, and
+    OBSERVATION ONLY: neither count influences any verdict boolean.
+    ``None`` means the model never instantiated (measurement unavailable);
+    ``0`` is a real measurement of a parameterless model. They are computed
+    the moment instantiation succeeds, so a candidate that fails its forward
+    pass or output contract still records how large the implementation was —
+    those are exactly the candidates the funnel must not lose.
       - instantiation_ok: config instantiated, model instantiated, forward pass
                           produced the shape required by its DECLARED contract
                           ([1, 256, 64] for ``classifier``, [1, 64] for
@@ -358,12 +369,19 @@ def _check_instantiation_and_gradient(
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
     if spec is None or spec.loader is None:
-        return False, False, False, f"Could not create module spec/loader for {model_file_path}"
+        return (
+            False,
+            False,
+            False,
+            f"Could not create module spec/loader for {model_file_path}",
+            None,
+            None,
+        )
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception as e:
-        return False, False, False, f"Import error: {e}"
+        return False, False, False, f"Import error: {e}", None, None
 
     # Instantiate config and model
     try:
@@ -371,7 +389,16 @@ def _check_instantiation_and_gradient(
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
-        return False, False, False, f"Model instantiation failed: {e}"
+        return False, False, False, f"Model instantiation failed: {e}", None, None
+
+    # V21 PR E (O-E-6 FINAL): both parameter-count views of the instantiated
+    # implementation, measured once, from this exact instance. numel() reads
+    # tensor metadata — no allocation, no forward pass. TOTAL is the
+    # architecture's size; TRAINABLE is what an optimizer would update; a
+    # frozen parameter makes them differ, and they are reported as two
+    # separate facts, never reconciled into one number.
+    realized_total = sum(p.numel() for p in model.parameters())
+    realized_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     # ---- Output contract is read BEFORE the shape probe (V21 PR A2) -------
     #
@@ -397,6 +424,8 @@ def _check_instantiation_and_gradient(
                 f"PLUGIN_OUTPUT_TYPE={declared_type!r} is not a legal output contract "
                 f"(expected one of: {', '.join(_LEGAL_OUTPUT_TYPES)})"
             ),
+            realized_total,
+            realized_trainable,
         )
 
     expected_shape: tuple[int, ...] = (
@@ -408,7 +437,7 @@ def _check_instantiation_and_gradient(
         x = torch.randint(0, _PROBE_NUM_CLASSES, (1, 64))
         out = model(x)
     except Exception as e:
-        return False, False, False, f"Forward pass failed: {e}"
+        return False, False, False, f"Forward pass failed: {e}", realized_total, realized_trainable
 
     if not isinstance(out, torch.Tensor):
         return (
@@ -416,6 +445,8 @@ def _check_instantiation_and_gradient(
             False,
             False,
             f"Forward returned {type(out).__name__}, expected a torch.Tensor",
+            realized_total,
+            realized_trainable,
         )
 
     if tuple(out.shape) != expected_shape:
@@ -424,6 +455,8 @@ def _check_instantiation_and_gradient(
             False,
             False,
             (f"Forward output shape {tuple(out.shape)} does not match expected {expected_shape}"),
+            realized_total,
+            realized_trainable,
         )
 
     output_type_ok = True
@@ -433,7 +466,14 @@ def _check_instantiation_and_gradient(
         loss = out.sum()
         loss.backward()
     except Exception as e:
-        return True, False, output_type_ok, f"Backward pass failed: {e}"
+        return (
+            True,
+            False,
+            output_type_ok,
+            f"Backward pass failed: {e}",
+            realized_total,
+            realized_trainable,
+        )
 
     no_grad = [name for name, p in model.named_parameters() if p.requires_grad and p.grad is None]
     if no_grad:
@@ -447,7 +487,7 @@ def _check_instantiation_and_gradient(
             f"{no_grad[:5]}. This is typically harmless."
         )
 
-    return True, True, output_type_ok, None
+    return True, True, output_type_ok, None, realized_total, realized_trainable
 
 
 # ---------------------------------------------------------------------------
@@ -497,9 +537,14 @@ class MLCodeValidatorAgent:
 
         # 6 + 7 + (output-type). In-process instantiation + gradient + output type (only if plugin loaded)
         if plugin_ok:
-            inst_ok, grad_ok, otype_ok, inst_err = _check_instantiation_and_gradient(
-                inp.model_file_path
-            )
+            (
+                inst_ok,
+                grad_ok,
+                otype_ok,
+                inst_err,
+                realized_total_parameter_count,
+                realized_trainable_parameter_count,
+            ) = _check_instantiation_and_gradient(inp.model_file_path)
         else:
             inst_ok, grad_ok, otype_ok, inst_err = (
                 False,
@@ -507,6 +552,9 @@ class MLCodeValidatorAgent:
                 False,
                 "Skipped — plugin did not load",
             )
+            # V21 PR E: never instantiated -> measurement unavailable, not 0.
+            realized_total_parameter_count = None
+            realized_trainable_parameter_count = None
 
         # 7. LLM code review (only if plugin file is readable)
         if os.path.isfile(inp.model_file_path):
@@ -624,6 +672,14 @@ class MLCodeValidatorAgent:
 
         out = ValidatorOutput(
             passed=passed,
+            # V21 PR E: explicit echo beside the existing hand-echoed
+            # model_type; persisted in validation_{run_name}.json, which is
+            # what makes a died-at-validation candidate joinable.
+            candidate_id=inp.candidate_id,
+            # V21 PR E (O-E-6 FINAL): the two stage-native measurements,
+            # observation only — no verdict boolean reads either.
+            realized_total_parameter_count=realized_total_parameter_count,
+            realized_trainable_parameter_count=realized_trainable_parameter_count,
             model_type=inp.model_type,
             plugin_registered=plugin_ok,
             tests_passed=tests_ok,

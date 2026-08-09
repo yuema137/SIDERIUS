@@ -324,6 +324,10 @@ class ExperimentRecord(BaseModel):
         "skipped_infrastructure_failure",
     ]
     model_type: str
+    #: V21 PR E — observational candidate identity (O-E-4/O-E-5), stamped by
+    #: ``_emit_record`` from the tuner input. None on records written before
+    #: PR E or by non-proposer candidates; never synthesised retroactively.
+    candidate_id: str | None = None
     timestamp: str
     file_index: int = Field(
         default=6,
@@ -1746,6 +1750,17 @@ class HyperparamTuningInput(BaseModel):
             "See docs/design/enable_partial_file_list.md."
         ),
     )
+    candidate_id: str | None = Field(
+        default=None,
+        description=(
+            "V21 PR E — the proposer-minted observational identity of the "
+            "candidate this tuning run belongs to, carried verbatim from "
+            "ValidatorOutput by the valid->tune protocol. Stamped onto every "
+            "ExperimentRecord and echoed on the output. Join key for the "
+            "read-side funnel ONLY (O-E-5); None = pre-PR-E input or a "
+            "non-proposer candidate."
+        ),
+    )
     healthgate_mode: HealthGateMode | None = Field(
         default=None,
         description=(
@@ -2391,6 +2406,15 @@ class HyperparamTuningOutput(BaseModel):
         description=(
             "The declared result authority this run ran under. None on "
             "legacy outputs = not declared."
+        ),
+    )
+    candidate_id: str | None = Field(
+        default=None,
+        description=(
+            "V21 PR E — echoed verbatim from the input on BOTH the healthy "
+            "and the degraded exit path, mirroring the healthgate_mode echo. "
+            "Run-level funnel label: every record in all_records belongs to "
+            "this candidate. None on legacy outputs."
         ),
     )
     health_checks_config_source: str | None = Field(

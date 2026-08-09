@@ -45,6 +45,10 @@ def local_all_fields(
       - storage, llm_provider, llm_model_id: passed from the orchestrator
     """
     return ValidatorInput(
+        # V21 PR E hop 3: carried from the IMMEDIATE upstream (the
+        # implementor's echo), not re-read from the proposal — so severing
+        # any earlier echo is visible end to end instead of papered over.
+        candidate_id=output.candidate_id,
         model_type=output.model_type,
         model_file_path=output.model_file_path,
         test_file_path=output.test_file_path,

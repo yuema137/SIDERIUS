@@ -107,7 +107,9 @@ def test_declared_contract_survives_every_hop(tmp_path, output_type):
     plugin_path.write_text(source)
 
     # hop 4: the validator reads the declaration and checks the real forward
-    inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(plugin_path))
+    inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(
+        str(plugin_path)
+    )
     assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
     # hop 5-6: registration, then resolution through the production lookup

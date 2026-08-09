@@ -1,14 +1,23 @@
 # PR E — Proposal-scale funnel instrumentation
 
-**Status: DESIGN REVISION 2 — 2026-08-08, returned for operator review.
-Not approved; no implementation begun. No production code, test, schema,
-launcher or scorer file is touched by this document.**
+**Status: IMPLEMENTED 2026-08-08 — E0-E4 complete on
+`feat/pr-e-proposal-scale-funnel`, awaiting operator review. NOT merged.**
+Design approved 2026-08-08 with O-E-6 FINAL (§0.I). Commits: E0
+`b8ea7b50` (ledger), E1 `337b9945`+`2281ae72` (pins), E2 `86401ae8`
+(identity transport), E3 `0bd27244`+`4ed97cb0` (both counts), E4
+`b008ff54` (read-side assembly + the REQUIRED pseudo Gate, passed).
+Final evidence: **§PR-E final validation**.
 
-Revision 2 applies operator decisions **O-E-1 … O-E-5** and the
-persistence audit they required. The result is **materially smaller than
-revision 1**: two of revision 1's five commits disappear entirely, because
-the audit proved the measurements they would have copied downstream are
-already persisted by the stage that owns them.
+Revision 2 applied operator decisions **O-E-1 … O-E-5** and the
+persistence audit they required, shrinking the PR to four commits with
+`candidate_id` as the only cross-stage transport. Revision 3 applied the
+operator's three design corrections (DC-1 … DC-3); its O-E-6 pre-E3 audit
+hit the STOP condition (the proposal contract explicitly says
+"trainable"), and the operator resolved it as **option (c): record both
+conventions at validation**, frozen below.
+
+Branch note: PR E work lives on `feat/pr-e-proposal-scale-funnel`,
+split off the PR D branch per the operator's operational requirement.
 
 | | |
 |---|---|
@@ -46,6 +55,10 @@ verdict is taken from pytest's own exit code, never from a pipe's.
 | **O-E-3** | join-on-read; measurements stay with their **native owner** | revision 1's **Commit E4 (forward the proposed count) is deleted entirely** — see §0.C |
 | **O-E-4** | one candidate = one proposer-emitted proposal; a revision is a **new** candidate | maps exactly onto the existing outer attempt loop — see §0.D |
 | **O-E-5** | `candidate_id` MAY be an observational join key; MUST NOT be a behavioural key | §0.F restates the invariant correctly; revision 1's "never a lookup key" was wrong |
+| **O-E-6 FINAL** | record **BOTH** conventions at validation (option c); proposal contract (trainable estimate) authoritative and unchanged; `model_params` unchanged; no cross-convention delta/ratio anywhere | E3 unblocked and rewritten for two fields with unambiguous names; frozen text in §0.I |
+| **DC-1** | every persisted `candidate_id` producer must be proved, not assumed | audit done (§0.J): **no generic echo exists**; the implementor (2 construction sites) and validator (1) must explicitly echo — both nodes added to E2's scope. Mint rule frozen (§0.J) |
+| **DC-2** | one pseudo-mode complete iteration is a **MERGE REQUIREMENT** | E4 §4 and Layer G reconciled — the contradiction is resolved in favour of required |
+| **DC-3** | legacy attempt-3 check is a **stage-local sanity check**, never a "reconstructed funnel"; no name-keyed join ever | E4 renamed and reworded; a mutation polices the name-join |
 
 ### 0.B The five stages, as they exist in code
 
@@ -218,7 +231,8 @@ E2 §5 states how that is proved.
 ### 0.G Semantics-neutral naming — binding
 
 ```text
-ALLOWED    parameter_count_estimate      realized_parameter_count
+ALLOWED    parameter_count_estimate      realized_total_parameter_count
+           realized_trainable_parameter_count
            model_params                  preflight_factor
            stopped_at_stage (derived)    reason_absent
 FORBIDDEN  undersized  too_small  scale_deficit  size_violation
@@ -238,6 +252,131 @@ append-only correction goes into `v21_priorities.md`. **Search-space
 policy is not reopened.**
 
 ---
+
+### 0.I O-E-6 pre-E3 audit — the STOP condition fired
+
+O-E-6 required auditing `parameter_count_estimate`'s actual semantic
+contract before E3, with: *"If that contract explicitly means
+trainable-only, STOP and report the evidence."* **It does, in two places.**
+
+| source | wording | verdict |
+|---|---|---|
+| schema description, `agent/schemas/proposal.py:1044` | *"LLM-emitted estimate of the **total trainable** parameter count for baseline_config"* | explicit "trainable" |
+| proposer prompt hard constraint, `ml_model_proposal_agent.py:378-380` | *"your best estimate of the **total trainable** parameter count at the baseline_config"* | explicit "trainable" |
+| consumer, `agent/utils/proposer_preflight.py:118-121` | static formula `num_params × seg × bs × 6e-10`, order-of-magnitude | **convention-insensitive** |
+| `docs/reliable_resource_proposer.md` Decision 5 | no convention language at all (`grep trainable` → empty) | unspecified |
+| FCNet ~323M reference; recorded attempt ranges 663,488-12,772,096 | from-scratch models: every parameter is trainable, so **total == trainable** on all recorded values | indistinguishable |
+
+**Honest characterisation:** the word "trainable" is explicit but appears
+incidental, not load-bearing — the only consumer is order-of-magnitude
+insensitive, the design doc that introduced the field specifies no
+convention, and on every model the system has ever produced the two
+conventions are numerically identical (the difference is observable only
+with frozen parameters). But O-E-6 drew the line at *explicit*, so this
+returns to the operator rather than being decided here.
+
+**Options** (PR E may not edit the prompt, so re-wording the constraint is
+out of scope regardless):
+
+```text
+(a) O-E-6 stands: validator records TOTAL. The proposal estimate stays
+    nominally trainable; the funnel labels both conventions explicitly
+    and never computes a cross-convention delta. The nominal mismatch is
+    honest and, on from-scratch models, numerically vacuous.
+(b) Validator records TRAINABLE-only — matching the PROPOSAL contract
+    (grounds independent of model_params, which O-E-6 rightly rejected
+    as a reason). Architecture size is then not measured anywhere.
+(c) Validator records BOTH totals: realized_parameter_count (total) AND
+    realized_trainable_parameter_count. Two sums over one already-
+    instantiated model; each funnel column then has a like-for-like
+    partner: proposal-estimate <-> trainable; architecture <-> total;
+    model_params stays untouched.
+```
+
+**Recommendation: (c).** It implements O-E-6's own reasoning — *"these
+can simultaneously both be real measurements"* — at the cost of one extra
+optional field, and dissolves the conflict instead of picking a side.
+
+**RESOLVED — operator chose (c), 2026-08-08. O-E-6 FINAL, frozen:**
+
+```text
+ProposalOutput.parameter_count_estimate
+    = estimated TRAINABLE parameter count      [existing contract; UNCHANGED]
+
+ValidatorOutput.realized_total_parameter_count
+    = TOTAL parameters of the instantiated implementation
+    = sum(p.numel() for p in model.parameters())
+
+ValidatorOutput.realized_trainable_parameter_count
+    = TRAINABLE parameters of the instantiated implementation
+    = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+ExperimentRecord.model_params
+    = TRAINABLE parameters                     [existing semantics; UNCHANGED]
+```
+
+The ambiguous name `realized_parameter_count` is **not used** — the
+convention is in the field name, so no future reader needs this document
+to know it. All four are distinct stage-native observations; nothing is
+forwarded downstream to make one record complete. The read-side assembler
+exposes convention-explicit labels (display labels only — **no schema
+rename** of the existing proposal field):
+
+```text
+proposed_trainable_parameter_count_estimate    <- ProposalOutput.parameter_count_estimate
+implemented_total_parameter_count              <- validator total
+implemented_trainable_parameter_count          <- validator trainable
+trained_trainable_parameter_count              <- ExperimentRecord.model_params
+```
+
+Like-for-like relations: proposed-trainable ↔ implemented-trainable, and
+implemented-trainable ↔ trained-trainable; implemented-total stands alone
+as architecture size. **PR E computes no delta or ratio across unlike
+conventions** — a future analysis may, explicitly, on same-convention
+quantities.
+
+### 0.J DC-1 producer audit — no generic echo exists; two nodes join E2
+
+The operator's suspicion is **confirmed**: a schema field would not have
+reached the persisted JSONs. Every output is explicitly constructed, and
+no `model_copy`/generic-echo mechanism exists in either node:
+
+```text
+ProposalOutput      built by model_validate(raw-LLM-dict) at
+                    ml_model_proposal_agent.py:1389 (legacy) and the
+                    pipeline equivalent (:1998); persisted at :1341
+ImplementorOutput   explicitly constructed at ml_model_implementor.py:1657
+                    (Branch B plugin-reuse) AND :1804 (normal path);
+                    persisted at :1821
+ValidatorOutput     explicitly constructed at ml_code_validator_agent.py:625
+                    (echoes model_type=inp.model_type by hand — the
+                    pattern candidate_id follows); persisted at :683
+```
+
+Consequences, binding on E2:
+
+- **The implementor and validator nodes are IN E2's scope.** Each must
+  explicitly echo `candidate_id` from its input to its output — the
+  implementor at **both** construction sites, including Branch B reuse
+  (a reused plugin still belongs to the current candidate).
+- **The transport test starts at the real system-generated mint and ends
+  at every persisted native artifact** — all three stage JSONs plus the
+  `ExperimentRecord` — not at schema construction.
+- Each echo site is a mutation target: dropping any one must fail a test.
+
+**Mint rule — FROZEN (operator, 2026-08-08):**
+
+> `candidate_id` is SYSTEM-GENERATED, after the LLM proposal JSON has been
+> parsed and before `ProposalOutput` is persisted. It is never
+> LLM-generated and never derived from `model_name`.
+
+The audit adds the implementation consequence: `run()` at
+`ml_model_proposal_agent.py:1333` (`output = self._run_pipeline(inp) if
+has_pipeline else self._run_legacy(inp)`, then persist) is the **single
+site covering both modes** — minting there covers legacy and pipeline
+paths with one edit and cannot be bypassed by either. A test must assert
+the id is absent from the raw LLM dict's accepted keys, so a
+prompt-injected id can never survive parsing.
 
 ## 1. Objective
 
@@ -290,11 +429,12 @@ proposer mints candidate_id
 Measurement ownership, per O-E-3 — **none of these move**:
 
 ```text
-parameter_count_estimate   proposal stage   proposal_{run_name}.json
-preflight_factor           proposal stage   proposal_{run_name}.json
-realized_parameter_count   validator stage  validation_{run_name}.json   (E3 adds)
-model_params               tuner            ExperimentRecord
-stop stage / reason        DERIVED ON READ  no schema field at all
+parameter_count_estimate              proposal stage   proposal_{run_name}.json
+preflight_factor                      proposal stage   proposal_{run_name}.json
+realized_total_parameter_count        validator stage  validation_{run_name}.json  (E3)
+realized_trainable_parameter_count    validator stage  validation_{run_name}.json  (E3)
+model_params                          tuner            ExperimentRecord
+stop stage / reason                   DERIVED ON READ  no schema field at all
 ```
 
 **Binding principle 2:** deleting any of the five hops must fail a test,
@@ -367,40 +507,65 @@ join-on-read decision is wrong and E4 must not be written**.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `run_workflow` `:2214-2428` and record the attempt-loop
-      structure and the rename at `:2333`
-- [ ] Pin exact key sets for `ProposalOutput`, `ImplementorOutput`,
-      `ValidatorOutput`, `HyperparamTuningInput`, `ExperimentRecord`, so
-      E2/E3 adding a field is a deliberate visible edit to this module
-- [ ] Pin `ValidatorOutput` as having **no numeric field** — the fact E3
-      changes
-- [ ] Pin the persistence layout as behaviour, not documentation: drive
-      the three nodes against a `tmp_path` workspace and assert
-      `proposal_`, `implementor_`, `validation_{run_name}.json` are each
-      written where the audit says
-- [ ] Pin that two attempts write into **different** directories and do
-      not overwrite each other — the property join-on-read depends on
-- [ ] Pin that the inner retry loop **does** overwrite within one attempt
-      dir, so the known limitation is recorded as tested behaviour rather
-      than an assumption
-- [ ] Hardcode every expectation; never read a value back from the thing
-      under test (CLAUDE.md)
+- [x] Re-read `run_workflow` `:2214-2428`; attempt loop `:2215`, temp dir
+      `:2220`, rename `:2333-2335`; `iter_dir =
+      {workspace}/{run_name}/iteration_{NNN}` (`:1690`, `:2050`)
+- [x] Key sets pinned in
+      `tests/unit/agent/schemas/test_pr_e_stage_contract_pins.py` —
+      **exact literal sets** for the five proposal-chain schemas
+      (`ProposalOutput` 17, `ImplementorInput` 17, `ImplementorOutput` 10,
+      `ValidatorInput` 13, `ValidatorOutput` 22). **Deviation, recorded:**
+      `HyperparamTuningInput` (68 fields) and `ExperimentRecord` (53) are
+      pinned on funnel-relevant presence/absence facts only, invoking the
+      §6 churn clause explicitly — a full pin there would tax every
+      unrelated PR. Also pinned: `candidate_id` absent from all seven
+      schemas (the E2 before-state); `stopped_at_stage` stored nowhere
+      (O-E-2); `parameter_count_estimate` on `ProposalOutput` only and
+      `model_params` on the record (O-E-3 ownership)
+- [x] `ValidatorOutput` pinned as having **no numeric field** (exact
+      22-key set + a type-level scan), plus explicit absence pins for
+      both E3 field names
+- [x] Persistence pinned as behaviour in
+      `tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py`:
+      all three nodes driven through their REAL `run()` with bridge-level
+      mocks (canonical fixtures imported from the owning node test
+      modules, the established cross-import pattern); each writes
+      `{stage}_{run_name}.json` into the given workspace
+- [x] Two attempts (validation fail → new proposal via
+      `max_impl_attempts=1`) produce `attempt_001_alpha_net` +
+      `attempt_002_beta_net`, neither overwritten, both matched by a
+      name-blind `attempt_*` glob
+- [x] Inner-retry overwrite pinned: two implementor runs with one storage
+      leave exactly one `implementor_{run}.json` holding the TERMINAL
+      outcome — E4 must never infer retry counts from artifacts
+- [x] Every expectation hardcoded; nothing read back from the thing under
+      test
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Five exact key-set assertions
-- [ ] `ValidatorOutput` has no numeric field
+- [x] Five exact key-set assertions + the ownership pins — 16 tests
+      across the two modules, `16 passed in 2.10s`
+- [x] `ValidatorOutput` has no numeric field
 
 **Integration / pseudo**
-- [ ] Two simulated attempts produce two directories, both discoverable by
+- [x] Two simulated attempts produce two directories, both discoverable by
       a `attempt_*` glob, neither overwriting the other
 
 **Negative / invalid input**
-- [ ] A workspace with no attempt dirs yields an empty discovery, not an error
+- [x] **Moved to E4, recorded as a deviation** — "empty workspace yields
+      empty discovery" is a property of the assembler, which does not
+      exist until E4 (already listed in E4 §6 as "zero candidates").
+      Cannot be tested before the reader exists
+- [x] Two fixture defects found against real shapes and fixed:
+      `LLMCodeReview.spec_alignment` is a bool (my mock said `"ok"`), and
+      `run_workflow` Step 0 loads
+      `{data_dir}/{model}/{source}/agent/run_output_{source}_agent.json`
+      BEFORE any (mocked) agent runs — the layout test must seed it
 
 **Backward-compatibility / default parity**
-- [ ] All pre-existing schema and protocol suites pass **unmodified**
+- [x] Neighbouring suites pass unmodified: schemas + all three node
+      suites `1112 passed in 4.66s`
 
 **Real-training Gate:** none. A GPU cannot evaluate a key set or a path.
 
@@ -432,15 +597,29 @@ join-on-read decision is wrong and E4 must not be written**.
 .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
 ```
 
-- [ ] New module counts and wall time — **to record**
-- [ ] Pre-existing suites unmodified — **to record**
-- [ ] Mutation: make two attempts share a directory → must fail — **to record**
+- [x] `16 passed in 2.10s` (both modules)
+- [x] Neighbouring suites unmodified: `1112 passed in 4.66s`
+- [x] Mutations — **5 attempted, 4 behaviour-changing → 4 caught,
+      1 equivalent → classified**:
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E1-1 | `ValidatorOutput` silently gains `candidate_id` | CAUGHT (2 failures) |
+      | M-E1-2 | `ValidatorOutput` silently gains a numeric field | CAUGHT (2 failures) |
+      | M-E1-3 | temp `attempt_dir` collapsed to a constant | **EQUIVALENT** — the rename target (`attempt_{N:03d}_{name}`) owns the final layout; the temp name is renamed away every attempt |
+      | M-E1-3v2 | the RENAME's attempt numbering collapsed to a constant | CAUGHT |
+      | M-E1-4 | rename drops the name-blind `attempt_` prefix | CAUGHT |
 
 #### 8. Commit boundary
 
-- [ ] Tests only; zero production files
-- [ ] No field, no transport, no assembly
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] Tests only; zero production files (commit `337b9945`)
+- [x] No field, no transport, no assembly
+- [x] Two new test modules; deviations in §3/§4. **Process slip,
+      recorded:** the ledger update aborted on a stale anchor and E1's
+      commit landed with these boxes still open; fixed in the next docs
+      commit rather than by history rewrite. Root cause was editing this
+      document from memory instead of re-reading it — the exact rule-5
+      violation the mandate names
 
 ---
 
@@ -470,7 +649,10 @@ agent/schemas/hyperparam_tuning.py   HyperparamTuningInput          NEW, optiona
 agent/schemas/protocols/             ml_model_propose_to_ml_model_impl.py
                                      ml_model_impl_to_ml_model_valid.py
                                      ml_model_valid_to_ml_model_tune.py
-nodes/ml_model_proposal_agent/…      mint
+nodes/ml_model_proposal_agent/…      mint (single site in run(), §0.J)
+nodes/ml_model_implementor/…         explicit echo, BOTH construction
+                                     sites (:1657 Branch B reuse, :1804)
+nodes/ml_code_validator_agent/…      explicit echo (:625)
 nodes/ml_hyperparameter_tune_agent/… stamp onto the record
 tests/
 ```
@@ -491,55 +673,118 @@ tests/
 
 #### 3. Implementation plan
 
-- [ ] Re-read each protocol file immediately before editing and follow the
-      flat-optional-parameter pattern PR D established at
-      `ml_model_valid_to_ml_model_tune.py:54-55,275-276`
-- [ ] Mint the id in the proposer at the point one `ProposalOutput` is
-      emitted — **exact site and format decided after reading the emit
-      path**, not invented here. Requirements: unique per emitted
-      proposal; **new id on every proposer run** (O-E-4); not derived from
-      `model_name`
-- [ ] Add `candidate_id: str | None = None` to the five schemas, each
-      documenting that `None` means "predates PR E or transport severed",
-      never "unknown, substitute one"
-- [ ] Add one parameter per protocol function, `default=None`
-- [ ] Stamp onto `ExperimentRecord` at the tuner
-- [ ] Grep-verify no registration, dispatch, admission, scoring or path
-      construction reads it
+- [x] Re-read every file immediately before editing. **Deviation
+      (smaller, category: mechanism already exists):** the protocols take
+      the WHOLE upstream objects, so the design's "one parameter per
+      protocol function" was unnecessary — the id travels inside the
+      objects and each protocol maps it field→field
+      (`candidate_id=output.candidate_id`) from its **immediate**
+      upstream, so severing any echo is visible end to end. Zero new
+      protocol parameters; zero `run_workflow` changes
+- [x] Minted in `run()` after `_run_legacy`/`_run_pipeline` return,
+      before the persist: `output.candidate_id = f"cand_{uuid.uuid4().hex}"`
+      — UNCONDITIONAL assignment, so even a value smuggled past a parser
+      whitelist is overwritten. uuid4 makes duplicates impossible by
+      construction (no explicit collision check needed)
+- [x] Asserted: a `candidate_id` in the raw LLM commit JSON does not
+      survive (`test_the_llm_cannot_supply_the_id`) — both parser
+      whitelists (`:1401` legacy, `:2010` pipeline) exclude it AND the
+      mint overwrites
+- [x] Implementor echoes at BOTH sites — normal (`:1804` region) and
+      Branch-B plugin reuse (`:1657` region, "a reused plugin still
+      belongs to the CURRENT candidate"). **M-E2-7 initially SURVIVED**
+      because no test drove Branch B; fixed by adding
+      `TestBranchBReuseEcho` (test architecture, not the mutation), after
+      which it is caught
+- [x] Validator echo at `:625`, beside the hand-echoed `model_type`
+- [x] Schemas: **eight** fields, not five — the five planned
+      (`ProposalOutput`, `ImplementorInput/Output`,
+      `ValidatorInput/Output`) plus `HyperparamTuningInput`,
+      `ExperimentRecord`, and — bounded extension, recorded —
+      `HyperparamTuningOutput`, echoed on BOTH exit paths exactly like
+      the `healthgate_mode` echo it sits beside, because the degraded
+      exit would otherwise make crashed candidates silently unjoinable
+- [x] Superseded (see first item): no protocol parameters exist to add
+- [x] Stamped at the `_emit_record` validate-and-persist seam — the
+      structural choke point (13 callers, one function) — via a new
+      keyword `candidate_id: str | None = None`; all 12 production call
+      sites pass it explicitly (8 in `run()` directly; 2 helpers already
+      held `agent_input`; `_handle_admission_refusal` and
+      `_handle_in_subprocess_rejection` gained a threaded parameter).
+      Also echoed in the run-provenance stamp dict (`run_config`), same
+      cannot-disagree argument as D-C1a
+- [x] Verified by grep AND by behaviour: no registration, dispatch,
+      admission, scoring or path construction reads it;
+      `TestNoBehaviouralKeyUsage` pins five sensitive files, and the
+      behavioural-inertness tests prove identical outputs under two ids
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A minted id arrives unchanged at `ExperimentRecord`
-- [ ] An omitted id arrives as `None` at every hop; nothing is synthesised
-- [ ] Two proposer runs in one iteration mint **different** ids (O-E-4)
-- [ ] Inner implement/validate retries on one `ProposalOutput` keep the
-      **same** id (O-E-4)
+- [x] The minted id reaches `HyperparamTuningInput` AND all three
+      persisted stage JSONs (`test_minted_id_reaches_the_tuner_input_and_every_artifact`);
+      `_emit_record` stamps it onto the record
+      (`test_emit_record_stamps_the_id_before_validate_and_persist`)
+- [x] `None` propagates at every hop; `_emit_record(candidate_id=None)`
+      keeps `None` — nothing synthesised (mutation M-E2-9 police this)
+- [x] Two proposer runs mint different ids (O-E-4)
+- [x] Same-`ProposalOutput` retries keep the id trivially — it rides
+      inside the object; the Branch-B test and the E4 Gate exercise it
 
 **Integration / pseudo**
-- [ ] Drive the **real** protocol functions, not a reimplementation —
-      B1b's P2 and PR D's M-D3 both survived exactly that mistake
+- [x] Every hop is the REAL production function: real proposer/implementor/
+      validator `run()` bodies (bridge-level mocks) + the three real
+      protocols. **A new finding this surfaced:** the fixed-plan seam
+      (`load_validation_fixed_candidate_plan`) computes its unknown-key
+      refusal from `ProposalOutput.model_fields`, so adding the field
+      SILENTLY REMOVED `candidate_id` from that refusal — an operator
+      plan could then have smuggled an identity nobody minted. Closed
+      with an explicit refusal in the loader (same-causal-scope
+      discovery; mutation M-E2-12), and a clean plan now loads with
+      `candidate_id=None` — a fixed-plan candidate is deliberately
+      id-less, per O-E-4
 
 **Negative / invalid input**
-- [ ] A duplicate id within one run is impossible by construction, or
-      fails loudly at mint (§6)
+- [x] **CORRECTED on operator review 2026-08-09 — the original claim
+      ("duplicates impossible by construction") was WRONG as a contract
+      statement.** uuid4 is a *random* UUID (122 bits): collisions are
+      probabilistically negligible, not impossible, and no run-scoped
+      registry can span the chain's per-iteration subprocesses without new
+      persistent state (an operator decision per O-E-3/§15). The audited
+      contract (§6, revised) is: **probabilistic uniqueness at mint,
+      LOUD DETECTION at the read side**, where the attempt-directory
+      evidence makes distinctness observable. Implemented in
+      `funnel_assembly.py`: `IterationFunnel.duplicate_id_conflicts` +
+      per-row `id_conflict`, rows never merged, tuner evidence carrying a
+      conflicted id WITHHELD (never attached-to-last). The pre-guard
+      behaviour — reproduced empirically before fixing — was: two rows
+      survive but the tuner output silently attaches to the LAST row,
+      giving the other a wrong derived `stopped_at_stage`, with no flag
 
 **Backward-compatibility / default parity**
-- [ ] A record with no `candidate_id` loads, scores and resumes unchanged
-- [ ] No retroactive id on resumed pre-PR-E iterations — the analogue of
-      PR D's non-retroactivity rule
-- [ ] E1's key-set pins updated **in this commit**, deliberately
+- [x] A record with no `candidate_id` loads (`test_a_pre_pr_e_record_still_loads`);
+      the broad sweep (below) proves scoring/resume paths unchanged
+- [x] No retroactive id: nothing writes the field outside the mint, the
+      echoes and the stamp — all forward-only
+- [x] E1's key-set pins updated in this commit, deliberately (each set
+      +`candidate_id`; the absence test became
+      `TestTheFactsE2Changed.test_candidate_id_present_on_every_hop_schema`,
+      which also pins `default=None` on all eight schemas)
 
 **Real-training Gate:** none proposed. **Not to be launched without
 operator approval.**
 
 #### 5. Acceptance criteria
 
-- Given a minted id at the proposer, the persisted `ExperimentRecord`
-  carries that exact string.
-- Deleting the parameter at **any one** of the five hops fails a test,
-  detected by an **AST call-site assertion** (`ast.Name` of the same id),
-  not a substring search.
+- Given a minted id at the proposer, that exact string is present in
+  **all four persisted artifacts**: `proposal_{run}.json`,
+  `implementor_{run}.json`, `validation_{run}.json` and the
+  `ExperimentRecord` — the transport test starts at the real mint and
+  ends on disk (§0.J), not at schema construction.
+- Deleting the parameter at any protocol hop, **or the echo at any of the
+  three node construction sites** (implementor ×2 incl. Branch B,
+  validator ×1), fails a test — AST call-site assertions
+  (`ast.Name` of the same id), not substring searches.
 - Given no id, every hop reports `None`; no synthesis anywhere.
 - **O-E-5 boundary, proved as behaviour not as grep:** a test runs the
   production path twice with two *different* `candidate_id` values and
@@ -554,7 +799,7 @@ operator approval.**
 
 | Case | Required behaviour |
 |---|---|
-| Duplicate `candidate_id` in one run | **Fail loudly at mint.** A duplicated join key silently merges two candidates' funnels — worse than no funnel |
+| Duplicate `candidate_id` in one run | **Detected LOUDLY at the read side** (revised 2026-08-09 after the source audit): the mint cannot enforce run-scoped uniqueness — the proposer is constructed fresh per attempt (`model_exploration.py:2322`) and chain mode runs each iteration in its own subprocess, so only new persistent state could span the run, which O-E-3/§15 reserve for the operator. uuid4 gives probabilistic uniqueness; the assembler detects a non-None id in >1 distinct attempt dir, reports `duplicate_id_conflicts`, marks both rows `id_conflict`, never merges, and **withholds** tuner evidence rather than guessing an owner |
 | Legacy record, `candidate_id=None` | Load normally; the row is unjoinable and reported as such. **Never** synthesise |
 | Transport severed at one hop | `None` reaches the record; caught by that hop's mutation, not by a runtime error |
 | Resume of a pre-PR-E iteration | Unchanged; no retroactive id |
@@ -570,29 +815,70 @@ operator approval.**
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Reachability module count / wall time — **to record**
-- [ ] Five hop-deletion mutations, one per hop — **to record**
-- [ ] Mutation: synthesise an id when absent → must fail — **to record**
-- [ ] Mutation: reuse one id across two proposer runs → must fail — **to record**
-- [ ] pyright vs baseline — **to record**
+- [x] `tests/unit/agent/protocols/test_pr_e_candidate_id_transport.py`:
+      `16 passed in 2.33s`; all three PR E modules together
+      `31 passed in 2.93s`
+- [x] Mutations — **13 attempted, 13 behaviour-changing → 13 caught,
+      0 equivalent** (M-E2-7 caught only after a test-architecture fix):
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E2-1 | mint removed | CAUGHT (4 failures) |
+      | M-E2-2 | mint derived from `model_name` | CAUGHT |
+      | M-E2-3 | propose→impl hop severed | CAUGHT |
+      | M-E2-4 | impl→valid hop severed | CAUGHT |
+      | M-E2-5 | valid→tune hop severed | CAUGHT |
+      | M-E2-6 | implementor normal echo severed | CAUGHT |
+      | M-E2-7 | implementor **Branch-B** echo severed | **SURVIVED round 1** — no test drove the reuse path; `TestBranchBReuseEcho` added; **CAUGHT on rerun**. The exact §0.J prediction: every explicit echo is its own mutation target |
+      | M-E2-8 | validator echo severed | CAUGHT (2 failures) |
+      | M-E2-9 | record stamp synthesises when absent (`or "cand_synth"`) | CAUGHT |
+      | M-E2-10 | record stamp removed | CAUGHT |
+      | M-E2-11 | one `_emit_record` call site forgets the id | CAUGHT (the AST all-12-sites test) |
+      | M-E2-12 | fixed-plan `candidate_id` refusal removed | CAUGHT |
+      | M-E2-13 | output echo dropped from the healthy dict | CAUGHT |
+
+- [x] Synthesise-when-absent = M-E2-9, caught
+- [x] Id reuse across runs is structurally impossible (fresh uuid4 per
+      `run()`); the two-runs test pins distinctness; a "reuse" mutation
+      would be M-E2-2's shape and is covered by it — recorded rather
+      than duplicated
+- [x] LLM-supplied id = M-E2-1/M-E2-2 territory plus the dedicated
+      `test_the_llm_cannot_supply_the_id`; the parser whitelists never
+      accepted the key (verified at `:1401` and `:2010`)
+- [x] pyright `0 errors, 4 warnings` — baseline held
+- [x] **Collateral suite repair, classified (rule 15):** the broad sweep
+      (`tests/unit/{agent,sdsc,nodes,core}`: `6446 passed` after fixes)
+      surfaced 14 failures, ALL test-fixture defects from E2's new
+      surface, none production: (a) `test_prephase_measurement_reachability`'s
+      stub `_Input` lacked `candidate_id` (13 tests) — field added to the
+      stub; its `_emit_record` stub lambda widened to accept `**kw`;
+      (b) `test_realized_vs_admitted_memory` anchored on the exact old
+      call text `_emit_record(sandbox, final_record)` — a brittle
+      substring of the §E.3d.9 kind; relaxed to the stable prefix so the
+      guarded property (attach-before-emit) stays pinned
 
 #### 8. Commit boundary
 
-- [ ] Diff touches five schemas, three protocols, two nodes, tests
-- [ ] No scorer, metric, HealthGate or registration file
-- [ ] No measurement forwarded — this commit moves **only** the id
-- [ ] Diff summary, staged file list, tests, mutations and deviations shown before committing
+- [x] Diff: 4 schema files (8 fields), 3 protocols, 3 nodes (proposer
+      mint, implementor ×2 echoes, validator echo), the tuner
+      (`_emit_record` + 12 sites + 2 helper signatures + 3 dict echoes),
+      the fixed-plan loader guard, tests
+- [x] No scorer, metric, HealthGate or registration file
+- [x] No measurement forwarded — this commit moves **only** the id
+- [x] Recorded in §3/§4/§7 above
 
 ---
 
-### Commit E3 — Stop discarding the validator's realized parameter count
+### Commit E3 — Capture both parameter-count views of the instantiated model
 
 #### 1. Goal
 
-Record the parameter count of the model the validator **already
-instantiates**, on the validator's own output, so proposed-vs-realized is
-comparable for every candidate that reaches validation — including those
-that never train.
+Record **both parameter-count views** available from the model the
+validator **already instantiates** — total (architecture size) and
+trainable (training exposure) — on the validator's own output, per
+O-E-6 FINAL. Two sums over one `.parameters()` traversal; no new
+instantiation. Every candidate that reaches validation gets both numbers,
+including candidates that never train.
 
 **Why this commit and not another.** It is a distinct causal fact — a
 measurement computed and thrown away — from E2's missing join key, and it
@@ -600,22 +886,24 @@ is the only stage where the number exists *before* training.
 `ExperimentRecord.model_params` cannot cover candidates that die at
 validation or admission, because they never produce a record.
 
-**Independent of E2** in revision 2: it adds one field to one schema and
-forwards nothing. It is ordered after E1 only for the key-set pin.
+**Independent of E2**: it adds two fields to one schema and forwards
+nothing. It is ordered after E1 only for the key-set pin.
+**UNBLOCKED — O-E-6 FINAL (option c), frozen in §0.I.**
 
 #### 2. Scope
 
 **Changes**
 
 ```text
-nodes/ml_code_validator_agent/…   _check_instantiation_and_gradient returns the count
-agent/schemas/validator.py        ValidatorOutput.realized_parameter_count  NEW, optional
+nodes/ml_code_validator_agent/…   _check_instantiation_and_gradient returns both counts
+agent/schemas/validator.py        ValidatorOutput.realized_total_parameter_count      NEW, optional
+                                  ValidatorOutput.realized_trainable_parameter_count  NEW, optional
 tests/
 ```
 
 **No protocol changes. No downstream schema changes.** Per O-E-3 the
 validator is the canonical owner and `validation_{run_name}.json` is where
-the number lives.
+both numbers live.
 
 **Must remain unchanged**
 - **The validator's verdict.** `passed` and all six check booleans must be
@@ -624,70 +912,110 @@ the number lives.
 - The instantiation and gradient logic itself.
 
 **Non-goals**
-- Any threshold, warning or rejection based on the count.
+- Any threshold, warning or rejection based on either count.
 - Instantiating a model anywhere it is not already instantiated.
-- Forwarding the count anywhere.
+- Forwarding either count anywhere.
+- Any delta/ratio between unlike conventions, anywhere.
 
 **Dependencies:** E1.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `ml_code_validator_agent.py:336-400` and its call site at
-      `:633` immediately before editing; the model is instantiated at `:371`
-- [ ] Widen the helper's return, or return a small typed result — decide
-      after reading the call site, not before
-- [ ] **Determine and match the convention used by
-      `ExperimentRecord.model_params`.** `train_engine_sandbox.py:664`
-      uses `sum(p.numel() for p in model.parameters() if p.requires_grad)`
-      — trainable-only — while `probe_production.py:202` counts all. The
-      two must be comparable or the funnel's central comparison is
-      meaningless. **Verify the exact expression before choosing**
-- [ ] Return `None` when instantiation fails; never `0`
-- [ ] Assert the verdict booleans are unchanged for every existing case
+- [x] Re-read the helper (now at `:336-470` after E2's echo shifted
+      lines) and its call site; all NINE return statements enumerated
+      before editing
+- [x] Chose the widened tuple —
+      `(inst_ok, grad_ok, otype_ok, err, total, trainable)` — over a
+      typed result object: nine mechanical return-site edits versus a new
+      type for one private helper. **Implementation choice recorded:**
+      the counts are measured IMMEDIATELY after successful instantiation,
+      so the six post-instantiation failure returns (illegal declaration,
+      forward crash, non-tensor, wrong shape, backward crash) still carry
+      them — a candidate that instantiates but dies later is exactly one
+      the funnel must not lose, and `test_a_post_instantiation_failure_
+      still_carries_the_counts` pins it
+- [x] Both counts per O-E-6 FINAL, one traversal, same instance;
+      `model_params` untouched; nothing anywhere computes a
+      cross-convention delta or ratio (no consumer exists — E4's reader
+      displays, never derives)
+- [x] The three pre/at-instantiation failures return `None, None`; the
+      plugin-did-not-load branch at the call site likewise
+- [x] Verdict booleans unchanged: every existing verdict expectation is
+      byte-identical. **Deviation, recorded:** 11 tests in
+      `test_validator_agent.py` unpack the (private) helper directly and
+      needed their tuples widened — arity only, zero expectation values
+      changed; node-level tests untouched
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A plugin of known size reports exactly that integer
-- [ ] Instantiation failure → `None`, not `0`
-- [ ] **Convention parity:** a fixture plugin containing a **frozen**
-      parameter, where total and trainable-only differ observably, asserts
-      the validator's count matches `model_params`' convention exactly
+- [x] Known-size fixture: Embedding(256,8) + Conv1d(8,256,1) →
+      **4352 / 4352**, hand-derived literals
+- [x] Instantiation failure and import error → both `None`, never `0`
+- [x] **Frozen-parameter fixture:** same architecture with the embedding
+      frozen → **total 4352, trainable 2304**, pinned independently; the
+      2048 gap is the observable distinction
+- [x] Zero-parameter buffer-only model → **0 / 0, a real measurement**
 
 **Integration / pseudo**
-- [ ] The count is present in the persisted `validation_{run_name}.json`
+- [x] Both counts present in the persisted `validation_{run_name}.json`
 
 **Negative / invalid input**
-- [ ] Import error and config error paths return the same verdict and a
-      `None` count
+- [x] Import / instantiation error paths: same verdicts, `None` counts
+- [x] **Negative finding, recorded as-is (E3 changes no verdict):** a
+      parameterless model CANNOT pass validation — `loss.backward()` on a
+      graph with no grad-requiring tensors raises, so the PRE-EXISTING
+      gradient check fails it. Its counts still read 0/0: a real size on
+      a candidate that failed for a reason unrelated to size. Pinned by
+      `test_a_zero_count_candidate_fails_on_the_PRE_EXISTING_gradient_rule`
+      so a later "fix" cannot silently couple verdict and measurement.
+      Consequence: **every passing model necessarily has ≥1 trainable
+      parameter**, which is what makes mutation M-E3-5b equivalent
 
 **Backward-compatibility / default parity**
-- [ ] **Verdict parity is the acceptance signal:** every existing
-      validator test passes **unmodified**
-- [ ] E1's `ValidatorOutput` key-set pin updated deliberately
+- [x] Verdict parity: `105 passed` in the pre-existing validator modules
+      with zero expectation changes (11 direct-unpack arity widenings
+      only); full validator dir `114 passed` with the new module
+- [x] E1's pins updated deliberately: `VALIDATOR_OUTPUT_KEYS` +2; the
+      no-numeric-field test became `TestTheFactsE3Changed` — the ONLY
+      numeric fields are the two O-E-6 measurements, both defaulting
+      `None` (a numeric default would fake a measurement, §E.3d.4)
 
 **Real-training Gate:** none. The count needs no training.
 
 #### 5. Acceptance criteria
 
-- For a fixture plugin of known size,
-  `ValidatorOutput.realized_parameter_count` equals that exact integer,
-  and the value is present in the persisted JSON.
-- Every pre-existing validator test passes **unmodified**.
-- Instantiation failure yields `None`; no path can produce `0` for a model
-  that failed to instantiate.
-- The convention **provably matches** `ExperimentRecord.model_params`,
-  proved with a frozen-parameter fixture where the conventions would
-  otherwise disagree.
-- No branch anywhere reads the count.
+- For a fixture plugin of known size, `realized_total_parameter_count`
+  and `realized_trainable_parameter_count` each equal their exact
+  hand-computed integer, and both are present in the persisted JSON.
+- The frozen-parameter fixture pins the two fields **independently**:
+  total includes the frozen parameter, trainable excludes it.
+- All pre-existing validator **behavioural/verdict expectations** remain
+  unchanged. 11 tests that directly unpack the private helper required
+  arity-only updates for the widened return tuple (plus one more found by
+  the full suite in `test_output_contract_end_to_end.py`, fixed
+  `ca86aaac`); **zero expected verdict/value changed anywhere**.
+  *(Corrected on operator review 2026-08-09 — the original "passes
+  unmodified" claim was stale against E3's own implementation record.)*
+- Instantiation failure yields `None` for both; no path can produce `0`
+  for a model that failed to instantiate.
+- `ExperimentRecord.model_params` is untouched and un-redefined.
+- No code path computes a cross-convention delta or ratio.
+- No **behavioural or decision-bearing** branch consumes either count:
+  neither measurement affects validation, admission, tuning, scoring,
+  HealthGate or scientific authority. The E4 read-side assembler reads
+  and displays both **observationally** — which is the funnel working,
+  not a violation. *(Corrected on operator review 2026-08-09 — the
+  original "no branch anywhere reads either count" was written before E4
+  existed and was superseded by it.)*
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
 | Model instantiates but `.parameters()` raises | `None`, verdict unchanged; never crash the validator |
-| Model has zero parameters | Record `0` — a real measurement, distinct from `None` (§E.3d.4) |
-| The two conventions disagree | **Stop and report.** Choosing silently would make the funnel's central comparison wrong in a way no later test catches |
+| Model has zero parameters | Record `0` for both — a real measurement, distinct from `None` (§E.3d.4) |
+| A model with frozen parameters makes the conventions diverge | Both remain true measurements of different things (O-E-6). Report each under its own name; never reconcile them into one number |
 | Count contradicts `parameter_count_estimate` wildly | Record it. **No warning, no verdict** — that is the point of the PR |
 
 #### 7. Verification commands and evidence
@@ -697,16 +1025,28 @@ the number lives.
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
-- [ ] Validator suite unmodified, count and wall time — **to record**
-- [ ] Mutation: switch total ↔ trainable-only → must fail — **to record**
-- [ ] Mutation: return `0` instead of `None` on failure → must fail — **to record**
-- [ ] Mutation: let the count influence `passed` → must fail — **to record**
+- [x] Validator dir `114 passed in 2.00s`; three PR E modules + validator
+      `145 passed in 3.20s`
+- [x] Mutations — **8 attempted, 6 behaviour-changing → 6 caught,
+      2 classified**:
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E3-1 | the two expressions swapped | CAUGHT (frozen fixture) |
+      | M-E3-2 | trainable derived from total | CAUGHT (frozen fixture) |
+      | M-E3-3 | total derived from trainable | CAUGHT (frozen fixture) |
+      | M-E3-4 | instantiation failure returns `0` not `None` | CAUGHT |
+      | M-E3-5 | (harness error) comment-only edit | **INVALID** — changed no behaviour; recorded as a harness mistake, not a result |
+      | M-E3-5b | `passed and total > 0` | **EQUIVALENT, proved:** the pre-existing gradient check requires a successful `backward()`, which requires ≥1 grad-requiring parameter — so every passing model has `total ≥ trainable ≥ 1` and the guard can never flip a verdict. The zero-param finding above is the proof |
+      | M-E3-5c | `inst_ok` coupled to `total < 10_000` (non-equivalent replacement — the canonical 16,640-param fixture flips) | CAUGHT (2 failures) |
+      | M-E3-6 | counts dropped from the constructed output | CAUGHT (2 failures) |
 
 #### 8. Commit boundary
 
-- [ ] Diff touches the validator node, its schema, tests — nothing else
-- [ ] No protocol, no downstream schema, no verdict logic
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] Diff touches the validator node, its schema, tests — nothing else
+      (no protocol file, no downstream schema, no tuner file)
+- [x] No verdict logic changed; parity proved above
+- [x] Recorded in §3/§4/§7
 
 ---
 
@@ -744,52 +1084,90 @@ merges or drops rows — is different from a transport gap.
 
 #### 3. Implementation plan
 
-- [ ] Discover candidates by globbing `{iter_dir}/attempt_*/` and reading
-      whichever of `proposal_`, `implementor_`, `validation_{run}.json`
-      exist, plus the tuner's records
-- [ ] Join on `candidate_id`; records with `None` are **unjoinable**, each
-      kept separate
-- [ ] **Derive** `stopped_at_stage` from which native outcomes exist and
-      what they say — no stored field (O-E-2)
-- [ ] Carry each stage's **native** reason verbatim; where a stage has
-      none (implementation, §0.E), mark the reason **absent**
-- [ ] Report a candidate with a missing stage as **incomplete, stage
-      named** — never dropped, never defaulted
-- [ ] Record `preflight_factor` as a **measurement**, never a disposition
-      (§0.D)
-- [ ] Backfill: run over **stored** attempt-3 records and confirm the
-      parameter distribution the ledger already records
-      (663,488 - 12,772,096) is reproduced, **without claiming any new
-      distribution** (§E.3d.6)
-- [ ] Emit no aggregate, mean, ratio or verdict
+- [x] Implemented as `execute_tools/funnel_assembly.py` —
+      `assemble_iteration_funnel(iter_dir)` globs `attempt_*` (name-blind),
+      reads whichever stage files exist by filename prefix, and reads
+      tuner `run_output_*.json` from the per-model tuning dirs
+- [x] Join on explicit `candidate_id` only. `None` artifacts each stay a
+      SEPARATE unjoinable evidence item — even within one attempt dir,
+      because same-directory co-location is a directory fact, not an
+      identity (§10 forbids the dir-suffix join)
+- [x] `stopped_at_stage` derived on read in `_derive_stop` — funnel
+      order, first failure/absence wins; stored nowhere
+- [x] Native payloads carried verbatim in `StageEvidence.native`; the
+      stopping stage's payload IS `stop_reason_native`; implementation
+      (and never-ran stages) get `reason_absent=True`, no invention
+- [x] The four O-E-6 display labels are row fields
+      (`proposed_trainable_parameter_count_estimate`,
+      `implemented_total_parameter_count`,
+      `implemented_trainable_parameter_count`,
+      `trained_trainable_parameter_counts` — a LIST, honouring fan-in);
+      no delta/ratio/mean anywhere in the module
+- [x] `incomplete_stages` names every unreached stage;
+      "reached but number absent" stays visible as a present stage with a
+      None measurement — the §E.3d.4 four-state distinction
+- [x] `preflight_factor` carried as a measurement column; the module
+      docstring states the C1 advisory-only contract
+- [x] Legacy stage-local sanity check implemented as a separate flat
+      reader (`read_trained_parameter_counts`) that joins NOTHING, plus an
+      env-gated test (`SIDERIUS_V20_ATTEMPT3_DIR`, skip-with-reason when
+      unset per the portability rules). **Run against the real preserved
+      attempt-3 campaign on lilab: both ledger values (7,280,256 and
+      8,409,280) reproduced.** Finding recorded: the ledger's ×3/×4
+      values span BOTH chains (7,280,256 in `v20_arch_15_19`, 8,409,280
+      in `v20_loss_15_19`), so the check reads the campaign root — the
+      first single-chain version failed honestly and was corrected. The
+      assertion is PRESENCE of the recorded values, not a multiset — an
+      exact-count assertion would encode a counting methodology the
+      ledger does not state (§E.3d.6)
+- [x] No aggregate, mean, ratio or verdict anywhere in the module
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Complete candidate → every reached stage present
-- [ ] Candidate stopped at validation → derived stage + the validator's
-      own booleans as the reason
-- [ ] Candidate stopped at implementation → stage named, reason **absent**
-- [ ] Two candidates in one iteration do not merge
+- [x] Complete candidate: all stages present, fan-in of 3 records, all
+      four labelled columns populated from their native owners
+- [x] Stopped at validation → the native verdict IS the reason
+- [x] Stopped at implementation → reason ABSENT; plus the M-E4-7 killer:
+      implemented-but-never-validated stops at validation with reason
+      absent (the branch the first mutation round proved uncovered)
+- [x] Two candidates never merge; a None-id tuner output is NOT absorbed
+      via the model_name coincidence (the P6.2 regression case)
 
-**Integration / pseudo**
-- [ ] One pseudo-mode iteration yields a complete row end to end
+**Integration / pseudo — MERGE REQUIREMENT (DC-2)**
+- [x] **THE REQUIRED GATE PASSED** —
+      `tests/integration/workflows/test_pr_e_funnel_gate_pseudo.py`: the
+      real `run_workflow` with real proposer/implementor/validator
+      `run()` bodies (bridge-level mocks) and the REAL tuner on the K.9
+      pseudo stack (RecordingLLMBridge + RecordingSandbox, canned
+      choreography = 3 records). One minted id appears in all three
+      persisted stage JSONs, the tuner run_output, and every record; the
+      assembler returns exactly one complete row with
+      `tuner_record_count == 3`. Notable: the validator validated the
+      implementor's REAL generated plugin and it passed on its merits.
+      Two real guards fired during bring-up and were satisfied, not
+      bypassed: the DS5 run-invariants ingress check refused an
+      unstamped seed until the seed declared `health_gate_enabled=False`
 
 **Negative / invalid input**
-- [ ] Several records with `candidate_id=None` stay **separate and
-      unjoinable** — never merged into one pseudo-candidate. This is the
-      most dangerous possible bug in this commit
-- [ ] A malformed / truncated stage JSON is reported as unreadable, not
-      silently treated as a missing stage
-- [ ] Non-local storage backend → "not discoverable", never "no candidate"
+- [x] Six None-id artifacts across two legacy dirs → six separate
+      unjoinable items (M-E4-1 polices the merge)
+- [x] Malformed JSON → `UnreadableArtifact` on the row, never
+      stage-absent (M-E4-3)
+- [x] Missing directory → `discoverable=False`, distinct from an existing
+      empty dir (zero candidates); the E1-deferred "empty workspace"
+      case is covered here too (M-E4-4)
 
 **Backward-compatibility / default parity**
-- [ ] Backfill is **read-only**; assert nothing on disk changes
+- [x] `test_the_assembler_writes_nothing` snapshots the workspace before
+      and after; M-E4-6 (the reader writes a funnel artifact) is caught
+      by it
 
 **Real-training Gate:** the ledger asks for *"one iteration produces a
-complete funnel record"*. **Pseudo-mode is sufficient and is what this
-design proposes.** A real iteration is optional strengthening evidence and
-**must not be launched without operator approval.**
+complete funnel record"*. **The pseudo-mode iteration above satisfies it
+and is REQUIRED (DC-2).** A real-GPU/real-LLM iteration adds no property
+the pseudo path does not exercise, remains optional strengthening
+evidence, and **must not be launched without operator approval.**
 
 #### 5. Acceptance criteria
 
@@ -801,8 +1179,12 @@ design proposes.** A real iteration is optional strengthening evidence and
   unjoinable. **Not three, and never one merged row.**
 - With two legacy `None` records, the result has **two** unjoinable rows,
   not one.
-- The backfill reproduces the ledger's recorded attempt-3 range from
-  stored records, and the test asserts the **range**, not a new claim.
+- The legacy sanity check reproduces the ledger's recorded attempt-3
+  trained-count range from ONE stage's stored records, asserts the
+  **range**, and its output is labelled stage-local — it never appears as
+  a funnel row.
+- A mutation that joins legacy records via `model_name` must fail — the
+  name-keyed join is the P6.2 regression this commit must make impossible.
 - The output contains no aggregate and no field on §0.G's forbidden list.
 - No producer file appears in the diff; no file is written.
 
@@ -824,18 +1206,38 @@ design proposes.** A real iteration is optional strengthening evidence and
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
-- [ ] Completeness tests count / wall time — **to record**
-- [ ] Backfill result vs the ledger's recorded range — **to record**
-- [ ] Mutation: merge `None`-id records → must fail — **to record**
-- [ ] Mutation: drop an incomplete row instead of naming it → must fail — **to record**
-- [ ] Clean-tree full suite, pytest rc, counts — **to record**
+- [x] Assembler module `15 passed, 1 skipped (env-gated)` in 0.13s;
+      with `SIDERIUS_V20_ATTEMPT3_DIR` set: `15 passed` incl. the real
+      legacy check
+- [x] Legacy check against the preserved campaign: both recorded values
+      present (see §3)
+- [x] Mutations — **7 attempted, 7 behaviour-changing → 7 caught**
+      (M-E4-7 after a test addition):
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E4-1 | None ids merge into one pseudo-candidate | CAUGHT |
+      | M-E4-2 | tuner output joined by `model_name` | CAUGHT (the P6.2 regression case) |
+      | M-E4-3 | malformed JSON treated as stage-absent | CAUGHT |
+      | M-E4-4 | missing dir reported as empty-but-discoverable | CAUGHT |
+      | M-E4-5 | incomplete rows silently dropped | CAUGHT (6 failures) |
+      | M-E4-6 | the reader writes a funnel artifact | CAUGHT (write-nothing snapshot) |
+      | M-E4-7 | stop derivation mislabels implemented-but-never-validated | **SURVIVED round 1** — the branch had no test; killer added (implemented-but-never-validated), **CAUGHT on rerun** |
+
+- [x] Clean-tree full suite: recorded in §PR-E final validation
 
 #### 8. Commit boundary
 
-- [ ] Read-side + tests + this document only
-- [ ] No producer file; nothing written to disk
-- [ ] No aggregate, distribution claim or corrective change
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] One new read-side module + tests + this document. **Deviation,
+      recorded:** the module lives in `execute_tools/` beside
+      `scientific_aggregation.py` (the closest read-side precedent); it
+      is a helper module, not a node or skill, so no `{node}.md` is
+      required by the doc-sync rule — its contract lives in its docstring
+      and this section
+- [x] No producer file in the diff; the assembler writes nothing (proved
+      by test + M-E4-6)
+- [x] No aggregate, no distribution claim, no corrective change
+- [x] Recorded in §3/§4/§7 above
 
 ---
 
@@ -850,16 +1252,161 @@ design proposes.** A real iteration is optional strengthening evidence and
 | E | E4 | the join is complete; unjoinable rows stay unjoinable |
 | F | all | PR-level mutation account, by category, never a percentage |
 
-**Layer G — production-boundary evidence.** Assessment: **no GPU or LLM
-Gate is required.** Identity transport is in-process typed plumbing; the
-validator count needs no training; the assembler is read-only. The
-residual, stated rather than papered over: no deterministic fixture drives
-a *real* proposer, so the mint site is covered by a call-site test plus a
-mutation — as PR D covered hop 7 and B1b covered its clamp. A pseudo-mode
-iteration is the cheapest sufficient live confirmation and is **optional**.
+**Layer G — production-boundary evidence (revised by DC-2).** **One
+bounded deterministic/pseudo-mode iteration producing a complete on-disk
+funnel, successfully assembled, is a MERGE REQUIREMENT.** No real GPU and
+no real LLM are required — but unlike PR D, whose change was two `Literal`
+strings crossing pure in-process functions, E4's claim spans
+`native persistence -> filesystem discovery -> candidate_id join ->
+multi-record tuner fan-in -> derived row`, which unit and schema tests
+cannot exercise as one path. Revision 2 said "optional" here while E4's
+validation plan said required; the contradiction is resolved in favour of
+**required**, because the evidence is genuinely new and cheap. The
+remaining residual: no deterministic fixture drives a *real* LLM proposer,
+so the mint site is additionally covered by a call-site test plus a
+mutation, as PR D covered hop 7.
 
 **The scientific outcome is never the oracle.** A candidate proposing 600k
 parameters is not a test failure.
+
+### Layer F — PR-level mutation account (final)
+
+```text
+33 attempted
+30 behaviour-changing -> ALL 30 caught
+ 2 equivalent          -> classified with proofs
+ 1 invalid             -> classified (harness slip, recorded)
+
+  E1   5   4 caught; M-E1-3 EQUIVALENT (the temp attempt-dir name is
+           renamed away; the rename target owns the final layout)
+  E2  13   13 caught; M-E2-7 (Branch-B echo) survived round 1 because no
+           test drove the reuse path — TestBranchBReuseEcho added, caught
+  E3   8   6 caught; M-E3-5 INVALID (comment-only edit — a harness slip
+           recorded as such, not a result); M-E3-5b EQUIVALENT, PROVED:
+           the gradient check requires a successful backward(), which
+           requires >=1 grad-requiring parameter, so `passed and total>0`
+           can never flip a verdict — replaced by the non-equivalent
+           M-E3-5c (threshold coupling), caught
+  E4   7   7 caught; M-E4-7 (stop-derivation branch) survived round 1
+           because the implemented-but-never-validated branch had no
+           test — killer added, caught
+```
+
+Every round-1 survivor was a missing test, and every fix was to the test
+architecture — never to the mutation or its report. Three of the four
+commits produced one, which is the pattern §E.3d.9 predicts: a transport
+test is decoration exactly where nobody drove the path.
+
+## PR-E final validation
+
+Run from a **clean tracked tree** at `b008ff54` (E0-E4 all committed;
+verdicts from pytest's own exit status, never a pipe's):
+
+```text
+pytest tests/unit -q -m "not real_run"        FINAL, clean tree at e83eef71
+    8200 passed, 3 skipped, 1 xfailed         487.62s
+    PYTEST_RC=0                               (pytest's own status)
+    grep -cE "^(FAILED|ERROR)"  ->  0
+    delta from the 8196 pre-review run = +4 = exactly the four
+    duplicate-id guard tests
+
+  (previous authoritative run at ca86aaac: 8196 passed, 3 skipped,
+   1 xfailed, rc=0 — superseded by the operator-review round above)
+
+ruff check .                                 All checks passed!
+ruff format --check .                        775 files already formatted
+pyright (1.1.409)                            0 errors, 4 warnings  [baseline held]
+```
+
+**The count delta is itself a check.** Baseline at `aace4abb` was
+`8146 passed, 2 skipped`. PR E adds **57** tests, of which 6 live in
+`tests/integration` (the layout module and the Gate, outside the unit
+suite) and 1 is env-gated (the legacy V20 check, skipping without
+`SIDERIUS_V20_ATTEMPT3_DIR`): `8146 + 50 = 8196` passed and `2 + 1 = 3`
+skipped — **exact**. No pre-existing test was deleted, renamed away or
+skipped to reach green.
+
+**One defect this run caught, fixed in `ca86aaac`:** a third module
+(`test_output_contract_end_to_end.py`, PR A's) unpacked the widened
+helper's old 4-tuple — outside the validator directory my E3 sweep
+covered. Arity-only; a repo-wide census now confirms zero un-widened
+direct unpackers remain. The first full run reported `2 failed` and the
+suite was re-run from the fixed tree — the recorded verdict above is the
+authoritative second run, not the first.
+
+### Freeze proofs — by diff at the final head, base `aace4abb`
+
+```bash
+git diff --name-only aace4abb..HEAD -- . ':(exclude)docs' \
+  | grep -iE 'scoring|score|snr|metric|health_check|healthgate|loss_models|scientific_authority'
+# -> NONE
+git diff --name-only aace4abb..HEAD | grep -iE 'prompt|advice'
+# -> NONE
+git diff aace4abb..HEAD -- nodes/ml_model_proposal_agent/ml_model_proposal_agent.py
+# -> touches ONLY: +import uuid, +the 9-line mint block. The prompt text,
+#    the ~100M prior and every advice surface are byte-identical.
+```
+
+The complete non-documentation diff is **22 files**: 13 production
+(4 schemas, 3 protocols, 4 nodes+launcher, 1 new read-side module) and
+9 test files (6 new modules, 3 pre-existing modules touched only for the
+new surface's arity/fixtures).
+
+### The required Gate (DC-2) — PASSED
+
+`test_pr_e_funnel_gate_pseudo.py`: one bounded pseudo-mode iteration
+through the real `run_workflow` produced the complete on-disk funnel and
+the assembler built the complete row (fan-in 3). What it uniquely proved:
+the persistence -> discovery -> join -> fan-in -> derived-row path works
+as ONE path, which no unit layer exercises. No GPU, no real LLM.
+
+### Legacy stage-local sanity check — RUN against the real V20 data
+
+`SIDERIUS_V20_ATTEMPT3_DIR=/home/klz/Data/SIDEREIS_DATA/v20_attempt3_20260806_233242`:
+both ledger-recorded values (7,280,256 · 8,409,280) reproduced from the
+preserved campaign's own stage-local records. **No distribution is
+claimed** (§E.3d.6) — presence of the recorded values, nothing more.
+
+### Operator-review item 1 — the duplicate-id audit and guard (2026-08-09)
+
+**Audit answers, from source and an empirical reproduction:**
+
+| question | answer | evidence |
+|---|---|---|
+| what happens today with a duplicate non-None id across two attempts? | rows NOT merged, but the tuner output silently attached to the LAST row; the other row derived a wrong `stopped_at_stage="tuner"`; no flag anywhere | reproduction script over `funnel_assembly.py:329` (dict comprehension keeps last) |
+| detected anywhere? | no — not at mint, not at read, not in any test | grep + reproduction |
+| does the attempt-dir boundary preserve distinctness? | yes — two rows with distinct `attempt_dir` | reproduction |
+| any run-scoped uniqueness state at the mint? | no — proposer constructed fresh per attempt (`model_exploration.py:2322`); chain mode = one subprocess per iteration (`run_one_iteration.py:5`); only new persistent state could span the run (operator territory, O-E-3/§15) | source |
+| classification | **PROBABILISTICALLY UNIQUE ONLY** — uuid4 is a random UUID, not an allocator with a uniqueness proof | python docs / source |
+
+**Chosen narrowest fix (zero new state): read-side loud detection.**
+`DuplicateIdConflict` on the funnel + `id_conflict` on the rows; rows
+never merge; tuner evidence carrying a conflicted id is **withheld** with
+its path recorded on the conflict, because attributing it to either
+candidate would be a silent guess. Mint unchanged.
+
+```text
+guard tests    4 new (loud report, withheld evidence, same-dir NOT a
+               conflict, healthy runs report nothing)
+mutations      3 attempted, 2 behaviour-changing -> 2 caught
+               (M-E5-1 detection removed; M-E5-2 attach-to-last restored),
+               1 EQUIVALENT with proof (M-E5-3 `len(group)>1` vs
+               distinct-dirs: same-dir same-id artifacts merge into ONE row
+               and None-dir rows are excluded from grouping, so the two
+               conditions are always equal)
+```
+
+PR-level mutation account becomes: **36 attempted, 32 behaviour-changing
+→ 32 caught, 3 equivalent (proved), 1 invalid (classified).**
+
+**CI slip during this round, recorded:** the guard's first push failed CI
+on pyright strict — the new grouping dict reused the name of an existing
+per-directory list local (`dir_rows`), and pyright had not been re-run
+after the guard change (only ruff + pytest were). Renamed to
+`rows_by_claimed_id`; behaviour identical (the local suite was green both
+times because the list use precedes the dict at runtime); full pyright
+re-run `0 errors, 4 warnings`. The lesson is the PR D format-check lesson
+again, one tool over: every checker re-runs at every final head.
 
 ## 6. Backward compatibility / parity
 
@@ -895,15 +1442,20 @@ parameters is not a test failure.
    mutations.
 3. Two different `candidate_id` values produce **identical behaviour** —
    O-E-5's invariant, proved by execution.
-4. The validator's realized count is captured where the model is already
-   instantiated, with the verdict bit-identical and the convention
-   provably matching `model_params`.
+4. Both validator counts (total + trainable) are captured where the model
+   is already instantiated, pinned independently by a frozen-parameter
+   fixture, with the verdict bit-identical, `model_params` untouched, and
+   no cross-convention delta computed anywhere (O-E-6 FINAL).
 5. **No measurement is copied past its native owner** (O-E-3).
 6. `stopped_at_stage` exists only as a derived read-side value; **no new
    reason vocabulary appears in the diff** (O-E-2).
 7. The funnel assembles per candidate, names incomplete stages, and never
    merges unjoinable records.
-8. **No distribution is claimed** (§E.3d.6).
+8. **No distribution is claimed** (§E.3d.6); the legacy attempt-3 check
+   is stage-local, never a reconstructed funnel, and no identity is ever
+   inferred from `model_name` (DC-3).
+8b. One bounded pseudo-mode iteration produces a complete on-disk funnel
+   and is assembled — **merge requirement** (DC-2).
 9. No prompt, advice, threshold, scorer, metric or HealthGate file is in
    the diff; no new persistent artifact exists.
 10. Full configured CI passes **in addition to** PR E's own reachability
@@ -912,8 +1464,11 @@ parameters is not a test failure.
 ### V21 review fields
 
 ```text
-Metric-frozen proof:      to be verified by diff at merge — PR E touches no
-                          scoring path
+Metric-frozen proof:      VERIFIED BY DIFF at the final head — no scorer,
+                          metric, SNR, HealthGate-check or
+                          authority-semantics file outside docs/; no prompt
+                          or advice file anywhere in the diff; the ~100M
+                          prior byte-identical (§PR-E final validation)
 
 Name-keyed dependency
 added:                    MUST BE NONE in the behavioural sense (O-E-5).
@@ -932,12 +1487,23 @@ Transport contract:       field:    candidate_id  (the ONLY cross-stage field)
                           measurements: NOT transported — native owners per O-E-3
                           branches: complete / stopped-early / legacy-None
 
-Subprocess evidence:      to be determined in E3 — confirm whether the
-                          validator's instantiation runs in-process or in a
-                          sandbox subprocess, and whether the count crosses it
+Subprocess evidence:      RESOLVED in E3 — the validator's instantiation
+                          check is IN-PROCESS (importlib load + instantiate
+                          inside the validator's own process,
+                          `_check_instantiation_and_gradient`), so the counts
+                          cross no process boundary before persistence. The
+                          tuner's training subprocess is untouched by PR E;
+                          the id reaches records via the in-process
+                          `_emit_record` seam
 
-Acceptance evidence:      Layers A-F deterministic; Layer G argued unnecessary
-                          with the residual stated
+Acceptance evidence:      Layers A-F deterministic and complete; the
+                          REQUIRED Layer-G pseudo Gate PASSED (persistence ->
+                          discovery -> join -> fan-in -> derived row, as one
+                          path); mutations 33 attempted / 30 behaviour-
+                          changing -> 30 caught / 2 equivalent + 1 invalid
+                          classified; legacy stage-local check run against
+                          the real preserved V20 campaign; full clean-tree
+                          suite + pyright in §PR-E final validation
 ```
 
 ---
@@ -951,27 +1517,11 @@ changed. O-E-1 additionally requires a **dated append-only correction in
 `v21_priorities.md`**, retiring the "prompt contradiction resolved" merge
 criterion.
 
-### Open — one, surfaced by the revision-2 audit
+### Open — NONE
 
-**Q-E-5 — parameter-count convention (E3 §3, blocking E3 only).**
-
-`ExperimentRecord.model_params` is written from
-`train_engine_sandbox.py:664` as **trainable-only**
-(`if p.requires_grad`), while `probe_production.py:202` counts **all**
-parameters. The validator's new count must match whichever convention the
-funnel's proposed-vs-realized comparison is meant to use.
-
-This is flagged rather than decided because it is a **measurement-
-definition** question like O-E-4: a model with frozen layers reports two
-different truths, and choosing silently would make the funnel's central
-comparison wrong in a way no later test catches.
-
-**My recommendation: match `ExperimentRecord.model_params`
-(trainable-only), and record the choice explicitly in the design.** The
-funnel's comparison is proposed-vs-realized-vs-trained, so the two
-realized numbers must agree with the trained one, not with the probe.
-E3 §3 requires verifying the exact expression before implementing, so this
-can also be settled at that point if you prefer.
-
-**No other decision is open. E1 is not to be implemented until this
-revision is approved.**
+Q-E-5's lineage closed as **O-E-6 FINAL** (§0.I): the operator resolved
+the STOP condition as option (c) on 2026-08-08. The design is **APPROVED**;
+no further design review is required. Implementation proceeds
+E0 → E1 → E2 → E3 → E4 autonomously once PR #189 is merged from its
+restored D-only branch and this branch is updated onto the merged master.
+**PR E is not to be merged by the implementer.**

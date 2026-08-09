@@ -177,6 +177,12 @@ class ImplementorInput(BaseModel):
     which maps ProposalOutput → ImplementorInput.
     """
 
+    candidate_id: str | None = Field(
+        default=None,
+        description="V21 PR E — carried verbatim from ``ProposalOutput.candidate_id`` "
+        "by the propose->impl protocol. Observational join identity only "
+        "(O-E-5); None = pre-PR-E or non-proposer candidate.",
+    )
     model_name: str = Field(
         description="snake_case model type key. Used as the filename and PLUGIN_MODEL_TYPE constant.",
     )
@@ -305,6 +311,12 @@ class ImplementorOutput(BaseModel):
     via implementor_to_validator_v1 to confirm the plugin is valid.
     """
 
+    candidate_id: str | None = Field(
+        default=None,
+        description="V21 PR E — echoed verbatim from ImplementorInput. "
+        "Observational join identity only (O-E-5); None = pre-PR-E or "
+        "non-proposer candidate.",
+    )
     model_type: str = Field(
         description="The PLUGIN_MODEL_TYPE key written into the plugin file. "
         "Same as the input model_name.",
