@@ -1,10 +1,15 @@
 # PR F — Inspection-cost scaling study (measure only)
 
-**Status: DESIGN REVISION 2 — 2026-08-09, returned for operator review.
-NOT approved for implementation; no production code, test, schema,
-launcher or scorer file is touched by this document.** Q-F-3 is RESOLVED
-(operator, 2026-08-09); Q-F-1 and Q-F-2 are rewritten below with the
-source-grounded semantics the operator required and await final approval.
+**Status: DESIGN REVISION 3 — 2026-08-09, returned for final operator
+approval. NOT approved for implementation; no production code, test,
+schema, launcher or scorer file is touched by this document.**
+Q-F-1 APPROVED, Q-F-3 APPROVED (operator, 2026-08-09). Q-F-2 approved in
+principle; this revision applies the five narrow methodology
+reconciliations the operator required — per-operation timeout semantics
+matched to production's own enforcement styles, native
+`BatchSearchTimeout` outcomes preserved verbatim, the wall-expiry
+completion rule, the timing-blind grid rule, and the interpretation
+boundary.
 
 | | |
 |---|---|
@@ -114,7 +119,15 @@ via `ml_models/models_format_sandbox.py`; fcnet's config class is
 | gated_fno | `GatedFNOConfig` | `width=64, num_layers=2, num_gates=128` |
 
 **Grid rule (frozen here, exact values fixed in F1 after instantiation
-checks):** each architecture scales its OWN primary width/depth knobs
+checks — and TIMING-BLIND, operator rule):** grid selection may depend
+ONLY on config/schema validity, the deterministic ladder rules, and
+instantiation validity. It must NEVER depend on measured wall time,
+censoring outcomes, curve appearance, or whether a point supports a
+preferred recommendation. The flow is one-directional — generate the
+deterministic candidate grid, instantiate, valid stays valid, invalid
+stays in the manifest as `invalid_config` — never "try, dislike the
+timing, swap the multiplier". The manifest hash freezes the population
+before F2a, which makes this rule mechanically checkable. each architecture scales its OWN primary width/depth knobs
 through a small deterministic ladder (multipliers on the defaults, e.g.
 ×{½, 1, 2, 4, 8} on the primary width, respecting each field's validity;
 fcnet scales `latent_dims[0..1]`). Realized parameter counts (both O-E-6
@@ -179,9 +192,27 @@ estimate-bounded**: trusting a projection alone would repeat the
 one-number-optimism this subsystem's history warns about. Structure:
 
 ```text
-per-measurement   SIGALRM at 2 x the operation's production budget
-                  (reusing production's own _forward_pass_timeout
-                  primitive — §0.G)
+per-measurement bounds — PER OPERATION, matching production's own
+enforcement style (operator reconciliation 1; a uniform "2x everything"
+would BYPASS the native preemptive semantics for the training probe):
+
+  candidate_probe   production 120 s is POST-HOC (never interrupts).
+                    Harness EMERGENCY backstop: SIGALRM at 2 x 120 = 240 s
+                    via production's _forward_pass_timeout. Exact elapsed
+                    in [0, 240); >= 120 is an exact over-budget datum.
+  full_search       the REAL resolve_inference_batch runs with its own
+                    NATIVE semantics untouched (post-hoc 120/600 checks
+                    raising BatchSearchTimeout with the typed record).
+                    Harness EMERGENCY backstop: SIGALRM at 840 s
+                    (600 + one overrunning probe's 240) around the call.
+  training_probe    production 180 s is PREEMPTIVE, and the harness
+                    PRESERVES it: the probe runs under production's own
+                    _forward_pass_timeout(single_probe_seconds) exactly
+                    as wrapper.py:591 does. A fired 180 s alarm IS the
+                    production behaviour being studied — right-censoring
+                    at lower bound 180. NO 2x relaxation exists for this
+                    operation.
+
 per-run WALL      --max-wall-seconds, checked BETWEEN measurements
                   (post-hoc, exactly like batch_search_seconds);
                   on expiry the run STOPS CLEANLY with everything
@@ -197,55 +228,92 @@ pilot ramp        the pilot runs its 2 extreme entries (smallest and
                   touching the remaining 10
 ```
 
+Per-entry worst case is unchanged (7 × 240 + 840 + 180 = 2 700 s): the
+training probe was already accounted at its native 180.
+
 Expected reality, for calibration only (never a bound): C12 measured the
 323 M baseline's probe path at ~17.7 ms/step scale — most measurements
 should take seconds. The wall exists for the tail the study is about.
 
 ### 0.F Censoring and reproducibility semantics (operator requirement 4)
 
-Grounded in the native outcomes from §0.A — no second vocabulary. The
-decisive census fact: the two incident budgets are **post-hoc**, so an
-over-budget probe still yields an **exact** elapsed time. True censoring
-occurs only when the harness's own 2× SIGALRM interrupts.
+Grounded in the native outcomes from §0.A — no second vocabulary, and
+(operator reconciliation 1+2) **per-operation**, because the three live
+budgets enforce differently. The exception payloads were audited:
+`BatchSearchTimeout.record` IS the typed `ProbeTimeoutRecord`
+(`batch_resolver.py:103-105` — "carries the typed record rather than a
+message"), and `ForwardPassTimeoutError` carries a message only
+(`wrapper.py:106`), so the training-probe timeout's evidence is the
+operation name + the native 180 s bound.
 
-**Per-repeat raw dispositions (preserved verbatim, never coerced):**
+**Per-repeat raw record — a study-level ENVELOPE around native evidence,
+never a replacement for it:**
 
 ```text
-completed          exact elapsed_seconds; an EXACT observation even when
-                   elapsed >= the production budget (post-hoc semantics)
-right_censored     the 2x SIGALRM fired: lower_bound_seconds = 2 x budget;
-                   exact elapsed UNKNOWN. Never written as an elapsed time
-harness_deadline   reserved for the stuck-native-call case (§0.G): the
-                   external backstop killed the run during this call
-unloadable         the plugin/config could not be loaded/instantiated;
-                   loader error recorded
-invalid_config     reference-grid config refused by its own schema
+execution_outcome:
+  completed          the call returned. elapsed_seconds is EXACT — and for
+                     the POST-HOC operations this includes elapsed >= the
+                     production budget (an exact over-budget observation)
+  native_timeout     PRODUCTION's own bounded semantics ended the call:
+                       full_search: BatchSearchTimeout raised — the native
+                         ProbeTimeoutRecord is preserved VERBATIM
+                         (model_dump) on the measurement, including its
+                         operation ("batch_candidate" | "batch_search"),
+                         its budget, and its EXACT elapsed (post-hoc: the
+                         record's elapsed is a real measurement)
+                       training_probe: ForwardPassTimeoutError at the
+                         NATIVE 180 s — right-censored,
+                         lower_bound_seconds = 180, exact elapsed UNKNOWN;
+                         operation recorded as "training_probe"
+  harness_backstop   the STUDY's emergency SIGALRM fired (candidate_probe
+                     at 240 s; full_search outer at 840 s):
+                     lower_bound_seconds = the backstop value, exact
+                     elapsed UNKNOWN. Distinct from native_timeout by
+                     construction — a backstop firing means production's
+                     own semantics had NOT ended the call
+  harness_deadline   the external kill (§0.G stuck-native residual)
+  unloadable         plugin/config failed to load; loader error recorded
+  invalid_config     reference-grid config refused by its own schema
 ```
 
+The report can therefore always distinguish, verbatim: a
+candidate-budget native refusal, a whole-search native refusal, a native
+preemptive training timeout, a harness backstop, and an ordinary
+completed call.
+
 **Summary rule:** `median/min/max` are computed **over exact `completed`
-repeats only**. Every summary carries `n_completed / n_censored /
-n_deadline` explicitly. A censored repeat contributes its lower bound to
-the report's censoring narrative, never to the timing statistics.
+elapsed values only** (including exact over-budget ones, flagged).
+`native_timeout(full_search)`'s exact elapsed values (post-hoc, real
+measurements) are summarised SEPARATELY per native operation, never mixed
+into the completed-call statistics. Every summary carries
+`n_completed / n_native_timeout / n_backstop / n_deadline` explicitly.
+Censored lower bounds (training-probe native, backstops) contribute only
+to the censoring narrative.
 
 **Point-level classification against a production budget** (conservative
-reconciliation; a repeat is `under` iff `elapsed < budget`, `over` iff
-`elapsed >= budget` (exact) OR censored (which implies ≥ 2× budget)):
+reconciliation; per repeat):
 
 ```text
-all repeats under                     -> CLEAR
-all repeats over-or-censored          -> WOULD_BE_CENSORED
-repeats disagree (straddle the budget)-> INDETERMINATE
-any harness_deadline repeat           -> INDETERMINATE (and reported)
+under          completed with elapsed < budget
+over-exact     an EXACT observation >= budget: a completed post-hoc
+               overrun, or a native BatchSearchTimeout record whose exact
+               elapsed >= the budget under classification
+over-censored  a censored bound >= budget: a native training-probe
+               timeout (bound 180 = its budget) or a harness backstop
+               (bound = 2x budget)
+
+all repeats under                          -> CLEAR
+all repeats over (exact or censored)       -> WOULD_BE_CENSORED
+repeats straddle the budget                -> INDETERMINATE
+any harness_deadline repeat                -> INDETERMINATE (and reported)
 ```
 
 Re-run reconciliation is the same rule over the union of repeats: a
 re-run can move a point only TO `INDETERMINATE`, never flip
-`CLEAR ↔ WOULD_BE_CENSORED` silently. This replaces rev 1's
-underspecified "margin < dispersion" — the straddle test IS the
-dispersion test, expressed in the budget's own units, and it reuses the
-production semantics (`ProbeTimeoutRecord` for anything censored;
-`_a_timeout_must_have_reached_its_deadline`'s rule that a claim of
-timeout must have reached its bound).
+`CLEAR ↔ WOULD_BE_CENSORED` silently. The straddle test IS the dispersion
+test, in the budget's own units; native semantics
+(`ProbeTimeoutRecord`, `_a_timeout_must_have_reached_its_deadline`) are
+reused, never re-invented.
 
 **Three-layer reproducibility (unchanged from rev 1, now with exact
 lower layers):** deterministic manifest (content-hashed, seeded) /
@@ -259,7 +327,7 @@ Repository census of bounded-execution mechanisms:
 
 | mechanism | where | property | fit for the harness |
 |---|---|---|---|
-| `_forward_pass_timeout` (SIGALRM) | `wrapper.py:111` | preemptive, in-process, float-budget-safe (rounds up); **documented limitation: cannot interrupt a stuck native call** | **CHOSEN** for the per-measurement 2× bound — it is production's own primitive, so the harness's interruption semantics are production's |
+| `_forward_pass_timeout` (SIGALRM) | `wrapper.py:111` | preemptive, in-process, float-budget-safe (rounds up); **documented limitation: cannot interrupt a stuck native call** | **CHOSEN**, per operation: for `training_probe` at the NATIVE 180 s (production's exact seam, `wrapper.py:591` — the harness preserves, never relaxes, the preemptive semantics); for `candidate_probe`/`full_search` only as the EMERGENCY backstop (240 s / 840 s) beyond the post-hoc production checks |
 | post-hoc elapsed checks | `batch_resolver.py:157,:201` | zero interference with the measured call | **CHOSEN** for the run WALL (checked between measurements) |
 | `run_isolated_preflight` subprocess kill | `isolated_probe.py:438` | a real kill that stops stuck native calls — but it runs a whole pre-flight, and worker spawn + torch import overhead would pollute per-operation timings; the worker does not emit per-operation success timings | **REJECTED** for per-point use, for exactly the reason the operator flagged: the measured operation would no longer be the production operation |
 | external `timeout(1)` on the whole study process | invocation wrapper | kills anything, including stuck native calls | **CHOSEN** as the outer backstop only |
@@ -350,9 +418,13 @@ anyone to bend it.
 ```text
 scripts/inspection_cost_study/manifest.py    entries, ladder, hashing
 scripts/inspection_cost_study/harness.py     timing, walls, dispositions
-scripts/inspection_cost_study/schemas.py     SweepEntry / OperationPoint /
-                                             Measurement / PointVerdict
-                                             (Pydantic, per CLAUDE.md)
+scripts/inspection_cost_study/schemas.py     SweepEntry (incl.
+                                             architecture_family) /
+                                             OperationPoint / Measurement
+                                             (the §0.F envelope with
+                                             preserved native records) /
+                                             PointVerdict (Pydantic, per
+                                             CLAUDE.md)
 scripts/inspection_cost_study/classify.py    the frozen §0.F rule
 tests/unit/scripts/test_inspection_cost_study*.py
 ```
@@ -382,10 +454,22 @@ tests/unit/scripts/test_inspection_cost_study*.py
       label, exact config, both O-E-6 parameter counts
 - [ ] Manifest determinism: content hash; seeded ordering; no wall-clock
       or unseeded randomness anywhere in manifest generation
-- [ ] Harness: per operation point, call the REAL function under a
-      SIGALRM at 2× its production budget via production's own
-      `_forward_pass_timeout`; record §0.F raw dispositions verbatim;
-      post-hoc overruns keep their EXACT elapsed
+- [ ] Harness — PER-OPERATION invocation seams (§0.E/§0.F; the
+      operator's reconciliation 1, do not unify):
+      `candidate_probe`: REAL `probe_activation_footprint` under a 240 s
+      emergency backstop (`_forward_pass_timeout`); exact elapsed kept,
+      including exact over-120 observations.
+      `full_search`: REAL `resolve_inference_batch` with its NATIVE
+      semantics untouched; `BatchSearchTimeout` caught and its
+      `ProbeTimeoutRecord` preserved VERBATIM on the measurement
+      (`execution_outcome=native_timeout`); 840 s outer backstop only.
+      `training_probe`: REAL `probe_activation_footprint(mode="training")`
+      under production's OWN
+      `_forward_pass_timeout(ProbeBudgets().single_probe_seconds)` —
+      exactly the `wrapper.py:591` seam; a fired 180 s alarm records
+      `native_timeout`, lower bound 180. **NO 2× relaxation for this
+      operation** — bypassing the native preemptive bound would measure
+      something production never runs
 - [ ] Walls: `--max-wall-seconds` checked between measurements; clean
       stop with a wall-expiry marker in the file
 - [ ] Append-per-point writes; overwrite of an existing file refused
@@ -407,9 +491,16 @@ tests/unit/scripts/test_inspection_cost_study*.py
       `invalid_config` with the constructor error
 - [ ] §0.F classification rule: parametrized truth table —
       all-under → CLEAR; all-over → WOULD_BE_CENSORED; exact-over
-      (post-hoc) counts as over WITH exact time; straddle →
-      INDETERMINATE; any deadline → INDETERMINATE; union-of-reruns can
-      only move toward INDETERMINATE
+      (post-hoc completed OR a native `BatchSearchTimeout` record's exact
+      elapsed) counts as over WITH exact time; native training-probe
+      timeout counts as over-CENSORED at bound 180; harness backstop
+      counts as over-censored at its backstop value and is DISTINCT from
+      native_timeout; straddle → INDETERMINATE; any deadline →
+      INDETERMINATE; union-of-reruns can only move toward INDETERMINATE
+- [ ] Envelope preservation: a `native_timeout(full_search)` measurement
+      carries the native `ProbeTimeoutRecord` verbatim (`model_dump`
+      round-trips), and the report can name which native operation
+      (`batch_candidate` vs `batch_search`) refused
 - [ ] Summaries exclude censored repeats from median/min/max and carry
       `n_completed/n_censored/n_deadline`
 
@@ -419,8 +510,8 @@ tests/unit/scripts/test_inspection_cost_study*.py
 - [ ] Wall expiry mid-run: file retains completed points + expiry marker
 
 **Negative / invalid input**
-- [ ] A fixture with a deliberately tiny budget produces
-      `right_censored` with `lower_bound_seconds = 2×budget` and **no
+- [ ] A fixture with a deliberately tiny backstop produces
+      `harness_backstop` with `lower_bound_seconds = backstop` and **no
       elapsed value**; the record reuses `ProbeTimeoutRecord` fields and
       `is_capacity_evidence is False`
 - [ ] Overwrite refusal
@@ -445,6 +536,14 @@ tests/unit/scripts/test_inspection_cost_study*.py
 - A censored fixture point carries a lower bound and no exact time; a
   post-hoc-overrun fixture point carries an exact time and classifies
   `over`.
+- A fixture driving the training-probe seam with a deliberately slow
+  model is interrupted at the NATIVE 180 s path (unit-tested with a
+  reduced `ProbeBudgets` instance in the harness's own tests), recording
+  `native_timeout` — proving the harness preserves, not relaxes, the
+  preemptive production semantics.
+- A fixture `BatchSearchTimeout` is preserved verbatim as
+  `native_timeout` with its typed record — never collapsed into
+  `completed` or a generic harness censoring event.
 - `git diff` for this commit: `scripts/inspection_cost_study/` + tests +
   this document only.
 
@@ -455,7 +554,9 @@ tests/unit/scripts/test_inspection_cost_study*.py
 | Plugin fails to load | `unloadable` + loader error; sweep continues; report must count them (loadability bias stated) |
 | Ladder config invalid | `invalid_config` + constructor error; excluded from timing; counted |
 | Post-hoc overrun (elapsed ≥ budget, call completed) | EXACT time kept; classifies `over`; never written as censored |
-| 2× SIGALRM fires | `right_censored`, lower bound only |
+| Native `BatchSearchTimeout` during `full_search` | `native_timeout`, typed record verbatim; never `completed`, never a generic harness event |
+| Native 180 s training-probe alarm | `native_timeout`, lower bound 180 — the production behaviour under study, preserved |
+| Harness backstop fires (240 s / 840 s) | `harness_backstop`, lower bound only — distinct from `native_timeout` by construction |
 | Stuck native call (SIGALRM ignored) | run hangs → external backstop kills; file intact; point recorded `harness_deadline` on restart (§0.G residual, stated) |
 | Wall expires | clean stop, marker written, everything measured retained |
 | Manifest drift between pilot and full | full run REFUSES to start on hash mismatch for shared entries |
@@ -472,10 +573,12 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 - [ ] Unit counts / wall time — **to record**
 - [ ] Mutations — **to record**, at minimum: harness reimplements a probe
       → fail; censored point written with an exact elapsed → fail;
-      exact-over point written as censored → fail; classification
-      rule inlined in the report instead of calling `classify.py` → fail;
-      unseeded manifest ordering → fail; pooled-population statistic →
-      fail
+      exact-over point written as censored → fail; **training probe
+      wrapped at 2×360 instead of the native 180 → fail**; **native
+      `BatchSearchTimeout` collapsed into `completed` or into a generic
+      harness event → fail**; classification rule inlined in the report
+      instead of calling `classify.py` → fail; unseeded manifest ordering
+      → fail; pooled-population statistic → fail
 - [ ] Full checker set at the final head (§E.3d.12) — **to record**
 
 #### 8. Commit boundary
@@ -575,7 +678,16 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
 - [ ] Full (or approved-subset) manifest, R=3, wall from the projection
 - [ ] Report, per operation and per population (never pooled, never
       collapsed across operations): cost vs trainable params, cost vs
-      total params, cost vs batch
+      total params, cost vs batch — every entry and figure carrying its
+      `architecture_family`
+- [ ] **Interpretation boundary (operator rule, frozen):** the pointwise
+      censoring question is answered directly; scatter across
+      heterogeneous architectures may be PLOTTED, but **no pooled
+      cross-architecture regression/slope is fitted or interpreted as
+      "parameter count causes cost to scale as X"**. Any recommendation
+      attributing cost growth to model size must cite
+      within-architecture ladder evidence (population B's per-family
+      ladders) or otherwise clearly controlled comparisons
 - [ ] Classification table: every point CLEAR / WOULD_BE_CENSORED /
       INDETERMINATE against `single_candidate_seconds`,
       `batch_search_seconds`, `single_probe_seconds`; margins in seconds
@@ -602,15 +714,24 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
 
 #### 5. Acceptance criteria
 
-- Disposition accounting closes exactly:
-  `completed + right_censored + harness_deadline + unloadable +
-  invalid_config = manifest measurements` (+ the wall marker if the wall
-  fired).
+- Disposition accounting closes exactly **over the APPROVED COMPLETED
+  manifest (or operator-approved subset)**:
+  `completed + native_timeout + harness_backstop + harness_deadline +
+  unloadable + invalid_config = approved manifest measurements`.
+- **Wall expiry is a clean interruption, NOT successful F2b completion**
+  (operator rule, frozen): if the wall fires before the approved
+  manifest/subset completes — persist everything, record exact coverage,
+  STOP; **PR F is NOT complete**. It resumes under a freshly projected
+  wall, or the operator explicitly approves the completed subset as the
+  formal F2b population. The study population is never silently
+  redefined because runtime exceeded the projection.
 - Every classification row shows its per-repeat dispositions and margin;
   INDETERMINATE rows say why (straddle vs deadline).
-- The recommendation cites specific curve regions per population; the
-  report's final line restates: **no budget was changed; a change is a
-  separate PR justified by this data.**
+- The recommendation cites specific curve regions per population; any
+  size-causation claim cites within-architecture ladders only; no pooled
+  cross-architecture slope appears anywhere in the report. The report's
+  final line restates: **no budget was changed; a change is a separate PR
+  justified by this data.**
 
 #### 6. Failure and edge cases
 
@@ -619,7 +740,7 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
 | Flat curve, nothing censored | Legitimate outcome — recommendation "no change"; never enlarge models to force an effect |
 | Boundary cluster | INDETERMINATE class reported as such; escalating repeats requires a fresh runtime projection |
 | Degenerate plugin config (0 params) | Measured as-is (E3's finding: 0 is a real measurement) |
-| Wall fires mid-full-sweep | Everything measured is retained; the report covers measured entries and STATES the coverage; completing the tail needs a fresh wall + projection |
+| Wall fires mid-full-sweep | Clean interruption, NOT completion: everything measured retained, exact coverage recorded, STOP — F2b (and PR F) remain incomplete until the approved manifest finishes under a fresh projected wall, or the operator explicitly re-approves the completed subset as the formal population |
 
 #### 7. Verification commands and evidence
 
@@ -644,7 +765,9 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
 3. Manifest deterministic; raw dispositions preserved; censored bounds
    never mixed into exact-timing statistics; classifications
    verdict-stable under the frozen §0.F rule.
-4. Every measurement accounted for; the disposition arithmetic closes.
+4. The disposition arithmetic closes over the APPROVED COMPLETED
+   manifest/subset; a wall-interrupted partial run never counts as
+   completion (F2b §5).
 5. Per-operation, per-population analysis; the two populations never
    pooled; the two INERT budgets reported as findings, not measured
    against.
@@ -680,32 +803,30 @@ Acceptance evidence:      deterministic manifest + §0.F semantics +
 `reports/v21_pr_f_inspection_cost/` as written. Production reads none of
 it.
 
-### Q-F-1 — populations, cardinality and the runtime gate (REVISED — awaiting approval)
+### Q-F-2 — censoring and reproducibility semantics (FINAL FORM — awaiting approval)
 
-Approve, as now precisely defined:
+Freeze §0.F verbatim, now per-operation and grounded in the audited
+payloads:
 
-- the two labelled, never-pooled populations (§0.C) with the
-  natural-knob ladder rule (exact grids fixed in F1 by instantiation
-  check, every config verbatim in the manifest);
-- the entry/operation-point/measurement definitions and cardinality
-  (§0.D: ~113 entries → ~1 017 operation points → ~3 051 measurements;
-  pilot = 12 entries → 324 measurements);
-- the honest worst-case accounting (§0.E: ~2 700 s/entry/repeat
-  theoretical) and therefore the **wall-bounded** execution structure:
-  30-min pilot wall with a 2-extreme-entry ramp; full sweep autonomously
-  only if the pilot projects < ~1 h, else STOP with projection + subset.
+- execution outcomes `completed / native_timeout / harness_backstop /
+  harness_deadline / unloadable / invalid_config`, with
+  `native_timeout` preserving production's typed evidence VERBATIM
+  (`BatchSearchTimeout.record` = `ProbeTimeoutRecord`, exact elapsed for
+  the post-hoc operations; the native 180 s `ForwardPassTimeoutError`
+  right-censors the training probe at ITS OWN bound — no 2× relaxation);
+- summaries over exact `completed` values only, native-timeout exact
+  values summarised separately per native operation, censored bounds
+  never mixed in, all `n_*` counts explicit;
+- point classification CLEAR / WOULD_BE_CENSORED / INDETERMINATE via
+  under / over-exact / over-censored and the straddle rule; re-runs move
+  points only toward INDETERMINATE;
+- no second vocabulary anywhere.
 
-### Q-F-2 — censoring and reproducibility semantics (REVISED — awaiting approval)
+### Q-F-1 — RESOLVED (operator, 2026-08-09): APPROVED
 
-Freeze §0.F verbatim: raw per-repeat dispositions preserved
-(`completed` exact / `right_censored` lower-bound-only /
-`harness_deadline` / `unloadable` / `invalid_config`); post-hoc overruns
-are EXACT observations, not censoring; summaries over exact repeats only
-with explicit `n_*` counts; point classification
-CLEAR / WOULD_BE_CENSORED / INDETERMINATE by the straddle rule; re-runs
-move points only toward INDETERMINATE; native vocabulary
-(`ProbeTimeoutRecord`, the reached-its-deadline validator) reused, no
-second vocabulary.
+Populations, cardinality, wall-bounded execution and the pilot gate as
+§0.C-§0.E, **plus the timing-blind grid rule** (§0.C) and the
+wall-expiry-is-not-completion rule (F2b §5).
 
 ---
 

@@ -54,8 +54,14 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PR F is at DESIGN REVISION 2** — `pr_f_inspection_cost_study.md`,
-awaiting operator approval of the revised Q-F-1/Q-F-2; Q-F-3 resolved.
+**PR F is at DESIGN REVISION 3** — `pr_f_inspection_cost_study.md`,
+awaiting final operator approval of Q-F-2; Q-F-1 and Q-F-3 resolved.
+Rev 3 matched the harness's timeout handling to production's
+per-operation enforcement (the native 180 s preemptive training-probe
+alarm is preserved, never relaxed to 2×), preserves native
+`BatchSearchTimeout` records verbatim in a study envelope, froze
+wall-expiry-is-not-completion, the timing-blind grid rule, and the
+no-pooled-causal-slope interpretation boundary.
 The complete budget-consumer census found TWO of the five budgets are
 INERT (`single_inspection_seconds` enforced nowhere;
 `preflight_total_seconds=1200` unconsumed while the real end-to-end
