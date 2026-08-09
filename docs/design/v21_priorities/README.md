@@ -15,22 +15,32 @@ design, so a PR must not be implemented from Part III alone.
 ## Status
 
 Plan approved in principle 2026-08-07, with six design corrections
-applied. **PR A is MERGED** (PR #186, `b9f88ae5`) and **PR C is MERGED**
-(PR #187, `cac86c94`), both operator-merged 2026-08-08 with CI green.
+applied. **All three V21 launch blockers are MERGED:** PR A (#186,
+`b9f88ae5`), PR C (#187, `cac86c94`) and PR B (#188, `0aae3f4b`), all
+operator-merged with CI green.
 
-**PR B is the next unit and its design is APPROVED** (2026-08-08, with four
-operator corrections applied); nothing is implemented yet. **Q-B-1** — which
-budget semantics to freeze — is **deferred by design rather than
-unresolved**: it blocks **B3 only**, so B1 and B2 proceed first and B0 then
-presents measured evidence for the decision. PR C's merge gave PR B a second sub-item — **B-2**, the
-reassigned **FU-C-1** — and promoted the authority-stamp defect to a V21
-scientific-campaign launch blocker under **PR D**. PRs D-G are not
-started.
+```text
+PR A   the agent can propose AND execute different scientific formulations
+PR C   a generated model is a production first-class citizen
+PR B   resource prediction / admission / realization / attribution have
+       one clear and consistent semantics
+```
 
-PR A's open follow-ups (**FU-A-1/2/3**) and the findings it produced for
-PR B, PR C, PR D and PR G are registered in `v21_priorities.md` §E.3b, so
-they are visible when scoping those PRs rather than buried in PR A's
-record.
+**Q-B-1 is FROZEN as S3** (operator, 2026-08-08) and now governs every
+consumer of `vram_budget_gb`, not only PR B — recorded in
+`v21_priorities.md` §E.3c.
+
+**PRs D-G are not started, and each now carries an update block** derived
+from what A/B/C actually proved — see `v21_priorities.md` §E.4, which is
+binding on all of them. The single most reusable finding: three PRs in a
+row found **a correct rule that nothing called**, so every remaining PR
+must first ask whether the mechanism it wants already exists and lies
+inert. PR G is the one most changed by this — the measured memory profile
+it wants may already be reaching the policy.
+
+Open follow-ups: **FU-A-1/2/3**, **FU-B-1/2/3/4**, and the PR-C-era items
+in §E.3b. None blocks D-G. **FU-B-4** (live formal confirmation of the S3
+surface) is due before the first full V21 production campaign.
 
 ### Scope correction recorded 2026-08-07
 
@@ -68,7 +78,7 @@ Two consequences for other PRs:
 | PR | Document | Gate | Status |
 |---|---|---|---|
 | **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **MERGED** — PR #186, `b9f88ae5` |
-| **B** | [`pr_b_resource_budget_semantics.md`](./pr_b_resource_budget_semantics.md) | V21 launch blocker | **DESIGN APPROVED** 2026-08-08 — cleared to begin B1; Q-B-1 deferred by design, blocks B3 only |
+| **B** | [`pr_b_resource_budget_semantics.md`](./pr_b_resource_budget_semantics.md) | V21 launch blocker | **MERGED** — PR #188, `0aae3f4b`; Q-B-1 frozen as S3 |
 | **C** | [`pr_c_generated_model_production_compat.md`](./pr_c_generated_model_production_compat.md) | V21 launch blocker | **MERGED** — PR #187, `cac86c94` |
 | **D** | `pr_d_per_file_evidence.md` | Before V21 | not started |
 | **E** | `pr_e_scale_funnel_instrumentation.md` | Before first V21 data | not started |

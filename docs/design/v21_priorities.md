@@ -1070,6 +1070,13 @@ What this settles, and what it deliberately does not:
 | **NOT settled** | The escalation *mechanism*. It remains an output of PR B's B3 audit — freezing the semantics authorises no watchdog, kill path or flag |
 | **NOT settled** | Any upgrade to S2. Available later **with evidence**, once B2's telemetry has produced a real exceedance distribution |
 
+**PR B merged 2026-08-08** — PR #188, merge commit `0aae3f4b`, CI green
+on `a3d88b51`. Operator classification of its follow-ups, none blocking:
+**FU-B-1** delegation cleanup (not a correctness gap — parity-pinned);
+**FU-B-2** typed `cap_note`, tracked; **FU-B-3** `reset_process_peak`
+audit; **FU-B-4** live formal confirmation, due before the first full V21
+production campaign.
+
 Two findings promoted out of PR B by this decision:
 
 | Finding | Owner | Detail |
@@ -1387,16 +1394,77 @@ remaining in production.
 
 ## PR B — Resource-budget semantics and enforcement
 
-> ## STATUS: NEXT UNIT — not started. Design document required before any code.
+> ## STATUS: **MERGED** — PR #188, merge commit `0aae3f4b`, 2026-08-08.
 >
-> Operator serialization **A → C → B → D → E**. PR A (`b9f88ae5`) and PR C
-> (`cac86c94`) are merged; PR B is next.
+> Operator serialization **A → C → B → D → E**. All three launch blockers
+> are now merged: PR A (`b9f88ae5`), PR C (`cac86c94`), PR B (`0aae3f4b`).
+> Full implementation record in
+> `docs/design/v21_priorities/pr_b_resource_budget_semantics.md`.
 >
-> Per the standing rule, PR B gets its own document under
-> `docs/design/v21_priorities/` — `pr_b_resource_budget_semantics.md` —
-> written to the 8-section per-commit standard, with its audits **already
-> performed and evidence-cited**, and reviewed before implementation
-> begins. Part III is scope-level only.
+> **What PR B established, in the operator's corrected wording:**
+>
+> > PR B establishes **one evidence-graded S3 resource semantics at
+> > admission**; all currently retained comparison paths are
+> > **parity-checked** against it. Realized memory is recorded and
+> > operator-visible without becoming scientific evidence or an automatic
+> > kill signal, and peer usage remains context rather than candidate
+> > attribution.
+>
+> Deliberately *not* "one implementation" — `evaluate_vram_skill` retains
+> its own comparison, mechanically pinned by a 7-cell parity test. That
+> makes FU-B-1 de-duplication, **not a correctness gap**.
+>
+> **Delivered**
+>
+> | Unit | Result |
+> |---|---|
+> | B1 | Estimator inputs resolve from declarations, not literals (`resolve_model_field` / `resolve_train_field` / `resolve_loss_type`, 8 sites) |
+> | B1b | Harness hard bounds apply to the **resolved** configuration — closes the `--max_epochs` bypass and its `max_steps_per_attempt` twin |
+> | B2 | Realized memory measured in-subprocess, transported by the existing sidecar, recorded semantics-neutral |
+> | B0 | **Q-B-1 FROZEN as S3** (§E.3c) |
+> | B3 | Stage A audit → Stage B armed the graded threshold at one site → Stage C operator-visible notice |
+> | B4a | Rung 1 deterministic (15 cases); rung 2 **live** on an RTX 5090 |
+> | B4b | Rung 3 production edge (12 cases, 3 mutations); **rung 4 NOT RUN, justified** |
+>
+> **Evidence:** `pytest rc=0`, 8087 passed / 2 skipped / 1 xfailed, clean
+> tree; ruff + format clean; pyright 0 errors 4 warnings; CI SUCCESS on
+> `a3d88b51`. Mutations: **40 attempted, 39 behaviour-changing → 39
+> caught, 1 equivalent → classified.** No scorer, metric or SNR file
+> appears anywhere in the diff.
+>
+> **The audits overturned most of the PR's own premises**, which is where
+> its value sits:
+>
+> | Prior claim | Verdict |
+> |---|---|
+> | The `segmentation_size` fallback is a 40x *optimistic* under-estimate | **Backwards** — never optimistic; neutral to 40x conservative |
+> | FU-C-1 (`nhead` 4→2) is an active admission defect | **Latent** — the analytic VRAM estimator has had no production caller since `8b6c4ba8` |
+> | Enforcement enforced a wrong number, so B1 may explain P6.4 | **False for VRAM** — the admission number comes from a probe |
+> | The phases record realized peaks but nothing compares them | **Half wrong** — they never measured them |
+> | B3 must build an enforcement mechanism | **No** — the graded rule already existed at `decision_policy.py:285` and was inert because nothing populated `budget.vram_gb` |
+>
+> **Negative findings, recorded so the sweep's completeness is visible:**
+> `num_layers`, `batch_size`, `optimizer_type` and the
+> `validation_max_portion` clamp were **not** defects.
+>
+> **Permanent caveat on citing PR B.** No realized-vs-admitted
+> distribution exists; zero observations, and V20 cannot be
+> reconstructed. PR B delivers the **capability to collect** one.
+>
+> ```text
+> MAY be written    "PR B makes forecast error measurable"
+> MUST NOT be       "PR B showed typical forecast error is X%"
+> ```
+>
+> **Follow-ups, none blocking (operator classification 2026-08-08):**
+> **FU-B-1** delegate `evaluate_vram_skill` to the shared policy —
+> architecture cleanup, not correctness. **FU-B-2** typed `cap_note` —
+> tracked; reopens PR B only if threshold correctness changes.
+> **FU-B-3** `reset_process_peak()` counter-consumer audit.
+> **FU-B-4** live formal confirmation — due **before the first full V21
+> production campaign**, or satisfied by an explicitly bounded first run
+> that naturally traverses the path, and **never** by adding workload
+> until an exceedance appears.
 >
 > ### PR B gained a second, independent sub-item at PR C's merge
 >
@@ -1823,7 +1891,123 @@ production path.**
 
 ---
 
+## E.4 What A, B and C proved — binding on every remaining PR
+
+Written 2026-08-08, after all three launch blockers merged (`b9f88ae5`,
+`cac86c94`, `0aae3f4b`). These are not style notes; each is a defect that
+actually shipped and was found by audit.
+
+### E.4.1 The recurring defect shape: a correct rule that nothing calls
+
+Three PRs, three instances, same shape:
+
+```text
+PR A   SIDERIUS_PLUGIN_DIRS reached the subprocess -- which never read it
+       (#184, then #185 fixed the call site and left the function)
+PR C   get_config_class read a registry nobody had populated
+       -> 0 of 82 plugins resolved in a clean subprocess
+PR B   RuntimeBudget.vram_gb: declared, evidence-graded, unit-tested,
+       and never supplied by any production caller
+```
+
+**Every remaining PR must ask, before building: does this already exist
+and lie inert?** PR B's Stage A turned a "build an enforcement mechanism"
+commit into a one-line wiring change by asking it.
+
+The corollary is PR A's rule, restated: **audit consumers as consumers.**
+A rule existing in source is not evidence that any consumer honours it.
+
+### E.4.2 Establish reachability before calling a defect active
+
+Two findings were downgraded by audit, not by opinion:
+
+- **FU-C-1** (`nhead` 4→2) is arithmetically real and reaches **no
+  admission decision** — its only callers are orphaned.
+- `inference_batch_uncalibrated` is **observability-only** — every use of
+  `warnings` in the runtime package is a producer, none a predicate.
+
+Classify each finding `ACTIVE` / `LATENT` / `NOT A DEFECT` / `UNKNOWN`
+with evidence. Do not imply a latent defect caused observed behaviour.
+
+### E.4.3 A value that is only printed is not evidence
+
+`cap_note` (`wrapper.py:538-545`) computes exactly the three cap regimes
+B3 needed — into a **log string**. Same class as PR C's finding that a
+guardrail scanned `#` comments as live code. If a fact matters, it must be
+typed and persisted, not rendered.
+
+### E.4.4 Absent, explicit-default, explicit-override and explicit-invalid
+are four different states
+
+B1's resolver exists because they were being collapsed. B1b showed the
+consequence at a bound: **an omitted key let planner silence decide a
+harness-owned bound** — a plan without `epochs` trained ten under
+`--max_epochs 1`. An explicitly *invalid* value must not silently become
+a fallback either.
+
+### E.4.5 Observation must be provably decision-free
+
+B2's template, reusable by any PR adding evidence: a typed model,
+**semantics-neutral field names** (a test fails on `breach` / `violation`
+/ `over_budget`), missing evidence recorded as **unknown rather than
+compliant**, attribution to the owning process, and a guard test that
+fails if any decision path reads the new field.
+
+### E.4.6 Do not claim a distribution you have not collected
+
+B0 froze S3 on **zero** realized-vs-admitted observations, and said so.
+The capability to measure is not the measurement.
+
+### E.4.7 Mutation results are reported by category, not as a percentage
+
+```text
+N attempted
+N-k behaviour-changing -> must all be caught
+  k equivalent         -> classified, no missing acceptance signal
+```
+
+A surviving mutant is classified (real gap / equivalent / unreachable /
+wrong fixture) **before** any test is written for it. Two of PR B's own
+mutations turned out invalid — one was semantically equivalent, one
+targeted a harness that reimplemented production instead of calling it.
+
+### E.4.8 Validation hygiene, now in CLAUDE.md
+
+Commit before the full suite (the PR3-L2 preflight refuses uncommitted
+production edits, by design), and never take a pytest verdict from a
+pipe's exit code.
+
+---
+
 ## PR D — Per-file evidence to reflector and planner
+
+> **Updated 2026-08-08 from A/B/C (§E.4).** PR D is **B2-shaped**: it adds
+> an observation that must change no decision. Reuse B2's template rather
+> than inventing one — typed model, semantics-neutral names, and a guard
+> test that fails if any decision path reads the new field
+> (`test_realized_vs_admitted_memory.py::TestObservationOnly` is the
+> worked example).
+>
+> Three specific carry-overs:
+>
+> - **C1's lesson applies directly.** A missing per-file vector must
+>   **fail loudly or record `unknown`** — never default into a value that
+>   reads as real. C1 removed exactly such a default
+>   (`get_output_type` → `"classifier"`), and PR A's hop-by-hop transport
+>   exists because a dropped declaration did not raise.
+> - **"The agent sees it" must be proven at the real prompt.** PR A's A3
+>   declared its contract from the first typed object and missed the LLM's
+>   raw JSON parse; PR C found a fifth `get_output_type` consumer in
+>   `agent/prompts.py` that the execution-path census had not looked at.
+>   Prompt rendering is a consumer.
+> - **The metric stays frozen.** PR B changed no scorer file and proved it
+>   by diff. PR D should hold itself to the same check: per-file evidence
+>   is *reporting*, and the aggregate it sits beside must be
+>   byte-identical.
+>
+> Also inherited: **§E.4.2** — before claiming the scalar misled the
+> agent, establish that the reflector actually read it, rather than
+> inferring from the text it produced.
 
 ### Objective
 
@@ -1903,6 +2087,26 @@ the real `iter_006` fixture; no scorer file in the diff.
 ---
 
 ## PR E — Proposal-scale funnel instrumentation
+
+> **Updated 2026-08-08 from A/B/C (§E.4).** PR E's whole purpose —
+> "convert an impression into measurable data **without** correcting it" —
+> is the property B2 had to defend, so B2 is the template.
+>
+> - **§E.4.6 is the binding constraint here.** B0 froze a semantics on
+>   *zero* observations and said so plainly. PR E may ship the
+>   instrumentation and claim the capability; it may **not** report a
+>   funnel distribution until one has been collected. The same sentence
+>   that governs PR B governs PR E: *the capability to measure is not the
+>   measurement.*
+> - **Check what already exists first (§E.4.1).** PR E's own note says
+>   `parameter_count_estimate` is not forwarded. Before building new
+>   instrumentation, audit whether the value already reaches a boundary
+>   and is dropped — that was true in all three merged PRs.
+> - **Semantics-neutral naming.** "Undersizing" is a verdict. Record the
+>   measured quantities and let the analysis interpret them, exactly as
+>   B2 separated `realized − estimated` (forecast error) from
+>   `realized − threshold` (headroom consumed) rather than collapsing
+>   them into one judged number.
 
 ### Objective
 
@@ -1996,6 +2200,22 @@ corrective change to advice or thresholds in the diff.
 
 ## PR F — Inspection-cost scaling study (measure only)
 
+> **Updated 2026-08-08 from A/B/C (§E.4).** A measure-only study is
+> governed by the minimum-bounded-validation rule, and by one practical
+> fact PR B hit at Gate time:
+>
+> - **The GPU is shared.** B4a rung 2 ran while six training jobs
+>   belonging to another user held 8.1 GiB, and B4b rung 4 was **not run**
+>   partly for that reason. A scaling study must plan around foreign
+>   occupancy rather than assume the card — and must never enlarge a
+>   workload to force an effect.
+> - **Attribution (§E.4.5).** If inspection cost is measured on a shared
+>   card, peer usage is context. B2's per-process counters and
+>   `owning_process_pid` are the existing mechanism; do not re-derive one.
+> - **Honest absence.** PR F's premise is already that a timeout reports
+>   *inconclusive*, never "model too big". Preserve that: an unmeasured
+>   candidate is `unknown`, never "fits".
+
 ### Objective
 
 Decide whether the 120 s inspection budget censors large candidates —
@@ -2054,6 +2274,33 @@ not a prerequisite for launching V21.
 ---
 
 ## PR G — Capability-derived inference batch
+
+> **Updated 2026-08-08 from A/B/C (§E.4). This is the PR most changed by
+> what B and C found.**
+>
+> - **The measurement PR G wants may already exist (§E.4.1).** PR G's
+>   objective is to derive the batch from a candidate's **measured**
+>   memory profile. PR B established that `ProbeResult.peak_vram_gb` is
+>   populated by the bounded probe (`probe.py:554`), survives into
+>   `RuntimeEstimate`, and reaches the shared policy. **Audit that path
+>   before designing a new derivation** — B3 collapsed from "build a
+>   mechanism" to "wire one" by asking exactly this.
+> - **C3b already pinned the property PR G must preserve.** Planning and
+>   runtime call the *same* `inference_batch_for`, so an unregistered
+>   model is forecast with the batch it will actually run with, and
+>   `inference_batch_uncalibrated` reaches **observability surfaces only**
+>   — never a predicate. If PR G makes the batch capability-derived, that
+>   flag must not become a pricing or admission input.
+> - **Prove parity per built-in before switching off the name table
+>   (§E.4.7 discipline).** B3's parity matrix caught a real divergence in
+>   the PHYSICAL VETO regime that source reading had missed. The
+>   `_INFERENCE_BATCH_SIZES` entries are calibrated — `transformer` is 1
+>   rather than 25 *for a memory reason* — so a derived batch must be
+>   compared against each entry and any difference explained, not
+>   averaged away. Deleting the table to silence the flag is the lazy
+>   over-fix C3b's test already guards against.
+> - **Ownership unchanged.** O-C-2 assigned throughput to PR G and
+>   admission to PR C; PR B did not move that line.
 
 ### Objective
 
