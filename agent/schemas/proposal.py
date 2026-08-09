@@ -950,6 +950,18 @@ class ProposalOutput(BaseModel):
     tune_ml_hyperparam_agent (via proposal_to_hyperparam_seeded_v1).
     """
 
+    candidate_id: str | None = Field(
+        default=None,
+        description="V21 PR E — immutable observational identity of ONE "
+        "proposer-emitted proposal (O-E-4). SYSTEM-minted in the proposer's "
+        "run() after the LLM JSON is parsed and before persistence; never "
+        "LLM-generated, never derived from model_name. None means the "
+        "record predates PR E, the transport was severed, or the candidate "
+        "did not come from the proposer (fixed validation plan) — never "
+        "substitute one. Join key for the read-side funnel ONLY: it must "
+        "never key registration, dispatch, admission, scoring or paths "
+        "(O-E-5).",
+    )
     model_name: str = Field(
         min_length=1,
         description="Short, unique, snake_case identifier for the proposed model "

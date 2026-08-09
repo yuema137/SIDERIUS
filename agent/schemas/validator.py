@@ -51,6 +51,12 @@ class ValidatorInput(BaseModel):
     All file paths and spec data come directly from the implementor's output schema.
     """
 
+    candidate_id: str | None = Field(
+        default=None,
+        description="V21 PR E — carried verbatim from ``ImplementorOutput.candidate_id`` "
+        "by the impl->valid protocol. Observational join identity only "
+        "(O-E-5); None = pre-PR-E or non-proposer candidate.",
+    )
     model_type: str = Field(
         description="The PLUGIN_MODEL_TYPE key to validate.",
     )
@@ -125,6 +131,13 @@ class ValidatorOutput(BaseModel):
         "llm_review_spec_alignment — those are assessed independently and "
         "propagated as deviation notes so the tuner can account for them without "
         "blocking a trainable model on a fragile regex or a minor spec drift.",
+    )
+    candidate_id: str | None = Field(
+        default=None,
+        description="V21 PR E — echoed verbatim from ValidatorInput. "
+        "Observational join identity only (O-E-5); None = pre-PR-E or "
+        "non-proposer candidate. Persisted in validation_{run_name}.json, "
+        "which is what makes a died-at-validation candidate joinable.",
     )
     model_type: str = Field(
         description="The model type key that was validated.",

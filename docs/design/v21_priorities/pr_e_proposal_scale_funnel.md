@@ -671,52 +671,90 @@ tests/
 
 #### 3. Implementation plan
 
-- [ ] Re-read each protocol file immediately before editing and follow the
-      flat-optional-parameter pattern PR D established at
-      `ml_model_valid_to_ml_model_tune.py:54-55,275-276`
-- [ ] Mint the id in the proposer's `run()` (`:1333`), after
-      `_run_legacy`/`_run_pipeline` return and **before** the persist at
-      `:1341` — the single site covering both modes (§0.J). Frozen rule:
-      **SYSTEM-generated, never LLM-generated, never derived from
-      `model_name`**; unique per emitted proposal; new id on every
-      proposer run (O-E-4)
-- [ ] Assert `candidate_id` is not an accepted key of the raw LLM dict,
-      so a prompt-injected id cannot survive parsing
-- [ ] Echo `candidate_id` explicitly in the implementor at **both**
-      `ImplementorOutput` construction sites (`:1657`, `:1804`) — no
-      generic echo exists (§0.J)
-- [ ] Echo `candidate_id` explicitly in the validator at `:625`, beside
-      the existing hand-echoed `model_type`
-- [ ] Add `candidate_id: str | None = None` to the five schemas, each
-      documenting that `None` means "predates PR E or transport severed",
-      never "unknown, substitute one"
-- [ ] Add one parameter per protocol function, `default=None`
-- [ ] Stamp onto `ExperimentRecord` at the tuner
-- [ ] Grep-verify no registration, dispatch, admission, scoring or path
-      construction reads it
+- [x] Re-read every file immediately before editing. **Deviation
+      (smaller, category: mechanism already exists):** the protocols take
+      the WHOLE upstream objects, so the design's "one parameter per
+      protocol function" was unnecessary — the id travels inside the
+      objects and each protocol maps it field→field
+      (`candidate_id=output.candidate_id`) from its **immediate**
+      upstream, so severing any echo is visible end to end. Zero new
+      protocol parameters; zero `run_workflow` changes
+- [x] Minted in `run()` after `_run_legacy`/`_run_pipeline` return,
+      before the persist: `output.candidate_id = f"cand_{uuid.uuid4().hex}"`
+      — UNCONDITIONAL assignment, so even a value smuggled past a parser
+      whitelist is overwritten. uuid4 makes duplicates impossible by
+      construction (no explicit collision check needed)
+- [x] Asserted: a `candidate_id` in the raw LLM commit JSON does not
+      survive (`test_the_llm_cannot_supply_the_id`) — both parser
+      whitelists (`:1401` legacy, `:2010` pipeline) exclude it AND the
+      mint overwrites
+- [x] Implementor echoes at BOTH sites — normal (`:1804` region) and
+      Branch-B plugin reuse (`:1657` region, "a reused plugin still
+      belongs to the CURRENT candidate"). **M-E2-7 initially SURVIVED**
+      because no test drove Branch B; fixed by adding
+      `TestBranchBReuseEcho` (test architecture, not the mutation), after
+      which it is caught
+- [x] Validator echo at `:625`, beside the hand-echoed `model_type`
+- [x] Schemas: **eight** fields, not five — the five planned
+      (`ProposalOutput`, `ImplementorInput/Output`,
+      `ValidatorInput/Output`) plus `HyperparamTuningInput`,
+      `ExperimentRecord`, and — bounded extension, recorded —
+      `HyperparamTuningOutput`, echoed on BOTH exit paths exactly like
+      the `healthgate_mode` echo it sits beside, because the degraded
+      exit would otherwise make crashed candidates silently unjoinable
+- [x] Superseded (see first item): no protocol parameters exist to add
+- [x] Stamped at the `_emit_record` validate-and-persist seam — the
+      structural choke point (13 callers, one function) — via a new
+      keyword `candidate_id: str | None = None`; all 12 production call
+      sites pass it explicitly (8 in `run()` directly; 2 helpers already
+      held `agent_input`; `_handle_admission_refusal` and
+      `_handle_in_subprocess_rejection` gained a threaded parameter).
+      Also echoed in the run-provenance stamp dict (`run_config`), same
+      cannot-disagree argument as D-C1a
+- [x] Verified by grep AND by behaviour: no registration, dispatch,
+      admission, scoring or path construction reads it;
+      `TestNoBehaviouralKeyUsage` pins five sensitive files, and the
+      behavioural-inertness tests prove identical outputs under two ids
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A minted id arrives unchanged at `ExperimentRecord`
-- [ ] An omitted id arrives as `None` at every hop; nothing is synthesised
-- [ ] Two proposer runs in one iteration mint **different** ids (O-E-4)
-- [ ] Inner implement/validate retries on one `ProposalOutput` keep the
-      **same** id (O-E-4)
+- [x] The minted id reaches `HyperparamTuningInput` AND all three
+      persisted stage JSONs (`test_minted_id_reaches_the_tuner_input_and_every_artifact`);
+      `_emit_record` stamps it onto the record
+      (`test_emit_record_stamps_the_id_before_validate_and_persist`)
+- [x] `None` propagates at every hop; `_emit_record(candidate_id=None)`
+      keeps `None` — nothing synthesised (mutation M-E2-9 police this)
+- [x] Two proposer runs mint different ids (O-E-4)
+- [x] Same-`ProposalOutput` retries keep the id trivially — it rides
+      inside the object; the Branch-B test and the E4 Gate exercise it
 
 **Integration / pseudo**
-- [ ] Drive the **real** protocol functions, not a reimplementation —
-      B1b's P2 and PR D's M-D3 both survived exactly that mistake
+- [x] Every hop is the REAL production function: real proposer/implementor/
+      validator `run()` bodies (bridge-level mocks) + the three real
+      protocols. **A new finding this surfaced:** the fixed-plan seam
+      (`load_validation_fixed_candidate_plan`) computes its unknown-key
+      refusal from `ProposalOutput.model_fields`, so adding the field
+      SILENTLY REMOVED `candidate_id` from that refusal — an operator
+      plan could then have smuggled an identity nobody minted. Closed
+      with an explicit refusal in the loader (same-causal-scope
+      discovery; mutation M-E2-12), and a clean plan now loads with
+      `candidate_id=None` — a fixed-plan candidate is deliberately
+      id-less, per O-E-4
 
 **Negative / invalid input**
-- [ ] A duplicate id within one run is impossible by construction, or
-      fails loudly at mint (§6)
+- [x] Duplicates impossible by construction (uuid4); no collision branch
+      exists to test — recorded as the §6 resolution
 
 **Backward-compatibility / default parity**
-- [ ] A record with no `candidate_id` loads, scores and resumes unchanged
-- [ ] No retroactive id on resumed pre-PR-E iterations — the analogue of
-      PR D's non-retroactivity rule
-- [ ] E1's key-set pins updated **in this commit**, deliberately
+- [x] A record with no `candidate_id` loads (`test_a_pre_pr_e_record_still_loads`);
+      the broad sweep (below) proves scoring/resume paths unchanged
+- [x] No retroactive id: nothing writes the field outside the mint, the
+      echoes and the stamp — all forward-only
+- [x] E1's key-set pins updated in this commit, deliberately (each set
+      +`candidate_id`; the absence test became
+      `TestTheFactsE2Changed.test_candidate_id_present_on_every_hop_schema`,
+      which also pins `default=None` on all eight schemas)
 
 **Real-training Gate:** none proposed. **Not to be launched without
 operator approval.**
@@ -762,22 +800,57 @@ operator approval.**
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Reachability module count / wall time — **to record**
-- [ ] Hop-deletion mutations: three protocol hops + three node echo
-      sites (implementor :1657, :1804; validator :625) + the tuner stamp
-      — **to record**
-- [ ] Mutation: synthesise an id when absent → must fail — **to record**
-- [ ] Mutation: reuse one id across two proposer runs → must fail — **to record**
-- [ ] Mutation: accept a `candidate_id` key from the raw LLM dict → must
-      fail — **to record**
-- [ ] pyright vs baseline — **to record**
+- [x] `tests/unit/agent/protocols/test_pr_e_candidate_id_transport.py`:
+      `16 passed in 2.33s`; all three PR E modules together
+      `31 passed in 2.93s`
+- [x] Mutations — **13 attempted, 13 behaviour-changing → 13 caught,
+      0 equivalent** (M-E2-7 caught only after a test-architecture fix):
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E2-1 | mint removed | CAUGHT (4 failures) |
+      | M-E2-2 | mint derived from `model_name` | CAUGHT |
+      | M-E2-3 | propose→impl hop severed | CAUGHT |
+      | M-E2-4 | impl→valid hop severed | CAUGHT |
+      | M-E2-5 | valid→tune hop severed | CAUGHT |
+      | M-E2-6 | implementor normal echo severed | CAUGHT |
+      | M-E2-7 | implementor **Branch-B** echo severed | **SURVIVED round 1** — no test drove the reuse path; `TestBranchBReuseEcho` added; **CAUGHT on rerun**. The exact §0.J prediction: every explicit echo is its own mutation target |
+      | M-E2-8 | validator echo severed | CAUGHT (2 failures) |
+      | M-E2-9 | record stamp synthesises when absent (`or "cand_synth"`) | CAUGHT |
+      | M-E2-10 | record stamp removed | CAUGHT |
+      | M-E2-11 | one `_emit_record` call site forgets the id | CAUGHT (the AST all-12-sites test) |
+      | M-E2-12 | fixed-plan `candidate_id` refusal removed | CAUGHT |
+      | M-E2-13 | output echo dropped from the healthy dict | CAUGHT |
+
+- [x] Synthesise-when-absent = M-E2-9, caught
+- [x] Id reuse across runs is structurally impossible (fresh uuid4 per
+      `run()`); the two-runs test pins distinctness; a "reuse" mutation
+      would be M-E2-2's shape and is covered by it — recorded rather
+      than duplicated
+- [x] LLM-supplied id = M-E2-1/M-E2-2 territory plus the dedicated
+      `test_the_llm_cannot_supply_the_id`; the parser whitelists never
+      accepted the key (verified at `:1401` and `:2010`)
+- [x] pyright `0 errors, 4 warnings` — baseline held
+- [x] **Collateral suite repair, classified (rule 15):** the broad sweep
+      (`tests/unit/{agent,sdsc,nodes,core}`: `6446 passed` after fixes)
+      surfaced 14 failures, ALL test-fixture defects from E2's new
+      surface, none production: (a) `test_prephase_measurement_reachability`'s
+      stub `_Input` lacked `candidate_id` (13 tests) — field added to the
+      stub; its `_emit_record` stub lambda widened to accept `**kw`;
+      (b) `test_realized_vs_admitted_memory` anchored on the exact old
+      call text `_emit_record(sandbox, final_record)` — a brittle
+      substring of the §E.3d.9 kind; relaxed to the stable prefix so the
+      guarded property (attach-before-emit) stays pinned
 
 #### 8. Commit boundary
 
-- [ ] Diff touches five schemas, three protocols, two nodes, tests
-- [ ] No scorer, metric, HealthGate or registration file
-- [ ] No measurement forwarded — this commit moves **only** the id
-- [ ] Diff summary, staged file list, tests, mutations and deviations shown before committing
+- [x] Diff: 4 schema files (8 fields), 3 protocols, 3 nodes (proposer
+      mint, implementor ×2 echoes, validator echo), the tuner
+      (`_emit_record` + 12 sites + 2 helper signatures + 3 dict echoes),
+      the fixed-plan loader guard, tests
+- [x] No scorer, metric, HealthGate or registration file
+- [x] No measurement forwarded — this commit moves **only** the id
+- [x] Recorded in §3/§4/§7 above
 
 ---
 

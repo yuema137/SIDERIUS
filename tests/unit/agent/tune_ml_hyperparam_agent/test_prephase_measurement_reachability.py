@@ -45,6 +45,8 @@ class _Sandbox:
 class _Input:
     data_dir = "/nonexistent"
     gpu_pair_ceiling_gib = 24.0
+    # V21 PR E: the emission path stamps the candidate label from the input.
+    candidate_id = None
 
 
 def _call(tmp_path, **over):
@@ -199,7 +201,7 @@ class TestTheDispositionDrivesTheAttempt:
         """PR B's three refusal lanes are unchanged. The disposition itself
         survives in the evidence, so narrowing to a lane loses nothing."""
         records: list[dict] = []
-        monkeypatch.setattr(tuner, "_emit_record", lambda _s, r: records.append(r))
+        monkeypatch.setattr(tuner, "_emit_record", lambda _s, r, **_kw: records.append(r))
         import core.runtime_control.prephase_admission as boundary
 
         monkeypatch.setattr(

@@ -36,6 +36,7 @@ from agent.schemas.validator import ValidatorInput, ValidatorOutput
 #: The five hop schemas of the candidate_id transport (E2) — plus the two
 #: measurement surfaces (E3). Transcribed by hand from source.
 PROPOSAL_OUTPUT_KEYS = {
+    "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "baseline_config",
     "custom_loss_spec",
     "expert_advice",
@@ -56,6 +57,7 @@ PROPOSAL_OUTPUT_KEYS = {
 }
 
 IMPLEMENTOR_INPUT_KEYS = {
+    "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "model_name",
     "output_type",
     "model_description",
@@ -76,6 +78,7 @@ IMPLEMENTOR_INPUT_KEYS = {
 }
 
 IMPLEMENTOR_OUTPUT_KEYS = {
+    "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "baseline_config_adjustments",
     "capability_metadata",
     "config_fields",
@@ -89,6 +92,7 @@ IMPLEMENTOR_OUTPUT_KEYS = {
 }
 
 VALIDATOR_INPUT_KEYS = {
+    "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "config_fields",
     "description_file_path",
     "expert_advice",
@@ -105,6 +109,7 @@ VALIDATOR_INPUT_KEYS = {
 }
 
 VALIDATOR_OUTPUT_KEYS = {
+    "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "config_fields_valid",
     "description_valid",
     "error_message",
@@ -154,10 +159,13 @@ class TestExactKeySets:
         assert set(ValidatorOutput.model_fields) == VALIDATOR_OUTPUT_KEYS
 
 
-class TestTheFactsE2Changes:
-    """candidate_id exists NOWHERE today. E2 adds it to exactly five schemas."""
+class TestTheFactsE2Changed:
+    """E1 pinned candidate_id absent everywhere; E2 added it — deliberately —
+    to exactly the transport surfaces and nowhere else."""
 
-    def test_candidate_id_absent_from_every_hop_schema(self):
+    def test_candidate_id_present_on_every_hop_schema(self):
+        from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+
         for model in (
             ProposalOutput,
             ImplementorInput,
@@ -165,12 +173,14 @@ class TestTheFactsE2Changes:
             ValidatorInput,
             ValidatorOutput,
             HyperparamTuningInput,
+            HyperparamTuningOutput,
             ExperimentRecord,
         ):
-            assert "candidate_id" not in model.model_fields, (
-                f"{model.__name__} already declares candidate_id — E1's "
-                "before-state pin is stale; reconcile the design audit "
-                "before implementing E2"
+            field = model.model_fields.get("candidate_id")
+            assert field is not None, f"{model.__name__} lost candidate_id"
+            assert field.default is None, (
+                f"{model.__name__}.candidate_id default must stay None — a "
+                "non-None default would synthesise identity (O-E-4)"
             )
 
 

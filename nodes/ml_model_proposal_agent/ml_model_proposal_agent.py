@@ -22,6 +22,7 @@ Node contract:
 import argparse
 import json
 import os
+import uuid
 from functools import lru_cache
 from typing import Any
 
@@ -1331,6 +1332,14 @@ class MLModelProposalAgent:
         )
 
         output = self._run_pipeline(inp) if has_pipeline else self._run_legacy(inp)
+
+        # V21 PR E — mint the candidate identity HERE: after the LLM JSON has
+        # been parsed into a ProposalOutput, before it is persisted (O-E-4).
+        # This is the single site covering both legacy and pipeline modes.
+        # Unconditional assignment: even if a raw payload smuggled an id past
+        # a parser whitelist, the system's mint overwrites it — the id is
+        # never LLM-generated and never derived from model_name.
+        output.candidate_id = f"cand_{uuid.uuid4().hex}"
 
         # --- Persist ---
         if inp.storage.backend == "local" and inp.storage.local:

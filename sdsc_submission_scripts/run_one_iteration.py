@@ -155,6 +155,20 @@ def load_validation_fixed_candidate_plan(path: str | None) -> dict | None:
             f"describing one candidate plan, got {type(payload).__name__}"
         )
 
+    # V21 PR E: candidate_id became a ProposalOutput field, which silently
+    # removed it from the unknown-key refusal below. It must stay refused
+    # HERE: the id is SYSTEM-minted at proposal time (O-E-4), and a fixed
+    # plan is by definition not a proposer-emitted candidate — an id entering
+    # through this seam would be an identity nobody minted.
+    if "candidate_id" in payload:
+        raise SystemExit(
+            f"--validation_fixed_candidate_plan: {path!r} carries "
+            f"'candidate_id'. Candidate identity is system-generated at "
+            f"proposal time and may not be supplied through a plan; remove "
+            f"the key. (A fixed-plan candidate deliberately runs with "
+            f"candidate_id=None — it is not a proposer-emitted candidate.)"
+        )
+
     known = set(ProposalOutput.model_fields)
     unknown = sorted(set(payload) - known)
     if unknown:

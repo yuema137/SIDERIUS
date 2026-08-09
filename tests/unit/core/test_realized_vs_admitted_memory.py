@@ -348,7 +348,10 @@ class TestObservationOnly:
             "expected the definition plus at least one production call site; "
             "the observation is only worth anything if the emission path runs it"
         )
-        emit_index = src.index("_emit_record(sandbox, final_record)")
+        # V21 PR E appended candidate_id= to the call; anchor on the stable
+        # prefix so the guarded property (attach BEFORE emit) stays pinned
+        # without re-encoding unrelated kwargs.
+        emit_index = src.index("_emit_record(sandbox, final_record")
         preceding = src[max(0, emit_index - 400) : emit_index]
         assert "_attach_realized_memory(" in preceding, (
             "the attach call is not adjacent to the record emission — a future "

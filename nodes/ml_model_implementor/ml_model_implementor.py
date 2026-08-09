@@ -1655,6 +1655,10 @@ class MLModelImplementor:
             existing_desc_dir = os.path.join(os.path.dirname(existing_path), branch_b_model_name)
             existing_desc_path = os.path.join(existing_desc_dir, "description.md")
             return ImplementorOutput(
+                # V21 PR E: a reused plugin still belongs to the CURRENT
+                # candidate — the id labels the proposal attempt, not the
+                # artifact. No generic echo exists; this is explicit.
+                candidate_id=inp.candidate_id,
                 model_type=branch_b_model_name,
                 description_file_path=os.path.abspath(existing_desc_path),
                 model_file_path=os.path.abspath(existing_path),
@@ -1802,6 +1806,9 @@ class MLModelImplementor:
         # --- Build output ---
         config_fields = code.get("config_fields", {})
         output = ImplementorOutput(
+            # V21 PR E: explicit echo — schema fields do not travel by
+            # themselves (§0.J).
+            candidate_id=inp.candidate_id,
             model_type=inp.model_name,
             description_file_path=os.path.abspath(desc_path),
             model_file_path=model_file_path,

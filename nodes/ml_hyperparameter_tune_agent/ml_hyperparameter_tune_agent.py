@@ -557,7 +557,13 @@ def _build_resource_admission_record(
     return record
 
 
-def _emit_record(sandbox, record: dict, *, status: dict | None = None) -> None:
+def _emit_record(
+    sandbox,
+    record: dict,
+    *,
+    status: dict | None = None,
+    candidate_id: str | None = None,
+) -> None:
     """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
 
     Every `save_record` in this module must be preceded by
@@ -574,6 +580,10 @@ def _emit_record(sandbox, record: dict, *, status: dict | None = None) -> None:
     """
     if status is not None:
         _attach_runtime_evidence(record, status)
+    # V21 PR E: the candidate's observational identity is stamped at this
+    # single validate-and-persist seam so no record-construction site can
+    # forget it. None stays None — never synthesised (O-E-4/O-E-5).
+    record["candidate_id"] = candidate_id
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -609,6 +619,7 @@ def _handle_admission_refusal(
     hypothesis: str,
     round_index: int,
     attempt_in_round: int,
+    candidate_id: str | None = None,
 ) -> bool:
     """Record a phase the environment refused to start (B-C4c).
 
@@ -642,7 +653,7 @@ def _handle_admission_refusal(
         attempt_in_round=attempt_in_round,
         admission_evidence=admission,
     )
-    _emit_record(sandbox, record)
+    _emit_record(sandbox, record, candidate_id=candidate_id)
     print(
         f"  Saved admission refusal ({phase}): {record['status']} "
         f"[{record['memory']['reason_code']}]"
@@ -822,7 +833,7 @@ def _handle_prephase_gpu_measurement(
             "request_id": request_id,
         },
     )
-    _emit_record(sandbox, record)
+    _emit_record(sandbox, record, candidate_id=agent_input.candidate_id)
     _reason = _PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable")
     if _reason == "insufficient_headroom":
         print(f"  Pre-phase GPU measurement stopped the attempt: {outcome.disposition}")
@@ -3082,7 +3093,7 @@ def _check_and_record_guardrail_skip(
         n_steps=n_steps,
         agent_input=agent_input,
     )
-    _emit_record(sandbox, record)
+    _emit_record(sandbox, record, candidate_id=agent_input.candidate_id)
     return True
 
 
@@ -3100,6 +3111,7 @@ def _handle_in_subprocess_rejection(
     is_trial: bool,
     round_index: int,
     attempt_in_round: int,
+    candidate_id: str | None = None,
 ) -> bool:
     """RT2-G: a clean in-subprocess rejection — real setup was paid, so
     it CONSUMES an attempt (unlike the free pre-flight screen). Saves
@@ -3121,7 +3133,7 @@ def _handle_in_subprocess_rejection(
         rv_block=rv_block,
         fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
     )
-    _emit_record(sandbox, reject_record)
+    _emit_record(sandbox, reject_record, candidate_id=candidate_id)
     _append_runtime_observation(sandbox, run_name, rv_block)
     return True
 
@@ -3872,6 +3884,9 @@ class HyperparamTuningAgent:
             # disagree with what the run was launched under.
             "healthgate_mode": agent_input.healthgate_mode,
             "result_authority": agent_input.result_authority,
+            # V21 PR E — candidate label in the provenance stamp, same
+            # cannot-disagree argument as the D-C1a echo above.
+            "candidate_id": agent_input.candidate_id,
             "health_checks_config_source": health_checks_config_source,
             "health_checks_config_effective": agent_input.health_checks_config
             if agent_input.health_gate_enabled
@@ -4590,7 +4605,7 @@ class HyperparamTuningAgent:
                                 f"plugin's PLUGIN_CONFIG_CLASS."
                             ),
                         )
-                        _emit_record(sandbox, schema_record)
+                        _emit_record(sandbox, schema_record, candidate_id=agent_input.candidate_id)
                         continue
 
                     if not resource_check.get("feasible", True):
@@ -4666,7 +4681,7 @@ class HyperparamTuningAgent:
                                 resource_check, chosen_vram_budget
                             ),
                         )
-                        _emit_record(sandbox, oom_record)
+                        _emit_record(sandbox, oom_record, candidate_id=agent_input.candidate_id)
                         continue
 
                     # Phase 6.6 A.11 — capture the batch the VRAM skill picked
@@ -4863,7 +4878,9 @@ class HyperparamTuningAgent:
                                 ),
                                 memory_extra=_time_skip_memory_extra(time_check, plan),
                             )
-                            _emit_record(sandbox, time_record)
+                            _emit_record(
+                                sandbox, time_record, candidate_id=agent_input.candidate_id
+                            )
                             continue
 
                     # RT2-G: operator runtime policy for the in-subprocess
@@ -4951,6 +4968,7 @@ class HyperparamTuningAgent:
                         hypothesis=hypothesis,
                         round_index=round_index,
                         attempt_in_round=attempt_in_round,
+                        candidate_id=agent_input.candidate_id,
                     ):
                         continue
                     if _handle_in_subprocess_rejection(
@@ -4966,6 +4984,7 @@ class HyperparamTuningAgent:
                         is_trial=plan.is_trial,
                         round_index=round_index,
                         attempt_in_round=attempt_in_round,
+                        candidate_id=agent_input.candidate_id,
                     ):
                         continue
                     if train_status.get("status") == "error":
@@ -4988,7 +5007,12 @@ class HyperparamTuningAgent:
                             round_index=round_index,
                             attempt_in_round=attempt_in_round,
                         )
-                        _emit_record(sandbox, error_record, status=train_status)
+                        _emit_record(
+                            sandbox,
+                            error_record,
+                            status=train_status,
+                            candidate_id=agent_input.candidate_id,
+                        )
                         print(f"  Saved error record: {error_record['status']}")
                         continue
 
@@ -5020,6 +5044,7 @@ class HyperparamTuningAgent:
                             hypothesis=hypothesis,
                             round_index=round_index,
                             attempt_in_round=attempt_in_round,
+                            candidate_id=agent_input.candidate_id,
                         ):
                             continue
                         if inf_status.get("status") == "error":
@@ -5041,7 +5066,12 @@ class HyperparamTuningAgent:
                                 round_index=round_index,
                                 attempt_in_round=attempt_in_round,
                             )
-                            _emit_record(sandbox, error_record, status=inf_status)
+                            _emit_record(
+                                sandbox,
+                                error_record,
+                                status=inf_status,
+                                candidate_id=agent_input.candidate_id,
+                            )
                             print(f"  Saved error record: {error_record['status']}")
                             continue
 
@@ -5258,7 +5288,9 @@ class HyperparamTuningAgent:
                             }
                             error_record["memory"]["round_index"] = round_index
                             error_record["memory"]["attempt_in_round"] = attempt_in_round
-                            _emit_record(sandbox, error_record)
+                            _emit_record(
+                                sandbox, error_record, candidate_id=agent_input.candidate_id
+                            )
                             print(f"  Saved error record: {error_record['status']}")
                             continue
                         scoring_time = round(time.time() - t0, 1)
@@ -5784,7 +5816,7 @@ class HyperparamTuningAgent:
                         final_record, resource_check, final_record["runtime_verification"]
                     )
 
-                    _emit_record(sandbox, final_record)
+                    _emit_record(sandbox, final_record, candidate_id=agent_input.candidate_id)
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
                     )
@@ -5885,7 +5917,7 @@ class HyperparamTuningAgent:
                         # The RAW dict is saved (validation is the gate, not
                         # the serializer): model_dump() drops extra keys, which
                         # would silently lose the §4 watchdog provenance.
-                        _emit_record(sandbox, failure_record)
+                        _emit_record(sandbox, failure_record, candidate_id=agent_input.candidate_id)
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")
@@ -6085,6 +6117,8 @@ class HyperparamTuningAgent:
             # disagree with what the run was launched under.
             "healthgate_mode": agent_input.healthgate_mode,
             "result_authority": agent_input.result_authority,
+            # V21 PR E — run-level candidate label, echoed like the two above.
+            "candidate_id": agent_input.candidate_id,
             "health_checks_config_source": health_checks_config_source,
             "health_config_sha256": health_config_sha256,
             "formal_reference_score": _json_safe_reference(formal_reference_score),
@@ -6190,6 +6224,9 @@ class HyperparamTuningAgent:
                 # healthgate_mode: null because it failed.)
                 "healthgate_mode": agent_input.healthgate_mode,
                 "result_authority": agent_input.result_authority,
+                # V21 PR E — the degraded exit keeps the label too; losing it
+                # here would make crashed candidates silently unjoinable.
+                "candidate_id": agent_input.candidate_id,
                 "completed_rounds": completed_rounds,
                 "total_attempts": total_attempts,
                 "formal_reference_score": _json_safe_reference(formal_reference_score),

@@ -34,6 +34,10 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
     docs/design/enable_loss_inventory.md § Commit L3.
     """
     return ImplementorInput(
+        # V21 PR E hop 2: the system-minted identity travels inside the
+        # objects, so this protocol maps it field->field like every other
+        # field. None propagates for pre-PR-E / non-proposer candidates.
+        candidate_id=output.candidate_id,
         model_name=output.model_name,
         # V21 PR A3: the output contract must survive this hop. If it is dropped
         # here, a proposal declaring `regressor` silently produces a classifier

@@ -624,6 +624,10 @@ class MLCodeValidatorAgent:
 
         out = ValidatorOutput(
             passed=passed,
+            # V21 PR E: explicit echo beside the existing hand-echoed
+            # model_type; persisted in validation_{run_name}.json, which is
+            # what makes a died-at-validation candidate joinable.
+            candidate_id=inp.candidate_id,
             model_type=inp.model_type,
             plugin_registered=plugin_ok,
             tests_passed=tests_ok,

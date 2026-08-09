@@ -274,6 +274,9 @@ def local_validated_model(
         # V21 PR D — carried through unchanged, including `None`.
         healthgate_mode=healthgate_mode,
         result_authority=result_authority,
+        # V21 PR E hop 4: from the IMMEDIATE upstream (the validator's echo),
+        # for the same end-to-end-visibility reason as the impl->valid hop.
+        candidate_id=output.candidate_id,
         expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
