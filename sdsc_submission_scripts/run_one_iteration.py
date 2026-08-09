@@ -1858,6 +1858,14 @@ def main():
             data_scope=args.data_scope,
             health_gate_enabled=args.health_gate_enabled,
             health_gate_files=args.health_gate_files,
+            # V21 PR D — the declared posture, already validated above by
+            # validate_formal_launch and already written to the manifest.
+            # Before this it stopped at the manifest and never reached the
+            # tuner, so every formal record stamped
+            # `legacy_authority_unknown` and could neither become the chain
+            # incumbent nor enter the scientific aggregate.
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
             max_iterations=1,
             start_iteration=args.start_iteration,
             max_rounds=args.max_rounds,

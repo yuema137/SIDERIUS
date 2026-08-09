@@ -1004,13 +1004,20 @@ PR B   "If it executes, resource control remains correct."
 
 | PR | Title | Fixes | Depends on | Gate |
 |---|---|---|---|---|
-| **A** | Make the existing output contract reachable | P1 + P2 | none | **DELIVERED `0c4eb33e`** — awaiting merge |
-| **B** | Resource-budget semantics and enforcement | P6.4 | none | **V21 launch blocker** |
-| **C** | Generated-model production compatibility | P6.2 family | none | **V21 launch blocker** |
-| **D** | Per-file evidence to reflector and planner | P6.5 | none | Before V21 |
+| **A** | Make the existing output contract reachable | P1 + P2 | none | launch blocker — **MERGED `b9f88ae5`** |
+| **B** | Resource-budget semantics and enforcement | P6.4 | none | launch blocker — **MERGED `0aae3f4b`** |
+| **C** | Generated-model production compatibility | P6.2 family | none | launch blocker — **MERGED `cac86c94`** |
+| **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | launch blocker — **APPROVED, CI green `95f96745`** |
 | **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data |
 | **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
 | **G** | Capability-derived inference batch | P5 | B | Non-blocking |
+
+> **Row D corrected 2026-08-08.** It carried the withdrawn scope
+> ("Per-file evidence to reflector and planner", fixing P6.5, gated
+> "Before V21") long after §E.3e withdrew that premise and checkpoint 4
+> was replaced. The summary table is what a reader meets first, so a
+> stale row here outranks a correct body section. Found in the
+> pre-review audit of this ledger.
 
 ---
 
@@ -1034,6 +1041,18 @@ the PR A document, so a later PR planning against this ledger sees them.
 | **Authority stamp never reaches the record** — CLI `--healthgate_mode blocking --result_authority diagnostic`, record stamps `null / null → legacy_authority_unknown`, `authoritative: false` | **PR D** (its existing owner) — and **promoted to a V21 scientific-campaign LAUNCH BLOCKER** | **Two independent observations** now (PR A Gate 2C, PR C C5b), so this is causal evidence rather than an artifact oddity. Without it, a formal round that runs correctly still produces a record whose authority is unknown, breaking incumbent-selection and aggregation semantics downstream. That is more than the ordinary observability improvement PR D was scoped as |
 | `inference_batch_for`'s actual batch selection | **PR G** | Inference **throughput only**, confirmed by C3b's audit: planning and runtime call the same function, so the forecast never diverges from what runs |
 | **No mechanical guardrail exists** for the import-side-effect defect class | none — recorded | Deciding statically whether a registry read is reachable without its populating import is a whole-program reachability question over lazy imports. Stated rather than faked; enforced by C4's real-subprocess fixture instead |
+
+### Follow-ups filed by PR D — recorded 2026-08-08, none blocking
+
+Filed under **`FU-D21-*`**, not `FU-D-*`: V20's PR D already owns
+`FU-D-1` … `FU-D-12`, and `FU-D-11` / `FU-D-12` are cited as live
+operator-facing flags in `docs/running_chain_test.md:114,117`. Reusing the
+prefix would have put two distinct open items under one label.
+
+| ID | Item | Why deferred | Blocking? |
+|---|---|---|---|
+| **FU-D21-1** | `FormalValidity` is a `Literal` type alias, not an enum, and `ScientificAuthority.from_context` does not validate it — an unrecognised string behaves exactly like `"valid"` | Pre-existing property of a function PR D froze. Unreachable from PR D's transport (the tuner passes `formal_validity_of(...)`, which returns one of the three). Fixing it is a semantics change PR D was forbidden to make | No |
+| **FU-D21-2** | No deterministic fixture executes `run_one_iteration.__main__` end to end; hop 7's call site is covered by an AST call-site assertion plus mutations M-D1/M-D2 | O-D-2 classifies a pseudo-mode chain iteration as optional strengthening evidence, explicitly not a merge requirement | No |
 
 ### Findings PR A produced for OTHER PRs — recorded, not absorbed
 
@@ -1897,6 +1916,11 @@ Written 2026-08-08, after all three launch blockers merged (`b9f88ae5`,
 `cac86c94`, `0aae3f4b`). These are not style notes; each is a defect that
 actually shipped and was found by audit.
 
+> **Extended 2026-08-08 by PR D** (§E.3d.9-10). PR D was the **fourth**
+> consecutive instance of §E.3d.1, and produced a variant of it that the
+> A/B/C wording did not cover: the same defect shape appearing inside the
+> *test suite*. Both are binding on PRs E, F and G.
+
 ### E.3d.1 The recurring defect shape: a correct rule that nothing calls
 
 Three PRs, three instances, same shape:
@@ -1908,11 +1932,22 @@ PR C   get_config_class read a registry nobody had populated
        -> 0 of 82 plugins resolved in a clean subprocess
 PR B   RuntimeBudget.vram_gb: declared, evidence-graded, unit-tested,
        and never supplied by any production caller
+PR D   healthgate_mode / result_authority: two schema fields, a correct
+       27-row verdict rule, a launch-time validator that REFUSES an
+       undeclared formal launch, a manifest already recording the
+       declaration, and two consumers already reading the verdict --
+       and no production caller populating the tuner input
 ```
 
-**Every remaining PR must ask, before building: does this already exist
-and lie inert?** PR B's Stage A turned a "build an enforcement mechanism"
-commit into a one-line wiring change by asking it.
+**Four for four.** Every remaining PR must ask, before building: **does
+this already exist and lie inert?** PR B's Stage A turned a "build an
+enforcement mechanism" commit into a one-line wiring change by asking it;
+PR D's audit turned "make authority reach the record" into three
+parameters and two assignments.
+
+Note what makes this shape so durable: in PR D, **four** independent
+correct components surrounded the gap. The density of correct machinery
+around a defect is not evidence against the defect — it is what hides it.
 
 The corollary is PR A's rule, restated: **audit consumers as consumers.**
 A rule existing in source is not evidence that any consumer honours it.
@@ -1978,6 +2013,62 @@ production edits, by design), and never take a pytest verdict from a
 pipe's exit code.
 
 ---
+
+### E.3d.9 The defect shape also appears inside the test suite
+
+PR D's mutation M-D3 deleted the forwarding **inside** `run_workflow` and
+every test stayed green. The module asserted that `run_workflow` *accepts*
+the two keywords, and separately drove the protocol directly:
+
+```text
+hop start   asserted    (the signature has the parameter)
+hop middle  UNTESTED    (deleting the forwarding changed nothing)
+hop end     asserted    (the protocol sets the field when called directly)
+```
+
+That is §E.3d.1 with the test suite as the inert component. A signature is
+not forwarding; two endpoint assertions do not test the edge between them.
+The fix was to assert, by AST, that the call forwards the **parameter**
+(`ast.Name` of the same id) rather than any value — which also catches
+forwarding a literal.
+
+The sibling failure was subtler and is worth stating separately: M-D1/M-D2
+survived because the call-site test used a **substring search**, and
+`healthgate_mode=args.healthgate_mode` appears **seven times** in
+`run_one_iteration.py` (the crash-path `write_manifest` calls are textually
+identical). Deleting the one occurrence that mattered left six others and
+the assertion stayed green.
+
+```text
+BAN     "the string appears in the file"
+REQUIRE "this specific call node passes this specific value"
+```
+
+**Binding on E/F/G:** a transport test must locate the call site
+structurally, and every hop must have an assertion that fails when *that
+hop alone* is deleted.
+
+### E.3d.10 One-axis and two-axis absence failures are not the same defect
+
+PR D's first design said that defaulting `healthgate_mode="blocking"`
+would manufacture authority. The operator caught it; the frozen matrix
+says otherwise, and it was verified empirically:
+
+```text
+blocking + None        -> legacy_authority_unknown, authoritative=False
+None     + scientific  -> legacy_authority_unknown, authoritative=False
+blocking + scientific  -> authoritative=True            <- the dangerous one
+```
+
+Because the "undeclared" blocker fires when **either** axis is absent, a
+single-axis default **cannot** reach authority. It is still a real defect
+— it destroys "an undeclared axis stays undeclared" — but a *different*
+one, and the two need separate mutations (M-D5a, M-D5b).
+
+**Binding on E/F/G:** when a rule reads several fields, state which
+*combination* produces the harm before writing the mutation that polices
+it. A plausible-sounding harm attached to the wrong input is a test that
+passes for the wrong reason.
 
 ## E.3e Correction, 2026-08-08 — PR D's premise withdrawn after a code-grounded audit
 
@@ -2072,6 +2163,82 @@ a reason to touch the frozen metric.**
 ---
 
 ## PR D — Make the existing scientific-authority contract reachable
+
+> ## STATUS: APPROVED FOR MERGE 2026-08-08 — PR #189, CI green on `95f96745`
+>
+> Operator verdict: *"PR D implementation APPROVED, subject only to the
+> two documentation reconciliation fixes and CI finishing green. No
+> additional Gate, code change, or validation run is required."* Both
+> reconciliations applied; CI `Lint + Type + Unit Tests` **SUCCESS** on
+> `95f96745` (run `31295484292`, `headSha` verified). Merge commit to be
+> recorded here once merged.
+>
+> Branch `feat/pr-d-scientific-authority-reachable`. Full implementation
+> record: `v21_priorities/pr_d_scientific_authority_reachable.md`.
+>
+> **What PR D established**
+>
+> > A launcher's **declared** scientific posture now reaches the existing
+> > authority rule, so a formal record can become the chain incumbent and
+> > enter the scientific aggregate. PR D adds **no** authority semantics:
+> > the 27-row verdict table, the blocker precedence, the trial exclusion
+> > and the historical-reconstruction ladder are all byte-unchanged.
+>
+> **Delivered**
+>
+> | Unit | Result |
+> |---|---|
+> | D0 | Audit; census frozen (§0.C.1); O-D-1 and O-D-2 recorded; absence semantics split into corruption vs fabrication |
+> | D1 | The 27-row matrix pinned **before** any transport existed — 32 tests, **zero production diff**, every expectation hand-derived from the rule rather than read back from the module |
+> | D2 | The transport: 3 production files, ten wiring lines, closing hops 7-8-9 |
+> | D3 | The joint (launcher declaration → real transport → both consumers) and non-retroactivity — 10 tests, zero production diff |
+>
+> **Evidence:** clean-tree `pytest tests/unit -m "not real_run"` →
+> `8146 passed, 2 skipped, 1 xfailed`, **pytest rc=0**, zero FAILED/ERROR.
+> Baseline was `8087`, so `+59 = 32 + 17 + 10` **exactly** — no
+> pre-existing test was deleted, renamed away or skipped to reach green.
+> ruff + format clean; pyright `0 errors, 4 warnings` at baseline.
+> Mutations: **13 attempted, 13 behaviour-changing → 13 caught, 0
+> equivalent.** Metric/scorer/HealthGate freeze proved **by diff**: no
+> scoring, SNR, loss, health-check or authority-semantics file appears
+> outside `docs/`.
+>
+> **The defect was the §E.3d.1 shape for the fourth consecutive PR.** Both
+> schema fields had existed at `hyperparam_tuning.py:1749/:1761` since the
+> V20 authority work; `validate_formal_launch` already refused an
+> undeclared formal launch; the manifest already recorded the declaration;
+> both consumers already read the verdict correctly. **Nothing on the
+> production path populated the input.** No mechanism was missing — one
+> parameter was.
+>
+> **What PR D deliberately did NOT do**
+>
+> | | |
+> |---|---|
+> | `scripts/run_comparison.py` | stays authority-undeclared (**O-D-1**). Formal execution does not imply scientific authority; its records keep resolving `legacy_authority_unknown`, and that is the intended outcome |
+> | `run_exploration_test`, `model_exploration.__main__`, `bg_admission_validation` | dev/test/diagnostic surfaces, absent from the diff entirely |
+> | any default | absence stays information. `None / None` must remain distinguishable from `blocking / scientific` |
+> | Gate 1 / Gate 2 | none run (**O-D-2**), and none would have added evidence — the transported values are two `Literal` strings crossing no process boundary |
+>
+> **Two findings worth carrying forward.** Three mutations survived a
+> first round and **every one was a defect in the test, not luck** —
+> most instructively M-D3, where the test asserted `run_workflow`
+> *accepts* the keywords and separately drove the protocol, so the hop
+> existed at both ends and could be severed in the middle unobserved.
+> That is §E.3d.1 reproduced *inside the test suite*. Separately, a
+> pre-review audit of the design doc and this ledger found **twelve**
+> bookkeeping defects, including a `[x]` on a full-suite run that had not
+> happened and an overview table still advertising PR D's withdrawn
+> premise — recorded at §PR-D final validation, because "the design doc
+> is the live ledger" is only true if the ledger is audited like code.
+>
+> **Follow-ups, neither blocking:** **FU-D21-1** `FormalValidity` is a
+> `Literal` alias `from_context` does not validate — real, but
+> pre-existing, unreachable from PR D's transport, and fixable only by
+> changing frozen semantics; operator-confirmed as correctly deferred.
+> **FU-D21-2** no deterministic fixture executes
+> `run_one_iteration.__main__` end to end. Filed as `FU-D21-*` because
+> V20's PR D already owns `FU-D-1 … FU-D-12`.
 
 > **RE-SCOPED 2026-08-08 by operator decision, after the audit in §E.3e.**
 > The former scope ("Per-file evidence to reflector and planner") is
@@ -2406,6 +2573,22 @@ correction is decided after the data exists.
 Complete funnel on a live iteration; prompt contradiction resolved; no
 corrective change to advice or thresholds in the diff.
 
+> **Correction, 2026-08-08 (operator decision O-E-1).** The *"prompt
+> contradiction resolved"* clause above is **SUPERSEDED**. This section's
+> own Correction of 2026-08-07 already established there is no
+> contradiction — an encouraged 10M-100M range and a ~100M upper bound are
+> consistent — and the Scope explicitly forbids PR E from editing that
+> prior. A merge criterion cannot require resolving something the same
+> section says is not a defect and must not be touched. The clause is
+> retired; search-space policy is **not** reopened and remains a
+> post-funnel-data question. Effective merge criteria for PR E are those
+> in `v21_priorities/pr_e_proposal_scale_funnel.md` §8.
+>
+> Further operator decisions O-E-2 … O-E-5 (disposition semantics,
+> join-on-read storage, candidate-identity semantics, and the
+> `candidate_id` usage boundary) are recorded in that design document
+> §0.A, which is PR E's live ledger.
+
 ---
 
 ## PR F — Inspection-cost scaling study (measure only)
@@ -2552,7 +2735,7 @@ Byte-identical inference outputs; name table removed from the path.
 | 1 | Regression hypothesis reachable end to end by a generated model | PR A | **DONE** `b9f88ae5` |
 | 2 | Resource semantics correct — S3 frozen, admission graded, realization observable | PR B | **DONE** `0aae3f4b` |
 | 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
-| 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **TODO** |
+| 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189, CI green `95f96745` (merge commit to be recorded) |
 | 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **TODO** |
 | 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
 
@@ -2603,6 +2786,11 @@ Recommended serialization if capacity is limited: **A → C → B → D → E**,
 then F, then G. A is first because every V21 scientific question depends
 on the hypothesis space being open; C is second because a generated model
 that cannot execute makes every later validation ambiguous.
+
+**Progress, 2026-08-08:** `A ✓  C ✓  B ✓  D ✓(approved, CI green)` — all
+four launch-gating checkpoints (1-4) are satisfied. **PR E is next**, and
+it is the last checkpoint (5) before a V21 campaign can start. E, F and G
+are bound by §E.3d including PR D's additions §E.3d.9-10.
 
 ## E.6 First V21 experiment, once A-E are merged
 

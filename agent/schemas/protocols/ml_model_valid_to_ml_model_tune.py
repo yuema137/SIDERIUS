@@ -21,7 +21,12 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 
 from typing import Any, Literal
 
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput, serialize_expert_advice
+from agent.schemas.hyperparam_tuning import (
+    HealthGateMode,
+    HyperparamTuningInput,
+    ResultAuthority,
+    serialize_expert_advice,
+)
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.storage import StorageConfig
@@ -41,6 +46,13 @@ def local_validated_model(
     data_scope: DataScope | None = None,
     health_gate_enabled: bool = True,
     health_gate_files: list[int] | None = None,
+    # V21 PR D — the DECLARED scientific posture. `None` is a meaningful
+    # value, not a missing one: it means the caller declared nothing, and
+    # the authority rule reports that as `legacy_authority_unknown`. There
+    # is deliberately no default here — a default would turn a launcher's
+    # silence into a declaration it never made (design §0.E).
+    healthgate_mode: HealthGateMode | None = None,
+    result_authority: ResultAuthority | None = None,
     file_index: int = 6,
     llm_provider: Literal["gemini", "openai", "deepseek"] = "gemini",
     llm_model_id: str = "gemini-3.1-flash-lite-preview",
@@ -259,6 +271,9 @@ def local_validated_model(
         data_scope=data_scope if data_scope is not None else DataScope.default(),
         health_gate_enabled=health_gate_enabled,
         health_gate_files=health_gate_files,
+        # V21 PR D — carried through unchanged, including `None`.
+        healthgate_mode=healthgate_mode,
+        result_authority=result_authority,
         expert_advice=expert_advice,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,

@@ -241,6 +241,12 @@ class TestProtocolsToSchemas:
             "enable_structured_health_feedback",
             "health_feedback_history_window_iterations",
             "health_feedback_history_max_entries_per_model",
+            # V21 PR D — the declared scientific posture. Launch-critical
+            # because without it every formal record stamps
+            # `legacy_authority_unknown` and can neither become the chain
+            # incumbent nor enter the scientific aggregate.
+            "healthgate_mode",
+            "result_authority",
         }
         missing = required - set(HyperparamTuningInput.model_fields)
         assert not missing, f"missing launch-critical fields: {sorted(missing)}"
