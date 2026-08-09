@@ -570,56 +570,53 @@ tests/                               reachability + mutations
 
 #### 3. Implementation plan
 
-- [ ] Re-read `workflows/model_exploration.py:1346-1356` and confirm the
-      DS6b parameter block is still the right insertion point
-- [ ] Add both parameters to `run_workflow`, typed to match the schema
+- [x] Re-read `model_exploration.py:1349-1353`; DS6b block confirmed
+- [x] Added both parameters to `run_workflow` (`:1360-1361`), typed to match the schema
       (`HealthGateMode | None`, `ResultAuthority | None`), `default=None`
-- [ ] Forward both at the `local_validated_model(...)` call
+- [x] Forwarded at the `local_validated_model(...)` call (`:2579-2580`)
       (`model_exploration.py:2560` region)
-- [ ] Add both parameters to `local_validated_model`
+- [x] Added both parameters to `local_validated_model` (`:54-55`)
       (`ml_model_valid_to_ml_model_tune.py:38-46` region), `default=None`
-- [ ] Set both on the returned `HyperparamTuningInput`
+- [x] Set both on the returned `HyperparamTuningInput` (`:275-276`)
       (`:252` region) — the fields already exist at
       `hyperparam_tuning.py:1749/:1761`; **no schema change**
-- [ ] Pass both at the launcher call site
+- [x] Passed both at the launcher call site
       (`run_one_iteration.py:1846`) from `args.*`
-- [ ] Confirm no import cycle is introduced by the type imports; if the
-      `Literal` aliases are awkward to import, record the choice made
-- [ ] Verify the three undeclared launchers still call `run_workflow`
-      without the new kwargs and are untouched
+- [x] **No cycle.** Both files already imported from
+      `agent.schemas.hyperparam_tuning`, so `HealthGateMode` /
+      `ResultAuthority` were added to the existing import lists. The
+      design's fallback to `str | None` was not needed
+- [x] Verified: `run_exploration_test.py`, `model_exploration.__main__`
+      and `bg_admission_validation.py` are **not in the diff**
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A declared posture passed to `local_validated_model` appears
-      unchanged on the returned `HyperparamTuningInput`
-- [ ] An omitted posture yields `None` on both fields
-- [ ] The values are the exact strings supplied — no normalisation,
-      lower-casing or mapping
+- [x] A declared posture arrives unchanged
+- [x] An omitted posture yields `None` on both fields
+- [x] Exact strings, all three legal postures
 
 **Integration / pseudo**
-- [ ] Drive the **real** transport functions end to end (not a local
+- [x] Drove the **real** transport functions (not a local
       reimplementation — B1b's P2 mutation survived exactly that mistake):
       declared → `from_context` receives the declaration; undeclared →
       `from_context` receives `None/None` → `legacy_authority_unknown`
 
 **Negative / invalid input**
-- [ ] An invalid string is rejected by the existing `Literal` schema
-      validation, not silently coerced — record where the rejection occurs
-- [ ] `observe_only + scientific` is still refused **at the launcher** by
-      `validate_formal_launch`, and the transport does **not** duplicate
-      that check
-- [ ] Only one axis declared → still `legacy_authority_unknown`
+- [x] Rejected by Pydantic at `HyperparamTuningInput` construction inside
+      the protocol — `"enforcing"` and `"Scientific"` both raise
+- [x] Transport does **not** duplicate the check; the illegal pair is
+      deliberately absent from the carried-verbatim parametrization
+- [x] Only one axis declared → still `legacy_authority_unknown`
 
 **Backward-compatibility / default parity**
-- [ ] The three undeclared launchers produce byte-identical
-      `HyperparamTuningInput` field values before and after
-- [ ] The two pre-existing parity guards pass **unmodified**:
+- [x] Unchanged — `None` defaults; those files are not in the diff
+- [x] Both pre-existing parity guards pass **unmodified** (`22 passed`):
       `tests/unit/core/test_watchdog_admission_split.py:317` (launcher →
       `run_workflow` kwargs) and
       `tests/unit/sdsc_submission_scripts/test_launch_surface_parity.py`
       (shell → CLI → `run_workflow` → protocol → schema)
-- [ ] D1's 27-row matrix re-run and identical
+- [x] D1's 27-row matrix re-run and identical (`32 passed`)
 
 **Real-training Gate:** none proposed. See §5 Layer E for the argument
 that a GPU/LLM run adds no evidence here. **Not to be launched without
@@ -658,21 +655,75 @@ operator approval.**
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Reachability test result — **to record**
-- [ ] Parity guards (both, unmodified) — **to record**
-- [ ] Mutations M-D1..M-D4, M-D5a, M-D5b by category — **to record**
-- [ ] Test counts + wall time — **to record**
-- [ ] pyright error/warning counts vs the `0 errors, 4 warnings` baseline —
-      **to record**
+- [x] `17 passed in 1.51s`
+- [x] `22 passed`, neither file modified
+- [x] **6 attempted, 6 behaviour-changing → 6 caught, 0 equivalent** (after two test-architecture fixes, §D2.R)
+- [x] `agent+core+workflows+sdsc`: `6623 passed, 2 skipped`, pytest rc=0,
+      0 FAILED/ERROR, 458s
+- [x] pyright `0 errors, 4 warnings` — baseline held
 
 #### 8. Commit boundary
 
-- [ ] Diff touches exactly three production files plus tests
-- [ ] No semantics file, no tuner file, no schema field addition
-- [ ] No edit to the three deliberately-undeclared launchers
-- [ ] No `run_comparison.py` change — deliberately undeclared per **O-D-1**
-- [ ] Diff summary, staged file list, tests, mutations and deviations
-      shown before committing
+- [x] Diff touches exactly three production files plus one test file
+- [x] No semantics file, no tuner file, no schema field addition
+- [x] No edit to the three deliberately-undeclared launchers
+- [x] No `run_comparison.py` change — deliberately undeclared per **O-D-1**
+- [x] Diff summary, staged files, tests, mutations and deviations recorded in §D2.R
+
+#### D2.R — Result, 2026-08-08
+
+**Production diff: three files, exactly as designed.**
+
+```text
+sdsc_submission_scripts/run_one_iteration.py     +2 kwargs at the run_workflow call
+workflows/model_exploration.py                   +2 params (:1360-1361), +2 forwarded (:2579-2580)
+agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py
+                                                 +2 params (:54-55), +2 set (:275-276)
+tests/unit/agent/schemas/test_authority_transport_reachable.py   new, 17 cases
+```
+
+No schema field added; `HealthGateMode` / `ResultAuthority` came from the
+import both files already had.
+
+```text
+17 passed   new reachability module
+22 passed   the two pre-existing parity guards, UNMODIFIED
+32 passed   D1's matrix, identical
+6623 passed, 2 skipped   agent+core+workflows+sdsc, pytest rc=0, 0 FAILED/ERROR
+pyright 0 errors, 4 warnings   baseline held
+mutations   6 attempted, 6 behaviour-changing -> 6 caught, 0 equivalent
+```
+
+**Two mutations survived the first round, and both were defects in MY
+TESTS, not gaps in luck.** Recorded because each is a distinct way a
+reachability test can be decoration:
+
+- **M-D3 (drop the forwarding inside `run_workflow`) SURVIVED.** The
+  module asserted `run_workflow` *accepts* the keywords and separately
+  drove the protocol directly — so the hop existed at both ends and could
+  be severed in the middle with nothing observing it. **This is the PR
+  A/B/C defect shape reproduced inside the test suite**: signature
+  presence is not forwarding. Fixed with an AST assertion that the call
+  forwards the *parameter* (`ast.Name` of the same id), which also
+  catches forwarding a literal.
+- **M-D1/M-D2 (drop the launcher's kwargs) SURVIVED.** The call-site test
+  used a substring search, and `healthgate_mode=args.healthgate_mode`
+  appears **seven times** in `run_one_iteration.py` — the crash-path
+  `write_manifest(...)` calls use identical text. Deleting the one
+  occurrence that matters left six others and the assertion stayed green.
+  Fixed by locating the `run_workflow(...)` call by AST and asserting the
+  value is `args.<field>`.
+
+Both fixes changed the test architecture rather than the mutation, per
+the standing rule. A third harness bug surfaced alongside — the mutation
+anchors themselves matched seven sites and correctly reported
+`NOT-APPLIED` rather than a false pass, which is the `count == 1`
+discipline working.
+
+**Deviation from the plan:** none in production. The design predicted
+three production files and three hops; that is exactly what changed. The
+only deviations were the two test corrections above, both discovered by
+the mutations the design required.
 
 ---
 

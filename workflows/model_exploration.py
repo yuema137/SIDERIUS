@@ -74,8 +74,10 @@ import yaml
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
+    HealthGateMode,
     HyperparamTuningOutput,
     PhysicalRejection,
+    ResultAuthority,
 )
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -1350,6 +1352,13 @@ def run_workflow(
     data_scope: DataScope | None = None,
     health_gate_enabled: bool = True,
     health_gate_files: list[int] | None = None,
+    # V21 PR D — the launcher's DECLARED scientific posture, forwarded to
+    # the tuner input so the existing authority rule can see it. `None`
+    # means "this caller declared nothing" and is the correct value for
+    # every dev/test/diagnostic entry point (design §0.C.1). No default:
+    # defaulting would let silence become a declaration (§0.E).
+    healthgate_mode: HealthGateMode | None = None,
+    result_authority: ResultAuthority | None = None,
     human_advice_interpret: str | None = None,
     human_advice_propose: str | None = None,
     human_advice_implement: str | None = None,
@@ -2566,6 +2575,9 @@ def run_workflow(
             data_scope=data_scope,
             health_gate_enabled=health_gate_enabled,
             health_gate_files=health_gate_files,
+            # V21 PR D — hop 7 -> hop 8, unchanged including `None`.
+            healthgate_mode=healthgate_mode,
+            result_authority=result_authority,
             file_index=file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
