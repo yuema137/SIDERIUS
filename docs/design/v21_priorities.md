@@ -2573,6 +2573,22 @@ correction is decided after the data exists.
 Complete funnel on a live iteration; prompt contradiction resolved; no
 corrective change to advice or thresholds in the diff.
 
+> **Correction, 2026-08-08 (operator decision O-E-1).** The *"prompt
+> contradiction resolved"* clause above is **SUPERSEDED**. This section's
+> own Correction of 2026-08-07 already established there is no
+> contradiction — an encouraged 10M-100M range and a ~100M upper bound are
+> consistent — and the Scope explicitly forbids PR E from editing that
+> prior. A merge criterion cannot require resolving something the same
+> section says is not a defect and must not be touched. The clause is
+> retired; search-space policy is **not** reopened and remains a
+> post-funnel-data question. Effective merge criteria for PR E are those
+> in `v21_priorities/pr_e_proposal_scale_funnel.md` §8.
+>
+> Further operator decisions O-E-2 … O-E-5 (disposition semantics,
+> join-on-read storage, candidate-identity semantics, and the
+> `candidate_id` usage boundary) are recorded in that design document
+> §0.A, which is PR E's live ledger.
+
 ---
 
 ## PR F — Inspection-cost scaling study (measure only)

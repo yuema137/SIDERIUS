@@ -1,16 +1,21 @@
 # PR E — Proposal-scale funnel instrumentation
 
-**Status: DESIGN DRAFT 2026-08-08 — NOT approved, no implementation begun.
-No production code, test, schema, launcher or scorer file is touched by
-this document.** Three operator decisions are required before D-day; they
-are listed at the end and two of them change the commit plan.
+**Status: DESIGN REVISION 2 — 2026-08-08, returned for operator review.
+Not approved; no implementation begun. No production code, test, schema,
+launcher or scorer file is touched by this document.**
+
+Revision 2 applies operator decisions **O-E-1 … O-E-5** and the
+persistence audit they required. The result is **materially smaller than
+revision 1**: two of revision 1's five commits disappear entirely, because
+the audit proved the measurements they would have copied downstream are
+already persisted by the stage that owns them.
 
 | | |
 |---|---|
 | Plan section | `docs/design/v21_priorities.md` — PR E section + §E.3d (binding) |
 | Gate | **V21 global checkpoint 5** — the last one before a campaign may start |
 | Depends on | A (`b9f88ae5`), C (`cac86c94`), B (`0aae3f4b`) merged; D (#189) approved |
-| Audit date | 2026-08-08, against `4d608902` (PR D branch head) |
+| Audit date | 2026-08-08, against `16c0a1b8` |
 
 ---
 
@@ -22,70 +27,107 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright     # pyright 1.1.409
 .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
 ```
 
-**Baseline at `4d608902`:** unit suite `8146 passed, 2 skipped, 1 xfailed`;
-pyright `0 errors, 4 warnings`; ruff clean.
+**Baseline:** unit suite `8146 passed, 2 skipped, 1 xfailed`; pyright
+`0 errors, 4 warnings`; ruff clean.
 
 Per CLAUDE.md the full suite runs **only from a clean tree**, and the
 verdict is taken from pytest's own exit code, never from a pipe's.
 
 ---
 
-## 0. Pre-design audit (performed 2026-08-08 against `4d608902`)
+## 0. Pre-design audit
 
-The ledger's PR E note gives one binding instruction before anything is
-built: *"Check what already exists first (§E.3d.1)."* That audit changes
-the shape of this PR substantially, so it comes first and in detail.
+### 0.A What revision 2 changed, and why
 
-### 0.A The five funnel stages, as they exist in code
+| O-E | Decision | Effect on the design |
+|---|---|---|
+| **O-E-1** | the "prompt contradiction" merge criterion is SUPERSEDED | §0.H closed; a dated correction goes in the ledger. Search-space policy stays shut |
+| **O-E-2** | no new global disposition vocabulary; `stopped_at_stage` is **read-side derived** | revision 1's cross-schema `stopped_at_stage` field is **deleted** |
+| **O-E-3** | join-on-read; measurements stay with their **native owner** | revision 1's **Commit E4 (forward the proposed count) is deleted entirely** — see §0.C |
+| **O-E-4** | one candidate = one proposer-emitted proposal; a revision is a **new** candidate | maps exactly onto the existing outer attempt loop — see §0.D |
+| **O-E-5** | `candidate_id` MAY be an observational join key; MUST NOT be a behavioural key | §0.F restates the invariant correctly; revision 1's "never a lookup key" was wrong |
 
-The stage sequence is `workflows/model_exploration.py::run_workflow`:
+### 0.B The five stages, as they exist in code
+
+Stage sequence, `workflows/model_exploration.py::run_workflow`:
 
 ```text
-:2327   proposal   = _propose_agent.run(propose_input)
-:2375   impl_input = local_full_spec(proposal, attempt_storage)
-:2412   valid_input= local_all_fields(...)
-:2428   validation = _valid_agent.run(valid_input)
-:2569   tune_input = local_validated_model(...)          <- PR D's hop
-:2665   tune_output= _tune_agent.run(tune_input)
+:2214   for attempt in range(1, max_proposal_attempts + 1):
+:2220     attempt_dir = {iter_dir}/attempt_{NNN}
+:2327     proposal   = _propose_agent.run(propose_input)
+:2333     attempt_dir renamed -> {iter_dir}/attempt_{NNN}_{model_name}
+:2338     --- Implement -> Validate (inner retry loop per proposal) ---
+:2428     validation = _valid_agent.run(valid_input)
+:2569     tune_input = local_validated_model(...)        <- PR D's hop
+:2665     tune_output= _tune_agent.run(tune_input)
 ```
 
-**PR E's transport rides exactly the hops PR D just wired and proved.**
-`local_validated_model` is the same protocol; the same AST-based
-call-site test architecture applies (§E.3d.9). This is the single largest
-reason PR E is smaller than the ledger's scope note implies.
-
-### 0.B What each stage already measures — and what it drops
-
-| # | Stage | Parameter count available? | Persisted? | Status |
+| # | Stage | Parameter count | Native owner | Status |
 |---|---|---|---|---|
-| 1 | proposal | **YES** — `ProposalOutput.parameter_count_estimate` (`agent/schemas/proposal.py:1042`), LLM-emitted, `int \| None` | on the proposal record | **PRODUCED, NOT FORWARDED.** The field exists on **no** downstream schema. `grep parameter_count_estimate agent/ nodes/ workflows/ core/ execute_tools/` returns the proposer, its prompt text, and nothing else |
-| 2 | implementation | **NO** — `ImplementorOutput` carries no count; the implementor emits source, never instantiates | — | genuinely absent |
-| 3 | validation | **YES, AND DISCARDED.** `_check_instantiation_and_gradient` instantiates the real model at `ml_code_validator_agent.py:371` (`model = module.PLUGIN_MODEL_CLASS(config)`) and returns only four booleans. `ValidatorOutput` has no numeric field at all | no | **MEASURED FOR FREE, THROWN AWAY** — §E.3d.1 again |
-| 4 | preflight / admission | **YES**, two independent surfaces: `ProposalOutput.preflight_estimated_minutes` / `preflight_factor`, and PR B's `HyperparamTuningOutput.physical_rejections` (`PhysicalRejection.binding_cap: Literal["vram","compute_intensity","vram+compute_intensity"]`) | partially | see §0.E |
-| 5 | trained | **YES** — `ExperimentRecord.model_params: int \| None` (`hyperparam_tuning.py:371`), populated from `train_engine_sandbox.py:664,1089` | on every record | **already complete** |
-| 5b | HealthGate valid | **YES** — gate results on the record; PR D's `scientific_authority` block now also lands there | yes | already complete |
+| 1 | proposal | `ProposalOutput.parameter_count_estimate` (`agent/schemas/proposal.py:1042`) | `proposal_{run_name}.json` | **already persisted natively** |
+| 2 | implementation | none — the implementor emits source, never instantiates | `implementor_{run_name}.json` | genuinely absent, and **out of scope** (§0.E) |
+| 3 | validation | **instantiated at `ml_code_validator_agent.py:371`, count discarded** | `validation_{run_name}.json` | **the one real measurement gap** |
+| 4 | preflight | `preflight_estimated_minutes`, `preflight_factor` on `ProposalOutput` | same file as stage 1 | **advisory only** — see §0.E |
+| 5 | trained | `ExperimentRecord.model_params` (`hyperparam_tuning.py:371`) | the record | already complete |
+| 5b | HealthGate / authority | gate results + PR D's `scientific_authority` | the record | already complete |
 
-Two further realized-count surfaces exist and are **not** funnel stages,
-recorded so a later reader does not mistake them for one:
-`isolated_probe.realized_parameter_count` (`agent/skills/evaluate_vram_skill/isolated_probe.py:261`)
-and `core/runtime_control/estimate_types.py:208 parameter_count` +
-`parameter_count_realized`. Both are **resource-estimation** inputs owned
-by PR B, on a different axis from proposal scale. Conflating them would
-repeat the `authoritative`-vs-GPU-measurement-authority confusion PR D
-had to disentangle in its §0.A.
+Two realized-count surfaces are **not** funnel stages and must not be
+conflated with them: `isolated_probe.realized_parameter_count` and
+`core/runtime_control/estimate_types.py:208 parameter_count`. Both are
+**resource-estimation** inputs owned by PR B. Conflating them would repeat
+the `authoritative`-vs-GPU-measurement-authority confusion PR D had to
+disentangle.
 
-**Consequence.** Of the five stages, **three already carry the number**
-(1, 3-as-instantiation, 5) and one measures it and throws it away. PR E's
-real content is therefore *not* "build instrumentation". It is:
+### 0.C Native persistence audit — the audit O-E-3 required
+
+**Every pre-tuner stage already persists its own output, per candidate.**
 
 ```text
-1. a join key that does not exist
-2. forward stage 1's number past ProposalOutput
-3. stop discarding stage 3's number
-4. a typed disposition where a candidate is dropped
+nodes/ml_model_proposal_agent/…:1340   {workspace}/proposal_{run_name}.json
+nodes/ml_model_implementor/…:1821      {workspace}/implementor_{run_name}.json
+nodes/ml_code_validator_agent/…:683    {workspace}/validation_{run_name}.json
 ```
 
-### 0.C Candidate identity — re-verified, still absent
+The filenames are fixed per `run_name`, which would be last-writer-wins —
+**except that `workspace` is per-attempt**:
+
+```text
+:2220  attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
+:2222  attempt_storage = _make_storage(attempt_dir, run_name)
+:2333  named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
+:2334  os.rename(attempt_dir, named_dir)
+```
+
+So each proposal attempt gets its own directory, and the three files live
+inside it. **A candidate that dies at validation still has its proposal,
+implementor and validation records on disk**, discoverable at
+`{iter_dir}/attempt_*/`.
+
+Two properties worth stating because the join depends on them:
+
+- **Discovery is not name-dependent.** The rename *prefixes* with
+  `attempt_{NNN}_`, so a glob finds every attempt regardless of what the
+  model was called. This matters: P6.2 is about name-keyed fragility, and
+  a funnel that could only find candidates by name would inherit it.
+- **The inner implement→validate retry loop overwrites within one
+  attempt dir.** Under O-E-4 those retries are the *same* candidate, so the
+  terminal outcome survives and that is what the funnel needs. Intermediate
+  retry attempts are not recoverable. **Recorded as a known limitation, not
+  a defect to fix in PR E.**
+
+**Binding consequence, per O-E-3.** Because stage-native evidence is
+available for every candidate, **no measurement is copied downstream.**
+Revision 1's plan to forward `parameter_count_estimate` through four hops
+into `ExperimentRecord` is **withdrawn**: it would have created a second
+copy of a number whose canonical owner already persists it, for the sole
+purpose of making one row look complete.
+
+```text
+WITHDRAWN   proposal count -> Implementor -> Validator -> Tuner -> record
+KEPT        proposal count stays in proposal_{run_name}.json, joined on read
+```
+
+### 0.D Candidate identity — absent, and O-E-4 maps cleanly onto the code
 
 ```bash
 grep -rn "candidate_id\|proposal_id\|lineage_id\|candidate_uid" \
@@ -93,384 +135,399 @@ grep -rn "candidate_id\|proposal_id\|lineage_id\|candidate_uid" \
 # -> no matches
 ```
 
-Re-verified at `4d608902`, after PRs A, C and D landed. The ledger's
-2026-08-07 finding stands: **no immutable candidate identity exists
-anywhere in `agent/schemas/`.**
+Re-verified after A, C and D landed. `exp_id` is not a substitute: it is
+minted inside the tuner, long after the proposal, one candidate produces
+many, and it cannot label a candidate that died at validation.
 
-The funnel cannot be joined on `model_name`, and this is not a
-hypothetical: P6.2 established that generated identity and registration
-are the fragile region, and PR C had to prove name-keyed reachability
-separately. A name is neither guaranteed unique across iterations nor
-stable across the five stages.
-
-`exp_id` is **not** a substitute. It identifies an experiment *round
-inside the tuner*, is minted long after the proposal, and one candidate
-produces many. It cannot label a candidate that died at validation.
-
-### 0.D The narrowest shared transport
-
-Identical in shape to PR D §0.D, and the same answer:
+**O-E-4 maps exactly onto the existing outer loop**, which is the reason
+the definition is implementable without new control flow:
 
 ```text
-propose -> local_full_spec        -> ImplementorInput
-        -> local_all_fields       -> ValidatorInput
-        -> local_validated_model  -> HyperparamTuningInput  <- PR D's hop
-        -> ExperimentRecord
+one iteration
+  attempt 1  -> _propose_agent.run(...) -> ProposalOutput  -> candidate A
+      inner implement/validate retries on the SAME proposal -> still A
+  attempt 2  -> _propose_agent.run(...) -> ProposalOutput  -> candidate B
+  attempt 3  -> ...                                        -> candidate C
 ```
 
-Four protocol hops, all in `agent/schemas/protocols/`, all already
-carrying flat scalar fields. The established pattern is a flat optional
-field per schema plus a parameter per protocol — exactly what PR D did
-for `healthgate_mode` / `result_authority` and what `health_gate_enabled`
-did before it.
+The outer `for attempt in range(1, max_proposal_attempts + 1)` re-runs the
+**proposer**, so each attempt emits a new `ProposalOutput` — a new
+candidate — and each already has its own directory. Inner retries reuse
+the same `ProposalOutput` and therefore the same id. **This is precisely
+O-E-4's definition, already expressed in the control flow.**
 
-**A `CandidateProvenance` object is deliberately NOT proposed.** Two
-fields (`candidate_id`, and the proposed count being forwarded) do not
-warrant a new nested type crossing four boundaries, and §7 of the ledger
-rules out repository-wide redesign inside an instrumentation PR.
+**A finding that resolves a tension revision 1 could not.** Revision 1
+worried that preflight-rejected drafts would be invisible attrition with
+no id. They do not exist: the proposer's preflight is **advisory only**
+(`ml_model_proposal_agent.py:165-168`):
 
-### 0.E Disposition — what "dropped" means at each stage, in code
+> *"C1 contract: the result is ADVISORY ONLY (static_uncalibrated
+> provenance). Callers must not request proposal revision, inject
+> rejection text into prompts, or otherwise derive blocking behavior from
+> it."*
 
-This is the least settled part of the audit and the reason **Q-E-2**
-exists. Each stage fails differently and there is no single existing
-typed vocabulary:
+So no draft is ever rejected or revised by preflight, and every proposer
+run emits exactly one `ProposalOutput`. **One proposer run ⇔ one
+candidate**, with no hidden population.
 
-| stage | how a candidate dies today | typed? |
+**This corrects the ledger's own funnel description.** The ledger's scope
+lists stage 3 as *"preflight disposition (admitted / rejected + typed
+reason)"*. Preflight admits nothing and rejects nothing today; it records
+an advisory factor. The funnel must record `preflight_factor` as a
+**measurement**, never as a disposition. Recorded here rather than
+silently reinterpreted.
+
+### 0.E What has no native reason, and what PR E does about it
+
+Per O-E-2, each stage's existing reason is the authority for that stage:
+
+| stage | native reason | typed? |
 |---|---|---|
-| proposal preflight | `preflight_factor` over budget → LLM revision loop; skip conditions add a `PREFLIGHT_SKIPPED:` string to `memo_consistency_notes` | **string prose** |
-| implementation | implementor retries, then gives up | exception / retry count |
-| validation | `ValidatorOutput.passed=False` plus six booleans naming *which* check failed | **booleans — effectively typed** |
-| admission | `PhysicalRejection.binding_cap` `Literal[...]` | **typed** (PR B) |
-| tuner round | `ExperimentRecord.failure_stage` / `failure_type` (`:335-336`), `status` `Literal[...]` (`:297`) | **typed** |
-| HealthGate | gate results + `formal_validity` | **typed** |
+| proposal | emitted, or the attempt produced nothing | n/a |
+| preflight | `preflight_factor` — a number, **not** a disposition | measurement |
+| implementation | **none** — retries then gives up | **absent** |
+| validation | `passed` + six booleans naming which check failed | effectively typed |
+| admission | `PhysicalRejection.binding_cap` `Literal[...]` | typed (PR B) |
+| tuner round | `failure_stage`, `failure_type`, `status` `Literal[...]` | typed |
+| HealthGate | gate results + `formal_validity` | typed |
 
-So four of six are already typed and two are not. A new global
-disposition enum would create a **second source of truth** beside
-`failure_stage` / `failure_type` / `binding_cap` — the exact mistake PR D
-avoided by refusing to duplicate `validate_formal_launch`'s refusal
-inside the transport.
+**Implementation is the only stage with no typed reason. PR E does not
+add one** (O-E-2). A candidate that stops there is reported as
+`stopped_at_stage="implementation"` with the reason **absent** — absence
+preserved as information, per §E.3d.4. Typing the implementor's failures
+is a legitimate follow-up and is explicitly not this PR.
 
-**Recommended (subject to Q-E-2): record the stage at which the candidate
-stopped, and carry the existing typed reason from that stage verbatim.**
-Do not invent a new vocabulary.
+### 0.F `candidate_id` usage boundary — corrected per O-E-5
 
-### 0.F Semantics-neutral naming — the ledger's explicit constraint
-
-> *"Undersizing" is a verdict. Record the measured quantities and let the
-> analysis interpret them.*
-
-Binding on every field name in this PR:
+Revision 1 said *"a label, never a lookup key"*. That was wrong, and the
+correct invariant is narrower and more useful:
 
 ```text
-ALLOWED    proposed_parameter_count      realized_parameter_count
-           parameter_count_delta         stopped_at_stage
+ALLOWED     observational correlation / join.
+            A read-side dict keyed by candidate_id is EXPECTED and valid.
+
+FORBIDDEN   any behavioural or correctness key:
+            model registration, dispatch, execution, compatibility,
+            admission, scoring, scientific decisions, filesystem routing.
+```
+
+The acceptance test is therefore **not** "the string never appears in a
+dict key" but "no production branch changes behaviour because of it".
+E2 §5 states how that is proved.
+
+### 0.G Semantics-neutral naming — binding
+
+```text
+ALLOWED    parameter_count_estimate      realized_parameter_count
+           model_params                  preflight_factor
+           stopped_at_stage (derived)    reason_absent
 FORBIDDEN  undersized  too_small  scale_deficit  size_violation
            is_undersized  severity
 ```
 
-B2's precedent is exact: it recorded `realized − estimated` and
-`realized − threshold` as two separate quantities rather than collapsing
-them into one judged number.
+B2's precedent: record `realized − estimated` and `realized − threshold`
+as separate quantities rather than one judged number.
 
-### 0.G Where the funnel lives — and why this is an operator decision
+### 0.H Ledger merge criterion — CLOSED by O-E-1
 
-Three options, none obviously correct, which is why it is **Q-E-3**:
-
-| option | mechanism | cost |
-|---|---|---|
-| **A. join-on-read (recommended)** | every stage writes its fields onto records that **already persist**; a read-side helper assembles the funnel by `candidate_id` | no new artifact kind; nothing new to version, migrate or resume |
-| B. new per-iteration funnel artifact | `{workspace}/funnel_{run_name}.json` | a new persistent record kind — §15 says that is the operator's call, not the implementer's |
-| C. manifest extension | add funnel keys to `run_one_iteration`'s manifest | manifest is a launch/iteration record, not a per-candidate one; one iteration can hold several candidates |
-
-**A is recommended** because it introduces no new artifact and no new
-failure mode, and because the ledger's requirement — *"queryable across
-iterations without log parsing"* — is satisfied by joining persisted
-records, which is what "without log parsing" actually asks for.
-
-### 0.H A stale merge criterion in the ledger — needs resolving (Q-E-1)
-
-The ledger's PR E **Merge criteria** reads:
-
-> Complete funnel on a live iteration; **prompt contradiction resolved**;
-> no corrective change to advice or thresholds in the diff.
-
-But the ledger's own **Correction, 2026-08-07** three paragraphs above
-says there **is no contradiction** (an encouraged 10-100M range and a
-~100M upper bound are consistent), that the real question is a
-search-space policy question, and that it is *"not this PR's to answer"*.
-The Scope section then explicitly forbids editing the `~100M` prior.
-
-The merge criteria therefore require resolving something the same section
-says is not a defect and must not be touched. **Recorded, not
-unilaterally deleted** — the ledger is append-only and this is the
-operator's to settle.
+The PR E merge criteria's *"prompt contradiction resolved"* clause is
+**superseded**: the ledger's own 2026-08-07 correction establishes there
+is no contradiction between the encouraged 10M-100M range and the ~100M
+prior, and PR E is forbidden from changing that prior. A dated
+append-only correction goes into `v21_priorities.md`. **Search-space
+policy is not reopened.**
 
 ---
 
 ## 1. Objective
 
-> **Make every proposed candidate joinable across all five stages, and
-> record the two parameter counts that already exist or are free to
-> obtain, so "the agent systematically undersizes" can become a measured
-> statement — without correcting anything.**
+> **Give every proposer-emitted candidate an immutable id, capture the one
+> parameter count that is currently measured and discarded, and assemble
+> the funnel by joining stage-native records on read — without correcting
+> anything and without claiming a distribution.**
 
-Explicitly:
-
-- PR E ships the **capability to measure**. Per §E.3d.6 it may **not**
-  report a funnel distribution, because none has been collected.
-- PR E changes **no** proposer prompt, no advice text, no threshold, no
-  admission rule and no size floor.
+Per §E.3d.6, PR E ships the **capability to measure**. It may not report
+a funnel distribution, because none has been collected.
 
 ## 2. Non-goals
 
 ```text
 NO  corrective action of any kind
-NO  edit to the ~100M proposal prior (ledger Scope, explicit)
-NO  change to advice text, thresholds, admission or a size floor
+NO  edit to the ~100M prior, advice text, thresholds, or a size floor
+NO  new disposition / reason vocabulary                       (O-E-2)
+NO  copying a measurement downstream past its native owner    (O-E-3)
+NO  new persistent funnel artifact or manifest extension      (O-E-3)
+NO  parent_candidate_id / lineage structure                   (O-E-4)
+NO  behavioural use of candidate_id                           (O-E-5)
+NO  typing the implementor's failure reasons
 NO  scorer / metric / HealthGate-semantic change
-NO  new disposition vocabulary competing with failure_stage / binding_cap
-NO  CandidateProvenance / RunContext object
-NO  claiming a funnel distribution (§E.3d.6)
-NO  planner exposure of any new field  (separate evidence + approval)
-NO  production-default change            (separate evidence + approval)
+NO  claiming a funnel distribution                            (§E.3d.6)
+NO  planner exposure or production-default change  (separate approval)
 ```
 
-The last two are called out because the operator's brief names them
-explicitly: **planner exposure and production-default changes are outside
-the implementation commits.**
+## 3. Transport contract — one field, and only one
 
-## 3. Complete transport contract (post-design)
+**`candidate_id` is the only cross-stage transport in PR E.** Every
+measurement stays with its native owner and is joined on read.
 
 ```text
 proposer mints candidate_id
-  -> ProposalOutput.candidate_id                        NEW field
-     ProposalOutput.parameter_count_estimate            EXISTS :1042
-  -> local_full_spec        -> ImplementorInput/Output  NEW param + field
-  -> local_all_fields       -> ValidatorInput/Output    NEW param + field
-                               + realized_parameter_count  NEW (free at :371)
-  -> local_validated_model  -> HyperparamTuningInput     NEW param + field
-  -> tuner                  -> ExperimentRecord.candidate_id  NEW
-                               ExperimentRecord.model_params  EXISTS :371
+  -> ProposalOutput.candidate_id            NEW   -> proposal_{run}.json
+  -> local_full_spec    -> ImplementorInput/Output  NEW -> implementor_{run}.json
+  -> local_all_fields   -> ValidatorInput/Output    NEW -> validation_{run}.json
+  -> local_validated_model -> HyperparamTuningInput NEW
+  -> tuner -> ExperimentRecord.candidate_id NEW   -> the record
 ```
 
-Per hop, with the failure semantics if the value is absent:
+| hop | producer | consumer | absent ⇒ |
+|---|---|---|---|
+| 1 | proposer | `ProposalOutput` | `None` — predates PR E |
+| 2 | `local_full_spec` | `ImplementorInput` | `None` propagates |
+| 3 | `local_all_fields` | `ValidatorInput` | `None` propagates |
+| 4 | `local_validated_model` | `HyperparamTuningInput` | `None` propagates |
+| 5 | tuner | `ExperimentRecord` | `None` — row unjoinable, and **says so** |
 
-| hop | producer | consumer | ownership | absent ⇒ |
-|---|---|---|---|---|
-| 1 | proposer | `ProposalOutput` | proposal schema | `None` — a legacy record predating PR E. Must stay distinguishable, per §E.3d.4 |
-| 2 | `local_full_spec` | `ImplementorInput` | protocol | `None` propagates |
-| 3 | `local_all_fields` | `ValidatorInput` | protocol | `None` propagates |
-| 4 | `local_validated_model` | `HyperparamTuningInput` | protocol | `None` propagates |
-| 5 | tuner | `ExperimentRecord` | record | `None` — the funnel row is incomplete and **says so** |
+Measurement ownership, per O-E-3 — **none of these move**:
 
-**Binding principle 2:** deleting any hop must fail a test. Structurally,
-not by substring — §E.3d.9.
+```text
+parameter_count_estimate   proposal stage   proposal_{run_name}.json
+preflight_factor           proposal stage   proposal_{run_name}.json
+realized_parameter_count   validator stage  validation_{run_name}.json   (E3 adds)
+model_params               tuner            ExperimentRecord
+stop stage / reason        DERIVED ON READ  no schema field at all
+```
 
-**Absence is never defaulted.** A missing `candidate_id` means "this
-record predates PR E or the chain was severed", and must never be
-replaced by a synthesised id, which would silently create a join that
-looks valid and is not.
+**Binding principle 2:** deleting any of the five hops must fail a test,
+proved by an **AST call-site assertion**, not a substring search
+(§E.3d.9 — PR D's M-D1/M-D2 survived a substring search that matched seven
+identical call sites).
+
+**Absence is never defaulted.** A missing `candidate_id` means "predates
+PR E, or the chain was severed". Synthesising one would manufacture a join
+that looks valid and is not — the direct analogue of PR D's rule that
+absence must not become a declaration.
 
 ## 4. Commit plan
 
 | # | Commit | Blocked on | Independently reviewable |
 |---|---|---|---|
 | **E0** | Audit + design synchronisation (this document) | — | Yes (docs only) |
-| **E1** | Pin the current five-stage behaviour before any field is added | — | Yes |
-| **E2** | Mint and transport the immutable candidate identity | E1 | Yes |
-| **E3** | Stop discarding the realized parameter count at validation | E2 | Yes |
-| **E4** | Forward the proposed count and record the stop-stage | E2 | Yes |
-| **E5** | Funnel assembly, completeness invariant, backfill evidence | E3, E4 | Yes |
+| **E1** | Pin the current stage contract and persistence layout | — | Yes |
+| **E2** | Mint and transport `candidate_id` | E1 | Yes |
+| **E3** | Stop discarding the validator's realized parameter count | E1 | Yes |
+| **E4** | Read-side funnel assembly, derived stop-stage, completeness | E2, E3 | Yes |
 
-> **Two clauses of the commit template do not apply to PR E, recorded as
-> deliberately not-applicable rather than silently skipped.** The
-> ordering-specific requirements — *"validate the actual visited
+Revision 1 had five commits; **its E4 (forward the proposed count) is
+deleted** by O-E-3, and its `stopped_at_stage` schema field is deleted by
+O-E-2. E3 is now independent of E2 — it adds a field to one schema and
+forwards nothing.
+
+> **Two clauses of the commit template are deliberately not applicable.**
+> The ordering-specific requirements — *"validate the actual visited
 > sample/file sequence"* and *"for the default `shuffle` path, prove that
 > selection, random-seed behavior, visited sequence and step count remain
 > unchanged"* — belong to a data-ordering feature. PR E touches no
-> sampling, ordering, seeding, `file_order` or step-count surface; it adds
-> optional scalar fields and a read-side join. **The analogous parity
-> obligation for PR E is E1's five-stage behavioural pin plus the
-> `None`-everywhere legacy path** (§6). Similarly, the template's
-> *"invalid `file_order`, missing files, duplicate files, scope
-> mismatches"* edge cases are replaced in §6 of each commit by the
-> failure cases PR E actually has: duplicate `candidate_id`, severed
-> transport, legacy `None`, and multi-candidate iterations.
+> sampling, ordering, seeding, `file_order` or step-count surface.
+> **The analogous parity obligations for PR E are E1's behavioural pin and
+> E3's verdict parity.** Likewise the template's *"invalid `file_order`,
+> missing files, duplicate files, scope mismatch"* edge cases are replaced
+> in each §6 by the ones PR E actually has: duplicate `candidate_id`,
+> severed transport, legacy `None`, multi-candidate iterations, and the
+> inner-retry overwrite.
 
 ---
 
-### Commit E1 — Pin the five-stage behaviour before adding any field
+### Commit E1 — Pin the stage contract and the persistence layout
 
 #### 1. Goal
 
-Turn the current end-to-end behaviour of the propose → implement →
-validate → tune chain into a regression fixture **before** any new field
-exists, so "PR E added instrumentation and changed nothing else" is a
-measured claim rather than an assertion made afterwards.
+Turn the audit's two load-bearing facts into regression fixtures **before**
+anything changes: the schema key sets, and the per-attempt persistence
+layout the entire join-on-read design rests on.
 
-**Why this commit and not another.** Exactly D1's argument, and D1 is the
-precedent: a parity claim written *after* a change cannot distinguish
-"unchanged" from "changed, and the expectations were written to match the
-new behaviour". It must not live in E2, because a test added in the same
-commit as the change it guards proves nothing about the before-state.
+**Why this commit and not another.** D1's argument exactly — a parity
+claim written after a change cannot distinguish "unchanged" from "changed,
+and the expectation was written to match". It must not live in E2/E3,
+because a test added in the same commit as the change it guards proves
+nothing about the before-state. The persistence pin belongs here rather
+than in E4 because **if the layout is not what the audit says, the whole
+join-on-read decision is wrong and E4 must not be written**.
 
 #### 2. Scope
 
 **Changes**
-- `tests/` — one new module pinning the pre-PR-E stage contract.
+- `tests/` — one module pinning schema key sets; one pinning the layout.
 
 **Must remain unchanged**
-- Every production file. **This commit has no production diff.**
+- Every production file. **Zero production diff.**
 
-**Non-goals**
-- Any new field or transport (E2+).
+**Non-goals** — any new field, transport or assembly.
 
 **Dependencies:** none.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `run_workflow` `:2262-2665` and record the exact call order
-      and the protocol function used at each hop
-- [ ] Enumerate the **existing** field set of `ProposalOutput`,
-      `ImplementorOutput`, `ValidatorOutput`, `HyperparamTuningInput` and
-      `ExperimentRecord` and pin each as an **exact key set**, so E2-E4
-      adding a field is a deliberate, visible edit to this test
-- [ ] Pin `ValidatorOutput`'s current shape explicitly as *"no numeric
-      field"* — the fact E3 changes
-- [ ] Pin that `parameter_count_estimate` appears on `ProposalOutput` and
-      on **no** downstream schema — the fact E4 changes
-- [ ] Hardcode every expectation; never read a value back from the schema
+- [ ] Re-read `run_workflow` `:2214-2428` and record the attempt-loop
+      structure and the rename at `:2333`
+- [ ] Pin exact key sets for `ProposalOutput`, `ImplementorOutput`,
+      `ValidatorOutput`, `HyperparamTuningInput`, `ExperimentRecord`, so
+      E2/E3 adding a field is a deliberate visible edit to this module
+- [ ] Pin `ValidatorOutput` as having **no numeric field** — the fact E3
+      changes
+- [ ] Pin the persistence layout as behaviour, not documentation: drive
+      the three nodes against a `tmp_path` workspace and assert
+      `proposal_`, `implementor_`, `validation_{run_name}.json` are each
+      written where the audit says
+- [ ] Pin that two attempts write into **different** directories and do
+      not overwrite each other — the property join-on-read depends on
+- [ ] Pin that the inner retry loop **does** overwrite within one attempt
+      dir, so the known limitation is recorded as tested behaviour rather
+      than an assumption
+- [ ] Hardcode every expectation; never read a value back from the thing
       under test (CLAUDE.md)
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Exact-key-set assertions for the five schemas
-- [ ] A test naming the two absences E3 and E4 will close
+- [ ] Five exact key-set assertions
+- [ ] `ValidatorOutput` has no numeric field
 
-**Integration / pseudo** — none required; these are schema facts.
+**Integration / pseudo**
+- [ ] Two simulated attempts produce two directories, both discoverable by
+      a `attempt_*` glob, neither overwriting the other
 
-**Negative / invalid input** — none applicable; no new input is accepted.
+**Negative / invalid input**
+- [ ] A workspace with no attempt dirs yields an empty discovery, not an error
 
 **Backward-compatibility / default parity**
-- [ ] The existing protocol test modules pass **unmodified**
+- [ ] All pre-existing schema and protocol suites pass **unmodified**
 
-**Real-training Gate:** none. A GPU cannot evaluate a schema key set.
+**Real-training Gate:** none. A GPU cannot evaluate a key set or a path.
 
 #### 5. Acceptance criteria
 
-- Five exact key-set assertions exist, written as literals.
-- Adding any field in E2-E4 makes **this** module fail until its
-  expectation is deliberately updated in that same commit.
-- `git diff --name-only` for this commit contains **zero** production files.
-- Every pre-existing protocol/schema test passes unmodified.
+- Five key-set assertions exist as literals; adding any field in E2/E3
+  fails **this** module until deliberately updated in that commit.
+- A test writes two attempts to a `tmp_path` and asserts **two distinct
+  directories**, each containing the stage files, both matched by
+  `attempt_*` — the exact property E4's join relies on.
+- A test asserts discovery does **not** depend on `model_name`, by
+  globbing on the `attempt_{NNN}_` prefix with an arbitrary name.
+- `git diff --name-only` contains **zero** production files.
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
-| An existing test already pins part of a key set | Keep both; do not delete the older one to avoid duplication |
-| A schema turns out to have a field the audit missed | **Record it as-is and stop.** E1 documents the truth; it never "fixes" a schema |
-| A key set is large and churns for unrelated reasons | Record the churn risk; if a set proves unstable, pin only the funnel-relevant subset and say so explicitly rather than silently narrowing |
+| The layout is **not** per-attempt as audited | **Stop and report.** Join-on-read's premise fails and E4 must be redesigned before it is written |
+| A node's persistence is conditional on `storage.backend == "local"` | Record the condition explicitly; the join must handle a non-local backend as "not discoverable", never as "no candidate" |
+| A key set churns for unrelated reasons | Pin only the funnel-relevant subset **and say so**; never silently narrow |
+| An existing test already pins part of a key set | Keep both |
 
 #### 7. Verification commands and evidence
 
 ```bash
 .venv/bin/python -m pytest tests/unit/agent/schemas tests/unit/agent/protocols -q
+.venv/bin/python -m pytest tests/unit/workflows -q
 .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
 ```
 
-- [ ] New module test count and wall time — **to record**
-- [ ] Pre-existing schema/protocol suites unmodified — **to record**
-- [ ] Mutations: flip one pinned key set → must fail — **to record**
+- [ ] New module counts and wall time — **to record**
+- [ ] Pre-existing suites unmodified — **to record**
+- [ ] Mutation: make two attempts share a directory → must fail — **to record**
 
 #### 8. Commit boundary
 
-- [ ] Diff contains test files only; zero production files
-- [ ] No new field, no transport
+- [ ] Tests only; zero production files
+- [ ] No field, no transport, no assembly
 - [ ] Diff summary, staged file list, tests and deviations shown before committing
 
 ---
 
-### Commit E2 — Mint and transport the immutable candidate identity
+### Commit E2 — Mint and transport `candidate_id`
 
 #### 1. Goal
 
-Give every proposed candidate an immutable id at the moment of proposal
-and carry it, unchanged, to the persisted experiment record — so the five
-stages can be joined at all.
+Give every proposer-emitted proposal an immutable id and carry it,
+unchanged, to the persisted experiment record — so stage-native records
+can be joined at all.
 
-**Why this commit and not another.** It is the enabler: E3, E4 and E5
-each write a number that is meaningless without a join key. It is
-separated from E3/E4 because identity transport fails for a different
-reason than a missing measurement, and a red test should name which.
+**Why this commit and not another.** It is the only transport in PR E and
+the enabler for E4. Separated from E3 because identity transport fails for
+a different reason than a missing measurement, and a red test should name
+which.
 
 #### 2. Scope
 
 **Changes**
 
 ```text
-agent/schemas/proposal.py            ProposalOutput.candidate_id      NEW, optional
-agent/schemas/implementor.py         ImplementorInput/Output          NEW, optional
-agent/schemas/validator.py           ValidatorInput/Output            NEW, optional
-agent/schemas/hyperparam_tuning.py   HyperparamTuningInput            NEW, optional
-                                     ExperimentRecord.candidate_id    NEW, optional
-agent/schemas/protocols/*.py         four protocol functions          NEW parameter each
-nodes/ml_model_proposal_agent/…      mint the id
-nodes/ml_hyperparameter_tune_agent/… stamp it onto the record
-tests/                               reachability + mutations
+agent/schemas/proposal.py            ProposalOutput.candidate_id    NEW, optional
+agent/schemas/implementor.py         ImplementorInput/Output        NEW, optional
+agent/schemas/validator.py           ValidatorInput/Output          NEW, optional
+agent/schemas/hyperparam_tuning.py   HyperparamTuningInput          NEW, optional
+                                     ExperimentRecord.candidate_id  NEW, optional
+agent/schemas/protocols/             ml_model_propose_to_ml_model_impl.py
+                                     ml_model_impl_to_ml_model_valid.py
+                                     ml_model_valid_to_ml_model_tune.py
+nodes/ml_model_proposal_agent/…      mint
+nodes/ml_hyperparameter_tune_agent/… stamp onto the record
+tests/
 ```
 
 **Must remain unchanged**
-- Every scorer, metric and HealthGate file.
-- `core/scientific_authority.py` and PR D's transport.
-- Model naming, registration and `MODEL_REGISTRY` behaviour — the id is
-  **additive** and must not become a second identity used for lookup.
+- Every scorer, metric and HealthGate file; `core/scientific_authority.py`
+  and PR D's transport.
+- Model naming, registration, `MODEL_REGISTRY`, dispatch, admission,
+  scoring, filesystem routing — **O-E-5's forbidden list**.
+- The attempt-loop control flow. The id labels the existing structure; it
+  does not create or alter one.
 
 **Non-goals**
-- Any use of `candidate_id` for registration, dispatch or file naming.
-  It is a **label**, never a key into behaviour. This is the single most
-  important boundary in the PR: P6.2 is about name-keyed fragility, and
-  PR E must not add a second name-keyed dependency (the §E.7 review line
-  *"Name-keyed dependency added: must be none"* applies literally).
+- `parent_candidate_id` / lineage (O-E-4 — future follow-up if needed).
+- Any behavioural branch on the id.
 
 **Dependencies:** E1.
 
 #### 3. Implementation plan
 
-- [ ] Re-read each of the four protocol files immediately before editing
-      (CLAUDE.md rule) and follow the flat-optional-parameter pattern PR D
-      established at `ml_model_valid_to_ml_model_tune.py:54-55,275-276`
-- [ ] Decide the id's generation site and format after inspecting the
-      proposer — **do not invent it here.** Requirements: unique per
-      proposal, stable across retries of the *same* candidate, and not
-      derived from `model_name`
-- [ ] Add the field to the five schemas as `str | None = None`, with a
-      docstring stating that `None` means "predates PR E or transport was
-      severed", never "unknown, substitute one"
+- [ ] Re-read each protocol file immediately before editing and follow the
+      flat-optional-parameter pattern PR D established at
+      `ml_model_valid_to_ml_model_tune.py:54-55,275-276`
+- [ ] Mint the id in the proposer at the point one `ProposalOutput` is
+      emitted — **exact site and format decided after reading the emit
+      path**, not invented here. Requirements: unique per emitted
+      proposal; **new id on every proposer run** (O-E-4); not derived from
+      `model_name`
+- [ ] Add `candidate_id: str | None = None` to the five schemas, each
+      documenting that `None` means "predates PR E or transport severed",
+      never "unknown, substitute one"
 - [ ] Add one parameter per protocol function, `default=None`
 - [ ] Stamp onto `ExperimentRecord` at the tuner
-- [ ] Verify no launcher, registry or file path consumes it
+- [ ] Grep-verify no registration, dispatch, admission, scoring or path
+      construction reads it
 
 #### 4. Validation plan
 
 **Unit**
 - [ ] A minted id arrives unchanged at `ExperimentRecord`
-- [ ] An omitted id arrives as `None` at every hop
-- [ ] The id is not used in any registry lookup or path construction
+- [ ] An omitted id arrives as `None` at every hop; nothing is synthesised
+- [ ] Two proposer runs in one iteration mint **different** ids (O-E-4)
+- [ ] Inner implement/validate retries on one `ProposalOutput` keep the
+      **same** id (O-E-4)
 
 **Integration / pseudo**
 - [ ] Drive the **real** protocol functions, not a reimplementation —
       B1b's P2 and PR D's M-D3 both survived exactly that mistake
 
 **Negative / invalid input**
-- [ ] Two candidates in one iteration receive **different** ids
-- [ ] A retried/revised proposal's id behaviour is asserted explicitly
-      against whatever Q-E-4 decides (same id vs new id)
+- [ ] A duplicate id within one run is impossible by construction, or
+      fails loudly at mint (§6)
 
 **Backward-compatibility / default parity**
-- [ ] A record with no `candidate_id` still loads, still scores, still
-      resumes — the legacy path
+- [ ] A record with no `candidate_id` loads, scores and resumes unchanged
+- [ ] No retroactive id on resumed pre-PR-E iterations — the analogue of
+      PR D's non-retroactivity rule
 - [ ] E1's key-set pins updated **in this commit**, deliberately
 
 **Real-training Gate:** none proposed. **Not to be launched without
@@ -480,24 +537,30 @@ operator approval.**
 
 - Given a minted id at the proposer, the persisted `ExperimentRecord`
   carries that exact string.
-- Deleting the parameter at **any one** of the four hops makes a test
-  fail, and the failure is detected by an **AST call-site assertion**,
-  not a substring search (§E.3d.9).
-- Given no id, every hop reports `None`; no id is synthesised anywhere.
-- `grep` proves `candidate_id` appears in no registry lookup, no
-  `MODEL_REGISTRY` access and no filesystem path.
-- Two candidates produced in one iteration have distinct ids.
+- Deleting the parameter at **any one** of the five hops fails a test,
+  detected by an **AST call-site assertion** (`ast.Name` of the same id),
+  not a substring search.
+- Given no id, every hop reports `None`; no synthesis anywhere.
+- **O-E-5 boundary, proved as behaviour not as grep:** a test runs the
+  production path twice with two *different* `candidate_id` values and
+  asserts every behavioural output is identical — same registration, same
+  dispatch, same admission decision, same score, same paths. Only the
+  recorded label differs. A grep for `candidate_id` in registry/path code
+  is kept as a **supporting** check, because grep cannot prove absence of
+  behaviour.
+- Two proposer runs mint different ids; inner retries keep one.
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
-| Duplicate `candidate_id` within a run | Must be impossible by construction; if it can occur, **fail loudly at mint time** — a duplicated join key silently merges two candidates' funnels, which is worse than no funnel |
-| Legacy record with `candidate_id=None` | Load normally; the funnel row is marked incomplete. **Never** synthesise an id |
-| Transport severed at one hop | `None` reaches the record; caught by the hop mutation, not by a runtime error |
-| Resume of a pre-PR-E iteration | Unchanged behaviour; no retroactive id (the direct analogue of PR D's non-retroactivity rule) |
-| Proposal retried after validation failure | Behaviour set by **Q-E-4**; assert whichever is chosen |
-| Multi-candidate iteration | Each candidate distinct; assert with two candidates, not one |
+| Duplicate `candidate_id` in one run | **Fail loudly at mint.** A duplicated join key silently merges two candidates' funnels — worse than no funnel |
+| Legacy record, `candidate_id=None` | Load normally; the row is unjoinable and reported as such. **Never** synthesise |
+| Transport severed at one hop | `None` reaches the record; caught by that hop's mutation, not by a runtime error |
+| Resume of a pre-PR-E iteration | Unchanged; no retroactive id |
+| Proposer emits a revised proposal | **New id** (O-E-4). Asserted, because it is the definition the eventual measurement depends on |
+| Inner implement/validate retry | **Same id** (O-E-4). Asserted |
+| Multi-candidate iteration | Distinct ids; assert with two candidates, never one |
 
 #### 7. Verification commands and evidence
 
@@ -508,33 +571,37 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
 - [ ] Reachability module count / wall time — **to record**
-- [ ] Four hop-deletion mutations, one per protocol — **to record**
+- [ ] Five hop-deletion mutations, one per hop — **to record**
 - [ ] Mutation: synthesise an id when absent → must fail — **to record**
+- [ ] Mutation: reuse one id across two proposer runs → must fail — **to record**
 - [ ] pyright vs baseline — **to record**
 
 #### 8. Commit boundary
 
-- [ ] Diff touches the five schemas, four protocols, two nodes, tests
-- [ ] No scorer, metric or HealthGate file
-- [ ] No corrective change to any prompt or threshold
+- [ ] Diff touches five schemas, three protocols, two nodes, tests
+- [ ] No scorer, metric, HealthGate or registration file
+- [ ] No measurement forwarded — this commit moves **only** the id
 - [ ] Diff summary, staged file list, tests, mutations and deviations shown before committing
 
 ---
 
-### Commit E3 — Stop discarding the realized parameter count at validation
+### Commit E3 — Stop discarding the validator's realized parameter count
 
 #### 1. Goal
 
 Record the parameter count of the model the validator **already
-instantiates**, so proposed-vs-realized becomes comparable for every
-candidate that reaches validation — including those that never train.
+instantiates**, on the validator's own output, so proposed-vs-realized is
+comparable for every candidate that reaches validation — including those
+that never train.
 
-**Why this commit and not another.** It is a distinct causal fact (a
-measurement is discarded) from E2's missing join key, and it is the only
-stage where the number is available *before* training. Candidates that die
-at validation or admission are precisely the ones a funnel needs, and
-`ExperimentRecord.model_params` cannot cover them because they never
-produce a record.
+**Why this commit and not another.** It is a distinct causal fact — a
+measurement computed and thrown away — from E2's missing join key, and it
+is the only stage where the number exists *before* training.
+`ExperimentRecord.model_params` cannot cover candidates that die at
+validation or admission, because they never produce a record.
+
+**Independent of E2** in revision 2: it adds one field to one schema and
+forwards nothing. It is ordered after E1 only for the key-set pin.
 
 #### 2. Scope
 
@@ -543,83 +610,85 @@ produce a record.
 ```text
 nodes/ml_code_validator_agent/…   _check_instantiation_and_gradient returns the count
 agent/schemas/validator.py        ValidatorOutput.realized_parameter_count  NEW, optional
-agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py   forward it
-agent/schemas/hyperparam_tuning.py                            carry + stamp
 tests/
 ```
 
+**No protocol changes. No downstream schema changes.** Per O-E-3 the
+validator is the canonical owner and `validation_{run_name}.json` is where
+the number lives.
+
 **Must remain unchanged**
-- The validator's **verdict**. `passed`, and all six check booleans, must
-  be bit-identical for every input. E3 adds an observation; it must not
-  become a gate. A model whose parameter count is surprising still passes
-  or fails on exactly the criteria it does today.
+- **The validator's verdict.** `passed` and all six check booleans must be
+  bit-identical for every input. E3 adds an observation; it must not
+  become a gate.
 - The instantiation and gradient logic itself.
 
 **Non-goals**
 - Any threshold, warning or rejection based on the count.
-- Counting parameters anywhere the model is not already instantiated —
-  no new instantiation for measurement.
+- Instantiating a model anywhere it is not already instantiated.
+- Forwarding the count anywhere.
 
-**Dependencies:** E2 (the count needs the join key to be useful).
+**Dependencies:** E1.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `ml_code_validator_agent.py:336-400` immediately before
-      editing; the model is instantiated at `:371`
-- [ ] Widen the helper's return to include the count, or return a small
-      typed result — decide after reading its call site at `:633`
-- [ ] Count with `sum(p.numel() for p in model.parameters())`, matching
-      the convention already used at `train_engine_sandbox.py:664` and
-      `probe_production.py:202`. Record whether total or trainable-only,
-      and use the **same** convention as `ExperimentRecord.model_params`
-      so the two are comparable — verify which that is before choosing
+- [ ] Re-read `ml_code_validator_agent.py:336-400` and its call site at
+      `:633` immediately before editing; the model is instantiated at `:371`
+- [ ] Widen the helper's return, or return a small typed result — decide
+      after reading the call site, not before
+- [ ] **Determine and match the convention used by
+      `ExperimentRecord.model_params`.** `train_engine_sandbox.py:664`
+      uses `sum(p.numel() for p in model.parameters() if p.requires_grad)`
+      — trainable-only — while `probe_production.py:202` counts all. The
+      two must be comparable or the funnel's central comparison is
+      meaningless. **Verify the exact expression before choosing**
 - [ ] Return `None` when instantiation fails; never `0`
 - [ ] Assert the verdict booleans are unchanged for every existing case
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A plugin with a known parameter count reports exactly that count
+- [ ] A plugin of known size reports exactly that integer
 - [ ] Instantiation failure → `None`, not `0`
-- [ ] The convention matches `model_params` (total vs trainable), asserted
-      against a plugin containing a **frozen** parameter so the two
-      conventions differ observably
+- [ ] **Convention parity:** a fixture plugin containing a **frozen**
+      parameter, where total and trainable-only differ observably, asserts
+      the validator's count matches `model_params`' convention exactly
 
 **Integration / pseudo**
-- [ ] The count survives the protocol into the tuner input
+- [ ] The count is present in the persisted `validation_{run_name}.json`
 
 **Negative / invalid input**
-- [ ] Import error / config error paths still return the same verdict and
-      a `None` count
+- [ ] Import error and config error paths return the same verdict and a
+      `None` count
 
 **Backward-compatibility / default parity**
-- [ ] **Verdict parity is the acceptance signal**: every existing
-      validator test passes unmodified
+- [ ] **Verdict parity is the acceptance signal:** every existing
+      validator test passes **unmodified**
 - [ ] E1's `ValidatorOutput` key-set pin updated deliberately
 
-**Real-training Gate:** none. The count is available without training.
+**Real-training Gate:** none. The count needs no training.
 
 #### 5. Acceptance criteria
 
-- For a fixture plugin of known size, `ValidatorOutput.realized_parameter_count`
-  equals that exact integer.
-- Every pre-existing validator test passes **unmodified** — the verdict
-  did not move.
-- Instantiation failure yields `None`; no code path can produce `0` for a
-  model that failed to instantiate.
-- The counting convention is documented and **asserted** to match
-  `ExperimentRecord.model_params`, proven with a frozen-parameter fixture
-  where the two conventions would otherwise disagree.
-- No branch anywhere reads the count to make a decision.
+- For a fixture plugin of known size,
+  `ValidatorOutput.realized_parameter_count` equals that exact integer,
+  and the value is present in the persisted JSON.
+- Every pre-existing validator test passes **unmodified**.
+- Instantiation failure yields `None`; no path can produce `0` for a model
+  that failed to instantiate.
+- The convention **provably matches** `ExperimentRecord.model_params`,
+  proved with a frozen-parameter fixture where the conventions would
+  otherwise disagree.
+- No branch anywhere reads the count.
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
-| Model instantiates, `.parameters()` raises | `None` + the existing verdict unchanged; never crash the validator |
+| Model instantiates but `.parameters()` raises | `None`, verdict unchanged; never crash the validator |
 | Model has zero parameters | Record `0` — a real measurement, distinct from `None` (§E.3d.4) |
-| Counting is slow for a very large model | Measure it; `numel()` is metadata, not allocation. If it is ever non-trivial, record the measurement rather than adding a cap |
-| The count contradicts `parameter_count_estimate` wildly | **Record both. Emit no warning, no verdict.** This is the entire point of the PR |
+| The two conventions disagree | **Stop and report.** Choosing silently would make the funnel's central comparison wrong in a way no later test catches |
+| Count contradicts `parameter_count_estimate` wildly | Record it. **No warning, no verdict** — that is the point of the PR |
 
 #### 7. Verification commands and evidence
 
@@ -629,228 +698,142 @@ tests/
 ```
 
 - [ ] Validator suite unmodified, count and wall time — **to record**
-- [ ] Mutation: return trainable-only instead of total → must fail — **to record**
+- [ ] Mutation: switch total ↔ trainable-only → must fail — **to record**
 - [ ] Mutation: return `0` instead of `None` on failure → must fail — **to record**
+- [ ] Mutation: let the count influence `passed` → must fail — **to record**
 
 #### 8. Commit boundary
 
-- [ ] Diff touches the validator node, its schema, one protocol, the tuner, tests
-- [ ] No verdict logic changed
-- [ ] No decision reads the new number
+- [ ] Diff touches the validator node, its schema, tests — nothing else
+- [ ] No protocol, no downstream schema, no verdict logic
 - [ ] Diff summary, staged file list, tests and deviations shown before committing
 
 ---
 
-### Commit E4 — Forward the proposed count and record where a candidate stopped
+### Commit E4 — Read-side funnel assembly, derived stop-stage, completeness
 
 #### 1. Goal
 
-Carry `parameter_count_estimate` past `ProposalOutput` so it can be
-compared with the realized count on the same record, and record **which
-stage** a candidate stopped at using each stage's existing typed reason.
+Assemble the funnel by joining stage-native records on `candidate_id`,
+derive where each candidate stopped from the native outcomes, and prove
+no candidate is silently dropped or merged.
 
-**Why this commit and not another.** E3 supplies the realized number;
-this supplies the proposed number and the drop reason. Separated because
-forwarding an existing field and capturing a disposition fail for
-different reasons.
+**Why this commit and not another.** It consumes E2 and E3 and adds no
+transport and no schema field. Its failure mode — a join that silently
+merges or drops rows — is different from a transport gap.
 
 #### 2. Scope
 
 **Changes**
-
-```text
-agent/schemas/{implementor,validator,hyperparam_tuning}.py
-    proposed_parameter_count            NEW, optional (forwarded, not recomputed)
-    stopped_at_stage / stop_reason      NEW, optional — shape depends on Q-E-2
-agent/schemas/protocols/*.py            forward both
-tests/
-```
-
-**Must remain unchanged**
-- The proposer's prompt, the `~100M` prior, all advice text — **ledger
-  Scope, explicit and absolute.**
-- `ProposalOutput.parameter_count_estimate` itself: forwarded verbatim,
-  never recomputed, clamped or corrected.
-- Every existing typed failure vocabulary — `failure_stage`,
-  `failure_type`, `binding_cap`, the validator booleans.
-
-**Non-goals**
-- A new disposition enum competing with the above (see §0.E).
-- Any judgement field. §0.F's forbidden-names list is binding here.
-
-**Dependencies:** E2. Independent of E3.
-
-#### 3. Implementation plan
-
-- [ ] Forward `parameter_count_estimate` through the same four hops as
-      E2, under a name that says what it is (`proposed_parameter_count`)
-- [ ] Assert it is **byte-identical** to the proposer's value at every hop
-- [ ] Implement the disposition per **Q-E-2**; if the recommendation
-      stands, record `stopped_at_stage` plus the existing typed reason
-      from that stage, and **do not** define a new reason vocabulary
-- [ ] Verify no code path recomputes or adjusts the proposed count
-
-#### 4. Validation plan
-
-**Unit**
-- [ ] Proposed count arrives unchanged at the record
-- [ ] A candidate stopped at validation records `stopped_at_stage="validation"`
-      and the validator's own failure detail
-- [ ] A candidate stopped at admission records the existing `binding_cap`
-
-**Integration / pseudo**
-- [ ] A pseudo-mode iteration produces one complete row and one row that
-      stops early, and both are distinguishable
-
-**Negative / invalid input**
-- [ ] `parameter_count_estimate=None` (the documented `PREFLIGHT_SKIPPED`
-      case) forwards as `None` and is **not** replaced by an estimate
-
-**Backward-compatibility / default parity**
-- [ ] Legacy records with neither field still load and resume
-- [ ] The proposer's own behaviour is byte-identical — assert the prompt
-      text is unchanged in the diff
-
-**Real-training Gate:** none. **Not to be launched without operator
-approval.**
-
-#### 5. Acceptance criteria
-
-- The integer at `ProposalOutput.parameter_count_estimate` and the one on
-  the persisted record are **equal**, asserted as the same value, for a
-  candidate that completes.
-- A candidate that dies at each of validation and admission produces a
-  row naming that stage and carrying that stage's **existing** typed
-  reason — no new vocabulary appears in the diff.
-- `git diff` contains **no** change to any prompt, advice file or
-  threshold. Asserted by diff, as PR B and PR D did for the scorer.
-- No field name in the diff appears on §0.F's forbidden list.
-
-#### 6. Failure and edge cases
-
-| Case | Required behaviour |
-|---|---|
-| Proposer omits `parameter_count_estimate` | Forward `None`. The documented skip path already exists; do not fabricate |
-| A candidate stops at a stage with no typed reason (implementation) | Record the stage and mark the reason absent. **Do not invent one** |
-| A candidate stops at two stages (retry then final failure) | Record the terminal one; assert the behaviour rather than leaving it emergent |
-| Proposed and realized differ by orders of magnitude | Record both, judge nothing |
-
-#### 7. Verification commands and evidence
-
-```bash
-.venv/bin/python -m pytest tests/unit/agent tests/unit/workflows -q
-.venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
-git diff --name-only <base>..HEAD | grep -E 'prompt|advice' || echo "no prompt/advice file touched"
-```
-
-- [ ] Forwarding tests count / wall time — **to record**
-- [ ] Hop mutations for the proposed count — **to record**
-- [ ] Prompt/advice freeze proof — **to record**
-
-#### 8. Commit boundary
-
-- [ ] No prompt, advice or threshold file in the diff
-- [ ] No new disposition vocabulary
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
-
----
-
-### Commit E5 — Funnel assembly, completeness invariant, backfill evidence
-
-#### 1. Goal
-
-Provide the read-side join that turns per-stage fields into a funnel, and
-prove completeness — no candidate reaches a terminal state with a silently
-missing stage.
-
-**Why this commit and not another.** It consumes E2-E4 and adds no
-transport. Its failure mode (a join that silently drops rows) is different
-from a transport gap, and separating them means a red test names which.
-
-#### 2. Scope
-
-**Changes**
-- A read-side assembly helper (location decided by **Q-E-3**).
-- `tests/` — completeness and backfill.
+- A read-side assembly helper. Location decided by inspection; it is a
+  **reader**, so it must not live inside a producer node.
+- `tests/` — completeness, derivation, backfill.
 - This design document.
 
 **Must remain unchanged**
-- Every producer touched by E2-E4. **A diff in one is a finding, not a
+- Every producer touched by E2/E3. **A diff in one is a finding, not a
   task.**
+- Nothing is written to disk. The assembler is **read-only** (O-E-3).
 
-**Dependencies:** E3, E4.
+**Non-goals**
+- Any new persistent artifact or manifest key.
+- Any aggregate, mean, ratio, distribution or verdict.
+- Any new reason vocabulary — `stopped_at_stage` is **derived**, not stored.
+
+**Dependencies:** E2, E3.
 
 #### 3. Implementation plan
 
-- [ ] Implement assembly per Q-E-3 (option A recommended: join persisted
-      records on `candidate_id`, no new artifact)
-- [ ] A candidate with a missing stage is reported as **incomplete with
-      the stage named** — never dropped, never defaulted
-- [ ] Backfill check: run the assembler over **stored** attempt-3 records
-      and confirm it reproduces the parameter distribution the ledger
-      already records (663,488 - 12,772,096), **without** claiming any new
-      distribution (§E.3d.6)
-- [ ] Add no aggregate, mean, ratio or verdict to the output
+- [ ] Discover candidates by globbing `{iter_dir}/attempt_*/` and reading
+      whichever of `proposal_`, `implementor_`, `validation_{run}.json`
+      exist, plus the tuner's records
+- [ ] Join on `candidate_id`; records with `None` are **unjoinable**, each
+      kept separate
+- [ ] **Derive** `stopped_at_stage` from which native outcomes exist and
+      what they say — no stored field (O-E-2)
+- [ ] Carry each stage's **native** reason verbatim; where a stage has
+      none (implementation, §0.E), mark the reason **absent**
+- [ ] Report a candidate with a missing stage as **incomplete, stage
+      named** — never dropped, never defaulted
+- [ ] Record `preflight_factor` as a **measurement**, never a disposition
+      (§0.D)
+- [ ] Backfill: run over **stored** attempt-3 records and confirm the
+      parameter distribution the ledger already records
+      (663,488 - 12,772,096) is reproduced, **without claiming any new
+      distribution** (§E.3d.6)
+- [ ] Emit no aggregate, mean, ratio or verdict
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Complete candidate → all five stages present
-- [ ] Candidate missing a stage → reported incomplete, stage named
+- [ ] Complete candidate → every reached stage present
+- [ ] Candidate stopped at validation → derived stage + the validator's
+      own booleans as the reason
+- [ ] Candidate stopped at implementation → stage named, reason **absent**
 - [ ] Two candidates in one iteration do not merge
 
 **Integration / pseudo**
-- [ ] One pseudo-mode iteration yields a complete funnel row
+- [ ] One pseudo-mode iteration yields a complete row end to end
 
 **Negative / invalid input**
-- [ ] Records with `candidate_id=None` are grouped as **unjoinable**, not
-      merged into one pseudo-candidate — the most dangerous possible bug
-      in this commit
+- [ ] Several records with `candidate_id=None` stay **separate and
+      unjoinable** — never merged into one pseudo-candidate. This is the
+      most dangerous possible bug in this commit
+- [ ] A malformed / truncated stage JSON is reported as unreadable, not
+      silently treated as a missing stage
+- [ ] Non-local storage backend → "not discoverable", never "no candidate"
 
 **Backward-compatibility / default parity**
-- [ ] Backfill over stored records changes nothing on disk (read-only)
+- [ ] Backfill is **read-only**; assert nothing on disk changes
 
 **Real-training Gate:** the ledger asks for *"one iteration produces a
 complete funnel record"*. **Pseudo-mode is sufficient and is what this
-design proposes**; a real iteration is listed as optional strengthening
-evidence and **must not be launched without operator approval.**
+design proposes.** A real iteration is optional strengthening evidence and
+**must not be launched without operator approval.**
 
 #### 5. Acceptance criteria
 
-- For a fixture of three candidates — one complete, one stopped at
-  validation, one legacy with `candidate_id=None` — the assembler returns
-  exactly three rows: complete, incomplete-named-at-validation, and
-  unjoinable. **Not two, and never one merged row.**
+- For a fixture of four candidates — one complete, one stopped at
+  validation, one stopped at implementation, one legacy with
+  `candidate_id=None` — the assembler returns **exactly four rows**:
+  complete; incomplete-named-at-validation with the native booleans;
+  incomplete-named-at-implementation with reason **absent**; and one
+  unjoinable. **Not three, and never one merged row.**
+- With two legacy `None` records, the result has **two** unjoinable rows,
+  not one.
 - The backfill reproduces the ledger's recorded attempt-3 range from
-  stored records.
-- The output contains no aggregate and no judgement field.
-- No producer file appears in the diff.
+  stored records, and the test asserts the **range**, not a new claim.
+- The output contains no aggregate and no field on §0.G's forbidden list.
+- No producer file appears in the diff; no file is written.
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
-| Several records share a `candidate_id` (retry rounds) | Expected — one candidate has many tuner rounds. The funnel row is per **candidate**; assert the fan-in explicitly |
-| `candidate_id=None` on several legacy records | Each stays separate and unjoinable. Merging them is the failure this commit must make impossible |
-| Stage present but its number absent | Distinguish "stage not reached" from "stage reached, number absent" — §E.3d.4's four-state rule |
+| Several tuner records share one `candidate_id` | **Expected** — one candidate has many rounds. The row is per candidate; assert the fan-in explicitly rather than assuming one-to-one |
+| Multiple `None` ids | Each stays separate. Merging them is the failure this commit must make impossible |
+| Stage reached but its number absent | Distinguish "stage not reached" from "reached, number absent" — §E.3d.4's four-state rule |
+| Inner-retry overwrite (§0.C) | Only the terminal implement/validate outcome exists. Report it as such; **do not** infer retry count from its absence |
+| Attempt dir exists but holds no proposal | The proposer emitted nothing, so there is **no candidate** (§0.D). Report the directory as "no candidate emitted", not as a stopped candidate |
 | Zero candidates | Empty result, not an error |
 
 #### 7. Verification commands and evidence
 
 ```bash
-.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/agent -q
+.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/agent tests/unit/workflows -q
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
 - [ ] Completeness tests count / wall time — **to record**
 - [ ] Backfill result vs the ledger's recorded range — **to record**
 - [ ] Mutation: merge `None`-id records → must fail — **to record**
+- [ ] Mutation: drop an incomplete row instead of naming it → must fail — **to record**
 - [ ] Clean-tree full suite, pytest rc, counts — **to record**
 
 #### 8. Commit boundary
 
 - [ ] Read-side + tests + this document only
-- [ ] No producer file in the diff
+- [ ] No producer file; nothing written to disk
 - [ ] No aggregate, distribution claim or corrective change
 - [ ] Diff summary, staged file list, tests and deviations shown before committing
 
@@ -860,67 +843,71 @@ evidence and **must not be launched without operator approval.**
 
 | Layer | Commit | What it proves |
 |---|---|---|
-| A | E1 | five-stage behaviour pinned **before** any field exists |
+| A | E1 | schema and persistence layout pinned **before** anything changes |
 | B | E2 | identity reaches the record through the **real** protocols |
-| C | E2-E4 | every hop is load-bearing — AST call-site assertions, not substring (§E.3d.9) |
-| D | E3-E4 | the two numbers are recorded, and no decision reads them |
-| E | E5 | the join is complete, and unjoinable rows stay unjoinable |
+| C | E2, E3 | every hop is load-bearing — AST call-site assertions (§E.3d.9) |
+| D | E3 | the discarded measurement is captured, verdict bit-identical |
+| E | E4 | the join is complete; unjoinable rows stay unjoinable |
 | F | all | PR-level mutation account, by category, never a percentage |
 
 **Layer G — production-boundary evidence.** Assessment: **no GPU or LLM
-Gate is required.** Every property is reachable deterministically —
-identity transport is in-process typed plumbing, the validator count needs
-no training, and the join is read-side. The residual, stated rather than
-papered over: no deterministic fixture drives a *real* proposer, so the
-mint site is covered by a call-site test plus a mutation. A pseudo-mode
-iteration is the cheapest sufficient live confirmation and is proposed as
-**optional**, exactly as PR D's O-D-2 concluded.
+Gate is required.** Identity transport is in-process typed plumbing; the
+validator count needs no training; the assembler is read-only. The
+residual, stated rather than papered over: no deterministic fixture drives
+a *real* proposer, so the mint site is covered by a call-site test plus a
+mutation — as PR D covered hop 7 and B1b covered its clamp. A pseudo-mode
+iteration is the cheapest sufficient live confirmation and is **optional**.
 
-**The scientific outcome is never the oracle.** A candidate proposing
-600k parameters is not a test failure.
+**The scientific outcome is never the oracle.** A candidate proposing 600k
+parameters is not a test failure.
 
 ## 6. Backward compatibility / parity
 
 | invariant | how it is preserved |
 |---|---|
-| pre-PR-E records | all new fields optional, `None`; no retroactive id — the direct analogue of PR D's non-retroactivity rule |
+| pre-PR-E records | all new fields optional and `None`; no retroactive id |
 | validator verdicts | E3's acceptance signal is that every existing validator test passes **unmodified** |
 | proposer behaviour | no prompt, advice or threshold file in the diff, proved by diff |
 | scoring | no scorer/metric/SNR file in the diff, proved by diff |
 | HealthGate | untouched |
-| model registration | `candidate_id` is a label, never a lookup key — grep-proved |
+| behavioural independence | two different `candidate_id`s produce identical behaviour, proved by execution (O-E-5), with grep as support only |
+| on-disk artifacts | E4 writes nothing; the assembler is read-only |
 
 ## 7. Genericization review
 
 - **Does the touched code treat one task or campaign as the framework?**
   No. `candidate_id` and parameter counts are task-agnostic.
-- **Literals.** No model name, campaign name or size constant is
-  introduced. The `~100M` prior stays exactly where it is, untouched.
-- **Bounded genericization performed:** none required — the change
-  follows the flat-optional-field-plus-protocol-parameter pattern PR D
-  established in the same protocol files.
-- **Deliberately deferred:** a `CandidateProvenance` object carrying
-  identity, lineage and scale together. Justified only if a third or
-  fourth per-candidate fact needs the same route.
+- **Literals.** No model name, campaign name or size constant introduced.
+  The `~100M` prior is untouched.
+- **Bounded genericization performed:** none required — the change follows
+  the flat-optional-field-plus-protocol-parameter pattern PR D established
+  in the same protocol files.
+- **Deliberately deferred:** `parent_candidate_id` / revision lineage
+  (O-E-4 names it a possible future follow-up); typing the implementor's
+  failure reasons (§0.E).
 
 ## 8. Acceptance and merge criteria
 
-1. Every candidate that reaches the proposer receives an immutable id
-   that arrives unchanged at the persisted record.
-2. All four transport hops are load-bearing, proved by AST-anchored
+1. Every proposer-emitted proposal receives an id that arrives unchanged
+   at the persisted record; a revision gets a **new** id, an inner retry
+   keeps the **same** one.
+2. All five transport hops are load-bearing, proved by AST-anchored
    mutations.
-3. The realized parameter count is captured where the model is already
-   instantiated, and the validator's verdict is bit-identical.
-4. The proposed count is forwarded verbatim and never recomputed.
-5. A candidate stopped at any stage records that stage and its existing
-   typed reason; no new vocabulary is introduced.
-6. The funnel assembles per candidate, names incomplete stages, and never
+3. Two different `candidate_id` values produce **identical behaviour** —
+   O-E-5's invariant, proved by execution.
+4. The validator's realized count is captured where the model is already
+   instantiated, with the verdict bit-identical and the convention
+   provably matching `model_params`.
+5. **No measurement is copied past its native owner** (O-E-3).
+6. `stopped_at_stage` exists only as a derived read-side value; **no new
+   reason vocabulary appears in the diff** (O-E-2).
+7. The funnel assembles per candidate, names incomplete stages, and never
    merges unjoinable records.
-7. **No distribution is claimed** (§E.3d.6). PR E delivers the capability.
-8. No prompt, advice, threshold, scorer, metric or HealthGate file is in
-   the diff.
-9. Full configured CI passes **in addition to** PR E's own reachability
-   and mutation evidence.
+8. **No distribution is claimed** (§E.3d.6).
+9. No prompt, advice, threshold, scorer, metric or HealthGate file is in
+   the diff; no new persistent artifact exists.
+10. Full configured CI passes **in addition to** PR E's own reachability
+    and mutation evidence.
 
 ### V21 review fields
 
@@ -929,22 +916,25 @@ Metric-frozen proof:      to be verified by diff at merge — PR E touches no
                           scoring path
 
 Name-keyed dependency
-added:                    MUST BE NONE. candidate_id is a label, never a key
-                          into registration, dispatch or paths. Grep-proved in
-                          E2's acceptance — this is the review line PR E is
-                          most at risk of violating
+added:                    MUST BE NONE in the behavioural sense (O-E-5).
+                          candidate_id is a valid observational join key; a
+                          read-side dict keyed by it is expected. It must never
+                          key registration, dispatch, admission, scoring or
+                          filesystem routing. Proved by running the production
+                          path under two different ids and asserting identical
+                          behaviour — the line PR E is most at risk of violating
 
-Transport contract:       field:    candidate_id, proposed_parameter_count,
-                                    realized_parameter_count, stopped_at_stage
-                          producer: ml_model_proposal_agent (mint)
+Transport contract:       field:    candidate_id  (the ONLY cross-stage field)
+                          producer: ml_model_proposal_agent (mint, one per run)
                           boundaries: local_full_spec -> local_all_fields
                                       -> local_validated_model -> ExperimentRecord
                           consumers: read-side funnel assembly only
+                          measurements: NOT transported — native owners per O-E-3
                           branches: complete / stopped-early / legacy-None
 
-Subprocess evidence:      to be determined — the validator's instantiation and
-                          the tuner's training both cross process boundaries;
-                          confirm during E3 whether the count crosses one
+Subprocess evidence:      to be determined in E3 — confirm whether the
+                          validator's instantiation runs in-process or in a
+                          sandbox subprocess, and whether the count crosses it
 
 Acceptance evidence:      Layers A-F deterministic; Layer G argued unnecessary
                           with the residual stated
@@ -952,65 +942,36 @@ Acceptance evidence:      Layers A-F deterministic; Layer G argued unnecessary
 
 ---
 
-## Operator decisions required — NONE RESOLVED, implementation blocked
+## Operator decisions
 
-### Q-E-1 — The ledger's PR E merge criteria contradict its own Scope
+### Recorded and applied — O-E-1 … O-E-5
 
-**Question.** Merge criteria say *"prompt contradiction resolved"*; the
-Correction three paragraphs above says there is no contradiction and the
-`~100M` prior must not be edited (§0.H).
+All five are applied throughout revision 2; §0.A maps each to what it
+changed. O-E-1 additionally requires a **dated append-only correction in
+`v21_priorities.md`**, retiring the "prompt contradiction resolved" merge
+criterion.
 
-**Options.** (a) Strike the clause as superseded by the 2026-08-07
-correction — my recommendation, since the correction is the later and
-more specific statement. (b) Keep it and define what "resolved" means
-without editing the prior. (c) Re-open the search-space policy question
-as its own PR.
+### Open — one, surfaced by the revision-2 audit
 
-**Recommendation: (a)**, recorded as a dated correction in the
-append-only ledger, exactly as §E.3e was.
+**Q-E-5 — parameter-count convention (E3 §3, blocking E3 only).**
 
-### Q-E-2 — Disposition vocabulary
+`ExperimentRecord.model_params` is written from
+`train_engine_sandbox.py:664` as **trainable-only**
+(`if p.requires_grad`), while `probe_production.py:202` counts **all**
+parameters. The validator's new count must match whichever convention the
+funnel's proposed-vs-realized comparison is meant to use.
 
-**Question.** Four of six stages already have typed failure reasons
-(`failure_stage`, `failure_type`, `binding_cap`, the validator booleans);
-two do not (proposal preflight uses prose in `memo_consistency_notes`;
-implementation uses exceptions).
+This is flagged rather than decided because it is a **measurement-
+definition** question like O-E-4: a model with frozen layers reports two
+different truths, and choosing silently would make the funnel's central
+comparison wrong in a way no later test catches.
 
-**Options.** (a) Record `stopped_at_stage` and carry each stage's existing
-reason verbatim — my recommendation; no second source of truth.
-(b) Define a new global disposition enum — competes with three existing
-vocabularies. (c) Type the two untyped stages as part of PR E — real
-scope growth into the proposer and implementor.
+**My recommendation: match `ExperimentRecord.model_params`
+(trainable-only), and record the choice explicitly in the design.** The
+funnel's comparison is proposed-vs-realized-vs-trained, so the two
+realized numbers must agree with the trained one, not with the probe.
+E3 §3 requires verifying the exact expression before implementing, so this
+can also be settled at that point if you prefer.
 
-**Recommendation: (a).** (c) is a defensible follow-up but would enlarge
-an instrumentation PR into a refactor of two nodes.
-
-### Q-E-3 — Where the funnel lives
-
-**Question.** Join-on-read over existing records, a new per-iteration
-artifact, or a manifest extension (§0.G).
-
-**Recommendation: A, join-on-read.** B introduces a new persistent record
-kind, which §15 of the working rules makes an operator decision rather
-than an implementer's, and adds a resume/versioning surface for no
-measurement benefit.
-
-### Q-E-4 — Identity across proposal revisions
-
-**Question.** The proposer has a preflight revision loop and the
-implementor retries. Is a revised draft the **same** candidate (same id,
-funnel shows revisions) or a **new** one (new id, funnel shows N attempts)?
-
-**Why this is genuinely the operator's.** It determines what "a candidate"
-*means* in the eventual distribution — whether the funnel counts drafts or
-accepted proposals. That is a measurement-definition question, and getting
-it wrong makes the data uninterpretable in a way no test can catch.
-
-**No recommendation offered.** I can supply the code facts about where
-revisions occur, but the definition should be the operator's.
-
----
-
-**Nothing in this document is implemented.** On approval the sequence is
-E0 (this document) → E1 → E2 → E3 → E4 → E5, and Q-E-2, Q-E-3 and Q-E-4
-must be answered first because they change E4, E5 and E2 respectively.
+**No other decision is open. E1 is not to be implemented until this
+revision is approved.**
