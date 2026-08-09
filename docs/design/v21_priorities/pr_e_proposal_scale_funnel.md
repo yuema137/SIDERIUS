@@ -1399,6 +1399,15 @@ mutations      3 attempted, 2 behaviour-changing -> 2 caught
 PR-level mutation account becomes: **36 attempted, 32 behaviour-changing
 → 32 caught, 3 equivalent (proved), 1 invalid (classified).**
 
+**CI slip during this round, recorded:** the guard's first push failed CI
+on pyright strict — the new grouping dict reused the name of an existing
+per-directory list local (`dir_rows`), and pyright had not been re-run
+after the guard change (only ruff + pytest were). Renamed to
+`rows_by_claimed_id`; behaviour identical (the local suite was green both
+times because the list use precedes the dict at runtime); full pyright
+re-run `0 errors, 4 warnings`. The lesson is the PR D format-check lesson
+again, one tool over: every checker re-runs at every final head.
+
 ## 6. Backward compatibility / parity
 
 | invariant | how it is preserved |

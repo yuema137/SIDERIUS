@@ -354,12 +354,12 @@ def assemble_iteration_funnel(iter_dir: str) -> IterationFunnel:
     # Duplicate-id detection (the enforceable uniqueness seam): a non-None
     # id in more than one DISTINCT attempt directory is two candidates whose
     # identities collided. Never merge them, never pick one — report loudly.
-    dir_rows: dict[str, list[CandidateFunnelRow]] = {}
+    rows_by_claimed_id: dict[str, list[CandidateFunnelRow]] = {}
     for row in rows:
         if row.candidate_id is not None and row.attempt_dir is not None:
-            dir_rows.setdefault(row.candidate_id, []).append(row)
+            rows_by_claimed_id.setdefault(row.candidate_id, []).append(row)
     conflicted: dict[str, DuplicateIdConflict] = {}
-    for cid, group in dir_rows.items():
+    for cid, group in rows_by_claimed_id.items():
         if len({r.attempt_dir for r in group}) > 1:
             conflict = DuplicateIdConflict(
                 candidate_id=cid,
