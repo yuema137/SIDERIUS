@@ -30,8 +30,7 @@ PR B   resource prediction / admission / realization / attribution have
 consumer of `vram_budget_gb`, not only PR B — recorded in
 `v21_priorities.md` §E.3c.
 
-**PR D is APPROVED and CI-green** (PR #189, `95f96745`, branch
-`feat/pr-d-scientific-authority-reachable`) — see
+**PR D is MERGED** (PR #189, merge commit `aace4abb`, 2026-08-08) — see
 `pr_d_scientific_authority_reachable.md`. Its production diff is three
 files and ten wiring lines: the authority declaration now reaches the tuner
 input, whose two fields existed all along and were never populated. That
@@ -44,16 +43,14 @@ shape appearing *inside the test suite* (`v21_priorities.md` §E.3d.9),
 plus a correction on how multi-field absence failures must be
 distinguished (§E.3d.10). Both bind E, F and G.
 
-**PR E is at DESIGN REVISION 2** — `pr_e_proposal_scale_funnel.md`,
-awaiting operator review of the revision; nothing implemented. Operator
-decisions **O-E-1 … O-E-5** are applied: no new disposition vocabulary,
-join-on-read with stage-native measurement ownership, one candidate = one
-proposer-emitted proposal, and the corrected `candidate_id` boundary
-(valid observational join key, never a behavioural key). The persistence
-audit shrank the PR to four commits: `candidate_id` is the **only**
-cross-stage transport, because every pre-tuner stage already persists its
-own output per attempt directory. One open decision: **Q-E-5**, the
-parameter-count convention (trainable-only vs total), blocking E3 only.
+**PR E design is APPROVED and implementation is IN PROGRESS** on
+`feat/pr-e-proposal-scale-funnel` — `pr_e_proposal_scale_funnel.md` is the
+live ledger. All operator decisions **O-E-1 … O-E-6** are frozen:
+`candidate_id` is the only cross-stage transport (system-minted, never
+LLM-supplied, observational join key only); measurements stay with their
+native owners; the validator records BOTH parameter-count conventions
+under unambiguous names; `stopped_at_stage` is derived on read; one
+bounded pseudo-mode complete iteration is a merge requirement.
 
 **PRs F-G are not started, and each carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is

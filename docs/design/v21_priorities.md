@@ -1007,7 +1007,7 @@ PR B   "If it executes, resource control remains correct."
 | **A** | Make the existing output contract reachable | P1 + P2 | none | launch blocker — **MERGED `b9f88ae5`** |
 | **B** | Resource-budget semantics and enforcement | P6.4 | none | launch blocker — **MERGED `0aae3f4b`** |
 | **C** | Generated-model production compatibility | P6.2 family | none | launch blocker — **MERGED `cac86c94`** |
-| **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | launch blocker — **APPROVED, CI green `95f96745`** |
+| **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | launch blocker — **MERGED `aace4abb`** |
 | **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data |
 | **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
 | **G** | Capability-derived inference batch | P5 | B | Non-blocking |
@@ -2164,14 +2164,18 @@ a reason to touch the frozen metric.**
 
 ## PR D — Make the existing scientific-authority contract reachable
 
-> ## STATUS: APPROVED FOR MERGE 2026-08-08 — PR #189, CI green on `95f96745`
+> ## STATUS: MERGED 2026-08-08 — PR #189, merge commit `aace4abb`
 >
 > Operator verdict: *"PR D implementation APPROVED, subject only to the
 > two documentation reconciliation fixes and CI finishing green. No
 > additional Gate, code change, or validation run is required."* Both
 > reconciliations applied; CI `Lint + Type + Unit Tests` **SUCCESS** on
-> `95f96745` (run `31295484292`, `headSha` verified). Merge commit to be
-> recorded here once merged.
+> `95f96745` (run `31295484292`, `headSha` verified). Operator-approved
+> merge executed 2026-08-08 as `aace4abb`. Note for the record: the
+> merged head also carried the PR E **design documents** (revision-2
+> state, superseded on the PR E branch) — the operator chose to merge
+> without restoring the branch to a code-only-D head; no PR E production
+> code existed, so master's production diff is PR D's alone.
 >
 > Branch `feat/pr-d-scientific-authority-reachable`. Full implementation
 > record: `v21_priorities/pr_d_scientific_authority_reachable.md`.
@@ -2735,7 +2739,7 @@ Byte-identical inference outputs; name table removed from the path.
 | 1 | Regression hypothesis reachable end to end by a generated model | PR A | **DONE** `b9f88ae5` |
 | 2 | Resource semantics correct — S3 frozen, admission graded, realization observable | PR B | **DONE** `0aae3f4b` |
 | 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
-| 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189, CI green `95f96745` (merge commit to be recorded) |
+| 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189 merged `aace4abb` |
 | 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **TODO** |
 | 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
 
