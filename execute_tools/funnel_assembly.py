@@ -77,6 +77,25 @@ class StageEvidence(BaseModel):
     reason_absent: bool = False
 
 
+class DuplicateIdConflict(BaseModel):
+    """One non-None ``candidate_id`` observed in MORE THAN ONE distinct
+    attempt directory.
+
+    Mint uniqueness is probabilistic (uuid4 — random, not an allocator with
+    a uniqueness proof), and no run-scoped registry can span the chain's
+    per-iteration subprocesses without new persistent state. The read side
+    is therefore the enforceable seam: it holds the attempt-directory
+    evidence that the candidates are distinct, reports the conflict LOUDLY,
+    keeps the rows separate, and attaches tuner evidence to NONE of them —
+    attributing it to either would be resolving an ambiguity by guess.
+    """
+
+    candidate_id: str
+    attempt_dirs: list[str]
+    #: Tuner outputs carrying the conflicted id — withheld from attachment.
+    withheld_tuner_outputs: list[str] = Field(default_factory=list)
+
+
 class CandidateFunnelRow(BaseModel):
     """The assembled per-candidate view. In memory only — never persisted."""
 
@@ -100,6 +119,10 @@ class CandidateFunnelRow(BaseModel):
     stop_reason_native: dict[str, Any] | None = None
     incomplete_stages: list[str] = Field(default_factory=list)
     unreadable: list[UnreadableArtifact] = Field(default_factory=list)
+    #: True when this row's id appears in another attempt directory too —
+    #: its derived fields (esp. stopped_at_stage) are then unreliable; see
+    #: the funnel's ``duplicate_id_conflicts`` for the loud report.
+    id_conflict: bool = False
 
 
 class IterationFunnel(BaseModel):
@@ -117,6 +140,8 @@ class IterationFunnel(BaseModel):
     #: Attempt dirs holding no proposal artifact: the proposer emitted
     #: nothing there, so there IS no candidate (§0.D) — reported, not rowed.
     no_candidate_dirs: list[str] = Field(default_factory=list)
+    #: LOUD duplicate-identity report. Empty on every healthy run.
+    duplicate_id_conflicts: list[DuplicateIdConflict] = Field(default_factory=list)
 
 
 def _read_json(path: str) -> tuple[dict[str, Any] | None, UnreadableArtifact | None]:
@@ -326,10 +351,38 @@ def assemble_iteration_funnel(iter_dir: str) -> IterationFunnel:
                 assert payload is not None
                 tuner_outputs.append((path, payload))
 
-    by_id = {row.candidate_id: row for row in rows if row.candidate_id is not None}
+    # Duplicate-id detection (the enforceable uniqueness seam): a non-None
+    # id in more than one DISTINCT attempt directory is two candidates whose
+    # identities collided. Never merge them, never pick one — report loudly.
+    dir_rows: dict[str, list[CandidateFunnelRow]] = {}
+    for row in rows:
+        if row.candidate_id is not None and row.attempt_dir is not None:
+            dir_rows.setdefault(row.candidate_id, []).append(row)
+    conflicted: dict[str, DuplicateIdConflict] = {}
+    for cid, group in dir_rows.items():
+        if len({r.attempt_dir for r in group}) > 1:
+            conflict = DuplicateIdConflict(
+                candidate_id=cid,
+                attempt_dirs=sorted({r.attempt_dir for r in group if r.attempt_dir}),
+            )
+            conflicted[cid] = conflict
+            funnel.duplicate_id_conflicts.append(conflict)
+            for r in group:
+                r.id_conflict = True
+
+    by_id = {
+        row.candidate_id: row
+        for row in rows
+        if row.candidate_id is not None and row.candidate_id not in conflicted
+    }
     for path, payload in tuner_outputs:
         cid = payload.get("candidate_id")
         records = payload.get("all_records") or []
+        if isinstance(cid, str) and cid in conflicted:
+            # Withheld: attributing this output to one of the colliding
+            # candidates would be a silent guess.
+            conflicted[cid].withheld_tuner_outputs.append(path)
+            continue
         if isinstance(cid, str):
             row = by_id.get(cid)
             if row is None:

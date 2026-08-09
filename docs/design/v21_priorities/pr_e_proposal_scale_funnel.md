@@ -745,8 +745,21 @@ tests/
       id-less, per O-E-4
 
 **Negative / invalid input**
-- [x] Duplicates impossible by construction (uuid4); no collision branch
-      exists to test — recorded as the §6 resolution
+- [x] **CORRECTED on operator review 2026-08-09 — the original claim
+      ("duplicates impossible by construction") was WRONG as a contract
+      statement.** uuid4 is a *random* UUID (122 bits): collisions are
+      probabilistically negligible, not impossible, and no run-scoped
+      registry can span the chain's per-iteration subprocesses without new
+      persistent state (an operator decision per O-E-3/§15). The audited
+      contract (§6, revised) is: **probabilistic uniqueness at mint,
+      LOUD DETECTION at the read side**, where the attempt-directory
+      evidence makes distinctness observable. Implemented in
+      `funnel_assembly.py`: `IterationFunnel.duplicate_id_conflicts` +
+      per-row `id_conflict`, rows never merged, tuner evidence carrying a
+      conflicted id WITHHELD (never attached-to-last). The pre-guard
+      behaviour — reproduced empirically before fixing — was: two rows
+      survive but the tuner output silently attaches to the LAST row,
+      giving the other a wrong derived `stopped_at_stage`, with no flag
 
 **Backward-compatibility / default parity**
 - [x] A record with no `candidate_id` loads (`test_a_pre_pr_e_record_still_loads`);
@@ -786,7 +799,7 @@ operator approval.**
 
 | Case | Required behaviour |
 |---|---|
-| Duplicate `candidate_id` in one run | **Fail loudly at mint.** A duplicated join key silently merges two candidates' funnels — worse than no funnel |
+| Duplicate `candidate_id` in one run | **Detected LOUDLY at the read side** (revised 2026-08-09 after the source audit): the mint cannot enforce run-scoped uniqueness — the proposer is constructed fresh per attempt (`model_exploration.py:2322`) and chain mode runs each iteration in its own subprocess, so only new persistent state could span the run, which O-E-3/§15 reserve for the operator. uuid4 gives probabilistic uniqueness; the assembler detects a non-None id in >1 distinct attempt dir, reports `duplicate_id_conflicts`, marks both rows `id_conflict`, never merges, and **withholds** tuner evidence rather than guessing an owner |
 | Legacy record, `candidate_id=None` | Load normally; the row is unjoinable and reported as such. **Never** synthesise |
 | Transport severed at one hop | `None` reaches the record; caught by that hop's mutation, not by a runtime error |
 | Resume of a pre-PR-E iteration | Unchanged; no retroactive id |
@@ -977,12 +990,24 @@ both numbers live.
   hand-computed integer, and both are present in the persisted JSON.
 - The frozen-parameter fixture pins the two fields **independently**:
   total includes the frozen parameter, trainable excludes it.
-- Every pre-existing validator test passes **unmodified**.
+- All pre-existing validator **behavioural/verdict expectations** remain
+  unchanged. 11 tests that directly unpack the private helper required
+  arity-only updates for the widened return tuple (plus one more found by
+  the full suite in `test_output_contract_end_to_end.py`, fixed
+  `ca86aaac`); **zero expected verdict/value changed anywhere**.
+  *(Corrected on operator review 2026-08-09 — the original "passes
+  unmodified" claim was stale against E3's own implementation record.)*
 - Instantiation failure yields `None` for both; no path can produce `0`
   for a model that failed to instantiate.
 - `ExperimentRecord.model_params` is untouched and un-redefined.
 - No code path computes a cross-convention delta or ratio.
-- No branch anywhere reads either count.
+- No **behavioural or decision-bearing** branch consumes either count:
+  neither measurement affects validation, admission, tuning, scoring,
+  HealthGate or scientific authority. The E4 read-side assembler reads
+  and displays both **observationally** — which is the funnel working,
+  not a violation. *(Corrected on operator review 2026-08-09 — the
+  original "no branch anywhere reads either count" was written before E4
+  existed and was superseded by it.)*
 
 #### 6. Failure and edge cases
 
@@ -1338,6 +1363,38 @@ as ONE path, which no unit layer exercises. No GPU, no real LLM.
 both ledger-recorded values (7,280,256 · 8,409,280) reproduced from the
 preserved campaign's own stage-local records. **No distribution is
 claimed** (§E.3d.6) — presence of the recorded values, nothing more.
+
+### Operator-review item 1 — the duplicate-id audit and guard (2026-08-09)
+
+**Audit answers, from source and an empirical reproduction:**
+
+| question | answer | evidence |
+|---|---|---|
+| what happens today with a duplicate non-None id across two attempts? | rows NOT merged, but the tuner output silently attached to the LAST row; the other row derived a wrong `stopped_at_stage="tuner"`; no flag anywhere | reproduction script over `funnel_assembly.py:329` (dict comprehension keeps last) |
+| detected anywhere? | no — not at mint, not at read, not in any test | grep + reproduction |
+| does the attempt-dir boundary preserve distinctness? | yes — two rows with distinct `attempt_dir` | reproduction |
+| any run-scoped uniqueness state at the mint? | no — proposer constructed fresh per attempt (`model_exploration.py:2322`); chain mode = one subprocess per iteration (`run_one_iteration.py:5`); only new persistent state could span the run (operator territory, O-E-3/§15) | source |
+| classification | **PROBABILISTICALLY UNIQUE ONLY** — uuid4 is a random UUID, not an allocator with a uniqueness proof | python docs / source |
+
+**Chosen narrowest fix (zero new state): read-side loud detection.**
+`DuplicateIdConflict` on the funnel + `id_conflict` on the rows; rows
+never merge; tuner evidence carrying a conflicted id is **withheld** with
+its path recorded on the conflict, because attributing it to either
+candidate would be a silent guess. Mint unchanged.
+
+```text
+guard tests    4 new (loud report, withheld evidence, same-dir NOT a
+               conflict, healthy runs report nothing)
+mutations      3 attempted, 2 behaviour-changing -> 2 caught
+               (M-E5-1 detection removed; M-E5-2 attach-to-last restored),
+               1 EQUIVALENT with proof (M-E5-3 `len(group)>1` vs
+               distinct-dirs: same-dir same-id artifacts merge into ONE row
+               and None-dir rows are excluded from grouping, so the two
+               conditions are always equal)
+```
+
+PR-level mutation account becomes: **36 attempted, 32 behaviour-changing
+→ 32 caught, 3 equivalent (proved), 1 invalid (classified).**
 
 ## 6. Backward compatibility / parity
 

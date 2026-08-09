@@ -172,6 +172,60 @@ class TestUnjoinableNeverMerges:
         assert len(funnel.unjoinable) == 1
 
 
+class TestDuplicateIdConflicts:
+    """The uniqueness contract, as audited 2026-08-09: mint uniqueness is
+    PROBABILISTIC (uuid4), no run-scoped registry can span the chain's
+    per-iteration subprocesses, so the READ side is the enforceable seam.
+    Before this guard existed, a duplicated id was not merged but its tuner
+    evidence silently attached to the LAST row — a wrong derived
+    stopped_at_stage on the other, with no flag anywhere."""
+
+    def _duplicate_pair(self, tmp_path):
+        _attempt(tmp_path, 1, "dup_a", cid="cand_SAME")
+        _attempt(tmp_path, 2, "dup_b", cid="cand_SAME")
+        _tuner(tmp_path, "dup_b", cid="cand_SAME", params=(42,))
+
+    def test_duplicates_are_reported_loudly_and_never_merged(self, tmp_path):
+        self._duplicate_pair(tmp_path)
+        funnel = assemble_iteration_funnel(str(tmp_path))
+        assert len(funnel.rows) == 2  # never merged
+        assert all(r.id_conflict for r in funnel.rows)
+        assert len(funnel.duplicate_id_conflicts) == 1
+        conflict = funnel.duplicate_id_conflicts[0]
+        assert conflict.candidate_id == "cand_SAME"
+        assert len(conflict.attempt_dirs) == 2
+
+    def test_tuner_evidence_is_withheld_not_attached_to_the_last_row(self, tmp_path):
+        """The pre-guard failure mode, pinned dead: attach-to-last gave one
+        candidate another candidate's training evidence."""
+        self._duplicate_pair(tmp_path)
+        funnel = assemble_iteration_funnel(str(tmp_path))
+        assert all(r.tuner_record_count == 0 for r in funnel.rows)
+        conflict = funnel.duplicate_id_conflicts[0]
+        assert len(conflict.withheld_tuner_outputs) == 1
+        assert "run_output_r1.json" in conflict.withheld_tuner_outputs[0]
+
+    def test_same_dir_same_id_is_one_candidate_not_a_conflict(self, tmp_path):
+        """Three artifacts sharing one id in ONE attempt dir are the same
+        candidate (O-E-4) — the conflict fires only across DISTINCT dirs."""
+        _attempt(tmp_path, 1, "solo", cid="cand_solo")
+        funnel = assemble_iteration_funnel(str(tmp_path))
+        assert funnel.duplicate_id_conflicts == []
+        assert len(funnel.rows) == 1
+        assert funnel.rows[0].id_conflict is False
+
+    def test_healthy_runs_report_no_conflicts(self, tmp_path):
+        _attempt(tmp_path, 1, "a", cid="cand_a")
+        _attempt(tmp_path, 2, "b", cid="cand_b")
+        _tuner(tmp_path, "b", cid="cand_b")
+        funnel = assemble_iteration_funnel(str(tmp_path))
+        assert funnel.duplicate_id_conflicts == []
+        assert {r.candidate_id: r.tuner_record_count for r in funnel.rows} == {
+            "cand_a": 0,
+            "cand_b": 2,
+        }
+
+
 class TestFailureModes:
     def test_malformed_artifact_is_unreadable_not_stage_absent(self, tmp_path):
         d = _attempt(tmp_path, 1, "alpha", cid="cand_a", stages=("proposal", "implementor"))
