@@ -43,7 +43,9 @@ shape appearing *inside the test suite* (`v21_priorities.md` §E.3d.9),
 plus a correction on how multi-field absence failures must be
 distinguished (§E.3d.10). Both bind E, F and G.
 
-**PR E is IMPLEMENTED and awaiting operator review** (not merged) on
+**PR E is MERGED** (PR #190, merge commit `f1f4c30a`, 2026-08-09) — the
+V21 launch-blocking chain A → C → B → D → E is complete. Originally
+implemented on
 `feat/pr-e-proposal-scale-funnel` — `pr_e_proposal_scale_funnel.md` is the
 live ledger. All operator decisions **O-E-1 … O-E-6** are frozen:
 `candidate_id` is the only cross-stage transport (system-minted, never

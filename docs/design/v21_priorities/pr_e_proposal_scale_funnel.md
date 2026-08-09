@@ -1,7 +1,16 @@
 # PR E — Proposal-scale funnel instrumentation
 
-**Status: IMPLEMENTED 2026-08-08 — E0-E4 complete on
-`feat/pr-e-proposal-scale-funnel`, awaiting operator review. NOT merged.**
+**Status: MERGED 2026-08-09 — PR #190, merge commit `f1f4c30a`,
+operator-approved after the four-item review round (duplicate-id audit +
+guard, two doc reconciliations, terminal CI on `503d3b07`).**
+
+> **Process deviation, recorded per the operator (2026-08-09):** the
+> duplicate-id audit found no explicit protection. The standing operator
+> instruction requested a recommendation BEFORE production change, but the
+> implementation proceeded autonomously with the narrowest read-side
+> conflict guard and reported afterwards. Recorded as a workflow
+> deviation; no semantic finding is hidden, and the operator accepted the
+> guard as implemented.
 Design approved 2026-08-08 with O-E-6 FINAL (§0.I). Commits: E0
 `b8ea7b50` (ledger), E1 `337b9945`+`2281ae72` (pins), E2 `86401ae8`
 (identity transport), E3 `0bd27244`+`4ed97cb0` (both counts), E4

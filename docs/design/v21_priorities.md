@@ -1008,7 +1008,7 @@ PR B   "If it executes, resource control remains correct."
 | **B** | Resource-budget semantics and enforcement | P6.4 | none | launch blocker — **MERGED `0aae3f4b`** |
 | **C** | Generated-model production compatibility | P6.2 family | none | launch blocker — **MERGED `cac86c94`** |
 | **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | launch blocker — **MERGED `aace4abb`** |
-| **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data — **IMPLEMENTED, in review** |
+| **E** | Proposal-scale funnel instrumentation | P4 | none | **MERGED `f1f4c30a`** |
 | **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
 | **G** | Capability-derived inference batch | P5 | B | Non-blocking |
 
@@ -2469,12 +2469,24 @@ the real `iter_006` fixture; no scorer file in the diff.
 
 ## PR E — Proposal-scale funnel instrumentation
 
-> ## STATUS: IMPLEMENTED 2026-08-08 — awaiting operator review, NOT merged
+> ## STATUS: MERGED 2026-08-09 — PR #190, merge commit `f1f4c30a`
+>
+> Operator-approved after a four-item review round: (1) the duplicate-id
+> audit — classification PROBABILISTICALLY UNIQUE ONLY, a reproduced
+> silent-misattribution latent defect, closed by read-side
+> `duplicate_id_conflicts` detection with tuner evidence WITHHELD on
+> conflict (zero new state; the invariant: an identity collision can
+> never produce a legitimate-looking but wrong funnel join); (2)+(3) two
+> stale documentation claims reconciled with dated notes; (4) terminal
+> CI SUCCESS on the exact final head `503d3b07` after CI itself caught a
+> pyright shadowing slip — every checker closed on the final head.
+> Final account: mutations 36/32 → 32 caught, 3 equivalent proved,
+> 1 invalid; full suite 8200 passed, rc=0.
 >
 > Branch `feat/pr-e-proposal-scale-funnel`. Live ledger:
 > `v21_priorities/pr_e_proposal_scale_funnel.md`. Commits: E0 `b8ea7b50`,
 > E1 `337b9945`+`2281ae72`, E2 `86401ae8`, E3 `0bd27244`+`4ed97cb0`,
-> E4 `b008ff54`.
+> E4 `b008ff54`, review round `ca86aaac`+`e83eef71`+`503d3b07`.
 >
 > **What PR E delivered**
 >
@@ -2776,7 +2788,7 @@ Byte-identical inference outputs; name table removed from the path.
 | 2 | Resource semantics correct — S3 frozen, admission graded, realization observable | PR B | **DONE** `0aae3f4b` |
 | 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
 | 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189 merged `aace4abb` |
-| 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **IMPLEMENTED — in review** (branch `feat/pr-e-proposal-scale-funnel`) |
+| 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **DONE** — PR #190 merged `f1f4c30a` |
 | 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
 
 > **Checkpoint 4 replaced 2026-08-08** (§E.3e). It formerly read *"Agent
@@ -2827,10 +2839,11 @@ then F, then G. A is first because every V21 scientific question depends
 on the hypothesis space being open; C is second because a generated model
 that cannot execute makes every later validation ambiguous.
 
-**Progress, 2026-08-08:** `A ✓  C ✓  B ✓  D ✓(approved, CI green)` — all
-four launch-gating checkpoints (1-4) are satisfied. **PR E is next**, and
-it is the last checkpoint (5) before a V21 campaign can start. E, F and G
-are bound by §E.3d including PR D's additions §E.3d.9-10.
+**Progress, 2026-08-09:** `A ✓  C ✓  B ✓  D ✓  E ✓` — **all five
+launch-gating checkpoints are satisfied.** The V21 launch-blocking chain
+A → C → B → D → E is complete; F and G remain non-blocking and are bound
+by §E.3d including PR D's additions §E.3d.9-10. PR F starts with a fresh
+audit, never from the old ledger premise.
 
 ## E.6 First V21 experiment, once A-E are merged
 
