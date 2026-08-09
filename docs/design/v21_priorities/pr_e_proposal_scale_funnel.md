@@ -1303,12 +1303,15 @@ Run from a **clean tracked tree** at `b008ff54` (E0-E4 all committed;
 verdicts from pytest's own exit status, never a pipe's):
 
 ```text
-pytest tests/unit -q -m "not real_run"        (production tree = ca86aaac;
-                                               docs-only edits pending, which
-                                               the PR3-L2 preflight allowlists)
-    8196 passed, 3 skipped, 1 xfailed         490.98s
+pytest tests/unit -q -m "not real_run"        FINAL, clean tree at e83eef71
+    8200 passed, 3 skipped, 1 xfailed         487.62s
     PYTEST_RC=0                               (pytest's own status)
     grep -cE "^(FAILED|ERROR)"  ->  0
+    delta from the 8196 pre-review run = +4 = exactly the four
+    duplicate-id guard tests
+
+  (previous authoritative run at ca86aaac: 8196 passed, 3 skipped,
+   1 xfailed, rc=0 — superseded by the operator-review round above)
 
 ruff check .                                 All checks passed!
 ruff format --check .                        775 files already formatted
