@@ -2,9 +2,11 @@
 
 **Date:** 2026-08-09 · **Host:** `ligroup` (lilab), CPU-only, loadavg
 6.2–17.4 recorded per point · **Evidence:** `measurements_pilot.json` +
-`measurements_pilot_rerun.json` (append-per-point JSONL, schema-validated
+`measurements_pilot_rerun.json` + `measurements_subset.json` +
+`measurements_subset_b.json` (append-per-point JSONL, schema-validated
 on write and read-back) · **Manifest hashes:** pilot `7bb4cb62…`, full
-`805559bc…` · **Design ledger:**
+`805559bc…`, subset `1ccc46b0…` (subset_b carries its standalone
+single-entry sub-manifest hash `0834abda…`) · **Design ledger:**
 `docs/design/v21_priorities/pr_f_inspection_cost_study.md`
 
 ## Scope — the operator-approved study population
@@ -16,12 +18,15 @@ on write and read-back) · **Manifest hashes:** pilot `7bb4cb62…`, full
 > budget-policy study if a budget change is pursued.
 > *(Operator decision, 2026-08-09 — the pilot + reproducibility rerun IS
 > the formal F2b population, via the frozen wall-expiry rule's explicit
-> subset-approval path.)*
+> subset-approval path. Subsequently amended by the operator's
+> MINIMUM-SUFFICIENT-EVIDENCE correction, which added the bounded
+> stratified subset — see "The bounded F2b subset" below.)*
 
 Measured coverage: **3 of 12 pilot entries, 64 + 64 measurements across
 two independent wall-bounded runs** (the 1800 s wall fired in both, by
-design). The 107-entry full manifest remains frozen and hashed for any
-future targeted study.
+design). The full manifest (112 entries, of which 107 are measurable —
+5 builtin ladder steps are `invalid_config`) remains frozen and hashed
+for any future targeted study.
 
 ## The budgets under study (from the consumer census — only the ENFORCED ones)
 
@@ -41,15 +46,16 @@ deliberately not measured against.
 architecture family *deep dilated WaveNet*, **7,089,024** total params
 (= trainable), seg 16,000:
 
-| evidence | run 1 | run 2 |
+| evidence | run 1 (repeats 0, 1) | run 2 (repeats 0, 1) |
 |---|---|---|
-| direct candidate probe, B=64 (exact, post-hoc) | **149.97 s** | **145.42 s** |
+| direct candidate probe, B=64 (exact, post-hoc) | **149.97 s / 145.42 s** | **147.29 s / 143.21 s** |
 | native `BatchSearchTimeout(operation="batch_candidate", B=64)` inside the real `resolve_inference_batch` (exact) | **145.05 s** | **141.41 s** |
 
 This is the verbatim P3/V20 incident signature
 (*"the bounded 'batch candidate' step at candidate batch 64"*), preserved
-through the native `ProbeTimeoutRecord`. Timing dispersion ≈ 2.5 % on a
-busy host.
+through the native `ProbeTimeoutRecord`. All six exact observations sit
+19–25 % over the 120 s budget; timing dispersion across them is ≈ 2–5 %
+on a busy host.
 
 **The per-batch cost curve is linear in B** (run 1, exact seconds):
 
@@ -64,7 +70,7 @@ architecture at B ≳ 51
 
 | entry | family | total params | B=64 probe | full search | training probe |
 |---|---|---|---|---|---|
-| `A_stub_arch_001_a` | generated (stub) | 4,352 | 0.35 s | 0.9 s | 0.1 s |
+| `A_stub_arch_001_a` | generated (stub) | 4,352 | 1.0 s | 1.8 s | 0.14 s |
 | `A_wavenet_30layer_baseline` | generated (deep dilated) | 7,089,024 | **149.97 s — OVER budget** | ended by the native candidate timeout | 2.0 s |
 | `B_019_gated_fno` (×8 ladder) | gated_fno | **2,621,834,112** | 57–62 s — *under* budget | **completed** in ~205 s with a **measured** no-feasible-batch verdict (predicted 21.5 GB @ B=1 vs the 12 GB cap, vram-binding) | 25.9 s |
 
@@ -137,8 +143,8 @@ Built-in WaveNet, identical family, channels doubled per step, R=3
 step   params      B=64 probe   full search   training probe
 x0.5     81,632     15.3 s        26 s          0.3 s
 x1      302,784     27.6 s        50 s          0.4 s
-x2    1,176,704     56.0 s       100 s          0.9 s
-ratio/step:          ~1.9-2.0x    ~2.0x         smooth, monotone
+x2    1,176,704     55.8 s       100 s          0.9 s
+ratio/step:          ~1.8-2.0x    ~1.9-2.0x     smooth, monotone
 ```
 
 Within this family, cost scales cleanly (~2× per channel-doubling) —
@@ -155,7 +161,7 @@ the ×8 step is schema-invalid.
 |---|---|---|---|---|
 | unet (`spectral_bottleneck_unet_ce_control`, the largest generated entry) | 86,944,928 | 8,000 | 17.2 s | CLEAR everywhere |
 | fourier/pyramid (`tiny_multirate_spectral_pyramid_classifier`) | 159,000 | 40,000 | 9.4 s | CLEAR everywhere |
-| rnn/gru (`embedded_resconv_bigru_head_compact`) | 162,112 | 625 | 0.25 s | CLEAR everywhere |
+| rnn/gru (`embedded_resconv_bigru_head_compact`) | 162,112 | 625 | 0.24 s | CLEAR everywhere |
 | ssm/mamba (`light_selective_ssm_skip_classifier`) | 1,027,248 | 40,000 | — | **kernel OOM-killed the study process at 47 GB anon-RSS** |
 
 **Finding F-A4 — a third censoring mechanism: host memory, not time.**
@@ -165,7 +171,13 @@ anon-RSS to 47,010,964 kB and the kernel OOM-killer killed the study
 host-takedown class that `isolated_probe.py`'s worker subprocess exists
 to contain. Recorded as `harness_deadline` per the frozen rule (no
 elapsed time fabricated; 135 prior measurements survived via
-append-per-point). Two consequences: (1) the study's in-process
+append-per-point). The file's final line is, verbatim,
+`{"wall_expired": {"note": "run killed by kernel OOM, not the wall;
+135 prior measurements intact"}}` — the format's only interruption
+marker is the `wall_expired` key, so `read_measurements` reports
+`wall_expired=True` for this file; the stored note carries the actual
+cause, and nothing in the artifact claims the 3600 s wall fired.
+Two consequences: (1) the study's in-process
 direct-probe axis inherits the risk production already solved with the
 isolated worker — a harness limitation now stated from evidence, not
 theory; (2) for budget policy, TIME budgets are not the only inspection
@@ -220,8 +232,8 @@ None of these were fixed here — PR F is measure-only.
    study first** (WaveNet × depth, PUNet × depth, Transformer × layers …)
    — a few dozen strategically chosen points answer the causal question
    with more information density than mechanically sweeping the 83
-   historical candidates. The frozen 107-entry manifest and this harness
-   are ready for exactly that.
+   historical candidates. The frozen manifest (112 entries, 107
+   measurable) and this harness are ready for exactly that.
 3. **The host-memory mechanism (F-A4) belongs in any budget redesign:**
    the isolated worker's RSS containment is already the production
    defence; a future inspection policy should treat "probe would exhaust
@@ -229,6 +241,34 @@ None of these were fixed here — PR F is measure-only.
    never as a timeout, and never by probing large batches in-process.
 4. **FU-F-1:** reconcile or retire the two inert declared budgets and the
    1200-vs-900 contradiction — a small cleanup PR of its own.
+
+## Errata — 2026-08-09 evidence audit (prose corrected to match evidence)
+
+A read-only audit re-derived every quoted number from the measurement
+files while the terminal test suite ran. Five prose defects were found —
+**the measurement evidence itself was internally consistent throughout**;
+in each case the artifact is authoritative and the text was corrected to
+follow it. Original statements are preserved here.
+
+1. **Headline table run-labels.** Was: probe B=64 "run 1: 149.97 s /
+   run 2: 145.42 s". Evidence: each pilot file holds TWO probe repeats —
+   run 1: 149.97/145.42 (repeats 0/1), run 2: 147.29/143.21. 145.42 was
+   run 1's second repeat, not run 2. Corrected table shows all four; the
+   incident count rises from "three times" to SIX over-budget
+   observations (4 exact probes + 2 native timeouts).
+2. **Stub row.** Was: 0.35 s probe / 0.9 s search / 0.1 s training —
+   drafting-time values. Evidence (run 1, medians): ≈1.0 s / ≈1.8 s /
+   ≈0.14 s. Still ≪ every budget; the contrast claim is unaffected.
+3. **Ladder ×2 step.** Was 56.0 s at B=64. Evidence repeats
+   55.66/55.76/56.64 → median 55.76 → 55.8 s; probe ratio/step is
+   1.8–2.0×.
+4. **bigru cell.** Was 0.25 s. Evidence 0.28/0.23/0.24 → median 0.24 s.
+5. **Manifest cardinality.** "107-entry full manifest" clarified: the
+   frozen manifest holds 112 entries, of which 107 are measurable
+   (5 builtin ladder steps are `invalid_config`).
+
+No measurement JSON, manifest, script, test or production file was
+changed to make documentation agree — the prose followed the evidence.
 
 **No recommendation was implemented. No budget, probe, resolver, prompt
 or production file was changed by PR F.**

@@ -4,7 +4,8 @@
 awaiting operator review of the PR. NOT merged. Zero production diff.**
 Q-F-1/Q-F-2/Q-F-3 all APPROVED FINAL. F1 (harness, `b680ea17`) froze the
 methodology before data; F2a (`2e2c6465`) ran the real pilot twice under
-its wall and reproduced the V20 incident three times; the F2b full sweep
+its wall and reproduced the V20 incident in six over-budget
+observations; the F2b full sweep
 was priced at 10–30 h by the pilot, and the operator's
 MINIMUM-SUFFICIENT-EVIDENCE correction replaced it with a bounded,
 timing-blind 8-entry stratified subset — executed 2026-08-09
@@ -775,11 +776,14 @@ reconciliation (frozen §0.F rule, union of repeats over 27 shared
         0 ILLEGAL flips
 ```
 
-**The V20 incident is now a reproducible measurement, three times over:**
-the direct candidate probe of `wavenet_30layer_baseline` (7,089,024
-params) at B=64 measured **149.97 s and 145.42 s exact** (over the
-post-hoc 120 s budget), and the real `resolve_inference_batch` raised the
-native `BatchSearchTimeout(operation="batch_candidate", candidate_batch=
+**The V20 incident is now a reproducible measurement, six times over**
+*(count corrected by the 2026-08-09 evidence audit: each pilot run holds
+TWO probe repeats at B=64, not one)*: the direct candidate probe of
+`wavenet_30layer_baseline` (7,089,024 params) at B=64 measured
+**149.97 s / 145.42 s exact in run 1 and 147.29 s / 143.21 s exact in
+run 2** (all over the post-hoc 120 s budget), and the real
+`resolve_inference_batch` raised the native
+`BatchSearchTimeout(operation="batch_candidate", candidate_batch=
 64)` with exact elapsed **145.05 s / 141.41 s** in the two runs — the
 verbatim P3 incident signature. Its per-batch curve is linear
 (1.35 / 3.38 / 9.83 / 21.67 / 41.97 / 80.28 / 149.97 s for
@@ -861,8 +865,9 @@ minimum-sufficient-evidence principle — recorded, not hidden.
 
 > **Expected:** 8 entries, 216 measurements, ≤ ~1 h. **Observed:** 7 of
 > 8 entries measured, **163 measurements** (162 `completed` exact + 1
-> `harness_deadline` bound-only), ~52 min of measurement wall time, one
-> kernel OOM kill, one deliberate declination. Mechanical validation on
+> `harness_deadline` bound-only) under the 3 600 s wall (which never
+> fired — the run ended at the kernel OOM kill), one deliberate
+> declination. Mechanical validation on
 > read-back: schema-valid, zero duplicate
 > (entry, operation, batch, repeat) identities, zero exact/bound mixing,
 > disposition accounting closes exactly (162 + 1 = 163).
@@ -874,8 +879,9 @@ INDETERMINATE is the OOM point below (`deadline-or-unbounded evidence
 present` — the frozen deadline rule, no time fabricated).
 
 **The ladder (B_000 → B_005 → B_010, R=3 medians, exact):** B=64 probe
-15.3 → 27.6 → 56.0 s; full search 26 → 50 → 100 s; training probe
-0.3 → 0.4 → 0.9 s — ~2× per channel-doubling, smooth and monotone.
+15.3 → 27.6 → 55.8 s; full search 26 → 50 → 100 s; training probe
+0.3 → 0.4 → 0.9 s — ~1.8–2.0× per channel-doubling, smooth and
+monotone.
 Extrapolating one step (stated as extrapolation, never a measurement)
 puts `B_015` at B=64 ≈ 110 s — just under the 120 s budget — while the
 **30-layer** generated cousin measured ~150 s at 7 M params:
@@ -910,7 +916,11 @@ append-per-point persistence.
    of its own single-entry sub-manifest (`0834abda…`), not the 8-entry
    subset hash — a mechanical consequence of running one entry
    standalone, recorded here so the hash mismatch is never mistaken for
-   evidence corruption.
+   evidence corruption. The OOM interruption marker in
+   `measurements_subset.json` reuses the format's `wall_expired` key
+   with an explicit "killed by kernel OOM, not the wall" note —
+   mechanical readers see an interrupted run, and the note carries the
+   true cause.
 4. The study's in-process direct-probe axis inherits exactly the risk
    production already solved with the isolated worker — now a
    measured harness limitation, stated in the report.
@@ -928,12 +938,37 @@ initially REFUSED by the count==1 site guard because the target pattern
 also exists in `select_pilot` — reapplied at docstring-anchored unique
 sites; baseline re-run green after byte-identical restore.
 
+**Terminal validation (head `a8e3b8ed`, clean tree, no concurrent
+edits):** ruff clean; `ruff format --check` clean (781 files); pyright
+0 errors / 4 warnings (= baseline); full `pytest tests/` with pytest's
+own exit code read from the log: **8 422 passed / 133 skipped /
+1 xfailed / 1 failed in 901 s**. The single failure
+(`tests/integration/workflows/test_k9_invented_model_dual_mode.py::`
+`test_invented_model_type_triggers_k2_5_8_fallback_path`, "Gate should
+print a verdict line") is **PRE-EXISTING ON MASTER**: it fails
+byte-identically at the merge base `c0989e5d`, proven by running it
+from a clean `git archive` checkout at a different absolute path. It
+is outside the project's CI scope (unit + static, by design), was
+never collected by this PR's earlier unit-scope suite runs (which
+report 3 skips, not 133 — they did not enter `tests/integration/`),
+and imports nothing from PR F. Recorded as an observation and
+deliberately NOT fixed inside a measure-only PR. Unit scope: fully
+green.
+
+**Post-validation reconciliation (operator-approved scope):** the five
+evidence-audit corrections below the suite run are a
+NON-EXECUTABLE DOCUMENTATION/EVIDENCE-ONLY reconciliation
+(`docs/**/*.md` + `reports/**/*.md`; no script, test, measurement
+JSON, manifest or production file), so the executable-tree verdict at
+`a8e3b8ed` carries to the final head. GitHub CI must still pass on the
+exact final HEAD SHA before the PR is declared READY.
+
 ### Commit F2b — SUPERSEDED BY OPERATOR DECISION 2026-08-09
 
 > **Expected:** the full 107-entry sweep (or an approved subset) after a
 > GO projection. **Observed:** the pilot priced the full sweep at
 > 10–30 h and simultaneously answered the study's causal question — the
-> V20 incident reproduced three times, and censoring proved
+> V20 incident reproduced repeatedly, and censoring proved
 > architecture-shaped, not size-shaped. **Correction (operator, quoted
 > in the report's Scope section):** the pilot + reproducibility rerun IS
 > the formal F2b population, via the frozen subset-approval path;

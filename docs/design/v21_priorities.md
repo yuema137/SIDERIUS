@@ -2717,9 +2717,11 @@ corrective change to advice or thresholds in the diff.
 > **What the study established (pilot + reproducibility rerun, real CPU,
 > operator-scoped population):** the V20 inspection timeout is a
 > REPRODUCIBLE measurement — `wavenet_30layer_baseline` (7.09 M params)
-> probes 145–150 s exact at B=64 against the post-hoc 120 s budget and
-> raises the native `BatchSearchTimeout(batch_candidate, B=64)` verbatim,
-> three times across two independent runs; its per-batch curve is linear
+> probes 143–150 s exact at B=64 (two repeats per run) against the
+> post-hoc 120 s budget and raises the native
+> `BatchSearchTimeout(batch_candidate, B=64)` verbatim in both runs —
+> six over-budget observations across two independent runs; its
+> per-batch curve is linear
 > (≈2.34 s/unit, censoring onset B≈51). Meanwhile a 2.62 B-param
 > gated_fno probes UNDER budget and completes with a MEASURED
 > no-feasible-batch VRAM verdict. **Inspection cost is

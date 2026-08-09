@@ -56,8 +56,9 @@ bounded pseudo-mode complete iteration is a merge requirement.
 
 **PR F's study is COMPLETE and awaiting PR review** (branch
 `feat/pr-f-inspection-cost-study`, not merged; zero production diff).
-The pilot reproduced the V20 inspection timeout three times as an exact
-measurement and rejected the "parameter count → timeout" story
+The pilot reproduced the V20 inspection timeout as an exact measurement
+— six over-budget observations across two runs — and rejected the
+"parameter count → timeout" story
 (architecture-shaped cost: a 7 M deep WaveNet is censored at B=64 while
 a 2.6 B FNO probes under budget). The full population sweep was
 deliberately not run — the operator's MINIMUM-SUFFICIENT-EVIDENCE
