@@ -44,7 +44,15 @@ shape appearing *inside the test suite* (`v21_priorities.md` §E.3d.9),
 plus a correction on how multi-field absence failures must be
 distinguished (§E.3d.10). Both bind E, F and G.
 
-**PRs E-G are not started, and each carries an update block** derived
+**PR E has a DESIGN DRAFT** — `pr_e_proposal_scale_funnel.md`, not
+approved, nothing implemented. Its audit found that three of the five
+funnel stages already carry a parameter count and a fourth measures one
+and discards it, so PR E is mostly a **join key** plus two forwards
+rather than new instrumentation. **Four operator decisions (Q-E-1 … Q-E-4)
+block implementation**, including a contradiction between the ledger's PR
+E merge criteria and its own Scope section.
+
+**PRs F-G are not started, and each carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
 binding on all of them. The single most reusable finding: three PRs in a
 row found **a correct rule that nothing called**, so every remaining PR
