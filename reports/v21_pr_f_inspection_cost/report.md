@@ -200,6 +200,65 @@ host-memory mechanism. **It cannot support:** population-wide censoring
 prevalence or per-family censoring rates over the 83 historical
 candidates — the exhaustive sweep was deliberately not run.
 
+## Hardware-local calibration boundary (operator clarification, 2026-08-09)
+
+PR F does NOT identify a universal inspection-time threshold.
+
+The wall-time measurements in this study calibrate the CURRENT
+inspection policy on the specific execution environment used for the
+study: the current host/CPU (`ligroup`, CPU-only, recorded loadavg per
+point), the current runtime/software stack, the observed host-load
+conditions, and the current production implementation of the inspected
+operations. Therefore a result such as `candidate probe > 120 s` means:
+**under this execution environment, the current 120-second policy would
+censor this operation.** It does NOT mean 120 seconds is the correct or
+incorrect universal threshold for every SIDERIUS deployment. Absolute
+inspection time is deployment-sensitive: a materially different
+machine/runtime may change the observed wall-time scale even when the
+candidate architecture and configuration are identical.
+
+### Consequence for portability
+
+A new deployment/hardware environment should perform a bounded
+calibration before treating the current absolute timing thresholds as
+calibrated. This does NOT imply rerunning the complete PR F study — a
+future calibration procedure should use the minimum sufficient set of
+representative operations/architectures needed to characterize the
+local runtime regime.
+
+### Long-term design implication
+
+The preferred long-term direction is NOT to replace 120 seconds with
+another global magic constant. Recorded as a recommendation for future
+work: inspection budgets should ideally become deployment-aware and
+potentially dynamic, e.g.
+
+```text
+hardware/runtime calibration
+  -> local timing baseline
+  -> operation-aware and/or architecture-aware budget
+  -> staged/adaptive inspection where justified
+```
+
+The exact future mechanism is NOT decided by PR F. Possible future
+approaches — hardware-profile-specific defaults; startup calibration;
+normalized timing relative to local reference probes;
+architecture/operation-aware limits; staged or adaptive inspection —
+must be evaluated in a separate design/change PR. PR F remains
+measure-only and implements NONE of these policies.
+
+### Claim boundary
+
+**SUPPORTED by this study:** the behavior of the current policy on the
+measured execution environment; architecture-specific examples of
+censoring/non-censoring; evidence that raw parameter count alone is not
+a sufficient timing proxy.
+
+**NOT SUPPORTED:** a universal optimal timeout; portability of the
+measured absolute wall times to different hardware; a globally valid
+mapping from parameter count to inspection cost; the exact design of a
+future dynamic budget policy.
+
 ## Findings (observations, not tasks — FU-F-1)
 
 - **F-A1:** `single_inspection_seconds=120` is declared but enforced
@@ -239,7 +298,13 @@ None of these were fixed here — PR F is measure-only.
    defence; a future inspection policy should treat "probe would exhaust
    host RAM" as a first-class *measured* refusal alongside time budgets —
    never as a timeout, and never by probing large batches in-process.
-4. **FU-F-1:** reconcile or retire the two inert declared budgets and the
+4. **Absolute thresholds do not transfer across hardware.** If SIDERIUS
+   is deployed on materially different hardware/runtime, repeat the
+   inspection-time calibration with a small bounded calibration suite
+   (minimum sufficient representative operations/architectures — see
+   the hardware-local calibration boundary above) rather than assuming
+   the current absolute thresholds transfer unchanged.
+5. **FU-F-1:** reconcile or retire the two inert declared budgets and the
    1200-vs-900 contradiction — a small cleanup PR of its own.
 
 ## Errata — 2026-08-09 evidence audit (prose corrected to match evidence)

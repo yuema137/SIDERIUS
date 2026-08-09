@@ -963,6 +963,65 @@ JSON, manifest or production file), so the executable-tree verdict at
 `a8e3b8ed` carries to the final head. GitHub CI must still pass on the
 exact final HEAD SHA before the PR is declared READY.
 
+### Hardware-local calibration boundary (operator clarification, 2026-08-09; documentation/recommendation only — no study, evidence, budget or production change)
+
+PR F does NOT identify a universal inspection-time threshold.
+
+The wall-time measurements in this study calibrate the CURRENT
+inspection policy on the specific execution environment used for the
+study: the current host/CPU (`ligroup`, CPU-only, recorded loadavg per
+point), the current runtime/software stack, the observed host-load
+conditions, and the current production implementation of the inspected
+operations. Therefore a result such as `candidate probe > 120 s` means:
+**under this execution environment, the current 120-second policy would
+censor this operation.** It does NOT mean 120 seconds is the correct or
+incorrect universal threshold for every SIDERIUS deployment. Absolute
+inspection time is deployment-sensitive: a materially different
+machine/runtime may change the observed wall-time scale even when the
+candidate architecture and configuration are identical.
+
+#### Consequence for portability
+
+A new deployment/hardware environment should perform a bounded
+calibration before treating the current absolute timing thresholds as
+calibrated. This does NOT imply rerunning the complete PR F study — a
+future calibration procedure should use the minimum sufficient set of
+representative operations/architectures needed to characterize the
+local runtime regime.
+
+#### Long-term design implication
+
+The preferred long-term direction is NOT to replace 120 seconds with
+another global magic constant. Recorded as a recommendation for future
+work: inspection budgets should ideally become deployment-aware and
+potentially dynamic, e.g.
+
+```text
+hardware/runtime calibration
+  -> local timing baseline
+  -> operation-aware and/or architecture-aware budget
+  -> staged/adaptive inspection where justified
+```
+
+The exact future mechanism is NOT decided by PR F. Possible future
+approaches — hardware-profile-specific defaults; startup calibration;
+normalized timing relative to local reference probes;
+architecture/operation-aware limits; staged or adaptive inspection —
+must be evaluated in a separate design/change PR. PR F remains
+measure-only and implements NONE of these policies.
+
+#### Claim boundary
+
+**SUPPORTED by this study:** the behavior of the current policy on the
+measured execution environment; architecture-specific examples of
+censoring/non-censoring; evidence that raw parameter count alone is not
+a sufficient timing proxy.
+
+**NOT SUPPORTED:** a universal optimal timeout; portability of the
+measured absolute wall times to different hardware; a globally valid
+mapping from parameter count to inspection cost; the exact design of a
+future dynamic budget policy.
+
 ### Commit F2b — SUPERSEDED BY OPERATOR DECISION 2026-08-09
 
 > **Expected:** the full 107-entry sweep (or an approved subset) after a
