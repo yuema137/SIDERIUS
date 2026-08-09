@@ -759,6 +759,22 @@ def main():
             # The inference ACTUAL covers this subprocess's real work:
             # setup + all file loops + output writes (§2.6).
             runtime_session.record_phase_actual("inference", time.perf_counter() - t_process_start)
+
+            # V21 PR B2 — realized peak memory for this phase, read in the
+            # inference subprocess so the counters are this candidate's.
+            # See the training engine for the same call. Observation only.
+            from core.runtime_control.realized_memory import read_process_peak_mib
+
+            _alloc, _reserved, _device = read_process_peak_mib()
+            runtime_session.record_phase_peak_memory(
+                "inference",
+                allocator_peak_mib=_alloc,
+                reserved_peak_mib=_reserved,
+                completeness="complete"
+                if _alloc is not None or _reserved is not None
+                else "unavailable",
+                device_index=_device,
+            )
             runtime_session.finalize("inference_complete")
 
     else:

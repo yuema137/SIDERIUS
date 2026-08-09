@@ -338,7 +338,7 @@ def _measure_ms_per_step(
 
         seg_size = int(model_config["segmentation_size"])
         batch_size = int(train_config.get("batch_size", 1))
-        loss_type = loss_config.get("loss_type", "ce")
+        loss_type = _training_est.resolve_loss_type(loss_config)
 
         # Pick a minimal slice of the sample_set large enough for the required batches.
         # Both early returns must obey the declared ``tuple[float | None, dict]``
@@ -513,7 +513,9 @@ def _store_reuse_decision(
             seg_size=seg_size,
             batch_size=batch_size,
             train_portion=train_portion,
-            epochs=int(train_config.get("epochs", 1)),
+            # V21 PR B1 — TrainConfig declares 10; the literal 1 made the
+            # store-reuse step count 10x optimistic (design doc §0.6.4).
+            epochs=_training_est.resolve_train_field(train_config, "epochs", safety_margin=1),
         ).unit_count
         decision = decide_nonformal_estimation(
             is_trial_round=True,
@@ -625,10 +627,18 @@ def run_skill(sandbox, **kwargs) -> dict:
     budget_min = float(kwargs.get("time_budget_minutes", 0.0))
     data_dir = kwargs.get("data_dir")
 
-    seg_size = int(model_config.get("segmentation_size", 1000))
+    # V21 PR B1. These were resolved against literals contradicting the
+    # declarations the run itself uses, and `seg_size` in particular is not
+    # only printed: it is a component of the observation-store calibration
+    # key (`_store_reuse_decision`). A run whose model really runs at 40000
+    # was reading and writing a bucket labelled 1000, mixing incomparable
+    # measurements. See the PR B design doc §0.6.5b.
+    seg_size = _training_est.resolve_model_field(
+        model_type, model_config, "segmentation_size", safety_margin=1000
+    )
     batch_size = int(train_config.get("batch_size", 1))
-    epochs = int(train_config.get("epochs", 1))
-    loss_type = loss_config.get("loss_type", "ce")
+    epochs = _training_est.resolve_train_field(train_config, "epochs", safety_margin=1)
+    loss_type = _training_est.resolve_loss_type(loss_config)
 
     print(
         f"\n>>> [Skill: TimeEval] Checking wall-time for {str(model_type).upper()} "
