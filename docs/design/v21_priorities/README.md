@@ -54,7 +54,16 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PRs F-G are not started, and each carries an update block** derived
+**PR F has a DESIGN DRAFT** — `pr_f_inspection_cost_study.md`, not
+approved, nothing implemented. Its fresh audit (per the E.5 rule) found
+the sixth instance of §E.3d.1 — the per-candidate inspection cost is
+measured on every successful probe and discarded (`batch_resolver.py:175`)
+— so the curve cannot be reconstructed from records and needs a harness.
+The study is CPU-only (no GPU, no LLM), zero production diff, staged
+behind a pilot-then-project runtime gate. **Three operator decisions
+(Q-F-1 … Q-F-3) block implementation.**
+
+**PR G is not started, and carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
 binding on all of them. The single most reusable finding: three PRs in a
 row found **a correct rule that nothing called**, so every remaining PR
