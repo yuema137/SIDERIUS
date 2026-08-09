@@ -1,12 +1,19 @@
 # PR D — Make the existing scientific-authority contract reachable
 
-**Status: IMPLEMENTED 2026-08-08, pending operator review.** Design was
+**Status: IMPLEMENTED AND VALIDATED 2026-08-08 — approved by the operator,
+CI green, READY FOR OPERATOR MERGE. Not merged.** Design was
 approved 2026-08-08 subject to the recorded decisions O-D-1 and O-D-2
 below; Q-D-1 is RESOLVED and the launcher census is FROZEN. D0-D3 are
 complete on `feat/pr-d-scientific-authority-reachable`; the production
 diff is **three files, ten wiring lines** (+36/-1 with imports and
 comments), exactly the three hops the audit predicted. Final evidence is
-in **§PR-D final validation**. **Not merged.**
+in **§PR-D final validation**. GitHub CI (`Lint + Type + Unit Tests`) is
+**SUCCESS on `dbf8a29a`** — run `31295064064`, `headSha` verified rather
+than inferred from the branch. PR **#189**.
+
+> An earlier run, `31294679925` on `e832df26`, shows `cancelled`. That is
+> GitHub's concurrency group superseding it when the next commit was
+> pushed — **not a failure**, and not evidence about the code.
 
 | | |
 |---|---|
@@ -1301,7 +1308,17 @@ pytest tests/unit -q -m "not real_run"
 ruff check .                                 All checks passed!
 ruff format --check .                        768 files already formatted
 pyright (1.1.409)                            0 errors, 4 warnings   [baseline held]
+
+GitHub CI, run 31295064064, headSha dbf8a29a
+    Lint + Type + Unit Tests                 SUCCESS   10m38s
 ```
+
+Documentation-only commits followed the clean-tree suite and followed CI;
+`git diff --name-only dbf8a29a..HEAD` returns paths under `docs/` alone,
+so neither verdict is stale. The configured CI is unit + static **by
+design**, which is why §E.4's "acceptance evidence complete" requires this
+PR's own transport and mutation evidence *in addition to* a green CI —
+never CI alone.
 
 **The test-count delta is itself a check.** Baseline at `57087ed9` was
 `8087 passed, 2 skipped, 1 xfailed`. The final run is `8146` — exactly
@@ -1390,8 +1407,8 @@ existed.
 
 ## Remaining operator decisions
 
-**None — implementation and validation are COMPLETE; PR D is pending
-operator merge.** Q-D-1 was resolved by O-D-1 and the census is frozen at
+**None — implementation and validation are COMPLETE and CI is green; PR D
+is READY FOR OPERATOR MERGE.** Q-D-1 was resolved by O-D-1 and the census is frozen at
 §0.C.1; the Gate question was resolved by O-D-2. No design decision
 remains open.
 
