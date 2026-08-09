@@ -54,14 +54,17 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PR F has a DESIGN DRAFT** — `pr_f_inspection_cost_study.md`, not
-approved, nothing implemented. Its fresh audit (per the E.5 rule) found
-the sixth instance of §E.3d.1 — the per-candidate inspection cost is
-measured on every successful probe and discarded (`batch_resolver.py:175`)
-— so the curve cannot be reconstructed from records and needs a harness.
-The study is CPU-only (no GPU, no LLM), zero production diff, staged
-behind a pilot-then-project runtime gate. **Three operator decisions
-(Q-F-1 … Q-F-3) block implementation.**
+**PR F is at DESIGN REVISION 2** — `pr_f_inspection_cost_study.md`,
+awaiting operator approval of the revised Q-F-1/Q-F-2; Q-F-3 resolved.
+The complete budget-consumer census found TWO of the five budgets are
+INERT (`single_inspection_seconds` enforced nowhere;
+`preflight_total_seconds=1200` unconsumed while the real end-to-end
+bound is a hardcoded 900 s subprocess deadline) — filed as FU-F-1, not
+fixed. The incident budgets are POST-HOC, so overruns yield EXACT times
+and true censoring only occurs at the harness's 2× SIGALRM — which
+reuses production's own primitive. Execution is wall-bounded (30-min
+pilot wall, ramped), not estimate-bounded: the honest theoretical worst
+case is ~2 700 s per entry per repeat. Zero production diff; CPU-only.
 
 **PR G is not started, and carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
