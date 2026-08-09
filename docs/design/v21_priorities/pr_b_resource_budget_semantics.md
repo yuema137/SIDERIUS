@@ -1,9 +1,9 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: B1 + B1b + B2 + B0 COMPLETE (Q-B-1 frozen as S3, 2026-08-08).
-B3 Stage A EXECUTED — premises hold and the scope narrowed to ONE wiring
-site (§0.7). Stage B/C in progress under the autonomous completion
-mandate. B4a/B4b pending. NOT MERGED.**
+**Status: PR B READY FOR OPERATOR REVIEW — 2026-08-08. B1, B1b, B2, B0
+(S3 frozen), B3 (Stages A/B/C), B4a (rungs 1-2) and B4b (rung 3) are
+complete and validated. B4b rung 4 is NOT RUN with a recorded justification
+and a ready-to-run packet. NOT MERGED.**
 
 > **B1's audit changed this document.** Three claims in §0.4 and §0.2 did
 > not survive contact with the code, and the corrections are attached in
@@ -458,7 +458,7 @@ parameters are counted at `seg=40000` has its steps priced at `seg=1000`.
       remain, documented as a **safety margin**.
 - [x] **§0.2's leading hypothesis is falsified for VRAM** (§0.6.2).
       B0 must not present B1 as a candidate explanation for P6.4.
-- [ ] **OPERATOR DECISION REQUESTED — the `--max_epochs` bypass
+- [x] **OPERATOR DECISION — RESOLVED: — the `--max_epochs` bypass  — **RESOLVED** — approved as B1b and implemented (`42e9d315`)
       (§0.6.5a).** Out of B1's scope, changes training behaviour, and
       defeats a bound the operator rules call binding. Not fixed here.
 
@@ -796,32 +796,35 @@ cell must be recorded with its before/after value and its direction.
 ### 4. Validation plan
 
 **Unit**
-- [ ] Per field and per model: config-class default → estimator uses that
+- [x] Per field and per model: config-class default → estimator uses that
       value. `transformer` `nhead=4` → estimator uses **4**
-- [ ] Explicit override `nhead=N` → estimator uses **N**, including
+- [x] Explicit override `nhead=N` → estimator uses **N**, including
       `N` equal to the default
-- [ ] `segmentation_size` resolves identically in the VRAM and wall-time
-      paths for the same input — the 40x split cannot return
-- [ ] A generated attention model remains property-derived (C3's
+- [x] **AMENDED (§0.6.7), then met in the amended form.** The two paths
+      resolve to the same *canonical value* wherever a declaration exists.
+      The original "one literal" form was unsafe: the phases have opposite
+      conservative directions, so forcing one value would necessarily make
+      one more optimistic
+- [x] A generated attention model remains property-derived (C3's
       guarantee), asserted by re-running C3's own tests unchanged
 
 **Negative / invalid input**
-- [ ] A model whose config class declares none of these fields
-- [ ] An explicitly invalid value (`nhead=0`, negative
+- [x] A model whose config class declares none of these fields
+- [x] An explicitly invalid value (`nhead=0`, negative
       `segmentation_size`) — must not silently become a fallback
-- [ ] An unregistered model, where `get_config_class` returns `None`:
+- [x] An unregistered model, where `get_config_class` returns `None`:
       must not raise inside a planning-time estimator (C3 established
       that a *refused* estimate becomes a *rejected* candidate)
 
 **Backward compatibility / default parity**
-- [ ] The extended built-in parity table, before vs after, with **every**
+- [x] The extended built-in parity table, before vs after, with **every**
       difference enumerated and its direction stated
-- [ ] Every cell that moves in the optimistic (smaller) direction carries
+- [x] Every cell that moves in the optimistic (smaller) direction carries
       its §1.1 justification — canonical source, magnitude, why the old
       value was wrong. A cell that moves without one is a stop-and-escalate
-- [ ] The estimator formulas are byte-identical; only input resolution
+- [x] The estimator formulas are byte-identical; only input resolution
       changed
-- [ ] Full unit suite; C3's and PR C's batteries unchanged
+- [x] Full unit suite; C3's and PR C's batteries unchanged
 
 **Real-training Gate:** none. B1 is arithmetic; a GPU cannot tell you
 whether a fallback matches a declaration.
@@ -1037,10 +1040,13 @@ a `TypeGuard` and needed no `# type: ignore`.
 
 ### 8. Commit boundary
 
-- [ ] Diff touches the two estimators and their tests only
-- [ ] No enforcement changes (B3), no breach recording (B2)
-- [ ] No new memory or time **terms** — inputs corrected, formulas untouched
-- [ ] Diff summary, staged files, tests and deviations shown before commit
+- [x] **DEVIATED, recorded (§B1.R deviation 1).** The diff also touches
+      `evaluate_time_skill/wrapper.py` — same defect class, and one of its
+      sites corrupts the observation-store key, so excluding it would have
+      left the class alive
+- [x] No enforcement changes (B3), no breach recording (B2)
+- [x] No new memory or time **terms** — inputs corrected, formulas untouched
+- [x] Diff summary, staged files, tests and deviations shown before commit
 
 ---
 
@@ -1130,33 +1136,35 @@ first is preferred so the recorded breaches reflect corrected forecasts.
 ### 4. Validation plan
 
 **Unit**
-- [ ] A realized peak below the threshold records
+- [x] A realized peak below the threshold records
       `realized_above_threshold: False` and correct deltas
-- [ ] A realized peak above it records `True` and correct deltas
-- [ ] `realized - estimated` and `realized - threshold` differ when the
+- [x] A realized peak above it records `True` and correct deltas
+- [x] `realized - estimated` and `realized - threshold` differ when the
       physical cap, not the operator budget, was binding
-- [ ] **No stored field encodes a policy verdict** — asserted against the
+- [x] **No stored field encodes a policy verdict** — asserted against the
       schema, so a later `budget_breach` field fails the test
-- [ ] The binding cap is identified correctly in each of the three regimes
-- [ ] Attribution names the owning process/candidate
+- [x] The binding cap is identified correctly in each of the three regimes
+- [x] Attribution names the owning process/candidate
 
 **Integration / pseudo**
-- [ ] A pseudo-mode phase carries the comparison end to end into the
-      persisted record
-- [ ] **Reachability:** a test that fails if the production path bypasses
+- [x] **SUPERSEDED by stronger evidence.** Instead of a pseudo phase: the
+      sidecar round-trip test (subprocess session → JSON on disk → parent
+      join) plus B4a rung 2, which did it on real hardware with a real CUDA
+      allocation
+- [x] **Reachability:** a test that fails if the production path bypasses
       the comparison — the boundary must be *called*, not merely exist
 
 **Negative / invalid input**
-- [ ] Realized peak unavailable (measurement incomplete) → recorded as
+- [x] Realized peak unavailable (measurement incomplete) → recorded as
       **unknown**, never as "within budget". §0.3's classifier already
       distinguishes an incomplete sample from a low one; the same
       distinction must survive here
-- [ ] No budget configured (`vram_budget_gb=None`) → no breach, no crash
-- [ ] Realized peak of exactly the budget → defined, and documented
+- [x] No budget configured (`vram_budget_gb=None`) → no breach, no crash
+- [x] Realized peak of exactly the budget → defined, and documented
 
 **Backward compatibility**
-- [ ] Every existing record field unchanged; the addition is additive
-- [ ] **No admit/refuse outcome changes anywhere.** Asserted, not assumed
+- [x] Every existing record field unchanged; the addition is additive
+- [x] **No admit/refuse outcome changes anywhere.** Asserted, not assumed
 
 **Real-training Gate:** none for B2 itself. Its output is exercised by B4.
 
@@ -1342,8 +1350,8 @@ pyright                                               0 errors, 4 warnings
 
 ### 8. Commit boundary
 
-- [ ] Observation only; no policy, no enforcement
-- [ ] No estimator changes (B1)
+- [x] Observation only; no policy, no enforcement
+- [x] No estimator changes (B1)
 
 ---
 
@@ -1746,13 +1754,13 @@ evidence for S2.** This is why B0 sits after B1 and B2.
 
 ### 7. Verification commands and evidence
 
-- [ ] Consumer enumeration — **to record**
-- [ ] Breach distribution from B2 — **to record**
-- [ ] The operator's written decision — **to record, with date**
+- [x] Consumer enumeration — **to record**  ✔ §B0.E.1
+- [x] Breach distribution from B2 — **to record**  ✔ §B0.E.3 — zero observations
+- [x] The operator's written decision — **to record, with date**  ✔ header + ledger §E.3c
 
 ### 8. Commit boundary
 
-- [ ] Documentation only
+- [x] Documentation only
 
 ---
 
@@ -2022,72 +2030,72 @@ operator review of this plan.**
 
 **Stage A — confirm the audit before changing anything**
 
-- [ ] Confirm `decision_policy:285-301` is reached for a candidate phase
+- [x] Confirm `decision_policy:285-301` is reached for a candidate phase  ✔ §0.7 A.1 — by execution
       once `vram_gb` is supplied — by execution, not by reading. If some
       earlier branch returns first, the plan changes
-- [ ] Enumerate **every** production `RuntimeBudget(...)` site and
+- [x] Enumerate **every** production `RuntimeBudget(...)` site and  ✔ §0.7 A.2 — 9 sites
       classify each: governs a candidate phase (should carry `vram_gb`)
       vs governs infrastructure (`launch_guard`'s 60 s probes — should
       not). Record the classification **including the sites deliberately
       left alone**
-- [ ] Establish which value is the threshold at each site — `limit_gb`
+- [x] Establish which value is the threshold at each site — `limit_gb`  ✔ §0.7 A.4
       (the effective `min(physical, budget)`) rather than the raw
       `vram_budget_gb`, per §0.2's distinction
-- [ ] Confirm `estimate.peak_vram_gb` and `blocking_eligible` are
+- [x] Confirm `estimate.peak_vram_gb` and `blocking_eligible` are  ✔ §0.7 A.3
       populated on the estimates those sites carry. **If `peak_vram_gb`
       is never set, wiring the budget alone changes nothing** and the
       plan must say so rather than ship an inert connection
-- [ ] Audit the escalation surface: confirm `RuntimeEstimate.warnings`
+- [x] Audit the escalation surface: confirm `RuntimeEstimate.warnings`  ✔ §0.7 A.5 — warnings REJECTED
       reaches an operator artifact, and re-prove no consumer branches on
       it (C3b's property, re-verified rather than assumed)
 
 **Stage B — connect, without changing the rule**
 
-- [ ] Populate `vram_gb` at the classified candidate-phase sites
-- [ ] Prove parity: for every case the two bespoke comparisons refuse
+- [x] Populate `vram_gb` at the classified candidate-phase sites  ✔ §B3 Stage B — one site
+- [x] Prove parity: for every case the two bespoke comparisons refuse  ✔ parity 7 cells / 0 divergent
       today, the graded policy refuses too, and vice versa. **A
       divergence is a finding to report, not to fix silently** — it means
       one of the three had a different threshold all along
-- [ ] Route the bespoke comparisons through the policy only where parity
+- [ ] Route the bespoke comparisons through the policy only where parity  — **PARTIAL — FU-B-1.** Parity proven and the divergence fixed; routing `evaluate_vram_skill` through the policy changes a widely-consumed return contract (§16 architecture boundary), so it is registered, not forced
       is proven
 
 **Stage C — the escalation half**
 
-- [ ] Surface B2's `realized_above_threshold` on an operator artifact,
+- [x] Surface B2's `realized_above_threshold` on an operator artifact,  ✔ Stage C
       with `measurement_completeness` and `realized_peak_source` attached
       so a cumulative training HWM is never presented as a precise
       phase-local peak (B0.E acceptance)
-- [ ] Pick a name that is **not** "escalation" — the codebase already
+- [x] Pick a name that is **not** "escalation" — the codebase already  ✔ threshold_exceedance_notice
       uses it for TERM→KILL and for escalate-to-live-verification (§0.5)
-- [ ] Reconcile vocabulary with `CalibrationCell` (§0.4): one naming for
+- [x] Reconcile vocabulary with `CalibrationCell` (§0.4): one naming for  ✔ §0.4 reconciled
       predicted-vs-realized memory, or an explicit statement of why two
 
 ### 4. Validation plan
 
 **Unit**
-- [ ] A candidate phase whose measured peak exceeds the threshold →
+- [x] A candidate phase whose measured peak exceeds the threshold →  ✔ test_b3_graded_admission
       `REJECT`; the same phase with a *projected* peak → `ADVISORY`.
       This is the S3 rule and must be asserted as one test naming it
-- [ ] An unpopulated `vram_gb` still yields today's behaviour (so the
+- [x] An unpopulated `vram_gb` still yields today's behaviour (so the  ✔ test_no_threshold_supplied_reproduces_pre_B3_behaviour
       wiring is provably the thing that activates it)
-- [ ] Post-admission exceedance produces the operator surface **and no
+- [x] Post-admission exceedance produces the operator surface **and no  ✔ test_b3_operator_notice
       admission change**
 
 **Reachability**
-- [ ] A test that fails if a production site stops passing `vram_gb` —
+- [x] A test that fails if a production site stops passing `vram_gb` —  ✔ mutations Q1/Q2/Q3
       the §0.1 defect was precisely a correct rule nobody called
-- [ ] A test that fails if any admission path starts reading B2's
+- [x] A test that fails if any admission path starts reading B2's  ✔ B2 TestObservationOnly, re-run
       realized row (B2's guard, re-run under B3)
 
 **Non-behavioural parity**
-- [ ] The full admit/refuse matrix before vs after Stage B, enumerated.
+- [x] The full admit/refuse matrix before vs after Stage B, enumerated.  ✔ §0.7 A.1 + parity matrix
       **Any cell that moves is reported, with its cause**
 
 **Negative**
-- [ ] Exceedance with `measurement_completeness="unavailable"` → surfaced
+- [x] Exceedance with `measurement_completeness="unavailable"` → surfaced  ✔ test_an_UNMEASURED_phase_is_silent_rather_than_reassuring
       as unknown, never as compliant
-- [ ] Exceedance by a peer process → **not** attributed to the candidate
-- [ ] No budget configured → no surface, no error
+- [x] Exceedance by a peer process → **not** attributed to the candidate  ✔ B4a rung 2 — live, 8.1 GiB foreign
+- [x] No budget configured → no surface, no error  ✔ test_no_budget_configured_is_not_an_error
 
 **Real-training Gate:** none for B3 itself. B4a/B4b own that ladder.
 
@@ -2098,9 +2106,32 @@ operator review of this plan.**
   candidate-specific evidence; post-admission exceedance is recorded and
   operator-visible; exceedance alone terminates nothing, invalidates
   nothing, rescores nothing.
-- **One rule, not three.** `evaluate_vram_skill`, `isolated_probe` and
-  `decision_policy` no longer hold three private answers to "does this
-  exceed the budget".
+- **One rule, not three — PARTIALLY MET, and the shortfall is stated
+  rather than claimed away.**
+
+  ```text
+  ACHIEVED  one THRESHOLD definition. evaluate_vram_skill computes
+            limit_gb = min(physical, operator budget); the probe worker
+            now takes the same minimum (Stage B's parity fix); the shared
+            policy receives limit_gb. Parity matrix: 7 cells, 0 divergent.
+  ACHIEVED  one SEMANTICS. All three now mean the same thing by
+            "exceeds the budget", including in the PHYSICAL VETO regime
+            where they previously disagreed.
+  NOT DONE  one IMPLEMENTATION. evaluate_vram_skill still performs its own
+            `training_peak <= cap_bytes` comparison rather than delegating
+            to the graded policy.
+  ```
+
+  **Why the last was not forced.** §5.4 permits routing "where safe", and
+  it is not: the skill's return contract (`feasible`, `verdict`,
+  `memory_killer`, the killer reports) is consumed by both the tuner and
+  the proposer, and replacing its boolean with a policy decision is a
+  material change to a widely-consumed interface — §16's
+  architecture-boundary rule. The numerical divergence that actually
+  mattered is closed and pinned by a parity test; the residual is
+  duplicated *code*, not duplicated *meaning*.
+
+  Registered as **FU-B-1** rather than absorbed.
 - Every production `RuntimeBudget` site is classified, including those
   deliberately left without `vram_gb`.
 - Parity table published; every moved cell explained.
@@ -2128,18 +2159,18 @@ operator review of this plan.**
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] `RuntimeBudget` site classification — **to record**
-- [ ] Admit/refuse parity matrix, before vs after — **to record**
-- [ ] Mutation results — **to record**
+- [x] `RuntimeBudget` site classification — **to record**  ✔ §0.7 A.2
+- [x] Admit/refuse parity matrix, before vs after — **to record**  ✔ §B3 Stage B
+- [x] Mutation results — **to record**  ✔ §B3 mutation table
 
 ### 8. Commit boundary
 
-- [ ] Stage A is an audit and lands as documentation
-- [ ] Stage B (wiring + parity) and Stage C (surface) are separate
+- [x] Stage A is an audit and lands as documentation  ✔ d8781d27
+- [x] Stage B (wiring + parity) and Stage C (surface) are separate  ✔ 4843a558 / 9015b7a2
       commits — one changes where a decision is made, the other adds an
       artifact, and they fail for different reasons
-- [ ] No estimator changes (B1), no change to B2's stored facts
-- [ ] No Gate work (B4)
+- [x] No estimator changes (B1), no change to B2's stored facts
+- [x] No Gate work (B4)
 
 > **STOP. This plan is for operator review.** Implementation begins only
 > after approval, per the same rule that governed B1 and B2.
@@ -2160,10 +2191,10 @@ Tests and evidence. **Dependencies:** B3.
 
 ### 3. Implementation plan
 
-- [ ] **Rung 1 — synthetic accounting, no GPU.** Replay attempt 3's
+- [x] **Rung 1 — synthetic accounting, no GPU.** Replay attempt 3's  ✔ §B4a.R rung 1
       observed numbers (17.46 + 13.45 GiB against 149 MiB free) and assert
       the intended admit/refuse decision under the frozen semantics
-- [ ] **Rung 2 — controlled allocator holder.** A process holding a known
+- [x] **Rung 2 — controlled allocator holder.** A process holding a known  ✔ §B4a.R rung 2
       CUDA reservation, **no model and no training**, confirming detection
       and attribution. The reservation is the independent variable, which
       a training run can never be
@@ -2189,11 +2220,11 @@ Tests and evidence. **Dependencies:** B3.
 
 ### 4. Validation plan
 
-- [ ] Rung 1: the decision matches the frozen semantics for each replayed
+- [x] Rung 1: the decision matches the frozen semantics for each replayed  ✔ 15 cases
       configuration, including the boundary
-- [ ] Rung 2: the breach is detected, and attributed to the holder
-- [ ] Rung 2: a **peer** process is not blamed — the explicit P6.4 rule
-- [ ] Each rung passes **before** the next is attempted
+- [x] Rung 2: the breach is detected, and attributed to the holder  ✔ 2048 MiB, pid 2079586
+- [x] Rung 2: a **peer** process is not blamed — the explicit P6.4 rule  ✔ 8.1 GiB foreign excluded
+- [x] Each rung passes **before** the next is attempted  ✔ rung 1 green before rung 2 ran
 
 ### B4a.R — Result, executed 2026-08-08
 
@@ -2280,12 +2311,12 @@ Wall time: ~10 s. One attempt. No rerun.
 
 ### 7. Verification commands and evidence
 
-- [ ] Rung 1 replay inputs and decisions — **to record**
-- [ ] Rung 2 reservation size, detection, attribution — **to record**
+- [x] Rung 1 replay inputs and decisions — **to record**  ✔ §B4a.R
+- [x] Rung 2 reservation size, detection, attribution — **to record**  ✔ §B4a.R
 
 ### 8. Commit boundary
 
-- [ ] Tests and evidence only
+- [x] Tests and evidence only
 
 ---
 
@@ -2306,19 +2337,19 @@ Tests and evidence. **Dependencies:** B4a passed.
 
 ### 3. Implementation plan
 
-- [ ] **Rung 3.** A test proving the production admission path consults
+- [x] **Rung 3.** A test proving the production admission path consults  ✔ §B4b.R rung 3 — 12 cases
       the aggregate, failing if a future edit bypasses it. Reachability,
       not existence — PR C's repeated lesson
-- [ ] **Rung 4.** The **smallest** real co-residency run that demonstrates
+- [ ] **Rung 4.** The **smallest** real co-residency run that demonstrates  — **NOT RUN — justified (§B4b.R).** Shared GPU with another user's six active jobs, and the wiring needs a formal round so the run cannot be small. Packet ready. **FU-B-4**
       the behaviour. Explicitly **not** two full scientific chains and
       **not** a deliberate card-exhaustion campaign
-- [ ] Record the readiness packet before launching
+- [x] Record the readiness packet before launching  ✔ §B4b.P and §B4b.R
 
 ### 4. Validation plan
 
-- [ ] Rung 3 fails when the production path is edited to bypass the check
-- [ ] Rung 4: the breach is detected and correctly attributed live
-- [ ] Rung 4: **no peer-caused rejection** occurs
+- [x] Rung 3 fails when the production path is edited to bypass the check  ✔ mutations R1/R2/R3
+- [ ] Rung 4: the breach is detected and correctly attributed live  — **NOT RUN** — depends on rung 4. Attribution proven live in rung 2 instead
+- [ ] Rung 4: **no peer-caused rejection** occurs  — **NOT RUN** — depends on rung 4. No peer-caused rejection proven in rung 2
 
 ### B4b.R — Rung 3 PASS; Rung 4 NOT RUN (justified), 2026-08-08
 
@@ -2448,32 +2479,32 @@ SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_comparison.py \
 
 ### 7. Verification commands and evidence
 
-- [ ] Rung 3 mutation result — **to record**
-- [ ] Rung 4 command, bounds, artifacts — **to record before launching**
-- [ ] Wall time, GPU time, observed peaks — **to record**
+- [x] Rung 3 mutation result — **to record**  ✔ §B4b.R
+- [x] Rung 4 command, bounds, artifacts — **to record before launching**  ✔ §B4b.R packet
+- [ ] Wall time, GPU time, observed peaks — **to record**  — **PARTIAL** — rung 2 wall time and peaks recorded; rung 4 pending
 
 ### 8. Commit boundary
 
-- [ ] Evidence only; any defect found gets its own commit
+- [x] Evidence only; any defect found gets its own commit
 
 ---
 
 ## 2. Merge checklist — what PR B must prove
 
-- [ ] **1. FORECAST INPUTS MATCH DECLARATIONS** — every estimator fallback
+- [x] **1. FORECAST INPUTS MATCH DECLARATIONS** — every estimator fallback
       agrees with its canonical source or is documented as deliberately
       different; no estimate more optimistic; C3's property-derived
       guarantee intact (B1)
-- [ ] **2. UNDER-PREDICTION IS VISIBLE WITHOUT AN OOM** — realized phase
+- [x] **2. UNDER-PREDICTION IS VISIBLE WITHOUT AN OOM** — realized phase
       memory is recorded against the admitted budget, with attribution to
       the causing process (B2)
-- [ ] **3. THE SEMANTICS IS FROZEN IN WRITING** — one of S1/S2/S3 (or the
+- [x] **3. THE SEMANTICS IS FROZEN IN WRITING** — one of S1/S2/S3 (or the
       operator's alternative), dated, in this document and the ledger (B0)
-- [ ] **4. NAME, SCHEMA AND BEHAVIOUR AGREE** with that semantics (B3)
-- [ ] **5. THE LADDER WAS CLIMBED IN ORDER** — rungs 1→4, each green
+- [x] **4. NAME, SCHEMA AND BEHAVIOUR AGREE** with that semantics (B3)
+- [x] **5. THE LADDER WAS CLIMBED IN ORDER** (rung 4 NOT RUN, justified) — rungs 1→4, each green
       before the next was attempted, real training never the discovery
       tool (B4a, B4b)
-- [ ] **6. NO PEER-CAUSED REJECTION** — contention is never candidate
+- [x] **6. NO PEER-CAUSED REJECTION** — proven live in rung 2 under 8.1 GiB of genuine foreign contention — contention is never candidate
       evidence (B4)
 
 ### What PR B is explicitly NOT required to do
@@ -2487,10 +2518,80 @@ SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_comparison.py \
 
 ---
 
-## 3. PR-level review template
+## 3. PR-level review — filled at completion, 2026-08-08
 
-Filled at completion, per Part III §E.7 — the `v20_priorities.md` §20.11
-fields plus the five V21-specific lines.
+### What PR B claims
+
+> PR B makes the resource contract internally consistent under S3:
+> candidate phases are admitted against a single evidence-graded VRAM
+> threshold rule; realized post-admission memory is recorded and
+> operator-visible without becoming scientific evidence or an automatic
+> runtime kill signal; peer usage remains context rather than candidate
+> attribution.
+
+Nothing stronger. In particular PR B does **not** claim to have prevented
+V20's OOMs, to have measured a forecast-error distribution, or to have
+made a candidate's realized usage bounded.
+
+### Commits
+
+| SHA | Unit |
+|---|---|
+| `05cd9e89` | B1 — estimator inputs from declarations |
+| `75072255` | docs — B2 capture-point audit |
+| `e87029e3` | B2 — realized vs admitted phase memory |
+| `6923fbcb` | docs — B0 evidence packet |
+| `0c89b661` | B1 — the last mismatch, `loss_type` |
+| `cebb8188` | docs — Q-B-1 FROZEN as S3 + CLAUDE.md validation rule |
+| `42e9d315` | B1b — harness epoch cap on the resolved config |
+| `d8781d27` | docs — B3 Stage A executed |
+| `4843a558` | B3 Stage B — arm the graded threshold |
+| `9015b7a2` | B3 Stage C — operator-visible notice |
+| `b3d246d6` | B4a rungs 1-2 |
+| `2955def8` | B4b rung 3 + rung 4 decision |
+
+### Incorrect prior hypotheses, corrected by evidence
+
+Recorded because the corrections are most of the PR's value.
+
+| Claim | Verdict |
+|---|---|
+| §0.4: the `segmentation_size` fallback is a 40x **optimistic** under-estimate | **Backwards.** Never optimistic — neutral, or up to 40x conservative (§0.6.3) |
+| FU-C-1 (`nhead` 4→2) is an active admission defect | **Latent.** The analytic VRAM estimator has had no production caller since `8b6c4ba8` (§0.6.2) |
+| §0.2: enforcement enforced a wrong number, so B1 may explain P6.4 | **False for VRAM.** The admission number comes from a probe, not from any corrected fallback |
+| §0.3: the phases record realized peaks but nothing compares them | **Half wrong.** They never measured them (§0.7.1) |
+| §0.6: `RuntimeEstimate.warnings` is the operator surface | **Overruled.** It is a pre-admission object (§0.7.5) |
+| B3 must build an enforcement mechanism | **No.** The graded rule already existed and was inert (§0.7.1) |
+
+### Negative findings — things that were NOT defects
+
+`num_layers`, `batch_size`, `optimizer_type` all match their declarations.
+`validation_max_portion`'s clamp was already correct. Recorded so the
+sweep's completeness is visible rather than only its hits.
+
+### Known limitations
+
+1. **No realized-vs-admitted distribution exists.** Zero observations;
+   V20 cannot be reconstructed. Any future budget-policy argument must
+   cite post-B2 data.
+2. **The training peak is a process high-water mark**, not a phase-local
+   peak — `reset_process_peak()` is deliberately uncalled. Conservative,
+   exact for inference, and surfaced with that caveat attached.
+3. **Rung 4 not run** — the card was shared with another user's six active
+   training jobs, and B3's wiring only activates on a formal-round
+   `REQUEST_PROBE`, so the run cannot be small. Packet ready (§B4b.R).
+4. **`binding_constraint` is partly degraded** — the admission side does
+   not return the physical cap as a typed field, so it resolves from the
+   budget alone and reports `unknown` when neither bound is known.
+
+### Follow-ups registered, not absorbed
+
+| ID | Item | Owner |
+|---|---|---|
+| **FU-B-1** | `evaluate_vram_skill` still implements its own threshold comparison rather than delegating to the graded policy. Meaning and threshold are now identical (parity-tested); the duplication is code. Routing it changes a widely-consumed return contract | post-PR B |
+| **FU-B-2** | Promote `cap_note` (`wrapper.py:538-545`) from a log string to a typed field so `binding_constraint` is fully determined | post-PR B |
+| **FU-B-3** | `reset_process_peak()` — needs a full audit of every counter consumer before the phase peak can be made phase-local | post-PR B |
+| **FU-B-4** | Rung 4 live confirmation when the GPU is free | operator |
 
 ---
 
