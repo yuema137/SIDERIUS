@@ -496,6 +496,92 @@ class TestPilotSelection:
         assert pops == {"v20_generated_realized", "builtin_reference"}
 
 
+class TestF2bSubsetSelection:
+    def test_subset_is_deterministic_and_timing_blind(self):
+        from scripts.inspection_cost_study.manifest import select_f2b_subset
+
+        entries = []
+        for i in range(6):
+            entries.append(
+                _fixture_entry(
+                    entry_id=f"B_{i:03d}_wavenet",
+                    population="builtin_reference",
+                    architecture_family="wavenet",
+                    realized_total_parameter_count=(i + 1) * 100_000,
+                )
+            )
+        for name, params in (
+            ("big_unet_control", 5_000_000),
+            ("some_pyramid_classifier", 200_000),
+            ("a_ssm_model", 300_000),
+            ("a_bigru_head", 100_000),
+        ):
+            entries.append(
+                _fixture_entry(
+                    entry_id=f"A_{name}",
+                    population="v20_generated_realized",
+                    architecture_family="generated",
+                    model_identity=name,
+                    realized_total_parameter_count=params,
+                )
+            )
+        # a mamba+ssm pyramid hybrid, LARGER than the pure pyramid rep:
+        # the fourier/pyramid predicate must exclude it (it belongs to the
+        # ssm/mamba family), and it must not displace the pure-ssm rep
+        # either (smaller than a_ssm_model)
+        entries.append(
+            _fixture_entry(
+                entry_id="A_mamba_ssm_pyramid_mix",
+                population="v20_generated_realized",
+                architecture_family="generated",
+                model_identity="mamba_ssm_pyramid_mix",
+                realized_total_parameter_count=250_000,
+            )
+        )
+        # a smaller unet-family member: the largest-member rule must skip it
+        entries.append(
+            _fixture_entry(
+                entry_id="A_small_unet_control",
+                population="v20_generated_realized",
+                architecture_family="generated",
+                model_identity="small_unet_control",
+                realized_total_parameter_count=1_000_000,
+            )
+        )
+        # an unloadable entry: validity filter must exclude it
+        entries.append(
+            _fixture_entry(
+                entry_id="A_broken_unet",
+                population="v20_generated_realized",
+                architecture_family="generated",
+                model_identity="broken_unet",
+                realized_total_parameter_count=9_999_999,
+                load_error="boom",
+            )
+        )
+        s1 = select_f2b_subset(entries)
+        s2 = select_f2b_subset(list(entries))
+        # the FULL selection sequence is pinned: ascending ladder minus its
+        # top step, then the four family reps (largest member each, the
+        # fourier/pyramid predicate excluding ssm/mamba), then the most
+        # expensive ladder step LAST. A mutation to any predicate, the
+        # ordering, the largest-member key, or the validity filter changes
+        # this exact list.
+        assert [e.entry_id for e in s1] == [
+            "B_000_wavenet",
+            "B_001_wavenet",
+            "B_002_wavenet",
+            "B_003_wavenet",
+            "B_004_wavenet",
+            "A_big_unet_control",
+            "A_some_pyramid_classifier",
+            "A_a_ssm_model",
+            "A_a_bigru_head",
+            "B_005_wavenet",
+        ]
+        assert [e.entry_id for e in s1] == [e.entry_id for e in s2]
+
+
 class TestPopulationDiscipline:
     def test_report_groups_by_population_and_keeps_family(self, tmp_path, monkeypatch):
         from scripts.inspection_cost_study.report import build_report

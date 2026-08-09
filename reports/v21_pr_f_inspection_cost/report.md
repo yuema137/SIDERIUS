@@ -83,11 +83,11 @@ within-family ladder evidence would require the deferred targeted study.
 ## Classification (frozen rule; union of both runs, 27 operation points)
 
 ```text
-CLEAR              26   (every timed repeat under its budget)
-WOULD_BE_CENSORED   1   (the incident point: candidate_probe B=64,
-                         4/4 exact observations over 120 s, zero straddle)
-INDETERMINATE       0
-illegal flips under union: 0   (27/27 verdicts stable across runs)
+pilot (union of two runs, 27 points):
+  CLEAR 26 · WOULD_BE_CENSORED 1 (the incident point, 4/4 exact over) ·
+  INDETERMINATE 0 · illegal flips 0
+bounded subset (55 points):
+  CLEAR 54 · WOULD_BE_CENSORED 0 · INDETERMINATE 1 (the F-A4 OOM point)
 ```
 
 Note on the incident entry's `full_search` row: it classifies CLEAR
@@ -112,6 +112,81 @@ the 7,280,256 anchor). Its verdict: **censored at B=64, clear at
 B ≤ 32**. The remaining anchors are covered by the frozen manifest for
 any future targeted study; no distribution claim is made from one point
 (§E.3d.6).
+
+## The bounded F2b subset (operator-corrected scope: minimum sufficient evidence)
+
+> *"Validation cost must be proportional to the information needed for
+> the decision; exhaustive coverage is not itself an acceptance
+> criterion."* — operator, 2026-08-09. The full 113-entry sweep was
+> deliberately not run; this frozen, timing-blind, 8-entry subset
+> (`select_f2b_subset`, hash `1ccc46b0…`) closes the two remaining
+> decision-relevant uncertainties: the within-family ladder for the
+> incident family, and family breadth in the realized population.
+
+**Evidence:** `measurements_subset.json` (136) + `measurements_subset_b.json`
+(27) = 163 measurements; 55 operation points; verdicts under the frozen
+rule: **54 CLEAR / 0 WOULD_BE_CENSORED / 1 INDETERMINATE** (the OOM point
+below).
+
+### The within-family ladder — the causal size question, answered for 3 steps
+
+Built-in WaveNet, identical family, channels doubled per step, R=3
+(medians, exact):
+
+```text
+step   params      B=64 probe   full search   training probe
+x0.5     81,632     15.3 s        26 s          0.3 s
+x1      302,784     27.6 s        50 s          0.4 s
+x2    1,176,704     56.0 s       100 s          0.9 s
+ratio/step:          ~1.9-2.0x    ~2.0x         smooth, monotone
+```
+
+Within this family, cost scales cleanly (~2× per channel-doubling) —
+extrapolating ONE more step (stated extrapolation, NOT a measurement)
+puts the ×4 step at B=64 ≈ 110 s, *just under* the 120 s budget, while
+the **30-layer** generated cousin measured 150 s at only 7 M params:
+**within the WaveNet family, depth crosses the budget before width
+does.** The ×4 step was deliberately NOT probed (host-safety, below);
+the ×8 step is schema-invalid.
+
+### Family breadth — censoring is confined, but a THIRD mechanism appeared
+
+| family (population A rep) | params | seg | B=64 probe | verdict |
+|---|---|---|---|---|
+| unet (`spectral_bottleneck_unet_ce_control`, the largest generated entry) | 86,944,928 | 8,000 | 17.2 s | CLEAR everywhere |
+| fourier/pyramid (`tiny_multirate_spectral_pyramid_classifier`) | 159,000 | 40,000 | 9.4 s | CLEAR everywhere |
+| rnn/gru (`embedded_resconv_bigru_head_compact`) | 162,112 | 625 | 0.25 s | CLEAR everywhere |
+| ssm/mamba (`light_selective_ssm_skip_classifier`) | 1,027,248 | 40,000 | — | **kernel OOM-killed the study process at 47 GB anon-RSS** |
+
+**Finding F-A4 — a third censoring mechanism: host memory, not time.**
+Probing the 1 M-param selective-SSM at B=64 × seg 40,000 in-process drove
+anon-RSS to 47,010,964 kB and the kernel OOM-killer killed the study
+(dmesg 2026-08-09 15:39:12) — the exact documented 2026-07-31
+host-takedown class that `isolated_probe.py`'s worker subprocess exists
+to contain. Recorded as `harness_deadline` per the frozen rule (no
+elapsed time fabricated; 135 prior measurements survived via
+append-per-point). Two consequences: (1) the study's in-process
+direct-probe axis inherits the risk production already solved with the
+isolated worker — a harness limitation now stated from evidence, not
+theory; (2) for budget policy, TIME budgets are not the only inspection
+censor: some architectures are host-memory hazards at high batch before
+any timer matters, and the production worker's RSS sampling is the live
+defence.
+
+### Coverage and non-claims
+
+Measured: 6 of 8 subset entries complete (162 exact measurements +
+1 OOM `harness_deadline`). NOT measured, with reasons: the ×4 WaveNet
+ladder step (declined for host safety after the OOM — activation
+footprint projected ≈2× the ×2 step at B=64 × seg 40,000; the stated
+extrapolation above carries the information at zero risk) and the SSM
+beyond its first probe. **This evidence supports:** rejecting a global
+size-based budget policy; a clean within-family width ladder for 3 steps;
+depth-vs-width for the incident family; family-confinement of
+time-censoring among the sampled families; the existence of the
+host-memory mechanism. **It cannot support:** population-wide censoring
+prevalence or per-family censoring rates over the 83 historical
+candidates — the exhaustive sweep was deliberately not run.
 
 ## Findings (observations, not tasks — FU-F-1)
 
@@ -147,7 +222,12 @@ None of these were fixed here — PR F is measure-only.
    with more information density than mechanically sweeping the 83
    historical candidates. The frozen 107-entry manifest and this harness
    are ready for exactly that.
-3. **FU-F-1:** reconcile or retire the two inert declared budgets and the
+3. **The host-memory mechanism (F-A4) belongs in any budget redesign:**
+   the isolated worker's RSS containment is already the production
+   defence; a future inspection policy should treat "probe would exhaust
+   host RAM" as a first-class *measured* refusal alongside time budgets —
+   never as a timeout, and never by probing large batches in-process.
+4. **FU-F-1:** reconcile or retire the two inert declared budgets and the
    1200-vs-900 contradiction — a small cleanup PR of its own.
 
 **No recommendation was implemented. No budget, probe, resolver, prompt

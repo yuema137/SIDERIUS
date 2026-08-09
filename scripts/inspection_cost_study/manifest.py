@@ -221,3 +221,48 @@ def select_pilot(entries: list[SweepEntry]) -> list[SweepEntry]:
             break
         add(e)
     return picked[:12]
+
+
+def select_f2b_subset(entries: list[SweepEntry]) -> list[SweepEntry]:
+    """The operator-corrected bounded F2b subset (minimum sufficient
+    evidence, 2026-08-09) — deterministic and TIMING-BLIND: every rule
+    below reads only manifest facts (population, identity keywords,
+    parameter counts, validity), fixed before any subset timing existed.
+
+    What it resolves (recorded in the ledger):
+      1. the within-family ladder for THE incident family — the only
+         claim class the interpretation boundary allows for
+         size-attribution: the four VALID builtin wavenet ladder steps;
+      2. family breadth in the realized population — is censoring
+         confined to the deep-dilated class? One representative each of
+         the unet, fourier/pyramid, ssm/mamba and rnn/gru families
+         (largest member, boundary-informative).
+
+    Ordering maximises completed coverage under the wall: the three
+    cheap ladder steps, then the four family representatives, then the
+    x4 ladder step LAST (the single most expensive projected point).
+    """
+    loadable = [e for e in entries if e.load_error is None]
+    a = [e for e in loadable if e.population == "v20_generated_realized"]
+    b = [e for e in loadable if e.population == "builtin_reference"]
+
+    def total(e: SweepEntry) -> int:
+        return e.realized_total_parameter_count or 0
+
+    ladder = sorted(
+        (e for e in b if e.architecture_family == "wavenet"),
+        key=total,
+    )
+
+    def rep(pred) -> SweepEntry | None:
+        c = sorted((e for e in a if pred(e.model_identity)), key=lambda e: (-total(e), e.entry_id))
+        return c[0] if c else None
+
+    reps = [
+        rep(lambda n: "unet" in n),
+        rep(lambda n: ("fourier" in n or "pyramid" in n) and "mamba" not in n and "ssm" not in n),
+        rep(lambda n: "ssm" in n or "mamba" in n),
+        rep(lambda n: "rnn" in n or "gru" in n),
+    ]
+    picked = ladder[:-1] + [r for r in reps if r is not None] + ladder[-1:]
+    return picked
