@@ -1,15 +1,14 @@
 # PR F — Inspection-cost scaling study (measure only)
 
-**Status: DESIGN REVISION 3 — 2026-08-09, returned for final operator
-approval. NOT approved for implementation; no production code, test,
-schema, launcher or scorer file is touched by this document.**
-Q-F-1 APPROVED, Q-F-3 APPROVED (operator, 2026-08-09). Q-F-2 approved in
-principle; this revision applies the five narrow methodology
-reconciliations the operator required — per-operation timeout semantics
-matched to production's own enforcement styles, native
-`BatchSearchTimeout` outcomes preserved verbatim, the wall-expiry
-completion rule, the timing-blind grid rule, and the interpretation
-boundary.
+**Status: STUDY COMPLETE 2026-08-09 (operator-scoped) — awaiting operator
+review of the PR. NOT merged. Zero production diff.** Q-F-1/Q-F-2/Q-F-3
+all APPROVED FINAL. F1 (harness, `b680ea17`) froze the methodology
+before data; F2a (`2e2c6465`) ran the real pilot twice under its wall
+and reproduced the V20 incident three times; the F2b full sweep was
+priced at 10–30 h by the pilot and the operator resolved the STOP gate
+by approving the pilot + reproducibility rerun as the formal study
+population (F2b supersession block below). Deliverable:
+`reports/v21_pr_f_inspection_cost/report.md`.
 
 | | |
 |---|---|
@@ -805,7 +804,29 @@ the operator.
 
 ---
 
-### Commit F2b — Full sweep, curve, classification, recommendation
+### Commit F2b — SUPERSEDED BY OPERATOR DECISION 2026-08-09
+
+> **Expected:** the full 107-entry sweep (or an approved subset) after a
+> GO projection. **Observed:** the pilot priced the full sweep at
+> 10–30 h and simultaneously answered the study's causal question — the
+> V20 incident reproduced three times, and censoring proved
+> architecture-shaped, not size-shaped. **Correction (operator, quoted
+> in the report's Scope section):** the pilot + reproducibility rerun IS
+> the formal F2b population, via the frozen subset-approval path;
+> *"the design serves the question, not the other way around"* — a full
+> mechanical sweep of 83 historical candidates would answer only
+> population-prevalence, which is not needed unless a budget change is
+> actually pursued, and a future budget-policy study would be better
+> served by targeted per-family ladders. **Consequence:** the deliverable
+> below is REPLACED by `reports/v21_pr_f_inspection_cost/report.md`
+> (generated from schema-validated evidence via `report.build_report`;
+> classification exclusively via `classify.classify_point`); the frozen
+> 107-entry manifest and the harness remain ready for the targeted
+> follow-up. The original F2b plan is retained below, unexecuted, per the
+> append-only rule.
+
+#### The original F2b plan (retained, NOT executed)
+
 
 #### 1. Goal
 

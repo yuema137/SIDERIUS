@@ -2708,6 +2708,44 @@ corrective change to advice or thresholds in the diff.
 
 ## PR F — Inspection-cost scaling study (measure only)
 
+> ## STATUS: STUDY COMPLETE 2026-08-09 — awaiting operator review, NOT merged
+>
+> Branch `feat/pr-f-inspection-cost-study`. Live ledger:
+> `v21_priorities/pr_f_inspection_cost_study.md`; deliverable:
+> `reports/v21_pr_f_inspection_cost/report.md`. Zero production diff.
+>
+> **What the study established (pilot + reproducibility rerun, real CPU,
+> operator-scoped population):** the V20 inspection timeout is a
+> REPRODUCIBLE measurement — `wavenet_30layer_baseline` (7.09 M params)
+> probes 145–150 s exact at B=64 against the post-hoc 120 s budget and
+> raises the native `BatchSearchTimeout(batch_candidate, B=64)` verbatim,
+> three times across two independent runs; its per-batch curve is linear
+> (≈2.34 s/unit, censoring onset B≈51). Meanwhile a 2.62 B-param
+> gated_fno probes UNDER budget and completes with a MEASURED
+> no-feasible-batch VRAM verdict. **Inspection cost is
+> architecture-shaped, not size-shaped** — the simple "parameter count →
+> timeout" story is rejected. Classification (frozen rule, union of both
+> runs): 26 CLEAR / 1 WOULD_BE_CENSORED / 0 INDETERMINATE, 0 illegal
+> flips.
+>
+> **The full 83+29-entry sweep was deliberately NOT run** (operator
+> decision at the STOP gate): the pilot priced it at 10–30 h, PR F is not
+> a launch blocker, and the causal question was already answered; a
+> future budget change should be preceded by a targeted per-family
+> ladder study, for which the frozen 107-entry manifest and harness
+> stand ready.
+>
+> **Findings (FU-F-1, observations not tasks):** two of the five declared
+> ProbeBudgets are INERT — `single_inspection_seconds` enforced nowhere;
+> `preflight_total_seconds=1200` unconsumed while the real bound is a
+> hardcoded 900 s subprocess deadline (7th §E.3d.1 instance). Plus F-A3:
+> torchinfo launders in-hook SIGALRMs into RuntimeError.
+>
+> **Recommendation (implemented NOWHERE):** do not raise 120→300
+> globally; if change is pursued, prefer staged inspection / cheaper
+> analytic pre-flight / architecture-aware budgets, justified by the
+> targeted ladder study.
+
 > **Updated 2026-08-08 from A/B/C (§E.3d).** A measure-only study is
 > governed by the minimum-bounded-validation rule, and by one practical
 > fact PR B hit at Gate time:

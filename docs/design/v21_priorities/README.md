@@ -54,8 +54,15 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PR F is at DESIGN REVISION 3** — `pr_f_inspection_cost_study.md`,
-awaiting final operator approval of Q-F-2; Q-F-1 and Q-F-3 resolved.
+**PR F's study is COMPLETE and awaiting PR review** (branch
+`feat/pr-f-inspection-cost-study`, not merged; zero production diff).
+The pilot reproduced the V20 inspection timeout three times as an exact
+measurement and rejected the "parameter count → timeout" story
+(architecture-shaped cost: a 7 M deep WaveNet is censored at B=64 while
+a 2.6 B FNO probes under budget). The full population sweep was
+deliberately not run (operator decision at the runtime gate: 10–30 h
+priced, not a launch blocker, question already answered); deliverable in
+`reports/v21_pr_f_inspection_cost/report.md`.
 Rev 3 matched the harness's timeout handling to production's
 per-operation enforcement (the native 180 s preemptive training-probe
 alarm is preserved, never relaxed to 2×), preserves native
