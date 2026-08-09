@@ -1,9 +1,11 @@
 # PR D — Make the existing scientific-authority contract reachable
 
-**Status: DESIGN APPROVED 2026-08-08 (operator), subject to the recorded
-decisions O-D-1 and O-D-2 below. Q-D-1 is RESOLVED and the launcher census
-is FROZEN. No implementation has begun; no production code, test, schema,
-launcher or scorer file is touched by this document.**
+**Status: IMPLEMENTED 2026-08-08, pending operator review.** Design was
+approved 2026-08-08 subject to the recorded decisions O-D-1 and O-D-2
+below; Q-D-1 is RESOLVED and the launcher census is FROZEN. D0-D3 are
+complete on `feat/pr-d-scientific-authority-reachable`; the production
+diff is **three files, six lines**, exactly as designed. Final evidence is
+in **§PR-D final validation**. **Not merged.**
 
 | | |
 |---|---|
@@ -413,7 +415,7 @@ before-state.
       not an enum, and `from_context` does not validate it — an unrecognised
       string simply matches no blocker branch and yields the same result as
       `valid`. Left exactly as-is: PR D changes no semantics, and this is a
-      pre-existing property of a frozen function. Filed as **FU-D-1**
+      pre-existing property of a frozen function. Filed as **FU-D21-1**
 - [x] A caller attempting to pass `authoritative=` directly is refused
       (`extra="forbid"`, `:86`) — `test_a_caller_cannot_supply_a_conclusion`
 
@@ -505,7 +507,7 @@ historical records are judged. (b) Asserting
 rejected as a tautology that would survive both fields being wrong
 together.
 
-**Negative finding, recorded not fixed — FU-D-1.** `FormalValidity` is a
+**Negative finding, recorded not fixed — FU-D21-1.** `FormalValidity` is a
 `Literal` *type alias*, not an enum, and `from_context` performs no
 validation on it: an unrecognised `formal_validity` string matches no
 blocker branch and therefore behaves exactly like `"valid"`. This is
@@ -641,7 +643,7 @@ operator approval.**
 | Launcher passes a kwarg `run_workflow` does not accept | Already caught by `test_watchdog_admission_split.py:317` — the Gate 0 attempt-1 failure mode. Must stay green |
 | Protocol accepts the kwarg but never sets it on the schema | Caught by `test_no_silently_dropped_constructor_kwarg` in the parity harness. Must stay green |
 | Only one of the two fields is wired | Still `legacy_authority_unknown` (either-axis rule, §0.A). A test must assert this rather than assuming symmetry |
-| An undeclared launcher is accidentally given a default | **Stop.** This is mutation M-D5 and the wrong fix; the undeclared test must fail |
+| An undeclared launcher is accidentally given a default | **Stop.** This is mutation M-D5a/M-D5b and the wrong fix; the undeclared test must fail |
 | Invalid literal reaches the schema | Pydantic refuses at `HyperparamTuningInput` construction. Fail loudly; do not coerce |
 | A historical record is resumed under a declared run | Must stay `unreconstructable_legacy` (§0.F). Asserted in D3 |
 | Import cycle from the type aliases | Fall back to `str | None` at the transport hops **only if** the schema still enforces the `Literal`; record the decision |
@@ -755,44 +757,74 @@ one broke.
 
 #### 3. Implementation plan
 
-- [ ] Build a formal record carrying a `blocking/scientific/valid`
+- [x] Build a formal record carrying a `blocking/scientific/valid`
       verdict through the real `ScientificAuthority.from_context`
-- [ ] Drive `core/resume.py`'s authority predicate on it and assert
+      — built through the real protocol → input → `from_context`
+      (`_formal_record`, mirroring tuner `:5745-5752`)
+- [x] Drive `core/resume.py`'s authority predicate on it and assert
       admission; drive the undeclared case and assert refusal with the
       recorded exclusion reason
-- [ ] Drive `partition_for_aggregation` on both and assert
-      included/excluded counts
-- [ ] Assert a historical record with **no** stored verdict, resumed with
+      — **superseded, already covered.** `test_resume_incumbent.py`
+      drives the real predicate in both directions
+      (`test_an_authoritative_record_becomes_the_incumbent`,
+      `test_a_non_authoritative_record_never_becomes_the_incumbent`);
+      mutation **M-D6** proves that module load-bearing (12 failures).
+      A duplicate here would name no defect only it can catch
+- [x] Drive `partition_for_aggregation` on both and assert
+      included/excluded counts — asserted in the new module
+      (`included_count == 1` / `all_excluded is True`); also pre-covered
+      by `test_pr_d_positive_path_deterministic.py`
+- [x] Assert a historical record with **no** stored verdict, resumed with
       a *declared* current-iteration output, still resolves
       `unreconstructable_legacy` (§0.F) — pinning that PR D confers no
       retroactive authority
-- [ ] Publish the §0.C census in this document with each path's
+      — asserted, plus a provenance guard on `resume.py:299`
+      (`TestPRDConfersNoRetroactiveAuthority`)
+- [x] Publish the §0.C census in this document with each path's
       classification **and the reason for every deliberate exclusion**
-- [ ] Consider extending
+      — published and frozen at §0.C / §0.C.1
+- [x] Consider extending
       `test_launch_surface_parity.py::test_tuning_input_covers_gate_launch_critical_fields`
       to name the two fields — currently it does not
+      — **done.** Both added to the launch-critical set with the reason
+      recorded inline: an undeclared launch stamps
+      `legacy_authority_unknown` on every formal record
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Incumbent predicate: authoritative → admitted; undeclared → refused
-- [ ] Aggregation: authoritative → `included=1`; undeclared →
-      `excluded=1`, `all_excluded=True`
+- [x] Incumbent predicate: authoritative → admitted; undeclared → refused
+      — pre-covered by `test_resume_incumbent.py` (`39 passed` within the
+      71-test consumer run); M-D6 proves it load-bearing
+- [x] Aggregation: authoritative → `included=1`; undeclared →
+      `excluded=1`, `all_excluded=True` — asserted end to end **from a
+      launcher declaration**, which is the hop no existing test crossed
 
 **Integration / pseudo**
 - [ ] Optional and explicitly not required for merge: a pseudo-mode chain
       iteration asserting the persisted record's
       `scientific_authority.primary_basis`. No GPU, no real LLM. Listed as
       the cheapest available live confirmation if the operator wants one
+      — **DELIBERATELY NOT RUN**, per O-D-2, which classifies it as
+      optional strengthening evidence and explicitly not a merge
+      requirement. Left unchecked rather than marked done, because it was
+      not performed. Tracked as **FU-D21-2**
 
 **Negative / invalid input**
-- [ ] A record whose stored verdict contradicts its own facts still
-      resolves `verdict_inconsistent_with_its_facts` — unchanged
-- [ ] A malformed verdict still resolves `malformed_verdict` — unchanged
+- [x] A record whose stored verdict contradicts its own facts still
+      resolves `verdict_inconsistent_with_its_facts` — unchanged;
+      pre-covered by `test_scientific_authority.py`, which passes
+      unmodified
+- [x] A malformed verdict still resolves `malformed_verdict` — unchanged;
+      same module, unmodified
 
 **Backward-compatibility / default parity**
-- [ ] Historical no-verdict record → `unreconstructable_legacy`
-- [ ] Trial records still carry **no** authority block
+- [x] Historical no-verdict record → `unreconstructable_legacy`
+      — asserted directly, and the reconstruction ladder's *source* is
+      pinned separately so a future change to `resume.py:299` cannot
+      silently start feeding it the current run's declaration
+- [x] Trial records still carry **no** authority block — asserted on the
+      guard itself; **M-D8** catches its removal
 
 **Real-training Gate:** none. **Not to be launched without operator
 approval.**
@@ -817,25 +849,81 @@ approval.**
 | Trial record acquires an authority block | Regression — the stamp guard at tuner `:5744` was disturbed |
 | Extending the launch-critical field list breaks an unrelated test | Report it; do not weaken the other test |
 
+None occurred. The second was a live risk and was handled: the
+retroactivity test supplies a **declared** current-iteration output and
+asserts the record still resolves `unreconstructable_legacy`, so it is
+not vacuous.
+
 #### 7. Verification commands and evidence
 
 ```bash
-.venv/bin/python -m pytest tests/unit/core/test_resume_incumbent.py     tests/unit/execute_tools/test_scientific_aggregation.py     tests/integration/workflows/test_pr_d_positive_path_deterministic.py -q
+.venv/bin/python -m pytest tests/unit/core/test_resume_incumbent.py \
+    tests/unit/execute_tools/test_scientific_aggregation.py \
+    tests/integration/workflows/test_pr_d_positive_path_deterministic.py -q
+.venv/bin/python -m pytest tests/unit/core/test_authority_end_to_end_and_history.py \
+    tests/unit/sdsc_submission_scripts/test_launch_surface_parity.py -q
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
-- [ ] Downstream-decision results — **to record**
-- [ ] Historical-record non-reinterpretation result — **to record**
-- [ ] Census published — **to record**
-- [ ] Clean-tree full suite: pytest rc, counts, zero FAILED/ERROR — **to record**
+- [x] Downstream-decision results: the three consumer suites named above
+      `71 passed in 1.90s`, pytest rc=0, **neither consumer file modified**
+- [x] Historical-record non-reinterpretation result:
+      `unreconstructable_legacy` preserved under a declared current run;
+      provenance guard on `resume.py:299` green
+- [x] Census published — §0.C, frozen at §0.C.1
+- [x] New module `10 passed`; extended parity harness `4 passed`
+- [x] Clean-tree full suite: recorded in **§PR-D final validation**
 
 #### 8. Commit boundary
 
-- [ ] Tests + this document only
-- [ ] No production file in the diff
-- [ ] No unrelated cleanup, no follow-up work pulled forward
-- [ ] Diff summary, staged file list, tests and deviations shown before
-      committing
+- [x] Tests + this document only
+- [x] No production file in the diff
+- [x] No unrelated cleanup, no follow-up work pulled forward
+- [x] Diff summary, staged file list, tests and deviations recorded in
+      §D3.R below before committing
+
+---
+
+#### D3.R — Result, 2026-08-08
+
+**Zero production diff.** Two test files: one new module, plus two fields
+added to the pre-existing launch-critical list.
+
+```text
+10 passed   tests/unit/core/test_authority_end_to_end_and_history.py   (new)
+ 4 passed   test_launch_surface_parity.py (list extended)
+mutations   3 attempted, 3 behaviour-changing -> 3 caught by the suite,
+            0 equivalent  (M-D6 by its owning module - see the table)
+```
+
+**The plan called for downstream-consumer tests; the audit showed they
+already exist, so D3 is deliberately SMALL.** Duplicating them would
+violate CLAUDE.md's rule that a test must name a defect only it can
+catch. Already covered and not re-written: resume's real predicate (both
+directions), `unreconstructable_legacy`, `reconstructed_legacy`, trial
+exclusion, and aggregation include/exclude with reasons.
+
+Two properties were genuinely uncovered, because PR D created the seam
+they cross:
+
+1. **The joint** — every existing test starts from a hand-built verdict;
+   none starts from a *launcher declaration* and follows it through the
+   real transport into the consumers' admission rule.
+2. **History is not rewritten** — PR D makes new iterations declare a
+   posture, and must not thereby confer authority on records that
+   recorded none.
+
+**Mutations, with one classification worth reading:**
+
+| # | mutation | result |
+|---|---|---|
+| M-D6 | resume's predicate ignores `authoritative` | **CAUGHT — by the module that owns it.** It survived *this* module (which drives `resolve_record_authority`, not the predicate) and produced **12 failures** in `test_resume_incumbent.py`. Recorded as caught-by-owner rather than "fixed" with a duplicate test |
+| M-D7 | a verdict-less legacy record reconstructs as `reconstructed_legacy` unconditionally | CAUGHT |
+| M-D8 | the trial stamp guard `if not trial_config.is_trial` removed | CAUGHT |
+
+**Deviation from the plan:** D3 is smaller than designed, for the reason
+above. Classified as §14 category 2 ("an existing test already covers a
+planned new test") — proceeded autonomously and recorded.
 
 ---
 
@@ -909,7 +997,24 @@ never as a percentage.
 ### Layer D — downstream decisions (D3)
 
 As in D3's acceptance. Both consumers exercised through their real
-production functions.
+production functions. Three further mutations police the properties D3
+owns:
+
+```text
+M-D6  core/resume.py's predicate ignores `resolution.authoritative`
+M-D7  a verdict-less legacy record reconstructs as `reconstructed_legacy`
+      unconditionally, instead of only when its OWN iteration declared
+M-D8  the tuner's `if not trial_config.is_trial` stamp guard is removed
+```
+
+**M-D6's classification is worth reading rather than tallying.** It
+survived D3's own module and was caught by `test_resume_incumbent.py`
+(12 failures) — the module that owns the predicate. D3 drives
+`resolve_record_authority`, not `_formal_candidate_is_authoritative`, so
+the correct response was to record it as caught-by-owner, **not** to add
+a duplicate test that names no defect only it can catch. A mutation
+caught anywhere in the suite is caught; which module catches it is
+evidence about test ownership, not about coverage.
 
 ### Layer E — production-boundary evidence
 
@@ -941,12 +1046,38 @@ Recorded as an option, not proposed as a requirement.
 
 The scientific outcome is never the oracle.
 
+### Layer F — PR-level mutation account
+
+Reported by category, never as a percentage:
+
+```text
+13 attempted
+13 behaviour-changing -> all caught
+ 0 equivalent / unreachable / invalid
+
+  D1  4   N1 either-axis->both-axis; N2 drop non_blocking_mode;
+          N3 precedence reordered; N4 declared_diagnostic stops blocking
+  D2  6   M-D1/M-D2 launcher call-site kwargs; M-D3 forwarding inside
+          run_workflow; M-D4 assignment in local_validated_model;
+          M-D5a default ONE axis; M-D5b default BOTH axes
+  D3  3   M-D6 predicate ignores authoritative (caught by its owning
+          module); M-D7 unconditional legacy reconstruction;
+          M-D8 trial stamp guard removed
+```
+
+Three survivors occurred during development — M-D3, M-D1/M-D2 in D2 —
+and **every one was a defect in the test, not a gap in the mutation set**.
+Each is recorded at §D2.R with the specific way a reachability test can be
+decoration. A fourth apparent survivor was the harness reporting
+`NOT-APPLIED` when an anchor matched seven sites, which is the `count == 1`
+discipline working rather than a result.
+
 ## 6. Backward compatibility / parity
 
 | invariant | how it is preserved |
 |---|---|
 | every declared posture's verdict | matrix pinned before the change (D1) |
-| undeclared → `legacy_authority_unknown` | `None` defaults at hops 7-8; M-D5 guards the wrong fix |
+| undeclared → `legacy_authority_unknown` | `None` defaults at hops 7-8; M-D5a/M-D5b guard the wrong fix |
 | trial records unchanged | the stamp is guarded by `if not trial_config.is_trial` (tuner `:5744`); PR D does not touch it |
 | scoring | no scorer file in the diff — verified by diff, as PR B did |
 | HealthGate behaviour | untouched; `healthgate_mode` is a *declaration*, and enforcement already reads config, not this field |
@@ -1055,8 +1186,8 @@ CONTRACT    explicit declaration -> and only that -> authority
 ```
 
 This is also why the alternative fixes were rejected: giving
-`run_comparison` a default `scientific` posture would manufacture
-authority (mutation **M-D5**), and adding two CLI flags purely for
+`run_comparison` a default `blocking + scientific` posture would
+manufacture authority (mutation **M-D5b**), and adding two CLI flags purely for
 surface symmetry would imply a campaign posture the harness does not have.
 
 **Supporting code fact** (observed, not load-bearing for the decision):
@@ -1121,6 +1252,21 @@ merge requirement**. It must not be escalated into a real scientific
 campaign to close a wiring gap.
 
 ---
+
+## Follow-ups filed by PR D — none launch-blocking
+
+**Naming.** V20's PR D already owns `FU-D-1` … `FU-D-12`, two of which
+(`FU-D-11`, `FU-D-12`) are cited as live operator-facing flags in
+`docs/running_chain_test.md:114,117`. Reusing `FU-D-1` here would have put
+two distinct open items under one label. V21 PR D therefore files under
+**`FU-D21-*`**. Caught during the pre-review audit of this document; the
+originally-filed `FU-D-1` was renamed before any external reference to it
+existed.
+
+| ID | Item | Why not in this PR | Blocking? |
+|---|---|---|---|
+| **FU-D21-1** | `FormalValidity` is a `Literal` *type alias*, not an enum, and `from_context` does not validate it — an unrecognised string matches no blocker branch and therefore behaves exactly like `"valid"` | Pre-existing property of a **frozen** function (§7 of the working rules). Not reachable from PR D's transport: the tuner passes `formal_validity_of(...)`, which returns one of the three. Fixing it would be a semantics change PR D is forbidden to make | No |
+| **FU-D21-2** | No deterministic fixture executes `run_one_iteration.__main__` end to end, so hop 7's call site is covered by an AST call-site assertion plus mutations M-D1/M-D2 rather than by execution | O-D-2 classifies a pseudo-mode chain iteration as **optional strengthening evidence, explicitly not a merge requirement**. Recorded rather than closed, and deliberately left as an unchecked box in D3 §4 so the ledger does not claim work that was not done | No |
 
 ## Remaining operator decisions
 
