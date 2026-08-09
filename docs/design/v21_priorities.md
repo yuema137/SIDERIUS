@@ -1916,10 +1916,12 @@ Written 2026-08-08, after all three launch blockers merged (`b9f88ae5`,
 `cac86c94`, `0aae3f4b`). These are not style notes; each is a defect that
 actually shipped and was found by audit.
 
-> **Extended 2026-08-08 by PR D** (§E.3d.9-10). PR D was the **fourth**
-> consecutive instance of §E.3d.1, and produced a variant of it that the
-> A/B/C wording did not cover: the same defect shape appearing inside the
-> *test suite*. Both are binding on PRs E, F and G.
+> **Extended 2026-08-08 by PR D** (§E.3d.9-10) and **2026-08-09 by PR E**
+> (§E.3d.11-12). PR D was the **fourth** consecutive instance of §E.3d.1
+> and found the shape inside the *test suite*; PR E was the **fifth**
+> (the validator computed the measurement and threw it away) and added
+> the uniqueness-contract and final-head-checker lessons. All are binding
+> on PRs F and G.
 
 ### E.3d.1 The recurring defect shape: a correct rule that nothing calls
 
@@ -2069,6 +2071,55 @@ one, and the two need separate mutations (M-D5a, M-D5b).
 *combination* produces the harm before writing the mutation that polices
 it. A plausible-sounding harm attached to the wrong input is a test that
 passes for the wrong reason.
+
+### E.3d.11 "Impossible by construction" must name the construction
+
+PR E's first ledger claimed uuid4 duplicates were *"impossible by
+construction"* while its own failure contract demanded *"fail loudly at
+mint"*. The operator caught that these cannot both be true, and the audit
+settled it: uuid4 is a **random** UUID — probabilistically unique, not an
+allocator with a uniqueness proof — and no mint-side registry can span
+the chain's per-iteration subprocesses without new persistent state.
+
+```text
+"impossible by construction"  -> name the mechanism, or downgrade the
+                                 claim to "probabilistically unique"
+probabilistic uniqueness      -> requires a DETECTION seam, placed where
+                                 the evidence already lives
+the enforceable seam          -> is not always where the value is created;
+                                 here the READ side owned the
+                                 attempt-directory evidence the mint
+                                 could never see
+```
+
+The latent defect the audit surfaced is the reason this is a lesson and
+not pedantry: without detection, a collision produced a
+**legitimate-looking, wrong join** — tuner evidence silently attached to
+the last row sharing the id — which is strictly worse than a crash.
+
+**Binding on F/G:** every uniqueness or exclusivity claim in a design
+must either name its enforcing mechanism with file:line, or state its
+probabilistic nature AND its detection seam.
+
+### E.3d.12 Every checker re-runs at every final head
+
+Twice in two PRs, one checker was skipped after a "small" late change and
+the skipped checker was exactly the one that would have failed:
+
+```text
+PR D   ruff format --check reported "1 file would be reformatted";
+       the commit went in without chasing which file
+PR E   pyright was not re-run after the review-round guard (ruff and
+       pytest were); CI failed on a strict-mode shadowed local that
+       runtime — and therefore pytest — could not see
+```
+
+Both were caught by CI and fixed in one commit, but the pattern is the
+point: **a green subset of checkers is evidence about that subset only.**
+The final head of every commit runs the full set — ruff check, ruff
+format --check, pyright, targeted pytest — no matter how small the
+delta looks. A rename is small; a strict-mode redeclaration is invisible
+to every checker except the one skipped.
 
 ## E.3e Correction, 2026-08-08 — PR D's premise withdrawn after a code-grounded audit
 
@@ -2496,12 +2547,18 @@ the real `iter_006` fixture; no scorer file in the diff.
 > | E2 | `candidate_id`: system-minted in the proposer (never LLM-supplied, never name-derived), transported inside the objects through the three real protocols, explicitly echoed at both implementor construction sites and the validator, stamped on every record at the `_emit_record` seam, echoed on both tuner output exits. The fixed-plan seam REFUSES an operator-supplied id |
 > | E3 | O-E-6 FINAL: `realized_total_parameter_count` + `realized_trainable_parameter_count` measured from the model the validator already instantiates; verdict bit-identical; frozen-parameter fixture pins the conventions independently |
 > | E4 | `execute_tools/funnel_assembly.py` — read-only join on explicit id; `stopped_at_stage` derived on read; native reasons verbatim; None-ids never merge; the **REQUIRED pseudo-mode complete-funnel Gate PASSED**; legacy stage-local check reproduced both recorded V20 attempt-3 values from the preserved campaign |
+> | Review round | **Duplicate-id conflict guard** (operator item 1): mint uniqueness is PROBABILISTIC (uuid4; no run-scoped registry can span the chain's per-iteration subprocesses without new persistent state, which O-E-3/§15 reserve for the operator), so the READ side — which owns the attempt-directory evidence — detects a non-None id in >1 distinct attempt dir, reports `IterationFunnel.duplicate_id_conflicts`, marks both rows `id_conflict`, never merges, and **withholds** tuner evidence rather than attaching it to the last row. Plus two dated doc reconciliations (validator-test arity claim; count-consumer claim superseded by E4) |
 >
-> **Mutations: 33 attempted, 30 behaviour-changing → 30 caught, 2
-> equivalent (proved) + 1 invalid (classified).** Every round-1 survivor
-> was a missing test on an undriven path — Branch-B reuse, the
-> zero-parameter verdict, the implemented-but-never-validated branch —
-> and every fix was test architecture, never the mutation.
+> **Mutations, final: 36 attempted, 32 behaviour-changing → 32 caught,
+> 3 equivalent (each with a proof) + 1 invalid (classified).** Every
+> round-1 survivor was a missing test on an undriven path — Branch-B
+> reuse, the zero-parameter verdict, the implemented-but-never-validated
+> branch — and every fix was test architecture, never the mutation. The
+> three equivalence proofs are domain invariants, not hand-waves: the
+> rename target owns the attempt layout; every passing model has ≥1
+> trainable parameter (backward() requires one); same-dir same-id
+> artifacts collapse to one row, so group size always equals the
+> distinct-dir count.
 >
 > **Findings worth keeping:** (1) adding `candidate_id` to
 > `ProposalOutput` SILENTLY removed it from the fixed-plan seam's
@@ -2511,7 +2568,13 @@ the real `iter_006` fixture; no scorer file in the diff.
 > (backward() requires a grad-requiring tensor), which PROVES every
 > passing model has ≥1 trainable parameter — used to classify a mutation
 > equivalent. (3) The ledger's attempt-3 ×3/×4 values span BOTH chains
-> (7,280,256 arch · 8,409,280 loss).
+> (7,280,256 arch · 8,409,280 loss). (4) Before the review-round guard, a
+> duplicated non-None id was NOT merged but its tuner evidence silently
+> attached to the LAST row sharing the id — a legitimate-looking, wrong
+> funnel join with no flag anywhere; reproduced empirically before
+> fixing. The invariant now: **an identity collision can never produce a
+> plausible-but-wrong join** — ambiguity is reported, never resolved by
+> guess.
 >
 > No prompt, advice, ~100M-prior, scorer, metric or HealthGate change —
 > proved by diff. No distribution claimed (§E.3d.6): PR E delivers the
