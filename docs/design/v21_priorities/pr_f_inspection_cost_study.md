@@ -443,18 +443,18 @@ tests/unit/scripts/test_inspection_cost_study*.py
 
 #### 3. Implementation plan
 
-- [ ] Re-read `batch_resolver.py:100-260`, `structural_probe.py:225+`,
+- [x] Re-read `batch_resolver.py:100-260`, `structural_probe.py:225+`,
       `wrapper.py:111,:580-660` immediately before writing; confirm
       signatures, the candidate tuple import, and `_forward_pass_timeout`'s
       import path
-- [ ] Manifest: population A via the REAL plugin loader (loadability
+- [x] Manifest: population A via the REAL plugin loader (loadability
       authority; failures recorded `unloadable`, never skipped);
       population B from §0.C's per-architecture ladders, instantiation-
       checked, `invalid_config` recorded; every entry carries population
       label, exact config, both O-E-6 parameter counts
-- [ ] Manifest determinism: content hash; seeded ordering; no wall-clock
+- [x] Manifest determinism: content hash; seeded ordering; no wall-clock
       or unseeded randomness anywhere in manifest generation
-- [ ] Harness — PER-OPERATION invocation seams (§0.E/§0.F; the
+- [x] Harness — PER-OPERATION invocation seams (§0.E/§0.F; the
       operator's reconciliation 1, do not unify):
       `candidate_probe`: REAL `probe_activation_footprint` under a 240 s
       emergency backstop (`_forward_pass_timeout`); exact elapsed kept,
@@ -470,26 +470,26 @@ tests/unit/scripts/test_inspection_cost_study*.py
       `native_timeout`, lower bound 180. **NO 2× relaxation for this
       operation** — bypassing the native preemptive bound would measure
       something production never runs
-- [ ] Walls: `--max-wall-seconds` checked between measurements; clean
+- [x] Walls: `--max-wall-seconds` checked between measurements; clean
       stop with a wall-expiry marker in the file
-- [ ] Append-per-point writes; overwrite of an existing file refused
+- [x] Append-per-point writes; overwrite of an existing file refused
       loudly
-- [ ] `classify.py`: the frozen §0.F reconciliation rule, pure function
+- [x] `classify.py`: the frozen §0.F reconciliation rule, pure function
       over raw measurements — the report may only call it, never inline
       its own
-- [ ] Unit fixtures: tiny CPU models only (sub-second); the real
+- [x] Unit fixtures: tiny CPU models only (sub-second); the real
       populations are F2's business
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Manifest bit-identical across two generations (hash equality)
-- [ ] Population labels present on every entry; a pooled-statistics
+- [x] Manifest bit-identical across two generations (hash equality)
+- [x] Population labels present on every entry; a pooled-statistics
       helper does not exist (the report tests assert per-population
       grouping)
-- [ ] Ladder configs instantiation-checked; an invalid config yields
+- [x] Ladder configs instantiation-checked; an invalid config yields
       `invalid_config` with the constructor error
-- [ ] §0.F classification rule: parametrized truth table —
+- [x] §0.F classification rule: parametrized truth table —
       all-under → CLEAR; all-over → WOULD_BE_CENSORED; exact-over
       (post-hoc completed OR a native `BatchSearchTimeout` record's exact
       elapsed) counts as over WITH exact time; native training-probe
@@ -497,28 +497,28 @@ tests/unit/scripts/test_inspection_cost_study*.py
       counts as over-censored at its backstop value and is DISTINCT from
       native_timeout; straddle → INDETERMINATE; any deadline →
       INDETERMINATE; union-of-reruns can only move toward INDETERMINATE
-- [ ] Envelope preservation: a `native_timeout(full_search)` measurement
+- [x] Envelope preservation: a `native_timeout(full_search)` measurement
       carries the native `ProbeTimeoutRecord` verbatim (`model_dump`
       round-trips), and the report can name which native operation
       (`batch_candidate` vs `batch_search`) refused
-- [ ] Summaries exclude censored repeats from median/min/max and carry
+- [x] Summaries exclude censored repeats from median/min/max and carry
       `n_completed/n_censored/n_deadline`
 
 **Integration / pseudo**
-- [ ] End-to-end over ≤3 fixture models: valid append-per-point file;
+- [x] End-to-end over ≤3 fixture models: valid append-per-point file;
       same-seed re-run → identical manifest hash and dispositions
-- [ ] Wall expiry mid-run: file retains completed points + expiry marker
+- [x] Wall expiry mid-run: file retains completed points + expiry marker
 
 **Negative / invalid input**
-- [ ] A fixture with a deliberately tiny backstop produces
+- [x] A fixture with a deliberately tiny backstop produces
       `harness_backstop` with `lower_bound_seconds = backstop` and **no
       elapsed value**; the record reuses `ProbeTimeoutRecord` fields and
       `is_capacity_evidence is False`
-- [ ] Overwrite refusal
+- [x] Overwrite refusal
 
 **Backward-compatibility / default parity**
-- [ ] Zero production diff (commit-boundary `git diff --name-only`)
-- [ ] The harness's reported "current budgets" equal the production
+- [x] Zero production diff (commit-boundary `git diff --name-only`)
+- [x] The harness's reported "current budgets" equal the production
       `ProbeBudgets()` defaults — budget drift is visible
 
 **Real-training Gate:** none — CPU-only by design.
@@ -570,8 +570,8 @@ tests/unit/scripts/test_inspection_cost_study*.py
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Unit counts / wall time — **to record**
-- [ ] Mutations — **to record**, at minimum: harness reimplements a probe
+- [x] Unit counts / wall time — **to record**
+- [x] Mutations — **to record**, at minimum: harness reimplements a probe
       → fail; censored point written with an exact elapsed → fail;
       exact-over point written as censored → fail; **training probe
       wrapped at 2×360 instead of the native 180 → fail**; **native
@@ -579,17 +579,79 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
       harness event → fail**; classification rule inlined in the report
       instead of calling `classify.py` → fail; unseeded manifest ordering
       → fail; pooled-population statistic → fail
-- [ ] Full checker set at the final head (§E.3d.12) — **to record**
+- [x] Full checker set at the final head (§E.3d.12) — **to record**
 
 #### 8. Commit boundary
 
-- [ ] `scripts/inspection_cost_study/` + tests + this document only;
+- [x] `scripts/inspection_cost_study/` + tests + this document only;
       zero production files
-- [ ] No budget value in the diff except read from production
-- [ ] Diff summary, staged files, tests, deviations recorded here before
+- [x] No budget value in the diff except read from production
+- [x] Diff summary, staged files, tests, deviations recorded here before
       committing
 
 ---
+
+
+#### F1.R — Result, 2026-08-09
+
+**Implemented as** `scripts/inspection_cost_study/{schemas,manifest,
+harness,classify,report}.py` + `tests/unit/scripts/
+test_inspection_cost_study.py`. **Zero production diff.** The report
+generator was pulled INTO F1 (deviation, recorded: freezing report
+methodology pre-data is the same argument as freezing the classifier).
+
+```text
+30 passed in 4.26s          the F1 module (fixture models, CPU, sub-second)
+manifest smoke (real)       112 entries = 83 A + 29 B; hash stable across
+                            two builds; 5 ladder configs recorded
+                            invalid_config (schema upper bounds at x4/x8 —
+                            the timing-blind rule visibly working);
+                            builtin realized range -> 2.6e9 params;
+                            generated range 4,352 -> 86,944,928
+mutations                   11 attempted, 11 behaviour-changing -> 11 caught
+                            (M-F1-3 and M-F1-5 after test-architecture
+                            fixes, below), 0 equivalent
+checkers at this head       ruff clean · format clean · pyright 0 errors,
+                            4 warnings (baseline) — §E.3d.12 honoured
+```
+
+**Finding F-A3 (production observation, recorded NOT fixed):** torchinfo
+catches exceptions raised inside hooked forwards and re-raises
+`RuntimeError("Failed to run torchinfo...")` — so a SIGALRM
+`ForwardPassTimeoutError` that fires during the torchinfo phase arrives
+LAUNDERED, surviving only as `__cause__`/`__context__` (verified
+empirically: `RuntimeError -> ForwardPassTimeoutError`). The harness
+walks the exception chain (`_alarm_in_chain`) so a timeout is never
+misfiled as an ordinary failure; production's own wrapper handles the
+same case via its `"torchinfo" in str(e)` RuntimeError branch, which
+files a laundered NATIVE 180 s training alarm as a `model_inspection`
+tracing failure rather than a `training_probe` timeout — an
+observation for FU-F-1's file, not a PR F change.
+
+**Mutation table:**
+
+| # | mutation | result |
+|---|---|---|
+| M-F1-1 | training probe relaxed to 2× native | CAUGHT (AST + behaviour) |
+| M-F1-2 | native `BatchSearchTimeout` collapsed to completed | CAUGHT |
+| M-F1-3 | backstop written as exact elapsed | **SURVIVED round 1** — the mutated site (the direct `except`) is unreachable by a sleep fixture because torchinfo launders the alarm (F-A3); fixed with a structural AST pin over EVERY `harness_backstop` construction (bound present, elapsed absent); **CAUGHT on rerun** |
+| M-F1-4 | exact-over classified as censored | CAUGHT (2 failures) |
+| M-F1-5 | report inlines a verdict via `IfExp` | **SURVIVED round 1** — the detector only inspected `Compare` nodes; strengthened to allow verdict literals ONLY as counter-initialiser dict keys; **CAUGHT on rerun** |
+| M-F1-6 | manifest hash made order-insensitive | CAUGHT |
+| M-F1-7 | pooled `ALL::` population key added | CAUGHT |
+| M-F1-8 | invalid config silently dropped | CAUGHT |
+| M-F1-9 | wall-expiry marker suppressed | CAUGHT |
+| M-F1-10 | censored bounds mixed into the timing summary | CAUGHT |
+| M-F1-11 | exception-chain walk removed | CAUGHT |
+
+**Other deviations, recorded:** (1) `get_criterion` lives in
+`ml_models.loss_models_sandbox`, not `models_format_sandbox` — my first
+import guessed the module (a rule-5 slip caught by the tests, fixed at
+the real seam). (2) An unused `WallExpired` exception class was written
+then deleted — the wall is handled inline; dead code does not ship.
+(3) pyright strict caught two `str`-vs-`Literal` boundaries; both fixed
+at the TYPE level (`SweepEntry.loss_type` is now the real
+`Literal["ce","smooth_l1"]`), no ignores anywhere.
 
 ### Commit F2a — Ramped pilot and projection
 
