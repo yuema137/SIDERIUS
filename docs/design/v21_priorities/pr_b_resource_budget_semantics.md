@@ -1,6 +1,6 @@
 # PR B — Resource-budget semantics and estimator correctness
 
-**Status: PR B READY FOR OPERATOR REVIEW — 2026-08-08. B1, B1b, B2, B0
+**Status: PR B APPROVED FOR MERGE by the operator, 2026-08-08. B1, B1b, B2, B0
 (S3 frozen), B3 (Stages A/B/C), B4a (rungs 1-2) and B4b (rung 3) are
 complete and validated. B4b rung 4 is NOT RUN with a recorded justification
 and a ready-to-run packet. NOT MERGED.**
@@ -2138,6 +2138,21 @@ operator review of this plan.**
 - **Mutation:** removing `vram_gb` from a production site turns a test
   red; making exceedance terminate a phase turns a test red.
 
+**How mutation results are reported (operator, 2026-08-08).** Not as a
+percentage. The goal is not that every mutant dies — it is that *every
+mutation which changes a claim* dies. An equivalent mutant alters no
+observable property, so requiring a test to distinguish it would be
+inventing a test for nothing:
+
+```text
+40 attempted
+39 behaviour-changing  -> 39 caught
+ 1 equivalent          -> classified, no missing acceptance signal
+```
+
+Writing "97.5% mutation score" would hide which of those two categories
+the survivor fell into.
+
 ### 6. Failure and edge cases
 
 | Case | Required behaviour |
@@ -2522,12 +2537,34 @@ SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_comparison.py \
 
 ### What PR B claims
 
-> PR B makes the resource contract internally consistent under S3:
-> candidate phases are admitted against a single evidence-graded VRAM
-> threshold rule; realized post-admission memory is recorded and
-> operator-visible without becoming scientific evidence or an automatic
-> runtime kill signal; peer usage remains context rather than candidate
-> attribution.
+> **PR B establishes one evidence-graded S3 resource semantics at
+> admission; all currently retained comparison paths are parity-checked
+> against it. Realized memory is recorded and operator-visible without
+> becoming scientific evidence or an automatic kill signal, and peer usage
+> remains context rather than candidate attribution.**
+
+**Operator wording correction, 2026-08-08.** The earlier phrasing —
+"a single evidence-graded VRAM threshold rule" — read as *one
+implementation*, which is not what was achieved and would have been an
+overclaim. `evaluate_vram_skill` retains its own comparison. What PR B
+establishes is one **semantic authority**, with the retained path
+mechanically pinned to it:
+
+```text
+                 semantic authority
+                          |
+              evidence-graded S3 rule
+                          |
+          ┌───────────────┴───────────────┐
+    shared policy                  retained private comparison
+                                            |
+                                   7-cell parity test — fails
+                                   if the two ever drift
+```
+
+The distinction matters for what FU-B-1 *is*: architecture cleanup and
+de-duplication, **not a correctness gap** — precisely because the parity
+test goes red if either side moves.
 
 Nothing stronger. In particular PR B does **not** claim to have prevented
 V20's OOMs, to have measured a forecast-error distribution, or to have
@@ -2571,9 +2608,18 @@ sweep's completeness is visible rather than only its hits.
 
 ### Known limitations
 
-1. **No realized-vs-admitted distribution exists.** Zero observations;
-   V20 cannot be reconstructed. Any future budget-policy argument must
-   cite post-B2 data.
+1. **No realized-vs-admitted distribution exists — a PERMANENT caveat on
+   how PR B may be cited.** Zero observations; V20 cannot be
+   reconstructed. PR B delivers **the capability to collect** the
+   distribution, not the distribution.
+
+   ```text
+   MAY be written    "PR B makes forecast error measurable"
+   MUST NOT be       "PR B showed typical forecast error is X%"
+   ```
+
+   Binding beyond this PR (operator, 2026-08-08): any future
+   budget-policy argument must cite post-B2 campaign data.
 2. **The training peak is a process high-water mark**, not a phase-local
    peak — `reset_process_peak()` is deliberately uncalled. Conservative,
    exact for inference, and surfaced with that caveat attached.
@@ -2588,10 +2634,10 @@ sweep's completeness is visible rather than only its hits.
 
 | ID | Item | Owner |
 |---|---|---|
-| **FU-B-1** | `evaluate_vram_skill` still implements its own threshold comparison rather than delegating to the graded policy. Meaning and threshold are now identical (parity-tested); the duplication is code. Routing it changes a widely-consumed return contract | post-PR B |
-| **FU-B-2** | Promote `cap_note` (`wrapper.py:538-545`) from a log string to a typed field so `binding_constraint` is fully determined | post-PR B |
+| **FU-B-1** | Delegate `evaluate_vram_skill`'s retained comparison to the shared policy. **Non-blocking, classified by the operator as architecture cleanup / de-duplication, NOT a correctness gap** — the 7-cell parity test fails if the two drift. Routing it changes a widely-consumed return contract | post-PR B |
+| **FU-B-2** | Promote `cap_note` (`wrapper.py:538-545`) from a log string to a typed field so `binding_constraint` is fully determined. **Tracked; does not reopen PR B unless it changes threshold correctness** | post-PR B |
 | **FU-B-3** | `reset_process_peak()` — needs a full audit of every counter consumer before the phase peak can be made phase-local | post-PR B |
-| **FU-B-4** | Rung 4 live confirmation when the GPU is free | operator |
+| **FU-B-4** | Live formal production confirmation (B4b rung 4). **Not a merge blocker.** Due **before the first full V21 production campaign**, or satisfied by an explicitly bounded first run that naturally traverses the path. **Never by adding workload until an exceedance appears** | operator |
 
 ---
 
