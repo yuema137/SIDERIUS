@@ -173,3 +173,51 @@ def build_manifest() -> list[SweepEntry]:
             )
         )
     return entries
+
+
+#: P6.3's ledger-recorded trained counts (overlay anchors, Q-F-1).
+_P63_VALUES: tuple[int, ...] = (663_488, 7_280_256, 8_409_280, 12_772_096)
+
+
+def select_pilot(entries: list[SweepEntry]) -> list[SweepEntry]:
+    """The deterministic 12-entry pilot (design F2a §3) — timing-blind.
+
+    Ramp order: the two size extremes FIRST (by realized total), then the
+    incident-class deep dilated architecture, then the four population-A
+    entries nearest each P6.3 recorded value, then fcnet at its ~323 M
+    default plus the largest VALID ladder entry of three reference
+    families. Selection reads only manifest facts, never timings.
+    """
+    loadable = [e for e in entries if e.load_error is None]
+    a = [e for e in loadable if e.population == "v20_generated_realized"]
+    b = [e for e in loadable if e.population == "builtin_reference"]
+
+    def total(e: SweepEntry) -> int:
+        return e.realized_total_parameter_count or 0
+
+    picked: list[SweepEntry] = []
+
+    def add(e: SweepEntry | None) -> None:
+        if e is not None and all(x.entry_id != e.entry_id for x in picked):
+            picked.append(e)
+
+    smallest = min(loadable, key=lambda e: (total(e), e.entry_id))
+    largest = max(loadable, key=lambda e: (total(e), e.entry_id))
+    add(smallest)
+    add(largest)
+    # The incident class: the deep dilated V20 baseline, by exact identity.
+    add(next((e for e in a if e.model_identity == "wavenet_30layer_baseline"), None))
+    for target in _P63_VALUES:
+        add(min(a, key=lambda e: (abs(total(e) - target), e.entry_id)))
+    # fcnet at its default (~323 M) = the fcnet ladder's largest valid entry.
+    fc = [e for e in b if e.architecture_family == "fcnet"]
+    add(max(fc, key=lambda e: (total(e), e.entry_id)) if fc else None)
+    for family in ("wavenet", "transformer", "rnn"):
+        fam = [e for e in b if e.architecture_family == family]
+        add(max(fam, key=lambda e: (total(e), e.entry_id)) if fam else None)
+    # Deterministic pad to exactly 12 from the largest remaining entries.
+    for e in sorted(loadable, key=lambda e: (-total(e), e.entry_id)):
+        if len(picked) >= 12:
+            break
+        add(e)
+    return picked[:12]

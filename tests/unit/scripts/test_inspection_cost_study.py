@@ -458,6 +458,44 @@ class TestRealSeams:
                 )
 
 
+class TestPilotSelection:
+    def test_pilot_is_deterministic_timing_blind_and_sized(self):
+        """Selection reads only manifest facts. Verified on synthetic
+        entries so the test stays sub-second."""
+        from scripts.inspection_cost_study.manifest import select_pilot
+
+        entries = []
+        for i in range(20):
+            entries.append(
+                _fixture_entry(
+                    entry_id=f"A_{i:02d}",
+                    population="v20_generated_realized",
+                    realized_total_parameter_count=(i + 1) * 100_000,
+                )
+            )
+        for fam, n in (("fcnet", 3), ("wavenet", 2), ("transformer", 2), ("rnn", 2)):
+            for j in range(n):
+                entries.append(
+                    _fixture_entry(
+                        entry_id=f"B_{fam}_{j}",
+                        population="builtin_reference",
+                        architecture_family=fam,
+                        realized_total_parameter_count=(j + 1) * 1_000_000,
+                    )
+                )
+        p1 = select_pilot(entries)
+        p2 = select_pilot(list(entries))
+        assert [e.entry_id for e in p1] == [e.entry_id for e in p2]
+        assert len(p1) == 12
+        # Ramp: extremes first.
+        totals = [e.realized_total_parameter_count for e in entries]
+        assert p1[0].realized_total_parameter_count == min(totals)
+        assert p1[1].realized_total_parameter_count == max(totals)
+        # Both populations represented.
+        pops = {e.population for e in p1}
+        assert pops == {"v20_generated_realized", "builtin_reference"}
+
+
 class TestPopulationDiscipline:
     def test_report_groups_by_population_and_keeps_family(self, tmp_path, monkeypatch):
         from scripts.inspection_cost_study.report import build_report

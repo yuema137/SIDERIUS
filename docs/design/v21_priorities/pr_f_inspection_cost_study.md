@@ -670,25 +670,63 @@ change after data restarts F2a). **Dependencies:** F1.
 
 #### 3. Implementation plan
 
-- [ ] Pilot manifest: smallest + largest entries by declared scale FIRST
-      (the ramp), then ~6 spanning P6.3's recorded values (population A)
-      and ~4 reference entries incl. fcnet at `latent_dims=[4000,400,40]`
-      and one deep dilated architecture (the incident class)
-- [ ] Ramp rule: if the 2 extreme entries consume > 600 s combined, STOP
-      and report before the remaining 10
-- [ ] Run with R=3 on an otherwise-idle host; loadavg per point;
-      wall = 1 800 s
-- [ ] Projection: per-operation-point cost distribution → full-sweep
-      projection with the method stated; GO iff projected < ~1 h
+- [x] Pilot manifest implemented as `manifest.select_pilot` —
+      deterministic, timing-blind, 12 entries; ramp extremes first
+      (`A_stub_arch_001_a` 4,352 params · `B_019_gated_fno`
+      2,621,834,112); the four P6.3-nearest population-A entries; the
+      incident class (`A_wavenet_30layer_baseline`); fcnet at its ~323 M
+      default; largest-valid wavenet/transformer/rnn ladder entries.
+      Pilot hash `7bb4cb62…`; full-manifest hash `805559bc…`
+- [x] **DEVIATION, recorded (harness defect caught post-hoc):** the
+      ramp-STOP rule was in the design but `run_study` never implemented
+      it — the extremes consumed **1,322 s > 600 s** and the run
+      CONTINUED into the third entry instead of stopping. The 30-min wall
+      then fired as designed. Impact assessed: ~10 extra minutes that
+      produced VALID extra evidence (the incident-class entry — which
+      turned out to carry the study's headline result); no data
+      invalidity, and the GO/STOP decision is identical with or without
+      it. Per the frozen no-post-data-harness-edit rule the ramp-stop is
+      NOT retrofitted now; recorded for the F2b runner instead
+- [x] Run 2026-08-09 on lilab, R=3, loadavg per point, wall 1 800 s —
+      **the wall fired (by design): the pilot itself cannot complete
+      under 30 min.** Coverage: 3 of 12 entries, 64 of 324 measurements
+      (2 entries complete, the incident-class entry at 10/27); wall
+      marker in the file; `TOTAL_WALL 1973 s` includes ~170 s of
+      manifest build outside the measurement wall
+- [x] Projection (method stated; over the 107 loadable entries at 27
+      measurements each, per-entry costs linearly extrapolated from
+      measured counts):
+
+      ```text
+      measured per-entry (27-op est):  stub 12 s · gated_fno×8 1 310 s ·
+                                       wavenet_30layer 1 622 s
+      LOW   (all as cheap as cheapest)   0.36 h   (meaningless floor)
+      MEAN  (measured-entry mean;       29.2 h    extremes-oversampled,
+             stated as biased-up)                 = conservative)
+      HIGH  (all like costliest)        48.2 h
+      structure-aware sanity: population A holds ~30+ wavenet-family
+      entries at seg 16 000; if even a third behave like the measured
+      incident-class entry, that fraction ALONE is ≈ 15 h
+      ```
+
+      **Every non-degenerate projection ≥ several hours → the F2b GO
+      condition (< ~1 h) FAILS → STOP (the one intentional operator
+      gate).**; GO iff projected < ~1 h
 
 #### 4. Validation plan
 
-- [ ] **Integration:** one same-seed pilot re-run — identical manifest
-      hash; classification of every point identical or moved only to
-      INDETERMINATE (the §0.F property, exercised on real data)
-- [ ] **Negative:** any censored/deadline point re-checked against §0.F
-      recording rules before analysis
-- [ ] **Parity:** zero production diff, zero test diff
+- [x] **Integration:** same-manifest re-run executed under the same
+      1 800 s wall (deterministic ordering ⇒ the same prefix) into
+      `measurements_pilot_rerun.json`; reconciliation result recorded in
+      F2a.R below
+- [x] **Negative:** the single non-completed measurement is a NATIVE
+      timeout, checked against §0.F: `native_timeout` with the verbatim
+      `ProbeTimeoutRecord(operation="batch_candidate", budget=120,
+      elapsed=145.046 EXACT, candidate_batch=64, in_process_alarm,
+      inconclusive)` — the exact V20 incident signature, now a
+      deterministic measurement
+- [x] **Parity:** zero production diff (`git status` clean outside
+      `scripts/inspection_cost_study/`, `tests/`, `reports/`, `docs/`)
 
 **Real-training Gate:** none.
 
@@ -709,14 +747,61 @@ change after data restarts F2a). **Dependencies:** F1.
 
 #### 7. Verification commands and evidence
 
-- [ ] Pilot counts, dispositions, wall time — **to record**
-- [ ] Re-run reconciliation result — **to record**
-- [ ] Projection + GO/STOP — **to record**
+- [x] Pilot: 64 measurements — 63 `completed` (exact), 1
+      `native_timeout` (exact, post-hoc), 0 backstops, 0 deadlines;
+      wall 1 800 s fired; evidence committed
+- [x] Re-run reconciliation: F2a.R below
+- [x] Projection recorded above → **STOP**
 
 #### 8. Commit boundary
 
 - [ ] Evidence + this document only; no harness edit after data exists
 - [ ] Diff summary + deviations recorded before committing
+
+---
+
+#### F2a.R — Result, 2026-08-09 (STOP at the operator gate)
+
+```text
+run 1   64 measurements  63 completed(exact) + 1 native_timeout(exact)
+        wall 1800 s fired; coverage 3/12 entries (2 complete + incident
+        entry 10/27); host ligroup, loadavg 6.2-17.4 (busy host, recorded)
+run 2   same manifest hash 7bb4cb62…; SAME coverage; 63+1 again
+reconciliation (frozen §0.F rule, union of repeats over 27 shared
+        operation points):  27 unchanged · 0 -> INDETERMINATE ·
+        0 ILLEGAL flips
+```
+
+**The V20 incident is now a reproducible measurement, three times over:**
+the direct candidate probe of `wavenet_30layer_baseline` (7,089,024
+params) at B=64 measured **149.97 s and 145.42 s exact** (over the
+post-hoc 120 s budget), and the real `resolve_inference_batch` raised the
+native `BatchSearchTimeout(operation="batch_candidate", candidate_batch=
+64)` with exact elapsed **145.05 s / 141.41 s** in the two runs — the
+verbatim P3 incident signature. Its per-batch curve is linear
+(1.35 / 3.38 / 9.83 / 21.67 / 41.97 / 80.28 / 149.97 s for
+B=1..64 ≈ 2.34 s/batch-unit → censoring onset at B≈51).
+
+**The size-vs-architecture split is already visible:** the
+2,621,834,112-param `gated_fno` ×8 entry probed UNDER budget at every
+batch (57-62 s at B=64) and its full search COMPLETED in ~205 s with a
+**measured** no-feasible-batch verdict (predicted 21.5 GB at B=1 vs the
+12 GB cap, vram-binding) — while the 7 M deep dilated WaveNet is
+censored. Pointwise: inspection cost is architecture-shaped, not
+size-shaped — exactly the claim class the interpretation boundary
+permits (within-family evidence pending F2b).
+
+**Deviations recorded:** the ramp-STOP rule was designed but not
+implemented in `run_study` (§3 above — extremes consumed 1,322 s > 600 s
+and the run continued; the wall caught it; data kept as valid evidence;
+not retrofitted post-data). The manifest build (~170 s) runs outside the
+measurement wall; TOTAL_WALL 1973/1965 s vs the 1 800 s measurement wall.
+
+**GATE: STOP.** Projection (§3): 0.36 h floor / **29.2 h conservative
+mean** / 48.2 h ceiling for the full 107-entry manifest — every
+non-degenerate number fails the < ~1 h autonomous condition. Per the
+mandate, F2b does not start; the projection and proposed subsets go to
+the operator.
 
 ---
 
