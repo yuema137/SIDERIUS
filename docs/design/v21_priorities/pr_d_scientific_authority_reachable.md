@@ -190,9 +190,31 @@ Three existing guards keep it that way, and PR D must not weaken any:
 - the schema fields are optional *only* so historical replays still load
   (`hyperparam_tuning.py:1753-1758`).
 
-**Binding for this PR:** the fix is transport, never a default. Adding
-`default="blocking"` anywhere would manufacture authority and is
-out of scope by definition.
+**Binding for this PR: the fix is transport, never a default.** Two
+distinct harms, kept distinct because conflating them produced a wrong
+mutation description on the first pass (corrected 2026-08-08 on operator
+review):
+
+```text
+default ONE axis      e.g. healthgate_mode="blocking", result_authority=None
+  -> still legacy_authority_unknown, authoritative=False
+  -> does NOT manufacture authority
+  -> but CORRUPTS ABSENCE SEMANTICS: an undeclared axis no longer reads
+     as undeclared, and the record's stored facts now misdescribe the run
+
+default BOTH axes     "blocking" + "scientific"
+  -> a valid formal round becomes authoritative=True
+  -> MANUFACTURES AUTHORITY nobody declared     <- the dangerous case
+```
+
+The asymmetry follows from the frozen matrix (§0.A):
+`legacy_authority_unknown` fires when **either** axis is `None`, so a
+single-axis default cannot reach `authoritative=True` on its own.
+
+Both are out of scope by definition. Any default is forbidden — the
+one-axis case because absence must stay information (§8 of the working
+rules), the two-axis case because it fabricates a scientific claim. The
+mutations that police them are **M-D5a** and **M-D5b** respectively.
 
 ### 0.F Downstream consumers — re-verified, no new ones
 
@@ -949,6 +971,24 @@ semantics above.
 `run_comparison` may carry valid measurements and scores, and will
 continue to resolve `legacy_authority_unknown`. That is the intended
 outcome, not a defect, and D2 must not "fix" it.
+
+**Precision on what "undeclared" means here** (operator correction,
+2026-08-08). `run_comparison` must remain undeclared on **both** axes.
+Note the two failure modes are not interchangeable:
+
+```text
+giving it ONE axis      -> still legacy_authority_unknown
+                        -> does NOT confer authority
+                        -> but its records would then carry a declaration
+                           the launcher never made
+giving it BOTH axes     -> confers authority this launcher has no
+                           campaign posture to justify
+```
+
+So the reason for leaving it alone is **not** "one axis would be enough
+to confer authority" — it would not. It is that `run_comparison` declares
+no campaign posture at all, and neither a partial nor a complete
+declaration would be truthful.
 
 ### O-D-2 — No GPU/LLM Gate for PR D
 
