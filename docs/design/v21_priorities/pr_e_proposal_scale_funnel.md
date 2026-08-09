@@ -1,18 +1,20 @@
 # PR E — Proposal-scale funnel instrumentation
 
-**Status: DESIGN REVISION 3 — 2026-08-08, returned for final operator
-approval. Not approved; no implementation begun. No production code, test,
-schema, launcher or scorer file is touched by this document.**
+**Status: DESIGN APPROVED 2026-08-08 (operator) — O-E-6 resolved as (c),
+FINAL text in §0.I. No further design review required. Implementation
+authorized as E0 → E1 → E2 → E3 → E4, to begin only after PR #189 is
+restored to its D-only branch, merged, and this branch is updated onto
+the merged master. Nothing implemented yet.**
 
 Revision 2 applied operator decisions **O-E-1 … O-E-5** and the
 persistence audit they required, shrinking the PR to four commits with
-`candidate_id` as the only cross-stage transport. Revision 3 applies the
-operator's three design corrections and the **O-E-6 pre-E3 audit** — which
-hit O-E-6's own STOP condition: the proposal field's contract explicitly
-says "trainable" (§0.I). **One decision is therefore returned to the
-operator; everything else is settled.**
+`candidate_id` as the only cross-stage transport. Revision 3 applied the
+operator's three design corrections (DC-1 … DC-3); its O-E-6 pre-E3 audit
+hit the STOP condition (the proposal contract explicitly says
+"trainable"), and the operator resolved it as **option (c): record both
+conventions at validation**, frozen below.
 
-Branch note: PR E work now lives on `feat/pr-e-proposal-scale-funnel`,
+Branch note: PR E work lives on `feat/pr-e-proposal-scale-funnel`,
 split off the PR D branch per the operator's operational requirement.
 
 | | |
@@ -51,7 +53,7 @@ verdict is taken from pytest's own exit code, never from a pipe's.
 | **O-E-3** | join-on-read; measurements stay with their **native owner** | revision 1's **Commit E4 (forward the proposed count) is deleted entirely** — see §0.C |
 | **O-E-4** | one candidate = one proposer-emitted proposal; a revision is a **new** candidate | maps exactly onto the existing outer attempt loop — see §0.D |
 | **O-E-5** | `candidate_id` MAY be an observational join key; MUST NOT be a behavioural key | §0.F restates the invariant correctly; revision 1's "never a lookup key" was wrong |
-| **O-E-6** | validator count = TOTAL parameters; `model_params` keeps trainable-only; conventions never silently compared | applied to E3/E4 — **but the required pre-E3 audit found the proposal contract explicitly says "trainable", O-E-6's stated STOP condition. Evidence and options at §0.I; awaiting the operator** |
+| **O-E-6 FINAL** | record **BOTH** conventions at validation (option c); proposal contract (trainable estimate) authoritative and unchanged; `model_params` unchanged; no cross-convention delta/ratio anywhere | E3 unblocked and rewritten for two fields with unambiguous names; frozen text in §0.I |
 | **DC-1** | every persisted `candidate_id` producer must be proved, not assumed | audit done (§0.J): **no generic echo exists**; the implementor (2 construction sites) and validator (1) must explicitly echo — both nodes added to E2's scope. Mint rule frozen (§0.J) |
 | **DC-2** | one pseudo-mode complete iteration is a **MERGE REQUIREMENT** | E4 §4 and Layer G reconciled — the contradiction is resolved in favour of required |
 | **DC-3** | legacy attempt-3 check is a **stage-local sanity check**, never a "reconstructed funnel"; no name-keyed join ever | E4 renamed and reworded; a mutation polices the name-join |
@@ -227,7 +229,8 @@ E2 §5 states how that is proved.
 ### 0.G Semantics-neutral naming — binding
 
 ```text
-ALLOWED    parameter_count_estimate      realized_parameter_count
+ALLOWED    parameter_count_estimate      realized_total_parameter_count
+           realized_trainable_parameter_count
            model_params                  preflight_factor
            stopped_at_stage (derived)    reason_absent
 FORBIDDEN  undersized  too_small  scale_deficit  size_violation
@@ -291,7 +294,44 @@ out of scope regardless):
 **Recommendation: (c).** It implements O-E-6's own reasoning — *"these
 can simultaneously both be real measurements"* — at the cost of one extra
 optional field, and dissolves the conflict instead of picking a side.
-**E3 is blocked until the operator chooses; nothing else is.**
+
+**RESOLVED — operator chose (c), 2026-08-08. O-E-6 FINAL, frozen:**
+
+```text
+ProposalOutput.parameter_count_estimate
+    = estimated TRAINABLE parameter count      [existing contract; UNCHANGED]
+
+ValidatorOutput.realized_total_parameter_count
+    = TOTAL parameters of the instantiated implementation
+    = sum(p.numel() for p in model.parameters())
+
+ValidatorOutput.realized_trainable_parameter_count
+    = TRAINABLE parameters of the instantiated implementation
+    = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+ExperimentRecord.model_params
+    = TRAINABLE parameters                     [existing semantics; UNCHANGED]
+```
+
+The ambiguous name `realized_parameter_count` is **not used** — the
+convention is in the field name, so no future reader needs this document
+to know it. All four are distinct stage-native observations; nothing is
+forwarded downstream to make one record complete. The read-side assembler
+exposes convention-explicit labels (display labels only — **no schema
+rename** of the existing proposal field):
+
+```text
+proposed_trainable_parameter_count_estimate    <- ProposalOutput.parameter_count_estimate
+implemented_total_parameter_count              <- validator total
+implemented_trainable_parameter_count          <- validator trainable
+trained_trainable_parameter_count              <- ExperimentRecord.model_params
+```
+
+Like-for-like relations: proposed-trainable ↔ implemented-trainable, and
+implemented-trainable ↔ trained-trainable; implemented-total stands alone
+as architecture size. **PR E computes no delta or ratio across unlike
+conventions** — a future analysis may, explicitly, on same-convention
+quantities.
 
 ### 0.J DC-1 producer audit — no generic echo exists; two nodes join E2
 
@@ -387,11 +427,12 @@ proposer mints candidate_id
 Measurement ownership, per O-E-3 — **none of these move**:
 
 ```text
-parameter_count_estimate   proposal stage   proposal_{run_name}.json
-preflight_factor           proposal stage   proposal_{run_name}.json
-realized_parameter_count   validator stage  validation_{run_name}.json   (E3 adds)
-model_params               tuner            ExperimentRecord
-stop stage / reason        DERIVED ON READ  no schema field at all
+parameter_count_estimate              proposal stage   proposal_{run_name}.json
+preflight_factor                      proposal stage   proposal_{run_name}.json
+realized_total_parameter_count        validator stage  validation_{run_name}.json  (E3)
+realized_trainable_parameter_count    validator stage  validation_{run_name}.json  (E3)
+model_params                          tuner            ExperimentRecord
+stop stage / reason                   DERIVED ON READ  no schema field at all
 ```
 
 **Binding principle 2:** deleting any of the five hops must fail a test,
@@ -701,14 +742,16 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 
 ---
 
-### Commit E3 — Stop discarding the validator's realized parameter count
+### Commit E3 — Capture both parameter-count views of the instantiated model
 
 #### 1. Goal
 
-Record the parameter count of the model the validator **already
-instantiates**, on the validator's own output, so proposed-vs-realized is
-comparable for every candidate that reaches validation — including those
-that never train.
+Record **both parameter-count views** available from the model the
+validator **already instantiates** — total (architecture size) and
+trainable (training exposure) — on the validator's own output, per
+O-E-6 FINAL. Two sums over one `.parameters()` traversal; no new
+instantiation. Every candidate that reaches validation gets both numbers,
+including candidates that never train.
 
 **Why this commit and not another.** It is a distinct causal fact — a
 measurement computed and thrown away — from E2's missing join key, and it
@@ -716,27 +759,24 @@ is the only stage where the number exists *before* training.
 `ExperimentRecord.model_params` cannot cover candidates that die at
 validation or admission, because they never produce a record.
 
-**Independent of E2**: it adds field(s) to one schema and forwards
+**Independent of E2**: it adds two fields to one schema and forwards
 nothing. It is ordered after E1 only for the key-set pin.
-
-**BLOCKED pending the operator's §0.I decision** — the O-E-6 pre-audit
-hit its STOP condition. The text below is written for option (a)/(c)
-(total; §0.I records the difference) and will be reconciled to whichever
-the operator chooses.
+**UNBLOCKED — O-E-6 FINAL (option c), frozen in §0.I.**
 
 #### 2. Scope
 
 **Changes**
 
 ```text
-nodes/ml_code_validator_agent/…   _check_instantiation_and_gradient returns the count
-agent/schemas/validator.py        ValidatorOutput.realized_parameter_count  NEW, optional
+nodes/ml_code_validator_agent/…   _check_instantiation_and_gradient returns both counts
+agent/schemas/validator.py        ValidatorOutput.realized_total_parameter_count      NEW, optional
+                                  ValidatorOutput.realized_trainable_parameter_count  NEW, optional
 tests/
 ```
 
 **No protocol changes. No downstream schema changes.** Per O-E-3 the
 validator is the canonical owner and `validation_{run_name}.json` is where
-the number lives.
+both numbers live.
 
 **Must remain unchanged**
 - **The validator's verdict.** `passed` and all six check booleans must be
@@ -745,9 +785,10 @@ the number lives.
 - The instantiation and gradient logic itself.
 
 **Non-goals**
-- Any threshold, warning or rejection based on the count.
+- Any threshold, warning or rejection based on either count.
 - Instantiating a model anywhere it is not already instantiated.
-- Forwarding the count anywhere.
+- Forwarding either count anywhere.
+- Any delta/ratio between unlike conventions, anywhere.
 
 **Dependencies:** E1.
 
@@ -757,33 +798,32 @@ the number lives.
       `:633` immediately before editing; the model is instantiated at `:371`
 - [ ] Widen the helper's return, or return a small typed result — decide
       after reading the call site, not before
-- [ ] Count per the operator's §0.I decision — **O-E-6 baseline: TOTAL
-      parameters, `sum(p.numel() for p in model.parameters())`**, the
-      size of the implemented architecture. `ExperimentRecord.model_params`
-      keeps its existing trainable-only semantics and is **not**
-      redefined. The two are different native measurements and are
-      **never silently compared** (no delta, no ratio across
-      conventions); the funnel displays each with its convention explicit
-- [ ] Return `None` when instantiation fails; never `0`
+- [ ] Compute both counts per O-E-6 FINAL, on the SAME traversal of the
+      already-instantiated model:
+      `realized_total_parameter_count = sum(p.numel() for p in model.parameters())`;
+      `realized_trainable_parameter_count = sum(... if p.requires_grad)`.
+      `ExperimentRecord.model_params` is untouched and un-redefined. No
+      code computes a delta or ratio across unlike conventions
+- [ ] Return `None` for both when instantiation fails; never `0`
 - [ ] Assert the verdict booleans are unchanged for every existing case
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A plugin of known size reports exactly that integer
-- [ ] Instantiation failure → `None`, not `0`
-- [ ] **Convention explicitness:** a fixture plugin containing a
-      **frozen** parameter, where total and trainable differ observably,
-      asserts the validator reports the §0.I-decided quantity — and that
-      nothing anywhere computes a delta or ratio between it and
-      `model_params`
+- [ ] A plugin of known size reports exactly those integers (both fields)
+- [ ] Instantiation failure → both `None`, never `0`
+- [ ] **Frozen-parameter fixture (required by O-E-6 FINAL):** a plugin
+      with a frozen parameter, where total and trainable observably
+      differ, pins **both fields independently** — total counts the
+      frozen parameter, trainable does not — and asserts nothing anywhere
+      computes a delta or ratio across unlike conventions
 
 **Integration / pseudo**
-- [ ] The count is present in the persisted `validation_{run_name}.json`
+- [ ] Both counts are present in the persisted `validation_{run_name}.json`
 
 **Negative / invalid input**
-- [ ] Import error and config error paths return the same verdict and a
-      `None` count
+- [ ] Import error and config error paths return the same verdict and
+      `None` for both counts
 
 **Backward-compatibility / default parity**
 - [ ] **Verdict parity is the acceptance signal:** every existing
@@ -794,24 +834,24 @@ the number lives.
 
 #### 5. Acceptance criteria
 
-- For a fixture plugin of known size,
-  `ValidatorOutput.realized_parameter_count` equals that exact integer,
-  and the value is present in the persisted JSON.
+- For a fixture plugin of known size, `realized_total_parameter_count`
+  and `realized_trainable_parameter_count` each equal their exact
+  hand-computed integer, and both are present in the persisted JSON.
+- The frozen-parameter fixture pins the two fields **independently**:
+  total includes the frozen parameter, trainable excludes it.
 - Every pre-existing validator test passes **unmodified**.
-- Instantiation failure yields `None`; no path can produce `0` for a model
-  that failed to instantiate.
-- The convention is the §0.I-decided one, proved with a frozen-parameter
-  fixture where total and trainable observably differ.
+- Instantiation failure yields `None` for both; no path can produce `0`
+  for a model that failed to instantiate.
 - `ExperimentRecord.model_params` is untouched and un-redefined.
 - No code path computes a cross-convention delta or ratio.
-- No branch anywhere reads the count.
+- No branch anywhere reads either count.
 
 #### 6. Failure and edge cases
 
 | Case | Required behaviour |
 |---|---|
 | Model instantiates but `.parameters()` raises | `None`, verdict unchanged; never crash the validator |
-| Model has zero parameters | Record `0` — a real measurement, distinct from `None` (§E.3d.4) |
+| Model has zero parameters | Record `0` for both — a real measurement, distinct from `None` (§E.3d.4) |
 | A model with frozen parameters makes the conventions diverge | Both remain true measurements of different things (O-E-6). Report each under its own name; never reconcile them into one number |
 | Count contradicts `parameter_count_estimate` wildly | Record it. **No warning, no verdict** — that is the point of the PR |
 
@@ -823,10 +863,12 @@ the number lives.
 ```
 
 - [ ] Validator suite unmodified, count and wall time — **to record**
-- [ ] Mutation: switch the count to the other convention → must fail
-      (the frozen-parameter fixture is what makes this observable) — **to record**
+- [ ] Mutation: swap the two fields' expressions → must fail (the
+      frozen-parameter fixture is what makes this observable) — **to record**
+- [ ] Mutation: derive trainable from total (or vice versa) instead of
+      counting → must fail on the frozen fixture — **to record**
 - [ ] Mutation: return `0` instead of `None` on failure → must fail — **to record**
-- [ ] Mutation: let the count influence `passed` → must fail — **to record**
+- [ ] Mutation: let either count influence `passed` → must fail — **to record**
 
 #### 8. Commit boundary
 
@@ -879,6 +921,9 @@ merges or drops rows — is different from a transport gap.
       what they say — no stored field (O-E-2)
 - [ ] Carry each stage's **native** reason verbatim; where a stage has
       none (implementation, §0.E), mark the reason **absent**
+- [ ] Expose the four parameter columns under O-E-6 FINAL's
+      convention-explicit display labels (§0.I) — labels only, no schema
+      rename, and no delta/ratio across unlike conventions
 - [ ] Report a candidate with a missing stage as **incomplete, stage
       named** — never dropped, never defaulted
 - [ ] Record `preflight_factor` as a **measurement**, never a disposition
@@ -1044,10 +1089,10 @@ parameters is not a test failure.
    mutations.
 3. Two different `candidate_id` values produce **identical behaviour** —
    O-E-5's invariant, proved by execution.
-4. The validator's realized count is captured where the model is already
-   instantiated, with the verdict bit-identical, under the §0.I-decided
-   convention, with `model_params` untouched and no cross-convention
-   delta computed anywhere (O-E-6).
+4. Both validator counts (total + trainable) are captured where the model
+   is already instantiated, pinned independently by a frozen-parameter
+   fixture, with the verdict bit-identical, `model_params` untouched, and
+   no cross-convention delta computed anywhere (O-E-6 FINAL).
 5. **No measurement is copied past its native owner** (O-E-3).
 6. `stopped_at_stage` exists only as a derived read-side value; **no new
    reason vocabulary appears in the diff** (O-E-2).
@@ -1090,8 +1135,10 @@ Subprocess evidence:      to be determined in E3 — confirm whether the
                           validator's instantiation runs in-process or in a
                           sandbox subprocess, and whether the count crosses it
 
-Acceptance evidence:      Layers A-F deterministic; Layer G argued unnecessary
-                          with the residual stated
+Acceptance evidence:      Layers A-F deterministic; Layer G is a REQUIRED
+                          bounded pseudo-mode complete-iteration confirmation
+                          (persistence -> discovery -> join -> fan-in ->
+                          derived row); no real GPU or real LLM required
 ```
 
 ---
@@ -1105,20 +1152,11 @@ changed. O-E-1 additionally requires a **dated append-only correction in
 `v21_priorities.md`**, retiring the "prompt contradiction resolved" merge
 criterion.
 
-### Open — exactly one, and it is O-E-6's own STOP condition
+### Open — NONE
 
-**Q-E-5 (superseded by O-E-6, which then hit its STOP clause).** The
-operator rejected revision 2's trainable-only recommendation and issued
-O-E-6 (validator = TOTAL), conditional on a pre-E3 audit of
-`parameter_count_estimate`'s contract. That audit (§0.I) found the
-contract **explicitly says "trainable"** in both the schema description
-and the proposer prompt — the case O-E-6 reserves for the operator.
-
-The full evidence and three options are at §0.I; the recorded
-recommendation is **(c): the validator records both totals**, which
-implements O-E-6's own two-measurements reasoning and gives every funnel
-column a like-for-like partner. **E3 is blocked on this choice. E1, E2
-and E4 are not.**
-
-**No other decision is open. E1 is not to be implemented until this
-revision is approved.**
+Q-E-5's lineage closed as **O-E-6 FINAL** (§0.I): the operator resolved
+the STOP condition as option (c) on 2026-08-08. The design is **APPROVED**;
+no further design review is required. Implementation proceeds
+E0 → E1 → E2 → E3 → E4 autonomously once PR #189 is merged from its
+restored D-only branch and this branch is updated onto the merged master.
+**PR E is not to be merged by the implementer.**
