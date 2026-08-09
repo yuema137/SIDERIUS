@@ -1317,7 +1317,11 @@ git diff --name-only 57087ed9..HEAD -- . ':(exclude)docs' \
 # -> no matches
 ```
 
-The complete non-documentation diff is six files:
+The complete non-documentation diff is **seven files — 3 production, 4
+tests**. (Corrected on operator review 2026-08-08: this line read "six",
+and the block below was headed "TESTS (3 files)" while listing four
+paths. `test_launch_surface_parity.py` is the fourth — modified rather
+than new, which is exactly how it went uncounted twice.)
 
 ```text
 PRODUCTION (3 files, ten wiring lines, +36/-1 with imports and comments)
@@ -1326,7 +1330,7 @@ PRODUCTION (3 files, ten wiring lines, +36/-1 with imports and comments)
   agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py
                                                           2 params + 2 fields set
 
-TESTS (3 files)
+TESTS (4 files — 3 new, 1 modified)
   tests/unit/core/test_authority_matrix_frozen.py             new, 32
   tests/unit/agent/schemas/test_authority_transport_reachable.py  new, 17
   tests/unit/core/test_authority_end_to_end_and_history.py    new, 10
@@ -1386,11 +1390,21 @@ existed.
 
 ## Remaining operator decisions
 
-**None — implementation may begin.** Q-D-1 is resolved by O-D-1 and the
-census is frozen at §0.C.1; the Gate question is resolved by O-D-2.
+**None — implementation and validation are COMPLETE; PR D is pending
+operator merge.** Q-D-1 was resolved by O-D-1 and the census is frozen at
+§0.C.1; the Gate question was resolved by O-D-2. No design decision
+remains open.
 
-Two boundaries that remain the operator's, not the implementer's, if they
-arise during implementation:
+Operator review 2026-08-08: **implementation APPROVED**, subject only to
+two documentation reconciliations — the diff-file count above, and this
+paragraph, which still read *"implementation may begin"* long after it
+had. Both applied. No additional Gate, code change or validation run was
+required. **FU-D21-1 was explicitly confirmed as correctly deferred**:
+real, but pre-existing, unreachable from PR D's transport, and fixable
+only by changing frozen authority semantics.
+
+Two boundaries remain the operator's, not the implementer's, should they
+arise later:
 
 - moving any launcher between census categories (§0.C.1 is closed);
 - any change to the 27-row verdict matrix (frozen by §0.A and pinned by
