@@ -1057,61 +1057,84 @@ merges or drops rows — is different from a transport gap.
 
 #### 3. Implementation plan
 
-- [ ] Discover candidates by globbing `{iter_dir}/attempt_*/` and reading
-      whichever of `proposal_`, `implementor_`, `validation_{run}.json`
-      exist, plus the tuner's records
-- [ ] Join on `candidate_id`; records with `None` are **unjoinable**, each
-      kept separate
-- [ ] **Derive** `stopped_at_stage` from which native outcomes exist and
-      what they say — no stored field (O-E-2)
-- [ ] Carry each stage's **native** reason verbatim; where a stage has
-      none (implementation, §0.E), mark the reason **absent**
-- [ ] Expose the four parameter columns under O-E-6 FINAL's
-      convention-explicit display labels (§0.I) — labels only, no schema
-      rename, and no delta/ratio across unlike conventions
-- [ ] Report a candidate with a missing stage as **incomplete, stage
-      named** — never dropped, never defaulted
-- [ ] Record `preflight_factor` as a **measurement**, never a disposition
-      (§0.D)
-- [ ] **Legacy stage-local sanity check** (DC-3 — deliberately NOT
-      called a backfill): run the *stage-local reader* over stored
-      attempt-3 records and confirm the already-recorded trained
-      parameter-count range (663,488 - 12,772,096) is reproduced. This is
-      a read of ONE stage's native records. It is **not** a reconstructed
-      cross-stage funnel and must never be described as one: pre-PR-E
-      records have `candidate_id=None`, are unjoinable by rule, and **no
-      identity may be inferred from `model_name` or anything else** to
-      join them
-- [ ] Emit no aggregate, mean, ratio or verdict
+- [x] Implemented as `execute_tools/funnel_assembly.py` —
+      `assemble_iteration_funnel(iter_dir)` globs `attempt_*` (name-blind),
+      reads whichever stage files exist by filename prefix, and reads
+      tuner `run_output_*.json` from the per-model tuning dirs
+- [x] Join on explicit `candidate_id` only. `None` artifacts each stay a
+      SEPARATE unjoinable evidence item — even within one attempt dir,
+      because same-directory co-location is a directory fact, not an
+      identity (§10 forbids the dir-suffix join)
+- [x] `stopped_at_stage` derived on read in `_derive_stop` — funnel
+      order, first failure/absence wins; stored nowhere
+- [x] Native payloads carried verbatim in `StageEvidence.native`; the
+      stopping stage's payload IS `stop_reason_native`; implementation
+      (and never-ran stages) get `reason_absent=True`, no invention
+- [x] The four O-E-6 display labels are row fields
+      (`proposed_trainable_parameter_count_estimate`,
+      `implemented_total_parameter_count`,
+      `implemented_trainable_parameter_count`,
+      `trained_trainable_parameter_counts` — a LIST, honouring fan-in);
+      no delta/ratio/mean anywhere in the module
+- [x] `incomplete_stages` names every unreached stage;
+      "reached but number absent" stays visible as a present stage with a
+      None measurement — the §E.3d.4 four-state distinction
+- [x] `preflight_factor` carried as a measurement column; the module
+      docstring states the C1 advisory-only contract
+- [x] Legacy stage-local sanity check implemented as a separate flat
+      reader (`read_trained_parameter_counts`) that joins NOTHING, plus an
+      env-gated test (`SIDERIUS_V20_ATTEMPT3_DIR`, skip-with-reason when
+      unset per the portability rules). **Run against the real preserved
+      attempt-3 campaign on lilab: both ledger values (7,280,256 and
+      8,409,280) reproduced.** Finding recorded: the ledger's ×3/×4
+      values span BOTH chains (7,280,256 in `v20_arch_15_19`, 8,409,280
+      in `v20_loss_15_19`), so the check reads the campaign root — the
+      first single-chain version failed honestly and was corrected. The
+      assertion is PRESENCE of the recorded values, not a multiset — an
+      exact-count assertion would encode a counting methodology the
+      ledger does not state (§E.3d.6)
+- [x] No aggregate, mean, ratio or verdict anywhere in the module
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Complete candidate → every reached stage present
-- [ ] Candidate stopped at validation → derived stage + the validator's
-      own booleans as the reason
-- [ ] Candidate stopped at implementation → stage named, reason **absent**
-- [ ] Two candidates in one iteration do not merge
+- [x] Complete candidate: all stages present, fan-in of 3 records, all
+      four labelled columns populated from their native owners
+- [x] Stopped at validation → the native verdict IS the reason
+- [x] Stopped at implementation → reason ABSENT; plus the M-E4-7 killer:
+      implemented-but-never-validated stops at validation with reason
+      absent (the branch the first mutation round proved uncovered)
+- [x] Two candidates never merge; a None-id tuner output is NOT absorbed
+      via the model_name coincidence (the P6.2 regression case)
 
 **Integration / pseudo — MERGE REQUIREMENT (DC-2)**
-- [ ] One bounded deterministic/pseudo-mode iteration produces the
-      on-disk stage artifacts, and the assembler builds a complete row
-      from them. **This is a PR E merge requirement, not optional**: it
-      is the only evidence layer that exercises
-      `persistence -> filesystem discovery -> id join -> tuner fan-in ->
-      derived row` as one path. No GPU, no real LLM, and the scientific
-      outcome is never the oracle
+- [x] **THE REQUIRED GATE PASSED** —
+      `tests/integration/workflows/test_pr_e_funnel_gate_pseudo.py`: the
+      real `run_workflow` with real proposer/implementor/validator
+      `run()` bodies (bridge-level mocks) and the REAL tuner on the K.9
+      pseudo stack (RecordingLLMBridge + RecordingSandbox, canned
+      choreography = 3 records). One minted id appears in all three
+      persisted stage JSONs, the tuner run_output, and every record; the
+      assembler returns exactly one complete row with
+      `tuner_record_count == 3`. Notable: the validator validated the
+      implementor's REAL generated plugin and it passed on its merits.
+      Two real guards fired during bring-up and were satisfied, not
+      bypassed: the DS5 run-invariants ingress check refused an
+      unstamped seed until the seed declared `health_gate_enabled=False`
 
 **Negative / invalid input**
-- [ ] Several records with `candidate_id=None` stay **separate and
-      unjoinable** — never merged into one pseudo-candidate. This is the
-      most dangerous possible bug in this commit
-- [ ] A malformed / truncated stage JSON is reported as unreadable, not
-      silently treated as a missing stage
-- [ ] Non-local storage backend → "not discoverable", never "no candidate"
+- [x] Six None-id artifacts across two legacy dirs → six separate
+      unjoinable items (M-E4-1 polices the merge)
+- [x] Malformed JSON → `UnreadableArtifact` on the row, never
+      stage-absent (M-E4-3)
+- [x] Missing directory → `discoverable=False`, distinct from an existing
+      empty dir (zero candidates); the E1-deferred "empty workspace"
+      case is covered here too (M-E4-4)
 
 **Backward-compatibility / default parity**
-- [ ] The legacy sanity check is **read-only**; assert nothing on disk changes
+- [x] `test_the_assembler_writes_nothing` snapshots the workspace before
+      and after; M-E4-6 (the reader writes a funnel artifact) is caught
+      by it
 
 **Real-training Gate:** the ledger asks for *"one iteration produces a
 complete funnel record"*. **The pseudo-mode iteration above satisfies it
@@ -1156,19 +1179,38 @@ evidence, and **must not be launched without operator approval.**
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
-- [ ] Completeness tests count / wall time — **to record**
-- [ ] Legacy stage-local sanity check vs the ledger's recorded range — **to record**
-- [ ] Mutation: join legacy records on `model_name` → must fail — **to record**
-- [ ] Mutation: merge `None`-id records → must fail — **to record**
-- [ ] Mutation: drop an incomplete row instead of naming it → must fail — **to record**
-- [ ] Clean-tree full suite, pytest rc, counts — **to record**
+- [x] Assembler module `15 passed, 1 skipped (env-gated)` in 0.13s;
+      with `SIDERIUS_V20_ATTEMPT3_DIR` set: `15 passed` incl. the real
+      legacy check
+- [x] Legacy check against the preserved campaign: both recorded values
+      present (see §3)
+- [x] Mutations — **7 attempted, 7 behaviour-changing → 7 caught**
+      (M-E4-7 after a test addition):
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E4-1 | None ids merge into one pseudo-candidate | CAUGHT |
+      | M-E4-2 | tuner output joined by `model_name` | CAUGHT (the P6.2 regression case) |
+      | M-E4-3 | malformed JSON treated as stage-absent | CAUGHT |
+      | M-E4-4 | missing dir reported as empty-but-discoverable | CAUGHT |
+      | M-E4-5 | incomplete rows silently dropped | CAUGHT (6 failures) |
+      | M-E4-6 | the reader writes a funnel artifact | CAUGHT (write-nothing snapshot) |
+      | M-E4-7 | stop derivation mislabels implemented-but-never-validated | **SURVIVED round 1** — the branch had no test; killer added (implemented-but-never-validated), **CAUGHT on rerun** |
+
+- [x] Clean-tree full suite: recorded in §PR-E final validation
 
 #### 8. Commit boundary
 
-- [ ] Read-side + tests + this document only
-- [ ] No producer file; nothing written to disk
-- [ ] No aggregate, distribution claim or corrective change
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] One new read-side module + tests + this document. **Deviation,
+      recorded:** the module lives in `execute_tools/` beside
+      `scientific_aggregation.py` (the closest read-side precedent); it
+      is a helper module, not a node or skill, so no `{node}.md` is
+      required by the doc-sync rule — its contract lives in its docstring
+      and this section
+- [x] No producer file in the diff; the assembler writes nothing (proved
+      by test + M-E4-6)
+- [x] No aggregate, no distribution claim, no corrective change
+- [x] Recorded in §3/§4/§7 above
 
 ---
 
