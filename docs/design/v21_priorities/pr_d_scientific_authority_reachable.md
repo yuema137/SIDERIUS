@@ -366,13 +366,12 @@ before-state.
 
 #### 3. Implementation plan
 
-- [ ] Read `core/scientific_authority.py:96-180` and confirm the blocker
-      set and precedence order are still `:124-141` / `:64-70` at
-      implementation time
-- [ ] Enumerate the full cross-product
+- [x] Read `core/scientific_authority.py:96-180`; blockers confirmed at
+      `:130-141`, precedence at `:64-70`, unchanged
+- [x] Enumerated the full cross-product
       `{None, blocking, observe_only} × {None, scientific, diagnostic} ×
       {valid, invalid, unknown}` = 27 cases
-- [ ] **Option A (chosen).** For each of the 27 cases assert the COMPLETE
+- [x] **Option A (chosen).** For each of the 27 cases assert the COMPLETE
       downstream-visible result against **hardcoded** expectations — never
       values read back from the module under test (CLAUDE.md rule). The
       `model_dump()` surface is 8 fields:
@@ -384,41 +383,43 @@ before-state.
                       enters_scientific_aggregation
       ```
 
-- [ ] Pin `blocking_reasons` as an **ordered** list per row, not a set —
+- [x] Pin `blocking_reasons` as an **ordered** list per row, not a set —
       the order is `_BLOCKER_PRECEDENCE` and is itself semantic (an
       operator reads the first one). Multi-blocker rows such as
       `observe_only + diagnostic + invalid` must pin all three in order
-- [ ] Assert the three echoed inputs equal the inputs supplied — a
+- [x] Assert the three echoed inputs equal the inputs supplied — a
       transform there would be a silent semantic change
-- [ ] Assert exactly **one** case is `authoritative`, named explicitly as
+- [x] Assert exactly **one** case is `authoritative`, named explicitly as
       `blocking + scientific + valid`
-- [ ] Assert `enters_incumbent_selection` and
+- [x] Assert `enters_incumbent_selection` and
       `enters_scientific_aggregation` per row rather than asserting they
       merely track `authoritative` — they are separate computed fields
       today and a future divergence must show up as a failing row
-- [ ] Assert the dump has **exactly** these 8 keys, so a new
+- [x] Assert the dump has **exactly** these 8 keys, so a new
       downstream-visible field cannot appear unpinned
-- [ ] Verify the module is not imported anywhere in the test with a
-      monkeypatch that could mask a real change
+- [x] Verified: no monkeypatch of `core.scientific_authority` anywhere in
+      the new module
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] 27 parametrized cases green
-- [ ] `authoritative` count == 1
+- [x] 27 parametrized cases green (32 tests total incl. the property tests)
+- [x] `authoritative` count == 1
 
 **Integration / pseudo** — none required; this is a pure-function matrix.
 
 **Negative / invalid input**
-- [ ] An unrecognised `formal_validity` string is rejected or handled as
-      the module currently does — record which, do not change it
-- [ ] A caller attempting to pass `authoritative=` directly is refused
-      (`extra="forbid"`, `:86`)
+- [x] **Recorded, not changed.** `FormalValidity` is a `Literal` *type alias*,
+      not an enum, and `from_context` does not validate it — an unrecognised
+      string simply matches no blocker branch and yields the same result as
+      `valid`. Left exactly as-is: PR D changes no semantics, and this is a
+      pre-existing property of a frozen function. Filed as **FU-D-1**
+- [x] A caller attempting to pass `authoritative=` directly is refused
+      (`extra="forbid"`, `:86`) — `test_a_caller_cannot_supply_a_conclusion`
 
 **Backward-compatibility / default parity**
-- [ ] Existing `tests/unit/core/test_scientific_authority.py` passes
-      **unmodified** — if any existing assertion conflicts, stop and
-      report rather than editing it
+- [x] Existing `tests/unit/core/test_scientific_authority.py` passes
+      **unmodified**: `49 passed`. No conflict
 
 **Real-training Gate:** none. A GPU cannot evaluate a truth table.
 
@@ -456,16 +457,64 @@ the planned assertions delivered and was corrected on operator review.
 .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
 ```
 
-- [ ] Matrix test count + wall time — **to record**
-- [ ] Existing authority module result (unmodified) — **to record**
-- [ ] Mutation: invert one blocker condition → matrix fails — **to record**
+- [x] `32 passed in 0.13s` (`tests/unit/core/test_authority_matrix_frozen.py`)
+- [x] `49 passed in 0.10s`, file unmodified
+- [x] **4 attempted, 4 behaviour-changing, 4 caught, 0 equivalent:**
+      `N1` either-axis→both-axis; `N2` drop `non_blocking_mode`;
+      `N3` precedence reordered; `N4` `declared_diagnostic` stops blocking
 
 #### 8. Commit boundary
 
-- [ ] Diff contains test files only; **zero** production files
-- [ ] No transport wiring
-- [ ] Diff summary, staged file list, test counts and any deviations shown
-      before committing
+- [x] Diff contains one test file; **zero** production files
+- [x] No transport wiring
+- [x] Diff summary, staged file list, test counts and deviations recorded below
+
+#### D1.R — Result, 2026-08-08
+
+**Implemented as** `tests/unit/core/test_authority_matrix_frozen.py`
+(one new file, **zero production diff**).
+
+```text
+32 passed in 0.13s        the new matrix module
+49 passed in 0.10s        pre-existing test_scientific_authority.py, UNMODIFIED
+mutations                 4 attempted, 4 behaviour-changing -> 4 caught,
+                          0 equivalent
+```
+
+**What was expected vs what the code did.** Expected: the hand-derived
+table would need reconciling against the implementation. Observed: all 27
+rows matched on the first run. That is the intended outcome of deriving
+expectations from the *rule* rather than from the module — had I generated
+them by calling `from_context`, the table would have agreed by
+construction and proved nothing.
+
+**Implementation choice.** Option A: the complete 8-field `model_dump()`
+per row, plus an exact key-set assertion so a future downstream-visible
+field cannot appear unpinned. `blocking_reasons` is compared as an
+**ordered list**, because `primary_basis` is literally `blocking_reasons[0]`
+and a set comparison would let precedence drift while every row still
+passed — mutation `N3` exists to prove that assertion is load-bearing.
+
+**Alternatives rejected.** (a) Asserting only `authoritative` +
+`primary_basis` — the narrower claim the design originally made; rejected
+on operator review because `resolve_record_authority` re-derives and
+compares **every key present** on a stored verdict
+(`core/scientific_authority.py:320-325`), so any drifting field changes how
+historical records are judged. (b) Asserting
+`enters_* == authoritative` as a relationship rather than per row —
+rejected as a tautology that would survive both fields being wrong
+together.
+
+**Negative finding, recorded not fixed — FU-D-1.** `FormalValidity` is a
+`Literal` *type alias*, not an enum, and `from_context` performs no
+validation on it: an unrecognised `formal_validity` string matches no
+blocker branch and therefore behaves exactly like `"valid"`. This is
+pre-existing, is not reachable from PR D's transport (the tuner passes
+`formal_validity_of(...)`, which returns one of the three), and changing
+it would be a semantics change PR D is forbidden to make. Filed as a
+follow-up, deliberately untouched.
+
+**Deviation from the plan:** none.
 
 ---
 
