@@ -1,13 +1,17 @@
 # PR F — Inspection-cost scaling study (measure only)
 
-**Status: STUDY COMPLETE 2026-08-09 (operator-scoped) — awaiting operator
-review of the PR. NOT merged. Zero production diff.** Q-F-1/Q-F-2/Q-F-3
-all APPROVED FINAL. F1 (harness, `b680ea17`) froze the methodology
-before data; F2a (`2e2c6465`) ran the real pilot twice under its wall
-and reproduced the V20 incident three times; the F2b full sweep was
-priced at 10–30 h by the pilot and the operator resolved the STOP gate
-by approving the pilot + reproducibility rerun as the formal study
-population (F2b supersession block below). Deliverable:
+**Status: STUDY COMPLETE 2026-08-09 (operator-corrected bounded scope) —
+awaiting operator review of the PR. NOT merged. Zero production diff.**
+Q-F-1/Q-F-2/Q-F-3 all APPROVED FINAL. F1 (harness, `b680ea17`) froze the
+methodology before data; F2a (`2e2c6465`) ran the real pilot twice under
+its wall and reproduced the V20 incident three times; the F2b full sweep
+was priced at 10–30 h by the pilot, and the operator's
+MINIMUM-SUFFICIENT-EVIDENCE correction replaced it with a bounded,
+timing-blind 8-entry stratified subset — executed 2026-08-09
+(`9e2c6941`), results in the F2b-subset.R block: 163 measurements,
+54 CLEAR / 1 INDETERMINATE; the wavenet width ladder (~2× per
+channel-doubling; depth, not width, crosses the budget) and finding
+F-A4 (host-memory censoring, kernel OOM kill). Deliverable:
 `reports/v21_pr_f_inspection_cost/report.md`.
 
 | | |
@@ -804,6 +808,126 @@ the operator.
 
 ---
 
+### Operator correction, 2026-08-09 — MINIMUM SUFFICIENT EVIDENCE (supersedes the first F2b resolution)
+
+> **validation cost must be proportional to the information needed for
+> the decision; exhaustive coverage is not itself an acceptance
+> criterion.** *(operator, verbatim principle)*
+
+The first resolution ("pilot alone is the study") is amended: do NOT run
+the ~113-entry sweep, but DO close the smallest remaining
+decision-relevant uncertainty with a bounded, stratified subset of the
+ALREADY-FROZEN manifest, ≤ ~1 h, frozen methodology intact.
+
+**The remaining uncertainty, audited:** after F2a, (a) whether censoring
+scales WITHIN the incident family — the only claim class the
+interpretation boundary allows for size-attribution — was unmeasured
+(one family member ≠ a ladder); (b) whether censoring is CONFINED to the
+deep-dilated class or reaches other realized families (unet,
+fourier/pyramid, ssm/mamba, rnn/gru); (c) whether anything approaches
+the 180 s / 600 s budgets at all.
+
+**The frozen subset (`select_f2b_subset`, deterministic, TIMING-BLIND —
+every rule reads manifest facts only, fixed before any subset timing;
+hash `1ccc46b0…`, 8 entries, 216 measurements):**
+
+| # | entry | why it is informative |
+|---|---|---|
+| 1-3, 8 | `B_{000,005,010,015}_wavenet` — the four VALID builtin wavenet ladder steps, 81,632 → 4,651,008 params, identical architecture family | the within-family ladder for THE incident family: the causal size question, in the only form the boundary permits |
+| 4 | `A_spectral_bottleneck_unet_ce_control` (86.9 M, the largest generated entry) | unet-family breadth at the population's size extreme |
+| 5 | `A_tiny_multirate_spectral_pyramid_classifier` (seg 40,000) | fourier/pyramid family at full segment length |
+| 6 | `A_light_selective_ssm_skip_classifier` (1.03 M, seg 40,000) | ssm/mamba family — sequential-scan cost structure |
+| 7 | `A_embedded_resconv_bigru_head_compact` | rnn/gru family |
+
+Ordering maximises completed coverage under the wall (cheap ladder steps
+→ family reps → the projected-most-expensive ×4 step LAST) — an
+information-value ordering fixed from manifest facts, not timings.
+
+**What the subset CAN support:** rejecting or confirming a monotone
+within-family cost/censoring trend for the incident family; whether any
+other sampled family approaches any live budget; the per-operation
+margins for representative realized candidates.
+**What it CANNOT support (deliberately):** population-wide censoring
+prevalence or per-family censoring rates over the 83 historical
+candidates — the exhaustive sweep was deliberately not run, and the
+report states this limitation explicitly.
+
+**Reproducibility note:** the subset runs ONCE with R=3 (within-run
+dispersion); the two-run union stability check was already demonstrated
+on the pilot; repeating the subset was declined under the
+minimum-sufficient-evidence principle — recorded, not hidden.
+
+### Subset execution result (F2b-subset.R, 2026-08-09)
+
+> **Expected:** 8 entries, 216 measurements, ≤ ~1 h. **Observed:** 7 of
+> 8 entries measured, **163 measurements** (162 `completed` exact + 1
+> `harness_deadline` bound-only), ~52 min of measurement wall time, one
+> kernel OOM kill, one deliberate declination. Mechanical validation on
+> read-back: schema-valid, zero duplicate
+> (entry, operation, batch, repeat) identities, zero exact/bound mixing,
+> disposition accounting closes exactly (162 + 1 = 163).
+
+**Verdicts (frozen `classify_point`, re-derived from persisted evidence
+after recovery — not from in-session state):** over 55 operation points,
+**54 CLEAR / 0 WOULD_BE_CENSORED / 1 INDETERMINATE**. The single
+INDETERMINATE is the OOM point below (`deadline-or-unbounded evidence
+present` — the frozen deadline rule, no time fabricated).
+
+**The ladder (B_000 → B_005 → B_010, R=3 medians, exact):** B=64 probe
+15.3 → 27.6 → 56.0 s; full search 26 → 50 → 100 s; training probe
+0.3 → 0.4 → 0.9 s — ~2× per channel-doubling, smooth and monotone.
+Extrapolating one step (stated as extrapolation, never a measurement)
+puts `B_015` at B=64 ≈ 110 s — just under the 120 s budget — while the
+**30-layer** generated cousin measured ~150 s at 7 M params:
+**within the WaveNet family, depth crosses the budget before width.**
+
+**Family breadth:** unet 86.9 M → B=64 probe 17.2 s; fourier/pyramid at
+seg 40,000 → 9.4 s; rnn/gru → 0.25 s — all CLEAR with wide margins.
+
+**Incident during execution — kernel OOM kill (recorded as finding
+F-A4, a THIRD censoring mechanism: host memory, not time):** probing
+`A_light_selective_ssm_skip_classifier` (1.03 M params) at B=64 ×
+seg 40,000 in-process drove the study process to **47,010,964 kB
+anon-RSS** and the kernel OOM-killer killed it (dmesg 2026-08-09
+15:39:12, pid 377256) — the documented 2026-07-31 host-takedown class
+that production's `isolated_probe.py` worker subprocess exists to
+contain. Handled per the frozen rules: the in-flight point was appended
+as `harness_deadline` (bound-only, error text citing dmesg) plus an
+interruption marker; the 135 prior measurements survived via
+append-per-point persistence.
+
+**Deviations, recorded:**
+1. **`B_015_wavenet` was NOT probed — declined for host safety** after
+   the OOM (its B=64 × seg 40,000 activation footprint projects ≈2× the
+   ×2 step's); the within-family extrapolation above carries the
+   decision-relevant information at zero risk to this shared host. This
+   is the minimum-sufficient-evidence principle applied to a live
+   hazard, not a silent gap.
+2. The SSM entry has only its first (fatal) probe point; its remaining
+   operations were not attempted (same hazard).
+3. The safe remainder (`A_embedded_resconv_bigru_head_compact`) ran
+   alone into `measurements_subset_b.json`; its header carries the hash
+   of its own single-entry sub-manifest (`0834abda…`), not the 8-entry
+   subset hash — a mechanical consequence of running one entry
+   standalone, recorded here so the hash mismatch is never mistaken for
+   evidence corruption.
+4. The study's in-process direct-probe axis inherits exactly the risk
+   production already solved with the isolated worker — now a
+   measured harness limitation, stated in the report.
+
+**Mutation account for `select_f2b_subset`** (the only study code added
+after the F1 battery; test pins the FULL selected-identity sequence):
+**5 attempted / 5 behaviour-changing / 5 caught / 0 equivalent /
+0 invalid** — M-SUB-1 expensive-step-last ordering, M-SUB-2
+largest-member key inverted, M-SUB-3 fourier/pyramid predicate loses
+its ssm/mamba exclusion (caught via a deliberately-planted
+`mamba_ssm_pyramid_mix` fixture larger than the pure pyramid rep),
+M-SUB-4 validity filter dropped (caught via a planted `load_error`
+entry), M-SUB-5 ladder sort inverted. Hygiene note: two mutations were
+initially REFUSED by the count==1 site guard because the target pattern
+also exists in `select_pilot` — reapplied at docstring-anchored unique
+sites; baseline re-run green after byte-identical restore.
+
 ### Commit F2b — SUPERSEDED BY OPERATOR DECISION 2026-08-09
 
 > **Expected:** the full 107-entry sweep (or an approved subset) after a
@@ -971,7 +1095,7 @@ Acceptance evidence:      deterministic manifest + §0.F semantics +
 `reports/v21_pr_f_inspection_cost/` as written. Production reads none of
 it.
 
-### Q-F-2 — censoring and reproducibility semantics (FINAL FORM — awaiting approval)
+### Q-F-2 — RESOLVED (operator, 2026-08-09): APPROVED as frozen below (the five Rev-2 conditions are incorporated verbatim)
 
 Freeze §0.F verbatim, now per-operation and grounded in the audited
 payloads:
@@ -998,6 +1122,10 @@ wall-expiry-is-not-completion rule (F2b §5).
 
 ---
 
-**Nothing in this document is implemented.** On approval of Q-F-1/Q-F-2
-as revised, the sequence is F1 → F2a → (gate) → F2b. Findings F-A1/F-A2
-and FU-F-1 are recorded for a future PR and are untouched here.
+**Final status (2026-08-09):** F1 and F2a are implemented and committed;
+the original F2b full sweep is SUPERSEDED by the operator's
+minimum-sufficient-evidence correction, and the bounded stratified
+subset is executed with results in the F2b-subset.R block above. Zero
+production files were changed. Findings F-A1/F-A2/F-A3/**F-A4** and
+FU-F-1 are recorded for a future PR and remain untouched here. PR F is
+awaiting operator review; **it must not be merged by the assistant.**

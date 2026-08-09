@@ -60,8 +60,18 @@ The pilot reproduced the V20 inspection timeout three times as an exact
 measurement and rejected the "parameter count → timeout" story
 (architecture-shaped cost: a 7 M deep WaveNet is censored at B=64 while
 a 2.6 B FNO probes under budget). The full population sweep was
-deliberately not run (operator decision at the runtime gate: 10–30 h
-priced, not a launch blocker, question already answered); deliverable in
+deliberately not run — the operator's MINIMUM-SUFFICIENT-EVIDENCE
+correction replaced it with a bounded, timing-blind 8-entry stratified
+subset (163 measurements, 54 CLEAR / 1 INDETERMINATE): the builtin
+WaveNet width ladder scales cleanly ~2× per channel-doubling
+(15 → 28 → 56 s at B=64) while the 30-layer cousin is censored at 7 M
+params — **depth, not width or parameter count, crosses the budget** —
+and every other sampled realized family (unet 87 M, fourier/pyramid,
+rnn/gru) clears with wide margins. The subset also surfaced **F-A4, a
+third censoring mechanism: host memory** — a 1 M-param selective-SSM at
+B=64 × seg 40,000 drove the in-process probe to 47 GB RSS and a kernel
+OOM kill (the documented 2026-07-31 host-takedown class that
+production's isolated worker contains). Deliverable in
 `reports/v21_pr_f_inspection_cost/report.md`.
 Rev 3 matched the harness's timeout handling to production's
 per-operation enforcement (the native 180 s preemptive training-probe

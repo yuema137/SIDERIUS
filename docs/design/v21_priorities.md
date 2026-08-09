@@ -2735,6 +2735,24 @@ corrective change to advice or thresholds in the diff.
 > ladder study, for which the frozen 107-entry manifest and harness
 > stand ready.
 >
+> **The bounded stratified subset (operator MINIMUM-SUFFICIENT-EVIDENCE
+> correction, executed 2026-08-09):** 8 timing-blind entries from the
+> frozen manifest; 163 measurements (162 exact + 1 bound-only);
+> verdicts 54 CLEAR / 0 WOULD_BE_CENSORED / 1 INDETERMINATE. The builtin
+> WaveNet width ladder scales ~2× per channel-doubling (15 → 28 → 56 s
+> at B=64; ×4 step extrapolates to ≈110 s, just under budget) while the
+> 30-layer generated cousin is censored at only 7 M params — **within
+> the incident family, DEPTH crosses the budget before width**. Every
+> other sampled realized family (unet 86.9 M, fourier/pyramid at full
+> segment length, rnn/gru) clears with wide margins. **New finding
+> F-A4 — a third censoring mechanism, host memory:** the 1 M-param
+> selective-SSM at B=64 × seg 40,000 drove the in-process probe to
+> 47 GB anon-RSS and a kernel OOM kill (dmesg 2026-08-09 15:39:12) —
+> the documented 2026-07-31 host-takedown class that production's
+> isolated worker subprocess contains; recorded under the frozen
+> deadline rule, and the ×4 ladder step was declined for host safety
+> (deviation recorded in the PR F ledger's F2b-subset.R block).
+>
 > **Findings (FU-F-1, observations not tasks):** two of the five declared
 > ProbeBudgets are INERT — `single_inspection_seconds` enforced nowhere;
 > `preflight_total_seconds=1200` unconsumed while the real bound is a
