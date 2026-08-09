@@ -1004,13 +1004,20 @@ PR B   "If it executes, resource control remains correct."
 
 | PR | Title | Fixes | Depends on | Gate |
 |---|---|---|---|---|
-| **A** | Make the existing output contract reachable | P1 + P2 | none | **DELIVERED `0c4eb33e`** — awaiting merge |
-| **B** | Resource-budget semantics and enforcement | P6.4 | none | **V21 launch blocker** |
-| **C** | Generated-model production compatibility | P6.2 family | none | **V21 launch blocker** |
-| **D** | Per-file evidence to reflector and planner | P6.5 | none | Before V21 |
+| **A** | Make the existing output contract reachable | P1 + P2 | none | launch blocker — **MERGED `b9f88ae5`** |
+| **B** | Resource-budget semantics and enforcement | P6.4 | none | launch blocker — **MERGED `0aae3f4b`** |
+| **C** | Generated-model production compatibility | P6.2 family | none | launch blocker — **MERGED `cac86c94`** |
+| **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | **V21 launch blocker** — implemented, in review |
 | **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data |
 | **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
 | **G** | Capability-derived inference batch | P5 | B | Non-blocking |
+
+> **Row D corrected 2026-08-08.** It carried the withdrawn scope
+> ("Per-file evidence to reflector and planner", fixing P6.5, gated
+> "Before V21") long after §E.3e withdrew that premise and checkpoint 4
+> was replaced. The summary table is what a reader meets first, so a
+> stale row here outranks a correct body section. Found in the
+> pre-review audit of this ledger.
 
 ---
 
@@ -1034,6 +1041,18 @@ the PR A document, so a later PR planning against this ledger sees them.
 | **Authority stamp never reaches the record** — CLI `--healthgate_mode blocking --result_authority diagnostic`, record stamps `null / null → legacy_authority_unknown`, `authoritative: false` | **PR D** (its existing owner) — and **promoted to a V21 scientific-campaign LAUNCH BLOCKER** | **Two independent observations** now (PR A Gate 2C, PR C C5b), so this is causal evidence rather than an artifact oddity. Without it, a formal round that runs correctly still produces a record whose authority is unknown, breaking incumbent-selection and aggregation semantics downstream. That is more than the ordinary observability improvement PR D was scoped as |
 | `inference_batch_for`'s actual batch selection | **PR G** | Inference **throughput only**, confirmed by C3b's audit: planning and runtime call the same function, so the forecast never diverges from what runs |
 | **No mechanical guardrail exists** for the import-side-effect defect class | none — recorded | Deciding statically whether a registry read is reachable without its populating import is a whole-program reachability question over lazy imports. Stated rather than faked; enforced by C4's real-subprocess fixture instead |
+
+### Follow-ups filed by PR D — recorded 2026-08-08, none blocking
+
+Filed under **`FU-D21-*`**, not `FU-D-*`: V20's PR D already owns
+`FU-D-1` … `FU-D-12`, and `FU-D-11` / `FU-D-12` are cited as live
+operator-facing flags in `docs/running_chain_test.md:114,117`. Reusing the
+prefix would have put two distinct open items under one label.
+
+| ID | Item | Why deferred | Blocking? |
+|---|---|---|---|
+| **FU-D21-1** | `FormalValidity` is a `Literal` type alias, not an enum, and `ScientificAuthority.from_context` does not validate it — an unrecognised string behaves exactly like `"valid"` | Pre-existing property of a function PR D froze. Unreachable from PR D's transport (the tuner passes `formal_validity_of(...)`, which returns one of the three). Fixing it is a semantics change PR D was forbidden to make | No |
+| **FU-D21-2** | No deterministic fixture executes `run_one_iteration.__main__` end to end; hop 7's call site is covered by an AST call-site assertion plus mutations M-D1/M-D2 | O-D-2 classifies a pseudo-mode chain iteration as optional strengthening evidence, explicitly not a merge requirement | No |
 
 ### Findings PR A produced for OTHER PRs — recorded, not absorbed
 
@@ -2072,6 +2091,24 @@ a reason to touch the frozen metric.**
 ---
 
 ## PR D — Make the existing scientific-authority contract reachable
+
+> ## STATUS: IMPLEMENTED 2026-08-08 — awaiting operator review, NOT merged
+>
+> Branch `feat/pr-d-scientific-authority-reachable`. Semantic commits:
+> `14fbbc15` (design precision), `f1b03055` (D1 — 27-row matrix pinned
+> **before** transport), `b7ffda5f` (D2 — the transport), `7ea7e87b`
+> (D3 — consumers + non-retroactivity).
+>
+> **Production diff: three files, six lines** —
+> `run_one_iteration.py` (two kwargs at the `run_workflow` call),
+> `workflows/model_exploration.py` (two parameters, two forwarded),
+> `ml_model_valid_to_ml_model_tune.py` (two parameters, two set on the
+> input). No schema field added; the fields already existed at
+> `hyperparam_tuning.py:1749/:1761` and were simply never populated —
+> the §E.3d.1 shape again.
+>
+> Full ledger, per-commit evidence, frozen census and follow-ups:
+> `v21_priorities/pr_d_scientific_authority_reachable.md`.
 
 > **RE-SCOPED 2026-08-08 by operator decision, after the audit in §E.3e.**
 > The former scope ("Per-file evidence to reflector and planner") is

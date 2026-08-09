@@ -30,7 +30,13 @@ PR B   resource prediction / admission / realization / attribution have
 consumer of `vram_budget_gb`, not only PR B — recorded in
 `v21_priorities.md` §E.3c.
 
-**PRs D-G are not started, and each now carries an update block** derived
+**PR D is IMPLEMENTED and awaiting operator review** (branch
+`feat/pr-d-scientific-authority-reachable`, not merged) — see
+`pr_d_scientific_authority_reachable.md`. Its production diff is three
+files and six lines: the authority declaration now reaches the tuner
+input, whose two fields existed all along and were never populated.
+
+**PRs E-G are not started, and each carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
 binding on all of them. The single most reusable finding: three PRs in a
 row found **a correct rule that nothing called**, so every remaining PR
@@ -38,8 +44,10 @@ must first ask whether the mechanism it wants already exists and lies
 inert. PR G is the one most changed by this — the measured memory profile
 it wants may already be reaching the policy.
 
-Open follow-ups: **FU-A-1/2/3**, **FU-B-1/2/3/4**, and the PR-C-era items
-in §E.3b. None blocks D-G. **FU-B-4** (live formal confirmation of the S3
+Open follow-ups: **FU-A-1/2/3**, **FU-B-1/2/3/4**, **FU-D21-1/2** and the
+PR-C-era items in §E.3b. None blocks E-G. Note the `FU-D21-*` prefix: V20's
+PR D already owns `FU-D-1` … `FU-D-12`, two of which are live
+operator-facing flags. **FU-B-4** (live formal confirmation of the S3
 surface) is due before the first full V21 production campaign.
 
 ### Scope correction recorded 2026-08-07
