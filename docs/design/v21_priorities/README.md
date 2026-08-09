@@ -30,11 +30,19 @@ PR B   resource prediction / admission / realization / attribution have
 consumer of `vram_budget_gb`, not only PR B — recorded in
 `v21_priorities.md` §E.3c.
 
-**PR D is IMPLEMENTED and awaiting operator review** (branch
-`feat/pr-d-scientific-authority-reachable`, not merged) — see
+**PR D is APPROVED and CI-green** (PR #189, `95f96745`, branch
+`feat/pr-d-scientific-authority-reachable`) — see
 `pr_d_scientific_authority_reachable.md`. Its production diff is three
 files and ten wiring lines: the authority declaration now reaches the tuner
-input, whose two fields existed all along and were never populated.
+input, whose two fields existed all along and were never populated. That
+makes **all four launch-gating checkpoints satisfied**; PR E is the last
+one before a V21 campaign can start.
+
+PR D was the **fourth** consecutive instance of "a correct rule that
+nothing calls", and it produced a new variant of that lesson — the same
+shape appearing *inside the test suite* (`v21_priorities.md` §E.3d.9),
+plus a correction on how multi-field absence failures must be
+distinguished (§E.3d.10). Both bind E, F and G.
 
 **PRs E-G are not started, and each carries an update block** derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
