@@ -144,6 +144,26 @@ DELIBERATELY UNDECLARED
 This census is closed. A path may only move category by a written
 operator decision, not by a later implementer's judgement.
 
+**Reconciled against the final tree, 2026-08-08.** Line numbers above are
+the audit-time ones; D2 added 12 lines to `model_exploration.py`, so its
+`__main__` call moved `:2994 -> :3006`. The classification is what matters
+and it holds exactly:
+
+```text
+scripts/run_comparison.py                   0 authority mentions   undeclared
+sdsc_submission_scripts/run_exploration_test.py
+                                            0 authority mentions   undeclared
+scripts/bg_admission_validation.py          0 authority mentions   undeclared
+workflows/model_exploration.py              4 mentions  = the two run_workflow
+                                            parameters and the two forwarded
+                                            to the protocol. Its own __main__
+                                            call at :3006 passes NEITHER, so
+                                            the dev entry point stays
+                                            undeclared as frozen
+```
+
+Three of the four files do not appear in the PR diff at all.
+
 ### 0.D The narrowest shared transport
 
 There is **no** existing generic run-posture or execution-context object
@@ -1133,8 +1153,12 @@ Applied only to touched surfaces.
 ### V21 review fields
 
 ```text
-Metric-frozen proof:      no scorer/metric/SNR file in `git diff base..HEAD`;
-                          PR D touches no scoring path (to be re-verified at merge)
+Metric-frozen proof:      VERIFIED BY DIFF at the final head — no scorer,
+                          metric, SNR, loss, health-check or authority-semantics
+                          file appears in `git diff 57087ed9..HEAD` outside
+                          docs/. The complete non-doc diff is 3 production
+                          files (ten wiring lines) + 4 test files. Command and
+                          output recorded in §PR-D final validation
 
 Name-keyed dependency
 added:                    none. No model name, campaign name or launcher name
@@ -1155,7 +1179,12 @@ Subprocess evidence:      not applicable — the transport is in-process up to t
                           already correct and is not modified
 
 Acceptance evidence:      Layers A-D deterministic; Layer E argued unnecessary
-                          with the residual stated
+                          with the residual stated (FU-D21-2). Full configured
+                          CI equivalent from a clean tree: 8146 passed,
+                          2 skipped, 1 xfailed, pytest rc=0, 0 FAILED/ERROR;
+                          ruff + format clean; pyright 0 errors / 4 warnings at
+                          baseline. Mutations 13 attempted / 13 behaviour-
+                          changing -> 13 caught / 0 equivalent (Layer F)
 ```
 
 ---
@@ -1251,6 +1280,92 @@ clamp inside `run()`. A pseudo-mode chain iteration traversing the real
 launcher wiring is **optional strengthening evidence, explicitly not a
 merge requirement**. It must not be escalated into a real scientific
 campaign to close a wiring gap.
+
+---
+
+## PR-D final validation
+
+Run from a **clean tracked tree** at `6030be59`, per CLAUDE.md — the
+PR3-L2 preflight refuses uncommitted production edits, so a full-suite
+verdict from a work-in-progress tree means nothing. Commits after this
+point are **documentation only** (`git diff --name-only 6030be59..HEAD`
+returns paths under `docs/` alone), so the verdict still holds at the
+final head.
+
+```text
+pytest tests/unit -q -m "not real_run"
+    8146 passed, 2 skipped, 1 xfailed        497.25s
+    PYTEST_RC=0                              (pytest's own status, not a pipe's)
+    grep -cE "^(FAILED|ERROR)"  ->  0
+
+ruff check .                                 All checks passed!
+ruff format --check .                        768 files already formatted
+pyright (1.1.409)                            0 errors, 4 warnings   [baseline held]
+```
+
+**The test-count delta is itself a check.** Baseline at `57087ed9` was
+`8087 passed, 2 skipped, 1 xfailed`. The final run is `8146` — exactly
+`+59`, which is `32` (D1 matrix) `+ 17` (D2 transport) `+ 10` (D3
+consumers). No pre-existing test was deleted, renamed away or silently
+skipped to reach green.
+
+### Metric / scorer / HealthGate freeze — proved by diff, not asserted
+
+```bash
+git diff --name-only 57087ed9..HEAD -- . ':(exclude)docs' \
+  | grep -E 'scoring|score|snr|metric|health_check|healthgate|loss_models|scientific_authority'
+# -> no matches
+```
+
+The complete non-documentation diff is six files:
+
+```text
+PRODUCTION (3 files, ten wiring lines, +36/-1 with imports and comments)
+  sdsc_submission_scripts/run_one_iteration.py            2 arguments passed
+  workflows/model_exploration.py                          2 params + 2 forwarded
+  agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py
+                                                          2 params + 2 fields set
+
+TESTS (3 files)
+  tests/unit/core/test_authority_matrix_frozen.py             new, 32
+  tests/unit/agent/schemas/test_authority_transport_reachable.py  new, 17
+  tests/unit/core/test_authority_end_to_end_and_history.py    new, 10
+  tests/unit/sdsc_submission_scripts/test_launch_surface_parity.py
+                                                              +2 field names
+```
+
+`core/scientific_authority.py`, every scorer and SNR module,
+`configs/health_checks.yaml` and every health-check skill are absent from
+the diff. **`scripts/run_comparison.py` is absent**, which is O-D-1
+holding rather than an omission.
+
+### Pre-review audit of this document and the ledger
+
+Performed 2026-08-08 before opening the PR, and it found eleven defects —
+recorded because "the design doc is the live ledger" is only true if the
+ledger is audited like code. The three that mattered:
+
+| # | defect | why it mattered |
+|---|---|---|
+| 1 | a `[x]` on "clean-tree full suite" that had **not been run**, pointing at a `§PR-D final validation` section that did not exist | the PR's terminal validation claimed as done. Marking a checkbox falsely is a workflow violation, not untidiness |
+| 2 | D3's checklist items **overwritten by their own evidence**, destroying the record of what was planned | D1 and D2 keep `[x] <plan item>` + evidence. D3 lost its before-state — the exact thing an append-only ledger exists to preserve. Restored from `c2664f8b` |
+| 3 | `FU-D-1` collided with V20 PR D's live `FU-D-1 … FU-D-12`, two of which are operator-facing flags in `docs/running_chain_test.md:114,117` | two distinct open items under one label. Renamed `FU-D21-*` before any external reference existed |
+
+Also corrected: a stale status header claiming no implementation had
+begun; a §7 command block whose commands were never the ones actually
+run (the three named consumer suites have now been run — `71 passed`);
+three `M-D5` references surviving the M-D5a/M-D5b split; D3's mutations
+missing from the validation ladder; no PR-level mutation account; both
+follow-ups unregistered in the ledger; and in `v21_priorities.md`, an
+overview table still advertising PR D's **withdrawn** premise
+("Per-file evidence to reflector and planner", gated "Before V21") plus a
+PR A row reading "awaiting merge" three PRs after it merged.
+
+One further defect surfaced from *running* the checks rather than reading
+the text: `ruff format --check` had been reporting `1 file would be
+reformatted` and I recorded the ruff line without chasing which file. It
+was D3's own module, so the commit would have failed CI on formatting
+alone. Fixed in `6030be59`.
 
 ---
 
