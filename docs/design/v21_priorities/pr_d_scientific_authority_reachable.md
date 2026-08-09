@@ -4,7 +4,8 @@
 approved 2026-08-08 subject to the recorded decisions O-D-1 and O-D-2
 below; Q-D-1 is RESOLVED and the launcher census is FROZEN. D0-D3 are
 complete on `feat/pr-d-scientific-authority-reachable`; the production
-diff is **three files, six lines**, exactly as designed. Final evidence is
+diff is **three files, ten wiring lines** (+36/-1 with imports and
+comments), exactly the three hops the audit predicted. Final evidence is
 in **§PR-D final validation**. **Not merged.**
 
 | | |

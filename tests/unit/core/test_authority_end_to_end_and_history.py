@@ -122,9 +122,7 @@ class TestTheWholeChainFromDeclarationToConsumer:
     """
 
     def test_a_declared_campaign_posture_ends_as_an_admissible_record(self, tmp_path):
-        record = _formal_record(
-            tmp_path, healthgate_mode="blocking", result_authority="scientific"
-        )
+        record = _formal_record(tmp_path, healthgate_mode="blocking", result_authority="scientific")
 
         resolution = resolve_record_authority(
             record,

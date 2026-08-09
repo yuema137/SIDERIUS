@@ -33,7 +33,7 @@ consumer of `vram_budget_gb`, not only PR B — recorded in
 **PR D is IMPLEMENTED and awaiting operator review** (branch
 `feat/pr-d-scientific-authority-reachable`, not merged) — see
 `pr_d_scientific_authority_reachable.md`. Its production diff is three
-files and six lines: the authority declaration now reaches the tuner
+files and ten wiring lines: the authority declaration now reaches the tuner
 input, whose two fields existed all along and were never populated.
 
 **PRs E-G are not started, and each carries an update block** derived

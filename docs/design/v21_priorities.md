@@ -2099,7 +2099,8 @@ a reason to touch the frozen metric.**
 > **before** transport), `b7ffda5f` (D2 — the transport), `7ea7e87b`
 > (D3 — consumers + non-retroactivity).
 >
-> **Production diff: three files, six lines** —
+> **Production diff: three files, ten wiring lines** (+36/-1 including
+> imports and explanatory comments) —
 > `run_one_iteration.py` (two kwargs at the `run_workflow` call),
 > `workflows/model_exploration.py` (two parameters, two forwarded),
 > `ml_model_valid_to_ml_model_tune.py` (two parameters, two set on the
