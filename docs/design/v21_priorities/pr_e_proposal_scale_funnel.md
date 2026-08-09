@@ -505,40 +505,65 @@ join-on-read decision is wrong and E4 must not be written**.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `run_workflow` `:2214-2428` and record the attempt-loop
-      structure and the rename at `:2333`
-- [ ] Pin exact key sets for `ProposalOutput`, `ImplementorOutput`,
-      `ValidatorOutput`, `HyperparamTuningInput`, `ExperimentRecord`, so
-      E2/E3 adding a field is a deliberate visible edit to this module
-- [ ] Pin `ValidatorOutput` as having **no numeric field** — the fact E3
-      changes
-- [ ] Pin the persistence layout as behaviour, not documentation: drive
-      the three nodes against a `tmp_path` workspace and assert
-      `proposal_`, `implementor_`, `validation_{run_name}.json` are each
-      written where the audit says
-- [ ] Pin that two attempts write into **different** directories and do
-      not overwrite each other — the property join-on-read depends on
-- [ ] Pin that the inner retry loop **does** overwrite within one attempt
-      dir, so the known limitation is recorded as tested behaviour rather
-      than an assumption
-- [ ] Hardcode every expectation; never read a value back from the thing
-      under test (CLAUDE.md)
+- [x] Re-read `run_workflow` `:2214-2428`; attempt loop `:2215`, temp dir
+      `:2220`, rename `:2333-2335`; `iter_dir =
+      {workspace}/{run_name}/iteration_{NNN}` (`:1690`, `:2050`)
+- [x] Key sets pinned in
+      `tests/unit/agent/schemas/test_pr_e_stage_contract_pins.py` —
+      **exact literal sets** for the five proposal-chain schemas
+      (`ProposalOutput` 17, `ImplementorInput` 17, `ImplementorOutput` 10,
+      `ValidatorInput` 13, `ValidatorOutput` 22). **Deviation, recorded:**
+      `HyperparamTuningInput` (68 fields) and `ExperimentRecord` (53) are
+      pinned on funnel-relevant presence/absence facts only, invoking the
+      §6 churn clause explicitly — a full pin there would tax every
+      unrelated PR. Also pinned: `candidate_id` absent from all seven
+      schemas (the E2 before-state); `stopped_at_stage` stored nowhere
+      (O-E-2); `parameter_count_estimate` on `ProposalOutput` only and
+      `model_params` on the record (O-E-3 ownership)
+- [x] `ValidatorOutput` pinned as having **no numeric field** (exact
+      22-key set + a type-level scan), plus explicit absence pins for
+      both E3 field names
+- [x] Persistence pinned as behaviour in
+      `tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py`:
+      all three nodes driven through their REAL `run()` with bridge-level
+      mocks (canonical fixtures imported from the owning node test
+      modules, the established cross-import pattern); each writes
+      `{stage}_{run_name}.json` into the given workspace
+- [x] Two attempts (validation fail → new proposal via
+      `max_impl_attempts=1`) produce `attempt_001_alpha_net` +
+      `attempt_002_beta_net`, neither overwritten, both matched by a
+      name-blind `attempt_*` glob
+- [x] Inner-retry overwrite pinned: two implementor runs with one storage
+      leave exactly one `implementor_{run}.json` holding the TERMINAL
+      outcome — E4 must never infer retry counts from artifacts
+- [x] Every expectation hardcoded; nothing read back from the thing under
+      test
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Five exact key-set assertions
-- [ ] `ValidatorOutput` has no numeric field
+- [x] Five exact key-set assertions + the ownership pins — 16 tests
+      across the two modules, `16 passed in 2.10s`
+- [x] `ValidatorOutput` has no numeric field
 
 **Integration / pseudo**
-- [ ] Two simulated attempts produce two directories, both discoverable by
+- [x] Two simulated attempts produce two directories, both discoverable by
       a `attempt_*` glob, neither overwriting the other
 
 **Negative / invalid input**
-- [ ] A workspace with no attempt dirs yields an empty discovery, not an error
+- [x] **Moved to E4, recorded as a deviation** — "empty workspace yields
+      empty discovery" is a property of the assembler, which does not
+      exist until E4 (already listed in E4 §6 as "zero candidates").
+      Cannot be tested before the reader exists
+- [x] Two fixture defects found against real shapes and fixed:
+      `LLMCodeReview.spec_alignment` is a bool (my mock said `"ok"`), and
+      `run_workflow` Step 0 loads
+      `{data_dir}/{model}/{source}/agent/run_output_{source}_agent.json`
+      BEFORE any (mocked) agent runs — the layout test must seed it
 
 **Backward-compatibility / default parity**
-- [ ] All pre-existing schema and protocol suites pass **unmodified**
+- [x] Neighbouring suites pass unmodified: schemas + all three node
+      suites `1112 passed in 4.66s`
 
 **Real-training Gate:** none. A GPU cannot evaluate a key set or a path.
 
@@ -570,15 +595,29 @@ join-on-read decision is wrong and E4 must not be written**.
 .venv/bin/python -m ruff check . && .venv/bin/python -m ruff format --check .
 ```
 
-- [ ] New module counts and wall time — **to record**
-- [ ] Pre-existing suites unmodified — **to record**
-- [ ] Mutation: make two attempts share a directory → must fail — **to record**
+- [x] `16 passed in 2.10s` (both modules)
+- [x] Neighbouring suites unmodified: `1112 passed in 4.66s`
+- [x] Mutations — **5 attempted, 4 behaviour-changing → 4 caught,
+      1 equivalent → classified**:
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E1-1 | `ValidatorOutput` silently gains `candidate_id` | CAUGHT (2 failures) |
+      | M-E1-2 | `ValidatorOutput` silently gains a numeric field | CAUGHT (2 failures) |
+      | M-E1-3 | temp `attempt_dir` collapsed to a constant | **EQUIVALENT** — the rename target (`attempt_{N:03d}_{name}`) owns the final layout; the temp name is renamed away every attempt |
+      | M-E1-3v2 | the RENAME's attempt numbering collapsed to a constant | CAUGHT |
+      | M-E1-4 | rename drops the name-blind `attempt_` prefix | CAUGHT |
 
 #### 8. Commit boundary
 
-- [ ] Tests only; zero production files
-- [ ] No field, no transport, no assembly
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] Tests only; zero production files (commit `337b9945`)
+- [x] No field, no transport, no assembly
+- [x] Two new test modules; deviations in §3/§4. **Process slip,
+      recorded:** the ledger update aborted on a stale anchor and E1's
+      commit landed with these boxes still open; fixed in the next docs
+      commit rather than by history rewrite. Root cause was editing this
+      document from memory instead of re-reading it — the exact rule-5
+      violation the mandate names
 
 ---
 
