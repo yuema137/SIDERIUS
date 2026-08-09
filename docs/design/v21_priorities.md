@@ -1008,7 +1008,7 @@ PR B   "If it executes, resource control remains correct."
 | **B** | Resource-budget semantics and enforcement | P6.4 | none | launch blocker — **MERGED `0aae3f4b`** |
 | **C** | Generated-model production compatibility | P6.2 family | none | launch blocker — **MERGED `cac86c94`** |
 | **D** | Make the existing scientific-authority contract reachable | authority transport (§E.3e.4) | none — branched after A/B/C | launch blocker — **MERGED `aace4abb`** |
-| **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data |
+| **E** | Proposal-scale funnel instrumentation | P4 | none | Before first V21 data — **IMPLEMENTED, in review** |
 | **F** | Inspection-cost scaling study (**measure only**) | P3 | E | Blocks only a **budget change** |
 | **G** | Capability-derived inference batch | P5 | B | Non-blocking |
 
@@ -2469,6 +2469,42 @@ the real `iter_006` fixture; no scorer file in the diff.
 
 ## PR E — Proposal-scale funnel instrumentation
 
+> ## STATUS: IMPLEMENTED 2026-08-08 — awaiting operator review, NOT merged
+>
+> Branch `feat/pr-e-proposal-scale-funnel`. Live ledger:
+> `v21_priorities/pr_e_proposal_scale_funnel.md`. Commits: E0 `b8ea7b50`,
+> E1 `337b9945`+`2281ae72`, E2 `86401ae8`, E3 `0bd27244`+`4ed97cb0`,
+> E4 `b008ff54`.
+>
+> **What PR E delivered**
+>
+> | Unit | Result |
+> |---|---|
+> | E1 | Stage contracts and the per-attempt persistence layout pinned BEFORE any change |
+> | E2 | `candidate_id`: system-minted in the proposer (never LLM-supplied, never name-derived), transported inside the objects through the three real protocols, explicitly echoed at both implementor construction sites and the validator, stamped on every record at the `_emit_record` seam, echoed on both tuner output exits. The fixed-plan seam REFUSES an operator-supplied id |
+> | E3 | O-E-6 FINAL: `realized_total_parameter_count` + `realized_trainable_parameter_count` measured from the model the validator already instantiates; verdict bit-identical; frozen-parameter fixture pins the conventions independently |
+> | E4 | `execute_tools/funnel_assembly.py` — read-only join on explicit id; `stopped_at_stage` derived on read; native reasons verbatim; None-ids never merge; the **REQUIRED pseudo-mode complete-funnel Gate PASSED**; legacy stage-local check reproduced both recorded V20 attempt-3 values from the preserved campaign |
+>
+> **Mutations: 33 attempted, 30 behaviour-changing → 30 caught, 2
+> equivalent (proved) + 1 invalid (classified).** Every round-1 survivor
+> was a missing test on an undriven path — Branch-B reuse, the
+> zero-parameter verdict, the implemented-but-never-validated branch —
+> and every fix was test architecture, never the mutation.
+>
+> **Findings worth keeping:** (1) adding `candidate_id` to
+> `ProposalOutput` SILENTLY removed it from the fixed-plan seam's
+> unknown-key refusal (the refused set derives from `model_fields`) — an
+> operator plan could then smuggle an unminted identity; closed with an
+> explicit refusal. (2) A parameterless model cannot pass validation
+> (backward() requires a grad-requiring tensor), which PROVES every
+> passing model has ≥1 trainable parameter — used to classify a mutation
+> equivalent. (3) The ledger's attempt-3 ×3/×4 values span BOTH chains
+> (7,280,256 arch · 8,409,280 loss).
+>
+> No prompt, advice, ~100M-prior, scorer, metric or HealthGate change —
+> proved by diff. No distribution claimed (§E.3d.6): PR E delivers the
+> capability to measure, not a measurement.
+
 > **Updated 2026-08-08 from A/B/C (§E.3d).** PR E's whole purpose —
 > "convert an impression into measurable data **without** correcting it" —
 > is the property B2 had to defend, so B2 is the template.
@@ -2740,7 +2776,7 @@ Byte-identical inference outputs; name table removed from the path.
 | 2 | Resource semantics correct — S3 frozen, admission graded, realization observable | PR B | **DONE** `0aae3f4b` |
 | 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
 | 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189 merged `aace4abb` |
-| 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **TODO** |
+| 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **IMPLEMENTED — in review** (branch `feat/pr-e-proposal-scale-funnel`) |
 | 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
 
 > **Checkpoint 4 replaced 2026-08-08** (§E.3e). It formerly read *"Agent

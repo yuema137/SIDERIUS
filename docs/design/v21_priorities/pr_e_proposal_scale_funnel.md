@@ -1,10 +1,12 @@
 # PR E — Proposal-scale funnel instrumentation
 
-**Status: DESIGN APPROVED 2026-08-08 (operator) — O-E-6 resolved as (c),
-FINAL text in §0.I. No further design review required. Implementation
-authorized as E0 → E1 → E2 → E3 → E4, to begin only after PR #189 is
-restored to its D-only branch, merged, and this branch is updated onto
-the merged master. Nothing implemented yet.**
+**Status: IMPLEMENTED 2026-08-08 — E0-E4 complete on
+`feat/pr-e-proposal-scale-funnel`, awaiting operator review. NOT merged.**
+Design approved 2026-08-08 with O-E-6 FINAL (§0.I). Commits: E0
+`b8ea7b50` (ledger), E1 `337b9945`+`2281ae72` (pins), E2 `86401ae8`
+(identity transport), E3 `0bd27244`+`4ed97cb0` (both counts), E4
+`b008ff54` (read-side assembly + the REQUIRED pseudo Gate, passed).
+Final evidence: **§PR-E final validation**.
 
 Revision 2 applied operator decisions **O-E-1 … O-E-5** and the
 persistence audit they required, shrinking the PR to four commits with
@@ -1242,6 +1244,101 @@ mutation, as PR D covered hop 7.
 **The scientific outcome is never the oracle.** A candidate proposing 600k
 parameters is not a test failure.
 
+### Layer F — PR-level mutation account (final)
+
+```text
+33 attempted
+30 behaviour-changing -> ALL 30 caught
+ 2 equivalent          -> classified with proofs
+ 1 invalid             -> classified (harness slip, recorded)
+
+  E1   5   4 caught; M-E1-3 EQUIVALENT (the temp attempt-dir name is
+           renamed away; the rename target owns the final layout)
+  E2  13   13 caught; M-E2-7 (Branch-B echo) survived round 1 because no
+           test drove the reuse path — TestBranchBReuseEcho added, caught
+  E3   8   6 caught; M-E3-5 INVALID (comment-only edit — a harness slip
+           recorded as such, not a result); M-E3-5b EQUIVALENT, PROVED:
+           the gradient check requires a successful backward(), which
+           requires >=1 grad-requiring parameter, so `passed and total>0`
+           can never flip a verdict — replaced by the non-equivalent
+           M-E3-5c (threshold coupling), caught
+  E4   7   7 caught; M-E4-7 (stop-derivation branch) survived round 1
+           because the implemented-but-never-validated branch had no
+           test — killer added, caught
+```
+
+Every round-1 survivor was a missing test, and every fix was to the test
+architecture — never to the mutation or its report. Three of the four
+commits produced one, which is the pattern §E.3d.9 predicts: a transport
+test is decoration exactly where nobody drove the path.
+
+## PR-E final validation
+
+Run from a **clean tracked tree** at `b008ff54` (E0-E4 all committed;
+verdicts from pytest's own exit status, never a pipe's):
+
+```text
+pytest tests/unit -q -m "not real_run"        (production tree = ca86aaac;
+                                               docs-only edits pending, which
+                                               the PR3-L2 preflight allowlists)
+    8196 passed, 3 skipped, 1 xfailed         490.98s
+    PYTEST_RC=0                               (pytest's own status)
+    grep -cE "^(FAILED|ERROR)"  ->  0
+
+ruff check .                                 All checks passed!
+ruff format --check .                        775 files already formatted
+pyright (1.1.409)                            0 errors, 4 warnings  [baseline held]
+```
+
+**The count delta is itself a check.** Baseline at `aace4abb` was
+`8146 passed, 2 skipped`. PR E adds **57** tests, of which 6 live in
+`tests/integration` (the layout module and the Gate, outside the unit
+suite) and 1 is env-gated (the legacy V20 check, skipping without
+`SIDERIUS_V20_ATTEMPT3_DIR`): `8146 + 50 = 8196` passed and `2 + 1 = 3`
+skipped — **exact**. No pre-existing test was deleted, renamed away or
+skipped to reach green.
+
+**One defect this run caught, fixed in `ca86aaac`:** a third module
+(`test_output_contract_end_to_end.py`, PR A's) unpacked the widened
+helper's old 4-tuple — outside the validator directory my E3 sweep
+covered. Arity-only; a repo-wide census now confirms zero un-widened
+direct unpackers remain. The first full run reported `2 failed` and the
+suite was re-run from the fixed tree — the recorded verdict above is the
+authoritative second run, not the first.
+
+### Freeze proofs — by diff at the final head, base `aace4abb`
+
+```bash
+git diff --name-only aace4abb..HEAD -- . ':(exclude)docs' \
+  | grep -iE 'scoring|score|snr|metric|health_check|healthgate|loss_models|scientific_authority'
+# -> NONE
+git diff --name-only aace4abb..HEAD | grep -iE 'prompt|advice'
+# -> NONE
+git diff aace4abb..HEAD -- nodes/ml_model_proposal_agent/ml_model_proposal_agent.py
+# -> touches ONLY: +import uuid, +the 9-line mint block. The prompt text,
+#    the ~100M prior and every advice surface are byte-identical.
+```
+
+The complete non-documentation diff is **22 files**: 13 production
+(4 schemas, 3 protocols, 4 nodes+launcher, 1 new read-side module) and
+9 test files (6 new modules, 3 pre-existing modules touched only for the
+new surface's arity/fixtures).
+
+### The required Gate (DC-2) — PASSED
+
+`test_pr_e_funnel_gate_pseudo.py`: one bounded pseudo-mode iteration
+through the real `run_workflow` produced the complete on-disk funnel and
+the assembler built the complete row (fan-in 3). What it uniquely proved:
+the persistence -> discovery -> join -> fan-in -> derived-row path works
+as ONE path, which no unit layer exercises. No GPU, no real LLM.
+
+### Legacy stage-local sanity check — RUN against the real V20 data
+
+`SIDERIUS_V20_ATTEMPT3_DIR=/home/klz/Data/SIDEREIS_DATA/v20_attempt3_20260806_233242`:
+both ledger-recorded values (7,280,256 · 8,409,280) reproduced from the
+preserved campaign's own stage-local records. **No distribution is
+claimed** (§E.3d.6) — presence of the recorded values, nothing more.
+
 ## 6. Backward compatibility / parity
 
 | invariant | how it is preserved |
@@ -1298,8 +1395,11 @@ parameters is not a test failure.
 ### V21 review fields
 
 ```text
-Metric-frozen proof:      to be verified by diff at merge — PR E touches no
-                          scoring path
+Metric-frozen proof:      VERIFIED BY DIFF at the final head — no scorer,
+                          metric, SNR, HealthGate-check or
+                          authority-semantics file outside docs/; no prompt
+                          or advice file anywhere in the diff; the ~100M
+                          prior byte-identical (§PR-E final validation)
 
 Name-keyed dependency
 added:                    MUST BE NONE in the behavioural sense (O-E-5).
@@ -1318,14 +1418,23 @@ Transport contract:       field:    candidate_id  (the ONLY cross-stage field)
                           measurements: NOT transported — native owners per O-E-3
                           branches: complete / stopped-early / legacy-None
 
-Subprocess evidence:      to be determined in E3 — confirm whether the
-                          validator's instantiation runs in-process or in a
-                          sandbox subprocess, and whether the count crosses it
+Subprocess evidence:      RESOLVED in E3 — the validator's instantiation
+                          check is IN-PROCESS (importlib load + instantiate
+                          inside the validator's own process,
+                          `_check_instantiation_and_gradient`), so the counts
+                          cross no process boundary before persistence. The
+                          tuner's training subprocess is untouched by PR E;
+                          the id reaches records via the in-process
+                          `_emit_record` seam
 
-Acceptance evidence:      Layers A-F deterministic; Layer G is a REQUIRED
-                          bounded pseudo-mode complete-iteration confirmation
-                          (persistence -> discovery -> join -> fan-in ->
-                          derived row); no real GPU or real LLM required
+Acceptance evidence:      Layers A-F deterministic and complete; the
+                          REQUIRED Layer-G pseudo Gate PASSED (persistence ->
+                          discovery -> join -> fan-in -> derived row, as one
+                          path); mutations 33 attempted / 30 behaviour-
+                          changing -> 30 caught / 2 equivalent + 1 invalid
+                          classified; legacy stage-local check run against
+                          the real preserved V20 campaign; full clean-tree
+                          suite + pyright in §PR-E final validation
 ```
 
 ---
