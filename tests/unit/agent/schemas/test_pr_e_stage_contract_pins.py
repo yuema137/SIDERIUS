@@ -110,6 +110,8 @@ VALIDATOR_INPUT_KEYS = {
 
 VALIDATOR_OUTPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
+    "realized_total_parameter_count",  # V21 PR E3 — O-E-6 FINAL
+    "realized_trainable_parameter_count",  # V21 PR E3 — O-E-6 FINAL
     "config_fields_valid",
     "description_valid",
     "error_message",
@@ -184,30 +186,31 @@ class TestTheFactsE2Changed:
             )
 
 
-class TestTheFactsE3Changes:
-    """ValidatorOutput measures nothing today; E3 adds the two counts."""
+class TestTheFactsE3Changed:
+    """E1 pinned ValidatorOutput as measuring nothing; E3 added exactly the
+    two O-E-6 counts — and nothing else numeric."""
 
-    def test_validator_output_has_no_numeric_field(self):
-        """The discarded-measurement fact: 22 fields, none numeric.
-
-        `_check_instantiation_and_gradient` instantiates the real model
-        (ml_code_validator_agent.py:371) and returns only booleans — the
-        parameter count is computed for free and thrown away. E3 changes
-        exactly this.
-        """
+    def test_the_only_numeric_fields_are_the_two_measurements(self):
         numeric = []
         for name, field in ValidatorOutput.model_fields.items():
             args = typing.get_args(field.annotation) or (field.annotation,)
             if any(a in (int, float) for a in args):
                 numeric.append(name)
-        assert numeric == []
+        assert sorted(numeric) == [
+            "realized_total_parameter_count",
+            "realized_trainable_parameter_count",
+        ], "a numeric field beyond the two O-E-6 measurements appeared unpinned"
 
-    def test_realized_count_fields_absent(self):
+    def test_both_measurement_fields_default_none(self):
         for name in (
             "realized_total_parameter_count",
             "realized_trainable_parameter_count",
         ):
-            assert name not in ValidatorOutput.model_fields
+            field = ValidatorOutput.model_fields[name]
+            assert field.default is None, (
+                f"{name} must default None — a numeric default would turn "
+                "measurement absence into a fake measurement (§E.3d.4)"
+            )
 
 
 class TestMeasurementOwnershipFacts:

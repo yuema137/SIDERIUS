@@ -139,6 +139,30 @@ class ValidatorOutput(BaseModel):
         "non-proposer candidate. Persisted in validation_{run_name}.json, "
         "which is what makes a died-at-validation candidate joinable.",
     )
+    realized_total_parameter_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="V21 PR E (O-E-6 FINAL) — TOTAL parameters of the "
+        "instantiated implementation: sum(p.numel() for p in "
+        "model.parameters()), measured from the SAME instance the "
+        "instantiation check already builds. The architecture's size. "
+        "None = the model never instantiated (measurement unavailable); "
+        "0 = a real measurement of a parameterless model. OBSERVATION "
+        "ONLY: no verdict, retry, admission, score or gate reads it. A "
+        "DIFFERENT convention from ExperimentRecord.model_params "
+        "(trainable-only) — never compare the two directly.",
+    )
+    realized_trainable_parameter_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="V21 PR E (O-E-6 FINAL) — TRAINABLE parameters of the "
+        "same instance: sum(p.numel() for p in model.parameters() if "
+        "p.requires_grad). What an optimizer would update; the "
+        "like-for-like partner of the proposal's parameter_count_estimate "
+        "(a trainable estimate) and of ExperimentRecord.model_params. "
+        "Differs from the total exactly when parameters are frozen. "
+        "OBSERVATION ONLY, same rules as the total.",
+    )
     model_type: str = Field(
         description="The model type key that was validated.",
     )

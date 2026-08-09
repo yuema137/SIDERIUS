@@ -906,41 +906,65 @@ both numbers live.
 
 #### 3. Implementation plan
 
-- [ ] Re-read `ml_code_validator_agent.py:336-400` and its call site at
-      `:633` immediately before editing; the model is instantiated at `:371`
-- [ ] Widen the helper's return, or return a small typed result — decide
-      after reading the call site, not before
-- [ ] Compute both counts per O-E-6 FINAL, on the SAME traversal of the
-      already-instantiated model:
-      `realized_total_parameter_count = sum(p.numel() for p in model.parameters())`;
-      `realized_trainable_parameter_count = sum(... if p.requires_grad)`.
-      `ExperimentRecord.model_params` is untouched and un-redefined. No
-      code computes a delta or ratio across unlike conventions
-- [ ] Return `None` for both when instantiation fails; never `0`
-- [ ] Assert the verdict booleans are unchanged for every existing case
+- [x] Re-read the helper (now at `:336-470` after E2's echo shifted
+      lines) and its call site; all NINE return statements enumerated
+      before editing
+- [x] Chose the widened tuple —
+      `(inst_ok, grad_ok, otype_ok, err, total, trainable)` — over a
+      typed result object: nine mechanical return-site edits versus a new
+      type for one private helper. **Implementation choice recorded:**
+      the counts are measured IMMEDIATELY after successful instantiation,
+      so the six post-instantiation failure returns (illegal declaration,
+      forward crash, non-tensor, wrong shape, backward crash) still carry
+      them — a candidate that instantiates but dies later is exactly one
+      the funnel must not lose, and `test_a_post_instantiation_failure_
+      still_carries_the_counts` pins it
+- [x] Both counts per O-E-6 FINAL, one traversal, same instance;
+      `model_params` untouched; nothing anywhere computes a
+      cross-convention delta or ratio (no consumer exists — E4's reader
+      displays, never derives)
+- [x] The three pre/at-instantiation failures return `None, None`; the
+      plugin-did-not-load branch at the call site likewise
+- [x] Verdict booleans unchanged: every existing verdict expectation is
+      byte-identical. **Deviation, recorded:** 11 tests in
+      `test_validator_agent.py` unpack the (private) helper directly and
+      needed their tuples widened — arity only, zero expectation values
+      changed; node-level tests untouched
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] A plugin of known size reports exactly those integers (both fields)
-- [ ] Instantiation failure → both `None`, never `0`
-- [ ] **Frozen-parameter fixture (required by O-E-6 FINAL):** a plugin
-      with a frozen parameter, where total and trainable observably
-      differ, pins **both fields independently** — total counts the
-      frozen parameter, trainable does not — and asserts nothing anywhere
-      computes a delta or ratio across unlike conventions
+- [x] Known-size fixture: Embedding(256,8) + Conv1d(8,256,1) →
+      **4352 / 4352**, hand-derived literals
+- [x] Instantiation failure and import error → both `None`, never `0`
+- [x] **Frozen-parameter fixture:** same architecture with the embedding
+      frozen → **total 4352, trainable 2304**, pinned independently; the
+      2048 gap is the observable distinction
+- [x] Zero-parameter buffer-only model → **0 / 0, a real measurement**
 
 **Integration / pseudo**
-- [ ] Both counts are present in the persisted `validation_{run_name}.json`
+- [x] Both counts present in the persisted `validation_{run_name}.json`
 
 **Negative / invalid input**
-- [ ] Import error and config error paths return the same verdict and
-      `None` for both counts
+- [x] Import / instantiation error paths: same verdicts, `None` counts
+- [x] **Negative finding, recorded as-is (E3 changes no verdict):** a
+      parameterless model CANNOT pass validation — `loss.backward()` on a
+      graph with no grad-requiring tensors raises, so the PRE-EXISTING
+      gradient check fails it. Its counts still read 0/0: a real size on
+      a candidate that failed for a reason unrelated to size. Pinned by
+      `test_a_zero_count_candidate_fails_on_the_PRE_EXISTING_gradient_rule`
+      so a later "fix" cannot silently couple verdict and measurement.
+      Consequence: **every passing model necessarily has ≥1 trainable
+      parameter**, which is what makes mutation M-E3-5b equivalent
 
 **Backward-compatibility / default parity**
-- [ ] **Verdict parity is the acceptance signal:** every existing
-      validator test passes **unmodified**
-- [ ] E1's `ValidatorOutput` key-set pin updated deliberately
+- [x] Verdict parity: `105 passed` in the pre-existing validator modules
+      with zero expectation changes (11 direct-unpack arity widenings
+      only); full validator dir `114 passed` with the new module
+- [x] E1's pins updated deliberately: `VALIDATOR_OUTPUT_KEYS` +2; the
+      no-numeric-field test became `TestTheFactsE3Changed` — the ONLY
+      numeric fields are the two O-E-6 measurements, both defaulting
+      `None` (a numeric default would fake a measurement, §E.3d.4)
 
 **Real-training Gate:** none. The count needs no training.
 
@@ -974,19 +998,28 @@ both numbers live.
 .venv/bin/python -m pytest tests/unit -q -m "not real_run" > /tmp/pytest.log 2>&1; echo $?
 ```
 
-- [ ] Validator suite unmodified, count and wall time — **to record**
-- [ ] Mutation: swap the two fields' expressions → must fail (the
-      frozen-parameter fixture is what makes this observable) — **to record**
-- [ ] Mutation: derive trainable from total (or vice versa) instead of
-      counting → must fail on the frozen fixture — **to record**
-- [ ] Mutation: return `0` instead of `None` on failure → must fail — **to record**
-- [ ] Mutation: let either count influence `passed` → must fail — **to record**
+- [x] Validator dir `114 passed in 2.00s`; three PR E modules + validator
+      `145 passed in 3.20s`
+- [x] Mutations — **8 attempted, 6 behaviour-changing → 6 caught,
+      2 classified**:
+
+      | # | mutation | result |
+      |---|---|---|
+      | M-E3-1 | the two expressions swapped | CAUGHT (frozen fixture) |
+      | M-E3-2 | trainable derived from total | CAUGHT (frozen fixture) |
+      | M-E3-3 | total derived from trainable | CAUGHT (frozen fixture) |
+      | M-E3-4 | instantiation failure returns `0` not `None` | CAUGHT |
+      | M-E3-5 | (harness error) comment-only edit | **INVALID** — changed no behaviour; recorded as a harness mistake, not a result |
+      | M-E3-5b | `passed and total > 0` | **EQUIVALENT, proved:** the pre-existing gradient check requires a successful `backward()`, which requires ≥1 grad-requiring parameter — so every passing model has `total ≥ trainable ≥ 1` and the guard can never flip a verdict. The zero-param finding above is the proof |
+      | M-E3-5c | `inst_ok` coupled to `total < 10_000` (non-equivalent replacement — the canonical 16,640-param fixture flips) | CAUGHT (2 failures) |
+      | M-E3-6 | counts dropped from the constructed output | CAUGHT (2 failures) |
 
 #### 8. Commit boundary
 
-- [ ] Diff touches the validator node, its schema, tests — nothing else
-- [ ] No protocol, no downstream schema, no verdict logic
-- [ ] Diff summary, staged file list, tests and deviations shown before committing
+- [x] Diff touches the validator node, its schema, tests — nothing else
+      (no protocol file, no downstream schema, no tuner file)
+- [x] No verdict logic changed; parity proved above
+- [x] Recorded in §3/§4/§7
 
 ---
 

@@ -381,7 +381,7 @@ class TestCheckInstantiationAndGradient:
     def test_valid_plugin_returns_true_true_none(self, tmp_path):
         path = tmp_path / "valid_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)
-        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert inst_ok is True
         assert grad_ok is True
         assert err is None
@@ -389,7 +389,7 @@ class TestCheckInstantiationAndGradient:
     def test_import_error_returns_false_false_message(self, tmp_path):
         path = tmp_path / "bad_import.py"
         path.write_text("import nonexistent_module_xyz_abc\n")
-        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -419,7 +419,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "wrong_shape.py"
         path.write_text(wrong_shape_src)
-        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert grad_ok is False
         assert err is not None
@@ -454,7 +454,7 @@ class TestCheckInstantiationAndGradient:
         """)
         path = tmp_path / "no_grad.py"
         path.write_text(no_grad_src)
-        inst_ok, grad_ok, _otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, _otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         # instantiation and forward pass succeed (correct shape)
         assert inst_ok is True
         # gradient check fails because output is detached
@@ -517,7 +517,7 @@ class TestDeclaredOutputContract:
         and emitting [B, T] validates. This test fails on pre-PR-A2 code."""
         path = tmp_path / "regressor_plugin.py"
         path.write_text(_regressor_plugin_src())
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
     def test_declared_classifier_with_3d_output_passes(self, tmp_path):
@@ -529,7 +529,7 @@ class TestDeclaredOutputContract:
                 'PLUGIN_MODEL_TYPE = "test_model"\nPLUGIN_OUTPUT_TYPE = "classifier"',
             )
         )
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
     def test_missing_declaration_is_read_as_classifier(self, tmp_path):
@@ -538,7 +538,7 @@ class TestDeclaredOutputContract:
         the producer side, not here."""
         path = tmp_path / "legacy_plugin.py"
         path.write_text(VALID_PLUGIN_SRC)  # no PLUGIN_OUTPUT_TYPE at all
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert (inst_ok, grad_ok, otype_ok, err) == (True, True, True, None)
 
     def test_declared_regressor_but_3d_output_is_refused(self, tmp_path):
@@ -550,7 +550,7 @@ class TestDeclaredOutputContract:
         )
         path = tmp_path / "lying_regressor.py"
         path.write_text(src)
-        inst_ok, _grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, _grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert otype_ok is False
         assert err is not None
@@ -561,7 +561,7 @@ class TestDeclaredOutputContract:
         """The mirror case."""
         path = tmp_path / "lying_classifier.py"
         path.write_text(_regressor_plugin_src(declared='"classifier"'))
-        inst_ok, _grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, _grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert inst_ok is False
         assert otype_ok is False
         assert err is not None
@@ -572,7 +572,7 @@ class TestDeclaredOutputContract:
         is how a metadata defect becomes wrong scientific semantics."""
         path = tmp_path / "nonsense_contract.py"
         path.write_text(_regressor_plugin_src(declared='"nonsense"'))
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
         assert err is not None
         assert "nonsense" in err
@@ -603,7 +603,7 @@ class TestDeclaredOutputContract:
         """)
         path = tmp_path / "tuple_out.py"
         path.write_text(src)
-        inst_ok, grad_ok, otype_ok, err = _check_instantiation_and_gradient(str(path))
+        inst_ok, grad_ok, otype_ok, err, _total, _trainable = _check_instantiation_and_gradient(str(path))
         assert (inst_ok, grad_ok, otype_ok) == (False, False, False)
         assert err is not None
         assert "tuple" in err.lower()
