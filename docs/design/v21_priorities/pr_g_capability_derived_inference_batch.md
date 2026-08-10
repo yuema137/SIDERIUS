@@ -1327,13 +1327,44 @@ G3       DONE — Option A: resolver prefers the probed hint + live
 G4       DONE — executed contract pin over both agent-inference-capable
          return families; census/docstring truth; 2/2 mutations caught;
          zero runtime diff (evidence in §G4.7)
-PR       none opened yet
+PR       opening — READY FOR OPERATOR REVIEW once CI is green on the
+         exact final HEAD. DO NOT MERGE (operator-owned).
 Gate     DONE — PASS (r2; r1 failed on a launcher-harness defect,
          proven and recorded; one authorized rerun). Evidence quoted
          in the Gate r1/r2 records below. The frozen doc's
          "operator-approved separately" clause was discharged by the
          operator's Implementation Working Rules (2026-08-10).
 jobs     no background jobs
+```
+
+### Terminal validation (2026-08-10, clean tree @ 2afce716)
+
+```text
+full unit suite   8277 passed, 3 skipped, 1 xfailed — rc=0 READ FROM
+                  THE LOG (scratchpad full_suite_2afce716.log);
+                  464 s wall. Zero failures — no pre-existing-failure
+                  classification needed.
+ruff check .      clean (rc=0)
+ruff format --check .  clean — 786 files (rc=0)
+pyright           CI-ONLY on this host (Node v10.19.0 cannot load the
+                  bundle; recorded at G1) — the CI run on the final
+                  HEAD is the pyright verdict for this PR.
+doc-sync          final quote-verification done: evaluate_time_skill.md
+                  kwarg row, inference_skill.md resolver section, the
+                  tuner .md PR G bullet, and the identity resolver
+                  signature each quoted against merged source.
+scope note        "full suite" = tests/unit (CI scope by design, §E.3d
+                  /"state the scope of any green claim"); the PR's own
+                  targeted integration/pseudo acceptance = the dual-mode
+                  coherence iteration, re-run GREEN at this head
+                  (1 passed, final_integration.log). The k9 dual-mode
+                  file FAILS at this head on `assert "Feasible" in
+                  stdout` (:268) — PROVEN PRE-EXISTING: the identical
+                  assertion fails at the merge base (master 51bc3a7a)
+                  from a clean git-archive checkout (k9_at_base.log,
+                  same message) — this is exactly the 0.R.6-recorded
+                  PR A isolated-preflight print relocation; outside CI
+                  scope, not caused and not fixed by PR G.
 ```
 
 ### PR-level Gate readiness packet (written BEFORE launch, 2026-08-10)
