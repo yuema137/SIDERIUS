@@ -39,45 +39,6 @@ that live outside `docs/design/`.
 | Path | Title / Topic | Status | Scope | Summary |
 |------|---------------|--------|-------|---------|
 | `docs/architecture.md` | Architecture overview | active | generic | Full system design (graph, nodes, protocols, skills) — canonical entry point for new contributors |
-| `docs/adaptive_new_model_proposer.md` | Adaptive New Model Proposer | active | mixed | Cumulative negative feedback for proposer (`disallowed_architectural_patterns`) |
-| `docs/aggregated_score_table_awareness.md` | Aggregated score-table awareness | active | mixed | Score-table rendering for LLM prompts |
-| `docs/align_denoising_score.md` | Align denoising score | active | task-specific | Canonical scoring formula (anchor-normalized) + legacy parity proof |
-| `docs/audit_and_optimize_token_usage_and_growth.md` | Token-usage audit | active | generic | Token-consumption profile per agent + growth analysis |
-| `docs/break_tuner_agent.md` | Planner/reflector split | active | generic | Tuner LLM cost-splitting design |
-| `docs/chain_skip_unproductive_iters_design.md` | Chain skip unproductive iters | active | generic | Delta-based skip-formal / bypass-time-budget gates |
-| `docs/checkpoint_l_sign_off.md` | Checkpoint L sign-off | archived | mixed | Loss inventory (L1–L6) Gate 2 + Gate 3 sign-off |
-| `docs/checkpoint_t_sign_off.md` | Checkpoint T sign-off | archived | mixed | Task config (T1–T4) sign-off |
-| `docs/commit_plan_ml_literature_review.md` | Lit-review commit plan | active | mixed | Execution log for the ml_literature_review node |
-| `docs/Consistent_growing_vocab_list.md` | Consistent growing vocab | active | generic | Cross-iteration knowledge accumulation (vocab, findings, cache, negatives, previous proposal) |
-| `docs/dynamic_search_pilot.md` | Dynamic search pilot | active | generic | Multi-round paper search loop for the lit-review node |
-| `docs/external_agents_architecture.md` | External agents architecture | active | generic | Vision doc for external-agent interoperability |
-| `docs/external_agents_for_proposer.md` | External agents for proposer | active | generic | Delegating proposer decisions to external agent implementations |
-| `docs/full_loop_5_agents.md` | Full loop with 5 agents | active | generic | End-to-end loop across proposer / implementor / validator / tuner / interpreter |
-| `docs/improving_validation_awareness.md` | Improving validation awareness | active | generic | Validator improvements (7-check pipeline) |
-| `docs/optimize_inference_and_scoring.md` | Optimize inference + scoring | active | mixed | Fix-1 (RSS ceiling), Fix-2 (subprocess spawn), Fix-3 (sentinel) — historical hardening |
-| `docs/paper_extract_pilot.md` | Paper extract pilot | active | generic | Lit-review compression pilot |
-| `docs/paper_resolver_pilot.md` | Paper resolver pilot | active | generic | Semantic Scholar + arXiv resolver pilot |
-| `docs/phase66_deterministic_vram_and_hardening.md` | Phase 6.6 hardening | archived | generic | Historical hardening pass |
-| `docs/phase66_ws_a_refactor_and_cleanup.md` | Phase 6.6 workstream A | archived | generic | Historical refactor notes |
-| `docs/phase66_ws_b_proposer_hardening.md` | Phase 6.6 workstream B | archived | generic | Historical proposer hardening |
-| `docs/phase67_infra_hardening_and_feedback_integrity.md` | Phase 6.7 infra hardening | archived | generic | Historical Phase 6.7 |
-| `docs/phase68_orchestrator_memory_and_resume.md` | Phase 6.8 memory + resume | archived | generic | Orchestrator memory hygiene + resume design |
-| `docs/phase68_task1_memory_diagnostic_20260427.md` | Phase 6.8 memory diagnostic | archived | generic | Diagnostic report dated 2026-04-27 |
-| `docs/proposer_prompt_audit.md` | Proposer prompt audit | active | generic | Audit of proposer prompt structure |
-| `docs/pseudo_test_infra.md` | Pseudo test infra | active | generic | Dual-mode pseudo/real integration test design |
-| `docs/refactor_formal_round_strategy.md` | Formal round strategy | active | generic | Strategy-based formal-round dispatch |
-| `docs/refactor_llm_bridge.md` | LLM Bridge refactor | active | generic | LLMBridge design + retry policy |
-| `docs/refine_inference_time_estimator.md` | Inference time estimator | active | generic | Inference-time gate / estimator refinement |
-| `docs/reliable_resource_proposer.md` | Reliable resource proposer | active | generic | VRAM/RSS budget-aware proposal design |
-| `docs/resource_estimator_implement.md` | Resource estimator impl | active | generic | Formal-round eval scope (Phase R) |
-| `docs/running_chain_test.md` | Chain runbook | active | mixed | Operational runbook for lilab + SDSC chain runs |
-| `docs/run_scoped_plugins.md` | Run-scoped plugins | active | generic | Per-run plugin isolation |
-| `docs/search_quality_validation.md` | Search quality validation | active | generic | Checkpoint S sign-off for lit-review search |
-| `docs/small_sample_trial.md` | Small sample trial | active | mixed | Multi-fidelity trial/formal mode |
-| `docs/soft_edge_for_all_nodes.md` | Soft edge for all nodes | active | generic | Graph edge soft-error handling |
-| `docs/trial_epoch_default.md` | Trial epoch default | active | mixed | Rationale for `--max_epochs 1` trial default |
-| `docs/V8_Gap_Report.md` | V8 Gap Report | archived | mixed | Historical v8 gap analysis |
-| `docs/validation_suite_runs.md` | Validation suite runs | active | generic | Validator suite documentation |
 
 ## Gate standards
 
