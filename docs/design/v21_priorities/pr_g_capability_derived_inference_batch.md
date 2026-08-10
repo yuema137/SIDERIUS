@@ -987,18 +987,34 @@ are batch-insensitive; the two changed payload strings are currently
 unread. The "add `explicit=` API without a caller" alternative is
 REJECTED as the §E.3d.1 anti-pattern. G3 = thread the live hop now +
 comment truth; severable if the operator prefers deferral.)
-- [ ] `resolve_inference_batch(model_type, explicit=None)`: prefer the
+- [x] `resolve_inference_batch(model_type, explicit=None)`: prefer the
       explicit probed batch when provided; table fallback otherwise —
       landed TOGETHER with its live caller (next step), never as an
-      uncalled parameter.
-- [ ] Tuner pre-phase site passes `active_params.get("inference_batch")`
+      uncalled parameter. *(Done — fail-closed validation like the G1
+      resolver: bool/non-int/≤0 → `ValueError`.)*
+- [x] Tuner pre-phase site passes `active_params.get("inference_batch")`
       — ordering already proven (0.R.5): the spec is built at :4917,
       after the hint capture at :4696, and `active_params` is already
       an argument of the helper. No phase reordering.
-- [ ] Correct the stale comments (identity :169-171, spec :130/:217,
+      *(Done — one argument at the `_handle_prephase_gpu_measurement`
+      resolve site (:760 region), comment updated to the truthful
+      resolution rule. Same commit as the resolver — no uncalled API.)*
+- [x] Correct the stale comments (identity :169-171, spec :130/:217,
       executor :1518-1524's "A.9 will remove" narrative → point at G4's
       actual disposition).
-- [ ] Unit tests per §4.
+      *(Done — both identity field comments, the spec field comment AND
+      its validator message, and the executor docstring now state:
+      probed hint authoritative, table fallback for no-hint callers,
+      agent-path fallback unreachable by construction pinned by G4.)*
+- [x] Unit tests per §4. *(14 tests in
+      `tests/unit/core/test_g3_measurement_identity_batch.py`: resolver
+      precedence/parity/negatives; the 0.R.12 safety pin
+      (`planned_config_hash` batch-insensitive; `inference_workload_hash`
+      batch-sensitive; training-phase compare ignores the batch;
+      inference-phase compare still flags the mismatch); and the
+      delete-the-hop payload-truth pair on the pre-phase helper
+      (hint → 64 in spec + planned identity; no hint → table 25, no
+      fabrication).)*
 
 #### 4. Validation plan
 - Unit: explicit beats table; absent explicit == today (parity).
@@ -1025,13 +1041,29 @@ comment truth; severable if the operator prefers deferral.)
 | Hint present for a training-phase spec | **Reflected in the recorded planned-identity payload** (`inference_batch_size`, `inference_workload_hash` — the payload-truth fix), but **inert to training semantics**: `planned_config_hash`, training-phase comparability (`COMPARABLE_FIELDS`), the worker, and cache/reuse are all batch-insensitive (0.R.12). Not the same as "ignored exactly as today" — the payload value changes 25→probed; only its downstream effect is nil |
 
 #### 7. Verification commands and evidence
-- [ ] `pytest tests/unit/core/ -k "identity or measurement_spec" -q` — **to record**
-- [ ] Stale-comment grep proof — **to record**
+- [x] `pytest tests/unit/core/ -k "identity or measurement_spec or
+      measurement_worker" -q` → **239 passed, 2 skipped** (8.81 s,
+      rc=0 from pytest) — every existing identity/spec/worker test
+      passes unmodified. New G3 file: 14 passed.
+- [x] Stale-comment grep proof: `grep -rn "same canonical source|same
+      one execute_inference uses|A.9 will remove" core/ agent/ nodes/`
+      → the ONLY hit is the executor's own retirement notice quoting
+      the retired plan ("V21 PR G (Q-G-4) retires the old \"A.9 will
+      remove...\""). No source comment still claims table==runtime.
+- [x] Mutations (2/2 attempted, 2/2 caught, site count==1, pycache
+      cleared, backup-restore, baseline re-run 14 passed):
+      identity precedence reversal → caught by the named
+      `test_explicit_beats_table` + the hinted payload-truth test;
+      tuner pre-phase hop deleted (`explicit=None`) → caught by the
+      hinted payload-truth test.
+- [x] ruff + format clean on all five touched files; pyright CI-only
+      on this host (G1 note).
 
 #### 8. Commit boundary
-- [ ] Diff = identity/spec + tuner one-argument threading + tests +
+- [x] Diff = identity/spec + tuner one-argument threading + tests +
       comment corrections; nothing else.
-- [ ] Show diff summary + evidence, then commit.
+- [x] ~~Show diff summary + evidence, then commit.~~ Superseded by the
+      Implementation Working Rules (autonomous semantic commits).
 
 ---
 
@@ -1245,7 +1277,10 @@ G2       DONE — zero tuner code change needed (§G2.0: the
          verdict flips, transport + 0.R.4 pins, C3b extension,
          pseudo coherence iteration, parity matrix, 2/2 mutations,
          comment truth, skill/node .md sync
-G3-G4    not started (G3 next, Option A)
+G3       DONE — Option A: resolver prefers the probed hint + live
+         pre-phase caller threading + comment truth; 0.R.12 pins;
+         2/2 mutations caught (evidence in §G3.7)
+G4       not started (next)
 PR       none opened yet
 Gate     not run
 jobs     no background jobs

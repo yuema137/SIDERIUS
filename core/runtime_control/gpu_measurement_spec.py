@@ -126,9 +126,11 @@ class GpuMeasurementSpec(BaseModel):
     #: rather than inferred.
     training_steps: int = Field(default=4, gt=0)
     inference_batches: int = Field(default=3, gt=0)
-    #: The batch the INFERENCE phase runs at, resolved by the PARENT from
-    #: `inference_batch_for(model_type)` -- the same canonical source
-    #: `execute_inference` uses. Required for an inference measurement.
+    #: The batch the INFERENCE phase runs at, resolved by the PARENT via
+    #: `resolve_inference_batch` — the probe-derived hint when one exists,
+    #: else the `inference_batch_for` table, exactly as
+    #: `execute_inference` resolves it (V21 PR G G3). Required for an
+    #: inference measurement.
     #:
     #: Formal inference runs punet at 25 while training runs at 1. Measuring
     #: the inference phase at the TRAINING batch reported 1050 MiB for a
@@ -214,8 +216,9 @@ class GpuMeasurementSpec(BaseModel):
         if self.request.phase == "inference" and self.inference_batch_size is None:
             raise ValueError(
                 "an inference-phase measurement requires inference_batch_size, "
-                "resolved from inference_batch_for(model_type); the training "
-                "batch is not the inference workload"
+                "resolved via resolve_inference_batch (probed hint when "
+                "available, else the registry table); the training batch is "
+                "not the inference workload"
             )
         return self
 

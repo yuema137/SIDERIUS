@@ -1513,12 +1513,16 @@ class TidmadSandbox:
                              and passed via --sample_set_json.
             inference_batch: Phase 6.6 A.10 — explicit batch chosen by the
                              pre-flight ``evaluate_vram_skill``. When provided,
-                             it is the authoritative runtime batch. When ``None``
-                             (legacy path and during the A.6-A.11 landing window),
-                             fall back to ``inference_batch_for(model_type)`` so
-                             callers not yet wired through the tuner keep running.
-                             A.9 will remove the fallback once every caller has
-                             been migrated.
+                             it is the authoritative runtime batch. When ``None``,
+                             fall back to ``inference_batch_for(model_type)``.
+                             V21 PR G (Q-G-4) retires the old "A.9 will remove
+                             the fallback" plan: the fallback is INTENTIONALLY
+                             retained for no-hint callers (``run_comparison.py``
+                             baselines, legacy validation scripts), and on the
+                             agent path it is unreachable by construction —
+                             every route to ``execute_inference`` carries a
+                             hint — a contract pinned by the G4 test on the
+                             feasible/CPU-mode resource_check returns.
             runtime_policy:  Optional RT2-D runtime policy dict (validated
                              against ``RuntimeControlPolicy``). Trial mode
                              only. The subprocess RESUMES the attempt's

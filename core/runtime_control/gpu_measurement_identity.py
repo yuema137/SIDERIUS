@@ -116,10 +116,13 @@ class PlannedCandidateIdentity(BaseModel):
     #: runtime flags. Shaped like C1's hash and NOT the same hash -- a
     #: different key set, a different name, and never capacity authority.
     planned_config_hash: str = Field(min_length=1)
-    #: The batch the INFERENCE phase runs at, resolved from
-    #: `inference_batch_for(model_type)` -- the same canonical source
-    #: `execute_inference` uses. `None` for a training-phase measurement,
-    #: where it is not part of the workload.
+    #: The batch the INFERENCE phase runs at, resolved by
+    #: `resolve_inference_batch` exactly as `execute_inference` resolves
+    #: it: the probe-derived hint when one exists (the agent path), else
+    #: the `inference_batch_for` table (V21 PR G G3 — previously this
+    #: recorded the table value unconditionally while runtime preferred
+    #: the hint). `None` for a training-phase measurement, where it is
+    #: not part of the workload.
     inference_batch_size: int | None = Field(default=None, gt=0)
     #: Present only for an inference measurement: the realized/planned hash
     #: bound to the inference batch. Kept SEPARATE from the config hash
@@ -149,10 +152,11 @@ class RealizedCandidateIdentity(BaseModel):
     #: C1's `candidate_config_hash`, from C1's builder. The one definition
     #: of "same realized configuration".
     realized_config_hash: str = Field(min_length=1)
-    #: The batch the INFERENCE phase runs at, resolved from
-    #: `inference_batch_for(model_type)` -- the same canonical source
-    #: `execute_inference` uses. `None` for a training-phase measurement,
-    #: where it is not part of the workload.
+    #: The batch the INFERENCE phase runs at, resolved by
+    #: `resolve_inference_batch` exactly as `execute_inference` resolves
+    #: it: the probe-derived hint when one exists, else the
+    #: `inference_batch_for` table (V21 PR G G3). `None` for a
+    #: training-phase measurement, where it is not part of the workload.
     inference_batch_size: int | None = Field(default=None, gt=0)
     #: Present only for an inference measurement: the realized/planned hash
     #: bound to the inference batch. Kept SEPARATE from the config hash
@@ -161,14 +165,29 @@ class RealizedCandidateIdentity(BaseModel):
     inference_workload_hash: str | None = None
 
 
-def resolve_inference_batch(model_type: str) -> int:
+def resolve_inference_batch(model_type: str, explicit: int | None = None) -> int:
     """The batch formal inference will actually run at.
 
-    THE canonical source, and the same one `execute_inference` uses
-    (`sandbox_executor.py:1483`). Resolved here so the probe cannot drift
-    from production, and deliberately NOT an operator CLI value: it is a
-    registered per-architecture production constant, not a Gate knob.
+    Mirrors `execute_inference`'s own resolution (`sandbox_executor.py:1543`):
+    a non-None probe-derived batch is AUTHORITATIVE; the registry table is
+    the fallback only when no hint exists (baselines, legacy callers, a
+    measurement requested before any preflight ran). V21 PR G G3: the
+    tuner's pre-phase site passes `active_params["inference_batch"]` (the
+    current attempt's probed batch), so the recorded planned-identity
+    payload states the batch production would really run — previously it
+    recorded the table value while runtime used the probe, a latent trap
+    for a future inference-phase measurement caller (a wrong-batch
+    inference measurement once produced a 3.47x under-read).
+
+    Deliberately NOT an operator CLI value: a production-resolved
+    constant, not a Gate knob. An invalid explicit value is rejected
+    loudly — never silently clamped or substituted (fail-closed).
     """
+    if explicit is not None:
+        # bool is an int subclass; a True/False batch is a caller bug.
+        if isinstance(explicit, bool) or not isinstance(explicit, int) or explicit <= 0:
+            raise ValueError(f"explicit inference batch must be a positive int; got {explicit!r}.")
+        return explicit
     from core.inference_defaults import inference_batch_for
 
     return int(inference_batch_for(model_type))
