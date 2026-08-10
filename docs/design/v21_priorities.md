@@ -1,6 +1,15 @@
 # SIDERIUS V21 Priorities
 
-**Status: OPEN, append-only during the V20 campaign.**
+**Status: CLOSED 2026-08-10 — the Part III execution plan is COMPLETE.
+All seven PRs are MERGED**: A #186, C #187, B #188, D #189, E #190,
+F #191, G #193 (merge commit `ca0d7524`). Global checkpoints 1–6 are
+DONE (see §E.4). What survives this ledger: the §E.3b follow-up
+register (none blocking; **FU-B-4** — live formal confirmation of the
+S3 surface — remains due before the first full V21 production
+campaign), and §E.6 (the first-experiment protocol, Candidate C),
+which governs the campaign itself and is executed under the launch
+protocols, not under this document. Historical content below is
+preserved as written.
 Created 2026-08-06 while V20 attempt 2 was running.
 
 ## Campaign state this ledger was written against (2026-08-07)
@@ -2873,6 +2882,118 @@ not a prerequisite for launching V21.
 
 ## PR G — Capability-derived inference batch
 
+**STATUS: MERGED 2026-08-10 — PR #193, merge commit `ca0d7524`,
+2026-08-10T21:50:23Z.** Reviewed final PR head `6aff04e8` (proven
+ancestor of master); 8 commits (design freeze `f48c1dee`;
+implementation `7cc6aef4` G1, `d4331ec7` G2, `0d8ccdfb` G3,
+`aee1115e` G4; docs/evidence `2afce716`, `844a329f`, `6aff04e8`).
+Exact-final-head CI SUCCESS (run 31430607965, headSha verified).
+NOT a V21 launch blocker. Frozen surfaces mechanically proven
+unchanged in the merged diff: scorer/metric, `batch_resolver` search
+semantics, admission ownership/semantics (O-C-2), all record schemas;
+`inference_batch_uncalibrated` remains observability-only. The
+detailed design doc
+(`docs/design/v21_priorities/pr_g_capability_derived_inference_batch.md`)
+is the historical engineering authority with per-commit evidence.
+
+### Final audited result (supersedes the original premise below)
+
+**Original premise — superseded.** This section's objective ("derive
+the inference batch from a measured memory profile rather than a
+name-keyed table; remove the name-keyed fallback; outputs
+byte-identical") was disproven by the PR G design audit — the eighth
+occurrence of the §E.3d.1 shape, in inverted form: the mechanism
+existed AND was already live.
+
+**Actual pre-PR-G state.** The probe-derived, name-blind batch
+(`evaluate_vram_skill/batch_resolver.py`) was ALREADY authoritative
+for agent-path runtime inference:
+`capability probe → resource_check["inference_batch"] → active_params
+→ inference runtime`. The real defect was **coherence**: runtime ran
+the probed batch while the wall-time forecast still priced the legacy
+table/fallback value, and the planned measurement-identity payload
+recorded the table value.
+
+**Final merged behavior:**
+
+1. **G1/G2 — forecast coherence.** The wall-time forecast consumes the
+   same probe-derived batch runtime uses. Implementation discovery
+   (bounded sequencing deviation, accepted): the tuner transport
+   already existed — `_run_time_preflight` splats `**active_params`,
+   so the value was present-but-unread; the wrapper/estimator
+   consumption (G1) made the approved behavior live and **G2 required
+   zero tuner transport-code change**, becoming the evidence/truth
+   commit.
+2. **The pricing bug was TWO-SIDED** (§0.R.10/0.R.10a of the PR doc):
+   probed B > 25 → the old table=25 forecast over-priced → false
+   `skipped_time_risk` rejection (≤ 2.56×); probed B < 25 →
+   under-priced → false time-risk acceptance (up to ~25× at B=1).
+   Final invariant: **the time gate prices inference at the batch that
+   will actually run.** No-hint paths (baselines, legacy scripts,
+   proposer advisory) are byte-identical.
+3. **G3 — identity payload truth.** The planned measurement-identity
+   payload now carries the probe-derived batch. Exact boundary
+   preserved: live measurements are TRAINING-phase; the inference
+   batch is inert to training `planned_config_hash`, training
+   comparability, worker behavior, cache/reuse and admission (0.R.12,
+   test-pinned). This is payload truth + latent-trap closure, NOT a
+   live inference-measurement equality.
+4. **G4 — contract, not deletion.** The legacy no-hint fallback/table
+   REMAINS for legitimate consumers (baselines, legacy scripts,
+   proposer advisory). No new production observability. An executed
+   contract test pins that every feasible/CPU-mode agent-path
+   `resource_check` capable of reaching inference carries
+   `inference_batch: int ≥ 1` — so the executor fallback is
+   unreachable on the normal agent path by construction.
+5. **A.9 retired.** The old "eventually delete the fallback" promise
+   is replaced by: retain the fallback for legitimate no-hint
+   consumers; pin the agent-path contract that makes it unreachable
+   there.
+
+### Decisive evidence (details in the PR doc)
+
+- Deterministic tests cover BOTH pricing directions (verdict flips
+  with the budget set strictly between old and new forecasts).
+- A pseudo dual-mode tuner iteration proves
+  forecast == runtime == record batch.
+- Hardware-local builtin parity matrix (lilab reference host): probed
+  vs table divergence is COMMON even on builtins (completed probes all
+  resolved 16 vs table 25/10; `gated_fno` has no table entry at all).
+- Mutation account: **9/9 behavior-changing mutations caught** across
+  G1–G4 (§E.3d.7 discipline: by category in the PR doc, none
+  surviving).
+- Terminal unit scope: **8277 passed / 3 skipped / 1 xfailed /
+  0 failed, rc=0** at the last executable-content commit `2afce716`;
+  everything after is diff-proven docs-only; exact-final-head CI green.
+- **Real Gate (one bounded cold-start run, generated model with no
+  table entry):** old fallback batch 25 → probe-derived = forecast =
+  runtime batch **64**; `inference_ms_source ==
+  "training_warmup_x2.7_fallback"`; time gate ALLOW 3.71/20 min; the
+  frozen scorer ran and produced a score; the HealthGates then
+  invalidated the collapsed low-budget model as expected — a correct
+  health verdict, not an infrastructure failure. History: the first
+  Gate run failed because the VALIDATION LAUNCHER was not
+  multiprocessing-spawn-safe (the scorer's spawn workers re-imported
+  an unguarded `__main__`); the production SHA was not implicated, the
+  launcher defect was audited and fixed, and one bounded rerun on the
+  same tested implementation passed.
+
+### Remaining limitations / follow-ups (recorded, no new work here)
+
+- The estimator uses one global ceil while runtime batches per file —
+  the already-audited bounded residual (≤ n_files − 1 steps); NOT
+  changed by PR G.
+- The builtin parity matrix is hardware-local (PR F calibration
+  boundary) — never a universal calibration.
+- PR F's **F-A3** torchinfo exception-laundering was reproduced by the
+  transformer parity probe (a 204.8 GB ENOMEM at B=64 laundered into a
+  generic RuntimeError) — remains outside PR G.
+- The k9 stdout integration failure is pre-existing (PR A's
+  isolated-preflight print relocation), proven at the merge base — not
+  a PR G regression.
+
+> **Original section as frozen pre-audit (historical record):**
+>
 > **Updated 2026-08-08 from A/B/C (§E.3d). This is the PR most changed by
 > what B and C found.**
 >
@@ -2942,7 +3063,7 @@ Byte-identical inference outputs; name table removed from the path.
 | 3 | Novel model name executes through every production stage, proven in a clean subprocess | PR C | **DONE** `cac86c94` |
 | 4 | **Declared scientific authority reaches formal records and governs downstream consumers correctly** | PR D | **DONE** — PR #189 merged `aace4abb` |
 | 5 | Proposal-scale funnel measurable across all five stages, joined on candidate identity | PR E | **DONE** — PR #190 merged `f1f4c30a` |
-| 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | ongoing |
+| 6 | Acceptance evidence complete (see below); no new name-keyed correctness/reachability dependency | all | **DONE** 2026-08-10 — with PR G (#193) merged, every V21 PR carries full CI + its targeted reachability/transport tests + its bounded real validation where required, recorded in its design doc; every PR's review fields declare "name-keyed dependency added: none" (PR G REDUCES name-keyed reliance) |
 
 > **Checkpoint 4 replaced 2026-08-08** (§E.3e). It formerly read *"Agent
 > sees per-file evidence; scores byte-identical"*, which the audit showed
@@ -2997,6 +3118,10 @@ launch-gating checkpoints are satisfied.** The V21 launch-blocking chain
 A → C → B → D → E is complete; F and G remain non-blocking and are bound
 by §E.3d including PR D's additions §E.3d.9-10. PR F starts with a fresh
 audit, never from the old ledger premise.
+
+**Progress, 2026-08-10 (final):** `A ✓  C ✓  B ✓  D ✓  E ✓  F ✓  G ✓`
+— the full serialization is complete; PR G merged as #193
+(`ca0d7524`). This ledger is CLOSED (see the header).
 
 ## E.6 First V21 experiment, once A-E are merged
 
