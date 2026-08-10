@@ -1308,6 +1308,17 @@ Acceptance evidence:      parity matrix + coherence invariant + one
 
 ## Implementation status
 
+**MERGED 2026-08-10 — PR #193, merge commit `ca0d7524`,
+2026-08-10T21:50:23Z** (operator-approved after the terminal-state
+reconciliation). Final reviewed PR head: `6aff04e8` (the docs-only
+terminal-reconciliation commit — the 8th commit, which the block below
+could not name for itself); exact-final-head CI SUCCESS: run
+31430607965, headSha == `6aff04e8`, API-verified. Ancestry of the
+reviewed head in master proven at merge. The canonical merged summary
+lives in `v21_priorities.md` (PR G STATUS block); this document is the
+historical engineering ledger. The block below is preserved as the
+pre-merge terminal state:
+
 **IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW. NOT MERGED**
 (operator-owned; terminal reconciliation 2026-08-10).
 
