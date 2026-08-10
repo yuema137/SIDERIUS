@@ -1306,15 +1306,25 @@ Acceptance evidence:      parity matrix + coherence invariant + one
 
 ---
 
-## Implementation status (live — updated as work proceeds)
+## Implementation status
 
-**IMPLEMENTATION IN PROGRESS** (started 2026-08-10).
+**IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW. NOT MERGED**
+(operator-owned; terminal reconciliation 2026-08-10).
 
 ```text
+PR       #193 — OPEN, MERGEABLE/CLEAN
 branch   feat/pr-g-capability-derived-inference-batch
 base     master @ 51bc3a7a (the rev-3 design commit)
-HEAD     f48c1dee (design freeze) + G1 (7cc6aef4, message amended
-         pre-push with the §G2.0 correction) + G2
+commits  7 in the PR (master..HEAD, re-derived from git):
+         f48c1dee  design FROZEN (operator-approved; pre-session)
+         7cc6aef4  G1 — both forecast seams (implementation)
+         d4331ec7  G2 — evidence + comment truth (implementation)
+         0d8ccdfb  G3 — identity hint preference (implementation)
+         aee1115e  G4 — feasible-return contract (implementation)
+         2afce716  Gate PASS record + truthful K.2.5-8 warning
+                   (docs + the warning-text change in wrapper.py —
+                   the LAST executable-content commit)
+         844a329f  terminal-validation record (docs-only)
 G1       DONE — both seams + 16 tests + 3/3 mutations caught (§G1.7)
 G2       DONE — zero tuner code change needed (§G2.0: the
          **active_params hop pre-exists); evidence = 2-direction
@@ -1327,15 +1337,29 @@ G3       DONE — Option A: resolver prefers the probed hint + live
 G4       DONE — executed contract pin over both agent-inference-capable
          return families; census/docstring truth; 2/2 mutations caught;
          zero runtime diff (evidence in §G4.7)
-PR       opening — READY FOR OPERATOR REVIEW once CI is green on the
-         exact final HEAD. DO NOT MERGE (operator-owned).
 Gate     DONE — PASS (r2; r1 failed on a launcher-harness defect,
-         proven and recorded; one authorized rerun). Evidence quoted
-         in the Gate r1/r2 records below. The frozen doc's
-         "operator-approved separately" clause was discharged by the
-         operator's Implementation Working Rules (2026-08-10).
+         proven and recorded; one authorized rerun). Records below.
+CI       SUCCESS at 844a329f (run 31427565937, headSha API-verified;
+         the run's type check is the authoritative pyright evidence —
+         local pyright cannot run on this host, Node v10.19.0).
+         This terminal-reconciliation commit is itself DOCS-ONLY (this
+         ledger file), so the executable tree is unchanged from
+         844a329f; CI on the new exact final HEAD is re-verified
+         after push and quoted in the operator merge packet — never
+         reused from a previous head.
+local terminal validation
+         full tests/unit suite at 2afce716 (clean tree):
+         8277 passed / 3 skipped / 1 xfailed / 0 failed, pytest rc=0
+         read from the log. PROOF the verdict carries to the final
+         head: `git diff 2afce716..844a329f` = ONE file, this ledger
+         (+32/−1) — non-executable only, so the executable tree at
+         844a329f is byte-identical to the locally validated one.
+tree     clean at 844a329f
 jobs     no background jobs
 ```
+
+*(This block is the terminal state; the earlier per-commit sections
+retain their as-of-writing prose as the historical ledger.)*
 
 ### Terminal validation (2026-08-10, clean tree @ 2afce716)
 
