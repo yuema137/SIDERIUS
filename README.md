@@ -63,14 +63,12 @@ trigger automatic retry with error feedback.
 **Reliability guardrails** (full design in the linked docs):
 
 - **Pre-flight resource gating** — the proposer must justify VRAM + wall-time estimates against
-  trial / formal budgets. Over-budget proposals get up to 3 revision rounds. See
-  [`docs/reliable_resource_proposer.md`](docs/reliable_resource_proposer.md).
+  trial / formal budgets. Over-budget proposals get up to 3 revision rounds.
 - **Per-round attempt budget** — `--attempts_per_round` caps retries inside one planner round;
-  `--max_fail_rounds` triggers a clean abort on a streak of fails. See
-  [`docs/resource_estimator_implement.md`](docs/resource_estimator_implement.md).
+  `--max_fail_rounds` triggers a clean abort on a streak of fails.
 - **Cumulative negative feedback** — architectural patterns that gate-exhausted in earlier
   iterations are tagged and forwarded as `disallowed_architectural_patterns`. The proposer
-  won't re-propose them. See [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md).
+  won't re-propose them.
 - **Pluggable HealthGates** — YAML-configured check-and-route gates (`configs/health_checks.yaml`)
   fire at tuner round boundaries. Six shipped checks: three blocking
   (`output_diversity`, `output_std`, `amplitude_collapse` — catch mode-collapse before it burns
@@ -84,8 +82,7 @@ trigger automatic retry with error feedback.
 - **Cross-iteration knowledge accumulation** — runtime vocab, key findings, per-model knowledge
   cache, negative feedback (physical rejections + gate exhaustions), and the previous iter's
   proposal are all carried forward by `sdsc_submission_scripts/run_one_iteration.py` and injected
-  into the next iter's proposer / interpreter / tuner. See
-  [`docs/Consistent_growing_vocab_list.md`](docs/Consistent_growing_vocab_list.md).
+  into the next iter's proposer / interpreter / tuner.
 
 ---
 
@@ -187,10 +184,8 @@ python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
 ```
 
 The planner/reflector split (`--reflect_provider` / `--reflect_model_id`) cuts top-tier LLM
-quota use roughly in half. See [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md).
-Trial-mode details (sampling strategies, portions, time / VRAM budgets) are in
-[`docs/small_sample_trial.md`](docs/small_sample_trial.md). Delta-based skip-formal and
-bypass-time-budget gates suppress spurious formal promotions when a new plan's trial score
+quota use roughly in half.
+Delta-based skip-formal and bypass-time-budget gates suppress spurious formal promotions when a new plan's trial score
 barely moves; their flags (`--skip_formal_min_delta`, `--bypass_formal_time_budget_min_delta`)
 live on the CHAIN entry points (`run_chain.sh` / `run_one_iteration.py`), not on the
 single-tuner CLI — see the `HyperparamTuningInput` schema docstring in
@@ -211,9 +206,6 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --human_advice_file advice/workflow/human_advice_chain_test.json \
     --llm_config llm_configs/openai_tiered_v1.json
 ```
-
-Operational runbook (workspace conventions, restart from failed iter, SDSC memory rule):
-[`docs/running_chain_test.md`](docs/running_chain_test.md).
 
 ### Scoped run — restrict a chain to a file subset (DataScope)
 
@@ -257,9 +249,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
 ```
 
 Operator-visible knobs (root papers, S2 search budget, confidence rubric, task description)
-live in [`configs/lit_review_config.yaml`](configs/lit_review_config.yaml). Behavioral
-validation: [`docs/search_quality_validation.md`](docs/search_quality_validation.md)
-(Checkpoint S sign-off; 0.90 max confidence, 4 v=1 findings across 5 runs).
+live in [`configs/lit_review_config.yaml`](configs/lit_review_config.yaml).
 
 ### Baseline comparison + dashboard
 
@@ -326,11 +316,9 @@ SIDERIUS/
 3. **`LLMBridge` is the single API gateway**: every agent goes through it. Direct
    `OpenAI()` constructors are CI-banned outside `agent/llm_bridge.py`.
 4. **Plugins are pluggable + run-scoped**: agent-generated models extend `MODEL_REGISTRY`
-   at runtime; each run stages its plugin into `{workspace}/plugins/{run_name}/`. See
-   [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md).
+   at runtime; each run stages its plugin into `{workspace}/plugins/{run_name}/`.
 5. **One scoring ruler (Option B, global `s_max`)**: model output, raw-baseline, and
-   perfect-denoiser ceiling all share the same FFT path and `log_{5.27}` step. See
-   [`docs/align_denoising_score.md`](docs/align_denoising_score.md).
+   perfect-denoiser ceiling all share the same FFT path and `log_{5.27}` step.
 6. **`docs/commit_plan_*.md` is the live execution doc** for any multi-commit feature.
    Update the design doc and the code together; never let them drift.
 
@@ -339,8 +327,7 @@ SIDERIUS/
 ## Testing
 
 The pyramid has five tiers, distinguished by *how many nodes* a test exercises and
-*whether it hits real LLM APIs / real training*. Full design in
-[`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md).
+*whether it hits real LLM APIs / real training*.
 
 ```bash
 # Always (CI gate)
@@ -366,42 +353,24 @@ The full set lives under [`docs/`](docs/). The curated start:
 **Design + invariants**
 - [`docs/architecture.md`](docs/architecture.md) — full system design (graph, nodes, protocols, skills)
 - [`docs/design/agent_composition_architecture.md`](docs/design/agent_composition_architecture.md) — three-layer roadmap (nodes → protocols → orchestrators; Run Monitor vision)
-- [`docs/external_agents_architecture.md`](docs/external_agents_architecture.md) — external-agent design vision
 - [`CLAUDE.md`](CLAUDE.md) — coding standards every contributor must follow
 - [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md) — node-directory contract
 
 **Workflow + agents**
-- [`docs/full_loop_5_agents.md`](docs/full_loop_5_agents.md) — core 5-agent workflow (lit-review is the 6th)
-- [`docs/external_agents_for_proposer.md`](docs/external_agents_for_proposer.md) — lit-review spec
-- [`docs/commit_plan_ml_literature_review.md`](docs/commit_plan_ml_literature_review.md) — lit-review execution log
-- [`docs/search_quality_validation.md`](docs/search_quality_validation.md) — Checkpoint S sign-off
-- [`docs/running_chain_test.md`](docs/running_chain_test.md) — operational runbook (lilab + SDSC)
-- [`docs/Consistent_growing_vocab_list.md`](docs/Consistent_growing_vocab_list.md) — cross-iteration knowledge carry-over (vocab, findings, cache, negatives, previous proposal)
 
 **Custom-loss inventory + task config (recent)**
 - [`docs/design/enable_loss_inventory.md`](docs/design/enable_loss_inventory.md) — proposer proposes custom loss plugins symmetric with model plugins; `LOSS_REGISTRY` + promotion contract
-- [`docs/checkpoint_l_sign_off.md`](docs/checkpoint_l_sign_off.md) — Checkpoint L (loss inventory) Gate 2 + Gate 3 sign-off
 - [`docs/design/enable_global_task_config.md`](docs/design/enable_global_task_config.md) — `configs/task_config.yaml` de-hardcodes `task_description` + `forward_contract` across implementor / proposer / tuner / lit-review
-- [`docs/checkpoint_t_sign_off.md`](docs/checkpoint_t_sign_off.md) — Checkpoint T (task config) sign-off
 
 **HealthGate + tuner controls**
 - [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md) — HealthGate skills + `configs/health_checks.yaml`
-- [`docs/break_tuner_agent.md`](docs/break_tuner_agent.md) — planner/reflector split
-- [`docs/small_sample_trial.md`](docs/small_sample_trial.md) — multi-fidelity trial/formal mode
-- [`docs/hyperparameter_tuner_features.md`](docs/hyperparameter_tuner_features.md) — tuner prompt features
-- [`docs/refactor_formal_round_strategy.md`](docs/refactor_formal_round_strategy.md) — strategy-based formal-round dispatch
 
 **Scoring**
-- [`docs/align_denoising_score.md`](docs/align_denoising_score.md) — canonical: ruler derivation + legacy-parity proof
 - [`reference_data/raw_and_ground_score.md`](reference_data/raw_and_ground_score.md) — per-file raw + ceiling table
 
 **Reliability**
-- [`docs/reliable_resource_proposer.md`](docs/reliable_resource_proposer.md) — pre-flight + revision loop
-- [`docs/adaptive_new_model_proposer.md`](docs/adaptive_new_model_proposer.md) — cumulative negative feedback
-- [`docs/run_scoped_plugins.md`](docs/run_scoped_plugins.md) — per-run plugin isolation
 
 **Test infra + gates**
-- [`docs/pseudo_test_infra.md`](docs/pseudo_test_infra.md) — dual-mode pseudo/real tests
 - [`docs/gates/gate_testing_standard.md`](docs/gates/gate_testing_standard.md) — canonical Gate testing standard (params + pass criteria)
 
 Per-developer memories live under `docs/memories/` (gitignored). See `docs/memories/README.md`.
