@@ -2708,6 +2708,65 @@ corrective change to advice or thresholds in the diff.
 
 ## PR F — Inspection-cost scaling study (measure only)
 
+> ## STATUS: STUDY COMPLETE 2026-08-09 — awaiting operator review, NOT merged
+>
+> Branch `feat/pr-f-inspection-cost-study`. Live ledger:
+> `v21_priorities/pr_f_inspection_cost_study.md`; deliverable:
+> `reports/v21_pr_f_inspection_cost/report.md`. Zero production diff.
+>
+> **What the F2a pilot + reproducibility rerun established (real CPU;
+> the final formal F2b evidence is the bounded subset below):** the V20
+> inspection timeout is a
+> REPRODUCIBLE measurement — `wavenet_30layer_baseline` (7.09 M params)
+> probes 143–150 s exact at B=64 (two repeats per run) against the
+> post-hoc 120 s budget and raises the native
+> `BatchSearchTimeout(batch_candidate, B=64)` verbatim in both runs —
+> six over-budget observations across two independent runs; its
+> per-batch curve is linear
+> (≈2.34 s/unit, censoring onset B≈51). Meanwhile a 2.62 B-param
+> gated_fno probes UNDER budget and completes with a MEASURED
+> no-feasible-batch VRAM verdict. **Inspection cost is
+> architecture-shaped, not size-shaped** — the simple "parameter count →
+> timeout" story is rejected. Classification (frozen rule, union of both
+> runs): 26 CLEAR / 1 WOULD_BE_CENSORED / 0 INDETERMINATE, 0 illegal
+> flips.
+>
+> **The full 83+29-entry sweep was deliberately NOT run** (operator
+> decision at the STOP gate): the pilot priced it at 10–30 h, PR F is not
+> a launch blocker, and the causal question was already answered; a
+> future budget change should be preceded by a targeted per-family
+> ladder study, for which the frozen 107-entry manifest and harness
+> stand ready.
+>
+> **The bounded stratified subset (operator MINIMUM-SUFFICIENT-EVIDENCE
+> correction, executed 2026-08-09):** 8 timing-blind entries from the
+> frozen manifest; 163 measurements (162 exact + 1 bound-only);
+> verdicts 54 CLEAR / 0 WOULD_BE_CENSORED / 1 INDETERMINATE. The builtin
+> WaveNet width ladder scales ~2× per channel-doubling (15 → 28 → 56 s
+> at B=64; ×4 step extrapolates to ≈110 s, just under budget) while the
+> 30-layer generated cousin is censored at only 7 M params — **within
+> the incident family, DEPTH crosses the budget before width**. Every
+> other sampled realized family (unet 86.9 M, fourier/pyramid at full
+> segment length, rnn/gru) clears with wide margins. **New finding
+> F-A4 — a third censoring mechanism, host memory:** the 1 M-param
+> selective-SSM at B=64 × seg 40,000 drove the in-process probe to
+> 47 GB anon-RSS and a kernel OOM kill (dmesg 2026-08-09 15:39:12) —
+> the documented 2026-07-31 host-takedown class that production's
+> isolated worker subprocess contains; recorded under the frozen
+> deadline rule, and the ×4 ladder step was declined for host safety
+> (deviation recorded in the PR F ledger's F2b-subset.R block).
+>
+> **Findings (FU-F-1, observations not tasks):** two of the five declared
+> ProbeBudgets are INERT — `single_inspection_seconds` enforced nowhere;
+> `preflight_total_seconds=1200` unconsumed while the real bound is a
+> hardcoded 900 s subprocess deadline (7th §E.3d.1 instance). Plus F-A3:
+> torchinfo launders in-hook SIGALRMs into RuntimeError.
+>
+> **Recommendation (implemented NOWHERE):** do not raise 120→300
+> globally; if change is pursued, prefer staged inspection / cheaper
+> analytic pre-flight / architecture-aware budgets, justified by the
+> targeted ladder study.
+
 > **Updated 2026-08-08 from A/B/C (§E.3d).** A measure-only study is
 > governed by the minimum-bounded-validation rule, and by one practical
 > fact PR B hit at Gate time:

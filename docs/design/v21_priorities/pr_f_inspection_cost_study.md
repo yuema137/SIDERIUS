@@ -1,15 +1,19 @@
 # PR F — Inspection-cost scaling study (measure only)
 
-**Status: DESIGN REVISION 3 — 2026-08-09, returned for final operator
-approval. NOT approved for implementation; no production code, test,
-schema, launcher or scorer file is touched by this document.**
-Q-F-1 APPROVED, Q-F-3 APPROVED (operator, 2026-08-09). Q-F-2 approved in
-principle; this revision applies the five narrow methodology
-reconciliations the operator required — per-operation timeout semantics
-matched to production's own enforcement styles, native
-`BatchSearchTimeout` outcomes preserved verbatim, the wall-expiry
-completion rule, the timing-blind grid rule, and the interpretation
-boundary.
+**Status: STUDY COMPLETE 2026-08-09 (operator-corrected bounded scope) —
+awaiting operator review of the PR. NOT merged. Zero production diff.**
+Q-F-1/Q-F-2/Q-F-3 all APPROVED FINAL. F1 (harness, `b680ea17`) froze the
+methodology before data; F2a (`2e2c6465`) ran the real pilot twice under
+its wall and reproduced the V20 incident in six over-budget
+observations; the F2b full sweep
+was priced at 10–30 h by the pilot, and the operator's
+MINIMUM-SUFFICIENT-EVIDENCE correction replaced it with a bounded,
+timing-blind 8-entry stratified subset — executed 2026-08-09
+(`9e2c6941`), results in the F2b-subset.R block: 163 measurements,
+54 CLEAR / 1 INDETERMINATE; the wavenet width ladder (~2× per
+channel-doubling; depth, not width, crosses the budget) and finding
+F-A4 (host-memory censoring, kernel OOM kill). Deliverable:
+`reports/v21_pr_f_inspection_cost/report.md`.
 
 | | |
 |---|---|
@@ -443,18 +447,18 @@ tests/unit/scripts/test_inspection_cost_study*.py
 
 #### 3. Implementation plan
 
-- [ ] Re-read `batch_resolver.py:100-260`, `structural_probe.py:225+`,
+- [x] Re-read `batch_resolver.py:100-260`, `structural_probe.py:225+`,
       `wrapper.py:111,:580-660` immediately before writing; confirm
       signatures, the candidate tuple import, and `_forward_pass_timeout`'s
       import path
-- [ ] Manifest: population A via the REAL plugin loader (loadability
+- [x] Manifest: population A via the REAL plugin loader (loadability
       authority; failures recorded `unloadable`, never skipped);
       population B from §0.C's per-architecture ladders, instantiation-
       checked, `invalid_config` recorded; every entry carries population
       label, exact config, both O-E-6 parameter counts
-- [ ] Manifest determinism: content hash; seeded ordering; no wall-clock
+- [x] Manifest determinism: content hash; seeded ordering; no wall-clock
       or unseeded randomness anywhere in manifest generation
-- [ ] Harness — PER-OPERATION invocation seams (§0.E/§0.F; the
+- [x] Harness — PER-OPERATION invocation seams (§0.E/§0.F; the
       operator's reconciliation 1, do not unify):
       `candidate_probe`: REAL `probe_activation_footprint` under a 240 s
       emergency backstop (`_forward_pass_timeout`); exact elapsed kept,
@@ -470,26 +474,26 @@ tests/unit/scripts/test_inspection_cost_study*.py
       `native_timeout`, lower bound 180. **NO 2× relaxation for this
       operation** — bypassing the native preemptive bound would measure
       something production never runs
-- [ ] Walls: `--max-wall-seconds` checked between measurements; clean
+- [x] Walls: `--max-wall-seconds` checked between measurements; clean
       stop with a wall-expiry marker in the file
-- [ ] Append-per-point writes; overwrite of an existing file refused
+- [x] Append-per-point writes; overwrite of an existing file refused
       loudly
-- [ ] `classify.py`: the frozen §0.F reconciliation rule, pure function
+- [x] `classify.py`: the frozen §0.F reconciliation rule, pure function
       over raw measurements — the report may only call it, never inline
       its own
-- [ ] Unit fixtures: tiny CPU models only (sub-second); the real
+- [x] Unit fixtures: tiny CPU models only (sub-second); the real
       populations are F2's business
 
 #### 4. Validation plan
 
 **Unit**
-- [ ] Manifest bit-identical across two generations (hash equality)
-- [ ] Population labels present on every entry; a pooled-statistics
+- [x] Manifest bit-identical across two generations (hash equality)
+- [x] Population labels present on every entry; a pooled-statistics
       helper does not exist (the report tests assert per-population
       grouping)
-- [ ] Ladder configs instantiation-checked; an invalid config yields
+- [x] Ladder configs instantiation-checked; an invalid config yields
       `invalid_config` with the constructor error
-- [ ] §0.F classification rule: parametrized truth table —
+- [x] §0.F classification rule: parametrized truth table —
       all-under → CLEAR; all-over → WOULD_BE_CENSORED; exact-over
       (post-hoc completed OR a native `BatchSearchTimeout` record's exact
       elapsed) counts as over WITH exact time; native training-probe
@@ -497,28 +501,28 @@ tests/unit/scripts/test_inspection_cost_study*.py
       counts as over-censored at its backstop value and is DISTINCT from
       native_timeout; straddle → INDETERMINATE; any deadline →
       INDETERMINATE; union-of-reruns can only move toward INDETERMINATE
-- [ ] Envelope preservation: a `native_timeout(full_search)` measurement
+- [x] Envelope preservation: a `native_timeout(full_search)` measurement
       carries the native `ProbeTimeoutRecord` verbatim (`model_dump`
       round-trips), and the report can name which native operation
       (`batch_candidate` vs `batch_search`) refused
-- [ ] Summaries exclude censored repeats from median/min/max and carry
+- [x] Summaries exclude censored repeats from median/min/max and carry
       `n_completed/n_censored/n_deadline`
 
 **Integration / pseudo**
-- [ ] End-to-end over ≤3 fixture models: valid append-per-point file;
+- [x] End-to-end over ≤3 fixture models: valid append-per-point file;
       same-seed re-run → identical manifest hash and dispositions
-- [ ] Wall expiry mid-run: file retains completed points + expiry marker
+- [x] Wall expiry mid-run: file retains completed points + expiry marker
 
 **Negative / invalid input**
-- [ ] A fixture with a deliberately tiny backstop produces
+- [x] A fixture with a deliberately tiny backstop produces
       `harness_backstop` with `lower_bound_seconds = backstop` and **no
       elapsed value**; the record reuses `ProbeTimeoutRecord` fields and
       `is_capacity_evidence is False`
-- [ ] Overwrite refusal
+- [x] Overwrite refusal
 
 **Backward-compatibility / default parity**
-- [ ] Zero production diff (commit-boundary `git diff --name-only`)
-- [ ] The harness's reported "current budgets" equal the production
+- [x] Zero production diff (commit-boundary `git diff --name-only`)
+- [x] The harness's reported "current budgets" equal the production
       `ProbeBudgets()` defaults — budget drift is visible
 
 **Real-training Gate:** none — CPU-only by design.
@@ -570,8 +574,8 @@ tests/unit/scripts/test_inspection_cost_study*.py
 PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
 ```
 
-- [ ] Unit counts / wall time — **to record**
-- [ ] Mutations — **to record**, at minimum: harness reimplements a probe
+- [x] Unit counts / wall time — **to record**
+- [x] Mutations — **to record**, at minimum: harness reimplements a probe
       → fail; censored point written with an exact elapsed → fail;
       exact-over point written as censored → fail; **training probe
       wrapped at 2×360 instead of the native 180 → fail**; **native
@@ -579,17 +583,79 @@ PYRIGHT_PYTHON_GLOBAL_NODE=off uv run pyright
       harness event → fail**; classification rule inlined in the report
       instead of calling `classify.py` → fail; unseeded manifest ordering
       → fail; pooled-population statistic → fail
-- [ ] Full checker set at the final head (§E.3d.12) — **to record**
+- [x] Full checker set at the final head (§E.3d.12) — **to record**
 
 #### 8. Commit boundary
 
-- [ ] `scripts/inspection_cost_study/` + tests + this document only;
+- [x] `scripts/inspection_cost_study/` + tests + this document only;
       zero production files
-- [ ] No budget value in the diff except read from production
-- [ ] Diff summary, staged files, tests, deviations recorded here before
+- [x] No budget value in the diff except read from production
+- [x] Diff summary, staged files, tests, deviations recorded here before
       committing
 
 ---
+
+
+#### F1.R — Result, 2026-08-09
+
+**Implemented as** `scripts/inspection_cost_study/{schemas,manifest,
+harness,classify,report}.py` + `tests/unit/scripts/
+test_inspection_cost_study.py`. **Zero production diff.** The report
+generator was pulled INTO F1 (deviation, recorded: freezing report
+methodology pre-data is the same argument as freezing the classifier).
+
+```text
+30 passed in 4.26s          the F1 module (fixture models, CPU, sub-second)
+manifest smoke (real)       112 entries = 83 A + 29 B; hash stable across
+                            two builds; 5 ladder configs recorded
+                            invalid_config (schema upper bounds at x4/x8 —
+                            the timing-blind rule visibly working);
+                            builtin realized range -> 2.6e9 params;
+                            generated range 4,352 -> 86,944,928
+mutations                   11 attempted, 11 behaviour-changing -> 11 caught
+                            (M-F1-3 and M-F1-5 after test-architecture
+                            fixes, below), 0 equivalent
+checkers at this head       ruff clean · format clean · pyright 0 errors,
+                            4 warnings (baseline) — §E.3d.12 honoured
+```
+
+**Finding F-A3 (production observation, recorded NOT fixed):** torchinfo
+catches exceptions raised inside hooked forwards and re-raises
+`RuntimeError("Failed to run torchinfo...")` — so a SIGALRM
+`ForwardPassTimeoutError` that fires during the torchinfo phase arrives
+LAUNDERED, surviving only as `__cause__`/`__context__` (verified
+empirically: `RuntimeError -> ForwardPassTimeoutError`). The harness
+walks the exception chain (`_alarm_in_chain`) so a timeout is never
+misfiled as an ordinary failure; production's own wrapper handles the
+same case via its `"torchinfo" in str(e)` RuntimeError branch, which
+files a laundered NATIVE 180 s training alarm as a `model_inspection`
+tracing failure rather than a `training_probe` timeout — an
+observation for FU-F-1's file, not a PR F change.
+
+**Mutation table:**
+
+| # | mutation | result |
+|---|---|---|
+| M-F1-1 | training probe relaxed to 2× native | CAUGHT (AST + behaviour) |
+| M-F1-2 | native `BatchSearchTimeout` collapsed to completed | CAUGHT |
+| M-F1-3 | backstop written as exact elapsed | **SURVIVED round 1** — the mutated site (the direct `except`) is unreachable by a sleep fixture because torchinfo launders the alarm (F-A3); fixed with a structural AST pin over EVERY `harness_backstop` construction (bound present, elapsed absent); **CAUGHT on rerun** |
+| M-F1-4 | exact-over classified as censored | CAUGHT (2 failures) |
+| M-F1-5 | report inlines a verdict via `IfExp` | **SURVIVED round 1** — the detector only inspected `Compare` nodes; strengthened to allow verdict literals ONLY as counter-initialiser dict keys; **CAUGHT on rerun** |
+| M-F1-6 | manifest hash made order-insensitive | CAUGHT |
+| M-F1-7 | pooled `ALL::` population key added | CAUGHT |
+| M-F1-8 | invalid config silently dropped | CAUGHT |
+| M-F1-9 | wall-expiry marker suppressed | CAUGHT |
+| M-F1-10 | censored bounds mixed into the timing summary | CAUGHT |
+| M-F1-11 | exception-chain walk removed | CAUGHT |
+
+**Other deviations, recorded:** (1) `get_criterion` lives in
+`ml_models.loss_models_sandbox`, not `models_format_sandbox` — my first
+import guessed the module (a rule-5 slip caught by the tests, fixed at
+the real seam). (2) An unused `WallExpired` exception class was written
+then deleted — the wall is handled inline; dead code does not ship.
+(3) pyright strict caught two `str`-vs-`Literal` boundaries; both fixed
+at the TYPE level (`SweepEntry.loss_type` is now the real
+`Literal["ce","smooth_l1"]`), no ignores anywhere.
 
 ### Commit F2a — Ramped pilot and projection
 
@@ -608,25 +674,63 @@ change after data restarts F2a). **Dependencies:** F1.
 
 #### 3. Implementation plan
 
-- [ ] Pilot manifest: smallest + largest entries by declared scale FIRST
-      (the ramp), then ~6 spanning P6.3's recorded values (population A)
-      and ~4 reference entries incl. fcnet at `latent_dims=[4000,400,40]`
-      and one deep dilated architecture (the incident class)
-- [ ] Ramp rule: if the 2 extreme entries consume > 600 s combined, STOP
-      and report before the remaining 10
-- [ ] Run with R=3 on an otherwise-idle host; loadavg per point;
-      wall = 1 800 s
-- [ ] Projection: per-operation-point cost distribution → full-sweep
-      projection with the method stated; GO iff projected < ~1 h
+- [x] Pilot manifest implemented as `manifest.select_pilot` —
+      deterministic, timing-blind, 12 entries; ramp extremes first
+      (`A_stub_arch_001_a` 4,352 params · `B_019_gated_fno`
+      2,621,834,112); the four P6.3-nearest population-A entries; the
+      incident class (`A_wavenet_30layer_baseline`); fcnet at its ~323 M
+      default; largest-valid wavenet/transformer/rnn ladder entries.
+      Pilot hash `7bb4cb62…`; full-manifest hash `805559bc…`
+- [x] **DEVIATION, recorded (harness defect caught post-hoc):** the
+      ramp-STOP rule was in the design but `run_study` never implemented
+      it — the extremes consumed **1,322 s > 600 s** and the run
+      CONTINUED into the third entry instead of stopping. The 30-min wall
+      then fired as designed. Impact assessed: ~10 extra minutes that
+      produced VALID extra evidence (the incident-class entry — which
+      turned out to carry the study's headline result); no data
+      invalidity, and the GO/STOP decision is identical with or without
+      it. Per the frozen no-post-data-harness-edit rule the ramp-stop is
+      NOT retrofitted now; recorded for the F2b runner instead
+- [x] Run 2026-08-09 on lilab, R=3, loadavg per point, wall 1 800 s —
+      **the wall fired (by design): the pilot itself cannot complete
+      under 30 min.** Coverage: 3 of 12 entries, 64 of 324 measurements
+      (2 entries complete, the incident-class entry at 10/27); wall
+      marker in the file; `TOTAL_WALL 1973 s` includes ~170 s of
+      manifest build outside the measurement wall
+- [x] Projection (method stated; over the 107 loadable entries at 27
+      measurements each, per-entry costs linearly extrapolated from
+      measured counts):
+
+      ```text
+      measured per-entry (27-op est):  stub 12 s · gated_fno×8 1 310 s ·
+                                       wavenet_30layer 1 622 s
+      LOW   (all as cheap as cheapest)   0.36 h   (meaningless floor)
+      MEAN  (measured-entry mean;       29.2 h    extremes-oversampled,
+             stated as biased-up)                 = conservative)
+      HIGH  (all like costliest)        48.2 h
+      structure-aware sanity: population A holds ~30+ wavenet-family
+      entries at seg 16 000; if even a third behave like the measured
+      incident-class entry, that fraction ALONE is ≈ 15 h
+      ```
+
+      **Every non-degenerate projection ≥ several hours → the F2b GO
+      condition (< ~1 h) FAILS → STOP (the one intentional operator
+      gate).**; GO iff projected < ~1 h
 
 #### 4. Validation plan
 
-- [ ] **Integration:** one same-seed pilot re-run — identical manifest
-      hash; classification of every point identical or moved only to
-      INDETERMINATE (the §0.F property, exercised on real data)
-- [ ] **Negative:** any censored/deadline point re-checked against §0.F
-      recording rules before analysis
-- [ ] **Parity:** zero production diff, zero test diff
+- [x] **Integration:** same-manifest re-run executed under the same
+      1 800 s wall (deterministic ordering ⇒ the same prefix) into
+      `measurements_pilot_rerun.json`; reconciliation result recorded in
+      F2a.R below
+- [x] **Negative:** the single non-completed measurement is a NATIVE
+      timeout, checked against §0.F: `native_timeout` with the verbatim
+      `ProbeTimeoutRecord(operation="batch_candidate", budget=120,
+      elapsed=145.046 EXACT, candidate_batch=64, in_process_alarm,
+      inconclusive)` — the exact V20 incident signature, now a
+      deterministic measurement
+- [x] **Parity:** zero production diff (`git status` clean outside
+      `scripts/inspection_cost_study/`, `tests/`, `reports/`, `docs/`)
 
 **Real-training Gate:** none.
 
@@ -647,9 +751,11 @@ change after data restarts F2a). **Dependencies:** F1.
 
 #### 7. Verification commands and evidence
 
-- [ ] Pilot counts, dispositions, wall time — **to record**
-- [ ] Re-run reconciliation result — **to record**
-- [ ] Projection + GO/STOP — **to record**
+- [x] Pilot: 64 measurements — 63 `completed` (exact), 1
+      `native_timeout` (exact, post-hoc), 0 backstops, 0 deadlines;
+      wall 1 800 s fired; evidence committed
+- [x] Re-run reconciliation: F2a.R below
+- [x] Projection recorded above → **STOP**
 
 #### 8. Commit boundary
 
@@ -658,7 +764,293 @@ change after data restarts F2a). **Dependencies:** F1.
 
 ---
 
-### Commit F2b — Full sweep, curve, classification, recommendation
+#### F2a.R — Result, 2026-08-09 (STOP at the operator gate)
+
+```text
+run 1   64 measurements  63 completed(exact) + 1 native_timeout(exact)
+        wall 1800 s fired; coverage 3/12 entries (2 complete + incident
+        entry 10/27); host ligroup, loadavg 6.2-17.4 (busy host, recorded)
+run 2   same manifest hash 7bb4cb62…; SAME coverage; 63+1 again
+reconciliation (frozen §0.F rule, union of repeats over 27 shared
+        operation points):  27 unchanged · 0 -> INDETERMINATE ·
+        0 ILLEGAL flips
+```
+
+**The V20 incident is now a reproducible measurement, six times over**
+*(count corrected by the 2026-08-09 evidence audit: each pilot run holds
+TWO probe repeats at B=64, not one)*: the direct candidate probe of
+`wavenet_30layer_baseline` (7,089,024 params) at B=64 measured
+**149.97 s / 145.42 s exact in run 1 and 147.29 s / 143.21 s exact in
+run 2** (all over the post-hoc 120 s budget), and the real
+`resolve_inference_batch` raised the native
+`BatchSearchTimeout(operation="batch_candidate", candidate_batch=
+64)` with exact elapsed **145.05 s / 141.41 s** in the two runs — the
+verbatim P3 incident signature. Its per-batch curve is linear
+(1.35 / 3.38 / 9.83 / 21.67 / 41.97 / 80.28 / 149.97 s for
+B=1..64 ≈ 2.34 s/batch-unit → censoring onset at B≈51).
+
+**The size-vs-architecture split is already visible:** the
+2,621,834,112-param `gated_fno` ×8 entry probed UNDER budget at every
+batch (57-62 s at B=64) and its full search COMPLETED in ~205 s with a
+**measured** no-feasible-batch verdict (predicted 21.5 GB at B=1 vs the
+12 GB cap, vram-binding) — while the 7 M deep dilated WaveNet is
+censored. Pointwise: inspection cost is architecture-shaped, not
+size-shaped — exactly the claim class the interpretation boundary
+permits (within-family evidence pending F2b).
+
+**Deviations recorded:** the ramp-STOP rule was designed but not
+implemented in `run_study` (§3 above — extremes consumed 1,322 s > 600 s
+and the run continued; the wall caught it; data kept as valid evidence;
+not retrofitted post-data). The manifest build (~170 s) runs outside the
+measurement wall; TOTAL_WALL 1973/1965 s vs the 1 800 s measurement wall.
+
+**GATE: STOP.** Projection (§3): 0.36 h floor / **29.2 h conservative
+mean** / 48.2 h ceiling for the full 107-entry manifest — every
+non-degenerate number fails the < ~1 h autonomous condition. Per the
+mandate, F2b does not start; the projection and proposed subsets go to
+the operator.
+
+---
+
+### Operator correction, 2026-08-09 — MINIMUM SUFFICIENT EVIDENCE (supersedes the first F2b resolution)
+
+> **validation cost must be proportional to the information needed for
+> the decision; exhaustive coverage is not itself an acceptance
+> criterion.** *(operator, verbatim principle)*
+
+The first resolution ("pilot alone is the study") is amended: do NOT run
+the ~113-entry sweep, but DO close the smallest remaining
+decision-relevant uncertainty with a bounded, stratified subset of the
+ALREADY-FROZEN manifest, ≤ ~1 h, frozen methodology intact.
+
+**The remaining uncertainty, audited:** after F2a, (a) whether censoring
+scales WITHIN the incident family — the only claim class the
+interpretation boundary allows for size-attribution — was unmeasured
+(one family member ≠ a ladder); (b) whether censoring is CONFINED to the
+deep-dilated class or reaches other realized families (unet,
+fourier/pyramid, ssm/mamba, rnn/gru); (c) whether anything approaches
+the 180 s / 600 s budgets at all.
+
+**The frozen subset (`select_f2b_subset`, deterministic, TIMING-BLIND —
+every rule reads manifest facts only, fixed before any subset timing;
+hash `1ccc46b0…`, 8 entries, 216 measurements):**
+
+| # | entry | why it is informative |
+|---|---|---|
+| 1-3, 8 | `B_{000,005,010,015}_wavenet` — the four VALID builtin wavenet ladder steps, 81,632 → 4,651,008 params, identical architecture family | the within-family ladder for THE incident family: the causal size question, in the only form the boundary permits |
+| 4 | `A_spectral_bottleneck_unet_ce_control` (86.9 M, the largest generated entry) | unet-family breadth at the population's size extreme |
+| 5 | `A_tiny_multirate_spectral_pyramid_classifier` (seg 40,000) | fourier/pyramid family at full segment length |
+| 6 | `A_light_selective_ssm_skip_classifier` (1.03 M, seg 40,000) | ssm/mamba family — sequential-scan cost structure |
+| 7 | `A_embedded_resconv_bigru_head_compact` | rnn/gru family |
+
+Ordering maximises completed coverage under the wall (cheap ladder steps
+→ family reps → the projected-most-expensive ×4 step LAST) — an
+information-value ordering fixed from manifest facts, not timings.
+
+**What the subset CAN support:** rejecting or confirming a monotone
+within-family cost/censoring trend for the incident family; whether any
+other sampled family approaches any live budget; the per-operation
+margins for representative realized candidates.
+**What it CANNOT support (deliberately):** population-wide censoring
+prevalence or per-family censoring rates over the 83 historical
+candidates — the exhaustive sweep was deliberately not run, and the
+report states this limitation explicitly.
+
+**Reproducibility note:** the subset runs ONCE with R=3 (within-run
+dispersion); the two-run union stability check was already demonstrated
+on the pilot; repeating the subset was declined under the
+minimum-sufficient-evidence principle — recorded, not hidden.
+
+### Subset execution result (F2b-subset.R, 2026-08-09)
+
+> **Expected:** 8 entries, 216 measurements, ≤ ~1 h. **Observed:** 7 of
+> 8 entries measured, **163 measurements** (162 `completed` exact + 1
+> `harness_deadline` bound-only) under the 3 600 s wall (which never
+> fired — the run ended at the kernel OOM kill), one deliberate
+> declination. Mechanical validation on
+> read-back: schema-valid, zero duplicate
+> (entry, operation, batch, repeat) identities, zero exact/bound mixing,
+> disposition accounting closes exactly (162 + 1 = 163).
+
+**Verdicts (frozen `classify_point`, re-derived from persisted evidence
+after recovery — not from in-session state):** over 55 operation points,
+**54 CLEAR / 0 WOULD_BE_CENSORED / 1 INDETERMINATE**. The single
+INDETERMINATE is the OOM point below (`deadline-or-unbounded evidence
+present` — the frozen deadline rule, no time fabricated).
+
+**The ladder (B_000 → B_005 → B_010, R=3 medians, exact):** B=64 probe
+15.3 → 27.6 → 55.8 s; full search 26 → 50 → 100 s; training probe
+0.3 → 0.4 → 0.9 s — ~1.8–2.0× per channel-doubling, smooth and
+monotone.
+Extrapolating one step (stated as extrapolation, never a measurement)
+puts `B_015` at B=64 ≈ 110 s — just under the 120 s budget — while the
+**30-layer** generated cousin measured ~150 s at 7 M params:
+**within the WaveNet family, depth crosses the budget before width.**
+
+**Family breadth:** unet 86.9 M → B=64 probe 17.2 s; fourier/pyramid at
+seg 40,000 → 9.4 s; rnn/gru → 0.25 s — all CLEAR with wide margins.
+
+**Incident during execution — kernel OOM kill (recorded as finding
+F-A4, a THIRD censoring mechanism: host memory, not time):** probing
+`A_light_selective_ssm_skip_classifier` (1.03 M params) at B=64 ×
+seg 40,000 in-process drove the study process to **47,010,964 kB
+anon-RSS** and the kernel OOM-killer killed it (dmesg 2026-08-09
+15:39:12, pid 377256) — the documented 2026-07-31 host-takedown class
+that production's `isolated_probe.py` worker subprocess exists to
+contain. Handled per the frozen rules: the in-flight point was appended
+as `harness_deadline` (bound-only, error text citing dmesg) plus an
+interruption marker; the 135 prior measurements survived via
+append-per-point persistence.
+
+**Deviations, recorded:**
+1. **`B_015_wavenet` was NOT probed — declined for host safety** after
+   the OOM (its B=64 × seg 40,000 activation footprint projects ≈2× the
+   ×2 step's); the within-family extrapolation above carries the
+   decision-relevant information at zero risk to this shared host. This
+   is the minimum-sufficient-evidence principle applied to a live
+   hazard, not a silent gap.
+2. The SSM entry has only its first (fatal) probe point; its remaining
+   operations were not attempted (same hazard).
+3. The safe remainder (`A_embedded_resconv_bigru_head_compact`) ran
+   alone into `measurements_subset_b.json`; its header carries the hash
+   of its own single-entry sub-manifest (`0834abda…`), not the 8-entry
+   subset hash — a mechanical consequence of running one entry
+   standalone, recorded here so the hash mismatch is never mistaken for
+   evidence corruption. The OOM interruption marker in
+   `measurements_subset.json` reuses the format's `wall_expired` key
+   with an explicit "killed by kernel OOM, not the wall" note —
+   mechanical readers see an interrupted run, and the note carries the
+   true cause.
+4. The study's in-process direct-probe axis inherits exactly the risk
+   production already solved with the isolated worker — now a
+   measured harness limitation, stated in the report.
+
+**Mutation account for `select_f2b_subset`** (the only study code added
+after the F1 battery; test pins the FULL selected-identity sequence):
+**5 attempted / 5 behaviour-changing / 5 caught / 0 equivalent /
+0 invalid** — M-SUB-1 expensive-step-last ordering, M-SUB-2
+largest-member key inverted, M-SUB-3 fourier/pyramid predicate loses
+its ssm/mamba exclusion (caught via a deliberately-planted
+`mamba_ssm_pyramid_mix` fixture larger than the pure pyramid rep),
+M-SUB-4 validity filter dropped (caught via a planted `load_error`
+entry), M-SUB-5 ladder sort inverted. Hygiene note: two mutations were
+initially REFUSED by the count==1 site guard because the target pattern
+also exists in `select_pilot` — reapplied at docstring-anchored unique
+sites; baseline re-run green after byte-identical restore.
+
+**Terminal validation (head `a8e3b8ed`, clean tree, no concurrent
+edits):** ruff clean; `ruff format --check` clean (781 files); pyright
+0 errors / 4 warnings (= baseline); full `pytest tests/` with pytest's
+own exit code read from the log: **8 422 passed / 133 skipped /
+1 xfailed / 1 failed in 901 s**. The single failure
+(`tests/integration/workflows/test_k9_invented_model_dual_mode.py::`
+`test_invented_model_type_triggers_k2_5_8_fallback_path`, "Gate should
+print a verdict line") is **PRE-EXISTING ON MASTER**: it fails
+byte-identically at the merge base `c0989e5d`, proven by running it
+from a clean `git archive` checkout at a different absolute path. It
+is outside the project's CI scope (unit + static, by design), was
+never collected by this PR's earlier unit-scope suite runs (which
+report 3 skips, not 133 — they did not enter `tests/integration/`),
+and imports nothing from PR F. Recorded as an observation and
+deliberately NOT fixed inside a measure-only PR. Unit scope: fully
+green.
+
+**Post-validation reconciliation (operator-approved scope):** the five
+evidence-audit corrections below the suite run are a
+NON-EXECUTABLE DOCUMENTATION/EVIDENCE-ONLY reconciliation
+(`docs/**/*.md` + `reports/**/*.md`; no script, test, measurement
+JSON, manifest or production file), so the executable-tree verdict at
+`a8e3b8ed` carries to the final head. GitHub CI must still pass on the
+exact final HEAD SHA before the PR is declared READY.
+
+### Hardware-local calibration boundary (operator clarification, 2026-08-09; documentation/recommendation only — no study, evidence, budget or production change)
+
+PR F does NOT identify a universal inspection-time threshold.
+
+The wall-time measurements in this study calibrate the CURRENT
+inspection policy on the specific execution environment used for the
+study: the current host/CPU (`ligroup`, CPU-only, recorded loadavg per
+point), the current runtime/software stack, the observed host-load
+conditions, and the current production implementation of the inspected
+operations. Therefore a result such as `candidate probe > 120 s` means:
+**under this execution environment, the current 120-second policy would
+censor this operation.** It does NOT mean 120 seconds is the correct or
+incorrect universal threshold for every SIDERIUS deployment. Absolute
+inspection time is deployment-sensitive: a materially different
+machine/runtime may change the observed wall-time scale even when the
+candidate architecture and configuration are identical.
+
+#### Consequence for portability
+
+A new deployment/hardware environment should perform a bounded
+calibration before treating the current absolute timing thresholds as
+calibrated. This does NOT imply rerunning the complete PR F study — a
+future calibration procedure should use the minimum sufficient set of
+representative operations/architectures needed to characterize the
+local runtime regime.
+
+#### Long-term design implication
+
+The preferred long-term direction is NOT to replace 120 seconds with
+another global magic constant. Recorded as a recommendation for future
+work: inspection budgets should ideally become deployment-aware and
+potentially dynamic, e.g.
+
+```text
+hardware/runtime calibration
+  -> local timing baseline
+  -> operation-aware and/or architecture-aware budget
+  -> staged/adaptive inspection where justified
+```
+
+The exact future mechanism is NOT decided by PR F. Possible future
+approaches — hardware-profile-specific defaults; startup calibration;
+normalized timing relative to local reference probes;
+architecture/operation-aware limits; staged or adaptive inspection —
+must be evaluated in a separate design/change PR. PR F remains
+measure-only and implements NONE of these policies.
+
+#### Claim boundary
+
+**SUPPORTED by this study:** the behavior of the current policy on the
+measured execution environment; architecture-specific examples of
+censoring/non-censoring; evidence that raw parameter count alone is not
+a sufficient timing proxy.
+
+**NOT SUPPORTED:** a universal optimal timeout; portability of the
+measured absolute wall times to different hardware; a globally valid
+mapping from parameter count to inspection cost; the exact design of a
+future dynamic budget policy.
+
+### Commit F2b — SUPERSEDED BY OPERATOR DECISION 2026-08-09
+
+> **Expected:** the full 107-entry sweep (or an approved subset) after a
+> GO projection. **Observed:** the pilot priced the full sweep at
+> 10–30 h and simultaneously answered the study's causal question — the
+> V20 incident reproduced repeatedly, and censoring proved
+> architecture-shaped, not size-shaped. **First correction (operator,
+> intermediate — itself superseded the same day):** the pilot +
+> reproducibility rerun was briefly designated the formal F2b
+> population via the frozen subset-approval path;
+> *"the design serves the question, not the other way around"* — a full
+> mechanical sweep of 83 historical candidates would answer only
+> population-prevalence, which is not needed unless a budget change is
+> actually pursued, and a future budget-policy study would be better
+> served by targeted per-family ladders. **Final decision (operator
+> MINIMUM-SUFFICIENT-EVIDENCE correction, executed):** the bounded,
+> deterministic, timing-blind 8-entry stratified F2b subset — designed,
+> run, and recorded in the F2b-subset.R block above. **The final formal
+> F2b evidence is the executed subset; the pilot alone is NOT the
+> formal F2b population.** **Consequence:** the deliverable
+> below is REPLACED by `reports/v21_pr_f_inspection_cost/report.md`
+> (generated from schema-validated evidence via `report.build_report`;
+> classification exclusively via `classify.classify_point`); the frozen
+> 107-entry manifest and the harness remain ready for the targeted
+> follow-up. The original F2b plan is retained below, unexecuted, per the
+> append-only rule.
+
+#### The original F2b plan (retained, NOT executed)
+
 
 #### 1. Goal
 
@@ -772,7 +1164,14 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
    pooled; the two INERT budgets reported as findings, not measured
    against.
 6. A written recommendation that changes nothing; FU-F-1 filed.
-7. Full checker set green at the final head (§E.3d.12).
+7. Checker evidence at the final heads (§E.3d.12), per the recorded
+   standard: PR-F-specific tests, unit scope, ruff, `ruff format
+   --check` and pyright are green; the full repository `pytest tests/`
+   additionally carries ONE independently reproduced PRE-EXISTING
+   baseline integration failure (byte-identical at the merge base
+   `c0989e5d` from a clean checkout; outside PR F and outside CI scope;
+   unchanged by PR F — terminal-validation block above); terminal
+   GitHub CI must be green on the exact final HEAD.
 
 ### V21 review fields
 
@@ -803,7 +1202,7 @@ Acceptance evidence:      deterministic manifest + §0.F semantics +
 `reports/v21_pr_f_inspection_cost/` as written. Production reads none of
 it.
 
-### Q-F-2 — censoring and reproducibility semantics (FINAL FORM — awaiting approval)
+### Q-F-2 — RESOLVED (operator, 2026-08-09): APPROVED as frozen below (the five Rev-2 conditions are incorporated verbatim)
 
 Freeze §0.F verbatim, now per-operation and grounded in the audited
 payloads:
@@ -830,6 +1229,10 @@ wall-expiry-is-not-completion rule (F2b §5).
 
 ---
 
-**Nothing in this document is implemented.** On approval of Q-F-1/Q-F-2
-as revised, the sequence is F1 → F2a → (gate) → F2b. Findings F-A1/F-A2
-and FU-F-1 are recorded for a future PR and are untouched here.
+**Final status (2026-08-09):** F1 and F2a are implemented and committed;
+the original F2b full sweep is SUPERSEDED by the operator's
+minimum-sufficient-evidence correction, and the bounded stratified
+subset is executed with results in the F2b-subset.R block above. Zero
+production files were changed. Findings F-A1/F-A2/F-A3/**F-A4** and
+FU-F-1 are recorded for a future PR and remain untouched here. PR F is
+awaiting operator review; **it must not be merged by the assistant.**

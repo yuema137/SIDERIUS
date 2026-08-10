@@ -54,8 +54,26 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PR F is at DESIGN REVISION 3** — `pr_f_inspection_cost_study.md`,
-awaiting final operator approval of Q-F-2; Q-F-1 and Q-F-3 resolved.
+**PR F's study is COMPLETE and awaiting PR review** (branch
+`feat/pr-f-inspection-cost-study`, not merged; zero production diff).
+The pilot reproduced the V20 inspection timeout as an exact measurement
+— six over-budget observations across two runs — and rejected the
+"parameter count → timeout" story
+(architecture-shaped cost: a 7 M deep WaveNet is censored at B=64 while
+a 2.6 B FNO probes under budget). The full population sweep was
+deliberately not run — the operator's MINIMUM-SUFFICIENT-EVIDENCE
+correction replaced it with a bounded, timing-blind 8-entry stratified
+subset (163 measurements, 54 CLEAR / 1 INDETERMINATE): the builtin
+WaveNet width ladder scales cleanly ~2× per channel-doubling
+(15 → 28 → 56 s at B=64) while the 30-layer cousin is censored at 7 M
+params — **depth, not width or parameter count, crosses the budget** —
+and every other sampled realized family (unet 87 M, fourier/pyramid,
+rnn/gru) clears with wide margins. The subset also surfaced **F-A4, a
+third censoring mechanism: host memory** — a 1 M-param selective-SSM at
+B=64 × seg 40,000 drove the in-process probe to 47 GB RSS and a kernel
+OOM kill (the documented 2026-07-31 host-takedown class that
+production's isolated worker contains). Deliverable in
+`reports/v21_pr_f_inspection_cost/report.md`.
 Rev 3 matched the harness's timeout handling to production's
 per-operation enforcement (the native 180 s preemptive training-probe
 alarm is preserved, never relaxed to 2×), preserves native
