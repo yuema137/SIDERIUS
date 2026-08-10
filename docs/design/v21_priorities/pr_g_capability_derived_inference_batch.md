@@ -1,26 +1,48 @@
 # PR G — Capability-derived inference batch
 
-**Status: DESIGN DRAFT rev 3 (2026-08-10) — awaiting operator review.
-No implementation.** Rev 1 found the capability-derived mechanism
-already live on the agent runtime path; rev 2 narrowed the scope to
-forecast/identity coherence. Rev 3 (final small audit, §0.R.9-0.R.12)
-resolves the operator's four remaining questions with exact source
-arithmetic: the "exact cancellation" claim is CORRECTED to
-bounded-residual invariance (ceil semantics, §0.R.9); the time-gate
-rejection consequence is traced and the reachability language made
-precise (candidate EXECUTION reachability can change — intended;
-hypothesis GENERATION reachability cannot, §0.R.10); the real Gate is
-frozen to require the `training_warmup_x2.7_fallback` forecast source
-(§0.R.11); and the training-phase identity hash/cache is PROVEN
-insensitive to the inference-batch payload field (outcome A,
-§0.R.12). Operator stances: Q-G-1, Q-G-4 (narrowed), Q-G-5 APPROVED;
-Q-G-2 and Q-G-3 resubmitted for final freeze with their conditions
-discharged below.
+**Status: DESIGN FROZEN — operator approved for implementation
+(2026-08-10). This document is now the LIVE engineering ledger for the
+PR G implementation; sections below are updated as the work proceeds.**
+Rev 1 found the capability-derived mechanism already live on the agent
+runtime path; rev 2 narrowed the scope to forecast/identity coherence.
+Rev 3 (final small audit, §0.R.9-0.R.12) resolved the operator's four
+remaining questions with exact source arithmetic: the "exact
+cancellation" claim was CORRECTED to bounded-residual invariance (ceil
+semantics, §0.R.9); the time-gate rejection consequence is traced and
+the reachability language made precise (candidate EXECUTION reachability
+can change — intended; hypothesis GENERATION reachability cannot,
+§0.R.10); the real Gate is frozen to require the
+`training_warmup_x2.7_fallback` forecast source (§0.R.11); and the
+training-phase identity hash/cache is PROVEN insensitive to the
+inference-batch payload field (outcome A, §0.R.12). **Operator freeze
+(2026-08-10): Q-G-1 APPROVED; Q-G-2 APPROVED/FROZEN; Q-G-3
+APPROVED/FROZEN — Option A; Q-G-4 APPROVED (narrowed contract-test +
+comment-truth form); Q-G-5 APPROVED. Implementation authorized; DO NOT
+MERGE until operator review.**
+
+**Rev 3 final reconciliation (2026-08-10, operator-directed; source-grounded,
+no implementation).** Two closures make the correctness story exact:
+(1) **The forecast error is two-sided, not "always conservative."** The
+production probe resolver's candidate set is `(64,32,16,8,4,2,1)`
+(`batch_resolver.py:58`) with NO floor and no `≥25` guarantee (§0.R.10a) — a
+candidate reaching inference can run at B < 25. The old table=25 forecast is then
+`ceil(total_ml/25)`: for probed B > 25 it OVER-prices (→ false `skipped_time_risk`
+rejection, ≤ 64/25 = 2.56×), for B < 25 it UNDER-prices (→ **false time-risk
+ACCEPTANCE** — a plan whose real inference time exceeds the budget is admitted;
+up to ~25× at the reachable minimum B=1). G2's real invariant is therefore **the
+time gate must price inference at the batch that will actually run**, not merely
+"make the forecast less conservative." (2) **The per-file ceil residual is bounded
+from source** (§0.R.9): `runtime = Σᵢ ceil(mlᵢ/B)`, `estimator = ceil(Σᵢ mlᵢ/B)`,
+difference ≤ `n_files − 1` steps (estimator always UNDER-counts); worst supported
+grid ≈ 21.9 % of runtime, default trial ≤ 2.4 %, default seg 40000 ≈ 1.08 % —
+second-order beside the ×2.7 path's 2.5×–25× factor. Every "exactly cancels" /
+"always conservative" statement is corrected in place below. **Q-G-2 conditions
+discharged; Q-G-3 frozen APPROVED — Option A.**
 
 | | |
 |---|---|
 | Plan section | `docs/design/v21_priorities.md` — PR G section + P5 + §E.3d (binding, incl. §E.3d.11-12) + §E.4 |
-| Gate | **NOT a V21 launch blocker.** No score/metric change; no hypothesis-GENERATION change. Candidate EXECUTION reachability CAN change — intended: G2 corrects wrongful `skipped_time_risk` skips caused by the ×2.7-path over-estimate (§0.R.10) |
+| Gate | **NOT a V21 launch blocker.** No score/metric change; no hypothesis-GENERATION change. Candidate EXECUTION reachability CAN change — intended: G2 makes the time gate price inference at the batch that will actually run, correcting the ×2.7-path forecast's **two-sided** error — wrongful `skipped_time_risk` rejection when the probed batch > 25, and wrongful admission when it is < 25 (§0.R.10, §0.R.10a) |
 | Depends on | PR F merged (`fd7c8816`) — no code dependency; PR B's S3 semantics and PR C's O-C-2 ownership line are frozen inputs |
 | Audit date | 2026-08-10, against master `c1925586` |
 
@@ -92,7 +114,7 @@ Every non-test consumer of `core/inference_defaults.py`, classified:
 
 | # | Site | Role today | PR G disposition |
 |---|---|---|---|
-| 1 | `core/sandbox_executor.py:1543` | **Fallback only** — used iff `inference_batch is None`; comment says "A.9 will remove the fallback once every caller has been migrated" (migration never completed) | G4: keep, observe loudly on agent paths (Q-G-4) |
+| 1 | `core/sandbox_executor.py:1543` | **Fallback only** — used iff `inference_batch is None`; comment says "A.9 will remove the fallback once every caller has been migrated" (migration never completed) | G4 (Q-G-4, final): **NO new runtime observability.** Keep the fallback value unchanged; pin by CONTRACT test that every feasible/CPU-mode agent-path `resource_check` return carries `inference_batch: int ≥ 1`, so the fallback is unreachable by construction on the agent path (reachable only from no-hint baseline/legacy or a contract bug). Comment/docstring truth only. *(Supersedes the rev-1 "observe loudly on agent paths" proposal, which is withdrawn.)* |
 | 2 | `agent/skills/inference_skill/estimator.py:118,240` | **Planning forecast** — VRAM/wall-time forecast at the TABLE batch | G1/G2: accept an explicit batch; tuner passes the probed one |
 | 3 | `agent/skills/evaluate_time_skill/wrapper.py:746` | **Time-gate forecast** — inference wall-time at the TABLE batch, while the probed batch is ALREADY in `active_params` when this gate fires (set :4696, gate fires :4699+) | G2: prefer the hint |
 | 4 | `core/runtime_control/gpu_measurement_identity.py:172-174` | **Measurement identity** — `resolve_inference_batch` returns the table value; its comment claims it is *"THE canonical source, and the same one `execute_inference` uses"* — **stale**: `execute_inference` prefers the hint | G3: prefer an explicit hint; fix the comment |
@@ -129,11 +151,14 @@ the wrong multiplier to a *measured* per-segment cost. This is
 throughput-forecast correctness — squarely PR G's O-C-2 ownership
 (throughput), not admission (PR C) and not S3 semantics (PR B).
 
-> **Rev-2 correction (0.R.3):** the divergence is confined to the
-> `training_warmup_x2.7` fallback path; the measured-hint and static
-> paths are batch-invariant by exact cancellation. The gap is real but
-> smaller than rev 1 claimed, and always in the conservative
-> (over-estimate) direction.
+> **Rev-2 correction, superseded by rev-3 §0.R.9/§0.R.10a:** the
+> order-of-magnitude divergence is confined to the `training_warmup_x2.7`
+> fallback path; on the measured-hint and static paths the batch does not
+> cancel exactly but leaves only a **bounded partial-batch residual**
+> (≤ `n_files − 1` steps; §0.R.9). The ×2.7 gap is **two-sided, not always
+> conservative**: table=25 over-prices when the probed batch > 25 (false
+> rejection) and under-prices when it is < 25 (false admission) — probed
+> batches below 25 are reachable (§0.R.10a).
 
 ### 0.D What C3b actually pins, and how PR G must move it
 
@@ -222,37 +247,42 @@ PSD segment) and `inf_batch` = ML segments per step. Units check:
 `ceil`, not real division):** in the measured-hint path,
 `seconds = ceil(total_ml/B) × (hint × B / ml_per_psd)/1000` — the batch
 does NOT cancel exactly; it cancels **up to the final-partial-batch
-residual**, `B·ceil(total_ml/B)/total_ml − 1 ≤ (B−1)/total_ml`, which
-§0.R.9 bounds at ≈2.4 % for the smallest realistic eval set and far
-less for typical ones. The same bounded residual applies to the static
-path (`ms/step` exactly linear in B). **The middle fallback path**
-(`training_warmup_x2.7`: ms/step from a training measurement,
-batch-independent; steps = ceil(total_ml/B)) is the only
-ORDER-OF-MAGNITUDE batch-sensitive path: the 25→64 effect is
-`ceil(total_ml/25)/ceil(total_ml/64)` (§0.R.9), ≈2.5× for
-representative eval sets, → 2.56 asymptotically — always in the
-over-estimate (conservative) direction. PROVIDED the wrapper's
-`inf_batch` (:746) equals the estimator's internal one (:240) — today
-both call `inference_batch_for`; G2 must keep both sides equal
-explicitly.
+residual**. Because runtime executes per file while the estimator takes
+one global ceil, the exact residual is bounded by `n_files − 1` steps
+(§0.R.9), which is ≤ 2.4 % of the step count at the default trial and a
+supported-grid worst case of ≈ 21.9 % — small either way. The same
+bounded residual applies to the static path (`ms/step` exactly linear in
+B). **The middle fallback path** (`training_warmup_x2.7`: ms/step from a
+training measurement, batch-independent; steps = ceil(total_ml/B)) is the
+only ORDER-OF-MAGNITUDE batch-sensitive path, and its error is
+**two-sided**: the forecast at table=25 vs runtime at the probed batch B
+differs by the factor `ceil(total_ml/25)/ceil(total_ml/B)` — **> 1 when
+B > 25** (over-price, e.g. 25→64 ≈ 2.5×, → 2.56 asymptotically: false
+time-risk rejection), and **< 1 when B < 25** (under-price: false
+time-risk admission — reachable, §0.R.10a; ~25× at the minimum B=1). It is
+NOT always conservative. PROVIDED the wrapper's `inf_batch` (:746) equals
+the estimator's internal one (:240) — today both call
+`inference_batch_for`; G2 must keep both sides equal explicitly.
 
 **Previous assumption** (rev 1): the time forecast diverges from
 runtime for every model where probed ≠ table.
-**Corrected understanding:** the divergence is REAL but confined to the
-×2.7 fallback path (first iteration / OOM-killed trial / degenerate
-sidecar — exactly generated models' early rounds), where table=25 vs
-probed=64 OVERESTIMATES inference wall time by
-`ceil(total_ml/25)/ceil(total_ml/64)` ≈ 2.5× (rev 3, 0.R.9 — always
-the conservative direction: wrongly rejects on time, never admits).
-The measured-hint and static paths are batch-invariant up to the
-bounded ceil residual (0.R.9), not by exact cancellation.
-**Two G2 consequences:** (1) the fix is still justified — it corrects
-the one wrong path and replaces accidental cancellation with explicit
-same-value threading; (2) **G2 MUST supply the SAME explicit batch to
-both the wrapper (:746) and the estimator (:240)** — changing one side
-only would BREAK the measured path's cancellation and corrupt the
-currently-correct forecast by the probed/table ratio. A test pins the
-both-sides invariant.
+**Corrected understanding (rev 3 final):** the order-of-magnitude
+divergence is REAL and confined to the ×2.7 fallback path (first
+iteration / OOM-killed trial / degenerate sidecar — exactly generated
+models' early rounds), where the forecast prices inference at table=25
+while runtime uses the probed batch. The error is **two-sided**: for a
+probed batch > 25 the forecast OVER-prices (up to 64/25 ≈ 2.56× — wrongly
+rejects on time); for a probed batch < 25 it UNDER-prices (a plan whose
+real inference time exceeds the budget is wrongly admitted). The
+measured-hint and static paths carry only the bounded per-file ceil
+residual (0.R.9), not exact cancellation.
+**Two G2 consequences:** (1) the fix is justified as a **two-sided
+pricing correction** — it makes the gate price inference at the batch
+that will run, not merely a less-conservative forecast; (2) **G2 MUST
+supply the SAME explicit batch to both the wrapper (:746) and the
+estimator (:240)** — changing one side only would break the two sides'
+same-batch coherence and corrupt the currently-correct forecast by the
+probed/table ratio. A test pins the both-sides invariant.
 
 #### 0.R.4 `active_params` lifetime — stale hint impossible by construction
 
@@ -332,32 +362,58 @@ evidence on the lilab reference GPU/host (PR F's calibration
 boundary), never a universal expected mapping**, and neither the
 resolver nor the table changes because of it in PR G.
 
-#### 0.R.9 The ceil arithmetic, exactly (rev 3; replaces rev 2's "exact cancellation")
+#### 0.R.9 The per-file ceil residual, bounded from source (rev 3 final; replaces rev 2's "exact cancellation" and rev 3's single-segment ≤2.4 %)
 
-Source facts: `PSD_SEGMENT_LENGTH = 10,000,000`
-(`execute_tools/dataset_config.py:302`, `TIDMAD.psd_segment_length`);
-`ml_per_psd = 10,000,000 // seg_size` → 250 at seg 40,000; 625 at
-seg 16,000. `total_ml = n_psd × ml_per_psd` where `n_psd` = PSD
-segments in the eval sample_set. **Nothing guarantees
-`total_ml % inf_batch == 0`** — eval-set sizes are not batch-multiples.
-Runtime executes the partial final batch as a genuine shorter slice
-(`inference_single.py:637,645`: `range(0, dim1, bs)`;
-`loader[i:i+bs]`), and it does so PER FILE, while the estimator takes
-ONE global `ceil` (`estimator.py:168-177`) — so the estimator's step
-count was never exactly runtime's; it under-counts per-file partials by
-at most `(n_files−1)·(B−1)` ML segments and over-counts the global
-partial by at most `B−1`. Exact residuals for the smallest realistic
-shapes (one PSD segment, seg 40,000, `total_ml=250`):
-`B=64: 64·ceil(250/64)=256 → +2.4 %`; `B=25: 250 → exact`. The
-measured-hint and static paths are therefore **batch-invariant up to
-bounded partial-batch residuals of order ≤2.4 % at the smallest
-realistic eval set** (multi-segment sets are smaller still), while the
-×2.7 path's batch sensitivity is a FACTOR:
-`ceil(total_ml/25)/ceil(total_ml/64)` — e.g. `total_ml=250`:
-`10/4 = 2.50`; `total_ml=2,500`: `100/40 = 2.50`; → `64/25 = 2.56`
-asymptotically. Every "exactly cancels" claim in this document is
-superseded by this statement; the qualitative conclusion (material
-divergence lives ONLY in the ×2.7 path) SURVIVES with exact bounds.
+**Source facts.** `PSD_SEGMENT_LENGTH = 10,000,000`
+(`execute_tools/dataset_config.py:293`; constants `SEGMENTS_PER_FILE = 200`,
+`NUM_FILES = 20` at `:294-295, :302-304`). `ml_per_psd = 10,000,000 //
+seg_size` → 250 at seg 40,000; 625 at seg 16,000; 200 at seg 50,000; legal
+`seg_size` = the 36 divisors of 10 M in `[100, 100000]`
+(`dataset_config.py:118-138`). The eval `SampleSet` is
+`{file_index: [psd_segment_indices]}` (`execute_tools/sample_set_builder.py:8`)
+with an **equal PSD count `P` per in-scope file** (normal mode = one file, 200
+segs, `:115`; trial/snapshot mode `P = max(1, round(trial_portion × 200))`
+applied identically per file, `:94, :100-102`; default `trial_portion = 0.1` →
+`P = 20`; full scope → `n_files = 20`). So each file carries the **same**
+`ml_i = M = P × ml_per_psd` ML segments.
+
+**Runtime is per-file, the estimator is one global ceil.** Runtime loops
+over files (`inference_single.py:559`) and, per file, batches `range(0, dim1,
+bs)` with `dim1 =` that file's ML count (`:627, :636-645`) — so
+`runtime_steps = Σᵢ ceil(mlᵢ / B) = n·ceil(M/B)`. The estimator computes
+`n_psd = Σ len(v)`, `total_ml = n_psd·ml_per_psd`,
+`ceil(total_ml / max(B,1))` (`estimator.py:174-177`) — one global ceil,
+`estimator_steps = ceil(n·M / B)`.
+
+**Exact bound.** Since `Σ ceil ≥ ceil Σ`, the estimator **always
+under-counts**: `0 ≤ runtime_steps − estimator_steps = n − ceil(n·s/B)`
+where `s = M mod B ∈ [0, B−1]`; this is maximised at `s = 1`, giving
+`diff ≤ n − ceil(n/B) ≤ n_files − 1` steps — an **absolute** bound of
+**≤ 19 steps** at the maximum `n_files = 20`, independent of B. As a
+relative error `(runtime − estimator)/runtime` over the whole supported
+grid (all 36 seg sizes, `n ≤ 20`, `P ≥ 1`, `B ∈ {64,…,1}`):
+- **default trial** (`P = 20`): ≤ **2.4 %**; at the actual default seg 40,000
+  (M=5000, n=20, B=64) it is `1580` vs `1563` → **1.08 %**; seg 16,000 → 0.33 %.
+- **normal mode** (single file): **0 %**.
+- **supported-grid worst case = ≈ 21.9 %** — the **exhaustively-confirmed
+  maximum** over every reachable point (all divisor seg sizes, `P ∈ [1,200]`,
+  `n ≤ 20`, `B ∈ {64,…,1}`; the `seg=100000` constraint forces
+  `ml_per_psd ≥ 100 > B_max`, so the pathological `M ≈ B+1` corner is
+  unreachable). One realising instance: seg 50,000 (ml_per_psd=200), `P = 1`
+  (M=200), `n = 8`, `B = 64` → runtime `8·ceil(200/64) = 32`, estimator
+  `ceil(1600/64) = 25` → 7 steps → **7/32 = 21.9 %** of runtime (several
+  equivalent corners tie at 7/32). It requires an atypical small
+  `trial_portion` (P=1); at that corner the whole inference is ~25–32 steps
+  (sub-second), where the per-file **fixed** residual (inference_single.py:500,
+  537) dominates the wall clock anyway.
+
+**Conclusion.** The measured-hint and static paths carry only this
+**bounded, always-downward per-file ceil residual** — ≤ `n_files − 1` steps,
+≤ 2.4 % at the default trial, ≈ 21.9 % at an atypical worst case — which is a
+**second-order** term beside the ×2.7 path's `ceil(total_ml/25)/ceil(total_ml/B)`
+**factor** (`> 1` for B > 25, up to 2.56×; `< 1` for B < 25, down to 1/25 at
+B=1 — §0.R.10a). Every "exactly cancels" / "always conservative" claim
+elsewhere in this document is superseded by this statement and §0.R.10a.
 
 #### 0.R.10 Time-gate rejection: the exact consequence, and precise reachability language
 
@@ -371,12 +427,54 @@ candidate evidence). Formal rounds additionally carry the
 bypass-time-budget gate for clear winners (:4774+). Consequences,
 stated precisely: **hypothesis/proposal GENERATION reachability is
 unchanged** (the proposer runs before and independently of this gate);
-**candidate/plan EXECUTION reachability IS affected** — a plan whose
-forecast wrongly exceeds the budget is skipped without ever training,
-and repeated wrongful skips can exhaust a round. G2's intended effect
-is that plans previously skipped by the ×2.7 over-estimate (≈2.5× on
-the inference term) can now execute. This is the bug-fix purpose,
-declared, not a side effect.
+**candidate/plan EXECUTION reachability IS affected in BOTH directions**
+(§0.R.10a) — (i) when the probed batch > 25, a plan whose ×2.7 forecast
+wrongly EXCEEDS the budget is skipped without ever training, and repeated
+wrongful skips can exhaust a round; (ii) when the probed batch < 25, the
+×2.7 forecast wrongly UNDER-prices inference and a plan whose real
+inference time exceeds the budget is admitted (a wrongful acceptance, not
+a wrongful skip). G2's intended effect is that the gate prices inference
+at the batch that will actually run — plans wrongly skipped when B > 25
+can execute, and plans wrongly admitted when B < 25 are correctly gated.
+This is the bug-fix purpose (a two-sided pricing correction), declared,
+not a side effect; no score/metric and no GENERATION change.
+
+#### 0.R.10a Reachability of a sub-25 probed batch (rev 3 final — closes the "always conservative" gap)
+
+The claim "table=25 is always conservative / wrongly rejects, never
+admits" holds only if a candidate that reaches inference cannot run below
+25. Source says it can:
+- The resolver's candidate set is
+  `_DEFAULT_CANDIDATE_BATCHES = (64, 32, 16, 8, 4, 2, 1)`
+  (`agent/skills/evaluate_vram_skill/batch_resolver.py:58`); the descending
+  loop `for B in candidate_batches:` (`:155`) returns the first B clearing
+  the VRAM + compute-intensity caps (`return B`, `:222-223`); a probe OOM at
+  a larger B `continue`s to the next-smaller one (`:184-199`); if even B=1
+  fails it **raises** (`:241-251`) — there is **no floor, no `max(…, 25)`,
+  no minimum-batch gate, and no sub-25 admission filter** anywhere on the
+  path. The only `25` is the legacy `_DEFAULT_INFERENCE_BATCH`
+  (`core/inference_defaults.py:60`), consulted **only** as the `is None`
+  fallback at `sandbox_executor.py:1543` — bypassed whenever the probe
+  supplies a value (always, on a feasible check).
+- The resolved sub-25 B flows unclamped into `active_params["inference_batch"]`
+  (tuner :4695-4697) → the time gate (`:4725`, after :4696) → runtime
+  (`:5031` → `sandbox_executor.py:1543`).
+- So B ∈ {16, 8, 4, 2, 1} is genuinely reachable for a candidate reaching
+  inference (a memory-heavy generated model whose larger candidates OOM /
+  exceed the caps), and the time gate then prices its inference at the
+  reachable batch. The false-admission direction is therefore **live** on
+  the GPU probe path.
+- **B=1 caveat (control-flow scope).** The CPU-only host also returns
+  `inference_batch: 1` (`evaluate_vram_skill/wrapper.py:569-584`), and the
+  ×2.7 branch fires on any `measured > 0` training warmup
+  (`evaluate_time_skill/wrapper.py:706-754`, gated on `data_dir`, not
+  device). But CPU-only is a degenerate "skip VRAM gate" fallback, and this
+  audit did **not** positively confirm from source that a CPU-only run
+  produces a training warmup and reaches this time-gate path in production.
+  So the **~25× under-price at B=1 is recorded as a formula-level /
+  reachable-batch worst case**, not as an observed live CPU time-gate
+  admission. The live, source-confirmed under-price is the GPU sub-25 path
+  (e.g. B=16 → ~1.56× real/forecast; B=8 → ~3×).
 
 #### 0.R.11 The Gate must enter the ×2.7 path — and deterministically can
 
@@ -449,9 +547,16 @@ calibrated table, documented as intentional.
   metric; no change to `batch_resolver.py` search semantics.
 - No change to S3 admission semantics (PR B) or admission ownership
   (O-C-2); `inference_batch_uncalibrated` stays observability-only.
-- No planner exposure and no production-default changes inside the
-  implementation commits — G2's behavior change on the agent path lands
-  only with its parity evidence and explicit operator approval (Q-G-2).
+- **No NEW planner-facing field, schema, or prompt exposure**, and no
+  production-default changes inside the implementation commits — G2's
+  behavior change on the agent path lands only with its parity evidence and
+  explicit operator approval (Q-G-2). (Note: G2 does not add planner
+  exposure, but correcting the time-gate price naturally changes *whether*
+  the existing `skipped_time_risk` skip-feedback is produced — a plan
+  wrongly skipped when B > 25 now runs, and a plan wrongly admitted when
+  B < 25 is now correctly skipped. That existing feedback reaching the
+  planner differently is the intended consequence of §0.R.10/§0.R.10a, not
+  a new exposure surface.)
 - No table deletion; no touching `run_comparison.py` baselines.
 - No empirical throughput campaign design beyond the single bounded
   real-inference validation listed under the PR-level Gate (§4).
@@ -523,7 +628,7 @@ outside the implementation commits.
 | Case | Behavior |
 |---|---|
 | Explicit batch ≤ 0 or non-int | Loud validation error (estimator returns its structured error path; never a silent fallback) |
-| Explicit batch present AND model registered | Explicit wins; source recorded — the hint is the batch that will run |
+| Explicit batch present AND model registered | Explicit wins — the hint is the batch that will run. **No new breakdown/output key**: the existing `breakdown.inference_batch` simply reports the value used; G1 adds no `inference_batch_source` field or any other schema change |
 | Hint absent | Exactly today's behavior, proven by parity test |
 
 #### 7. Verification commands and evidence
@@ -541,13 +646,17 @@ outside the implementation commits.
 ### Commit G2 — Wire the probed batch into the time gate (agent path)
 
 #### 1. Goal
-Close the live coherence gap as CORRECTED by 0.R.3: fix the one
-batch-sensitive forecast path (`training_warmup_x2.7`) and replace the
-other two paths' accidental cancellation (both sides happening to call
-`inference_batch_for`) with explicit same-value threading. This is the
-PR's one intended production-behavior change on the agent path,
-isolated here with its own parity evidence. **Lands only after Q-G-2
-confirmation.**
+Make the time gate **price inference at the batch that will actually run**
+(the real invariant — §0.R.10/§0.R.10a — not "a less-conservative
+forecast"). Concretely: fix the one order-of-magnitude batch-sensitive
+forecast path (`training_warmup_x2.7`), whose table=25 error is **two-sided**
+(over-prices when the probed batch > 25 → wrongful `skipped_time_risk`;
+under-prices when it is < 25 → wrongful admission), and replace the other
+two paths' coincidental same-value use (both sides happening to call
+`inference_batch_for`) with explicit same-value threading so their bounded
+per-file residual stays bounded. This is the PR's one intended
+production-behavior change on the agent path, isolated here with its own
+parity evidence. **Lands only after Q-G-2 confirmation.**
 
 #### 2. Scope
 - Files: `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
@@ -568,9 +677,20 @@ confirmation.**
 - [ ] Thread `active_params.get("inference_batch")` into the time-skill
       call; the wrapper uses it for its `inf_batch` (:746) AND passes
       the SAME value into `estimate_wall_time_seconds` via G1's seam —
-      **never one side only** (0.R.3: one-sided threading breaks the
-      measured path's exact cancellation). A test pins the both-sides
-      invariant.
+      **never one side only** (0.R.3: one-sided threading breaks the two
+      sides' same-batch coherence and re-introduces a probed/table ratio
+      error into the measured path). A test pins the both-sides invariant.
+- [ ] **Two-directional deterministic gate tests (0.R.10a; pseudo, no real
+      run).** On the `training_warmup_x2.7` branch, with a fixed
+      `total_ml` and a time budget chosen strictly between the old (B=25)
+      and new (probed B) forecasts, assert the verdict FLIPS the correct
+      way in BOTH directions:
+      - **B > 25** (e.g. 64): old forecast `ceil(total_ml/25)` exceeds the
+        budget → old REJECTS; new forecast `ceil(total_ml/64)` is under →
+        new ACCEPTS.
+      - **B < 25** (e.g. 16): old forecast is under the budget → old
+        ACCEPTS; new forecast `ceil(total_ml/16)` exceeds it → new REJECTS.
+      Deterministic unit/pseudo evidence — it needs no second real Gate.
 - [ ] Negative construction-pin test (0.R.4): a hint-less attempt
       following a hinted attempt delivers None to the wrapper —
       `active_params` is rebuilt per attempt at :4452, so stale leakage
@@ -698,7 +818,7 @@ comment truth; severable if the operator prefers deferral.)
 | Case | Behavior |
 |---|---|
 | Measurement requested before any preflight ran | Table fallback, recorded as such in the identity (no fabricated hint) |
-| Hint present for a training-phase spec | Ignored exactly as today (schema: `None` for training-phase) |
+| Hint present for a training-phase spec | **Reflected in the recorded planned-identity payload** (`inference_batch_size`, `inference_workload_hash` — the payload-truth fix), but **inert to training semantics**: `planned_config_hash`, training-phase comparability (`COMPARABLE_FIELDS`), the worker, and cache/reuse are all batch-insensitive (0.R.12). Not the same as "ignored exactly as today" — the payload value changes 25→probed; only its downstream effect is nil |
 
 #### 7. Verification commands and evidence
 - [ ] `pytest tests/unit/core/ -k "identity or measurement_spec" -q` — **to record**
@@ -711,7 +831,7 @@ comment truth; severable if the operator prefers deferral.)
 
 ---
 
-### Commit G4 — Fallback observability and the A.9 disposition
+### Commit G4 — Fallback contract and the A.9 disposition
 
 #### 1. Goal
 NARROWED per 0.R.6: the agent-path fallback is UNREACHABLE by
@@ -804,8 +924,14 @@ consumer census per §0.B/0.R.2).
    mechanically: forecast source, old effective batch (25), new
    explicit batch (probed), runtime batch (same), and the time-gate
    outcome; plus the frozen scorer accepting the output, scorer/metric
-   implementation untouched. A deterministic pseudo test pins the
-   branch; the one real run proves end-to-end reachability. No
+   implementation untouched. **Deterministic pseudo tests** pin the branch
+   AND the two-sided verdict flip (0.R.10a): one `B > 25` case (old rejects
+   / corrected accepts) and one `B < 25` case (old accepts / corrected
+   rejects), each with the time budget set between the old and new
+   forecasts. The **one** real run proves end-to-end reachability; it need
+   satisfy only `probed batch ≠ 25` AND
+   `inference_ms_source == "training_warmup_x2.7_fallback"` — a single
+   generated model, either direction, suffices (no second real Gate). No
    throughput campaign. All timings hardware-local (PR F calibration
    boundary).
 6. Full checker set per §E.3d.12 at the final heads; CI green on the
@@ -821,32 +947,45 @@ at runtime and is pinned by G4's contract test); its remaining
 consumers (baselines, legacy scripts, proposer advisory, no-hint
 fallback) are documented.*
 
-### Q-G-2 — The one production-behavior change (G2) — **RESUBMITTED FOR FINAL FREEZE; the last two conditions discharged in rev 3**
+### Q-G-2 — The one production-behavior change (G2) — **APPROVED / FROZEN (rev 3 final reconciliation; all conditions discharged)**
 Rev-2 discharged the call-graph and state-lifetime conditions (0.R.2,
-0.R.4). Rev 3 discharges the rest:
-1. *Exact ceil arithmetic* (0.R.9): the measured/static paths are
-   batch-invariant up to a bounded partial-batch residual (≤≈2.4 % at
-   the smallest realistic eval set); the ×2.7 path's effect is
-   `ceil(total_ml/25)/ceil(total_ml/64)` ≈ 2.5×, always conservative.
-   Every "exactly cancels" claim is corrected in place.
-2. *Reachability consequence stated precisely* (0.R.10): G2 can allow
-   plans previously and wrongly skipped on time to EXECUTE — intended;
-   hypothesis GENERATION is untouched; no score/metric change.
-G2 threads BOTH forecast sides with one value; parity matrix
-hardware-local and cost-bounded (0.R.8).
+0.R.4). Rev 3 final discharges the rest:
+1. *Exact per-file ceil bound* (0.R.9): the measured/static paths carry
+   only a **bounded, always-downward** per-file ceil residual —
+   `Σᵢ ceil(mlᵢ/B) − ceil(Σᵢ mlᵢ/B) ≤ n_files − 1` steps (≤ 19); as a
+   relative error ≤ 2.4 % at the default trial, ≈ 1.08 % at the default
+   seg 40 000, and a supported-grid worst case ≈ 21.9 % at an atypical
+   (P=1, seg 50 000, B=64). This is a **second-order** term beside the ×2.7
+   path's `ceil(total_ml/25)/ceil(total_ml/B)` **factor**. The
+   "≤2.4 % / smallest realistic set / exactly cancels" phrasings are
+   corrected in place.
+2. *Two-sided pricing error* (0.R.10, 0.R.10a): the ×2.7 forecast at
+   table=25 is **NOT always conservative**. A probed batch < 25 is
+   reachable (candidate set `(64,…,1)`, no floor — 0.R.10a), so the old
+   forecast can also UNDER-price and **wrongly admit** a plan whose real
+   inference exceeds the budget, as well as over-price and wrongly skip one.
+   G2's invariant is therefore **"the time gate prices inference at the
+   batch that will actually run"**, correcting BOTH directions — not merely
+   making the forecast less conservative. Hypothesis GENERATION is
+   untouched; no score/metric change.
+G2 threads BOTH forecast sides with one value; both-directions pinned by
+deterministic pseudo tests (0.R.10a) and the one real Gate; parity matrix
+hardware-local and cost-bounded (0.R.8). **Freezes for implementation.**
 
-### Q-G-3 — Identity alignment (G3) — **RESUBMITTED FOR FINAL FREEZE; outcome A proven in rev 3**
+### Q-G-3 — Identity alignment (G3) — **APPROVED / FROZEN — Option A (operator, rev 3 final)**
 0.R.12 proves from source: `planned_config_hash` excludes the inference
 batch; training-phase comparability excludes it; `inference_workload_-
-hash` has zero consumers; no cache/reuse keys on it. Changing 25→64
+hash` has zero consumers; no cache/reuse keys on it. Changing 25→probed
 alters exactly two currently-unread payload strings. The "API without a
 caller" middle option is rejected as the §E.3d.1 anti-pattern.
-**Choice for the operator:** (A, recommended) thread the live hop now —
-one argument, proven safe, pinned by a hash/comparability-unchanged
-test, removes the latent trap; or (B) defer G3's live hop and API
-entirely to the future inference-phase-measurement PR, doing only the
-comment-truth fixes here. Both are honest; A is one small proven-safe
-step, B is minimum-change.
+**Operator decision — Option A (approved):** thread the already-in-scope
+probed batch into the live planned-identity payload now — one argument,
+proven safe by 0.R.12 (no change to training hash, comparability, worker,
+cache/admission), pinned by the hash/comparability-unchanged test, and it
+removes the latent trap of a stale `25` sitting in the recorded payload.
+The deferred alternative (comment-truth fixes only, live hop postponed to
+the future inference-phase-measurement PR) is retired: Option A is one
+small proven-safe step and closes the payload-truth defect now.
 
 ### Q-G-4 — A.9 disposition — **APPROVED in the narrowed form (operator, rev-2 review)**
 No new production observability; G4 = contract test pinning "every
@@ -871,7 +1010,7 @@ Metric-frozen proof:      no scoring surface touched; guard tests
 Name-keyed dependency
 added:                    none — PR G REDUCES name-keyed reliance; the
                           table's remaining consumers are enumerated
-                          and observable
+                          and documented (§0.B census)
 Transport contract:       two LIVE hops (time-gate forecast, runtime)
                           each carry a delete-the-hop reachability
                           test; the identity hop is payload-truth +
@@ -887,9 +1026,13 @@ Acceptance evidence:      parity matrix + coherence invariant + one
 
 ---
 
-**Nothing in this document is implemented.** Q-G-1/Q-G-4/Q-G-5 are
-operator-approved; Q-G-2 and Q-G-3 are resubmitted with all stated
-conditions discharged by source audit. On final freeze, the sequence is
-G1 → G2 (evidence checkpoint) → G3 (option A or B per the operator) →
-G4 → PR-level validation. Every commit stops to show its diff summary,
-staged files, test evidence, and deviations before committing.
+**Nothing in this document is implemented.** All operator questions are
+now discharged: Q-G-1 / Q-G-4 / Q-G-5 approved (rev-2); Q-G-2 approved
+(rev-3, both conditions — the two-sided pricing error and the bounded
+per-file ceil residual — closed by source audit); Q-G-3 approved —
+Option A (thread the probed batch into the live planned-identity payload,
+proven inert to training hash / comparability / worker / reuse by 0.R.12).
+On this freeze, the sequence is G1 → G2 (evidence checkpoint) → G3
+(Option A) → G4 → PR-level validation. Every commit stops to show its
+diff summary, staged files, test evidence, and deviations before
+committing.
