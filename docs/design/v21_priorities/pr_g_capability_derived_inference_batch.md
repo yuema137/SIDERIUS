@@ -1168,11 +1168,12 @@ consumer census per §0.B/0.R.2).
 - [x] ruff + format clean; pyright CI-only on this host (G1 note).
 
 #### 8. Commit boundary
-- [x] Diff = contract test (+ new test-package `__init__.py`, matching
-      the sibling convention) + `inference_defaults.py` docstring truth
+- [x] Diff = contract test + `inference_defaults.py` docstring truth
       + this ledger — **zero runtime diff**, mechanically shown: the
       only non-test `.py` change is `core/inference_defaults.py`, whose
-      diff is entirely inside docstrings.
+      diff is entirely inside docstrings. *(Correction on read-back:
+      the test package's `__init__.py` already existed and tracked —
+      the commit is 3 files, exactly as listed here.)*
 - [x] ~~Show diff summary + evidence, then commit.~~ Superseded by the
       Implementation Working Rules (autonomous semantic commits).
 
@@ -1327,14 +1328,176 @@ G4       DONE — executed contract pin over both agent-inference-capable
          return families; census/docstring truth; 2/2 mutations caught;
          zero runtime diff (evidence in §G4.7)
 PR       none opened yet
-Gate     next — the PR-level bounded real Gate (§4 criterion 5); its
-         "operator-approved separately" clause is DISCHARGED by the
-         operator's Implementation Working Rules (2026-08-10): bounded
-         Gate 1/2 runs within the ~1 h / non-destructive envelope are
-         launched autonomously, and the resume directive explicitly
-         orders this one Gate. Cold-start per the standing rule.
+Gate     DONE — PASS (r2; r1 failed on a launcher-harness defect,
+         proven and recorded; one authorized rerun). Evidence quoted
+         in the Gate r1/r2 records below. The frozen doc's
+         "operator-approved separately" clause was discharged by the
+         operator's Implementation Working Rules (2026-08-10).
 jobs     no background jobs
 ```
+
+### PR-level Gate readiness packet (written BEFORE launch, 2026-08-10)
+
+```text
+Property proved:
+  end-to-end reachability of the G2/G3 coherence on the REAL stack —
+  the first trial attempt of a fresh iteration with a generated model
+  (no table entry) produces a saved record with
+    memory.inference_ms_source == "training_warmup_x2.7_fallback"
+    params.inference_batch == <probe-derived, guaranteed != 25:
+      the candidate set is powers of two (64..1)>
+  where that one value is what the time gate priced (G2 transport,
+  pinned deterministically) and what execute_inference ran (Phase 6.6
+  transport), plus the frozen scorer accepting the output
+  (denoising score present; scorer/metric untouched by this PR).
+
+Why cheaper evidence is insufficient:
+  every hop and both verdict directions are already pinned by unit /
+  pseudo tests; the ONLY unproven claim is that the real chain (real
+  probe, real warmup, real subprocess training/inference, real scorer)
+  traverses the same path end-to-end on hardware. One real record is
+  the minimum artifact that shows it.
+
+Workload (minimum bounded):
+  model_type      compact_wavenet_ce_coldstart_v1 (seed_plugin_path;
+                  small proven generated wavenet, seg 2000 default,
+                  NOT in the batch table -> old batch would be
+                  fallback 25)
+  max_rounds=1, force_formal_round=False (the round stays TRIAL — the
+  frozen "first trial attempt" route), attempts_per_round default 3,
+  max_epochs=1, trial/eval snapshot 0.05, train_portion 0.1,
+  trial_time_budget_minutes=20 (gate armed), data_dir=real TIDMAD
+  (warmup measures -> x2.7 branch; fresh workspace -> empty
+  observation store -> no store reuse), health gates at production
+  default, cold start (no seed_records).
+  LLM: openai gpt-5-mini (planner+reflector), 1-2 calls.
+
+Bounds (harness-owned):
+  outer hard timeout 1800 s on the whole run; expected wall ~5-15 min
+  (small model, 5% trial). Rounds=1, attempts<=3, epochs<=1.
+
+Environment (recorded at launch): lilab RTX 5090, 937 MiB in use /
+  22% util background load; data at /home/klz/Data/TIDMAD;
+  workspace .gate_artifacts/pr_g_gate_20260810 (preserved).
+
+PASS artifact:
+  the run's saved record JSON (workspace memory/output file) quoting:
+  inference_ms_source, params.inference_batch, the time-gate fields
+  (time_estimate_minutes/time_budget_minutes/time_mode), status and
+  denoising score. Old-batch contrast quoted from
+  inference_defaults.py (fallback 25, no table entry).
+
+Failure classification (decided in advance):
+  - LLM/API transport failure         -> infrastructure; ONE bounded
+    rerun allowed only if proven transient (does not change the SHA).
+  - all attempts VRAM/time-skipped    -> legitimate candidate
+    evidence; skip records also carry inference_ms_source
+    (_time_skip_memory_extra) and params.inference_batch — evaluate
+    the criterion on them; report, do not reroll.
+  - model collapse / HealthGate fire  -> legitimate evidence; fields
+    still recorded; report as-is.
+  - harness/wiring defect             -> STOP; audit why the
+    readiness audit missed it before any fix.
+```
+
+### Gate run r1 (2026-08-10) — FAILED on a LAUNCHER-harness defect; classified, one rerun authorized
+
+Outcome: killed by the OUTER 1800 s timeout during a later attempt's
+scoring; every attempt that reached scoring ended `error_scoring`;
+no success record. Workspace PRESERVED at
+`.gate_artifacts/pr_g_gate_20260810/` (7 attempt records + failure
+log `scratchpad/pr_g_gate.log`).
+
+Root cause (PROVEN from source, per the pre-declared "harness/wiring
+defect → STOP + audit" lane): the scorer forces the multiprocessing
+**spawn** start method (`execute_tools/scoring_utils.py:594-603`);
+spawn re-imports `__main__`, and the r1 launcher script executed
+`agent.run()` at module top level with NO `if __name__ == "__main__"`
+guard — so every scoring worker re-executed the ENTIRE tuner
+(the log shows repeated "Input validated" startups and exp ids up to
+`_007`; `resource_tracker` leaked-semaphore warning). A launcher
+(validation-harness) defect only: zero production code implicated;
+the tested SHA is unchanged. Why the readiness audit missed it: the
+audited reference harnesses (pytest tiers, `run_comparison.py`) are
+all either the true main module or guarded; the packet did not
+include a "launcher is spawn-safe" check — added to the r2 launcher
+and noted here as the audit strengthening.
+
+Secondary finding (workload escape): the planner ignored the input's
+small trial portion and chose 0.5 → 0.25 (the known
+`project_trial_llm_problem` behavior), inflating per-attempt cost;
+r2 hard-locks `plan_overrides={"trial_portion": 0.05}` (the operator
+lock exists precisely for this; the Gate property is independent of
+the portion).
+
+**Evidence already banked by r1 despite the failure** (real records,
+real hardware): skip records `_001` (est 36.69 min vs 20 → REJECT),
+`_005` (29.51), `_006` (181.35) each carry
+`memory.inference_ms_source == "training_warmup_x2.7_fallback"` AND
+`params.inference_batch == 64` (probed ≠ 25; the model has no table
+entry, so the OLD price would have been fallback 25 → attempt 2's
+accepted 18.2 min forecast would have been ≈ 46 min under table-25
+pricing and wrongly rejected — the live B > 25 contrast, observed on
+hardware). Missing from r1: a success record with the frozen scorer
+accepting the output — the r2 target.
+
+Rerun r2: same SHA, same bounded workload, fresh cold-start workspace
+`.gate_artifacts/pr_g_gate_20260810_r2/`, launcher fixed (main guard)
++ portion lock. ONE rerun only, per the packet.
+
+### Gate run r2 (2026-08-10) — **PASS** (reachability property established; collapse verdict reported as-is)
+
+Clean completion INSIDE every bound: rc=0, no timeout, 1 round /
+1 attempt, wall ≈ 8 min (vs 30-min cap), planned vs actual recorded.
+Workspace PRESERVED at `.gate_artifacts/pr_g_gate_20260810_r2/`
+(record, run output, summary JSON, denoised HDF5s, log
+`scratchpad/pr_g_gate_r2.log`).
+
+Mechanical quotes from the ONE record
+(`compact_wavenet_ce_coldstart_v1_pr_g_gate_x27_batch_v2_001`) and log:
+
+```text
+model              compact_wavenet_ce_coldstart_v1 (generated; NO
+                   table entry -> old effective batch = fallback 25)
+forecast source    memory.inference_ms_source ==
+                   "training_warmup_x2.7_fallback"        (0.R.11 ✓)
+old effective batch 25 (inference_defaults fallback; nothing registered)
+new explicit batch  64 — probe-derived; log line (r2, with the
+                   corrected wording live): "pricing at the
+                   probe-derived hint (64)"                (≠ 25 ✓)
+runtime batch      64 — record params.inference_batch == 64 AND the
+                   runtime observation payload's
+                   inference_batch_size == 64 (the G3 payload truth
+                   on a real record, not the table 25)
+time-gate outcome  est 3.71 min vs budget 20.0 → policy ALLOW
+                   (evidence real_dataset_warmup); trained 27 s
+                   forecast leg, inferenced, scored
+frozen scorer      RAN and ACCEPTED the output — denoising_score
+                   −3.1437 computed by the untouched scorer (quoted
+                   in the reflection); scorer/metric code untouched
+                   by this PR (guard tests unmodified)
+health verdict     amplitude/output-collapse gates fired (per-file
+                   unique_int8=1, output_std=0, dominant_mode_
+                   fraction=1.0 on files 3,10,17) → round invalidated,
+                   status failed_mode_collapse, score correctly
+                   EXCLUDED from best (best_denoising_score null)
+```
+
+Interpretation, per the pre-declared classification: the collapse is
+LEGITIMATE EVIDENCE (a 1-epoch, 5%-data cold-start tiny model
+collapsing is the health system doing its job) and is reported as-is —
+no reroll. The reachability property the Gate exists to prove IS
+established end-to-end on real hardware: probed batch (≠ 25) priced
+the x2.7 forecast, the SAME value ran inference and landed in the
+record and in the measurement-identity payload, and the frozen
+scorer + HealthGate chain consumed the output normally. Combined with
+r1's banked skip-record evidence (36.69/29.51/181.35 min forecasts
+priced at 64 vs 20-min budget — including the observed live contrast
+that attempt r1-002's accepted 18.2-min forecast would have been
+≈ 46 min and wrongly rejected under table-25 pricing), both time-gate
+outcomes (admit and skip) are witnessed on hardware at the probed
+batch. §4 criterion 5 is satisfied; no second Gate (no
+throughput campaign; hardware-local timings only).
 
 All operator questions are discharged: Q-G-1 / Q-G-4 / Q-G-5 approved
 (rev-2); Q-G-2 approved (rev-3, both conditions — the two-sided pricing

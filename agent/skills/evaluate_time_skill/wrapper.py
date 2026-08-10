@@ -802,12 +802,19 @@ def run_skill(sandbox, **kwargs) -> dict:
     # K.2.5-8.
     inference_batch_uncalibrated = bool(inference["breakdown"].get("inference_batch_uncalibrated"))
     if inference_batch_uncalibrated:
+        # V21 PR G: the batch shown is whatever the forecast actually
+        # priced — the probe-derived hint on the agent path, the silent
+        # table fallback (25) only on no-hint paths. The flag itself keeps
+        # its registration meaning either way.
+        _batch_provenance = (
+            "probe-derived hint" if explicit_inference_batch is not None else "runtime fallback"
+        )
         print(
             f"!!! [evaluate_time_skill] model_type {model_type!r} has no "
             f"registered inference batch in core/inference_defaults.py — "
-            f"using runtime fallback "
+            f"pricing at the {_batch_provenance} "
             f"({inference['breakdown']['inference_batch']}). "
-            f"Inference-phase wall-time estimate is UNCALIBRATED for this "
+            f"Architecture-level ms/step is UNCALIBRATED for this "
             f"novel architecture. Treat verdict as best-effort."
         )
 
