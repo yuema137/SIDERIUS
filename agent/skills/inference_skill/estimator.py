@@ -94,13 +94,16 @@ def resolve_forecast_batch(explicit: int | None, model_type: str) -> int:
     default (``inference_batch_for`` — the K.2.5-8 silent fallback to 25 for
     unregistered model types).
 
-    V21 PR G G1 — the inert seam. The override lets the tuner price the
-    forecast at the batch the runtime will ACTUALLY run (the probe-derived
-    value in ``active_params["inference_batch"]``), restoring
-    forecast==runtime coherence on the ``training_warmup_x2.7`` path. With
-    ``explicit is None`` the result is byte-identical to pre-G1 behaviour;
-    no caller passes an override until G2. An invalid override is rejected
-    loudly — never silently clamped or fallen back (fail-closed).
+    V21 PR G — the forecast prices at the batch the runtime will ACTUALLY
+    run: the probe-derived value in ``active_params["inference_batch"]``,
+    which the tuner's time gate has always forwarded wholesale
+    (``_run_time_preflight`` splats ``**active_params``) and the time-skill
+    wrapper now consumes and passes down here — restoring forecast==runtime
+    coherence on the ``training_warmup_x2.7`` path. With ``explicit is
+    None`` (every no-hint caller: baselines, legacy scripts, proposer
+    advisory) the result is byte-identical to pre-G1 behaviour. An invalid
+    override is rejected loudly — never silently clamped or fallen back
+    (fail-closed).
     """
     if explicit is None:
         return inference_batch_for(model_type)
@@ -259,11 +262,13 @@ def estimate_wall_time_seconds(
             has a warmup measurement. ``None`` → internal static fallback.
         num_params: Only needed by the static fallback. If absent, the
             model is instantiated internally via ``_count_params``.
-        inference_batch: V21 PR G G1 — an explicit batch to price the
-            forecast at, overriding the registry default. ``None`` (the
-            default, and every caller until G2) → byte-identical pre-G1
-            behaviour. When supplied it must be a positive int, else a
-            ``ValueError`` is raised (no silent clamp). It does NOT change
+        inference_batch: V21 PR G — an explicit batch to price the
+            forecast at, overriding the registry default. Supplied on the
+            live agent path by the evaluate_time_skill wrapper (the probed
+            batch from ``active_params``); ``None`` (baselines, legacy
+            scripts, proposer advisory) → byte-identical pre-G1 behaviour.
+            When supplied it must be a positive int, else a ``ValueError``
+            is raised (no silent clamp). It does NOT change
             ``inference_batch_uncalibrated``, which keeps its registration
             meaning ("is this model_type in the table"), not "was a batch
             supplied".

@@ -701,6 +701,49 @@ outside the implementation commits.
 
 ### Commit G2 — Wire the probed batch into the time gate (agent path)
 
+#### 0. Corrected understanding (implementation audit, 2026-08-10)
+
+```text
+Previous assumption (frozen design, §G1.2 "no caller passes the new
+  argument yet" / §G2.3 "thread active_params.get('inference_batch')
+  into the time-skill call"):
+  the tuner needed a G2 code change to deliver the probed batch, and
+  G1's wrapper seam would stay inert until then.
+
+Audit evidence:
+  _run_time_preflight has ALWAYS splatted **active_params into the
+  skill kwargs (tuner :1168-1178, `**active_params` at :1171), and
+  active_params["inference_batch"] is set at :4696 — before the gate
+  fires at :4725. _run_skill (:2166-2176) forwards **params verbatim
+  to the wrapper. The key was present-but-unread in the wrapper's
+  kwargs the whole time. (§0.B row 3 knew the value was in
+  active_params at gate time; the missed detail was only that the
+  splat already transports it.)
+
+Corrected understanding:
+  the tuner→wrapper hop pre-exists. G1's wrapper consumption went
+  LIVE on the agent path the moment it landed; G2 contains ZERO
+  tuner code changes. G2 is the evidence-and-truth commit: the
+  two-directional verdict-flip tests, the transport/reachability
+  pins, the 0.R.4 negative pin, the C3b extension, the parity
+  matrix, comment truth (the three "until G2"/"no caller" docstring
+  claims corrected), and the skill/node .md sync.
+
+Implementation consequence:
+  no diff in nodes/; the G1 commit message was amended (pre-push,
+  7cc6aef4) to state the immediate liveness instead of the false
+  "no caller supplies the value yet" claim. The composite G1+G2
+  end state is exactly the approved Q-G-2 change.
+
+Validation consequence:
+  the "delete-the-hop" reachability test targets the REAL hop (the
+  **active_params splat / key presence), mutation-verified by
+  stripping the key at the splat. Bounded deviation, recorded here;
+  no operator stop — the behavior change itself is the
+  operator-approved Q-G-2 change and nothing was pushed before its
+  evidence landed.
+```
+
 #### 1. Goal
 Make the time gate **price inference at the batch that will actually run**
 (the real invariant — §0.R.10/§0.R.10a — not "a less-conservative
@@ -728,15 +771,21 @@ parity evidence. **Lands only after Q-G-2 confirmation.**
 - Dependencies: G1.
 
 #### 3. Implementation plan
-- [ ] Inspect `_run_time_preflight`'s signature and the wrapper's
+- [x] Inspect `_run_time_preflight`'s signature and the wrapper's
       kwargs contract before finalizing (no guessed interfaces).
-- [ ] Thread `active_params.get("inference_batch")` into the time-skill
+      *(Done — and this inspection produced the §G2.0 corrected
+      understanding: the hop pre-exists via the `**active_params`
+      splat.)*
+- [x] Thread `active_params.get("inference_batch")` into the time-skill
       call; the wrapper uses it for its `inf_batch` (:746) AND passes
       the SAME value into `estimate_wall_time_seconds` via G1's seam —
       **never one side only** (0.R.3: one-sided threading breaks the two
       sides' same-batch coherence and re-introduces a probed/table ratio
       error into the measured path). A test pins the both-sides invariant.
-- [ ] **Two-directional deterministic gate tests (0.R.10a; pseudo, no real
+      *(Satisfied with zero tuner diff — the splat already threads it
+      (§G2.0); the wrapper's both-sides use landed in G1 and is pinned
+      by the G1 both-sides test + mutations 2/3.)*
+- [x] **Two-directional deterministic gate tests (0.R.10a; pseudo, no real
       run).** On the `training_warmup_x2.7` branch, with a fixed
       `total_ml` and a time budget chosen strictly between the old (B=25)
       and new (probed B) forecasts, assert the verdict FLIPS the correct
@@ -747,13 +796,31 @@ parity evidence. **Lands only after Q-G-2 confirmation.**
       - **B < 25** (e.g. 16): old forecast is under the budget → old
         ACCEPTS; new forecast `ceil(total_ml/16)` exceeds it → new REJECTS.
       Deterministic unit/pseudo evidence — it needs no second real Gate.
-- [ ] Negative construction-pin test (0.R.4): a hint-less attempt
+      *(Done —
+      `tests/unit/agent/tune_ml_hyperparam_agent/test_g2_time_gate_probed_batch.py::TestVerdictFlipsBothDirections`,
+      unregistered model (old batch = fallback 25), warmup-measured
+      training provenance so REJECT is real (§7.4). B=64 @ budget 14 min:
+      old REJECTS (15.5 min) / new ACCEPTS (12.76 min); B=4 @ budget
+      20 min: old ACCEPTS (15.5) / new REJECTS (39.1). Asserts
+      `feasible`, `over_effective_budget`, the estimator's priced batch,
+      and `inference_ms_source == "training_warmup_x2.7_fallback"`.
+      B=4 chosen over the sketch's 16 for a wider margin; same 0.R.10a
+      class.)*
+- [x] Negative construction-pin test (0.R.4): a hint-less attempt
       following a hinted attempt delivers None to the wrapper —
       `active_params` is rebuilt per attempt at :4452, so stale leakage
       is impossible; the test makes that construction property durable.
-- [ ] Extend the C3b pin (§0.D): a new test asserting that ON THE HINT
+      *(Done — `TestTunerTransport::test_hintless_active_params_delivers_no_batch`:
+      a hint-less `active_params` delivers NO `inference_batch` key
+      through `_run_time_preflight`, so the wrapper resolves the
+      registry default exactly as pre-G.)*
+- [x] Extend the C3b pin (§0.D): a new test asserting that ON THE HINT
       PATH the forecast batch equals the runtime batch (the restored
       invariant), alongside the existing no-hint pin.
+      *(Done — `test_planning_and_runtime_agree_on_the_batch_for_a_hinted_model`
+      in the C3b module: forecast prefers the hint verbatim and its
+      no-hint fallback is the SAME function the executor falls back to;
+      end-to-end transport equality delegated to the pseudo test below.)*
 - [ ] **Per-builtin parity matrix (§E.3d.7 discipline, recorded in this
       doc):** for the six shipped model types, compare the probe-derived
       batch against the table entry; every difference explained (e.g.
@@ -764,9 +831,26 @@ parity evidence. **Lands only after Q-G-2 confirmation.**
       probe costs (0.R.8); the resolver and the table do NOT change
       because of the matrix in PR G. Evidence recorded here before the
       commit is finalized.
-- [ ] Reachability evidence: a test that fails if the tuner stops
+- [x] Reachability evidence: a test that fails if the tuner stops
       passing the hint (deleting the hop breaks it — transport-contract
       discipline).
+      *(Done, two layers: (1)
+      `TestTunerTransport::test_probed_batch_reaches_time_skill_kwargs`
+      pins the `_run_time_preflight` splat; (2)
+      `tests/integration/workflows/test_g2_forecast_runtime_batch_pseudo.py`
+      runs ONE dual-mode pseudo tuner iteration (the K.9 choreography
+      with BOTH time budgets enabled) with pass-through shims on the
+      real time/inference wrappers, asserting per attempt:
+      forecast batch is not None, forecast batch == runtime batch
+      (probed 32 on this host — not the table, not the fallback), and
+      the record's `params["inference_batch"]` carries the same value.
+      The record schema has no forecast-batch field and G2 may not add
+      one (§2 non-goals), so equality is asserted at the skill
+      boundaries — bounded deviation from the sketch's "on the record"
+      wording. TEST-BUG deviation found and fixed during bring-up: the
+      forced-formal round 2 reads `formal_time_budget_minutes`, which
+      the first draft left None, silently skipping the second gate
+      firing — the input now enables both budgets.)*
 
 #### 4. Validation plan
 - Unit (tuner, mocked skills): the time skill receives the same batch
@@ -798,14 +882,78 @@ parity evidence. **Lands only after Q-G-2 confirmation.**
 | Probed batch differs wildly from table on a builtin | Legal; the parity matrix explains it; no clamping to the table |
 
 #### 7. Verification commands and evidence
-- [ ] Targeted tuner + skill tests — counts/wall time **to record**
-- [ ] Parity matrix evidence — **to record in this doc**
-- [ ] Mutation: forecast reads table despite hint → caught — **to record**
+- [x] Targeted tuner + skill tests (2026-08-10):
+      `test_g2_time_gate_probed_batch.py` → 4 passed (1.11 s);
+      `test_g2_forecast_runtime_batch_pseudo.py` → 1 passed (37.4 s);
+      C3b module incl. the new hinted-model pin → green in the same
+      run (log `g2_pseudo.log`: 9 passed alongside the pre-fix pseudo
+      failure; post-fix rerun 1 passed). All rc read from pytest.
+- [x] Parity matrix evidence (2026-08-10, hardware-local diagnostic —
+      lilab reference host, RTX 5090, `usable_cap` 25.1 GB of 31.3 GB,
+      torch 2.10.0+cu128; paper-spec baseline configs; the SAME
+      production resolver `resolve_inference_batch` with default
+      candidates/budgets; ~2.5 min total, well under the 0.R.8 bound;
+      resolver and table unchanged):
+
+      | model | seg | params | table | probed | note |
+      |---|---|---|---|---|---|
+      | punet | 40000 | 6.76 M | 25 | **16** | 14.5 s |
+      | wavenet | 40000 | 303 K | 25 | **16** | 42.2 s |
+      | fcnet | 40000 | 323 M | 25 | **16** | 4.0 s |
+      | rnn | 40000 | 1.97 M | 10 | **16** | 56.8 s |
+      | transformer | 20000 | — | 1 | **crash at B=64** (F-A3) | see below |
+      | gated_fno | 40000 | 61.5 M | 25 (fallback — NO table entry) | **16** | 16.7 s |
+
+      Differences explained, per row:
+      - **All completed probes resolve 16 < table 25** (and > rnn's 10):
+        at seg 40 000 the resolver's conservative
+        `forward_output_bytes_sum` bound prices B=32 over the 25.1 GB
+        cap for every one of these architectures; 16 clears it. The
+        table values are legacy hand calibrations against a different
+        bound. Probed ≠ table is therefore COMMON even on builtins —
+        the coherence gap G2 closes is not a generated-models-only
+        phenomenon on this host.
+      - **transformer**: the default descending search begins at B=64,
+        whose single attention matrix at seg 20 000 is
+        64 × 2 × 20 000² × 4 B ≈ 204.8 GB; the CPU allocator raises
+        ENOMEM, torchinfo re-wraps it as a generic
+        `RuntimeError("Failed to run torchinfo…")`, and
+        `is_memory_exception` does not recognize the laundered form, so
+        the resolver re-raises instead of stepping down — **PR F's
+        recorded F-A3 finding reproduced by the matrix**, the
+        2026-07-31 incident class. A bounded host-safe follow-up probe
+        (candidates `(4,2,1)`, ≤ 12.8 GB transient) shows it WOULD
+        resolve **4** (table: 1). Not fixed here — F-A3 remains a
+        recorded follow-up outside PR G scope (0.R.8: the matrix
+        changes nothing).
+      - **gated_fno has no table entry at all** — its "table" value is
+        the K.2.5-8 silent fallback 25, confirming §E.3b's finding on a
+        SHIPPED builtin, not just generated models.
+
+      Hardware-local only (PR F calibration boundary): these probed
+      values are properties of this host's cap and allocator, never a
+      universal expected mapping. Evidence log:
+      scratchpad `g2_parity_matrix.log`.
+- [x] Mutations (2/2 attempted, 2/2 caught, site count==1 each,
+      pycache cleared, backup-restore — never `git checkout` — baseline
+      re-run 13 passed):
+      - **A. forecast reads table despite hint** (wrapper's
+        `kwargs.get("inference_batch")` → `None`): caught by BOTH
+        verdict-flip tests. The pseudo test correctly still passes —
+        it pins TRANSPORT at the wrapper boundary while the flip tests
+        pin CONSUMPTION; the two families are complementary, neither
+        subsumes the other.
+      - **B. tuner hop deleted** (`**active_params` splat strips
+        `inference_batch` in `_run_time_preflight`): caught by the
+        transport test AND the pseudo coherence test.
 
 #### 8. Commit boundary
-- [ ] Diff = tuner seam + wrapper consumption + tests + node `.md`;
-      no estimator internals beyond G1's seam, no runtime_control.
-- [ ] Show diff summary + evidence + deviations, then commit.
+- [x] Diff = wrapper/estimator comment truth + tests + skill `.md`s +
+      tuner node `.md` + this ledger; ZERO tuner/executor/
+      runtime_control code changes (§G2.0 — the hop pre-exists).
+- [x] ~~Show diff summary + evidence + deviations, then commit.~~
+      Superseded by the Implementation Working Rules (autonomous
+      semantic commits); evidence recorded above.
 
 ---
 
@@ -1089,10 +1237,15 @@ Acceptance evidence:      parity matrix + coherence invariant + one
 ```text
 branch   feat/pr-g-capability-derived-inference-batch
 base     master @ 51bc3a7a (the rev-3 design commit)
-HEAD     f48c1dee (design freeze) + G1 committed on top
-G1       DONE — both seams + 16 tests + 3/3 mutations caught
-         (evidence in §G1.7; sha recorded at the G2 checkpoint)
-G2-G4    not started (G2 next)
+HEAD     f48c1dee (design freeze) + G1 (7cc6aef4, message amended
+         pre-push with the §G2.0 correction) + G2
+G1       DONE — both seams + 16 tests + 3/3 mutations caught (§G1.7)
+G2       DONE — zero tuner code change needed (§G2.0: the
+         **active_params hop pre-exists); evidence = 2-direction
+         verdict flips, transport + 0.R.4 pins, C3b extension,
+         pseudo coherence iteration, parity matrix, 2/2 mutations,
+         comment truth, skill/node .md sync
+G3-G4    not started (G3 next, Option A)
 PR       none opened yet
 Gate     not run
 jobs     no background jobs

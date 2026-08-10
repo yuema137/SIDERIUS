@@ -596,12 +596,17 @@ def run_skill(sandbox, **kwargs) -> dict:
     Required kwargs: model_type, model_config, train_config, loss_config,
                      sample_set, time_budget_minutes.
     Optional kwargs: train_portion (default 1.0), data_dir (enables warmup),
-                     inference_batch (V21 PR G G1 — explicit batch to price
+                     inference_batch (V21 PR G — explicit batch to price
                      the inference forecast at, overriding the registry
                      default; None → pre-G1 behaviour, byte-identical. Must
                      be a positive int; an invalid value surfaces via the
                      structured ``status: "error"`` return, never a silent
-                     clamp. No caller supplies it until G2).
+                     clamp. LIVE on the agent path: the tuner's
+                     _run_time_preflight splats **active_params, whose
+                     ``inference_batch`` is the current attempt's probed
+                     batch, set at tuner :4696 before the gate fires —
+                     so the forecast prices at the batch inference will
+                     actually run).
 
     Returns a dict with keys: status, feasible, verdict, suggestion,
     estimated_minutes, limit_minutes, breakdown, dominant_phase,

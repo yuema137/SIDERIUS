@@ -64,6 +64,44 @@ def test_planning_and_runtime_agree_on_the_batch_for_an_unregistered_model():
     assert estimate["breakdown"]["inference_batch"] == runtime_batch
 
 
+def test_planning_and_runtime_agree_on_the_batch_for_a_hinted_model():
+    """V21 PR G G2 extension of the pin above (PR G doc §0.D).
+
+    The original test pins the NO-HINT pair (both sides call
+    ``inference_batch_for``). On the live agent path both sides now
+    prefer the probed hint: ``sandbox_executor.execute_inference``
+    treats a non-None ``inference_batch`` as the authoritative runtime
+    batch (``:1543``), and the wall-time forecast prices at the same
+    explicit value via ``resolve_forecast_batch``. This test pins the
+    forecast side's hint-preference and its fallback being the SAME
+    function the executor falls back to — so the two resolution rules
+    cannot drift in either regime. End-to-end transport equality (the
+    same ``active_params`` value reaching both skills in one attempt)
+    is pinned by
+    ``tests/integration/workflows/test_g2_forecast_runtime_batch_pseudo.py``
+    and the delete-the-hop test in
+    ``tests/unit/agent/tune_ml_hyperparam_agent/test_g2_time_gate_probed_batch.py``.
+
+    Fails if: the forecast resolver stops preferring the hint, or its
+    no-hint fallback stops matching the executor's fallback function.
+    """
+    hint = 64  # unlike the fallback (25) and every builtin entry
+    assert inference_estimator.resolve_forecast_batch(hint, _UNREGISTERED) == hint
+    forecast = inference_estimator.estimate_wall_time_seconds(
+        _UNREGISTERED,
+        {"segmentation_size": 4000},
+        {"0": [0]},
+        inference_ms_per_step=1.0,
+        inference_batch=hint,
+    )
+    assert forecast["breakdown"]["inference_batch"] == hint
+
+    # No-hint regime: forecast fallback == runtime fallback, same function.
+    assert inference_estimator.resolve_forecast_batch(None, _UNREGISTERED) == inference_batch_for(
+        _UNREGISTERED
+    )
+
+
 def test_the_uncalibrated_flag_is_raised_but_changes_nothing_in_the_estimate():
     """The flag reports; it must not price.
 
