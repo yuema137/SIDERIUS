@@ -1,11 +1,17 @@
 # PR G — Capability-derived inference batch
 
-**Status: DESIGN DRAFT rev 1 (2026-08-10) — awaiting operator review.
-No implementation.** Fresh audit complete (§0); the audit MATERIALLY
-restates the objective: the capability-derived mechanism the ledger asks
-for **already exists and is live on the agent runtime path** — the
-remaining work is forecast/identity coherence and closing a
-half-finished migration, not building a derivation.
+**Status: DESIGN DRAFT rev 2 (2026-08-10) — awaiting operator review.
+No implementation.** Rev 1's fresh audit found the capability-derived
+mechanism **already live on the agent runtime path**. Rev 2 (operator-
+directed read-only source audit, §0.R) resolves eight pre-implementation
+questions and MATERIALLY narrows the scope again: the forecast
+divergence is confined to ONE of three forecast paths (the batch cancels
+exactly in the other two), the agent-path executor fallback is
+unreachable by construction, stale-hint leakage is impossible, and the
+measurement-identity fix is a one-line preference of a value already
+in scope. Operator stances: Q-G-1 approved in principle, Q-G-5
+approved in principle, Q-G-2 conditional (conditions now discharged by
+§0.R — awaiting confirmation), Q-G-3/Q-G-4 revised and resubmitted.
 
 | | |
 |---|---|
@@ -90,6 +96,13 @@ Every non-test consumer of `core/inference_defaults.py`, classified:
 | 6 | `scripts/run_comparison.py:227,427` | **Baselines** — no hint passed; table entries are paper/VRAM-calibrated for the builtin types | intentionally unchanged (Q-G-1) |
 | 7 | `scripts/c2_prephase_validation.py`, `scripts/pregate_runtime_control_validation.py` | Historical validation scripts | unchanged; documented |
 
+> **Rev-2 note:** the disposition column above is rev-1 history. Final
+> dispositions after the §0.R source audit: row 1 → **no new
+> observability; contract test + comment truth (0.R.6)**; rows 2-3 →
+> **G2 threads the SAME explicit batch into BOTH consumers (0.R.3)**,
+> and `estimate_peak_bytes` (inference) is production-dead (0.R.2);
+> row 4 → **payload-truth + latent-trap closure only (0.R.5)**.
+
 Note on #4: the measurement worker supports inference-phase
 measurements (`gpu_measurement_worker_main.py:270,506`), but the tuner
 today requests **training-phase measurements only** (`:774,:4961,:5000`;
@@ -111,6 +124,12 @@ time-gate decisions priced on a batch that will not run, and the
 the wrong multiplier to a *measured* per-segment cost. This is
 throughput-forecast correctness — squarely PR G's O-C-2 ownership
 (throughput), not admission (PR C) and not S3 semantics (PR B).
+
+> **Rev-2 correction (0.R.3):** the divergence is confined to the
+> `training_warmup_x2.7` fallback path; the measured-hint and static
+> paths are batch-invariant by exact cancellation. The gap is real but
+> smaller than rev 1 claimed, and always in the conservative
+> (over-estimate) direction.
 
 ### 0.D What C3b actually pins, and how PR G must move it
 
@@ -143,6 +162,159 @@ Audit verdict:
   outputs must be byte-identical; where the batch legitimately differs,
   the frozen scorer contract — not raw output bytes — is the invariant
   that must be shown untouched. Restated criteria in §4 (Q-G-5).
+
+### 0.R Revision 2 source audit (operator-directed, 2026-08-10; read-only)
+
+Every rev-1 assumption below is preserved as
+*assumption → audit evidence → corrected understanding*.
+
+#### 0.R.1 The G1 parity contradiction — resolved: no new key, ever
+
+Rev-1 proposed adding `inference_batch_source` to the breakdown while
+also requiring no-hint deep-equality — contradictory. Audit of the
+actual breakdown shapes (`estimator.py:155-164, 287-296`) and their
+consumers: the authoritative batch already reaches the record surface
+via `record_params["inference_batch"]` (tuner :4697), so a source field
+adds nothing a reviewer cannot already read. **Corrected design: G1
+adds NO new output key on ANY path.** The explicit argument, when
+supplied, replaces the VALUE of the existing `inference_batch`
+breakdown key; `inference_batch_uncalibrated` keeps its registration
+meaning untouched. No-hint deep-equality becomes trivially true.
+
+#### 0.R.2 The complete forecast-consumer call graph
+
+Production callers of the inference estimator's two entry points:
+
+| Caller | When it runs | Hint available? | Live? | PR G action |
+|---|---|---|---|---|
+| `evaluate_time_skill/wrapper.py:758` (via :746 batch, :749 conversion) | tuner attempt, AFTER the hint is captured at :4696 | **yes** | live agent path | **G2 threads it — into BOTH the wrapper and the estimator (see 0.R.3)** |
+| `agent/utils/proposer_preflight.py:182` (caller: `ml_model_proposal_agent.py:211-215`) | proposal time, before any tuner attempt exists | **no — by construction** (no realized candidate, no probe) | live but `advisory_only: True`, `provenance: "static_uncalibrated"`, static path only | none — and the static path is batch-invariant (0.R.3), so the table value cannot mislead it |
+| `estimate_peak_bytes` (inference, `estimator.py:90`) | — | — | **ZERO production callers** (grep-proven); the live inference-VRAM forecast is the structural probe inside `evaluate_vram_skill` | none — documented as dead on the forecast path; its table read is unreachable |
+
+No table-based live forecast consumer is left behind: after G2 the only
+live consumer is the proposer's batch-invariant advisory estimate.
+
+#### 0.R.3 The time-forecast formula — units proven from source
+
+**Producer of the hint** (`wrapper.py:213-222`): median over post-warmup
+files of `elapsed_ms / n_psd_segs` from the PREVIOUS trial round's real
+inference sidecar — **wall-milliseconds per PSD segment, measured at
+the batch that inference actually ran** (the probed batch, on the agent
+path). Throughput is baked into the measurement.
+
+**Conversion** (:749): `ms_per_step = hint × inf_batch / ml_per_psd`
+where `ml_per_psd = PSD_SEGMENT_LENGTH // seg_size` (ML segments per
+PSD segment) and `inf_batch` = ML segments per step. Units check:
+(ms/PSD-seg) × (ML-seg/step) / (ML-seg/PSD-seg) = ms/step. ✓
+
+**Consumer** (`estimator.py:212-296`):
+`seconds = ceil(total_ml / inf_batch) × ms_per_step / 1000`.
+
+**The decisive algebra:** in the measured-hint path,
+`seconds = (total_ml/inf_batch) × (hint × inf_batch / ml_per_psd)/1000
+= n_psd × hint / 1000` — **`inf_batch` cancels exactly**, PROVIDED the
+wrapper's `inf_batch` (:746) equals the estimator's internal one
+(:240). Today both call `inference_batch_for` → identical → exact
+cancellation. In the static path
+(`_static_inference_ms_per_step ∝ inf_batch`, steps ∝ 1/inf_batch) the
+batch also cancels. **Only the middle fallback path**
+(`training_warmup_x2.7`: ms/step from a training measurement,
+batch-independent; steps ∝ 1/inf_batch) is batch-sensitive:
+`seconds ∝ 1/inf_batch`.
+
+**Previous assumption** (rev 1): the time forecast diverges from
+runtime for every model where probed ≠ table.
+**Corrected understanding:** the divergence is REAL but confined to the
+×2.7 fallback path (first iteration / OOM-killed trial / degenerate
+sidecar — exactly generated models' early rounds), where table=25 vs
+probed=64 OVERESTIMATES inference wall time ×2.56 (conservative
+direction: wrongly rejects on time, never admits). The measured-hint
+and static paths are already batch-correct via cancellation.
+**Two G2 consequences:** (1) the fix is still justified — it corrects
+the one wrong path and replaces accidental cancellation with explicit
+same-value threading; (2) **G2 MUST supply the SAME explicit batch to
+both the wrapper (:746) and the estimator (:240)** — changing one side
+only would BREAK the measured path's cancellation and corrupt the
+currently-correct forecast by the probed/table ratio. A test pins the
+both-sides invariant.
+
+#### 0.R.4 `active_params` lifetime — stale hint impossible by construction
+
+`active_params` is constructed FRESH inside the attempt loop (:4452,
+the single construction site), from the current plan, WITHOUT an
+`inference_batch` key; the only write is :4696, after the current
+attempt's feasible resource check. A later attempt that produces no
+batch has a rebuilt dict with no key — a previous attempt's value
+cannot survive. `.get("inference_batch")` is therefore sound. G2 still
+adds the cheap negative test (hint-less attempt following a hinted
+attempt → wrapper receives None) to pin the construction property.
+
+#### 0.R.5 G3 ordering — the hint is already in scope, but the live path is training-phase only
+
+Proven order inside one attempt: preflight :4541 → hint captured into
+`active_params` :4696 → time gate :4712 → **prephase measurement
+:4917** (which RECEIVES `active_params`, hint included) → training →
+inference :5031. The helper then ignores the in-scope hint and
+re-derives from the table (:760). So structurally this is the
+operator's outcome A — no reordering needed, the value is already an
+argument away. **However:** the live path requests TRAINING-phase
+measurements only (:774; the worker consumes `inference_batch_size`
+only for `phase=="inference"`, `gpu_measurement_worker_main.py:270,
+506`; `INFERENCE_COMPARABLE_FIELDS` applies to inference-phase
+comparisons only). The table value is today EMBEDDED in the planned-
+identity payload but INERT for comparison and for the worker.
+**Corrected G3 claim:** on the live path, G3 changes only the recorded
+planned-identity payload (it stops recording a batch that is not the
+one production would run) and closes the latent trap for the future
+inference-phase caller. It does NOT create a live
+`measurement_batch == runtime_batch` equality, because no inference-
+phase measurement is requested today — and the PR-level invariant is
+restated accordingly (§4).
+
+#### 0.R.6 G4 reachability — the agent-path fallback is UNREACHABLE by construction
+
+Every route by which an agent attempt reaches `execute_inference`
+carries a hint: the feasible probe path always includes
+`inference_batch` (wrapper §6a return); the CPU-only early return
+includes `"inference_batch": 1` (wrapper :582); `schema_violation` →
+constraint-aware retry, no inference; `status="error"` → raise;
+infeasible → skip record + `continue`; prephase infrastructure failure
+→ terminal. The executor fallback (:1543) is reachable ONLY from
+`run_comparison.py` baselines, legacy validation scripts, and a
+hypothetical wrapper-contract bug ("if the wrapper somehow omits it",
+tuner :4693-4694).
+**Corrected G4 scope: NO new production observability** — a fact that
+cannot occur on the agent path needs no record field. Instead: (a) a
+CONTRACT TEST pinning "every feasible/CPU-mode resource_check carries
+`inference_batch: int ≥ 1`" — making the unreachability durable and
+loud at test time; (b) comment/docstring truth fixes (the executor's
+":1518 A.9 will remove the fallback" narrative and the
+`inference_defaults.py` consumer census).
+*Recorded observation (not PR G scope):* this audit also explains the
+pre-existing k9 integration failure — the "Feasible" verdict print
+moved into the isolated preflight SUBPROCESS when PR A landed, so the
+parent-process `capsys` assertion can never see it again.
+
+#### 0.R.7 The real Gate must exercise the change
+
+The bounded real validation's generated model MUST satisfy
+`probe-derived batch ≠ 25` (the old fallback), so the demonstrated
+contrast is `OLD forecast path (25-based ×2.7) → NEW (probed)` with
+runtime unchanged — a degenerate probed==25 case would pass without
+exercising G2. Selection is from the realized population's probe
+results (PR F's harness evidence shows generated models commonly probe
+to 64). Frozen scorer untouched, proven by the acceptance suite.
+
+#### 0.R.8 Parity-matrix cost bound and hardware locality
+
+The matrix reuses `resolve_inference_batch`'s CPU structural probe.
+PR F's measured costs on this host bound it: builtin wavenet full
+search 26–100 s per config; the 2.6 B gated_fno ~205 s. Six shipped
+models at production seg sizes ≈ **10–20 min total, CPU-only** — cheap
+enough to keep all six rows. The matrix is **hardware-local diagnostic
+evidence on the lilab reference GPU/host (PR F's calibration
+boundary), never a universal expected mapping**, and neither the
+resolver nor the table changes because of it in PR G.
 
 ---
 
@@ -197,11 +369,14 @@ outside the implementation commits.
 - [ ] Inspect both estimator entry points' exact signatures and the
       breakdown dict shape before finalizing the argument name/threading
       (rule: no guessed interfaces).
-- [ ] Add optional `inference_batch: int | None = None` to the
-      estimator entry points; when provided, use it in place of
-      `inference_batch_for(model_type)` and record the source in the
-      breakdown (e.g. `inference_batch_source: "explicit" | "table"`),
-      observability only.
+- [ ] Add optional `inference_batch: int | None = None` to
+      `estimate_wall_time_seconds`; when provided, it replaces the
+      VALUE of the existing `inference_batch` breakdown key. **NO new
+      output key on ANY path (0.R.1)** — the authoritative batch is
+      already recorded at `record_params["inference_batch"]` (:4697).
+      `estimate_peak_bytes` is NOT given the argument (production-dead
+      on the forecast path, 0.R.2) — its docstring gains one line
+      stating that.
 - [ ] Same optional input for the time-skill wrapper's `inf_batch`
       (:746), threading through the `inference_ms` scaling (:749).
 - [ ] Unit tests per §4 below.
@@ -209,9 +384,10 @@ outside the implementation commits.
 #### 4. Validation plan
 - Unit: with the argument absent, the returned estimate/breakdown is
   **deep-equal** to the pre-G1 output for a registered and an
-  unregistered model (parity pin); with the argument present, the
-  breakdown's `inference_batch` equals the explicit value and the
-  wall-time scales accordingly.
+  unregistered model (parity pin — trivially satisfiable now that no
+  key is added); with the argument present, the breakdown's
+  `inference_batch` equals the explicit value and the step count /
+  wall-time follow the 0.R.3 algebra.
 - Negative: explicit batch ≤ 0 rejected by validation with a clear
   error (no silent clamp).
 - Backward-compat: C3b's existing test file passes unmodified in G1
@@ -249,10 +425,13 @@ outside the implementation commits.
 ### Commit G2 — Wire the probed batch into the time gate (agent path)
 
 #### 1. Goal
-Close the live coherence gap (§0.C): the time-gate forecast uses the
-same batch runtime will use. This is the PR's one intended
-production-behavior change on the agent path, isolated here with its
-own parity evidence. **Lands only after Q-G-2 approval.**
+Close the live coherence gap as CORRECTED by 0.R.3: fix the one
+batch-sensitive forecast path (`training_warmup_x2.7`) and replace the
+other two paths' accidental cancellation (both sides happening to call
+`inference_batch_for`) with explicit same-value threading. This is the
+PR's one intended production-behavior change on the agent path,
+isolated here with its own parity evidence. **Lands only after Q-G-2
+confirmation.**
 
 #### 2. Scope
 - Files: `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
@@ -271,15 +450,27 @@ own parity evidence. **Lands only after Q-G-2 approval.**
 - [ ] Inspect `_run_time_preflight`'s signature and the wrapper's
       kwargs contract before finalizing (no guessed interfaces).
 - [ ] Thread `active_params.get("inference_batch")` into the time-skill
-      call; wrapper prefers it via the G1 seam.
+      call; the wrapper uses it for its `inf_batch` (:746) AND passes
+      the SAME value into `estimate_wall_time_seconds` via G1's seam —
+      **never one side only** (0.R.3: one-sided threading breaks the
+      measured path's exact cancellation). A test pins the both-sides
+      invariant.
+- [ ] Negative construction-pin test (0.R.4): a hint-less attempt
+      following a hinted attempt delivers None to the wrapper —
+      `active_params` is rebuilt per attempt at :4452, so stale leakage
+      is impossible; the test makes that construction property durable.
 - [ ] Extend the C3b pin (§0.D): a new test asserting that ON THE HINT
       PATH the forecast batch equals the runtime batch (the restored
       invariant), alongside the existing no-hint pin.
 - [ ] **Per-builtin parity matrix (§E.3d.7 discipline, recorded in this
       doc):** for the six shipped model types, compare the probe-derived
-      batch against the table entry on the reference hardware; every
-      difference explained (e.g. `transformer: 1` O(T²) vs probe
-      outcome), never averaged away. Evidence recorded here before the
+      batch against the table entry; every difference explained (e.g.
+      `transformer: 1` O(T²) vs probe outcome), never averaged away.
+      **Hardware-local diagnostic on the lilab reference host only
+      (PR F calibration boundary) — never a universal expected
+      mapping**; cost bounded ≈10-20 min CPU total from PR F's measured
+      probe costs (0.R.8); the resolver and the table do NOT change
+      because of the matrix in PR G. Evidence recorded here before the
       commit is finalized.
 - [ ] Reachability evidence: a test that fails if the tuner stops
       passing the hint (deleting the hop breaks it — transport-contract
@@ -328,9 +519,15 @@ own parity evidence. **Lands only after Q-G-2 approval.**
 ### Commit G3 — Measurement-identity alignment and stale-canonical-comment fix
 
 #### 1. Goal
-Close the latent identity trap (§0.B #4): the planned measurement
-identity must carry the batch that will actually run, and the
-"canonical source" comments must stop claiming table==runtime.
+NARROWED per 0.R.5. The live path requests training-phase measurements
+only, where the batch is inert for comparison — so G3 does NOT create a
+live `measurement_batch == runtime_batch` equality and must not claim
+one. What it does: (a) the planned-identity PAYLOAD stops recording a
+batch that is not the one production would run (the hint is already
+in-scope at the :4917 call site — a one-argument preference, no
+reordering); (b) the latent trap for a future inference-phase
+measurement caller is closed; (c) the stale "canonical source"
+comments stop claiming table==runtime.
 
 #### 2. Scope
 - Files: `core/runtime_control/gpu_measurement_identity.py`
@@ -351,11 +548,10 @@ identity must carry the batch that will actually run, and the
       constructs an inference-phase spec.
 - [ ] `resolve_inference_batch(model_type, explicit=None)`: prefer the
       explicit probed batch when provided; table fallback otherwise.
-- [ ] Tuner pre-phase site passes the probed batch when the preflight
-      has one (audit exact ordering at :4541-:4780 first — if the
-      measurement request is built before the preflight runs, record
-      that and keep the fallback with a comment, rather than reordering
-      phases "while refactoring").
+- [ ] Tuner pre-phase site passes `active_params.get("inference_batch")`
+      — ordering already proven (0.R.5): the spec is built at :4917,
+      after the hint capture at :4696, and `active_params` is already
+      an argument of the helper. No phase reordering.
 - [ ] Correct the stale comments (identity :169-171, spec :130/:217,
       executor :1518-1524's "A.9 will remove" narrative → point at G4's
       actual disposition).
@@ -370,9 +566,9 @@ identity must carry the batch that will actually run, and the
 - No Gate test (comments + latent-path alignment; the live path is G2's).
 
 #### 5. Acceptance criteria
-- A test proves the planned inference identity equals the batch
-  production would run (hint present), and the table value only when no
-  hint exists.
+- A test proves the planned-identity PAYLOAD carries the hint when one
+  exists and the table value only when none does — stated as payload
+  truth, NOT as a live measurement-path equality (0.R.5).
 - No remaining source comment claims `inference_batch_for` is "the same
   source `execute_inference` uses" — verified by grep, recorded here.
 
@@ -396,50 +592,58 @@ identity must carry the batch that will actually run, and the
 ### Commit G4 — Fallback observability and the A.9 disposition
 
 #### 1. Goal
-Close the never-finished A.7→A.9 migration honestly: the silent
-executor fallback stays (baselines need it — Q-G-4 recommendation), but
-an **agent-path** fallback firing becomes loudly observable, so the
-next "generated model silently ran at 25" cannot recur unnoticed.
+NARROWED per 0.R.6: the agent-path fallback is UNREACHABLE by
+construction (every route to inference carries a hint, incl. the
+CPU-mode `"inference_batch": 1` return), so **no new production
+observability is added for a path that cannot occur**. G4 closes the
+A.7→A.9 migration honestly with: (a) a CONTRACT TEST pinning "every
+feasible/CPU-mode resource_check carries `inference_batch: int ≥ 1`" —
+the property that makes the fallback unreachable, made durable and
+loud at test time; (b) comment/docstring truth (the executor's "A.9
+will remove the fallback" narrative and the `inference_defaults.py`
+consumer census per §0.B/0.R.2).
 
 #### 2. Scope
-- Files: `core/sandbox_executor.py` (:1543 region — record/print when
-  the fallback fires, observability only), `core/inference_defaults.py`
-  (docstring: the table's remaining legitimate consumers, per §0.B),
-  relevant `.md` docs (doc-sync rule); tests.
-- Must remain unchanged: the fallback VALUE and behavior; baselines;
-  the `inference_batch_uncalibrated` flag's meaning; no new predicate.
+- Files: `core/sandbox_executor.py` (comment truth only — NO behavior
+  or record change), `core/inference_defaults.py` (docstring census),
+  `agent/skills/evaluate_vram_skill/wrapper.py` (no code change — its
+  return contract is what the new test pins), relevant `.md` docs
+  (doc-sync rule); tests.
+- Must remain unchanged: ALL runtime behavior (this commit is tests +
+  comments/docs only); the fallback VALUE; baselines; the
+  `inference_batch_uncalibrated` flag's meaning.
 - Dependencies: G2 (so "agent path" has its final meaning).
 
 #### 3. Implementation plan
-- [ ] Inspect how `execute_inference` results surface into records
-      before choosing the observability channel (existing result dict
-      vs a print — prefer the existing record path; no new schema
-      category without a Pydantic model, per project rules).
-- [ ] Emit the fallback fact (model_type, fallback batch) through that
-      channel; observability only.
+- [ ] Contract test: every feasible/CPU-mode wrapper return shape
+      carries `inference_batch: int ≥ 1` (parametrized over the return
+      sites found in 0.R.6; fails if a new return path omits it).
 - [ ] Update `inference_defaults.py` docstring + executor comments to
-      the post-G4 truth (who legitimately consults the table).
-- [ ] Tests per §4.
+      the post-G4 truth (who legitimately consults the table; the A.9
+      promise replaced by the tested contract).
+- [ ] Record in this doc that the k9 "Feasible"-stdout failure is the
+      isolated-preflight print relocation (observation only — a test
+      fix belongs to its own maintenance change, not PR G).
 
 #### 4. Validation plan
-- Unit: fallback firing is recorded; hint path records nothing new.
-- Negative/guard: a test proving nothing READS the new observability
-  fact to make a decision (C3b discipline extended to it).
-- Backward-compat: baseline scripts' behavior unchanged (no hint →
-  same batch, plus the observability fact only where the record channel
-  exists).
+- Unit: the contract test over every feasible/CPU-mode return shape.
+- Mutation: removing `inference_batch` from any feasible return site is
+  caught.
+- Backward-compat: zero runtime diff in this commit (tests + comments
+  + docs only) — provable by an empty non-test/non-doc diff.
 
 #### 5. Acceptance criteria
-- A test fails if the fallback fires without being recorded on the
-  record-bearing path; a guard test fails if the fact becomes a
-  predicate.
-- Docstring census in `inference_defaults.py` matches §0.B verbatim.
+- The contract test fails when any feasible/CPU-mode return path drops
+  `inference_batch` — the unreachability property is pinned.
+- Docstring census in `inference_defaults.py` matches §0.B/0.R.2.
+- The commit's non-test/non-doc diff contains only comment lines
+  (mechanically shown at the commit boundary).
 
 #### 6. Failure and edge cases
 | Case | Behavior |
 |---|---|
-| Fallback on a no-record path (legacy script) | Print-level visibility only; no behavior change |
-| Fallback fires because the wrapper omitted the hint on a feasible check | Recorded — this is exactly the regression the observability exists to catch |
+| Fallback on a no-record path (baseline/legacy script) | Intentional and documented; no change |
+| A future wrapper return path omits the hint | The contract test fails — the regression is caught at test time, before production |
 
 #### 7. Verification commands and evidence
 - [ ] Targeted executor tests — **to record**
@@ -456,9 +660,12 @@ next "generated model silently ran at 25" cannot recur unnoticed.
 
 1. **Zero score/metric change**; `inference_batch_uncalibrated` still
    observability-only (existing guard tests unmodified and green).
-2. **Coherence invariant proven:** on the agent path, forecast batch ==
-   measurement-identity batch == runtime batch, with a reachability
-   test per hop (delete-the-hop discipline).
+2. **Coherence invariant proven (restated per 0.R.5):** on the live
+   agent path, **forecast batch == runtime batch** (both wrapper and
+   estimator sides, delete-the-hop reachability test per hop). The
+   measurement-identity leg is a PAYLOAD-truth + latent-trap-closure
+   claim only — no live inference-phase measurement exists to equate,
+   and this PR does not pretend otherwise.
 3. **Parity proven:** every no-hint path byte-identical to today
    (deep-equal breakdowns; baselines untouched); per-builtin parity
    matrix recorded with every probe-vs-table difference explained.
@@ -466,43 +673,68 @@ next "generated model silently ran at 25" cannot recur unnoticed.
    census matches the audit (§0.B).
 5. **Bounded real validation (PR-level Gate, operator-approved
    separately, cold-start per the standing rule):** ONE bounded real
-   inference on ONE generated model on the reference GPU showing
-   (a) the record's forecast batch == runtime batch, and (b) the frozen
-   scorer accepts the output identically to a control at the same batch.
-   No throughput campaign (minimum sufficient evidence).
+   inference on ONE generated model **whose probe-derived batch ≠ 25
+   (the old fallback)** — a degenerate probed==25 case would pass
+   without exercising G2 (0.R.7) — showing (a) the record's forecast
+   batch == runtime batch where OLD behavior would have forecast the
+   fallback batch, and (b) the frozen scorer accepts the output; the
+   scorer/metric implementation untouched. No throughput campaign
+   (minimum sufficient evidence). All timings hardware-local (PR F
+   calibration boundary).
 6. Full checker set per §E.3d.12 at the final heads; CI green on the
    exact final HEAD.
 
-## Operator decisions needed before implementation
+## Operator decisions (rev 2 — reflecting the operator's provisional stances and the §0.R audit)
 
-### Q-G-1 — Scope restatement (supersedes the old ledger merge criteria)
+### Q-G-1 — Scope restatement — **APPROVED IN PRINCIPLE (operator, rev-1 review)**
 The ledger's "remove the name-keyed fallback / name table removed from
-the path" is replaced by: *the table is never consulted on the agent
-production path when a probe hint exists; its remaining consumers
-(baselines, legacy scripts, no-hint fallback) are documented and
-observable.* **Approve/amend.**
+the path" is superseded by: *the table is never consulted on the agent
+production path when a probe hint exists (a property that already
+holds at runtime and is pinned by G4's contract test); its remaining
+consumers (baselines, legacy scripts, proposer advisory, no-hint
+fallback) are documented.* Awaiting final freeze with rev 2.
 
-### Q-G-2 — The one production-behavior change (G2)
-Feeding the probed batch to the time gate changes gate INPUTS on the
-agent path (forecast correctness). Lands only with the parity matrix +
-extended C3b pin as evidence. **Approve direction now; final approval
-at the G2 evidence checkpoint.**
+### Q-G-2 — The one production-behavior change (G2) — **CONDITIONAL (operator); conditions now discharged by audit, awaiting confirmation**
+The three conditions and their §0.R answers:
+1. *Forecast units/formula proven* → 0.R.3: hint = measured
+   ms/PSD-segment; batch cancels exactly in the measured and static
+   paths; only the ×2.7 fallback path is batch-sensitive
+   (conservative over-estimate). G2 must thread BOTH sides with the
+   same value — one-sided threading would corrupt the measured path.
+2. *`active_params` lifetime proven* → 0.R.4: fresh dict per attempt
+   (:4452); stale hint impossible by construction; negative test added
+   anyway.
+3. *Second forecast consumer resolved* → 0.R.2: the proposer preflight
+   is advisory-only, static-path (batch-invariant), and has no hint by
+   construction — no threading; `estimate_peak_bytes` (inference) is
+   production-dead. No live table-based forecast consumer remains
+   after G2.
 
-### Q-G-3 — Identity alignment (G3)
-Planned inference-measurement identity carries the batch that will
-actually run (explicit hint preferred). **Approve/amend.**
+### Q-G-3 — Identity alignment (G3) — **RESUBMITTED, NARROWED (was: not yet approved)**
+Ordering proven (0.R.5): the spec is built AFTER the hint exists and
+already receives `active_params` — outcome A structurally, no
+reordering. But the live path is training-phase-only, where the batch
+is comparison-inert: G3 therefore claims ONLY payload truth + latent
+trap closure + comment truth, and the PR-level invariant no longer
+equates a measurement path that does not exist. **Approve the
+narrowed G3, or defer it out of PR G** (it is severable; deferring
+leaves the stale comments and the latent trap in place, recorded).
 
-### Q-G-4 — A.9 disposition
-Recommendation: RETAIN the executor fallback + loud observability (G4),
-i.e. A.9's "remove the fallback" is formally abandoned in favor of
-"observe the fallback". Removing it would break baselines/legacy
-scripts for zero information gain. **Approve/amend.**
+### Q-G-4 — A.9 disposition — **RESUBMITTED, NARROWED (was: not yet approved)**
+Reachability proven (0.R.6): the agent-path fallback is unreachable by
+construction; only baselines/legacy scripts reach the table. Therefore
+NO new production observability (nothing to observe on a path that
+cannot occur). G4 = the reachability-preserving CONTRACT TEST + comment
+/docstring truth, zero runtime diff. A.9's "remove the fallback" is
+formally retired in favor of "pin the contract that makes it
+unreachable". **Approve/amend.**
 
-### Q-G-5 — Validation criterion replacing "byte-identical outputs"
-Byte-identity is only sound at an unchanged batch. Proposed criteria:
-no-hint paths byte-identical; hint paths validated by the coherence
-invariant + frozen-scorer acceptance (metric untouched), not raw output
-bytes across different batches. **Approve/amend.**
+### Q-G-5 — Validation criterion — **APPROVED IN PRINCIPLE (operator, rev-1 review)**
+No raw byte-identity across a legitimate batch change. Frozen criteria:
+no-hint parity (deep-equal breakdowns; zero behavior change off the
+agent path) + same-authority coherence (forecast == runtime) + frozen
+scorer/metric untouched. The Gate case must satisfy probed ≠ 25
+(0.R.7). Awaiting final freeze with rev 2.
 
 ## V21 review fields
 
